@@ -408,8 +408,10 @@ pruefe("name.textContent = t.name" in BR_JS,
        "Vorlagenname wird per textContent gesetzt (Fremdinhalt, kein innerHTML)")
 pruefe("this.loadPptxTemplates();" in BR_JS, "die Liste wird beim Oeffnen geladen")
 # Nach der DEFINITION suchen, nicht nach dem ersten Vorkommen (das ist
-# der Aufruf in renderPptxTemplates).
-i_delfn = BR_JS.find("deletePptxTemplate: function")
+# der Aufruf in renderTemplates). Seit der Word-Vorlage (2026-10-22) laufen
+# beide Formate durch deleteTemplate; deletePptxTemplate ist nur noch der
+# Einzeiler, der dorthin weiterreicht.
+i_delfn = BR_JS.find("deleteTemplate: function")
 pruefe(i_delfn > 0 and "window.confirm" in BR_JS[i_delfn:i_delfn + 700],
        "Entfernen fragt nach")
 pruefe("br-pptx-file" in SET_HTML and "br-pptx-default" in SET_HTML

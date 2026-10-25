@@ -166,7 +166,9 @@ class CreateWordTool(BaseTool):
             "Erstellt ein Word-Dokument (.docx). 'content' wird zeilenweise interpretiert: "
             "'# ' = Ueberschrift 1, '## ' = Ueberschrift 2, '### ' = Ueberschrift 3, "
             "'- ' oder '* ' = Aufzaehlung, '1. ' = nummerierte Liste, Leerzeile = neuer Absatz, "
-            "sonst normaler Absatz. Gibt eine Download-URL zurueck."
+            "sonst normaler Absatz. Das Dokument entsteht auf der HAUSVORLAGE (A4, "
+            "Schrift, Farben, Logo und Seitenzahl aus dem Branding) – schicke keine "
+            "Formatangaben mit. Gibt eine Download-URL zurueck."
         )
 
     def parameters_schema(self) -> dict:
@@ -176,11 +178,13 @@ class CreateWordTool(BaseTool):
                 "filename": {"type": "STRING", "description": "Dateiname/Titel des Dokuments (ohne Pfad), z.B. 'Quartalsbericht'."},
                 "title": {"type": "STRING", "description": "Optionaler Titel, der als grosse Ueberschrift oben eingefuegt wird."},
                 "content": {"type": "STRING", "description": "Inhalt des Dokuments (mit einfacher Markdown-Syntax, siehe Beschreibung)."},
+                "template": {"type": "STRING", "description": "Optional: Name einer hinterlegten Word-Vorlage (leer = Hausvorlage). Verfuegbare zeigt office_template_info mit art='word'."},
             },
             "required": ["filename", "content"],
         }
 
-    async def execute(self, filename: str = "", title: str = "", content: str = "", **kwargs) -> str:
+    async def execute(self, filename: str = "", title: str = "", content: str = "",
+                      template: str = "", **kwargs) -> str:
         if not filename:
             return "Fehler: 'filename' ist Pflicht."
         try:
@@ -188,9 +192,39 @@ class CreateWordTool(BaseTool):
         except Exception as e:
             return f"Fehler: python-docx nicht verfuegbar ({e})."
 
-        doc = Document()
+        # Hausvorlage wie bei PowerPoint. Faellt sie aus (Rechte, defekte
+        # hochgeladene Datei), entsteht das Dokument im Standarddesign – ein
+        # Dokument ist besser als eine Fehlermeldung, der Grund steht aber in
+        # der Rueckgabe.
+        vorlage_hinweis = ""
+        try:
+            from skills.office import vorlage_word as _vw
+            doc = Document(str(_vw.loese_vorlage(template)))
+            _vw.inhalt_leeren(doc)
+        except Exception as e:  # noqa: BLE001
+            doc = Document()
+            vorlage_hinweis = f" (Hinweis: Word-Hausvorlage nicht nutzbar – {e})"
+
+        def absatz(text: str, stil: str, ersatz: str = ""):
+            """Absatz mit Formatvorlage; fehlt sie (Firmenvorlage ohne
+            Aufzaehlungsstil), steht der Text mit Ersatzzeichen da, statt dass
+            das ganze Dokument an einem KeyError scheitert.
+            VORHER pruefen, nicht ``except KeyError``: python-docx legt den
+            Absatz samt Text an und wirft ERST beim Zuweisen des Stils – der
+            Text stuende dann doppelt im Dokument."""
+            if stil in doc.styles:
+                return doc.add_paragraph(text, style=stil)
+            return doc.add_paragraph(ersatz + text)
+
+        def ueberschrift(text: str, ebene: int):
+            if ("Title" if ebene == 0 else f"Heading {ebene}") in doc.styles:
+                return doc.add_heading(text, level=ebene)
+            p = doc.add_paragraph()
+            p.add_run(text).bold = True
+            return p
+
         if title:
-            doc.add_heading(title, level=0)
+            ueberschrift(title, 0)
 
         for raw in (content or "").split("\n"):
             line = raw.rstrip()
@@ -198,15 +232,16 @@ class CreateWordTool(BaseTool):
             if not stripped:
                 continue
             if stripped.startswith("### "):
-                doc.add_heading(stripped[4:].strip(), level=3)
+                ueberschrift(stripped[4:].strip(), 3)
             elif stripped.startswith("## "):
-                doc.add_heading(stripped[3:].strip(), level=2)
+                ueberschrift(stripped[3:].strip(), 2)
             elif stripped.startswith("# "):
-                doc.add_heading(stripped[2:].strip(), level=1)
+                ueberschrift(stripped[2:].strip(), 1)
             elif stripped.startswith("- ") or stripped.startswith("* "):
-                doc.add_paragraph(stripped[2:].strip(), style="List Bullet")
+                absatz(stripped[2:].strip(), "List Bullet", "• ")
             elif re.match(r"^\d+\.\s", stripped):
-                doc.add_paragraph(re.sub(r"^\d+\.\s", "", stripped), style="List Number")
+                m = re.match(r"^(\d+\.)\s", stripped)
+                absatz(re.sub(r"^\d+\.\s", "", stripped), "List Number", m.group(1) + " ")
             else:
                 doc.add_paragraph(stripped)
 
@@ -215,7 +250,7 @@ class CreateWordTool(BaseTool):
             doc.save(str(disk))
         except Exception as e:
             return f"Fehler beim Speichern: {e}"
-        return _ok(dl, fname, disk)
+        return _ok(dl, fname, disk, vorlage_hinweis)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1155,7 +1190,8 @@ class TemplateInfoTool(BaseTool):
             "Vorlage (Name, Platzhalter, Foliengroesse) UND ihren Dateipfad. Nuetzlich, "
             "wenn eine eigene Firmenvorlage hinterlegt wurde und unklar ist, welche "
             "Layouts es gibt – und PFLICHT, bevor du eine .pptx von Hand mit python-pptx "
-            "baust: von dort kommt der Pfad fuer Presentation(...)."
+            "baust: von dort kommt der Pfad fuer Presentation(...). Mit art='word' "
+            "dasselbe fuer Word: Pfad fuer Document(...) und die Formatvorlagen."
         )
 
     def parameters_schema(self) -> dict:
@@ -1163,11 +1199,14 @@ class TemplateInfoTool(BaseTool):
             "type": "OBJECT",
             "properties": {
                 "template": {"type": "STRING", "description": "Vorlagen-Dateiname (leer = Hausvorlage)."},
+                "art": {"type": "STRING", "description": "'powerpoint' (Vorgabe) oder 'word'."},
             },
             "required": [],
         }
 
-    async def execute(self, template: str = "", **kwargs) -> str:
+    async def execute(self, template: str = "", art: str = "", **kwargs) -> str:
+        if str(art or "").strip().lower() in ("word", "docx", "dokument"):
+            return self._word(template)
         try:
             from pptx import Presentation
             from skills.office import vorlage as _vorlage
@@ -1221,6 +1260,42 @@ class TemplateInfoTool(BaseTool):
             "MSO_THEME_COLOR.ACCENT_1..6 nehmen, dann folgen sie dem Branding.",
         ]
         return "\n".join(zeilen)
+
+    @staticmethod
+    def _word(template: str = "") -> str:
+        """Gegenstueck fuer Word: Pfad und Formatvorlagen der Hausvorlage."""
+        try:
+            from docx import Document
+            from docx.enum.style import WD_STYLE_TYPE
+            from skills.office import vorlage_word as _vw
+        except Exception as e:  # noqa: BLE001
+            return f"Fehler: python-docx/Vorlagenmodul nicht verfuegbar ({e})."
+        try:
+            pfad = _vw.loese_vorlage(template)
+            doc = Document(str(pfad))
+        except Exception as e:  # noqa: BLE001
+            return f"Fehler: Word-Vorlage nicht lesbar ({e})."
+        sec = doc.sections[0]
+        stile = sorted(st.name for st in doc.styles
+                       if st.type == WD_STYLE_TYPE.PARAGRAPH and st.name)
+        return "\n".join([
+            f"Word-Vorlage: {pfad.name} ({round(sec.page_width.cm, 1)}×"
+            f"{round(sec.page_height.cm, 1)} cm)",
+            # Aus demselben Grund wie bei PowerPoint: ohne Pfad oeffnet das
+            # Modell Document() ohne Argument und verliert das Branding.
+            f"Pfad (fuer python-docx): {pfad}",
+            f"Vorhandene Word-Vorlagen: {', '.join(_vw.verfuegbare()) or '(keine)'}",
+            "",
+            "Absatz-Formatvorlagen: " + ", ".join(stile),
+            "",
+            "BAUST DU PER python-docx (Tabellen, Bilder, eigene Gliederung)? Dann "
+            f"STARTE mit dieser Vorlage: Document(\"{pfad}\") und entferne ihren "
+            "Mustertext (alle Kinder von doc.element.body ausser dem letzten "
+            "w:sectPr) – NIEMALS Document() ohne Argument, das ist US-Letter mit "
+            "Calibri und Office-Blau. Formatierung nur ueber die Formatvorlagen "
+            "oben (style='Heading 1', 'List Bullet' …), keine eigenen Schriften, "
+            "Groessen oder Farben, Seitenformat NICHT aendern.",
+        ])
 
 
 # ─────────────────────────────────────────────────────────────────────────

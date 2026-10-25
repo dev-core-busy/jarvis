@@ -12254,6 +12254,180 @@ async def regenerate_branding_pptx_template(user: str = Depends(require_local_au
                          "size": pfad.stat().st_size if pfad.exists() else 0})
 
 
+
+# ─── Word-Vorlagen (Branding-Reiter) ──────────────────────────────────
+# Gegenstueck zu den PowerPoint-Vorlagen: gleicher Ordner (data/vorlagen),
+# gleiche Regeln (Hausvorlage = standard.docx, Inhalt wird beim Hochladen
+# testweise geoeffnet). Eigener Endpunkt-Satz statt eines Parameters an den
+# pptx-Endpunkten, damit eine falsch adressierte Datei nicht unter dem
+# anderen Format abgelegt werden kann.
+_DOCX_TPL_EXTS = {"docx", "dotx"}
+_DOCX_TPL_MAX_BYTES = 25 * 1024 * 1024
+
+
+def _docx_vorlagen_modul():
+    """Laedt das Word-Vorlagenmodul des Office-Skills (wie ``_pptx_vorlagen_modul``)."""
+    _pptx_vorlagen_modul()          # gleicher Pfad-Aufbau, gleiche Klartext-Meldung
+    from skills.office import vorlage_word as _vw
+    return _vw
+
+
+def _docx_tpl_pruefen(daten: bytes) -> tuple[bool, str, dict, bytes]:
+    """Prueft eine hochgeladene Word-Vorlage. Rueckgabe (ok, fehler, infos, daten).
+
+    ``daten`` kommt ggf. UMGESCHRIEBEN zurueck: eine .dotx wird zur .docx
+    (``vorlage_word.als_dokument``) – python-docx oeffnet eine .dotx nicht, die
+    Vorlage laege sonst ab und jedes Word-Dokument fiele danach auf das
+    Standarddesign zurueck."""
+    import io
+    import zipfile as _zip
+    if not daten:
+        return False, "Datei ist leer", {}, daten
+    if len(daten) > _DOCX_TPL_MAX_BYTES:
+        return False, (f"Datei ist zu gross ({len(daten) // (1024 * 1024)} MB, "
+                       f"erlaubt {_DOCX_TPL_MAX_BYTES // (1024 * 1024)} MB)"), {}, daten
+    try:
+        with _zip.ZipFile(io.BytesIO(daten)) as z:
+            namen = set(z.namelist())
+    except Exception:  # noqa: BLE001
+        return False, "Keine gueltige Office-Datei (kein ZIP-Container)", {}, daten
+    if "word/document.xml" not in namen:
+        return False, "Keine Word-Datei (word/document.xml fehlt)", {}, daten
+    try:
+        vw = _docx_vorlagen_modul()
+        daten = vw.als_dokument(daten)
+        from docx import Document as _D
+        from docx.enum.style import WD_STYLE_TYPE as _WST
+        doc = _D(io.BytesIO(daten))
+        sec = doc.sections[0]
+        stile = {st.name for st in doc.styles if st.type == _WST.PARAGRAPH}
+        breite, hoehe = (sec.page_width or 0), (sec.page_height or 0)
+        infos = {
+            "styles": len(stile),
+            "missing": [n for n in ("Heading 1", "Heading 2", "List Bullet", "List Number")
+                        if n not in stile],
+            "paragraphs": len(doc.paragraphs) + len(doc.tables),
+            "format": ("A4" if abs(breite - 7560310) < 20000 and abs(hoehe - 10692130) < 20000
+                       else ("Letter" if abs(breite - 7772400) < 20000 else "andere")),
+            "header": any(p.text.strip() or p._p.xpath(".//w:drawing")
+                          for s_ in doc.sections for p in s_.header.paragraphs),
+        }
+    except Exception as e:  # noqa: BLE001
+        return False, f"Vorlage nicht lesbar ({e})", {}, daten
+    return True, "", infos, daten
+
+
+@app.get("/api/branding/docx-templates")
+async def list_branding_docx_templates(user: str = Depends(require_local_auth)):
+    """Listet die hinterlegten Word-Vorlagen (Admin). Erzeugt nichts."""
+    try:
+        vw = _docx_vorlagen_modul()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": str(e), "templates": []}, status_code=409)
+    eintraege = []
+    for name in vw.verfuegbare():
+        try:
+            st = (vw.VORLAGEN_DIR / name).stat()
+        except OSError:
+            continue
+        eintraege.append({"name": name, "size": st.st_size, "mtime": int(st.st_mtime),
+                          "is_default": name == vw.STANDARD_NAME})
+    return JSONResponse({
+        "success": True,
+        "templates": eintraege,
+        "default_name": vw.STANDARD_NAME,
+        "default_exists": any(e["is_default"] for e in eintraege),
+        "max_bytes": _DOCX_TPL_MAX_BYTES,
+    })
+
+
+@app.post("/api/branding/docx-template")
+async def upload_branding_docx_template(file: UploadFile = File(...),
+                                        as_default: str = Form("false"),
+                                        user: str = Depends(require_local_auth)):
+    """Laedt eine Word-Vorlage hoch (Admin). ``.dotx`` wird als ``.docx`` abgelegt."""
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in _DOCX_TPL_EXTS:
+        return JSONResponse({"success": False,
+                             "error": f"Format .{ext} nicht erlaubt (nur .docx oder .dotx)"},
+                            status_code=400)
+    ok, fehler, infos, daten = _docx_tpl_pruefen(await file.read())
+    if not ok:
+        return JSONResponse({"success": False, "error": fehler}, status_code=400)
+    vw = _docx_vorlagen_modul()
+
+    default = str(as_default).lower() in ("1", "true", "yes", "on")
+    if default:
+        ziel_name = vw.STANDARD_NAME
+    else:
+        rein = re.sub(r"[^A-Za-z0-9_\-. ]+", "", Path(file.filename or "vorlage").name)
+        rein = rein.rsplit(".", 1)[0].strip().replace(" ", "_") or "vorlage"
+        ziel_name = f"{rein[:60]}.docx"
+        if ziel_name == vw.STANDARD_NAME:
+            default = True
+    try:
+        vw.VORLAGEN_DIR.mkdir(parents=True, exist_ok=True)
+        ziel = vw.VORLAGEN_DIR / ziel_name
+        tmp = ziel.with_suffix(".upload.tmp")
+        tmp.write_bytes(daten)
+        tmp.replace(ziel)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Speichern fehlgeschlagen ({e})"},
+                            status_code=500)
+
+    hinweise = []
+    if infos.get("format") == "Letter":
+        hinweise.append("Die Vorlage ist im US-Letter-Format, nicht A4.")
+    if infos.get("missing"):
+        hinweise.append("Es fehlen Formatvorlagen (" + ", ".join(infos["missing"])
+                        + "); dafuer wird einfacher Text gesetzt.")
+    if infos.get("paragraphs", 0) > 1:
+        hinweise.append("Mustertext der Vorlage wird nicht uebernommen – nur "
+                        "Formatvorlagen, Kopf-/Fusszeile und Seitenformat.")
+    return JSONResponse({"success": True, "name": ziel_name, "is_default": default,
+                         "style_count": infos.get("styles", 0),
+                         "format": infos.get("format", ""),
+                         "header": bool(infos.get("header")), "hints": hinweise})
+
+
+@app.delete("/api/branding/docx-template")
+async def delete_branding_docx_template(name: str = "",
+                                        user: str = Depends(require_local_auth)):
+    """Entfernt eine Word-Vorlage (Admin). Die Hausvorlage entsteht beim
+    naechsten Word-Auftrag neu aus dem Branding."""
+    try:
+        vw = _docx_vorlagen_modul()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+    sauber = Path(str(name or "")).name
+    if not sauber.lower().endswith(".docx"):
+        return JSONResponse({"success": False, "error": "Kein Vorlagenname"}, status_code=400)
+    ziel = vw.VORLAGEN_DIR / sauber
+    if not ziel.exists():
+        return JSONResponse({"success": False, "error": "Vorlage nicht gefunden"}, status_code=404)
+    try:
+        ziel.unlink()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Loeschen fehlgeschlagen ({e})"},
+                            status_code=500)
+    return JSONResponse({"success": True, "removed": sauber})
+
+
+@app.post("/api/branding/docx-template/regenerate")
+async def regenerate_branding_docx_template(user: str = Depends(require_local_auth)):
+    """Erzeugt die Word-Hausvorlage aus den AKTUELLEN Branding-Werten neu (Admin)."""
+    try:
+        vw = _docx_vorlagen_modul()
+        pfad = vw.erzeuge()
+        from skills.office import vorlage as _v
+        farben = _v.branding_farben()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Erzeugen fehlgeschlagen ({e})"},
+                            status_code=500)
+    return JSONResponse({"success": True, "name": pfad.name,
+                         "accent": farben.get("akzent", ""),
+                         "size": pfad.stat().st_size if pfad.exists() else 0})
+
 # ─── Confluence (für den Confluence-Reiter; teilt sich Client mit dem Skill) ──
 
 # Obergrenzen fuer Confluence-Listen (Code-Review 2026-10-07). Vorher fest 500:

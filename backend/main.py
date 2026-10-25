@@ -7122,6 +7122,18 @@ async def startup_mcp():
     MCP ist Beiwerk: der Dienst muss ohne jeden MCP-Server laufen. Deshalb
     hier fail-open mit lauter Meldung. KeyboardInterrupt und SystemExit gehen
     bewusst durch – ein Start, den jemand abbricht, soll abbrechen.
+
+    ⚠ DIE EIGENTLICHE SCHRANKE SITZT SEIT 2026-10-25 NICHT MEHR HIER, sondern
+    im Besitzer-Task je Verbindung (``McpServerConnection.connect``). Diese
+    Schranke allein hat zweimal NICHT gehalten: anyio-Cancel-Scopes sind
+    level-triggered, und solange der Transport-Scope im Lifespan-Task offen
+    war, wurde jeder weitere `await` gecancelt – der Start starb im naechsten,
+    voellig fremden Hook. Ein `except` im betroffenen Task kann einen fremden
+    Scope nicht einfangen; nur ein eigener Task kann ihn eingrenzen.
+
+    Deshalb ist der `cancelling()`-Vorbehalt unten jetzt RICHTIG (vorher war er
+    der Fehler): ein fremder Cancel erreicht den Lifespan-Task nicht mehr, eine
+    CancelledError hier ist also ein echter Abbruch und muss durch.
     """
     try:
         await mcp_manager.connect_all()

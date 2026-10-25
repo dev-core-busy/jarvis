@@ -79,6 +79,26 @@ def _abbruch():
         os._exit(2)
 
 
+
+def abbruch(text: str) -> None:
+    """'Konnte nicht laufen' – IMMER Exit 2, nie die Bilanz.
+
+    ⚠ BEZAHLT BEIM BAU DER GEGENPROBE (2026-10-25): die Abbruch-Stellen riefen
+    `ende()`, und die endet mit `exit(1 if FAIL else 0)`. Bei null
+    FAILs meldete ein ABBRUCH damit "bestanden" – genau der Zustand, gegen den
+    die Exit-2-Stufe gebaut ist. Gefunden hat es eine Sonde, die den Messaufbau
+    blind machte und Exit 0 statt 2 bekam (Register: ein Abbruch ist von einem
+    bestandenen Lauf sonst nicht zu unterscheiden). Die Stelle stand schon
+    im Commit 649e219e.
+    """
+    global _bilanz
+    _bilanz = True        # der atexit-Melder soll nicht doppelt melden
+    print("ABBRUCH: " + text)
+    print("  (bis hierher: %d OK, %d FAIL – 'konnte nicht laufen', NICHT "
+          "bestanden)" % (OK, FAIL))
+    sys.stdout.flush()
+    sys.exit(2)
+
 import atexit                                                      # noqa: E402
 
 atexit.register(_abbruch)
@@ -476,8 +496,7 @@ abschnitt("7. Durchstich gegen einen Server, der wirklich ein Zert vorzeigt")
 _PEM7 = _zert(cn="localhost", namen=("localhost",))
 _port, _stoppen = _tls_server(_PEM7)
 if not _port:
-    print("ABBRUCH: kein TLS-Server – ohne ihn ist Abschnitt 7 nicht messbar")
-    ende()
+    abbruch("kein TLS-Server – ohne ihn ist Abschnitt 7 nicht messbar")
 try:
     _erg = T.zertifikat_abholen("https://localhost:%d/mcp" % _port, frist=5.0)
 

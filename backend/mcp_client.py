@@ -228,13 +228,139 @@ class McpServerConnection:
         self.tools: list[McpRemoteTool] = []
         self._session = None
         self._exit_stack: AsyncExitStack | None = None
+        # Besitzer-Task und Stopp-Signal der Verbindung (siehe connect).
+        self._besitzer: "asyncio.Task | None" = None
+        self._stopp: "asyncio.Event | None" = None
 
     async def connect(self):
-        """Verbindet mit dem MCP-Server."""
+        """Verbindet mit dem MCP-Server – in einem EIGENEN BESITZER-TASK.
+
+        ⚠ BEZAHLTER VORFALL, ZWEI ANLAEUFE (DEV 2026-10-24/25): der
+        Transportfehler eines entfernten Servers (selbstsigniertes Zertifikat)
+        hat den GANZEN Dienst in eine Neustartschleife gelegt. Der erste Fix
+        fing die CancelledError; der zweite nahm sie mit `uncancel()` zurueck.
+        Beide hielten nicht, und der Grund ist die eigentliche Lehre:
+
+        **anyio-Cancel-Scopes sind level-triggered.** `streamablehttp_client`
+        haelt eine anyio-TaskGroup; scheitert deren HTTP-Task, wird der Scope
+        abgebrochen – und SOLANGE er offen ist, wird jeder weitere `await` in
+        diesem Task erneut gecancelt. Der Scope blieb offen, weil der
+        Transport ueber den AsyncExitStack betreten und bei einem Fehler NICHT
+        verlassen wurde. `uncancel()` setzt nur den asyncio-Zaehler zurueck,
+        nicht den anyio-Scope. Folge: der Start starb im naechsten,
+        voellig fremden Hook (`_geheimnis_modulschluessel_verpacken`, an seinem
+        ersten `to_thread`). Im Nachbau exakt reproduziert – mit UND ohne
+        `uncancel()` stirbt der naechste await.
+
+        DESHALB EIN BESITZER-TASK je Verbindung, und er loest BEIDES:
+          * Ein fremder Cancel-Scope trifft nur diesen Task, nie den Aufrufer
+            (Lifespan, Request). Der wartet nur auf ein Ereignis.
+          * Betreten und Verlassen des Transports geschehen im SELBEN Task –
+            anyio verlangt das ("Attempted to exit cancel scope in a different
+            task than it was entered in", ebenfalls im Journal von DEV). Nach
+            einem Fehler verlaesst der Besitzer den Scope SOFORT, bevor irgendein
+            anderer `await` kommt; anyio raeumt seinen Cancel beim Verlassen
+            selbst ab.
+
+        ``disconnect()`` setzt das Stopp-Signal; der Besitzer schliesst dann
+        seinen Stack selbst.
+        """
+        self._stopp = asyncio.Event()
+        bereit = asyncio.Event()
+        self._besitzer = asyncio.create_task(
+            self._besitzer_lauf(bereit), name="mcp-besitzer-%s" % self.name)
+        warten = asyncio.create_task(bereit.wait())
+        try:
+            await asyncio.wait({self._besitzer, warten},
+                               return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            # WIR wurden gecancelt (echter Abbruch, z. B. Shutdown waehrend des
+            # Aufbaus): den Besitzer mitnehmen, sonst verwaist er samt
+            # Subprozess, und den Abbruch durchlassen.
+            self._stopp.set()
+            self._besitzer.cancel()
+            raise
+        finally:
+            if not warten.done():
+                warten.cancel()
+        # ⚠ EIN ABBRUCH BLEIBT EIN ABBRUCH – auch ueber die Task-Grenze. Der
+        # Besitzer faengt jeden Transportfehler selbst; was ihn trotzdem
+        # verlaesst, ist ausschliesslich das Harte (KeyboardInterrupt,
+        # SystemExit, auch in einer Gruppe). `asyncio.wait` wirft das aber
+        # NICHT weiter, es liefert nur die erledigten Tasks – die erste Fassung
+        # des Umbaus hat es damit stillschweigend verschluckt (Waechter
+        # test_mcp_lifespan, "SystemExit in einer Gruppe geht durch"). Hier wird
+        # es ausdruecklich abgeholt und geworfen; das Abholen verhindert
+        # zugleich "Task exception was never retrieved" im Journal.
+        b = self._besitzer
+        if b is not None and b.done() and not b.cancelled():
+            fehler = b.exception()
+            if isinstance(fehler, (KeyboardInterrupt, SystemExit)):
+                raise fehler
+            if isinstance(fehler, BaseExceptionGroup):
+                harte, _ = fehler.split((KeyboardInterrupt, SystemExit))
+                if harte is not None:
+                    raise harte
+
+    async def _besitzer_lauf(self, bereit: "asyncio.Event"):
+        """Lebt so lange wie die Verbindung; nur hier wird der Stack betreten
+        UND verlassen. Siehe ``connect``."""
+        self._exit_stack = AsyncExitStack()
+        try:
+            await self._verbinden()
+            bereit.set()
+            if self.connected:
+                await self._stopp.wait()
+        except asyncio.CancelledError:
+            # Ein Abbruch von aussen (Shutdown) oder ein fremder Scope, der
+            # bis hierher durchschlaegt. Der Task endet hier ohnehin; NICHT
+            # weiterwerfen, sonst steht "Task exception was never retrieved"
+            # im Journal. Ein bereits verbundener Server ist dann schlicht
+            # getrennt – das ist kein Fehler, den man melden muesste.
+            if not self.connected and not self.error:
+                self.error = ("Verbindung abgebrochen – der Server hat den "
+                              "Transport fallen lassen (Zertifikat, Netz oder "
+                              "Protokoll)")
+        finally:
+            bereit.set()
+            # ⚠ SOFORT schliessen, im SELBEN Task, bevor irgendein anderer
+            # await kommt: solange der Scope offen ist, wird jeder await
+            # gecancelt. `print` ist kein await.
+            stapel, self._exit_stack = self._exit_stack, None
+            if stapel is not None:
+                try:
+                    await stapel.aclose()
+                except BaseException as e:  # noqa: BLE001
+                    if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                        raise
+                    # ⚠ NACH EINEM FEHLSCHLAG IST DAS DER NACHHALL, KEIN
+                    # PROBLEM. Die TaskGroup des Transports meldet beim
+                    # Verlassen den Fehler ihres Kind-Tasks noch einmal (als
+                    # ExceptionGroup) – das Aufraeumen ist dabei VOLLSTAENDIG
+                    # erfolgt, und der Grund steht schon in `self.error`. Die
+                    # erste Fassung schrieb dafuer "Aufraeumen unvollstaendig"
+                    # bei JEDEM Startversuch eines kaputten Servers: eine
+                    # falsche Aussage im Normalbetrieb, die das Journal
+                    # entwertet (Register). Gemeldet wird nur, was ohne
+                    # vorherigen Fehler beim Schliessen auftritt.
+                    nachhall = bool(self.error) and isinstance(
+                        e, (BaseExceptionGroup, asyncio.CancelledError))
+                    if not nachhall:
+                        print(f"[MCP] {self.name}: Aufraeumen unvollstaendig – "
+                              f"{type(e).__name__}: {e}", flush=True)
+            self._session = None
+            self.connected = False
+            self.tools = []
+
+    async def _verbinden(self):
+        """Der eigentliche Verbindungsaufbau – laeuft IM Besitzer-Task.
+
+        Faengt jeden Fehler und traegt den Grund in ``self.error`` ein; er
+        verlaesst den Besitzer nur als normales Ende.
+        """
         transport_type = self.config.get("transport", "stdio")
         try:
             from mcp import ClientSession
-            self._exit_stack = AsyncExitStack()
 
             if transport_type == "stdio":
                 await self._connect_stdio()
@@ -305,13 +431,19 @@ class McpServerConnection:
             # "Application startup failed. Exiting.", Exit 3, systemd startet
             # neu, und der ganze Dienst war wegen EINES optionalen Servers weg.
             #
-            # WEITERGEWORFEN WIRD NUR DER ECHTE ABBRUCH: wurde unser eigener
-            # Task gecancelt (Shutdown), muss die Ausnahme durch, sonst haengt
-            # das Herunterfahren. `cancelling()` unterscheidet genau das – ein
-            # blindes Schlucken waere hier der schlechtere Fehler.
-            aufgabe = asyncio.current_task()
-            if aufgabe is not None and aufgabe.cancelling():
-                raise
+            # ⚠ HIER STAND EIN `cancelling()`-VORBEHALT – und er war falsch:
+            # anyio cancelt den Task, um seinen Scope abzubrechen, damit steht
+            # `cancelling()` IMMER auf 1, und der Vorbehalt warf jeden
+            # Transportfehler als vermeintlichen Shutdown weiter (DEV
+            # 2026-10-25). Nach dem Umbau ist er auch ueberfluessig: dieser
+            # Code laeuft im BESITZER-Task (`_besitzer_lauf`), dessen Abbruch
+            # den Aufrufer nie erreicht. Ein echter Shutdown cancelt den
+            # Besitzer von aussen – der endet dann ohnehin.
+            #
+            # KEIN `uncancel()` und KEIN weiterer await: der Besitzer verlaesst
+            # direkt im Anschluss den Scope (finally -> aclose), und anyio
+            # raeumt seinen eigenen Cancel beim Verlassen selbst ab. Jeder
+            # await DAZWISCHEN wuerde erneut gecancelt (level-triggered).
             self.error = ("Verbindung abgebrochen – der Server hat den Transport "
                           "fallen lassen (Zertifikat, Netz oder Protokoll)")
             self.connected = False
@@ -478,38 +610,37 @@ class McpServerConnection:
         await self._session.initialize()
 
     async def disconnect(self):
-        """Trennt die Verbindung.
+        """Trennt die Verbindung – ueber den BESITZER-Task, nicht selbst.
 
-        ⚠ Hier kommen dieselben BaseException-Abkoemmlinge an wie beim
-        Verbinden, und sie sind beim Trennen besonders unangenehm: der Aufruf
-        steht in ``connect_server`` VOR dem Neuaufbau und in ``disconnect_all``
-        im Shutdown. Im Journal von DEV stand am 2026-10-24 genau eine Zeile
-        "Fehler beim Trennen – Attempted to exit cancel scope in a different
-        task" – der RuntimeError war von ``except Exception`` noch gedeckt, die
-        CancelledError daneben NICHT. Das ``finally`` raeumt in jedem Fall auf:
-        ein halb offener Stack waere beim naechsten Versuch die zweite Fehler-
-        quelle.
+        ⚠ DER STACK WIRD HIER NICHT MEHR GESCHLOSSEN. anyio verlangt, dass ein
+        Cancel-Scope in dem Task verlassen wird, in dem er betreten wurde; im
+        Journal von DEV stand genau deshalb "Fehler beim Trennen – Attempted to
+        exit cancel scope in a different task than it was entered in" (der
+        Aufbau lief im Lifespan-, das Trennen im Request-Task). Jetzt setzt
+        ``disconnect`` nur das Stopp-Signal, und der Besitzer schliesst seinen
+        eigenen Stack. Subprozesse eines stdio-Servers werden damit sauber
+        beendet, statt beim Fehlschlag des Schliessens zu verwaisen.
+
+        Wird DIESER Aufruf gecancelt (Shutdown), geht der Abbruch durch – aber
+        erst, nachdem der Besitzer seinerseits gestoppt ist. Gewartet wird mit
+        `gather(return_exceptions=True)`: ein Fehler im Besitzer gehoert in
+        dessen Meldung, nicht in den Aufrufer.
         """
+        besitzer = getattr(self, "_besitzer", None)
+        stopp = getattr(self, "_stopp", None)
         try:
-            if self._exit_stack:
-                await self._exit_stack.aclose()
+            if stopp is not None:
+                stopp.set()
+            if besitzer is not None and not besitzer.done():
+                await asyncio.gather(besitzer, return_exceptions=True)
         except asyncio.CancelledError:
-            aufgabe = asyncio.current_task()
-            if aufgabe is not None and aufgabe.cancelling():
-                # Im Shutdown MUSS der Abbruch durch – aber erst, nachdem das
-                # finally unten den Zustand saubergemacht hat.
-                raise
-            print(f"[MCP] {self.name}: Trennen abgebrochen", flush=True)
-        except BaseExceptionGroup as gruppe:
-            harte, _ = gruppe.split((KeyboardInterrupt, SystemExit))
-            if harte is not None:
-                raise
-            print(f"[MCP] {self.name}: Fehler beim Trennen – {gruppe}", flush=True)
-        except Exception as e:
-            print(f"[MCP] {self.name}: Fehler beim Trennen – {e}", flush=True)
+            if besitzer is not None and not besitzer.done():
+                besitzer.cancel()
+            raise
         finally:
+            self._besitzer = None
+            self._stopp = None
             self._session = None
-            self._exit_stack = None
             self.connected = False
             self.tools = []
 

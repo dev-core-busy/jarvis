@@ -98,6 +98,26 @@ def _abbruch_melden():
     os._exit(2)
 
 
+
+def abbruch(text: str) -> None:
+    """'Konnte nicht laufen' – IMMER Exit 2, nie die Bilanz.
+
+    ⚠ BEZAHLT BEIM BAU DER GEGENPROBE (2026-10-25): die Abbruch-Stellen riefen
+    `bilanz_und_ende()`, und die endet mit `exit(1 if FAIL else 0)`. Bei null
+    FAILs meldete ein ABBRUCH damit "bestanden" – genau der Zustand, gegen den
+    die Exit-2-Stufe gebaut ist. Gefunden hat es eine Sonde, die den Messaufbau
+    blind machte und Exit 0 statt 2 bekam (Register: ein Abbruch ist von einem
+    bestandenen Lauf sonst nicht zu unterscheiden). Zwei der Stellen standen
+    schon im Commit e5e51072.
+    """
+    global _bilanz_gedruckt
+    _bilanz_gedruckt = True        # der atexit-Melder soll nicht doppelt melden
+    print("ABBRUCH: " + text)
+    print("  (bis hierher: %d OK, %d FAIL – 'konnte nicht laufen', NICHT "
+          "bestanden)" % (OK, FAIL))
+    sys.stdout.flush()
+    sys.exit(2)
+
 import atexit                                                      # noqa: E402
 import os                                                          # noqa: E402
 
@@ -315,15 +335,22 @@ async def teil2b():
         entkommen = None
     except BaseException as e:  # noqa: BLE001
         entkommen = "%s: %s" % (type(e).__name__, e)
-    return entkommen, mgr._connections.get("id-gesund")
+    # ⚠ DEN ZUSTAND HIER LESEN, IM LAUFENDEN LOOP – nicht nach asyncio.run.
+    # Seit dem Besitzer-Task (2026-10-25) haelt jede Verbindung einen Task, der
+    # auf ihr Stopp-Signal wartet. `asyncio.run` raeumt beim Beenden alle
+    # Tasks ab, der Besitzer setzt dabei voellig korrekt `connected=False` –
+    # und eine Pruefung DANACH meldete einen Verbindungsverlust, den es im
+    # Dienst (dessen Loop weiterlaeuft) nicht gibt.
+    g = mgr._connections.get("id-gesund")
+    return entkommen, (None if g is None else g.connected)
 
 
 _ent2b, _gesund2b = asyncio.run(teil2b())
 check("ein Eintrag OHNE id beendet connect_all nicht", _ent2b is None,
       "entkommen: %s" % _ent2b)
 check("… und der gesunde Server DANACH wird trotzdem verbunden",
-      _gesund2b is not None and _gesund2b.connected is True,
-      "nicht verbunden" if _gesund2b is None else str(_gesund2b.connected))
+      _gesund2b is True,
+      "nicht verbunden" if _gesund2b is None else str(_gesund2b))
 
 
 # ── 5./6. Gegenkontrolle: ein ECHTER Abbruch muss durch ─────────────────────
@@ -403,15 +430,13 @@ _main = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 try:
     _baum = ast.parse(_main)
 except SyntaxError as e:
-    print("ABBRUCH: main.py nicht parsebar: %s" % e)
-    bilanz_und_ende()
+    abbruch("main.py nicht parsebar: %s" % e)
 
 _fn = next((n for n in ast.walk(_baum)
             if isinstance(n, ast.AsyncFunctionDef) and n.name == "startup_mcp"),
            None)
 if _fn is None:
-    print("ABBRUCH: startup_mcp nicht gefunden – der Waechter kann nichts messen")
-    bilanz_und_ende()
+    abbruch("startup_mcp nicht gefunden – der Waechter kann nichts messen")
 check("Positivkontrolle: startup_mcp gefunden", True)
 
 _typen = set()
@@ -432,5 +457,275 @@ check("startup_mcp sagt zu, dass der Dienst ohne MCP weiterlaeuft",
       "OHNE MCP" in (ast.get_docstring(_fn) or "")
       or any("OHNE MCP" in ast.unparse(n) for n in ast.walk(_fn)
              if isinstance(n, ast.Constant)))
+
+# ── 5. DIE ECHTE ANYIO-MECHANIK (der Vorfall vom 2026-10-25) ────────────────
+abschnitt("5. Echte anyio-Mechanik: level-triggered Cancel-Scope")
+# ⚠ WARUM DIESER ABSCHNITT DIE ABSCHNITTE 1-3 NICHT ERSETZT, SONDERN ERGAENZT:
+# dort wirft die Attrappe die CancelledError DIREKT. Das hat den ersten Fix
+# bestehen lassen (23/0 gruen), waehrend er auf DEV nicht hielt – denn der
+# echte Weg ist ein ANDERER: `streamablehttp_client` haelt eine
+# anyio-TaskGroup, ihr Scope wird abgebrochen, und anyio-Scopes sind
+# LEVEL-TRIGGERED. Solange der Scope offen ist, wird JEDER weitere await im
+# Task erneut gecancelt – auch in fremdem Code. Auf DEV starb so der Hook
+# `_geheimnis_modulschluessel_verpacken`, mit und ohne `uncancel()`.
+# Ein Messaufbau, der die Mechanik des echten Ablaufs nicht herstellt, misst
+# den Glueckfall (Register).
+#
+# Deshalb laeuft hier `_connect_streamable_http` UNGEPATCHT – nachgebaut ist
+# nur der Transport, und zwar mit echtem anyio.
+try:
+    import anyio
+    import contextlib as _ctx
+except ImportError as e:
+    abbruch("anyio fehlt (%s) – ohne es ist Abschnitt 5 nicht messbar" % e)
+
+
+def _transport_mit_taskgroup(scheitert: bool):
+    """Wie `streamablehttp_client`: eine anyio-TaskGroup um die Streams.
+
+    Scheitert ihr Hintergrund-Task, bricht anyio den Scope ab – genau wie bei
+    einem selbstsignierten Zertifikat im POST-Task.
+    """
+    @_ctx.asynccontextmanager
+    async def _cm(url="", **_kw):
+        async with anyio.create_task_group() as tg:
+            async def _post():
+                await anyio.sleep(0.02)
+                if scheitert:
+                    raise ConnectionError("[SSL: CERTIFICATE_VERIFY_FAILED] "
+                                          "self-signed certificate")
+                await anyio.sleep(3600)
+            # Benannt: anyio startet Kinder ueber einen WRAPPER, `_post` steht
+            # dann nicht in repr(coro) – die erste Leck-Pruefung fand den Task
+            # deshalb nie und blieb in der Gegenprobe stumm.
+            tg.start_soon(_post, name="mcp-probe-transport")
+            try:
+                yield ("read", "write", lambda: None)
+            finally:
+                tg.cancel_scope.cancel()
+    return _cm
+
+
+class _WartendeSession:
+    """Wie `ClientSession`: `initialize()` WARTET auf den Server.
+
+    Das ist der Punkt, an dem der abgebrochene Scope den Task trifft.
+    """
+    def __init__(self, r, w):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def initialize(self):
+        await anyio.sleep(2)
+
+    async def list_tools(self):
+        return _ToolsAntwort([_Tool("probe_werkzeug")])
+
+
+class _SchnelleSession(_WartendeSession):
+    async def initialize(self):
+        return None
+
+
+def _mcp_fuer(scheitert: bool, session_cls):
+    sys.modules["mcp.client.streamable_http"].streamablehttp_client = \
+        _transport_mit_taskgroup(scheitert)
+    sys.modules["mcp"].ClientSession = session_cls
+
+
+async def _naechster_hook():
+    """Wie `_geheimnis_modulschluessel_verpacken`: ein to_thread im Lifespan."""
+    try:
+        await asyncio.to_thread(lambda: 42)
+        return "lief"
+    except BaseException as e:  # noqa: BLE001
+        return "STARB: %s" % type(e).__name__
+
+
+# (a) POSITIVKONTROLLE DES AUFBAUS: der ALTE Weg (Transport im SELBEN Task
+# betreten, Fehler gefangen, Stack offen) MUSS den naechsten Hook sterben
+# lassen. Tut er das nicht, stellt dieser Aufbau den Vorfall nicht her, und
+# jede Pruefung unten waere trivial gruen – also Exit 2, nicht "bestanden".
+async def _alter_weg():
+    from contextlib import AsyncExitStack
+    _mcp_fuer(True, _WartendeSession)
+    stack = AsyncExitStack()
+    from mcp import ClientSession as _CS
+    from mcp.client.streamable_http import streamablehttp_client as _shc
+    try:
+        tr = await stack.enter_async_context(_shc(url="https://x.invalid/mcp"))
+        s = await stack.enter_async_context(_CS(tr[0], tr[1]))
+        await s.initialize()
+    except asyncio.CancelledError:
+        a = asyncio.current_task()
+        while a is not None and a.cancelling() > 0:
+            a.uncancel()             # wie der zweite, gescheiterte Fix
+    ergebnis = await _naechster_hook()
+    # Erst NACH der Messung aufraeumen – und im SELBEN Task. Sonst raeumt
+    # `asyncio.run` den offen gelassenen Generator beim Beenden in einem
+    # fremden Task ab, und auf stderr stuende ein Traceback, der wie ein Defekt
+    # des NEUEN Codes aussieht (genau so gesehen). Die Positivkontrolle soll
+    # den alten Fehler herstellen, nicht das Protokoll verschmutzen.
+    try:
+        await stack.aclose()
+    except BaseException:  # noqa: BLE001
+        pass
+    return ergebnis
+
+
+_journal5 = ""
+_loop_meldungen5 = []
+_alt = asyncio.run(_alter_weg())
+if not _alt.startswith("STARB"):
+    abbruch("der Aufbau stellt den Vorfall NICHT her (alter Weg: %s) – "
+          "Abschnitt 5 kann nichts messen" % _alt)
+check("Positivkontrolle: der ALTE Weg laesst den naechsten Hook sterben "
+      "(auch mit uncancel) – der Aufbau stellt den Vorfall her", True)
+
+
+# (b) DER ECHTE connect() mit kaputtem Server: der Aufrufer bleibt heil.
+async def _neuer_weg_kaputt():
+    import io
+    import contextlib as _c3
+    _mcp_fuer(True, _WartendeSession)
+    c = MC.McpServerConnection(_konf("theben"))      # KEIN Patch am Transport
+    puffer = io.StringIO()
+    try:
+        with _c3.redirect_stdout(puffer):
+            await c.connect()
+        entkommen = None
+    except BaseException as e:  # noqa: BLE001
+        entkommen = type(e).__name__
+    global _journal5
+    _journal5 = puffer.getvalue()
+    a = asyncio.current_task()
+    gezaehlt = a.cancelling() if a else -1
+    hook = await _naechster_hook()
+    zustand = (c.connected, c.error)
+    await c.disconnect()
+    return entkommen, gezaehlt, hook, zustand
+
+
+_ent5, _gez5, _hook5, (_verb5, _err5) = asyncio.run(_neuer_weg_kaputt())
+check("ein kaputter Server VERLAESST connect() nicht (echter anyio-Weg)",
+      _ent5 is None, "entkommen: %s" % _ent5)
+check("der Aufrufer ist danach NICHT gecancelt (cancelling() == 0)",
+      _gez5 == 0, "cancelling()=%s" % _gez5)
+check("der NAECHSTE Hook laeuft (der eigentliche Vorfall: er starb auf DEV)",
+      _hook5 == "lief", _hook5)
+check("der Server gilt als nicht verbunden, mit Grund",
+      _verb5 is False and bool(_err5), "connected=%s error=%r" % (_verb5, _err5))
+# ⚠ Eine Falschmeldung im Normalbetrieb entwertet das Journal: bei JEDEM
+# Startversuch eines kaputten Servers stand zuerst "Aufraeumen unvollstaendig",
+# obwohl das Aufraeumen vollstaendig war (die TaskGroup meldet nur den schon
+# bekannten Transportfehler nach). Der Grund gehoert EINMAL ins Journal.
+check("das Journal nennt den Grund – und KEIN falsches 'unvollstaendig'",
+      "abgebrochen" in _journal5 and "unvollstaendig" not in _journal5,
+      _journal5.strip()[:160])
+
+
+# (c) connect_all mit [kaputt, gesund] auf dem echten Weg: der gesunde wird
+# verbunden, und der Hook danach laeuft.
+async def _alle():
+    global _server
+    _server = [_konf("theben"), dict(_konf("gesund"), transport="stdio")]
+    mgr = MC.McpClientManager()
+
+    # Der gesunde Server laeuft ueber stdio – hier nachgebaut als schneller
+    # Transport. Der kaputte bleibt auf dem ungepatchten Streamable-Weg.
+    async def _gesund_stdio(self_):
+        self_._session = _SchnelleSession(None, None)
+    MC.McpServerConnection._connect_stdio = _gesund_stdio
+    _mcp_fuer(True, _WartendeSession)
+    try:
+        await mgr.connect_all()
+        entkommen = None
+    except BaseException as e:  # noqa: BLE001
+        entkommen = type(e).__name__
+    hook = await _naechster_hook()
+    gesund = mgr._connections.get("id-gesund")
+    g = None if gesund is None else gesund.connected
+    await mgr.disconnect_all()
+    return entkommen, hook, g
+
+
+_ent5c, _hook5c, _g5c = asyncio.run(_alle())
+check("connect_all mit kaputtem Server laeuft durch (echter Weg)",
+      _ent5c is None, "entkommen: %s" % _ent5c)
+check("… der Hook danach laeuft", _hook5c == "lief", _hook5c)
+check("… und der gesunde Server IST verbunden", _g5c is True, str(_g5c))
+
+
+# (d) AUFRAEUMEN IM SELBEN TASK: ein ERFOLGREICH verbundener Server wird von
+# einem ANDEREN Task getrennt (wie Request -> Shutdown). Vorher stand dabei
+# "Attempted to exit cancel scope in a different task" im Journal; mit dem
+# Besitzer schliesst der Task seinen Stack selbst.
+async def _trennen_aus_anderem_task():
+    # ⚠ DIE ECHTE FOLGE EINES NICHT GESCHLOSSENEN STACKS IST KEIN LAUFENDER
+    # TASK, sondern eine Meldung. Ohne `aclose` faellt der Transport-Generator
+    # an den asyncgen-Finalizer, und der schliesst ihn in einem FREMDEN Task:
+    # "an error occurred during closing of asynchronous generator" samt
+    # "Attempted to exit cancel scope in a different task" – woertlich so im
+    # Journal von DEV. Die erste Fassung zaehlte nur laufende Tasks; die hatte
+    # der Finalizer laengst beseitigt, und die Gegenprobe blieb stumm.
+    # Gesammelt wird deshalb, was der Loop an Fehlern meldet.
+    loop = asyncio.get_running_loop()
+    meldungen = []
+    loop.set_exception_handler(lambda _l, ctx: meldungen.append(
+        "%s | %s" % (ctx.get("message", ""), ctx.get("exception", ""))))
+    _mcp_fuer(False, _SchnelleSession)               # gesunder Transport
+    c = MC.McpServerConnection(_konf("gesund2"))
+    await c.connect()
+    verbunden = c.connected
+
+    def _transport_tasks():
+        return [x for x in asyncio.all_tasks()
+                if not x.done() and x.get_name() == "mcp-probe-transport"]
+    # POSITIVKONTROLLE der Zaehlung: WAEHREND der Server verbunden ist, MUSS
+    # sie den laufenden Transport-Task sehen. Ohne sie ist "0 nach dem Trennen"
+    # auch dann gruen, wenn die Zaehlung blind ist – genau so gewesen.
+    vorher_laufend = len(_transport_tasks())
+    import io
+    import contextlib as _c2
+    puffer = io.StringIO()
+    with _c2.redirect_stdout(puffer):
+        await asyncio.create_task(c.disconnect())    # ANDERER Task
+    import gc
+    gc.collect()                    # den Finalizer deterministisch laufen lassen
+    await asyncio.sleep(0.05)
+    global _loop_meldungen5
+    _loop_meldungen5 = list(meldungen)
+    # ⚠ "Sauber aufgeraeumt" heisst auch: der Hintergrund-Task des Transports
+    # LAEUFT NICHT MEHR. Schliesst niemand den Stack, laeuft er weiter (hier:
+    # 3600 s), und JEDER Reconnect liesse einen weiteren liegen – ein Leck,
+    # das kein Fehler meldet. Gezaehlt am echten Zustand der Tasks.
+    return (verbunden, puffer.getvalue(), c.connected,
+            len(_transport_tasks()), vorher_laufend)
+
+
+_v5d, _aus5d, _nach5d, _rest5d, _vor5d = asyncio.run(_trennen_aus_anderem_task())
+check("Positivkontrolle der Zaehlung: waehrend der Verbindung laeuft der "
+      "Transport-Task (sie ist nicht blind)", _vor5d >= 1,
+      "%d gesehen" % _vor5d)
+check("Positivkontrolle: der gesunde Server war verbunden", _v5d is True,
+      str(_v5d))
+check("Trennen aus einem ANDEREN Task raeumt sauber auf (kein "
+      "'Aufraeumen unvollstaendig')",
+      "unvollstaendig" not in _aus5d and "different task" not in _aus5d,
+      _aus5d.strip()[:120])
+check("… und danach gilt der Server als getrennt", _nach5d is False,
+      str(_nach5d))
+check("… und KEIN Transport-Task laeuft mehr (sonst leckt jeder Reconnect)",
+      _rest5d == 0, "%d Transport-Task(s) laufen weiter" % _rest5d)
+check("… und der Loop meldet KEIN Schliessen in fremdem Task "
+      "(die Zeile aus dem DEV-Journal)",
+      not any("asynchronous generator" in m or "different task" in m
+              for m in _loop_meldungen5),
+      "; ".join(_loop_meldungen5)[:200])
 
 bilanz_und_ende()

@@ -71,15 +71,17 @@ PROBEN = [
     # ── PRODUKT: die Gegenrichtung – der Shutdown muss abbrechen ───────────
     # Ohne `cancelling()` wird JEDE CancelledError geschluckt, auch der echte
     # Abbruch: das Herunterfahren haengt. Dieselbe Zeile, andere Richtung.
-    ("PRODUKT CancelledError wird blind geschluckt (Shutdown haengt)", MC,
-     "            aufgabe = asyncio.current_task()\n"
-     "            if aufgabe is not None and aufgabe.cancelling():\n"
-     "                raise\n"
-     "            self.error = (\"Verbindung abgebrochen",
-     "            aufgabe = asyncio.current_task()\n"
-     "            if False:\n"
-     "                raise\n"
-     "            self.error = (\"Verbindung abgebrochen"),
+    # ⚠ Die Shutdown-Zusage liegt seit dem Besitzer-Task an ANDERER Stelle:
+    # der `cancelling()`-Vorbehalt in `connect()` war selbst der Fehler (anyio
+    # setzt den Zaehler bei JEDEM Scope-Abbruch) und ist entfernt. Durchgelassen
+    # wird ein echter Abbruch jetzt dort, wo WIR gecancelt werden: beim Warten
+    # auf den Besitzer. Fehlt das `raise`, haengt das Herunterfahren.
+    ("PRODUKT der eigene Abbruch wird geschluckt (Shutdown haengt)", MC,
+     "            self._stopp.set()\n"
+     "            self._besitzer.cancel()\n"
+     "            raise\n",
+     "            self._stopp.set()\n"
+     "            self._besitzer.cancel()\n"),
     ("PRODUKT harte Anteile einer Gruppe werden geschluckt", MC,
      "            harte, _ = gruppe.split((KeyboardInterrupt, SystemExit))\n"
      "            if harte is not None:\n"
@@ -89,12 +91,45 @@ PROBEN = [
      "            if False:\n"
      "                raise\n"
      "            self.error = \"; \".join(str(e) for e in gruppe.exceptions)"),
+    # ── PRODUKT: der Besitzer-Task (2026-10-25) ───────────────────────────
+    # Die wichtigste Probe: sie stellt den Zustand VOR dem Umbau her – der
+    # Transport wird im AUFRUFER-Task betreten und bei einem Fehler offen
+    # gelassen. Genau damit starb auf DEV der naechste, fremde Startup-Hook.
+    ("PRODUKT Besitzer-Task umgangen (Aufbau im Aufrufer, der Vorfall)", MC,
+     "        self._stopp = asyncio.Event()\n"
+     "        bereit = asyncio.Event()\n"
+     "        self._besitzer = asyncio.create_task(\n",
+     "        self._exit_stack = AsyncExitStack()\n"
+     "        await self._verbinden()\n"
+     "        return\n"
+     "        self._stopp = asyncio.Event()\n"
+     "        bereit = asyncio.Event()\n"
+     "        self._besitzer = asyncio.create_task(\n"),
+    ("PRODUKT harte Ausnahme ueber die Task-Grenze verschluckt", MC,
+     "            if isinstance(fehler, BaseExceptionGroup):\n",
+     "            if False:\n"),
+    ("PRODUKT der Besitzer schliesst seinen Stack nicht (Leck je Reconnect)", MC,
+     "                    await stapel.aclose()\n",
+     "                    pass\n"),
+    ("PRODUKT der Nachhall wird wieder als 'unvollstaendig' gemeldet", MC,
+     "                    nachhall = bool(self.error) and isinstance(\n",
+     "                    nachhall = False and isinstance(\n"),
     # ── SONDE: schlaegt die Positivkontrolle an? ───────────────────────────
     ("SONDE der gesunde Server verbindet gar nicht mehr", WI,
      "        c._session = _ClientSession(object(), object())\n",
      "        pass\n"),
     ("SONDE der Cancel-Aufbau cancelt nicht (Gegenkontrolle trivial)", WI,
      "    aufgabe.cancel()\n", "    pass\n"),
+    # ⚠ EXIT 2 IST HIER DER BISS. Scheitert der nachgebaute Transport nicht,
+    # stellt Abschnitt 5 den Vorfall nicht her – und muss das als "konnte nicht
+    # laufen" melden, nicht als "bestanden". Ohne diese Probe waere die
+    # Positivkontrolle dort ungeprueft.
+    ("SONDE der anyio-Transport scheitert nicht (Abschnitt 5 blind)", WI,
+     "                if scheitert:\n"
+     "                    raise ConnectionError(\"[SSL: CERTIFICATE_VERIFY_FAILED] \"\n",
+     "                if False:\n"
+     "                    raise ConnectionError(\"[SSL: CERTIFICATE_VERIFY_FAILED] \"\n",
+     "abbruch"),
 ]
 
 DATEIEN = [MC, MA, WI]
@@ -135,7 +170,9 @@ def main() -> int:
 
     beissen = 0
     try:
-        for name, datei, alt, neu in PROBEN:
+        for probe in PROBEN:
+            name, datei, alt, neu = probe[:4]
+            erwartet = probe[4] if len(probe) > 4 else "fail"
             pfad = ROOT / datei
             text = pfad.read_text(encoding="utf-8")
             if text.count(alt) != 1:
@@ -146,13 +183,18 @@ def main() -> int:
                 fails, rc = lauf()
             finally:
                 pfad.write_bytes(sicherung[datei])
-            if fails > 0:
+            if fails > 0 and erwartet == "fail":
                 beissen += 1
                 print("  BISS %-56s %d FAIL" % (name, fails))
+            elif fails < 0 and erwartet == "abbruch":
+                beissen += 1
+                print("  BISS %-56s Exit 2 (erwartet)" % name)
             elif fails < 0:
                 # Ein Abbruch ist hier KEIN Biss: "konnte nicht laufen" ist von
                 # "bestanden" nicht zu unterscheiden (Register).
                 print("  ABBR %-56s konnte nicht laufen (rc=%s)" % (name, rc))
+            elif fails > 0:
+                print("  ??!  %-56s %d FAIL – erwartet war Exit 2" % (name, fails))
             else:
                 print("  ZAHN %-56s 0 FAIL – beisst NICHT" % name)
     finally:

@@ -129,7 +129,7 @@ TMP = Path(tempfile.mkdtemp(prefix="mcp_tls_test_"))
 
 
 def _zert(cn="probe.beispiel.invalid", namen=("probe.beispiel.invalid",),
-          tage_von=-1, tage_bis=30):
+          tage_von=-1, tage_bis=30, ca=False):
     """Ein echtes, selbstsigniertes Zertifikat – vom ERZEUGER gebaut."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
@@ -144,6 +144,11 @@ def _zert(cn="probe.beispiel.invalid", namen=("probe.beispiel.invalid",),
         b = b.add_extension(
             x509.SubjectAlternativeName([x509.DNSName(n) for n in namen]),
             critical=False)
+    if ca:
+        # Eine (Firmen-)Root-CA: selbstsigniert wie ein Server-Zert, aber mit
+        # CA:TRUE. Sie darf NIE gepinnt werden – sie signiert viele Server.
+        b = b.add_extension(x509.BasicConstraints(ca=True, path_length=None),
+                            critical=True)
     cert = b.sign(key, hashes.SHA256())
     pem = cert.public_bytes(serialization.Encoding.PEM).decode()
     schluessel = key.private_bytes(
@@ -158,6 +163,56 @@ def _zert(cn="probe.beispiel.invalid", namen=("probe.beispiel.invalid",),
 # Ein Zertifikat ohne Schluessel ist zum Vorzeigen nutzlos.
 _ZERT_SCHLUESSEL: dict = {}
 
+
+
+def _ca_und_leaf(leaf_namen=("andere.invalid",)):
+    """Eine ECHTE Root-CA (CA:TRUE, OHNE Server-Namen) und ein von ihr
+    signiertes Server-Zertifikat. So sieht eine Firmen-CA aus – sie wird nie
+    gepinnt, und ueber sie muss der NAME weiter zaehlen."""
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Firmen-Root")])
+    jetzt = dt.datetime.now(dt.timezone.utc)
+    ca = (x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name)
+          .public_key(ca_key.public_key()).serial_number(x509.random_serial_number())
+          .not_valid_before(jetzt - dt.timedelta(days=1))
+          .not_valid_after(jetzt + dt.timedelta(days=30))
+          .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+          # ⚠ RFC 5280: Python 3.13 prueft im Strikt-Modus (VERIFY_X509_STRICT)
+          # die Schluessel-Kennungen. Ohne SKI/AKI lehnt OpenSSL mit Code 85
+          # ("Missing Authority Key Identifier") ab – und zwar VOR dem
+          # Namensabgleich. Die erste Fassung dieses Materials war deshalb
+          # untauglich: "fremder Name verbindet nicht" waere aus dem FALSCHEN
+          # Grund gruen gewesen. Testmaterial baut der Erzeuger – vollstaendig.
+          .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
+                         critical=False)
+          .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True,
+                         crl_sign=True, content_commitment=False,
+                         key_encipherment=False, data_encipherment=False,
+                         key_agreement=False, encipher_only=False,
+                         decipher_only=False), critical=True)
+          .sign(ca_key, hashes.SHA256()))
+    lk = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    lname = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, leaf_namen[0])])
+    leaf = (x509.CertificateBuilder().subject_name(lname).issuer_name(ca_name)
+            .public_key(lk.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(jetzt - dt.timedelta(days=1))
+            .not_valid_after(jetzt + dt.timedelta(days=30))
+            .add_extension(x509.SubjectAlternativeName(
+                [x509.DNSName(n) for n in leaf_namen]), critical=False)
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None),
+                           critical=True)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                ca_key.public_key()), critical=False)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(lk.public_key()),
+                           critical=False)
+            .sign(ca_key, hashes.SHA256()))
+    ca_pem = ca.public_bytes(serialization.Encoding.PEM).decode()
+    leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
+    _ZERT_SCHLUESSEL[leaf_pem] = lk.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()).decode()
+    return ca_pem, leaf_pem
 
 def _tls_server(pem: str):
     """Ein echter TLS-Server, der ``pem`` vorzeigt. Liefert (port, stoppen).
@@ -222,37 +277,48 @@ PEM = _zert()
 check("Positivkontrolle: ein echtes Testzertifikat ist erzeugt",
       PEM.startswith("-----BEGIN CERTIFICATE-----"), PEM[:30])
 
-ctx = T.ssl_kontext(PEM)
-check("ein hinterlegtes Zertifikat ergibt einen Kontext", ctx is not None)
-check("… mit check_hostname AN", ctx is not None and ctx.check_hostname is True)
-check("… und verify_mode CERT_REQUIRED",
-      ctx is not None and ctx.verify_mode == ssl.CERT_REQUIRED,
-      str(getattr(ctx, "verify_mode", None)))
-# ⚠ Die System-CAs muessen DRIN bleiben: ein eigenes Zert ERGAENZT, ersetzt
-# nicht. Gemessen an der Zahl der geladenen CAs, nicht am Quelltext.
-#
-# ⚠ UND NICHT MIT `== system + 1`: `get_ca_certs()` listet nur, was als CA
-# gilt. Ein selbstsigniertes SERVER-Zertifikat ohne BasicConstraints CA:TRUE
-# ist geladen und wird beim Handshake auch benutzt, erscheint dort aber nicht –
-# die erste Fassung meldete deshalb einen Mangel, den es nicht gab (151 gegen
-# 151). Gemessen gehoert die Zusage ("nichts ist weggefallen"), nicht eine
-# Zahl, die von der Art des Zertifikats abhaengt.
-_eigene = len(ctx.get_ca_certs())
-_system = len(ssl.create_default_context().get_ca_certs())
-check("die System-CAs bleiben geladen (eigenes Zert ERGAENZT, ersetzt nicht)",
-      _eigene >= _system and _system > 0,
-      "eigene=%d system=%d" % (_eigene, _system))
-# Positivkontrolle der Messung: ein Kontext OHNE Systemvorgabe hat deutlich
-# weniger. Ohne sie waere `>=` auch bei einem leeren Satz gruen.
-_leer = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-check("Positivkontrolle: ein Kontext ohne System-CAs hat weniger",
-      len(_leer.get_ca_certs()) < _system,
-      "leer=%d system=%d" % (len(_leer.get_ca_certs()), _system))
-# Und die Zusage, dass das EIGENE Zertifikat wirklich wirkt – am Handshake
-# gemessen, nicht an einer Liste: der Kontext muss die Kette akzeptieren.
-check("das hinterlegte Zertifikat ist im Kontext wirksam "
-      "(load_verify_locations hat es angenommen)",
-      T.ssl_kontext(PEM) is not None)
+# ⚠ ZWEI WEGE SEIT 2026-10-25, und die Sicherheit haengt an ihrer Trennung.
+# Gemeldet war "trotz akzeptiertem Zertifikat weiterhin Verbindung
+# abgebrochen": der Server wurde per IP angesprochen, das Zertifikat galt nur
+# fuer Namen, und `check_hostname` lehnte ab. Ein ERLAUBTES selbstsigniertes
+# Server-Zert wird deshalb GEPINNT (Zertifikats- statt Namensabgleich). Das ist
+# nur sicher OHNE System-CAs – mit ihnen vertraute `check_hostname=False` jedem
+# CA-signierten Zertifikat fuer JEDEN Host. Gemessen wird das direkt an den
+# geladenen Ankern (`cert_store_stats`), nicht am Quelltext.
+_system = ssl.create_default_context().cert_store_stats()["x509"]
+check("Positivkontrolle: der System-Kontext hat Anker", _system > 0, str(_system))
+
+abschnitt("1a. Pinning: ein erlaubtes, selbstsigniertes SERVER-Zertifikat")
+pin = T.ssl_kontext(PEM)
+check("ein selbstsigniertes Server-Zert wird gepinnt", T.ist_gepinnt(PEM) is True)
+check("… mit CERT_REQUIRED (die Pruefung bleibt AN)",
+      pin is not None and pin.verify_mode == ssl.CERT_REQUIRED)
+check("… Namensabgleich aus – das Zertifikat selbst ist die Identitaet",
+      pin is not None and pin.check_hostname is False)
+_anker = pin.cert_store_stats()["x509"] if pin is not None else -1
+check("⚠ GENAU EIN Anker, KEINE System-CAs (sonst jedes CA-Zert fuer jeden Host)",
+      _anker == 1, "%d Anker geladen, System hat %d" % (_anker, _system))
+
+abschnitt("1b. CA-Weg: eine CA wird NIE gepinnt")
+PEM_CA = _zert(cn="Firmen-Root", namen=(), ca=True)
+check("eine selbstsignierte CA (CA:TRUE) wird NICHT gepinnt",
+      T.ist_gepinnt(PEM_CA) is False)
+ctx = T.ssl_kontext(PEM_CA)
+check("… der Name wird weiter geprueft (check_hostname AN)",
+      ctx is not None and ctx.check_hostname is True)
+check("… mit CERT_REQUIRED",
+      ctx is not None and ctx.verify_mode == ssl.CERT_REQUIRED)
+# Die System-CAs bleiben im CA-Weg: ein Firmen-Zert ERGAENZT, ersetzt nicht.
+_eigene = ctx.cert_store_stats()["x509"] if ctx is not None else -1
+check("… die System-CAs bleiben geladen (ergaenzt, ersetzt nicht)",
+      _eigene == _system + 1, "eigene=%d system=%d" % (_eigene, _system))
+
+# Mehrere Bloecke (eine Kette) sind KEIN Einzel-Zert zum Pinnen.
+check("eine Kette aus zwei Bloecken wird NICHT gepinnt (fail-closed)",
+      T.ist_gepinnt(PEM + PEM_CA) is False)
+check("ein kaputter Block wird nicht gepinnt",
+      T.ist_gepinnt("-----BEGIN CERTIFICATE-----\nkaputt\n-----END CERTIFICATE-----") is False)
+check("ein Pfad wird nie gepinnt", T.ist_gepinnt("/etc/ssl/ca.crt") is False)
 
 check("ohne Eintrag gibt es KEINEN eigenen Kontext (Vorgabe des Systems)",
       T.ssl_kontext(None) is None and T.ssl_kontext("") is None
@@ -567,5 +633,92 @@ try:
               "nicht erreichbar" in str(e), str(e)[:90])
 finally:
     _stoppen()
+
+# ── 8. DER GEMELDETE FALL: Server per IP, Zertifikat nur fuer einen Namen ───
+abschnitt("8. Pinning traegt, wo der Name nicht passt (der DEV-Fall)")
+# ⚠ So war "theben" eingetragen: https://<IP>:8442, das Zertifikat gilt nur
+# fuer `localhost` und einen Rechnernamen. Mit dem CA-Weg lehnte
+# `check_hostname` ab ("IP address mismatch", verify_code 64) – AUCH nach dem
+# Erlauben. Hier dieselbe Lage: Zertifikat nur fuer "localhost", angesprochen
+# ueber 127.0.0.1.
+import socket as _so8
+
+
+def _handshake(ctx, port, sni="127.0.0.1"):
+    try:
+        with _so8.create_connection(("127.0.0.1", port), timeout=5) as s:
+            with ctx.wrap_socket(s, server_hostname=sni):
+                return "ok"
+    except ssl.SSLCertVerificationError as f:
+        return "abgelehnt:%s" % f.verify_code
+    except Exception as f:  # noqa: BLE001
+        return "fehler:%s" % type(f).__name__
+
+
+_PEM8 = _zert(cn="localhost", namen=("localhost",))
+_port8, _stop8 = _tls_server(_PEM8)
+if not _port8:
+    abbruch("kein TLS-Server – Abschnitt 8 nicht messbar")
+try:
+    # Positivkontrolle: der CA-Weg (mit Namensabgleich) lehnt hier ab – genau
+    # das war der Vorfall. Ohne das waere "Pinning gelingt" trivial.
+    _ca8 = ssl.create_default_context()
+    _ca8.load_verify_locations(cadata=_PEM8)
+    _r_ca = _handshake(_ca8, _port8)
+    check("Positivkontrolle: mit Namensabgleich lehnt die IP ab (der Vorfall)",
+          _r_ca.startswith("abgelehnt"), _r_ca)
+
+    _r_pin = _handshake(T.ssl_kontext(_PEM8), _port8)
+    check("das ERLAUBTE Zertifikat verbindet ueber die IP (Pinning)",
+          _r_pin == "ok", _r_pin)
+
+    # ⚠ DIE SICHERHEITSHAELFTE: ein FREMDES gepinntes Zertifikat darf NICHT
+    # durch – sonst waere Pinning ohne Namensabgleich ein offenes Tor.
+    _r_fremd = _handshake(T.ssl_kontext(_zert(cn="localhost", namen=("localhost",))),
+                          _port8)
+    check("ein FREMDES gepinntes Zertifikat (gleicher Name!) wird abgelehnt",
+          _r_fremd.startswith("abgelehnt"), _r_fremd)
+finally:
+    _stop8()
+
+# ⚠ DER THEBEN-FALL: `openssl req -x509` setzt per Vorgabe CA:TRUE. Ein
+# selbstsigniertes SERVER-Zertifikat ist damit technisch eine CA – die erste
+# Fassung pinnte es deshalb nie, und auf DEV stand nach dem Erlauben weiter
+# "IP address mismatch". Hier dasselbe Zertifikat: CA:TRUE, kritisch, mit
+# Server-Namen.
+_PEM_X509 = _zert(cn="localhost", namen=("localhost",), ca=True)
+check("ein Server-Zert MIT CA:TRUE (openssl req -x509) wird gepinnt",
+      T.ist_gepinnt(_PEM_X509) is True)
+_port8c, _stop8c = _tls_server(_PEM_X509)
+try:
+    _r_x509 = _handshake(T.ssl_kontext(_PEM_X509), _port8c)
+    check("… und verbindet ueber die IP (das war der gemeldete Fall)",
+          _r_x509 == "ok", _r_x509)
+finally:
+    _stop8c()
+
+# Und der CA-Weg bleibt streng: eine ECHTE Root-CA (ohne Server-Namen), die das
+# Zertifikat eines Servers mit FREMDEM Namen signiert hat. Sie wird nicht
+# gepinnt, der Name zaehlt – und der passt nicht.
+_ROOT, _LEAF = _ca_und_leaf(("andere.invalid",))
+check("eine echte Root-CA (CA:TRUE, ohne Server-Namen) wird NICHT gepinnt",
+      T.ist_gepinnt(_ROOT) is False)
+_port8b, _stop8b = _tls_server(_LEAF)
+try:
+    _r_cab = _handshake(T.ssl_kontext(_ROOT), _port8b)
+    # Der GRUND muss der Name sein (62), nicht irgendein Kettenfehler – sonst
+    # misst die Pruefung die Untauglichkeit des Materials statt der Zusage.
+    # 62 = Hostname, 64 = IP-Adresse passt nicht (hier wird per IP
+    # angesprochen). Beides ist der gemeinte Grund; ausgeschlossen ist ein
+    # KETTENfehler (85, 18, 20 …), der die Untauglichkeit des Materials maesse.
+    check("ueber eine Root-CA verbindet ein FREMDER Name NICHT – wegen des Namens",
+          _r_cab in ("abgelehnt:62", "abgelehnt:64"), _r_cab)
+    # Positivkontrolle: dieselbe CA mit dem PASSENDEN Namen verbindet – sonst
+    # waere "abgelehnt" auch bei einer kaputten Kette gruen.
+    _r_cab_ok = _handshake(T.ssl_kontext(_ROOT), _port8b, sni="andere.invalid")
+    check("Positivkontrolle: dieselbe Root-CA mit passendem Namen verbindet",
+          _r_cab_ok == "ok", _r_cab_ok)
+finally:
+    _stop8b()
 
 ende()

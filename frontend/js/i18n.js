@@ -2609,6 +2609,8 @@ const _I18N = {
         'mcp.not_attempted':    'Inaktiv – es wird nicht verbunden',
         // Zertifikat ansehen, pruefen, erlauben
         'mcp.cert_view':        'Zertifikat ansehen',
+        'mcp.cert_check':       'Zertifikat prüfen',
+        'mcp.cert_pinned_hint': 'Dies ist ein selbstsigniertes Server-Zertifikat. Erlaubst du es, vertraut die Verbindung genau diesem einen Zertifikat (über seinen Schlüssel) – dann wird der Name nicht mehr verglichen, und ein Namensbefund oben ist kein Hindernis.',
         'mcp.cert_loading':     'Zertifikat wird geholt …',
         'mcp.cert_error':       'Zertifikat konnte nicht geholt werden.',
         'mcp.cert_save_error':  'Das Zertifikat konnte nicht hinterlegt werden.',
@@ -7000,6 +7002,8 @@ const _I18N = {
         'mcp.disconnected':     'Not connected',
         'mcp.not_attempted':    'Inactive – no connection is attempted',
         'mcp.cert_view':        'View certificate',
+        'mcp.cert_check':       'Check certificate',
+        'mcp.cert_pinned_hint': 'This is a self-signed server certificate. If you allow it, the connection trusts exactly this one certificate (via its key) \u2013 the name is then no longer compared, and a name finding above is no obstacle.',
         'mcp.cert_loading':     'Fetching certificate ...',
         'mcp.cert_error':       'The certificate could not be fetched.',
         'mcp.cert_save_error':  'The certificate could not be stored.',

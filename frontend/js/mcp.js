@@ -14,6 +14,13 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    // ⚠ RUECKFALLTEXT, wenn der Schluessel fehlt: `window.t` liefert sonst den
+    // NACKTEN SCHLUESSEL ("mcp.cert_check" auf dem Knopf), sobald ein Browser
+    // ein aelteres i18n.js im Cache haelt. Der Cache-Buster von i18n.js steht
+    // in 19 Seiten mit fremdem Arbeitsstand und wird hier bewusst nicht
+    // angefasst – also traegt der Aufruf seinen Text selbst mit.
+    const _tt = (k, f) => { const v = window.t(k); return (v && v !== k) ? v : f; };
+
     class JarvisMcpManager {
         constructor() {
             this._servers = [];
@@ -125,7 +132,7 @@
                                 <input type="checkbox" ${srv.enabled ? 'checked' : ''} data-action="toggle" data-id="${id}">
                                 <span>${toggleLabel}</span>
                             </label>
-                            ${istHttps ? `<button class="mcp-btn-sm" data-action="cert" data-id="${id}" title="${window.t('mcp.cert_view')}">${JarvisIcons.lupe()}</button>` : ''}
+                            ${istHttps ? `<button class="mcp-btn-sm mcp-btn-cert" data-action="cert" data-id="${id}">${_tt('mcp.cert_check', 'Zertifikat prüfen')}</button>` : ''}
                             <button class="mcp-btn-sm" data-action="reconnect" data-id="${id}" title="${window.t('mcp.reconnect')}">🔄</button>
                             <button class="mcp-btn-sm mcp-btn-danger" data-action="remove" data-id="${id}" title="${window.t('mcp.remove')}">${JarvisIcons.trash()}</button>
                         </div>
@@ -416,6 +423,14 @@
                 box.appendChild(ul);
             }
 
+            // ⚠ Ein Namensbefund (das Zertifikat gilt fuer andere Namen als
+            // die eingetragene Adresse) ist nach dem ERLAUBEN kein Hindernis
+            // mehr, wenn gepinnt wird – das Zertifikat selbst ist dann die
+            // Identitaet. Ohne diesen Satz steht der Befund rot da, und das
+            // Erlauben wirkt zwecklos (genau so gemeldet, 2026-10-25).
+            if (d.wird_gepinnt === true) {
+                box.appendChild(zeile('mcp-cert-hint', _tt('mcp.cert_pinned_hint', 'Dies ist ein selbstsigniertes Server-Zertifikat. Erlaubst du es, vertraut die Verbindung genau diesem einen Zertifikat (über seinen Schlüssel) – dann wird der Name nicht mehr verglichen, und ein Namensbefund oben ist kein Hindernis.')));
+            }
             if (d.schon_erlaubt === true) {
                 box.appendChild(zeile('mcp-cert-ok', window.t('mcp.cert_already')));
             } else if (z.pem) {

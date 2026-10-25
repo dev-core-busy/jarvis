@@ -11,6 +11,50 @@ from backend.tools.base import BaseTool
 from backend.config import config
 from backend.mcp_tls import CaFehler, ist_pem as _ca_ist_pem
 
+# Hoechstens so lange wartet ein Verbindungsaufbau auf den Server. Ein gesunder
+# MCP-Server antwortet auf `initialize` in Sekunden (der stdio-Testserver mit
+# npm-Start braucht ~3 s). Danach gilt er als stumm – siehe connect().
+VERBINDUNGS_FRIST_S = 15
+
+
+def _innerster_grund(fehler: BaseException) -> str:
+    """Den eigentlichen Grund aus einer (verschachtelten) Fehlergruppe ziehen.
+
+    Ein Transportfehler kommt als Gruppe um eine Kette (ConnectError ->
+    httpcore -> ssl.SSLCertVerificationError). Fuer den Administrator zaehlt
+    das Ende der Kette: bei TLS die ``verify_message`` mit Code, sonst die
+    Nachricht des innersten Fehlers. Leer, wenn nichts Brauchbares darin ist.
+    """
+    import ssl as _ssl
+    gesehen: set = set()
+    stapel = [fehler]
+    kandidat = ""
+    while stapel:
+        f = stapel.pop()
+        if f is None or id(f) in gesehen:
+            continue
+        gesehen.add(id(f))
+        if isinstance(f, _ssl.SSLCertVerificationError):
+            text = (f.verify_message or str(f)).strip()
+            hinweis = ""
+            # 62 = Hostname, 64 = IP-Adresse passt nicht zum Zertifikat
+            if f.verify_code in (62, 64):
+                hinweis = (" – das Zertifikat gilt nicht fuer die eingetragene "
+                           "Adresse. Ueber 'Zertifikat pruefen' laesst es sich "
+                           "erlauben (es wird dann gepinnt), oder die Adresse "
+                           "wird auf einen der Namen im Zertifikat umgestellt")
+            return "TLS-Pruefung (Code %s): %s%s" % (f.verify_code, text, hinweis)
+        if isinstance(f, BaseExceptionGroup):
+            stapel.extend(f.exceptions)
+        stapel.append(getattr(f, "__cause__", None))
+        stapel.append(getattr(f, "__context__", None))
+        if not isinstance(f, (BaseExceptionGroup, asyncio.CancelledError,
+                              GeneratorExit)):
+            t = str(f).strip()
+            if t and not kandidat:
+                kandidat = "%s: %s" % (type(f).__name__, t)
+    return kandidat
+
 
 def _zertifikat_moeglich(srv: dict) -> bool:
     """Hat dieser Server ueberhaupt ein Zertifikat zum Ansehen?
@@ -271,8 +315,31 @@ class McpServerConnection:
             self._besitzer_lauf(bereit), name="mcp-besitzer-%s" % self.name)
         warten = asyncio.create_task(bereit.wait())
         try:
-            await asyncio.wait({self._besitzer, warten},
-                               return_when=asyncio.FIRST_COMPLETED)
+            fertig, _ = await asyncio.wait(
+                {self._besitzer, warten}, timeout=VERBINDUNGS_FRIST_S,
+                return_when=asyncio.FIRST_COMPLETED)
+            if not fertig:
+                # ⚠ ZEITUEBERSCHREITUNG – DER SERVER ANTWORTET NICHT NACH MCP.
+                # Bezahlt auf DEV (2026-10-25): nachdem das Pinning den
+                # TLS-Handshake von "theben" moeglich machte, antwortete der
+                # Server auf den MCP-POST mit `text/plain` statt mit MCP
+                # ("Unexpected content type"). `initialize()` wartete auf eine
+                # Antwort, die nie kam – OHNE Zeitdeckel. Der Lifespan blieb
+                # haengen, uvicorn nahm keine Anfrage an, und DEV antwortete
+                # auf nichts (Health 000). Vorher hatte der sofort scheiternde
+                # Handshake genau das verborgen. Haengen ist fuer den Dienst so
+                # schlimm wie abbrechen.
+                self._zeitueberschreitung = True
+                self.error = ("Keine Antwort in %d s – der Server spricht an "
+                              "dieser Adresse kein MCP (falscher Pfad, oder er "
+                              "antwortet mit etwas anderem als JSON/SSE)"
+                              % VERBINDUNGS_FRIST_S)
+                self.connected = False
+                self._stopp.set()
+                self._besitzer.cancel()
+                # Dem Besitzer Gelegenheit geben, seinen Stack im EIGENEN Task
+                # zu schliessen – aber begrenzt, sonst haengt connect() erneut.
+                await asyncio.wait({self._besitzer}, timeout=5)
         except asyncio.CancelledError:
             # WIR wurden gecancelt (echter Abbruch, z. B. Shutdown waehrend des
             # Aufbaus): den Besitzer mitnehmen, sonst verwaist er samt
@@ -345,9 +412,26 @@ class McpServerConnection:
                     # vorherigen Fehler beim Schliessen auftritt.
                     nachhall = bool(self.error) and isinstance(
                         e, (BaseExceptionGroup, asyncio.CancelledError))
+                    # ⚠ DER NACHHALL TRAEGT DEN ECHTEN GRUND – nicht wegwerfen.
+                    # Gemeldet am 2026-10-25: "weiterhin Verbindung
+                    # abgebrochen – Zertifikat, Netz oder Protokoll", waehrend
+                    # in dieser Gruppe "IP address mismatch, certificate is not
+                    # valid for …" stand. Drei Moeglichkeiten zu nennen, wenn
+                    # die eine bekannt ist, schickt den Administrator auf die
+                    # Suche (Register: ein richtiger, aber unscharfer Grund ist
+                    # nutzlos). Der innerste Grund ersetzt die Sammelmeldung.
+                    if nachhall and not getattr(self, "_zeitueberschreitung", False):
+                        echt = _innerster_grund(e)
+                        if echt:
+                            self.error = "Verbindung abgebrochen: " + echt
                     if not nachhall:
                         print(f"[MCP] {self.name}: Aufraeumen unvollstaendig – "
                               f"{type(e).__name__}: {e}", flush=True)
+            # Genau EINE Zeile je Fehlschlag – mit dem genauesten Grund, den es
+            # gibt (praezisiert aus dem Nachhall, sonst die Sammelmeldung).
+            if getattr(self, "_grund_offen", False):
+                self._grund_offen = False
+                print(f"[MCP] {self.name}: {self.error}", flush=True)
             self._session = None
             self.connected = False
             self.tools = []
@@ -444,10 +528,19 @@ class McpServerConnection:
             # direkt im Anschluss den Scope (finally -> aclose), und anyio
             # raeumt seinen eigenen Cancel beim Verlassen selbst ab. Jeder
             # await DAZWISCHEN wuerde erneut gecancelt (level-triggered).
-            self.error = ("Verbindung abgebrochen – der Server hat den Transport "
-                          "fallen lassen (Zertifikat, Netz oder Protokoll)")
+            # Eine Zeitueberschreitung hat ihren eigenen, genaueren Grund schon
+            # gesetzt (connect) – der Abbruch hier ist dann nur deren Folge.
+            if not getattr(self, "_zeitueberschreitung", False):
+                self.error = ("Verbindung abgebrochen – der Server hat den "
+                              "Transport fallen lassen (Zertifikat, Netz oder "
+                              "Protokoll)")
             self.connected = False
-            print(f"[MCP] {self.name}: {self.error}", flush=True)
+            # NICHT hier drucken: der eigentliche Grund steckt in der Gruppe,
+            # die erst beim Schliessen kommt (Besitzer, finally). Eine Zeile
+            # jetzt und eine zweite, genauere danach hiesse zwei Meldungen fuer
+            # EINEN Fehler – und die erste waere die unscharfe. Gedruckt wird
+            # dort genau einmal.
+            self._grund_offen = True
         except BaseExceptionGroup as gruppe:
             # Dieselbe TaskGroup liefert beim Aufraeumen eine Gruppe (der
             # ConnectError zusammen mit dem GeneratorExit des Streams). Eine

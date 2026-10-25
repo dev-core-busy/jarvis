@@ -480,7 +480,7 @@ except ImportError as e:
     abbruch("anyio fehlt (%s) – ohne es ist Abschnitt 5 nicht messbar" % e)
 
 
-def _transport_mit_taskgroup(scheitert: bool):
+def _transport_mit_taskgroup(scheitert: bool, fehler=None):
     """Wie `streamablehttp_client`: eine anyio-TaskGroup um die Streams.
 
     Scheitert ihr Hintergrund-Task, bricht anyio den Scope ab – genau wie bei
@@ -492,6 +492,8 @@ def _transport_mit_taskgroup(scheitert: bool):
             async def _post():
                 await anyio.sleep(0.02)
                 if scheitert:
+                    if fehler is not None:
+                        raise fehler()
                     raise ConnectionError("[SSL: CERTIFICATE_VERIFY_FAILED] "
                                           "self-signed certificate")
                 await anyio.sleep(3600)
@@ -532,9 +534,9 @@ class _SchnelleSession(_WartendeSession):
         return None
 
 
-def _mcp_fuer(scheitert: bool, session_cls):
+def _mcp_fuer(scheitert: bool, session_cls, fehler=None):
     sys.modules["mcp.client.streamable_http"].streamablehttp_client = \
-        _transport_mit_taskgroup(scheitert)
+        _transport_mit_taskgroup(scheitert, fehler)
     sys.modules["mcp"].ClientSession = session_cls
 
 
@@ -727,5 +729,123 @@ check("… und der Loop meldet KEIN Schliessen in fremdem Task "
       not any("asynchronous generator" in m or "different task" in m
               for m in _loop_meldungen5),
       "; ".join(_loop_meldungen5)[:200])
+
+# ── 6. DER ECHTE GRUND STATT "Verbindung abgebrochen" ───────────────────────
+abschnitt("6. Der eigentliche TLS-Grund kommt beim Administrator an")
+# ⚠ GEMELDET (2026-10-25): "weiterhin Verbindung abgebrochen – der Server hat
+# den Transport fallen lassen (Zertifikat, Netz oder Protokoll)". Drei
+# Moeglichkeiten genannt, waehrend die eine bekannt war: in der Fehlergruppe,
+# die beim Schliessen kommt, stand "IP address mismatch". Die erste Fassung
+# verwarf genau diese Gruppe als "Nachhall". Gemessen ueber den GANZEN Pfad
+# (echter Besitzer, echter `_connect_streamable_http`), nicht an der
+# Hilfsfunktion allein.
+import ssl as _ssl6
+
+
+def _ip_fehler():
+    f = _ssl6.SSLCertVerificationError(1, "certificate verify failed")
+    f.verify_code = 64
+    f.verify_message = "IP address mismatch, certificate is not valid for '192.0.2.7'."
+    return f
+
+
+async def _echter_grund():
+    _mcp_fuer(True, _WartendeSession, fehler=_ip_fehler)
+    c = MC.McpServerConnection(_konf("theben"))
+    await c.connect()
+    grund = c.error
+    await c.disconnect()
+    return grund
+
+
+_grund6 = asyncio.run(_echter_grund())
+check("der Grund nennt den TLS-Code (64), nicht nur 'Verbindung abgebrochen'",
+      "64" in (_grund6 or "") and "IP address mismatch" in (_grund6 or ""),
+      repr(_grund6))
+check("… und bei einem Namensfehler den naechsten Schritt (Zertifikat pruefen)",
+      "Zertifikat pruefen" in (_grund6 or ""), repr(_grund6))
+check("… statt der Sammelmeldung mit drei Moeglichkeiten",
+      "Zertifikat, Netz oder Protokoll" not in (_grund6 or ""), repr(_grund6))
+
+# Die Hilfsfunktion selbst: verschachtelte Gruppe mit Kette
+_tief = _ip_fehler()
+_mitte = ConnectionError("httpcore")
+_mitte.__cause__ = _tief
+_gruppe6 = ExceptionGroup("unhandled errors in a TaskGroup", [_mitte])
+check("_innerster_grund findet den SSL-Fehler tief in Gruppe und Kette",
+      "Code 64" in MC._innerster_grund(_gruppe6),
+      MC._innerster_grund(_gruppe6)[:90])
+check("… ohne SSL-Fehler die innerste brauchbare Nachricht",
+      "httpcore" in MC._innerster_grund(
+          ExceptionGroup("g", [ConnectionError("httpcore")])))
+check("… und nichts Erfundenes, wenn nichts darin steht",
+      MC._innerster_grund(BaseExceptionGroup("g", [GeneratorExit()])) == "")
+
+# ── 7. ZEITDECKEL: ein Server, der nach dem Handshake NICHT antwortet ───────
+abschnitt("7. Ein stummer Server haengt den Start nicht auf")
+# ⚠ BEZAHLT AUF DEV (2026-10-25): nachdem das Pinning den Handshake von
+# "theben" moeglich machte, antwortete der Server mit `text/plain` statt MCP.
+# `initialize()` wartete ohne Deckel, der Lifespan blieb haengen, und DEV
+# antwortete auf NICHTS (Health 000). Haengen ist fuer den Dienst so schlimm
+# wie abbrechen – und der vorher sofort scheiternde Handshake hatte es
+# verborgen.
+
+
+class _StummeSession(_WartendeSession):
+    """`initialize()` antwortet NIE – wie ein Server, der kein MCP spricht."""
+    async def initialize(self):
+        await anyio.sleep(3600)
+
+
+async def _stumm():
+    """⚠ DER WAECHTER DECKELT SICH HIER SELBST. Dieser Abschnitt stellt
+    absichtlich einen Server her, der NIE antwortet. Hebelt eine Sabotage den
+    Zeitdeckel aus (Besitzer umgangen, Zeitueberschreitung unbehandelt), haengt
+    sonst der WAECHTER bis zum Harness-Timeout – und ein haengender Lauf ist
+    kein Biss, sondern "konnte nicht laufen" (beim Bau genau so: zwei Proben
+    mit rc=timeout). Ein Haenger wird deshalb als ERGEBNIS gemeldet."""
+    import time
+    _mcp_fuer(False, _StummeSession)             # Transport gesund, Server stumm
+    c = MC.McpServerConnection(_konf("stumm"))
+    t0 = time.monotonic()
+    try:
+        await asyncio.wait_for(c.connect(), timeout=8)
+        haengt = False
+    except asyncio.TimeoutError:
+        haengt = True
+    dauer = time.monotonic() - t0
+    hook = await _naechster_hook()
+    grund = c.error
+    verb = c.connected
+    try:
+        await asyncio.wait_for(c.disconnect(), timeout=8)
+        trennen_haengt = False
+    except asyncio.TimeoutError:
+        trennen_haengt = True
+    return dauer, hook, grund, verb, haengt, trennen_haengt
+
+
+_frist_alt = MC.VERBINDUNGS_FRIST_S
+MC.VERBINDUNGS_FRIST_S = 1                       # kurz, sonst 15 s Testlauf
+try:
+    _d7, _h7, _g7, _v7, _haengt7, _trennt7 = asyncio.run(_stumm())
+finally:
+    MC.VERBINDUNGS_FRIST_S = _frist_alt
+check("connect() haengt NICHT (sonst blockiert ein stummer Server den Start)",
+      _haengt7 is False, "connect() lief in den Waechter-Deckel von 8 s")
+check("… und das Trennen danach haengt ebenfalls nicht",
+      _trennt7 is False, "disconnect() lief in den Waechter-Deckel von 8 s")
+# Positivkontrolle: es MUSS wirklich gewartet worden sein – kehrt connect()
+# sofort zurueck, misst diese Pruefung keinen Haenger.
+check("Positivkontrolle: der stumme Server liess connect() bis zur Frist warten",
+      _d7 >= 0.9, "%.2f s" % _d7)
+check("connect() kehrt nach der Frist zurueck (haengt nicht ewig)",
+      _d7 < 8, "%.2f s" % _d7)
+check("der naechste Hook laeuft danach", _h7 == "lief", _h7)
+check("der Grund nennt die ZEITUEBERSCHREITUNG (nicht 'abgebrochen')",
+      "Keine Antwort" in (_g7 or "") and "kein MCP" in (_g7 or ""), repr(_g7))
+check("… und der Server gilt als nicht verbunden", _v7 is False, str(_v7))
+check("die Frist im Dienst ist endlich und zuegig",
+      0 < _frist_alt <= 30, str(_frist_alt))
 
 bilanz_und_ende()

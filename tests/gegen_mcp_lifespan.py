@@ -114,6 +114,19 @@ PROBEN = [
     ("PRODUKT der Nachhall wird wieder als 'unvollstaendig' gemeldet", MC,
      "                    nachhall = bool(self.error) and isinstance(\n",
      "                    nachhall = False and isinstance(\n"),
+    # Der Nachhall traegt den echten Grund ("IP address mismatch"); wird er
+    # verworfen, steht wieder die Sammelmeldung mit drei Moeglichkeiten da.
+    ("PRODUKT der echte TLS-Grund wird verworfen (Sammelmeldung)", MC,
+     "                        echt = _innerster_grund(e)\n",
+     "                        echt = \"\"\n"),
+    # ⚠ NICHT den Zeitdeckel selbst entfernen: dann haengt Abschnitt 7 bis zum
+    # Harness-Timeout, und ein haengender Lauf ist kein Biss (Exit 2 /
+    # "konnte nicht laufen"). Sabotiert wird die BEHANDLUNG der
+    # Zeitueberschreitung – der Aufruf kehrt zurueck, aber stumm und mit
+    # weiterlaufendem Besitzer.
+    ("PRODUKT die Zeitueberschreitung wird nicht behandelt (stummer Haenger)", MC,
+     "            if not fertig:\n",
+     "            if False:\n"),
     # ── SONDE: schlaegt die Positivkontrolle an? ───────────────────────────
     ("SONDE der gesunde Server verbindet gar nicht mehr", WI,
      "        c._session = _ClientSession(object(), object())\n",
@@ -126,9 +139,9 @@ PROBEN = [
     # Positivkontrolle dort ungeprueft.
     ("SONDE der anyio-Transport scheitert nicht (Abschnitt 5 blind)", WI,
      "                if scheitert:\n"
-     "                    raise ConnectionError(\"[SSL: CERTIFICATE_VERIFY_FAILED] \"\n",
+     "                    if fehler is not None:\n",
      "                if False:\n"
-     "                    raise ConnectionError(\"[SSL: CERTIFICATE_VERIFY_FAILED] \"\n",
+     "                    if fehler is not None:\n",
      "abbruch"),
 ]
 

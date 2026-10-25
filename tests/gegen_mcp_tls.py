@@ -101,6 +101,33 @@ PROBEN = [
     ("PRODUKT die Beschreibung gibt das Zertifikat heraus", TLS,
      "    return \"eigenes CA-Zertifikat (PEM-Block)\" if ist_pem(roh) \\\n",
      "    return roh if ist_pem(roh) \\\n"),
+    # ── PRODUKT: Pinning (2026-10-25) – die Sicherheit haengt an DREI Grenzen ──
+    # ⚠ Die wichtigste Probe: Pinning MIT System-CAs. Dann vertraute
+    # `check_hostname=False` jedem CA-signierten Zertifikat fuer JEDEN Host.
+    ("PRODUKT Pinning laedt die System-CAs (offenes Tor)", TLS,
+     "        pin = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)\n",
+     "        pin = ssl.create_default_context()\n"),
+    # Die Grenze liegt seit dem theben-Befund nicht mehr an CA:TRUE, sondern
+    # an "fuer einen Server ausgestellt". Eine echte Root-CA (CA:TRUE, OHNE
+    # Server-Namen) darf nie gepinnt werden – sonst gilt jeder ihrer Server
+    # fuer jede Adresse.
+    ("PRODUKT eine echte Root-CA wird gepinnt (jeder ihrer Server ueberall)", TLS,
+     "        if not hat_servernamen:\n            return False\n",
+     "        if False:\n            return False\n"),
+    # Und die Gegenrichtung, der gemeldete Fall: CA:TRUE schliesst wieder aus,
+    # ein Zertifikat aus `openssl req -x509` wird nie gepinnt.
+    ("PRODUKT CA:TRUE schliesst aus (theben wird nie gepinnt)", TLS,
+     "    if ist_ca:\n        try:\n",
+     "    if ist_ca:\n        return False\n        try:\n"),
+    ("PRODUKT eine Kette wird gepinnt", TLS,
+     "    if str(pem).count(\"BEGIN CERTIFICATE\") != 1:\n        return False\n",
+     "    if False:\n        return False\n"),
+    ("PRODUKT Pinning ohne CERT_REQUIRED (jedes Zert kommt durch)", TLS,
+     "        pin.verify_mode = ssl.CERT_REQUIRED\n",
+     "        pin.verify_mode = ssl.CERT_NONE\n"),
+    ("PRODUKT Pinning greift nicht (der gemeldete Fall: IP lehnt ab)", TLS,
+     "    if ist_pem(roh) and _ist_server_zert_zum_pinnen(roh):\n",
+     "    if False:\n"),
     # ── SONDE: schlagen die Positivkontrollen an? ──────────────────────────
     # ⚠ HIER IST EXIT 2 DAS RICHTIGE ERGEBNIS, kein Mangel. Ohne gueltiges
     # Testmaterial kann der Waechter nichts messen – und "konnte nicht laufen"

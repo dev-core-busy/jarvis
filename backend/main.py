@@ -7261,8 +7261,13 @@ async def mcp_zertifikat_ansehen(server_id: str,
           f"{daten['host']}:{daten['port']}, Abdruck "
           f"{daten['fingerprint_sha256'][:23]}…, Befunde: "
           f"{len(daten['befunde'])}", flush=True)
+    # Wuerde dieses Zertifikat beim Erlauben GEPINNT (Zertifikats- statt
+    # Namensabgleich)? Die Oberflaeche muss das sagen: sonst steht ein roter
+    # Namensbefund da, der nach dem Erlauben keine Rolle mehr spielt, und der
+    # Administrator haelt das Erlauben fuer zwecklos (gemeldet 2026-10-25).
     return JSONResponse({"ok": True, "zertifikat": daten,
-                         "schon_erlaubt": schon})
+                         "schon_erlaubt": schon,
+                         "wird_gepinnt": mcp_tls.ist_gepinnt(daten.get("pem"))})
 
 
 # ─── Telemetry API ─────────────────────────────────────────────────────────

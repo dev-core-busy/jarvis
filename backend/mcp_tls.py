@@ -147,6 +147,74 @@ def _pfad_pruefen(roh: str) -> Path:
     return aufgeloest
 
 
+def _ist_server_zert_zum_pinnen(pem: str) -> bool:
+    """Genau EIN selbstsigniertes Zertifikat, das KEINE CA ist?
+
+    Nur dann ist Pinning (Zertifikats- statt Namensabgleich) sicher. Eine
+    Kette, mehrere Bloecke oder ein CA-Zertifikat gehen den CA-Weg mit
+    Namensabgleich – im Zweifel also der strengere Weg (fail-closed).
+    """
+    if str(pem).count("BEGIN CERTIFICATE") != 1:
+        return False
+    try:
+        from cryptography import x509
+        cert = x509.load_pem_x509_certificate(str(pem).strip().encode())
+    except Exception:  # noqa: BLE001
+        return False
+    if cert.subject != cert.issuer:
+        return False
+    # ⚠ DIE GRENZE IST NICHT `CA:TRUE`, SONDERN "FUER EINEN SERVER AUSGESTELLT".
+    # Die erste Fassung schloss jedes Zertifikat mit CA:TRUE aus – und traf
+    # damit genau den haeufigsten Fall: `openssl req -x509` setzt per Vorgabe
+    # (v3_ca) `basicConstraints=critical,CA:TRUE`. Das Zertifikat von "theben"
+    # auf DEV ist so eines (2026-10-25 gemessen: CA=TRUE, kritisch, 2 DNS- und
+    # 2 IP-SANs) – es wurde nie gepinnt, und nach dem Erlauben stand weiter
+    # "IP address mismatch" da.
+    #
+    # Fuer die Sicherheit des Pinnings ist CA:TRUE bei einem SELBSTSIGNIERTEN
+    # Zertifikat ohne Belang: sie haengt am privaten Schluessel. Wer mit ihm
+    # weitere Zertifikate signieren koennte, kaeme ohnehin direkt durch.
+    #
+    # Gefaehrlich waere eine ECHTE Firmen-Root-CA: ihr Schluessel hat viele
+    # legitime Server signiert, und gepinnt galte jeder davon fuer jede
+    # Adresse. Eine solche CA traegt keine Server-Namen. Deshalb: CA:TRUE OHNE
+    # SubjectAlternativeName -> CA-Weg mit Namensabgleich; alles andere ist ein
+    # Server-Zertifikat. (Ueber "Zertifikat pruefen" wird ohnehin immer das
+    # Zertifikat hinterlegt, das der Server SELBST vorzeigt – eine Root-CA
+    # kommt nur ueber das freie Feld hinein.)
+    try:
+        bc = cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+        ist_ca = bool(bc.ca)
+    except x509.ExtensionNotFound:
+        ist_ca = False      # ein selbstsigniertes Server-Zert hat oft gar keine
+    except Exception:  # noqa: BLE001
+        return False
+    if ist_ca:
+        try:
+            san = cert.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName).value
+            hat_servernamen = bool(san.get_values_for_type(x509.DNSName)
+                                   or san.get_values_for_type(x509.IPAddress))
+        except x509.ExtensionNotFound:
+            hat_servernamen = False
+        except Exception:  # noqa: BLE001
+            return False
+        if not hat_servernamen:
+            return False
+    return True
+
+
+def ist_gepinnt(ca_cert: str | None) -> bool:
+    """Wird fuer ``ca_cert`` gepinnt (Zertifikats- statt Namensabgleich)?
+
+    Fuer die Oberflaeche: sie soll ehrlich sagen, dass bei einem erlaubten
+    Zertifikat der NAME nicht mehr geprueft wird – weil das Zertifikat selbst
+    die Identitaet ist.
+    """
+    roh = str(ca_cert or "").strip()
+    return bool(roh) and ist_pem(roh) and _ist_server_zert_zum_pinnen(roh)
+
+
 def ssl_kontext(ca_cert: str | None) -> "ssl.SSLContext | None":
     """SSL-Kontext, der ZUSAETZLICH ``ca_cert`` vertraut – oder ``None``.
 
@@ -163,6 +231,44 @@ def ssl_kontext(ca_cert: str | None) -> "ssl.SSLContext | None":
     roh = str(ca_cert or "").strip()
     if not roh:
         return None
+
+    # ── Pinning: ein ausdruecklich ERLAUBTES, selbstsigniertes Server-Zert ──
+    # ⚠ BEZAHLT AUF DEV (2026-10-25): "trotz akzeptiertem Zertifikat weiterhin
+    # Verbindung abgebrochen". Das Erlauben hatte gewirkt (hinterlegt ==
+    # vorgezeigt), aber der Server wurde ueber eine IP-ADRESSE angesprochen,
+    # waehrend das Zertifikat nur fuer zwei NAMEN gilt – `check_hostname`
+    # lehnte ab (verify_code 64, "IP address mismatch"). Mit dem CA-Weg unten
+    # war das selbstsignierte Zertifikat eines Servers, den man per IP
+    # erreicht, also GAR NICHT einzubinden – und genau das ist der Hauptfall.
+    #
+    # "Diesem Zertifikat vertrauen" heisst PINNING: vertraut wird genau EINEM
+    # Zertifikat, bewiesen ueber seinen Schluessel. Dann ersetzt der
+    # Zertifikats-Abgleich den Namensabgleich – und das ist nicht schwaecher,
+    # sondern enger: der Handshake gelingt nur dem Server, der den privaten
+    # Schluessel genau dieses Zertifikats hat. Am echten Server gemessen: das
+    # erlaubte Zertifikat verbindet, ein FREMDES gepinntes wird abgelehnt.
+    #
+    # ⚠ DAS IST NUR OHNE SYSTEM-CAS SICHER, und darin liegt die ganze Gefahr:
+    # `check_hostname = False` MIT dem Satz des Systems (149 CAs auf DEV)
+    # vertraute jedem CA-signierten Zertifikat fuer JEDEN Host – wer irgendein
+    # oeffentliches Zertifikat besitzt, gaebe sich als dieser Server aus.
+    # Deshalb ein NACKTER Kontext mit genau dem einen Anker.
+    #
+    # NUR fuer ein Server-Zertifikat, NIE fuer eine CA: eine eingefuegte
+    # Firmen-Root-CA ist ebenfalls selbstsigniert, signiert aber VIELE Server.
+    # Ohne Namensabgleich galte jeder davon fuer jede Adresse. Erkannt wird das
+    # an BasicConstraints CA:TRUE.
+    if ist_pem(roh) and _ist_server_zert_zum_pinnen(roh):
+        pin = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        pin.check_hostname = False
+        pin.verify_mode = ssl.CERT_REQUIRED
+        try:
+            pin.load_verify_locations(cadata=roh)
+        except ssl.SSLError as e:
+            raise CaFehler(
+                "Der eingetragene PEM-Block ist kein lesbares Zertifikat (%s)."
+                % e) from e
+        return pin
 
     ctx = ssl.create_default_context()
     ctx.check_hostname = True

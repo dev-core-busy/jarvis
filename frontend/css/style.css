@@ -844,6 +844,9 @@ body.light .mcp-cert-fehler {
     transition: background 0.2s;
 }
 .mcp-btn-sm:hover { background: rgba(var(--fg-rgb), 0.1); }
+/* Text- statt Symbolknopf ("Zertifikat pruefen"): darf nicht umbrechen, sonst
+   steht er zweizeilig neben den Symbolknoepfen und verschiebt die Zeile. */
+.mcp-btn-cert { white-space: nowrap; }
 .mcp-btn-danger:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
 .mcp-btn-primary {
     background: var(--accent);

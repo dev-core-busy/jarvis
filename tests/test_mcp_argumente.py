@@ -56,7 +56,16 @@ exec(_hol(r'\nINTERNE_VERLAUFS_MARKEN = .*?(?=\n_BLOCKED_TOOLS_FOR_LDAP)',
           "ist_benutzerfrage"), ns)
 exec(_hol(r'\n_benutzer_eingabe_cv: .*?\)\n', "_benutzer_eingabe_cv"), ns)
 exec(_hol(r'\n# ── MCP-Argumente: .*?(?=\ndef _reminder_exempt)', "MCP-Argument-Block"), ns)
-pruefen = ns["_mcp_argumente_pruefen"]
+_pruefen_roh = ns["_mcp_argumente_pruefen"]
+
+
+def pruefen(tool, args):
+    """Nur der Ablehnungsgrund (Pflichtfelder) – fuer die Abschnitte 1-3."""
+    return _pruefen_roh(tool, args)[0]
+
+
+def weglassen(tool, args):
+    return _pruefen_roh(tool, args)[1]
 cv = ns["_benutzer_eingabe_cv"]
 
 
@@ -88,6 +97,26 @@ THEBEN = Tool({
                                        "Ohne Angabe alle Versionen."},
     },
     "required": ["lab_code", "host", "port"],
+})
+
+# Derselbe Server eine Stunde spaeter (DEV 2026-10-25, 19:32): lab_code und
+# port OPTIONAL, Pflicht nur noch host.
+THEBEN_NEU = Tool({
+    "type": "object",
+    "properties": {
+        "lab_code": {"type": "string",
+                     "description": "Optional: nur Befunde dieses Laborcodes, z.B. 'an1'. "
+                                    "Ohne Angabe alle Labore."},
+        "host": {"type": "string",
+                 "description": "Ziel-IP der Theben-Datenbank, z.B. '192.0.2.5'"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535,
+                 "description": "Optional: Zielport der Theben-Datenbank. Standard: 3306"},
+        "days": {"type": "integer", "minimum": 0,
+                 "description": "Zeitraum in Tagen rückwärts nach Eingangsdatum; "
+                                "0 = nur heute. Standard: 5"},
+        "ldt_version": THEBEN._s["properties"]["ldt_version"],
+    },
+    "required": ["host"],
 })
 
 AUFTRAG = ("liefere eine Befundliste vom Typ LDT3.2.18 der letzten 5 Tage fuer "
@@ -156,6 +185,28 @@ check(pruefen(THEBEN, {"host": "h", "port": 1}) is not None,
 check(pruefen(THEBEN, {"host": "h", "lab_code": "an1", "port": 1}) is None,
       "ohne Laufkontext (unbekannt): Beispielpruefung uebersprungen, nicht alles gesperrt")
 
+print("3b. Optionales Feld: weglassen, NICHT nachfragen (zweiter Vorfall)")
+tok = mit_eingabe(AUFTRAG)
+vorfall2 = {"days": 5, "host": "198.51.100.7", "lab_code": "an1", "ldt_version": "LDT3.2.18"}
+check(pruefen(THEBEN_NEU, vorfall2) is None,
+      "optionaler lab_code mit Beispiel 'an1' loest KEINE Rueckfrage aus")
+check(weglassen(THEBEN_NEU, vorfall2) == ["lab_code"],
+      "lab_code wird zum Weglassen gemeldet, sonst nichts")
+check(weglassen(THEBEN_NEU, dict(vorfall2, port=3306)) == ["lab_code"],
+      "'Standard: 3306' ist eine Vorgabe – port bleibt stehen")
+check(weglassen(THEBEN_NEU, {"host": "198.51.100.7", "ldt_version": "LDT3.2.18"}) == [],
+      "ohne Beispielwert wird nichts weggelassen")
+check(weglassen(THEBEN, {"days": 5, "host": "198.51.100.7", "lab_code": "an1"}) == [],
+      "PFLICHT-lab_code wird NICHT still weggelassen (dort gilt die Rueckfrage)")
+cv.reset(tok)
+tok = mit_eingabe(AUFTRAG + " nur Labor an1")
+check(weglassen(THEBEN_NEU, vorfall2) == [], "vom Benutzer genanntes 'an1' bleibt stehen")
+cv.reset(tok)
+hw = ns["_mcp_weggelassen_hinweis"]([("lab_code", "an1")])
+check("'lab_code' = 'an1'" in hw and "NICHT eingeschraenkt" in hw and "Nicht danach fragen" in hw,
+      "Hinweis ans Modell: weggelassen, ungefiltert, nicht nachfragen")
+check(ns["_mcp_weggelassen_hinweis"]([]) == "", "ohne Wegnahme kein Hinweis")
+
 # ── Regeln am Syntaxbaum ────────────────────────────────────────────────────
 print("4. Verdrahtung")
 baum = ast.parse(AGENT_SRC)
@@ -184,6 +235,16 @@ fg = _aufrufe(ex, "freigabe")
 check(len(pr) == 1, "_execute_tool ruft _mcp_argumente_pruefen genau einmal")
 check(bool(pr) and bool(fg) and max(c.lineno for c in pr) < min(c.lineno for c in fg),
       "die Pruefung steht VOR der Bestaetigungskarte (_wirkung.freigabe)")
+# Weglassen wirkt auf BEIDE Saetze: Anzeige (args, Karte) und Aufruf (exec_args)
+check(any(isinstance(n, ast.Assign) and any(getattr(t_, "id", None) == "args" for t_ in n.targets)
+          for n in ast.walk(ex)), "args wird ohne die weggelassenen Felder NEU gebunden (Karte)")
+check(any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "pop"
+          and getattr(n.func.value, "id", None) == "exec_args" for n in ast.walk(ex)),
+      "exec_args verliert die weggelassenen Felder (Aufruf)")
+hw_calls = _aufrufe(ex, "_mcp_weggelassen_hinweis")
+exe = [c for c in _aufrufe(ex, "execute")]
+check(bool(hw_calls) and bool(exe) and min(c.lineno for c in hw_calls) > max(c.lineno for c in exe),
+      "Hinweis wird NACH tool.execute vor das Ergebnis gesetzt")
 for lauf in ("run_task", "_run_headless"):
     sets = [c for c in _aufrufe(fn[lauf], "set")
             if isinstance(c.func, ast.Attribute)

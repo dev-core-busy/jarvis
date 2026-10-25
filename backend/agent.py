@@ -587,8 +587,16 @@ def _mcp_freigegeben(tool, benutzer: str) -> bool:
 # BEISPIEL aus der Beschreibung – und liess `port` ganz weg; vorgelegt wurde
 # das trotzdem als Bestaetigungskarte. Ein Verbot im Prompt waere eine Bitte
 # (Register: Excel-Nullen 2026-10-23); ein erfundener Laborcode fragt still das
-# falsche Labor ab. Deshalb ein Riegel VOR der Karte: der Aufruf geht mit Grund
-# ans Modell zurueck, und das fragt den Benutzer im selben Lauf.
+# falsche Labor ab. Deshalb ein Riegel VOR der Karte.
+# ⚠ ZWEITER ANLAUF (DEV 2026-10-25, eine Stunde spaeter): der Server hatte
+# `lab_code` inzwischen OPTIONAL gemacht ("Ohne Angabe alle Labore"), und der
+# Riegel liess trotzdem nach dem Laborcode fragen – eine Pflicht-Rueckfrage
+# fuer ein Feld, das keine Pflicht ist. Seitdem nach Feldart getrennt:
+#   * PFLICHTfeld fehlt oder traegt ein erfundenes Beispiel -> Aufruf zurueck,
+#     das Modell fragt den Benutzer (ohne den Wert geht es nicht);
+#   * OPTIONALES Feld traegt ein erfundenes Beispiel -> das Feld wird still
+#     WEGGELASSEN, der Aufruf laeuft (ohne Filter = Vorgabe des Servers), und
+#     das Modell erfaehrt im Ergebnis, dass nicht gefiltert wurde.
 # Nur fuer MCP: deren Schemas schreibt ein FREMDER Server, mit Beispielen in
 # der Beschreibung, die wir nicht steuern.
 
@@ -662,21 +670,24 @@ def _vom_benutzer_genannt(wert: str, texte: str) -> bool:
                      texte, re.IGNORECASE) is not None
 
 
-def _mcp_argumente_pruefen(tool, args: dict) -> str | None:
-    """Ablehnungsgrund fuer einen MCP-Aufruf – oder None, wenn er so raus darf.
+def _mcp_argumente_pruefen(tool, args: dict) -> tuple[str | None, list]:
+    """``(Ablehnungsgrund oder None, wegzulassende Felder)`` fuer einen MCP-Aufruf.
 
-    1. Ein Pflichtfeld (``required``) fehlt oder ist leer.
-    2. Ein Wert ist ein BEISPIEL aus dem Schema und steht nirgends in dem, was
-       der Benutzer geschrieben hat.
-    Der Grund nennt den naechsten Schritt (den Benutzer fragen) – ein Grund
-    ohne Weg laesst das Modell den naechsten Wert raten.
+    Erfunden heisst: der Wert ist ein BEISPIEL aus dem Schema und steht nirgends
+    in dem, was der Benutzer geschrieben hat.
+      * Ein Pflichtfeld (``required``) fehlt, ist leer oder erfunden -> Grund.
+        Er nennt den naechsten Schritt (den Benutzer fragen) – ein Grund ohne
+        Weg laesst das Modell den naechsten Wert raten.
+      * Ein OPTIONALES Feld ist erfunden -> es steht in der Wegnahme-Liste; der
+        Aufruf darf ohne das Feld laufen. Danach fragen hiesse, eine Angabe zu
+        erzwingen, die das Werkzeug nicht braucht.
     """
     try:
         schema = tool.parameters_schema() if callable(getattr(tool, "parameters_schema", None)) else {}
     except Exception:  # noqa: BLE001
         schema = {}
     if not isinstance(schema, dict):
-        return None
+        return None, []
     felder = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
     args = args if isinstance(args, dict) else {}
 
@@ -698,19 +709,36 @@ def _mcp_argumente_pruefen(tool, args: dict) -> str | None:
                 continue
             if not _vom_benutzer_genannt(s, texte):
                 erfunden.append((f, s))
-    if not fehlend and not erfunden:
-        return None
-    zeilen = ["Aufruf NICHT ausgefuehrt – es fehlen Angaben, die nur der Benutzer machen kann."]
+    weglassen = [f for f, _ in erfunden if f not in pflicht]
+    erfunden_pflicht = [(f, s) for f, s in erfunden if f in pflicht]
+    if not fehlend and not erfunden_pflicht:
+        return None, weglassen
+    zeilen = ["Aufruf NICHT ausgefuehrt – es fehlen Pflichtangaben, die nur der Benutzer machen kann."]
     if fehlend:
         zeilen.append("Pflichtangaben fehlen: " + ", ".join(_beschr(f) for f in fehlend) + ".")
-    for f, s in erfunden:
+    for f, s in erfunden_pflicht:
         zeilen.append(f"'{f}' = '{s}' ist das BEISPIEL aus der Schema-Beschreibung, "
                       f"nicht eine Angabe des Benutzers.")
-    namen = [f for f in fehlend] + [f for f, _ in erfunden]
+    namen = [f for f in fehlend] + [f for f, _ in erfunden_pflicht]
     zeilen.append("Frage den Benutzer nach " + ", ".join(f"'{f}'" for f in namen)
                   + " und rufe das Werkzeug erst mit seinen Angaben erneut auf. "
-                  "Setze KEINEN Beispiel- oder Platzhalterwert ein.")
-    return "\n".join(zeilen)
+                  "Setze KEINEN Beispiel- oder Platzhalterwert ein. Nach optionalen "
+                  "Angaben fragst du NICHT.")
+    return "\n".join(zeilen), weglassen
+
+
+def _mcp_weggelassen_hinweis(weggelassen: list) -> str:
+    """Zeile VOR dem Ergebnis: welche optionalen Felder nicht mitgeschickt wurden.
+
+    Ohne sie hielte das Modell das Ergebnis fuer gefiltert ("die Befunde von
+    Labor an1") – die Antwort wuerde eine Einschraenkung behaupten, die nie galt.
+    """
+    if not weggelassen:
+        return ""
+    return ("[Hinweis: " + ", ".join(f"'{f}' = '{s}'" for f, s in weggelassen)
+            + " war nur das Beispiel aus der Schema-Beschreibung, nicht eine Angabe "
+            "des Benutzers, und wurde WEGGELASSEN – das Ergebnis ist in diesem "
+            "Punkt NICHT eingeschraenkt. Nicht danach fragen.]\n")
 
 
 def _reminder_exempt(tool_name: str, user: str) -> bool:
@@ -4762,13 +4790,24 @@ KRITISCH – Autonomie-Regeln:
             # MCP: Pflichtfelder und Schema-Beispiele VOR der Bestaetigungskarte
             # (siehe `_mcp_argumente_pruefen`) – eine Karte mit erfundenem
             # Laborcode verlagert die Pruefung auf den Benutzer.
+            # Optionale Felder mit erfundenem Beispiel fallen aus BEIDEN Saetzen
+            # (Anzeige `args` fuer die Karte, `exec_args` fuer den Aufruf) – das
+            # Original-Dict des Aufrufers bleibt unangetastet (neu gebunden).
+            _mcp_weggelassen: list = []
             if not _ldap_blocked and _ist_mcp_tool(tool, name):
-                _mcp_grund = _mcp_argumente_pruefen(tool, args)
+                _mcp_grund, _mcp_weg = _mcp_argumente_pruefen(tool, args)
                 if _mcp_grund:
-                    print(f"[AGENT] MCP-Aufruf '{name}' zurueckgewiesen (Angaben fehlen/"
-                          f"Schema-Beispiel): {_mcp_grund.splitlines()[1:2]}", flush=True)
+                    print(f"[AGENT] MCP-Aufruf '{name}' zurueckgewiesen (Pflichtangabe "
+                          f"fehlt/Schema-Beispiel): {_mcp_grund.splitlines()[1:2]}", flush=True)
                     result = _mcp_grund
                     _ldap_blocked = True
+                elif _mcp_weg:
+                    _mcp_weggelassen = [(f, args.get(f)) for f in _mcp_weg]
+                    args = {k: v for k, v in args.items() if k not in _mcp_weg}
+                    for _f in _mcp_weg:
+                        exec_args.pop(_f, None)
+                    print(f"[AGENT] MCP-Aufruf '{name}': Schema-Beispiel in optionalem "
+                          f"Feld weggelassen: {_mcp_weggelassen}", flush=True)
 
             # OS-Sandbox: Shell-Befehle als unprivilegierter OS-Benutzer ausfuehren
             # (harte Grenze via OS-Rechte – wirkt unabhaengig von Base64/Python/etc.).
@@ -4935,6 +4974,8 @@ KRITISCH – Autonomie-Regeln:
                     _ccv = None
                 try:
                     result = await tool.execute(**exec_args)
+                    if _mcp_weggelassen and isinstance(result, str):
+                        result = _mcp_weggelassen_hinweis(_mcp_weggelassen) + result
                 finally:
                     _sbx_ctx.reset_tool_user(_u_token)
                     if _p_token is not None and _cvp is not None:

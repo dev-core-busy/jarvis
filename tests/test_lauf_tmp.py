@@ -680,7 +680,10 @@ pruef("und dem Benutzer gemeldet",
 # ausschliesst. `melden=True` galt naemlich fuer JEDEN Text, auch fuer einen
 # Zwischentext neben Werkzeug-Aufrufen ("ich speichere sie unter /tmp/x.pptx").
 _ruf_text = re.search(r"await self\._deliver_docs\(ws, text, _delivered_docs.*?\)", ag, re.S)
-_ruf_tool = re.search(r"await self\._deliver_docs\(ws, result_str.*?\)", ag, re.S)
+# Das Werkzeug-Ergebnis heisst seit dem Ablage-Hinweis grosser MCP-Ergebnisse
+# `_sichtbar` (nicht mehr `result_str`) – der alte Anker fand den Aufruf nicht
+# mehr und meldete einen Fehler, den es nicht gab.
+_ruf_tool = re.search(r"await self\._deliver_docs\(ws, (?:result_str|_sichtbar)\b.*?\)", ag, re.S)
 pruef("gemeldet wird nur beim letzten Text des Laufs",
       bool(_ruf_text) and "melden=True" not in _ruf_text.group(0)
       and "is_intermediate" in _ruf_text.group(0),

@@ -55,6 +55,10 @@
 .upd-status-row { display:flex;align-items:center;gap:8px;font-size:0.82rem; }
 .upd-dot { width:8px;height:8px;border-radius:50%;flex-shrink:0; }
 .upd-dot.ok{background:#2ecc71;} .upd-dot.pending{background:#f39c12;} .upd-dot.error{background:#e74c3c;}
+/* Docker-Installation: Stand unbekannt, Aktualisierung ueber neues Image */
+.upd-dot.image { background:var(--text-secondary); }
+.upd-image-befehl { display:block;font-family:monospace;font-size:.75rem;padding:6px 8px;border-radius:6px;
+    background:var(--bg-input);color:var(--text-primary);user-select:all;word-break:break-all; }
 .upd-commit-list { display:flex;flex-direction:column;gap:4px;background:rgba(127,127,127,0.08);border-radius:6px;padding:8px 10px; }
 .upd-commit { display:flex;gap:8px;align-items:flex-start;font-size:0.77rem; }
 .upd-commit-hash { font-family:monospace;color:var(--accent,#6366f1);flex-shrink:0; }

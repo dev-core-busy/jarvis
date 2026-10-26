@@ -43,6 +43,10 @@ services:
       - jarvis-certs:/app/certs
       # WhatsApp-Session (Baileys Auth-Daten persistent)
       - wa-session:/app/services/whatsapp-bridge/auth
+      # Systemkonfiguration (Broker-Policy, Freigabe-Schluessel, ggf. geheimnis.key).
+      # Eigenes Volume, NICHT unter jarvis-data: der Schluessel gehoert nicht
+      # neben die verschluesselten Daten – getrennt sichern.
+      - jarvis-etc:/etc/jarvis
     shm_size: "256mb"   # Für Browser-Automation empfohlen
 
 # ── Volumes ────────────────────────────────────────────────────────────────────
@@ -52,4 +56,6 @@ volumes:
   jarvis-certs:
     driver: local
   wa-session:
+    driver: local
+  jarvis-etc:
     driver: local

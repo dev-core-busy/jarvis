@@ -3596,7 +3596,8 @@ KRITISCH – Autonomie-Regeln:
 
                     # Office-Dokumente DIREKT als Download-Chip ausliefern (Seitenkanal,
                     # erkennt auch per Shell erzeugte Dateien in /tmp etc.).
-                    await self._deliver_docs(ws, _sichtbar, _delivered_docs, username, since=_task_start_time)
+                    await self._deliver_docs(ws, _sichtbar, _delivered_docs, username,
+                                             since=_task_start_time, aus_werkzeug=True)
 
                     # Mit ARGUMENTEN und Abbruchgrund: ohne sie war ein Aufruf,
                     # dem ein Pflichtfeld fehlte, im Verlauf nicht erkennbar
@@ -6695,7 +6696,8 @@ KRITISCH – Autonomie-Regeln:
                 % (grenze, len(text), rest))
 
     async def _deliver_docs(self, ws, text, delivered, username: str = "",
-                            since: float = 0.0, melden: bool = False):
+                            since: float = 0.0, melden: bool = False,
+                            aus_werkzeug: bool = False):
         """Liefert erzeugte Office-Dokumente als Download-Chip ans Frontend –
         UNABHAENGIG davon, ob sie via office_*-Tool oder per Shell-Skript (z.B.
         python-pptx fuer Diagramme) erzeugt wurden.
@@ -6721,9 +6723,19 @@ KRITISCH – Autonomie-Regeln:
         Juni als Ergebnis-Chip einer Word/PDF-Aufgabe heraus (``filesystem list
         data/documents`` als Zwischenschritt). ``since=0`` schaltet die Pruefung
         ab (Aufrufer ohne Laufzeitbezug).
+
+        ``aus_werkzeug=True``: ``text`` ist ein WERKZEUG-Ergebnis. Blosse
+        Dateinamen darin, die nirgends als Datei liegen, merkt sich (c) als
+        bekannte Bezugnahme – nennt die Endantwort sie spaeter (etwa als Quelle
+        einer Wissenssuche), ist das keine behauptete Ergebnisdatei.
         """
         if not text or self.is_sub_agent:
             return
+        # Meta-Angaben zwischen zwei U+2063 (Quellenliste, Prompt-Optimierung
+        # eines vorgeschalteten Proxys) sind keine Antwort: die Namensratenden
+        # Zweige (b) und (c) durchsuchen sie nicht (gemeldet 2026-10-26).
+        from backend.meta_marke import ohne_meta as _ohne_meta
+        _suchtext = _ohne_meta(text)
         import os as _os, uuid as _uuid, shutil as _shutil
         from pathlib import Path as _Path
         proj = _Path(__file__).resolve().parent.parent
@@ -6986,7 +6998,7 @@ KRITISCH – Autonomie-Regeln:
             await _emit(f"{base}.{safe_ext}", f"/api/documents/{fname}")
 
         # (b) Lokale Dateipfade zu AGENT-ERZEUGTEN Dokumenten -> nach data/documents/ ziehen
-        for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:" + _EXT_RE + r")|data/documents/[\w.\-]+\.(?:" + _EXT_RE + ")", text):
+        for m in re.finditer(r"(?:/[\w.\-]+)+\.(?:" + _EXT_RE + r")|data/documents/[\w.\-]+\.(?:" + _EXT_RE + ")", _suchtext):
             raw = m.group(0)
             p = _hostpfad(raw)
             try:
@@ -7234,7 +7246,7 @@ KRITISCH – Autonomie-Regeln:
                 return
             await _emit(f"{base}.{ext}", f"/api/documents/{fname}")
 
-        for m in re.finditer(r"(?<![\w./\\-])([\w.\-]+\.(?:" + _EXT_RE + r"))\b", text):
+        for m in re.finditer(r"(?<![\w./\\-])([\w.\-]+\.(?:" + _EXT_RE + r"))\b", _suchtext):
             raw = m.group(1)
             if "/" in raw or "\\" in raw:
                 continue  # Pfade sind in (b) abgedeckt
@@ -7259,6 +7271,21 @@ KRITISCH – Autonomie-Regeln:
                         await _liefere_namenstreffer(_g, raw)
                     if len(_geschwister) > _SEITEN_DECKEL:
                         _zuviele.append((raw, len(_geschwister)))
+                elif aus_werkzeug:
+                    # 3. ein Werkzeug nannte den Namen (Wissenssuche, Auflistung,
+                    #    Web) – der Lauf hat ihn GELESEN, nicht erzeugt. Gemerkt,
+                    #    damit eine spaetere Quellenangabe in der Endantwort keine
+                    #    Warnung ausloest (gemeldet 2026-10-26: Quellen als roter
+                    #    Kasten). Erst NACH den Seiten-Geschwistern: die gelten
+                    #    auch fuer Werkzeug-Ergebnisse.
+                    delivered.add("quelle:" + _namensschluessel(raw))
+                elif ("quelle:" + _namensschluessel(raw)) in delivered:
+                    # 4. ein Werkzeug-Ergebnis dieses Laufs nannte den Namen
+                    #    schon (siehe `aus_werkzeug`): eine Bezugnahme auf
+                    #    Gelesenes, keine behauptete Ergebnisdatei. Journal ja,
+                    #    Meldung nein.
+                    _log(f"Name ohne Datei, aber aus einem Werkzeug-Ergebnis bekannt "
+                         f"(Quellenangabe) – keine Meldung: {raw!r}")
                 elif melden and _nichts_geliefert() and not _ist_anhangname(raw):
                     # 2. der Lauf hat dem Benutzer NICHTS gegeben und nennt
                     #    trotzdem eine Datei. Die Schranken sind eng, weil ein

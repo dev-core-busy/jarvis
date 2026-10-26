@@ -81,12 +81,14 @@
         if (widget) {
             widget.classList.toggle('has-update', !!d.has_update);
             // gruen nur bei bestaetigtem 'aktuell' (ok + kein Update); bei Fehler neutral
-            widget.classList.toggle('up-to-date', !d.has_update && !!d.ok);
+            // Im Image-Betrieb (Docker) ist der Stand unbekannt - also nicht gruen.
+            widget.classList.toggle('up-to-date', !d.has_update && !!d.ok && !d.image);
             widget.title = d.has_update
                 ? T('update.widget_title_avail', { n: d.commits_behind })
                 : T('update.widget_title_ok');
         }
         if (!body) return;
+        if (d.image) { buildImageBody(); return; }
         fetch('/api/update/settings', { headers: auth() })
             .then(function (r) { return r.json(); })
             .then(function (s) { buildBody(d, s.auto_update_schedule || 'never'); })
@@ -141,6 +143,18 @@
         if (checkBtn) checkBtn.addEventListener('click', check);
         var sched = document.getElementById('upd-schedule');
         if (sched) sched.addEventListener('change', function (e) { saveSchedule(e.target.value); });
+    }
+
+    /* Docker-Container ohne git: aktualisiert wird ueber ein neues Image auf dem
+       Host. Kein Knopf und keine Auto-Update-Auswahl - beides liefe ins Leere. */
+    function buildImageBody() {
+        body.innerHTML =
+            '<div class="upd-status-row"><span class="upd-dot image"></span>'
+            + '<span style="font-size:.82rem;color:var(--text-primary);">' + esc(T('update.image_titel')) + '</span></div>'
+            + '<p class="kb-hint" style="margin:0;">' + esc(T('update.image_hinweis')) + '</p>'
+            + '<code class="upd-image-befehl">docker compose pull &amp;&amp; docker compose up -d</code>';
+        var f = foot();
+        if (f) f.innerHTML = '';
     }
 
     function applyUpdate() {

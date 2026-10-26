@@ -38,6 +38,11 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# `_deliver_docs` importiert backend.meta_marke selbst (U+2063-Meta-Bloecke,
+# 2026-10-26) – das ECHTE Modul, keine Attrappe; dafuer muss das Repo
+# importierbar sein.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 AGENT = ROOT / "backend" / "agent.py"
 
 ok = 0

@@ -106,7 +106,9 @@ class TtsManager @Inject constructor(
      * Text sprechen. Falls TTS noch nicht bereit, wird der Text gepuffert
      * und nach Initialisierung automatisch gesprochen.
      */
-    fun speak(text: String) {
+    fun speak(roh: String) {
+        // Meta-Bloecke (U+2063) VOR beiden Wegen entfernen – Server und lokal.
+        val text = VorleseText.ohneMeta(roh).trim()
         if (text.isBlank()) return
         // Server-TTS (edge-tts)
         if (serverTtsEnabled && serverUrl.isNotBlank() && apiKey.isNotBlank()) {

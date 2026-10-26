@@ -84,7 +84,8 @@ COPY services/   ./services/
 RUN cd /app/services/whatsapp-bridge && npm install --omit=dev
 
 # ── Daten-Volume vorbereiten ─────────────────────────────────────────────────
-RUN mkdir -p /app/data/logs /app/data/knowledge /app/data/vision/faces /app/certs
+RUN mkdir -p /app/data/logs /app/data/knowledge /app/data/vision/faces /app/certs \
+    && install -d -m 0700 /etc/jarvis
 
 # ── Wallpaper ────────────────────────────────────────────────────────────────
 COPY docker/jarvis-wallpaper.jpg /usr/share/backgrounds/jarvis.jpg
@@ -101,7 +102,12 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 80 443
 
 # ── Volumes fuer persistente Daten ───────────────────────────────────────────
-VOLUME ["/app/data", "/app/certs"]
+# /etc/jarvis (gemeldet 2026-10-26): broker-policy.json, Freigabe-Schluessel und
+# ggf. geheimnis.key lagen im Container-Layer und gingen bei jedem Neuaufbau
+# verloren. BEWUSST ein eigenes Volume und NICHT unter /app/data: der
+# Hauptschluessel gehoert gerade NICHT neben das Chiffrat (BSI M5) – wer data/
+# sichert oder weitergibt, haette sonst beides.
+VOLUME ["/app/data", "/app/certs", "/etc/jarvis"]
 
 # ── Umgebungsvariablen (Defaults) ────────────────────────────────────────────
 ENV JARVIS_DOCKER=1 \

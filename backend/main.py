@@ -6041,8 +6041,10 @@ async def update_apply(user: str = Depends(require_local_auth)):
 @app.get("/api/update/settings")
 async def update_settings_get(user: str = Depends(require_local_auth)):
     """Gibt Auto-Update-Einstellungen zurück."""
+    from backend.update_manager import image_betrieb
     auto_schedule = config.get_setting("auto_update_schedule", "never")
-    return JSONResponse({"auto_update_schedule": auto_schedule})
+    return JSONResponse({"auto_update_schedule": auto_schedule,
+                         "image": image_betrieb()})
 
 
 @app.post("/api/update/settings")
@@ -6059,6 +6061,13 @@ async def update_settings_set(request: Request, user: str = Depends(require_loca
     # erlaubt – ein bestehender Auftrag muss auch mit kleinerer Lizenz wieder
     # abschaltbar sein, sonst laeuft er weiter und die Sperre haette den
     # gegenteiligen Effekt.
+    # Im Image-Betrieb (Docker ohne git) liefe der Auftrag ins Leere: er ruft
+    # `git pull` in /opt/jarvis auf. "never" bleibt erlaubt, damit ein alter
+    # Auftrag aus der Zeit vor dieser Sperre abschaltbar ist.
+    if schedule != "never":
+        from backend.update_manager import image_betrieb, IMAGE_HINWEIS
+        if image_betrieb():
+            return JSONResponse({"error": IMAGE_HINWEIS, "image": True}, status_code=409)
     if schedule != "never":
         from backend import license as _lic
         erlaubt, grund = _lic.auto_update_erlaubt()
@@ -26218,7 +26227,12 @@ async def tts_synthesize(request: Request):
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=status)
 
     body = await request.json()
-    text  = body.get("text", "").strip()
+    # Meta-Angaben zwischen zwei U+2063 (Prompt-Optimierung, Quellenliste eines
+    # vorgeschalteten Proxys) werden nicht vorgelesen. HIER statt in jedem
+    # Client: Web, Avatar, Windows- und Android-App mit Server-TTS laufen alle
+    # ueber diesen Endpunkt (backend/meta_marke.py).
+    from backend.meta_marke import ohne_meta
+    text  = ohne_meta(body.get("text", "")).strip()
     voice = body.get("voice", "de-DE-ConradNeural")
 
     if not text:

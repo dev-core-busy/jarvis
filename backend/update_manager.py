@@ -3,6 +3,7 @@
 import asyncio
 import os
 import pwd
+import shutil
 import subprocess
 import threading
 import time
@@ -256,6 +257,34 @@ def _mit_diagnose(fehler: str, *roh: str) -> str:
         return fehler
 
 
+# ─── Image-Betrieb (Docker) ──────────────────────────────────────────────────
+#
+# GEMELDET 2026-10-26 von einem Docker-Anwender: das Image enthaelt weder
+# /app/.git noch das git-Programm. Pruefen und Anwenden scheiterten deshalb mit
+# "git fetch fehlgeschlagen: [Errno 2] No such file or directory: 'git'" – eine
+# Meldung, die nach kaputter Installation klingt, obwohl der Weg dort schlicht
+# ein anderer ist: neues Image ziehen, Container neu erzeugen. Die Volumes
+# (data, certs, /etc/jarvis) tragen den Zustand ueber den Neuaufbau.
+#
+# Nur im Docker-Modus: ein Container mit eingehaengtem Checkout UND git
+# aktualisiert weiter ueber git. Ausserhalb von Docker bleibt die bisherige
+# Fehlermeldung – dort ist ein fehlendes git tatsaechlich ein Fehler.
+
+IMAGE_HINWEIS = (
+    "Diese Installation läuft als Docker-Container ohne Git-Checkout. "
+    "Aktualisiert wird über ein neues Image: auf dem Docker-Host "
+    "`docker compose pull && docker compose up -d` ausführen. "
+    "Daten, Zertifikate und /etc/jarvis liegen in Volumes und bleiben erhalten."
+)
+
+
+def image_betrieb() -> bool:
+    """Docker-Container, in dem ein git-Update nicht moeglich ist?"""
+    if os.environ.get("JARVIS_DOCKER", "0") != "1":
+        return False
+    return not (PROJECT_ROOT / ".git").exists() or shutil.which("git") is None
+
+
 # ─── Git-Hilfsfunktionen ─────────────────────────────────────────────────────
 
 def _git(*args, timeout=20) -> tuple[int, str, str]:
@@ -275,6 +304,12 @@ def _git(*args, timeout=20) -> tuple[int, str, str]:
 
 def check_update() -> dict:
     """Prüft ob Updates verfügbar sind. Führt git fetch aus."""
+    if image_betrieb():
+        # Kein Fehler, sondern ein anderer Weg – die Oberflaeche zeigt den Hinweis
+        # statt eines roten "git fetch fehlgeschlagen".
+        return {"ok": True, "image": True, "hinweis": IMAGE_HINWEIS,
+                "current_hash": "", "branch": "", "has_update": False,
+                "commits_behind": 0, "recent_commits": []}
     # Aktuellen Commit
     _, current_hash, _ = _git("rev-parse", "HEAD")
     _, current_short, _ = _git("rev-parse", "--short", "HEAD")
@@ -358,6 +393,8 @@ _ERZEUGTE_DATEIEN = (
 
 def apply_update() -> dict:
     """Führt git pull aus. Lokal geänderte Dateien werden per stash/pop bewahrt."""
+    if image_betrieb():
+        return {"ok": False, "image": True, "error": IMAGE_HINWEIS}
     # Aktuellen Branch ermitteln (für gezieltes Pull ohne Upstream-Tracking)
     _, branch, _ = _git("rev-parse", "--abbrev-ref", "HEAD")
     branch = branch or "master"

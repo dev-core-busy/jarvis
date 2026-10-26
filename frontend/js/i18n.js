@@ -1492,6 +1492,8 @@ const _I18N = {
         'update.error':             'Fehler: {msg}',
         'update.nacharbeit':        '⚠ Bitte nacharbeiten: lokale Änderungen an diesen Dateien widersprachen dem neuen Stand und wurden nicht übernommen – es gilt der neue Stand. Die lokale Fassung ist auf dem Server gesichert (git stash). Seite danach von Hand neu laden.\n{dateien}',
         'update.unknown_error':     'Unbekannter Fehler',
+        'update.image_titel':       'Docker-Installation',
+        'update.image_hinweis':     'Diese Installation wird über ein neues Image aktualisiert, nicht hier in der Oberfläche. Auf dem Docker-Host ausführen – Daten, Zertifikate und Schlüssel liegen in Volumes und bleiben erhalten:',
 
         // ── Profile Form Labels ───────────────────────────────
         'profile.name_label':       'Profilname',
@@ -5960,6 +5962,8 @@ const _I18N = {
         'update.error':             'Error: {msg}',
         'update.nacharbeit':        '⚠ Follow-up needed: local changes to these files conflicted with the new version and were not applied – the new version applies. The local copy is kept on the server (git stash). Reload the page manually afterwards.\n{dateien}',
         'update.unknown_error':     'Unknown error',
+        'update.image_titel':       'Docker installation',
+        'update.image_hinweis':     'This installation is updated by pulling a new image, not from this page. Run on the Docker host – data, certificates and keys live in volumes and are kept:',
 
         // ── Beschriftungen Profilformular ─────────────────────
         'profile.name_label':       'Profile Name',

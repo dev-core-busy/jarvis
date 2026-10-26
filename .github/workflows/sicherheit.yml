@@ -46,11 +46,14 @@ jobs:
       # Wie auf den Servern (DEV gemessen 2026-10-06): ohne wngerman entscheidet
       # die PDF-Qualitaetspruefung anders (backend/tools/knowledge.py::_wortliste),
       # ohne bubblewrap/User-Namespaces brechen die Sandbox-Waechter mit Exit 2 ab.
-      - name: Systempakete (OCR/PDF, Wortliste, Sandbox wie auf den Servern)
+      # ffmpeg: test_stt_fern wandelt echte Audiodateien um und endet ohne es
+      # ehrlich mit Exit 2 (seit 2026-10-25 so, verdeckt bis 2026-10-26 hinter
+      # dem pip-audit-Abbruch).
+      - name: Systempakete (OCR/PDF, Wortliste, Sandbox, ffmpeg wie auf den Servern)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
-            tesseract-ocr tesseract-ocr-deu poppler-utils wngerman bubblewrap >/dev/null
+            tesseract-ocr tesseract-ocr-deu poppler-utils wngerman bubblewrap ffmpeg >/dev/null
           # Ubuntu 24.04 sperrt unprivilegierte User-Namespaces per AppArmor;
           # Debian (die Server) nicht. unshare -r / bwrap brauchen sie.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
@@ -121,6 +124,14 @@ jobs:
       # vergleicht das INSTALLIERTE gegen den Pin und meldet jede Abweichung.
       - name: jsdom + acorn fuer die UI-Waechter (Fassungen aus package.json)
         run: npm install --no-save --no-audit --no-fund
+
+      # exchangelib ist eine SKILL-Abhaengigkeit (skills/email/skill.json, beim
+      # Aktivieren installiert) und steht deshalb nicht in der Lock. Ohne sie
+      # fehlt test_email_rules die Adapter-Probe -> Exit 2. Installiert wird
+      # ERST HIER, nach pip-audit und SBOM: die sollen genau den Stand der Lock
+      # zeigen. Fassung wie auf ECHT (gemessen 2026-10-26).
+      - name: exchangelib fuer die Adapter-Probe (Skill-Abhaengigkeit, nicht in der Lock)
+        run: venv/bin/pip install -q exchangelib==5.6.0
 
       - name: Waechter (tests/test_*.py, tests/test_*.js)
         run: venv/bin/python tests/ci_lauf.py --parallel 4 --zeitdeckel 300 --ausnahmen-pruefen

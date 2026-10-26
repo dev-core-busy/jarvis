@@ -9,3 +9,4 @@
 # Mit --ausnahmen-pruefen laufen sie trotzdem; wer gruen wird, wird gemeldet und
 # gehoert dann HIER gestrichen.
 test_onenote_import.py               # braucht tika-app.jar + Java (vendor/, gitignoriert) – die CI installiert beides nicht; ohne endet der Waechter seit 2026-10-25 ehrlich mit Exit 2 statt still mit 0
+test_mcp_lifespan.py                 # Positivkontrolle stellt den Vorfall auf dem Runner nicht her ("alter Weg: lief" – Zeitverhalten); lokal 52/0, laeuft auf DEV – Betreiberentscheid 2026-10-26

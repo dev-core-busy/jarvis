@@ -4334,18 +4334,35 @@ check("update_manager kennt die erzeugten Dateien",
 import ast as _ast31
 
 def _reihenfolge31():
+    # Der Rumpf darf in eine Hilfsfunktion wandern: seit 2026-10-26 (Sperre
+    # gegen den Fetch-Wettlauf) delegiert apply_update an
+    # _apply_update_gesperrt, und eine Suche NUR in apply_update fand weder
+    # Zuruecksetzen noch stash. Durchsucht werden deshalb apply_update und
+    # jede Modulfunktion, die es per Namen ruft (auch weiter verschachtelt);
+    # gemessen wird nur, wenn beides in DERSELBEN Funktion steht.
     baum = _ast31.parse(_um31)
-    fn = next(n for n in _ast31.walk(baum)
-              if isinstance(n, _ast31.FunctionDef) and n.name == "apply_update")
-    z_reset = z_stash = None
-    for k in _ast31.walk(fn):
-        if isinstance(k, _ast31.For) and getattr(k.iter, "id", "") == "_ERZEUGTE_DATEIEN":
-            z_reset = k.lineno
-        if isinstance(k, _ast31.Call) and getattr(k.func, "id", "") == "_git":
-            roh = [a for a in k.args if isinstance(a, _ast31.Constant)]
-            if roh and roh[0].value == "stash" and len(roh) > 1 and roh[1].value == "push":
-                z_stash = k.lineno
-    return z_reset, z_stash
+    funktionen = {n.name: n for n in baum.body if isinstance(n, _ast31.FunctionDef)}
+    offen, gesehen = ["apply_update"], []
+    while offen:
+        name = offen.pop()
+        if name in gesehen or name not in funktionen:
+            continue
+        gesehen.append(name)
+        for k in _ast31.walk(funktionen[name]):
+            if isinstance(k, _ast31.Call) and isinstance(k.func, _ast31.Name):
+                offen.append(k.func.id)
+    for name in gesehen:
+        z_reset = z_stash = None
+        for k in _ast31.walk(funktionen[name]):
+            if isinstance(k, _ast31.For) and getattr(k.iter, "id", "") == "_ERZEUGTE_DATEIEN":
+                z_reset = k.lineno
+            if isinstance(k, _ast31.Call) and getattr(k.func, "id", "") == "_git":
+                roh = [a for a in k.args if isinstance(a, _ast31.Constant)]
+                if roh and roh[0].value == "stash" and len(roh) > 1 and roh[1].value == "push":
+                    z_stash = k.lineno
+        if z_reset is not None or z_stash is not None:
+            return z_reset, z_stash
+    return None, None
 
 _zr31, _zs31 = sicher(_reihenfolge31) or (None, None)
 check("das Zuruecksetzen steht VOR dem stash (sonst wirkungslos) - reset=%s stash=%s"

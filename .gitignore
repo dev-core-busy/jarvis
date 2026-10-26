@@ -191,7 +191,7 @@ windows-app-go/.ftps_credentials
 # bei jedem Auftrag mitgeklont (git clone --depth 1) – fuer einen Lauf von
 # 30-60 Sekunden der teuerste Teil.
 
-# Benutzerhandbuch: enthaelt Screenshots vom Echt-System mit potenziell privaten Daten – NIE committen (Repo ist public); Quelle der Wahrheit ist Confluence-Seite 315077818
+# Benutzerhandbuch: enthaelt Screenshots vom Echt-System mit potenziell privaten Daten – NIE committen (Repo ist public); Quelle der Wahrheit ist die Confluence-Seite des Handbuchs
 Benutzerhandbuch/
 
 # Lokale Sitzungs-Startskripte (session.sh, session_main.sh, …) – Arbeitsumgebung des Entwicklers, nicht Teil des Projekts

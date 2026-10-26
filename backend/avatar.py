@@ -151,7 +151,7 @@ def load_config() -> dict:
 def parse_page_refs(text: str) -> list[str]:
     """Zieht Confluence-Seiten-IDs aus der Konfiguration.
 
-    Akzeptiert je Zeile eine volle URL (``…/pages/315077818/Titel``) ODER eine
+    Akzeptiert je Zeile eine volle URL (``…/pages/123456/Titel``) ODER eine
     blosse Seiten-ID. Beides, weil ein Admin die URL aus dem Browser kopiert,
     ein Skript aber eher die ID kennt. Unbrauchbare Zeilen werden verworfen –
     eine geratene Seiten-ID waere schlimmer als keine.

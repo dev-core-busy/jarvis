@@ -93,6 +93,10 @@ GESPERRT = {
     "4c9d730d42b68927", "c50bd72ebd05e3ec", "134303bbd311e55b", "478837e9e17b25f9",
     "2790eb528952c763", "8709b4a5275d8991", "777713b557718d59", "609b70d46663b302",
     "e2fd9e73edc665e4",
+    # 2026-10-26: interne Confluence-Seitennummern (Benutzerhandbuch alt/neu,
+    # BSI-Seite). Eine blanke Zahl traegt keine Domaene, die Domaenen-Eintraege
+    # greifen deshalb nicht - die Nummer selbst gehoert gesperrt.
+    "012bbf888993cccc", "5bc199baab01b3ae", "3fb4fbcafa145d4d",
 }
 
 # Interne NETZE (die ersten beiden Oktette, gehasht wie oben). Die Sperrliste

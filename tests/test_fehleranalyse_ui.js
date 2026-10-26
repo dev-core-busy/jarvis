@@ -17,6 +17,7 @@ require('./lib/bilanz')();
 const fs = require('fs');
 const path = require('path');
 const { JSDOM } = require('./lib/jsdom_laden')();
+const sitzungLaden = require('./lib/sitzung_laden');
 
 const ROOT = path.resolve(__dirname, '..');
 const lies = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -79,6 +80,8 @@ async function aufbau(opts) {
         }
         return antwort(404, { error: 'unbekannt ' + pfad });
     };
+    // Im Browser ist sitzung.js das erste Skript jeder Seite (tests/lib/sitzung_laden.js).
+    sitzungLaden(w, { token: 'tok' });
     w.eval(lies('frontend/js/icons.js'));
     w.eval(lies('frontend/js/i18n.js'));
     w.eval(lies('frontend/js/fehleranalyse.js'));

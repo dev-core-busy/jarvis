@@ -23,6 +23,8 @@ nie an PAM/AD.
 Zustand: die Probe-Sitzungen werden am Ende widerrufen; geschrieben wird nichts.
 
 Aufruf (root): bash /opt/jarvis/deploy/als_dienst.sh venv/bin/python tests/live_bsi_m5_dev.py
+  Liegt das 2FA-Geheimnis des Kontos im Root-Broker (Marke "broker", seit
+  2026-10-20): python3 tests/live_mit_brokercode.py tests/live_bsi_m5_dev.py
   ⚠ NICHT mehr per `runuser -u jarvis`: ohne den Hauptschluessel (LoadCredential)
   sind .secret_key und die 2FA-Secrets verpackt – ausgestellte Tokens gelten im
   Dienst nicht, und der TOTP-Code liesse sich nicht bilden.
@@ -123,11 +125,13 @@ check(offen == [], "⚠ settings.json: kein Geheimfeld im Klartext", offen)
 
 # ── Sitzungen ───────────────────────────────────────────────────────────────
 from backend import main as M  # noqa: E402
-import pyotp  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from zweifaktor_code import code_quelle  # noqa: E402
 
 st_auth = M._get_user_auth_state(KONTO)
 if not (st_auth.get("totp_enabled") and st_auth.get("totp_secret")):
     abbruch("Konto %s hat keine 2FA – Bestaetigung per Code nicht messbar" % KONTO)
+code = code_quelle(st_auth["totp_secret"])
 TOK = M.generate_token(KONTO, mit_2fa=True)
 # ⚠ Eine Sekunde Abstand: zwei Tokens desselben Kontos in derselben Sekunde
 # sind IDENTISCH (Zeitstempel + Signatur) – die erste Fassung mass damit
@@ -176,7 +180,7 @@ try:
 
     # ── E. Bestaetigen ─────────────────────────────────────────────────────
     print("E. Bestaetigung")
-    richtig = pyotp.TOTP(st_auth["totp_secret"]).now()
+    richtig = code()
     falsch = "%06d" % ((int(richtig) + 500000) % 1000000)
     st, d = ruf("/api/auth/bestaetigen", TOK, "POST", {"code": falsch})
     check(st == 403 and not d.get("ok"), "falscher Code: 403", (st, d))

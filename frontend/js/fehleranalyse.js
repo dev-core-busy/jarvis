@@ -33,7 +33,7 @@ window.Fehleranalyse = (function () {
     }
 
     function token() {
-        return window.authToken || (window.JarvisSitzung && window.JarvisSitzung.token());
+        return window.authToken || window.JarvisSitzung.token();
     }
 
     function zeit(ts) {

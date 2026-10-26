@@ -159,8 +159,11 @@ check("Protokoll gehoert dem Dienstbenutzer und ist nicht weltlesbar",
       PROTOKOLL.exists() and (PROTOKOLL.stat().st_mode & 0o077) == 0)
 jr = sh(["journalctl", "-t", "jarvis-security", "--since", "-5min", "--no-pager", "-o", "cat"])
 check("dieselbe Meldung im Journal (syslog, jarvis-security)", name in jr.stdout)
-pr = sh(["runuser", "-u", "jarvis", "--", str(JARVIS / "venv" / "bin" / "python"), "-m",
-         "backend.sicherheits_log", "pruefen"], cwd=str(JARVIS),
+# Ueber als_dienst.sh, NICHT runuser: ohne Hauptschluessel hat der Befehl den
+# Schluessel der Kette nicht und endet seit 2026-10-26 mit Exit 2 (vorher
+# meldete er jede Zeile mit Merkmal als Bruch – die Probe war dauerhaft rot).
+pr = sh(["bash", str(JARVIS / "deploy" / "als_dienst.sh"), str(JARVIS / "venv" / "bin" / "python"),
+         "-m", "backend.sicherheits_log", "pruefen"], cwd=str(JARVIS),
         env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
 try:
     kette = json.loads(pr.stdout)

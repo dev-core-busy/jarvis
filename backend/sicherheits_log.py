@@ -81,8 +81,18 @@ _lock = threading.Lock()
 _letzter_hash: str | None = None
 _letzte_datei: str | None = None
 _syslog: logging.Logger | None = None
-_fehler = {"datei": 0, "syslog": 0}
+_fehler = {"datei": 0, "syslog": 0, "ohne_schluessel": 0}
 _mac_schluessel: bytes | None = None
+# Groesse der Datei nach dem letzten EIGENEN Schreiben – weicht sie ab, hat ein
+# anderer Prozess angehaengt, und der gemerkte Hash ist nicht mehr der letzte.
+_letzte_groesse: int | None = None
+# Nebenprozesse laden den Schluessel einmal selbst (_schluessel()).
+_selbst_geladen = False
+
+
+def _ableiten(geheimnis: str) -> bytes | None:
+    return (hashlib.sha256(b"jarvis-sicherheits-log\0" + geheimnis.encode()).digest()
+            if geheimnis else None)
 
 
 def schluessel_setzen(geheimnis: str) -> None:
@@ -90,8 +100,54 @@ def schluessel_setzen(geheimnis: str) -> None:
     Start). Eigene Ableitung, damit der Sitzungsschluessel selbst nirgends
     als MAC fuer frei waehlbaren Text dient."""
     global _mac_schluessel
-    _mac_schluessel = (hashlib.sha256(b"jarvis-sicherheits-log\0" + geheimnis.encode()).digest()
-                       if geheimnis else None)
+    _mac_schluessel = _ableiten(geheimnis)
+
+
+def _schluessel() -> bytes | None:
+    """Gesetzter Schluessel – oder, in einem NEBENPROZESS, der selbst geladene.
+
+    WARUM (BSI-Abgleich 2026-10-26): ``python -m backend.abhaengigkeiten`` lief
+    am 21.10. von Hand, ohne ``schluessel_setzen``, und schrieb Zeilen OHNE
+    ``mac`` – auf DEV und ECHT ist die Kette seither gebrochen. Geladen wird
+    ueber ``secret_key.nur_lesen``: nie erzeugt, nie fluechtig. Ohne
+    Hauptschluessel (Prozess nicht ueber ``deploy/als_dienst.sh``) gibt es
+    deshalb KEINEN Schluessel statt eines falschen.
+
+    Die Fundorte haengen am Ort des Protokolls (``data/`` = ``DATEI`` zwei
+    Ebenen hoch, ``.env`` eine darueber) – ein Test im Sandkasten liest so nie
+    den Schluessel einer echten Installation.
+    """
+    global _mac_schluessel, _selbst_geladen
+    if _mac_schluessel or _selbst_geladen:
+        return _mac_schluessel
+    _selbst_geladen = True
+    try:
+        data = DATEI.resolve().parent.parent
+        env = os.environ.get("SECRET_KEY", "")
+        if not env.strip():
+            try:
+                from dotenv import dotenv_values
+                env = str(dotenv_values(data.parent / ".env").get("SECRET_KEY") or "")
+            except Exception:  # noqa: BLE001
+                env = ""
+        from backend import secret_key
+        _mac_schluessel = _ableiten(secret_key.nur_lesen(env, data / ".secret_key") or "")
+    except Exception:  # noqa: BLE001
+        _mac_schluessel = None
+    return _mac_schluessel
+
+
+class _OhneSchluessel(Exception):
+    """Die Kette traegt Pruefmerkmale, dieser Prozess hat keinen Schluessel."""
+
+
+def _sperren(f) -> None:
+    """Exklusive Sperre ueber Prozessgrenzen (Dienst + Wartungsbefehl)."""
+    try:
+        import fcntl
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    except (ImportError, OSError):
+        pass
 
 
 def aufbewahrung_tage() -> int:
@@ -150,21 +206,32 @@ def _letzte_zeile(pfad: Path) -> str:
     return ""
 
 
-def _prev_hash() -> str:
-    """Hash der letzten Zeile – gemerkt, solange niemand die Datei getauscht hat."""
-    global _letzter_hash, _letzte_datei
-    if _letzter_hash is not None and _letzte_datei == str(DATEI.resolve()):
-        return _letzter_hash
+def _letzter_eintrag() -> dict:
     zeile = _letzte_zeile(DATEI)
-    h = NULL_HASH
-    if zeile:
-        try:
-            h = json.loads(zeile).get("hash") or NULL_HASH
-        except Exception:  # noqa: BLE001
-            # unlesbare letzte Zeile: Kette ab hier neu verankern, aber den
-            # Bruch sichtbar lassen (pruefen() meldet ihn)
-            h = NULL_HASH
-    _letzter_hash, _letzte_datei = h, str(DATEI.resolve())
+    if not zeile:
+        return {}
+    try:
+        e = json.loads(zeile)
+        return e if isinstance(e, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _prev_hash() -> str:
+    """Hash der letzten Zeile – gemerkt, solange niemand die Datei getauscht
+    oder (aus einem anderen Prozess) verlaengert hat."""
+    global _letzter_hash, _letzte_datei, _letzte_groesse
+    try:
+        groesse = DATEI.stat().st_size
+    except OSError:
+        groesse = None
+    if (_letzter_hash is not None and _letzte_datei == str(DATEI.resolve())
+            and groesse == _letzte_groesse):
+        return _letzter_hash
+    # unlesbare letzte Zeile: Kette ab hier neu verankern, aber den Bruch
+    # sichtbar lassen (pruefen() meldet ihn)
+    h = _letzter_eintrag().get("hash") or NULL_HASH
+    _letzter_hash, _letzte_datei, _letzte_groesse = h, str(DATEI.resolve()), groesse
     return h
 
 
@@ -216,24 +283,38 @@ def ereignis(art: str, *, benutzer: str = "", ip: str = "", ergebnis: str = "",
     }
     if details:
         eintrag["details"] = {k: v for k, v in details.items() if v not in (None, "")}
-    global _letzter_hash
+    global _letzter_hash, _letzte_groesse
     with _lock:
         try:
-            prev = _prev_hash()
-            eintrag["prev"] = prev
-            if _mac_schluessel:
-                eintrag["mac"] = 1
-            eintrag["hash"] = _hash(prev, eintrag, _mac_schluessel)
             DATEI.parent.mkdir(parents=True, exist_ok=True)
             neu = not DATEI.exists()
             with DATEI.open("a", encoding="utf-8") as f:
+                _sperren(f)
+                schluessel = _schluessel()
+                # Eine Zeile ohne Merkmal hinter einer mit Merkmal ist fuer
+                # pruefen() ein Bruch – also gar nicht erst schreiben. Das
+                # Ereignis geht trotzdem nach syslog (Ablage 2, unten).
+                if not schluessel and _letzter_eintrag().get("mac"):
+                    raise _OhneSchluessel()
+                prev = _prev_hash()
+                eintrag["prev"] = prev
+                if schluessel:
+                    eintrag["mac"] = 1
+                eintrag["hash"] = _hash(prev, eintrag, schluessel)
                 f.write(json.dumps(eintrag, ensure_ascii=False) + "\n")
+                f.flush()
+                _letzter_hash = eintrag["hash"]
+                _letzte_groesse = os.fstat(f.fileno()).st_size
             if neu:
                 try:
                     os.chmod(DATEI, 0o600)
                 except OSError:
                     pass
-            _letzter_hash = eintrag["hash"]
+        except _OhneSchluessel:
+            _fehler["ohne_schluessel"] += 1
+            print(f"[Sicherheit] '{art}' nur im Journal (jarvis-security), nicht in "
+                  f"{DATEI}: dieser Prozess hat den Schluessel der Kette nicht – "
+                  "Wartungsbefehle ueber deploy/als_dienst.sh starten.", flush=True)
         except Exception as e:  # noqa: BLE001
             _fehler["datei"] += 1
             print(f"[Sicherheit] Protokoll nicht schreibbar: {e}", flush=True)
@@ -395,6 +476,15 @@ if __name__ == "__main__":  # python3 -m backend.sicherheits_log [pruefen|zeigen
     import sys
     befehl = sys.argv[1] if len(sys.argv) > 1 else "pruefen"
     if befehl == "pruefen":
+        # Ohne Schluessel ist jede Zeile mit Merkmal unpruefbar – das waere eine
+        # Liste von Scheinbruechen, kein Ergebnis (BSI-Abgleich 2026-10-26).
+        _schluessel()
+        if not _mac_schluessel and '"mac"' in (DATEI.read_text(encoding="utf-8", errors="replace")
+                                               if DATEI.exists() else ""):
+            print(json.dumps({"ok": None, "fehler": "Schluessel der Kette fehlt in diesem "
+                              "Prozess – ueber deploy/als_dienst.sh starten"},
+                             ensure_ascii=False), flush=True)
+            sys.exit(2)
         r = pruefen()
         print(json.dumps(r, ensure_ascii=False, indent=2))
         sys.exit(0 if r["ok"] else 1)

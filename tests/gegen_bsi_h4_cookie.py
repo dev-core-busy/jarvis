@@ -126,8 +126,9 @@ PROBEN = [
      "            if (cookieTauglich()) h['X-Jarvis-Sitzung'] = 'cookie';\n",
      "            h['X-Jarvis-Sitzung'] = 'cookie';\n"),
     ("Umstellung laeuft nie", JS, SJS,
-     "    umstellen();\n})();",
-     "})();"),
+     # seit 2026-10-13 folgt der Maskenschutz – Aufruf statt Dateiende
+     "\n    umstellen();\n",
+     "\n"),
     ("eine Anmeldestelle ohne Anmelde-Kopf", JS, WJS,
      "headers: window.JarvisSitzung.anmeldeKopf({ 'Content-Type': 'application/json' }), body: JSON.stringify(payload) })",
      "headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })"),

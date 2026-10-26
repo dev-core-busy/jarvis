@@ -107,10 +107,10 @@ PROBEN = [
     ("Merker nur im Speicher", TS,
      "        if STORE_PATH.exists():\n", "        if False:\n"),
     ("Login prueft wieder selbst per pyotp", MAIN,
-     "        _totp_erg = _totp_schutz.pruefen(_norm_login(username), user_state[\"totp_secret\"],\n"
-     "                                         totp_code)\n",
-     "        import pyotp\n"
-     "        _totp_erg = (_totp_schutz.OK if pyotp.TOTP(user_state[\"totp_secret\"])"
+     "            _totp_erg = _totp_schutz.pruefen(_norm_login(username), user_state[\"totp_secret\"],\n"
+     "                                             totp_code)\n",
+     "            import pyotp\n"
+     "            _totp_erg = (_totp_schutz.OK if pyotp.TOTP(user_state[\"totp_secret\"])"
      ".verify(totp_code, valid_window=1) else _totp_schutz.FALSCH)\n"),
     ("Bestaetigung prueft wieder selbst per pyotp", MAIN,
      "                ok = _totp_schutz.pruefen(_norm_login(user), geheim, code) == _totp_schutz.OK\n",

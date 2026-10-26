@@ -95,6 +95,32 @@ def aufloesen(env_wert: str, datei: Path) -> str:
 _PRAEFIX = "JGK1:"
 
 
+def nur_lesen(env_wert: str, datei: Path) -> str | None:
+    """Den ECHTEN Schluessel lesen – oder None, wenn dieser Prozess ihn nicht hat.
+
+    Anders als ``aufloesen`` wird hier nie erzeugt, nie geschrieben und nie ein
+    fluechtiger Ersatz geliefert. Gedacht fuer Nebenprozesse (Wartungsbefehle,
+    ``python -m backend.sicherheits_log pruefen``), die mit dem Schluessel
+    etwas NACHPRUEFEN oder FORTSCHREIBEN wollen: ein fluechtiger Schluessel
+    saehe dort wie ein gueltiger aus und erzeugte falsche Pruefmerkmale.
+    """
+    if not ist_platzhalter(env_wert):
+        return env_wert.strip()
+    try:
+        wert = datei.read_text().strip()
+    except OSError:
+        return None
+    if wert.startswith(_PRAEFIX):
+        haupt = _hauptfernet()
+        if haupt is None:
+            return None
+        try:
+            return haupt.decrypt(wert[len(_PRAEFIX):].encode("ascii")).decode("utf-8")
+        except Exception:  # noqa: BLE001
+            return None
+    return None if ist_platzhalter(wert) else wert
+
+
 def _hauptfernet():
     """Hauptschluessel (BSI M5) – None ohne ihn (Entwicklungsrechner, Docker
     ohne Datei, Prozess ausserhalb des Dienstes)."""

@@ -113,6 +113,9 @@ ABHOLER = {
     ("backend/sap_cert.py", "pruefen"): "holt das Zertifikat zur Anzeige/Bindung",
     ("backend/knowledge_sync.py", "_ermittlungs_kontext"): "nur fuer zertifikat_abfragen",
     ("backend/mail_tls.py", "pruefen"): "holt das Mailserver-Zertifikat zur Anzeige/Bindung",
+    # Nur ANSEHEN: der Endpunkt speichert nichts, Erlauben ist ein eigener PUT
+    # mit ca_cert (main.py, mcp_zertifikat_ansehen).
+    ("backend/mcp_tls.py", "zertifikat_abholen"): "holt das MCP-Server-Zertifikat zur Anzeige",
 }
 PRUEF_WORT = re.compile(r"verify|pruef|tls", re.I)
 

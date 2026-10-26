@@ -25,8 +25,8 @@ ST = "backend/sitzung_token.py"
 PROBEN = [
     # ── Konto-Sperre ──
     ("Login prueft die Konto-Sperre nicht", MAIN,
-     "    if _gesperrt is not None:\n        return _gesperrt\n",
-     "    pass\n"),
+     "    _gesperrt = _konto_sperre_antwort(username)\n    if _gesperrt is not None:\n        return _gesperrt\n",
+     "    _gesperrt = _konto_sperre_antwort(username)\n"),
     ("Fehlversuch nur noch je IP", MAIN,
      '    if _anmelde_schutz.fehlversuch(ip, _norm_login(username) if username else ""):\n',
      '    if _anmelde_schutz.fehlversuch(ip, ""):\n'),
@@ -103,12 +103,12 @@ PROBEN = [
      "    try:\n"
      "        _user_sessions.record_login(username, client_ip, display=_display_name(username))\n"),
     ("Merkmal wird nicht gespeichert", ST,
-     '"mit_2fa": _mit_2fa, "ohne_admin": _ohne_admin})',
-     '"ohne_admin": _ohne_admin})'),
+     '"mit_2fa": _mit_2fa, "ohne_admin": _ohne_admin,',
+     '"ohne_admin": _ohne_admin,'),
     # ── Apps ──
     ("Merkmal 'ohne Admin' wird nicht gespeichert", ST,
-     '"mit_2fa": _mit_2fa, "ohne_admin": _ohne_admin})',
-     '"mit_2fa": _mit_2fa})'),
+     '"mit_2fa": _mit_2fa, "ohne_admin": _ohne_admin,',
+     '"mit_2fa": _mit_2fa,'),
     ("App-Erkennung kennt die bestehenden Apps nicht", MAIN,
      '    return ua.startswith("okhttp/") or ua.startswith("go-http-client/")\n',
      '    return False\n'),

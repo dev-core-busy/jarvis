@@ -2750,6 +2750,7 @@ const _I18N = {
         'sprot.art.stt_quelle_geaendert':'Spracherkennung umgestellt',
         'sprot.art.lernnotiz_geloescht':'Lernnotiz gelöscht',
         'sprot.art.abhaengigkeiten': 'Abhängigkeiten geändert',
+        'sprot.art.fehleranalyse': 'Fehleranalyse abgerufen',
         // Weitere Protokolle (protokolle.js)
         'plog.zeitraum': 'Zeitraum',
         'plog.z_1h': 'Letzte Stunde',
@@ -7207,6 +7208,7 @@ const _I18N = {
         'sprot.art.stt_quelle_geaendert':'Speech recognition switched',
         'sprot.art.lernnotiz_geloescht':'Learning note deleted',
         'sprot.art.abhaengigkeiten': 'Dependencies changed',
+        'sprot.art.fehleranalyse': 'Error analysis retrieved',
         // Weitere Protokolle (protokolle.js)
         'plog.zeitraum': 'Period',
         'plog.z_1h': 'Last hour',

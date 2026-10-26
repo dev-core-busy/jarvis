@@ -98,7 +98,9 @@ PROBEN = [
      '    tok = request.headers.get("Authorization", "").replace("Bearer ", "") or request.query_params.get("token", "")\n'
      '    return get_redoc_html(openapi_url=f"/openapi.json?token={tok}", title="Jarvis API – ReDoc")\n'),
     ("Schema-Adresse mit Sitzungs- statt Abruf-Schluessel", MA,
-     '    key, _exp = _dlkey.erzeugen(user)\n    return "/openapi.json?token=" + key\n',
+     '    key, _exp = _dlkey.erzeugen(user, eingeschraenkt=_sitzung_ohne_admin(user),\n'
+     '                                sitzung=_abruf_sitzung(user))\n'
+     '    return "/openapi.json?token=" + key\n',
      '    key = user\n    return "/openapi.json?token=" + key\n'),
     # ── Oberflaeche ──
     ("vnc.js: Sitzungstoken in der noVNC-Adresse", VJ,

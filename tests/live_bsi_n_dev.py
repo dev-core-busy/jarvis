@@ -21,6 +21,8 @@ naechsten. Die Probe-Sitzung wird am Ende widerrufen; sonst wird nichts
 geschrieben.
 
 Aufruf (root): bash /opt/jarvis/deploy/als_dienst.sh venv/bin/python tests/live_bsi_n_dev.py
+  Liegt das 2FA-Geheimnis des Kontos im Root-Broker (Marke "broker", seit
+  2026-10-20): python3 tests/live_mit_brokercode.py tests/live_bsi_n_dev.py
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 """
 import http.client
@@ -96,7 +98,8 @@ check(d == {"status": "ok"}, "anonym: genau {'status': 'ok'}", d)
 check("server" not in kopf, "443: kein server-Kopf", kopf.get("server"))
 
 from backend import main as M  # noqa: E402
-import pyotp  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from zweifaktor_code import code_quelle  # noqa: E402
 
 st_auth = M._get_user_auth_state(KONTO)
 if not (st_auth.get("totp_enabled") and st_auth.get("totp_secret")):
@@ -113,7 +116,7 @@ try:
 
     # ── N3 ──────────────────────────────────────────────────────────────────
     print("N3: 2FA-Code nur einmal")
-    code = pyotp.TOTP(st_auth["totp_secret"]).now()
+    code = code_quelle(st_auth["totp_secret"])()
     st, d, _ = https("/api/auth/bestaetigen", TOK, "POST", {"code": code})
     if st != 200:
         # der aktuelle Code war womoeglich gerade schon verbraucht (Anmeldung

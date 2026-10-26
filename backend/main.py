@@ -1623,6 +1623,9 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/admin/anmeldeschutz/aufheben",    "Einstellungen · Anmeldesperre aufgehoben"),
     ("POST",   r"/api/auth/hinweise/gelesen",           "Konto · Hinweis gelesen"),
     ("POST",   r"/api/login/windows",                   "Konto · Windows-Anmeldung"),
+    # Fehleranalyse (Einstellungen -> Fehleranalyse)
+    ("POST",   r"/api/fehleranalyse/dossier",           "Einstellungen · Fehleranalyse · Dossier erstellt"),
+    ("POST",   r"/api/fehleranalyse/analyse",           "Einstellungen · Fehleranalyse · Analyse angefordert"),
 ]
 _ACTION_DETAILS = [(m, re.compile(muster), label) for m, muster, label in _ACTION_DETAILS]
 

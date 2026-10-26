@@ -7,9 +7,12 @@
  * Aufruf aufzeichnet. Geprueft wird die WIRKUNG am DOM:
  *   - Benutzer -> Laeufe -> Knoepfe (gesperrt, bis ein Lauf gewaehlt ist)
  *   - "Analysieren" gesperrt, wenn das Admin-Profil kein Modell hat
- *   - Dossier-Knopf sendet Lauf + Beschreibung, Ergebnis per textContent
- *     (eine Markup-Nutzlast im Dossier erzeugt KEIN Element)
+ *   - Dossier-Knopf sendet Lauf + Beschreibung; eine Markup-Nutzlast im
+ *     Dossier erzeugt KEIN Element
  *   - Analyse zeigt Text + Meta; scheitert sie, bleibt das Dossier stehen
+ *   - Markdown wird als DOM gezeichnet (fett, Ueberschrift, Liste, Code …),
+ *     eingerueckte Dossier-Zeilen bleiben Text, kopiert wird der ROHTEXT
+ *   - das Modul setzt nirgends innerHTML (Syntaxbaum, mit Positivkontrolle)
  *   - Verdrahtung in app.js am Syntaxbaum (acorn)
  */
 'use strict';
@@ -66,7 +69,7 @@ async function aufbau(opts) {
             return antwort(200, { ok: true, profil, laeufe: ben === 'firma\\m.mustermann' ? LAEUFE : [] });
         }
         if (pfad === '/api/fehleranalyse/dossier') {
-            return antwort(200, { ok: true, dossier: '# Dossier\n' + NUTZLAST,
+            return antwort(200, { ok: true, dossier: opts.dossier !== undefined ? opts.dossier : '# Dossier\n' + NUTZLAST,
                                   kennzahlen: { journal: 7, sicherheit: 1, fundstellen: 2, abgeschnitten: 1 } });
         }
         if (pfad === '/api/fehleranalyse/analyse') {
@@ -75,7 +78,8 @@ async function aufbau(opts) {
                                       analyse_ok: false, analyse_fehler: 'Modell nicht erreichbar' });
             }
             return antwort(200, { ok: true, dossier: '# Dossier A', kennzahlen: {},
-                                  analyse_ok: true, analyse: '### Ursache\n' + NUTZLAST,
+                                  analyse_ok: true,
+                                  analyse: opts.analyse !== undefined ? opts.analyse : '### Ursache\n' + NUTZLAST,
                                   modell: 'qwen', profil: 'Admin-Profil', analyse_abgeschnitten: true });
         }
         return antwort(404, { error: 'unbekannt ' + pfad });
@@ -162,15 +166,19 @@ function waehle(w, sel, wert) {
     await warte(20);
     const ana = aufrufe.filter(a => a.pfad === '/api/fehleranalyse/analyse');
     pruefe('POST an /analyse', ana.length === 1 && ana[0].init.method === 'POST');
-    pruefe('Analyse-Box sichtbar mit Text', d.getElementById('fa-analyse-box').hidden === false
-           && d.getElementById('fa-analyse').textContent.startsWith('### Ursache'));
+    const anaKopf = d.querySelector('#fa-analyse h6');
+    pruefe('Analyse-Box sichtbar, "### Ursache" als Ueberschrift', d.getElementById('fa-analyse-box').hidden === false
+           && !!anaKopf && anaKopf.textContent === 'Ursache', d.getElementById('fa-analyse').innerHTML);
+    pruefe('⚠ die Nutzlast steht in der Analyse als Zeichen da',
+           d.getElementById('fa-analyse').textContent.includes(NUTZLAST));
     pruefe('⚠ Analyse als Text, kein Element', d.querySelectorAll('#fa-analyse img').length === 0);
     pruefe('Meta nennt Modell, Profil und den Abbruch',
            /qwen/.test(d.getElementById('fa-analyse-meta').textContent)
            && /Admin-Profil/.test(d.getElementById('fa-analyse-meta').textContent)
            && /abgeschnitten/.test(d.getElementById('fa-analyse-meta').textContent),
            d.getElementById('fa-analyse-meta').textContent);
-    pruefe('das Dossier steht auch nach der Analyse', d.getElementById('fa-dossier').textContent === '# Dossier A');
+    pruefe('das Dossier steht auch nach der Analyse', d.getElementById('fa-dossier').textContent === 'Dossier A',
+           d.getElementById('fa-dossier').textContent);
 
     console.log('\n5. Analyse scheitert: Fehler sichtbar, Dossier bleibt');
     ({ w, d, aufrufe } = await aufbau({ analyseKaputt: true }));
@@ -183,7 +191,7 @@ function waehle(w, sel, wert) {
            fe.textContent);
     pruefe('Analyse-Box zu', d.getElementById('fa-analyse-box').hidden === true);
     pruefe('⚠ Dossier trotzdem sichtbar', d.getElementById('fa-dossier-box').hidden === false
-           && d.getElementById('fa-dossier').textContent === '# Dossier B');
+           && d.getElementById('fa-dossier').textContent === 'Dossier B', d.getElementById('fa-dossier').textContent);
 
     console.log('\n6. Ohne Profil-Modell kein Analysieren');
     ({ w, d } = await aufbau({ profil: { name: '', provider: '', model: '' } }));
@@ -194,6 +202,111 @@ function waehle(w, sel, wert) {
            d.getElementById('fa-analyse-btn').disabled && !d.getElementById('fa-dossier-btn').disabled);
     pruefe('der Hinweis sagt warum', /kein Profil/.test(d.getElementById('fa-profil').textContent),
            d.getElementById('fa-profil').textContent);
+
+    console.log('\n6b. Markdown als DOM, Rohtext beim Kopieren');
+    const MD_DOSSIER = [
+        '# Fehleranalyse-Dossier',
+        'Benutzer: x · **wichtig** und `code_wert` und *kursiv*',
+        '',
+        '## Ablauf (2 Eintraege)',
+        '[1] Werkzeug shell',
+        '    Argumente: {"cmd": "ls /data/*.csv"}',
+        '    - kein Listenpunkt, eingerueckt',
+        // a*b*c faengt schon der Blick NACH dem schliessenden Stern ab;
+        // foo*bar* baz misst den Blick DAVOR (Wortzeichen vor dem oeffnenden).
+        '    snake_case_name und a*b*c und foo*bar* baz bleiben so',
+        '',
+        '## Sicherheitsprotokoll',
+        '- erster Eintrag',
+        '- zweiter **' + NUTZLAST + '**',
+        '',
+        '1. eins',
+        '2. zwei',
+        '',
+        '> ein Zitat',
+        '',
+        '| Spalte A | Spalte B |',
+        '|---|---|',
+        '| 1 | 2 |',
+        '',
+        '```python',
+        'x = "**nicht fett**"  # ' + NUTZLAST,
+        '```',
+    ].join('\n');
+    ({ w, d } = await aufbau({ dossier: MD_DOSSIER }));
+    let kopiert = null;
+    Object.defineProperty(w.navigator, 'clipboard', { configurable: true,
+        value: { writeText: async (t) => { kopiert = t; } } });
+    await w.Fehleranalyse.onShow(); await warte(10);
+    waehle(w, d.getElementById('fa-benutzer'), 'firma\\m.mustermann'); await warte(20);
+    waehle(w, d.getElementById('fa-lauf'), '1792993217000-1');
+    d.getElementById('fa-dossier-btn').click(); await warte(20);
+    const dos = d.getElementById('fa-dossier');
+    const txt = (sel) => Array.prototype.map.call(dos.querySelectorAll(sel), e => e.textContent);
+    pruefe('Positivkontrolle: das Dossier ist gezeichnet', dos.childNodes.length > 5, dos.childNodes.length);
+    pruefe('⚠ "# …" wird Ueberschrift ohne Rautenzeichen',
+           txt('h4').join('|') === 'Fehleranalyse-Dossier', txt('h4').join('|'));
+    pruefe('"## …" wird Unterueberschrift', txt('h5').join('|') === 'Ablauf (2 Eintraege)|Sicherheitsprotokoll',
+           txt('h5').join('|'));
+    pruefe('⚠ **…** wird fett, ohne Sterne', txt('strong').indexOf('wichtig') >= 0 && !/\*\*wichtig/.test(dos.textContent),
+           txt('strong').join('|'));
+    pruefe('`…` wird Code', txt('p code').indexOf('code_wert') >= 0, txt('p code').join('|'));
+    pruefe('*…* wird kursiv', txt('em').indexOf('kursiv') >= 0, txt('em').join('|'));
+    pruefe('⚠ snake_case, a*b*c und foo*bar* bleiben Text (kein Kursiv daraus)',
+           txt('em').length === 1 && dos.textContent.includes('snake_case_name und a*b*c und foo*bar* baz'),
+           txt('em').join('|'));
+    pruefe('"- …" am Zeilenanfang wird Listenpunkt', txt('ul > li').length === 2, txt('ul > li').join('|'));
+    pruefe('⚠ ein eingeruecktes "- …" im Werkzeug-Ergebnis bleibt Text',
+           !txt('li').some(t => /kein Listenpunkt/.test(t)) && dos.textContent.includes('    - kein Listenpunkt'),
+           txt('li').join('|'));
+    const ablauf = Array.prototype.find.call(dos.querySelectorAll('p'), p => /Werkzeug shell/.test(p.textContent));
+    pruefe('⚠ Zeilen und Einrueckung eines Absatzes bleiben erhalten',
+           !!ablauf && ablauf.textContent.includes('\n    Argumente: '), ablauf && JSON.stringify(ablauf.textContent));
+    pruefe('nummerierte Liste', txt('ol > li').join('|') === 'eins|zwei', txt('ol > li').join('|'));
+    pruefe('Zitat', txt('blockquote').join('|') === 'ein Zitat', txt('blockquote').join('|'));
+    pruefe('Tabelle mit Kopf und Zeile', txt('th').join('|') === 'Spalte A|Spalte B' && txt('td').join('|') === '1|2',
+           txt('th').join('|') + ' / ' + txt('td').join('|'));
+    const codeBl = dos.querySelector('pre > code');
+    pruefe('⚠ Code-Block woertlich, ohne Formatierung darin',
+           !!codeBl && codeBl.textContent === 'x = "**nicht fett**"  # ' + NUTZLAST
+           && codeBl.querySelectorAll('*').length === 0, codeBl && codeBl.textContent);
+    pruefe('⚠ die Nutzlast erzeugt nirgends ein Element (auch nicht in fett/Code)',
+           dos.querySelectorAll('img').length === 0 && !w.__xss
+           && txt('strong').some(t => t === NUTZLAST));
+    d.getElementById('fa-dossier-kopieren').click(); await warte(20);
+    pruefe('⚠ Kopieren liefert den ROHTEXT (mit ** und ```), nicht die Anzeige',
+           kopiert === MD_DOSSIER, kopiert && kopiert.slice(0, 60));
+
+    console.log('\n6c. Das Modul setzt nirgends Markup (Syntaxbaum)');
+    const acornR = require(path.join(ROOT, 'node_modules/acorn'));
+    function markupStellen(code) {
+        const baum = acornR.parse(code, { ecmaVersion: 'latest', sourceType: 'script' });
+        const funde = [];
+        (function lauf(n) {
+            if (!n || typeof n.type !== 'string') return;
+            const name = (m) => m && m.type === 'MemberExpression'
+                ? (m.computed ? (m.property.type === 'Literal' ? m.property.value : '?') : m.property.name) : null;
+            if (n.type === 'AssignmentExpression' && /^(innerHTML|outerHTML)$/.test(String(name(n.left)))) {
+                funde.push(name(n.left));
+            }
+            if (n.type === 'CallExpression' && /^(insertAdjacentHTML|write|writeln|createContextualFragment)$/.test(String(name(n.callee)))) {
+                funde.push(name(n.callee));
+            }
+            for (const k of Object.keys(n)) {
+                const v = n[k];
+                if (Array.isArray(v)) v.forEach(lauf);
+                else if (v && typeof v.type === 'string') lauf(v);
+            }
+        })(baum);
+        return funde;
+    }
+    const kontrolle = markupStellen("a.innerHTML = x; b['outerHTML'] = y; c.insertAdjacentHTML('x', z);");
+    if (kontrolle.length !== 3) {
+        console.log('  ABBRUCH: die Markup-Sonde erkennt ihre Kontrollfaelle nicht (' + kontrolle.join(',') + ')');
+        process.exit(2);
+    }
+    const funde = markupStellen(lies('frontend/js/fehleranalyse.js'));
+    pruefe('⚠ fehleranalyse.js setzt kein innerHTML/outerHTML/insertAdjacentHTML', funde.length === 0, funde.join(','));
 
     console.log('\n7. Verdrahtung in app.js (Syntaxbaum) und i18n');
     const acorn = require(path.join(ROOT, 'node_modules/acorn'));

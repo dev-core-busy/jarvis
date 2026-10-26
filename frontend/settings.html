@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=36">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=214">
+    <link rel="stylesheet" href="/static/css/style.css?v=215">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -4642,7 +4642,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                         <div class="form-group">
                             <label for="fa-beschreibung" data-i18n="fa.beschreibung">Was wurde gemeldet? (optional)</label>
-                            <textarea id="fa-beschreibung" rows="3" maxlength="2000" data-i18n-placeholder="fa.beschreibung_ph" placeholder="z. B. „bekommt beim CSV-Export ‚Zugriff verweigert‘“"></textarea>
+                            <textarea id="fa-beschreibung" class="fa-beschreibung" rows="6" cols="42" maxlength="2000" data-i18n-placeholder="fa.beschreibung_ph" placeholder="z. B. „bekommt beim CSV-Export ‚Zugriff verweigert‘“"></textarea>
                         </div>
                         <p id="fa-profil" class="kb-hint"></p>
                         <div class="fa-knoepfe">
@@ -4657,7 +4657,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <button type="button" class="btn-secondary btn-small" id="fa-analyse-kopieren" data-i18n="fa.kopieren">Kopieren</button>
                             </div>
                             <p id="fa-analyse-meta" class="kb-hint"></p>
-                            <div id="fa-analyse" class="fa-text"></div>
+                            <div id="fa-analyse" class="fa-inhalt fa-md"></div>
                         </section>
                         <section id="fa-dossier-box" class="fa-box" hidden>
                             <div class="fa-box-kopf">
@@ -4665,7 +4665,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <button type="button" class="btn-secondary btn-small" id="fa-dossier-kopieren" data-i18n="fa.kopieren">Kopieren</button>
                             </div>
                             <p id="fa-kennzahlen" class="kb-hint"></p>
-                            <pre id="fa-dossier" class="fa-text fa-mono"></pre>
+                            <div id="fa-dossier" class="fa-inhalt fa-md fa-mono"></div>
                         </section>
                     </div>
                 </div>
@@ -6021,7 +6021,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/audit.js?v=5"></script>
     <script src="/static/js/sicherheitsprotokoll.js?v=1"></script>
     <script src="/static/js/protokolle.js?v=3"></script>
-    <script src="/static/js/fehleranalyse.js?v=2"></script>
+    <script src="/static/js/fehleranalyse.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=6"></script>
     <script src="/static/js/skills.js?v=50"></script>
     <script src="/static/js/chatlib.js?v=25"></script>

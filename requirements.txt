@@ -19,6 +19,13 @@ psutil==6.1.1
 # backend/tools/desktop.py), zog aber drei GPL-Pakete in den Backend-Prozess
 # (MouseInfo/PyMsgBox GPL-3.0+, python3-xlib GPL-2.0) – unvereinbar mit der
 # eigenen Apache-2.0. Nicht wieder aufnehmen, ohne das zu pruefen.
+# pillow: die Wheels buendeln einen EIGENEN Brotli-Decoder (pillow.libs/
+# libbrotlidec-*.so.<fassung>); 13.0.0 bringt 1.2.0 mit – CVE-2026-111497,
+# behoben erst ab Brotli 1.2.1, das Pillow am 2026-11-03 nachzieht (PR 10305).
+# Bewertet als nicht erreichbar (nur WOFF2 ueber FreeType; Jarvis laedt in
+# Pillow nur feste Systemschriften), Wiedervorlage 2026-12-01:
+# tests/test_pillow_brotli.py. Sobald ein Pillow mit Brotli >= 1.2.1 erscheint:
+# Untergrenze hier anheben, Lock neu erzeugen, Ausnahme streichen.
 pillow>=12.3.0         # Sicherheits-Untergrenze 2026-10-01 (vorher ==11.1.0)
 pytesseract==0.3.13   # Bild-OCR fuer Wissensbasis; benoetigt System-Paket: tesseract-ocr (+ tesseract-ocr-deu/-eng)
 pdf2image==1.17.0     # OCR-Fallback fuer gescannte PDFs (rendert Seiten zu Bildern); benoetigt System-Paket: poppler-utils

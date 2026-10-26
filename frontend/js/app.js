@@ -834,6 +834,7 @@
         const tabBranding = document.getElementById('settings-tab-branding');
         const tabMcp = document.getElementById('settings-tab-mcp');
         const tabTelemetry = document.getElementById('settings-tab-telemetry');
+        const tabFehleranalyse = document.getElementById('settings-tab-fehleranalyse');
         const tabInstructions = document.getElementById('settings-tab-instructions');
         const tabSecurity = document.getElementById('settings-tab-security');
         const tabCron    = document.getElementById('settings-tab-cron');
@@ -854,7 +855,7 @@
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');
         const tabExcel   = document.getElementById('settings-tab-excel');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabNewsfeed, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabSecurity, tabCron].concat(tabsSkillCfg);
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabNewsfeed, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabFehleranalyse, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -986,6 +987,10 @@
                     tabTelemetry.style.display = '';
                     tabTelemetry.classList.add('active');
                     if (window.telemetryManager) window.telemetryManager.init();
+                } else if (target === 'fehleranalyse' && tabFehleranalyse) {
+                    tabFehleranalyse.style.display = '';
+                    tabFehleranalyse.classList.add('active');
+                    if (window.Fehleranalyse) window.Fehleranalyse.onShow();
                 } else if (target === 'security' && tabSecurity) {
                     tabSecurity.style.display = '';
                     tabSecurity.classList.add('active');

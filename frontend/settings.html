@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=36">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=213">
+    <link rel="stylesheet" href="/static/css/style.css?v=214">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1652,6 +1652,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <!-- Beschriftung "Protokolle"/"Logs" seit 2026-10-20 (vorher "Telemetry"): der Reiter
                      haelt fast nur noch Protokolle. Die Kennung "telemetry" bleibt (app.js, IDs). -->
                 <button class="settings-tab-btn" data-settings-tab="telemetry" data-i18n="settings.tab.telemetry">Protokolle</button>
+                <button class="settings-tab-btn" data-settings-tab="fehleranalyse" data-i18n="settings.tab.fehleranalyse">Fehleranalyse</button>
                 <button class="settings-tab-btn" data-settings-tab="security" data-i18n="settings.tab.security">Sicherheit</button>
                 <button class="settings-tab-btn" data-settings-tab="cron" data-i18n="settings.tab.cron">Tasks</button>
             </div>
@@ -4623,6 +4624,52 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 </div>
 
                 <!-- ═══ Tab: Protokolle (Kennung telemetry) ═══ -->
+                <!-- ── Fehleranalyse (2026-10-26): Dossier zu einem Lauf eines Benutzers und
+                     optional die Deutung durch das Modell des angemeldeten Administrators.
+                     Logik: frontend/js/fehleranalyse.js, Endpunkte /api/fehleranalyse/*. ── -->
+                <div id="settings-tab-fehleranalyse" class="settings-tab-content" style="display:none;">
+                    <div class="kb-container">
+                        <p class="kb-hint" data-i18n-html="fa.intro">Meldet ein Benutzer ein Problem, stellt dieser Reiter alles zu seinem Lauf zusammen: Aufgabe, jeden Werkzeugaufruf mit Argumenten und Ergebnis, die Meldungen des Dienstes im selben Zeitraum, Sicherheitsereignisse und die Stellen im Programm, die eine Fehlermeldung erzeugen. Daraus entsteht ein <b>Dossier</b> zum Kopieren; auf Wunsch deutet es ein Modell.</p>
+                        <div class="fa-zeile">
+                            <div class="form-group">
+                                <label for="fa-benutzer" data-i18n="fa.benutzer">Benutzer</label>
+                                <select id="fa-benutzer"><option value="" data-i18n="fa.benutzer_waehlen">– Benutzer wählen –</option></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="fa-lauf" data-i18n="fa.lauf">Lauf</label>
+                                <select id="fa-lauf" disabled><option value="" data-i18n="fa.lauf_erst_benutzer">– zuerst Benutzer wählen –</option></select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="fa-beschreibung" data-i18n="fa.beschreibung">Was wurde gemeldet? (optional)</label>
+                            <textarea id="fa-beschreibung" rows="3" maxlength="2000" data-i18n-placeholder="fa.beschreibung_ph" placeholder="z. B. „bekommt beim CSV-Export ‚Zugriff verweigert‘“"></textarea>
+                        </div>
+                        <p id="fa-profil" class="kb-hint"></p>
+                        <div class="fa-knoepfe">
+                            <button type="button" class="btn-secondary" id="fa-dossier-btn" disabled data-i18n="fa.dossier_btn">Dossier erstellen</button>
+                            <button type="button" class="btn-primary" id="fa-analyse-btn" disabled data-i18n="fa.analyse_btn">Analysieren</button>
+                            <span id="fa-status" class="kb-hint" aria-live="polite"></span>
+                        </div>
+                        <div id="fa-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                        <section id="fa-analyse-box" class="fa-box" hidden>
+                            <div class="fa-box-kopf">
+                                <h3 data-i18n="fa.analyse_titel">Analyse</h3>
+                                <button type="button" class="btn-secondary btn-small" id="fa-analyse-kopieren" data-i18n="fa.kopieren">Kopieren</button>
+                            </div>
+                            <p id="fa-analyse-meta" class="kb-hint"></p>
+                            <div id="fa-analyse" class="fa-text"></div>
+                        </section>
+                        <section id="fa-dossier-box" class="fa-box" hidden>
+                            <div class="fa-box-kopf">
+                                <h3 data-i18n="fa.dossier_titel">Dossier</h3>
+                                <button type="button" class="btn-secondary btn-small" id="fa-dossier-kopieren" data-i18n="fa.kopieren">Kopieren</button>
+                            </div>
+                            <p id="fa-kennzahlen" class="kb-hint"></p>
+                            <pre id="fa-dossier" class="fa-text fa-mono"></pre>
+                        </section>
+                    </div>
+                </div>
+
                 <div id="settings-tab-telemetry" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <!-- "Zuletzt zurueckgesetzt" und der Knopf "Zuruecksetzen" sind seit 2026-10-20
@@ -5967,13 +6014,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=10"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=369"></script>
+    <script src="/static/js/i18n.js?v=370"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=29"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=5"></script>
     <script src="/static/js/sicherheitsprotokoll.js?v=1"></script>
     <script src="/static/js/protokolle.js?v=3"></script>
+    <script src="/static/js/fehleranalyse.js?v=1"></script>
     <script src="/static/js/kbgroups.js?v=6"></script>
     <script src="/static/js/skills.js?v=50"></script>
     <script src="/static/js/chatlib.js?v=25"></script>
@@ -6018,7 +6066,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- Suchfeld im Modal-Kopf. VOR app.js: dessen openModal ruft SettingsSearch.init(). -->
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
-    <script src="/static/js/app.js?v=229"></script>
+    <script src="/static/js/app.js?v=230"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

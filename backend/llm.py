@@ -27,6 +27,35 @@ class LLMResponse:
     usage: dict = None  # {"input_tokens": N, "output_tokens": M}
 
 
+def abbruch_grund(resp) -> str:
+    """``"laengenlimit"``, wenn die Antwort am max_tokens-Limit abgeschnitten
+    wurde, sonst ``""``.
+
+    EINE Stelle fuer alle Anbieter, gelesen aus der Rohantwort: OpenAI-kompatibel
+    (``finish_reason == "length"``), Anthropic (``stop_reason == "max_tokens"``),
+    Gemini (``finish_reason`` MAX_TOKENS). Der Verlauf braucht das: ein
+    abgeschnittener Tool-Aufruf kommt mit fehlenden Argumenten an, und ohne
+    diese Angabe sieht man nur den Folgefehler (DEV 2026-10-26).
+    """
+    try:
+        raw = getattr(resp, "raw", None)
+        if isinstance(raw, dict):
+            ch = raw.get("choices") or []
+            fr = (ch[0].get("finish_reason") if ch and isinstance(ch[0], dict) else "") or ""
+            return "laengenlimit" if str(fr).lower() == "length" else ""
+        if str(getattr(raw, "stop_reason", "") or "").lower() == "max_tokens":
+            return "laengenlimit"
+        kand = getattr(raw, "candidates", None) or []
+        if kand:
+            fr = getattr(kand[0], "finish_reason", None)
+            name = str(getattr(fr, "name", fr) or "")
+            if name.upper().endswith("MAX_TOKENS"):
+                return "laengenlimit"
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 class MockFC:
     """Einheitliches Function-Call Objekt (für alle Non-Gemini-Provider)."""
     def __init__(self, name, args):
@@ -1439,6 +1468,12 @@ class OpenAICompatibleProvider(LLMProvider):
                     parts.append(LLMPart(text=_reasoning))
 
             if message.get("tool_calls"):
+                if (choice.get("finish_reason") or "").lower() == "length":
+                    # Der letzte Aufruf ist dann meist unvollstaendig (Argumente
+                    # fehlen). Vorher still – im Journal stand nur der Folgefehler
+                    # (DEV 2026-10-26: `filesystem write` ohne `path`).
+                    print(f"[LLM] {model}: Tool-Aufruf bei max_tokens abgeschnitten – "
+                          "Argumente koennen fehlen", flush=True)
                 for tc in message["tool_calls"]:
                     fn = tc.get("function", {})
                     try:

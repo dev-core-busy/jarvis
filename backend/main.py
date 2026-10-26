@@ -7461,6 +7461,74 @@ async def api_conv_log_body(conv_id: str, user: str = Depends(require_local_auth
     return JSONResponse(_mit_anzeigenamen(body))
 
 
+# ─── Fehleranalyse (Einstellungen → Fehleranalyse) ──────────────────────────
+# Dossier zu einem Lauf (Verlauf + Journal + Sicherheitsprotokoll + Code-
+# Fundstellen) und optional eine Deutung durch das Modell des Administrators.
+# Logik: backend/fehleranalyse.py. Jeder Abruf eines Dossiers steht im
+# Sicherheitsprotokoll MIT dem analysierten Benutzer – das Dossier enthaelt
+# dessen Chat-Inhalte.
+
+@app.get("/api/fehleranalyse/laeufe")
+async def fehleranalyse_laeufe(benutzer: str = "", limit: int = 30,
+                               user: str = Depends(require_local_auth)):
+    """Die letzten Laeufe eines Benutzers (Kopfdaten) und das Analyse-Profil."""
+    from backend import fehleranalyse as fa
+    limit = max(1, min(int(limit or 30), 200))
+    if not benutzer.strip():
+        return JSONResponse({"ok": True, "laeufe": [], "profil": fa.profil_info(user)})
+    roh = await asyncio.to_thread(get_conversations, limit, None, benutzer.strip())
+    laeufe = [{"id": e.get("id"), "ts": e.get("ts"), "task": str(e.get("task") or "")[:300],
+               "steps": e.get("steps"), "duration_ms": e.get("duration_ms"),
+               "error": e.get("error"), "model": e.get("model"),
+               "client_type": e.get("client_type"), "username": e.get("username")}
+              for e in roh]
+    return JSONResponse({"ok": True, "laeufe": _mit_anzeigenamen(laeufe),
+                         "profil": fa.profil_info(user)})
+
+
+async def _fehleranalyse_dossier(request: Request, user: str, aktion: str) -> dict:
+    from backend import fehleranalyse as fa
+    try:
+        daten = await request.json()
+    except Exception:  # noqa: BLE001
+        daten = {}
+    conv_id = str((daten or {}).get("id") or "").strip()
+    if not conv_id:
+        return {"ok": False, "error": "Kein Lauf gewaehlt"}
+    beschreibung = str((daten or {}).get("beschreibung") or "")[:fa.MAX_BESCHREIBUNG]
+    erg = await fa.dossier_erstellen(conv_id, beschreibung, user)
+    if erg.get("ok"):
+        ip = request.client.host if request.client else ""
+        _sicherheits_log.ereignis("fehleranalyse", benutzer=user, ip=ip, ergebnis=aktion,
+                                  analysiert=erg.get("benutzer", ""), lauf=conv_id)
+    return erg
+
+
+@app.post("/api/fehleranalyse/dossier")
+async def fehleranalyse_dossier(request: Request, user: str = Depends(require_local_auth)):
+    """Nur das Dossier – ohne Modell, deterministisch, zum Kopieren."""
+    erg = await _fehleranalyse_dossier(request, user, "dossier")
+    if erg.get("ok"):
+        return JSONResponse(erg)
+    return JSONResponse(erg, status_code=404 if erg.get("error") == "Lauf nicht gefunden" else 400)
+
+
+@app.post("/api/fehleranalyse/analyse")
+async def fehleranalyse_analyse(request: Request, user: str = Depends(require_local_auth)):
+    """Dossier + Deutung durch das Modell im Profil des angemeldeten Administrators."""
+    from backend import fehleranalyse as fa
+    erg = await _fehleranalyse_dossier(request, user, "analyse")
+    if not erg.get("ok"):
+        return JSONResponse(erg, status_code=404 if erg.get("error") == "Lauf nicht gefunden" else 400)
+    lang = "en" if str(request.query_params.get("lang") or "") == "en" else "de"
+    ana = await fa.analysieren(erg["dossier"], user, lang)
+    erg.update({"analyse_ok": ana.get("ok", False), "analyse": ana.get("analyse", ""),
+                "analyse_fehler": ana.get("error", ""), "modell": ana.get("modell", ""),
+                "profil": ana.get("profil", ""),
+                "analyse_abgeschnitten": ana.get("abgeschnitten", False)})
+    return JSONResponse(erg)
+
+
 @app.get("/api/context/stats")
 async def api_context_stats(session_id: str = "", user: str = Depends(require_auth)):
     """Kontext-Statistiken – IMMER nur zum eigenen Kontext des Aufrufers.

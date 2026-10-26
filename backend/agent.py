@@ -127,7 +127,7 @@ from google.genai import types
 from fastapi import WebSocket
 
 from backend.config import config
-from backend.llm import get_provider
+from backend.llm import get_provider, abbruch_grund as _llm_abbruch_grund
 
 
 def _ist_nur_selbstgespraech(text: str) -> bool:
@@ -735,10 +735,71 @@ def _mcp_weggelassen_hinweis(weggelassen: list) -> str:
     """
     if not weggelassen:
         return ""
-    return ("[Hinweis: " + ", ".join(f"'{f}' = '{s}'" for f, s in weggelassen)
+    return (_WEGGELASSEN_ANFANG + ", ".join(f"'{f}' = '{s}'" for f, s in weggelassen)
             + " war nur das Beispiel aus der Schema-Beschreibung, nicht eine Angabe "
             "des Benutzers, und wurde WEGGELASSEN – das Ergebnis ist in diesem "
-            "Punkt NICHT eingeschraenkt. Nicht danach fragen.]\n")
+            "Punkt NICHT eingeschraenkt." + _WEGGELASSEN_ENDE)
+
+
+# Rahmen des Hinweises oben. ALS KONSTANTEN, weil `_ergebnis_kappen` ihn vor dem
+# Ablegen wieder abtrennen muss (DEV 2026-10-26): mitgeschrieben begann die Datei
+# mit "[" und wurde als .json abgelegt, obwohl CSV darin stand – das Skript des
+# Modells scheiterte an json.load, und die Kopfzeile war eine Hinweiszeile.
+_WEGGELASSEN_ANFANG = "[Hinweis: "
+_WEGGELASSEN_ENDE = " Nicht danach fragen.]\n"
+
+
+def _weggelassen_abtrennen(text: str) -> tuple[str, str]:
+    """``(hinweis, daten)`` – trennt einen fuehrenden Weggelassen-Hinweis ab."""
+    if text.startswith(_WEGGELASSEN_ANFANG):
+        ende = text.find(_WEGGELASSEN_ENDE)
+        if ende >= 0:
+            schnitt = ende + len(_WEGGELASSEN_ENDE)
+            return text[:schnitt], text[schnitt:]
+    return "", text
+
+
+# Werkzeuge, deren Pflichtfelder der Dispatch VOR der Zugriffspruefung prueft.
+# NICHT pauschal alle: `required` im Schema ist nicht ueberall die ganze
+# Wahrheit – `shell_execute` verlangt dort `command`, nimmt aber ebenso einen
+# Aufruf nur mit `code` an. Hier stehen die Werkzeuge, bei denen ein fehlendes
+# Feld sonst in eine Zugriffsentscheidung laeuft (leerer Pfad -> falsche Sperre
+# und ein protokollierter Sicherheitsverstoss).
+_PFLICHT_VOR_FREIGABE = frozenset({"filesystem"})
+
+
+def _pflicht_fehlt_grund(tool, name: str, args: dict, verfuegbar) -> str | None:
+    """Ablehnungsgrund, wenn einem Werkzeugaufruf ein Pflichtfeld fehlt, sonst None.
+
+    DER VORFALL (DEV 2026-10-26): das Modell wollte eine ganze CSV als `content`
+    an `filesystem write` uebergeben, die Antwort lief ins max_tokens-Limit, und
+    beim Aufruf kam nur noch ``{"action": "write"}`` an. Die Pfadpruefung loeste
+    den leeren Pfad auf das Arbeitsverzeichnis des Dienstes auf und meldete
+    "Schreiben ist nur im Arbeitsbereich erlaubt" – eine falsche Diagnose, die
+    obendrein als Sicherheitsverstoss protokolliert wurde. Ein fehlendes
+    Pflichtfeld ist keine Zugriffsfrage; der Grund nennt deshalb die Ursache
+    und den Weg. Fuer MCP-Werkzeuge gilt `_mcp_argumente_pruefen` (dort muss
+    der BENUTZER gefragt werden, hier fehlt etwas, das das Modell selbst kennt).
+    """
+    try:
+        schema = tool.parameters_schema() if callable(getattr(tool, "parameters_schema", None)) else {}
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(schema, dict) or not isinstance(schema.get("required"), list):
+        return None
+    args = args if isinstance(args, dict) else {}
+    fehlend = [f for f in schema["required"]
+               if isinstance(f, str) and args.get(f) in (None, "")]
+    if not fehlend:
+        return None
+    weg = ("per shell_execute (ein Skript liest die Quelldatei und schreibt das Ergebnis)"
+           if "shell_execute" in verfuegbar else "in mehreren kleinen Schritten")
+    return (f"Aufruf von '{name}' NICHT ausgefuehrt – Pflichtangabe(n) fehlen: "
+            + ", ".join(f"'{f}'" for f in fehlend) + ". Das ist KEINE Zugriffssperre. "
+            "Wahrscheinlichste Ursache: deine Antwort wurde am Laengenlimit "
+            "abgeschnitten, weil ein Argument zu gross war. Rufe das Werkzeug mit "
+            "allen Pflichtangaben erneut auf; grosse Inhalte NICHT als Argument "
+            f"uebergeben, sondern {weg}.")
 
 
 def _reminder_exempt(tool_name: str, user: str) -> bool:
@@ -3537,7 +3598,12 @@ KRITISCH – Autonomie-Regeln:
                     # erkennt auch per Shell erzeugte Dateien in /tmp etc.).
                     await self._deliver_docs(ws, _sichtbar, _delivered_docs, username, since=_task_start_time)
 
-                    _conv_messages.append({"role": "tool", "tool": tool_name, "content": result_str})
+                    # Mit ARGUMENTEN und Abbruchgrund: ohne sie war ein Aufruf,
+                    # dem ein Pflichtfeld fehlte, im Verlauf nicht erkennbar
+                    # (Fehleranalyse, DEV 2026-10-26).
+                    _conv_messages.append({"role": "tool", "tool": tool_name, "content": result_str,
+                                           "args": conv_log.args_fuer_verlauf(tool_args),
+                                           "abbruch": _llm_abbruch_grund(response)})
 
                     # BSI H8: ans Modell geht das Ergebnis NUR gerahmt (Fremdtext,
                     # Laufkennung) – alles darueber arbeitet mit dem rohen Text.
@@ -4215,7 +4281,9 @@ KRITISCH – Autonomie-Regeln:
                     # (Rolle 'tool' + Werkzeugname), damit die Oberflaeche beide
                     # Kanaele gleich darstellt.
                     _conv_messages.append({"role": "tool", "tool": tool_name,
-                                           "content": result_str})
+                                           "content": result_str,
+                                           "args": conv_log.args_fuer_verlauf(tool_args),
+                                           "abbruch": _llm_abbruch_grund(response)})
 
                     # Screenshot-Bild erkennen (IMAGE_BASE64:pfad|base64data)
                     image_part = None
@@ -4484,6 +4552,17 @@ KRITISCH – Autonomie-Regeln:
             return (f"Zugriff verweigert: Das Werkzeug '{name}' gehoert nicht zum Umfang "
                     f"der Rolle '{self._role_id}'. Verfuegbar: "
                     f"{', '.join(sorted(_allow)) or '(keine)'}.")
+
+        # ── Pflichtfelder: VOR jeder Zugriffspruefung ──
+        # Sonst beurteilt die Pfad-Freigabe einen leeren Pfad und meldet eine
+        # Sperre, die es nicht gibt (siehe `_pflicht_fehlt_grund`).
+        if name in _PFLICHT_VOR_FREIGABE:
+            _pf_grund = _pflicht_fehlt_grund(tool, name, args, self.tools_map)
+            if _pf_grund:
+                print(f"[AGENT {self.agent_id}] Tool '{name}' ohne Pflichtangabe "
+                      f"aufgerufen, nicht ausgefuehrt: Argumente "
+                      f"{sorted((args or {}).keys())}", flush=True)
+                return _pf_grund
 
         # ── Beobachter fuer Laeufe OHNE WebSocket ──
         # ``_run_headless`` sendet keine Statusmeldungen; ein Aufrufer, der einen
@@ -6566,6 +6645,8 @@ KRITISCH – Autonomie-Regeln:
         # zerschnitten – die magischen Bytes stehen am Anfang, das Bild aber
         # waere unvollstaendig und die Datei unbrauchbar.
         text = self._bilddaten_bergen(tool_name, text)
+        # Ein Weggelassen-Hinweis gehoert ans Modell, nicht in die abgelegte Datei.
+        hinweis, text = _weggelassen_abtrennen(text)
         # Grosses MCP-Ergebnis: vollstaendig als Datei, Hinweis VORN – hinten
         # laege er bei unbegrenzter Grenze hinter 270.000 Zeichen Daten.
         kopf = ""
@@ -6594,6 +6675,8 @@ KRITISCH – Autonomie-Regeln:
                 % (datei, len(text), text.count("\n") + 1,
                    ", als CSV mit Semikolon fuer Excel" if datei.endswith(".csv") else "",
                    datei, re.sub(r"^mcp_", "", tool_name) + Path(datei).suffix))
+        # Ablage-Kopf bleibt VORN – `_ohne_ablagehinweis` erkennt ihn am Anfang.
+        kopf = kopf + hinweis
         grenze = _TOOL_ERGEBNIS_MAX
         try:
             eigen = int(getattr(self.tools_map.get(tool_name), "ergebnis_max", 0) or 0)

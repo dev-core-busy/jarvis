@@ -94,6 +94,16 @@ class _Agent:
 # Die echte Methode aus agent.py in die Attrappe holen.
 _src = _kap.replace("_TOOL_ERGEBNIS_MAX", "self._TOOL_ERGEBNIS_MAX")
 _ns = {}
+# Modul-Helfer, den `_ergebnis_kappen` ruft (Weggelassen-Hinweis abtrennen).
+import ast as _ast  # noqa: E402
+for _n in _ast.parse(AGENT).body:
+    if (isinstance(_n, _ast.FunctionDef) and _n.name == "_weggelassen_abtrennen") or (
+            isinstance(_n, _ast.Assign) and any(
+                isinstance(t, _ast.Name) and t.id.startswith("_WEGGELASSEN_")
+                for t in _n.targets)):
+        exec(_ast.get_source_segment(AGENT, _n), _ns)
+check("_weggelassen_abtrennen" in _ns and "_WEGGELASSEN_ENDE" in _ns,
+      "Positivkontrolle: Helfer aus agent.py geladen")
 exec("class _A:\n" + "\n".join("    " + z for z in _src.splitlines()), _ns)
 _A = _ns["_A"]
 _Agent._ergebnis_kappen = _A._ergebnis_kappen

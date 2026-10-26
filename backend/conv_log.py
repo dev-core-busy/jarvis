@@ -277,6 +277,38 @@ def _new_id() -> str:
     return f"{int(time.time() * 1000)}{_seq:04d}"
 
 
+# Je Argumentwert im Verlauf. Das Argument ist Diagnosematerial (WELCHE Felder
+# kamen an, welcher Pfad, welcher Befehl) – ein ganzer Dateiinhalt in `content`
+# gehoert nicht doppelt in den Verlauf, er steckt im Ergebnis oder in der Datei.
+_MAX_ARG_CHARS = 2000
+
+
+def args_fuer_verlauf(args) -> dict:
+    """Werkzeug-Argumente fuer den Verlauf: lange Texte gekuerzt UND beziffert.
+
+    Bis 2026-10-26 hielt der Verlauf nur Werkzeugname und Ergebnis fest. Der
+    Vorfall des Tages (``filesystem write`` kam ohne ``path`` an) war darin
+    unsichtbar – genau die Angabe, an der die Diagnose hing.
+    """
+    if not isinstance(args, dict):
+        return {}
+    aus: dict = {}
+    for k, v in args.items():
+        if str(k).startswith("_"):
+            continue                  # interne Felder des Dispatch, kein Modell-Argument
+        if isinstance(v, str) and len(v) > _MAX_ARG_CHARS:
+            v = v[:_MAX_ARG_CHARS] + f" … [gekuerzt, {len(v)} Zeichen gesamt]"
+        elif not isinstance(v, (str, int, float, bool)) and v is not None:
+            try:
+                s = json.dumps(v, ensure_ascii=False, default=str)
+            except Exception:  # noqa: BLE001
+                s = str(v)
+            if len(s) > _MAX_ARG_CHARS:
+                v = s[:_MAX_ARG_CHARS] + f" … [gekuerzt, {len(s)} Zeichen gesamt]"
+        aus[str(k)] = v
+    return aus
+
+
 def _prepare_messages(messages: list[dict]) -> tuple[list[dict], int]:
     """Baut die Nachrichtenliste fuer den Rumpf.
 
@@ -299,6 +331,10 @@ def _prepare_messages(messages: list[dict]) -> tuple[list[dict], int]:
         item: dict = {"role": role}
         if m.get("tool"):
             item["tool"] = m["tool"]
+        if isinstance(m.get("args"), dict):
+            item["args"] = m["args"]
+        if m.get("abbruch"):
+            item["abbruch"] = str(m["abbruch"])
         if role in _NEVER_TRUNCATE:
             item["content"] = content          # unantastbar
         else:

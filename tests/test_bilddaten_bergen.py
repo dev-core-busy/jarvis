@@ -210,8 +210,15 @@ for _n in BAUM.body:
                 _konst_namen.append(_z.id)
 if len(_konst_namen) < 5:
     abbruch(f"nur {len(_konst_namen)} Konstanten gefunden – Fix nicht vorhanden?")
-for _k in _konst_namen:
+for _k in _konst_namen + ["_WEGGELASSEN_ANFANG", "_WEGGELASSEN_ENDE"]:
     exec(_konstante(_k), _ns)
+# `_ergebnis_kappen` trennt einen Weggelassen-Hinweis ab – der Helfer steht auf
+# Modulebene und muss mit in den Namensraum.
+for _n in BAUM.body:
+    if isinstance(_n, ast.FunctionDef) and _n.name == "_weggelassen_abtrennen":
+        exec(_segment(_n), _ns)
+if "_weggelassen_abtrennen" not in _ns:
+    abbruch("_weggelassen_abtrennen nicht in agent.py gefunden")
 
 _körper = "\n\n".join(
     textwrap.indent(_segment(_methode(AGENT_KLS, m)), "    ") for m in _METHODEN

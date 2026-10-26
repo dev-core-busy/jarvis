@@ -80,11 +80,14 @@ teile = []
 for k in baum.body:
     if isinstance(k, ast.Assign) and any(isinstance(t, ast.Name) and t.id in
                                          {"_TOOL_ERGEBNIS_MAX", "_MCP_DATEI_AB", "_MCP_TOOL_PREFIX",
-                                          "_ABLAGE_KOPF"}
+                                          "_ABLAGE_KOPF", "_WEGGELASSEN_ANFANG",
+                                          "_WEGGELASSEN_ENDE"}
                                          for t in k.targets):
         teile.append(k)
     elif isinstance(k, ast.FunctionDef) and k.name in ("_ist_mcp_tool", "_csv_fuer_excel",
-                                                          "_ohne_ablagehinweis"):
+                                                          "_ohne_ablagehinweis",
+                                                          "_weggelassen_abtrennen",
+                                                          "_mcp_weggelassen_hinweis"):
         teile.append(k)
 methoden = []
 for k in ast.walk(baum):
@@ -95,7 +98,7 @@ for k in ast.walk(baum):
                 methoden.append(m)
 namen = sorted({getattr(t, "id", "") for k in teile if isinstance(k, ast.Assign)
                 for t in k.targets} | {k.name for k in teile if isinstance(k, ast.FunctionDef)})
-if len(teile) != 7 or len(methoden) != 2:
+if len(teile) != 11 or len(methoden) != 2:
     print(f"ABBRUCH: Bausteine nicht gefunden (Modul {namen}, Methoden "
           f"{[m.name for m in methoden]})")
     shutil.rmtree(SANDKASTEN, ignore_errors=True)
@@ -286,6 +289,27 @@ check("die Statuszeile '📋 Ergebnis' zeigt den bereinigten Text",
       len(status) == 1 and "result_str" not in ast.unparse(status[0].args[1])
       and isinstance(arg, ast.Name) and arg.id in ast.unparse(status[0].args[1]),
       ast.unparse(status[0].args[1]) if status else "nicht gefunden")
+
+print("\n8. Ein Weggelassen-Hinweis landet NICHT in der Datei (DEV 2026-10-26)")
+# Der Vorfall: '[Hinweis: lab_code …]' stand vor der CSV, die Datei begann mit
+# '[' und wurde als .json abgelegt – json.load im Skript des Modells scheiterte.
+hinw = ns["_mcp_weggelassen_hinweis"]([("lab_code", "an1")])
+check("Positivkontrolle: der Hinweis beginnt mit '[' (das loeste den Fehler aus)",
+      hinw.startswith("["), hinw[:40])
+aus8 = agent._ergebnis_kappen(MCP, hinw + CSV)
+m8 = re.match(r"\[VOLLSTAENDIGES ERGEBNIS GESPEICHERT: (/tmp/\S+) ", aus8)
+modell8 = m8.group(1) if m8 else ""
+datei8 = _host(modell8) if modell8 else None
+check("⚠ Endung .csv – nicht .json", modell8.endswith(".csv"), modell8)
+ist8 = _lies_csv(datei8) if datei8 and datei8.is_file() else []
+check("⚠ die Datei ist ZELLGENAU die Originaltabelle (keine Hinweiszeile darin)",
+      ist8 == ERWARTET, f"{len(ist8)} gegen {len(ERWARTET)} Zeilen")
+check("der Hinweis erreicht das Modell weiterhin", hinw in aus8)
+check("der Ablage-Kopf steht weiter VORN (Anzeige entfernt ihn dort)",
+      aus8.startswith(ns["_ABLAGE_KOPF"]) and ohne(aus8).startswith(hinw), aus8[:80])
+klein = hinw + "a,b\n1,2\n"
+check("ein kleines Ergebnis mit Hinweis bleibt unveraendert",
+      agent._ergebnis_kappen(MCP, klein) == klein)
 
 shutil.rmtree(SANDKASTEN, ignore_errors=True)
 print(f"\nERGEBNIS: {ok} OK, {fail} FAIL")

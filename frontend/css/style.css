@@ -6242,6 +6242,34 @@ body.light .kb-cl-spanne { color: #5b6678; }
     font-weight: 600;
 }
 .sprot-kette ul { margin: 4px 0 0 18px; padding: 0; font-weight: 400; }
+
+/* Fehleranalyse (Einstellungen → Fehleranalyse). Die Boxen tragen KEIN eigenes
+   `display` – sonst ueberstimmte es das `hidden`-Attribut (Register). Knoepfe
+   in Flex-Zeilen brauchen `flex: 0 0 auto; width: auto`, `.btn-*` ist sonst
+   zeilenbreit. Inhalte werden als Text gesetzt (pre-wrap), nie als Markup. */
+.fa-zeile { display: flex; flex-wrap: wrap; gap: 12px; }
+.fa-zeile > .form-group { flex: 1 1 220px; min-width: 0; }
+.fa-zeile select { width: 100%; }
+.fa-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.fa-knoepfe .btn-primary, .fa-knoepfe .btn-secondary,
+.fa-box-kopf .btn-secondary { flex: 0 0 auto; width: auto; }
+.fa-box {
+    margin-top: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    padding: 10px 12px;
+}
+.fa-box-kopf { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.fa-box-kopf h3 { margin: 0; font-size: 0.95rem; color: var(--text-primary); }
+.fa-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: var(--text-primary);
+}
+.fa-mono { font-family: var(--font-mono); font-size: 0.76rem; max-height: 60vh; overflow: auto; margin: 0; }
 .sprot-kette-info { color: var(--text-secondary); font-size: 0.75rem; margin-top: 2px; font-weight: 400; }
 .sprot-art {
     display: inline-block;

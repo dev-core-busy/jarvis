@@ -109,23 +109,28 @@ if [ -f "$CODE_DIR/deploy/security/haertung_installieren.sh" ]; then
         || echo "[Broker] WARNUNG: Haertung nicht installiert (rc=$?)." >&2
 fi
 
-# 0c2. Node auf der Ziel-Linie halten (BSI M6). Liegt die installierte Linie
-# unter ZIEL (deploy/security/node_aktualisieren.sh), stellt eine EIGENE Unit um
-# – im Hintergrund, damit apt den Broker-Start nicht aufhaelt. Umgestellt wird
-# nur ohne Fremd-Entfernungen (sonst Warnung im Journal der Unit);
-# Notschalter NODE_AUTO=aus in /etc/jarvis/broker.conf.
+# 0c2. Node aktuell halten (BSI M6). Ein EIGENER Timer ruft
+# deploy/security/node_aktualisieren.sh --automatisch: unter der Ziel-Linie
+# stellt es um, auf ihr zieht es den neuesten NodeSource-Stand nach – im
+# Hintergrund, damit apt den Broker-Start nicht aufhaelt. Umgestellt wird nur
+# ohne Fremd-Entfernungen (sonst Warnung im Journal der Unit); Notschalter
+# NODE_AUTO=aus in /etc/jarvis/broker.conf.
+# TAEGLICH statt nur beim Start (26.10.2026): bis dahin lief die Unit nur unter
+# der Ziel-Linie, ein Sicherheitsstand innerhalb der Linie blieb liegen (ECHT
+# auf 24.21.0 bei CVE-2026-111497, behoben in 24.22.1). Der Timer ist
+# transient – ein Broker-Neustart legt ihn neu an, deshalb vorher stoppen.
 NODE_SKRIPT="$CODE_DIR/deploy/security/node_aktualisieren.sh"
 if command -v node >/dev/null 2>&1 && [ -f "$NODE_SKRIPT" ]; then
     bash "$NODE_SKRIPT" --pruefen >/dev/null \
         || echo "[Broker] WARNUNG: Node $(node --version 2>/dev/null) bekommt keine Sicherheitsupdates mehr (BSI M6)." >&2
-    if ! bash "$NODE_SKRIPT" --ziel-erreicht; then
-        systemctl reset-failed jarvis-node-aktualisieren.service >/dev/null 2>&1
-        systemd-run --no-block --collect --unit=jarvis-node-aktualisieren \
-            --description="Jarvis: Node auf die Ziel-Linie heben" \
-            /bin/bash "$NODE_SKRIPT" --automatisch >/dev/null 2>&1 \
-            && echo "[Broker] Node $(node --version 2>/dev/null) unter der Ziel-Linie – Umstellung gestartet (journalctl -u jarvis-node-aktualisieren)." \
-            || echo "[Broker] WARNUNG: Node-Umstellung liess sich nicht starten." >&2
-    fi
+    systemctl stop jarvis-node-aktualisieren.timer >/dev/null 2>&1
+    systemctl reset-failed jarvis-node-aktualisieren.service jarvis-node-aktualisieren.timer >/dev/null 2>&1
+    systemd-run --collect --unit=jarvis-node-aktualisieren \
+        --on-active=5min --on-calendar=daily --timer-property=RandomizedDelaySec=30min \
+        --description="Jarvis: Node-Linie halten und Sicherheitsstand nachziehen" \
+        /bin/bash "$NODE_SKRIPT" --automatisch >/dev/null 2>&1 \
+        && echo "[Broker] Node $(node --version 2>/dev/null) – Pruefung in wenigen Minuten, danach taeglich (journalctl -u jarvis-node-aktualisieren)." \
+        || echo "[Broker] WARNUNG: Node-Timer liess sich nicht anlegen." >&2
 fi
 
 # 0d. Verwaiste Shared-Memory-Segmente abraeumen (hart beendetes x11vnc laesst

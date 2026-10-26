@@ -19,6 +19,19 @@
 #   4. node_modules der Bridge neu bauen (native Teile haengen an der
 #      Node-ABI), als Dienstbenutzer; eine laufende Bridge neu starten.
 #
+# INNERHALB DER LINIE (seit 26.10.2026): ``--automatisch`` zieht auf der
+# Ziel-Linie auch den neuesten NodeSource-Stand nach (apt-get --only-upgrade,
+# gleiche Schranke wie beim Linienwechsel). Anlass: CVE-2026-111497 (Brotli,
+# behoben in 24.22.1) – ECHT stand auf 24.21.0, und das Skript meldete
+# "Ziel-Linie erreicht", weil es nur die Hauptversion verglich. Node
+# kennzeichnet Sicherheitsstaende in apt nicht; jeder neuere Stand einer
+# LTS-Linie ist der Traeger ihrer Fixes. unattended-upgrades greift hier nicht
+# (52jarvis-unattended laesst nur Debian-Security zu).
+# Der Broker-Start legt dafuer einen taeglichen Timer an (start_jarvis_root.sh).
+#
+# NACHWEIS NICHT UEBER process.versions.brotli: 24.22.1 meldet weiter 1.2.0,
+# obwohl der Fix drin ist (DEV, 26.10.2026). Massgeblich ist die Node-Version.
+#
 # AUTOMATISCH (seit 06.10.2026, Entscheidung des Betreibers): der Broker-Start
 # ruft ``--automatisch`` als eigene systemd-Unit auf, sobald die installierte
 # Linie unter ZIEL liegt. Umgestellt wird dann nur, wenn der Trockenlauf
@@ -30,7 +43,8 @@
 #   bash deploy/security/node_aktualisieren.sh            # auf ZIEL heben
 #   bash deploy/security/node_aktualisieren.sh --pruefen  # nur Stand melden
 #   bash deploy/security/node_aktualisieren.sh --ziel-erreicht   # Exit 0, wenn >= ZIEL
-#   bash deploy/security/node_aktualisieren.sh --automatisch     # nur ohne Fremd-Entfernungen
+#   bash deploy/security/node_aktualisieren.sh --automatisch     # Linie heben bzw. nachziehen,
+#                                                                # nur ohne Fremd-Entfernungen
 #   bash deploy/security/node_aktualisieren.sh --simulieren
 #       Trockenlauf: Paketquelle nur in einem Wegwerf-Verzeichnis, apt-get -s –
 #       zeigt, was installiert und ENTFERNT wuerde (Debians npm und die
@@ -86,6 +100,89 @@ _fremde_entfernungen() {
     sed -n 's/^  Remv \([^ ]*\) .*/\1/p' "$1" | grep -vE '^(nodejs|nodejs-doc|npm|libnode[0-9a-z-]*)$' || true
 }
 
+# Bridge-Module zur neuen ABI bauen – NIE als root (Code-Review 2026-10-07):
+# "als Eigentuemer von BRIDGE_DIR" hiess root, wenn der Broker-Start vor dem
+# chown (start_jarvis_root.sh, Schritt 6b) lief – dann baute root in einem
+# Baum, den der Dienstbenutzer schreibt (Skripte aus package.json als root).
+_bridge_bauen() {
+    [ -f "$BRIDGE_DIR/package.json" ] || return 0
+    local eigner
+    eigner="$(stat -c %U "$BRIDGE_DIR")"
+    if [ -d "$BRIDGE_DIR/node_modules" ]; then
+        if [ "$eigner" = "root" ] || [ -z "$eigner" ]; then
+            echo "WARNUNG: $BRIDGE_DIR gehoert root – npm rebuild NICHT als root; nach dem chown von Hand als Dienstbenutzer: cd $BRIDGE_DIR && npm rebuild" >&2
+        else
+            runuser -u "$eigner" -- sh -c "cd '$BRIDGE_DIR' && npm rebuild" \
+                && echo "Bridge-Module neu gebaut (als $eigner)." \
+                || echo "WARNUNG: npm rebuild in $BRIDGE_DIR gescheitert – Bridge vor dem Start pruefen." >&2
+        fi
+    fi
+    if systemctl is-active --quiet whatsapp-bridge.service; then
+        systemctl restart whatsapp-bridge.service && echo "whatsapp-bridge.service neu gestartet."
+    fi
+}
+
+# Auf der Ziel-Linie den neuesten NodeSource-Stand nachziehen (Kopf: "INNERHALB
+# DER LINIE"). Dieselbe Schranke wie beim Linienwechsel, nie ueber die Linie
+# hinaus, nur aus der von diesem Skript eingerichteten Quelle. Waechter-Modus:
+# Staende aus JARVIS_NODE_INST/JARVIS_NODE_KAND, Trockenlauf aus JARVIS_NODE_SIM_ECHT.
+_linie_nachziehen() {
+    local inst kand sim f
+    if [ -n "$TEST" ]; then
+        inst="${JARVIS_NODE_INST:-}"
+        kand="${JARVIS_NODE_KAND:-}"
+    else
+        if [ ! -f "$QUELLE" ]; then
+            echo "[Node] nicht aus NodeSource ($QUELLE fehlt) – Stand innerhalb der Linie nicht pruefbar."
+            return 0
+        fi
+        apt-get update -o Dir::Etc::sourcelist="$QUELLE" -o Dir::Etc::sourceparts=- \
+            -o APT::Get::List-Cleanup=0 -o DPkg::Lock::Timeout=300 >/dev/null 2>&1 \
+            || { echo "[Node] WARNUNG: NodeSource-Paketliste nicht ladbar – Stand nicht geprueft." >&2; return 4; }
+        inst="$(dpkg-query -W -f='${Version}' nodejs 2>/dev/null)"
+        # LC_ALL=C: die Ausgabe von apt-cache ist lokalisiert
+        kand="$(LC_ALL=C apt-cache policy nodejs | sed -n 's/^ *Candidate: *//p')"
+    fi
+    if [ -z "$inst" ] || [ -z "$kand" ] || [ "$kand" = "(none)" ]; then
+        echo "[Node] WARNUNG: Stand nicht bestimmbar (installiert '$inst', Kandidat '$kand')." >&2
+        return 4
+    fi
+    if ! dpkg --compare-versions "$kand" gt "$inst"; then
+        echo "[Node] $inst ist der neueste Stand der Linie."
+        return 0
+    fi
+    if [ "${kand%%.*}" != "$(_major)" ]; then
+        echo "[Node] WARNUNG: Kandidat $kand liegt ausserhalb der Linie $(_major) – nicht automatisch." >&2
+        return 4
+    fi
+    sim="$(mktemp)"
+    if [ -n "$TEST" ]; then
+        cat "${JARVIS_NODE_SIM_ECHT:-/dev/null}" > "$sim"
+    elif ! LC_ALL=C apt-get -s install --only-upgrade nodejs > "$sim.roh" 2>&1; then
+        echo "[Node] WARNUNG: Trockenlauf gescheitert – kein Nachziehen:" >&2
+        tail -3 "$sim.roh" >&2; rm -f "$sim" "$sim.roh"; return 4
+    else
+        grep -E '^(Inst|Remv) ' "$sim.roh" | sed 's/^/  /' > "$sim"
+        rm -f "$sim.roh"
+    fi
+    f="$(_fremde_entfernungen "$sim")"
+    rm -f "$sim"
+    if [ -n "$f" ]; then
+        echo "[Node] ABBRUCH: Nachziehen $inst -> $kand wuerde $(echo "$f" | wc -l) weitere Pakete entfernen ($(echo "$f" | head -8 | tr '\n' ' ')…) – nicht automatisch." >&2
+        return 4
+    fi
+    echo "[Node] Nachziehen innerhalb der Linie: $inst -> $kand"
+    if [ -n "$TEST" ]; then
+        echo "[Node] (Test) wuerde jetzt nachziehen"
+    else
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade -o DPkg::Lock::Timeout=300 nodejs \
+            || { echo "[Node] ABBRUCH: apt-get install --only-upgrade nodejs gescheitert." >&2; return 1; }
+        hash -r
+        echo "[Node] nachher: $(node --version 2>/dev/null || echo keins)"
+    fi
+    _bridge_bauen
+}
+
 if [ "${1:-}" = "--automatisch" ]; then
     KONF="${JARVIS_BROKER_CONF:-/etc/jarvis/broker.conf}"
     if [ -f "$KONF" ] && grep -qiE '^[[:space:]]*NODE_AUTO[[:space:]]*=[[:space:]]*"?aus' "$KONF"; then
@@ -95,7 +192,8 @@ if [ "${1:-}" = "--automatisch" ]; then
     command -v node >/dev/null 2>&1 || { echo "[Node] nicht installiert – nichts zu tun."; exit 0; }
     if [ "$(_major)" -ge "$ZIEL" ] 2>/dev/null; then
         echo "[Node] $(node --version) – Ziel-Linie $ZIEL erreicht."
-        exit 0
+        _linie_nachziehen
+        exit $?
     fi
     sim="$(mktemp)"
     if [ -n "$TEST" ]; then
@@ -132,28 +230,6 @@ _schranke_auto() {
         return 4
     fi
     return 0
-}
-
-# Bridge-Module zur neuen ABI bauen – NIE als root (Code-Review 2026-10-07):
-# "als Eigentuemer von BRIDGE_DIR" hiess root, wenn der Broker-Start vor dem
-# chown (start_jarvis_root.sh, Schritt 6b) lief – dann baute root in einem
-# Baum, den der Dienstbenutzer schreibt (Skripte aus package.json als root).
-_bridge_bauen() {
-    [ -f "$BRIDGE_DIR/package.json" ] || return 0
-    local eigner
-    eigner="$(stat -c %U "$BRIDGE_DIR")"
-    if [ -d "$BRIDGE_DIR/node_modules" ]; then
-        if [ "$eigner" = "root" ] || [ -z "$eigner" ]; then
-            echo "WARNUNG: $BRIDGE_DIR gehoert root – npm rebuild NICHT als root; nach dem chown von Hand als Dienstbenutzer: cd $BRIDGE_DIR && npm rebuild" >&2
-        else
-            runuser -u "$eigner" -- sh -c "cd '$BRIDGE_DIR' && npm rebuild" \
-                && echo "Bridge-Module neu gebaut (als $eigner)." \
-                || echo "WARNUNG: npm rebuild in $BRIDGE_DIR gescheitert – Bridge vor dem Start pruefen." >&2
-        fi
-    fi
-    if systemctl is-active --quiet whatsapp-bridge.service; then
-        systemctl restart whatsapp-bridge.service && echo "whatsapp-bridge.service neu gestartet."
-    fi
 }
 
 if [ -n "$TEST" ]; then

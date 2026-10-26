@@ -160,7 +160,12 @@ Wer über Tailscale administriert, nimmt `100.64.0.0/10` mit auf.
   auf Node 24 LTS (NodeSource, Schlüssel-Fingerabdruck festgeschrieben, kein
   `curl | bash`) und baut die Bridge-Module neu. Vorher ansehen, was apt entfernen
   würde: `node_aktualisieren.sh --simulieren` (ändert nichts). Der Broker-Start meldet
-  eine alte Node-Linie im Journal.
+  eine alte Node-Linie im Journal und legt den Timer `jarvis-node-aktualisieren` an
+  (wenige Minuten nach dem Start, danach täglich): unter der Ziel-Linie stellt er um,
+  auf ihr zieht er den neuesten NodeSource-Stand nach – das ist der Weg, auf dem
+  Node-Sicherheitsfixes ankommen, denn die automatischen Sicherheitsupdates lassen nur
+  Debian-Security zu. Beides nur, wenn apt außer Node selbst nichts entfernen würde;
+  abschalten mit `NODE_AUTO=aus` in `/etc/jarvis/broker.conf`.
 
 ## Geheimnisse (BSI M5)
 

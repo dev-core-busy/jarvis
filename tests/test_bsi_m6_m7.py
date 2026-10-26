@@ -402,25 +402,36 @@ shutil.rmtree(fake, ignore_errors=True)
 sjr = ohne_kommentare((ROOT / "start_jarvis_root.sh").read_text())
 check("Broker-Start meldet eine alte Node-Linie (--pruefen)",
       bool(re.search(r'"\$NODE_SKRIPT"\s+--pruefen', sjr)))
-check("Broker-Start stellt unter der Ziel-Linie automatisch um (eigene Unit, --automatisch)",
-      'if ! bash "$NODE_SKRIPT" --ziel-erreicht; then' in sjr
-      and bool(re.search(r'systemd-run --no-block[^\n]*\\\n[^\n]*\\\n\s*/bin/bash "\$NODE_SKRIPT" --automatisch', sjr)))
+# Seit 2026-10-26 (CVE-2026-111497): ein TAEGLICHER Timer, der auch auf der
+# Ziel-Linie laeuft – vorher startete die Unit nur unter ZIEL, und ein
+# Sicherheitsstand innerhalb der Linie blieb liegen (ECHT 24.21.0).
+_sjr_timer = re.search(r'systemd-run --collect --unit=jarvis-node-aktualisieren \\\n'
+                       r'([^\n]*)\\\n[^\n]*\\\n\s*/bin/bash "\$NODE_SKRIPT" --automatisch', sjr)
+check("Broker-Start legt einen Timer fuer --automatisch an (kurz nach dem Start + taeglich)",
+      _sjr_timer is not None and "--on-calendar=daily" in _sjr_timer.group(1)
+      and "--on-active=" in _sjr_timer.group(1), _sjr_timer.group(0) if _sjr_timer else None)
+check("…nicht nur unter der Ziel-Linie (keine --ziel-erreicht-Schranke davor)",
+      "--ziel-erreicht" not in sjr)
+check("…stoppt einen vorhandenen Timer vorher (Broker-Neustart legt ihn neu an)",
+      bool(re.search(r'systemctl stop jarvis-node-aktualisieren\.timer[^\n]*\n(?:[^\n]*\n)?\s*systemd-run --collect', sjr)))
 
 # --automatisch: Entscheidung wirklich ausfuehren (Attrappe node, Trockenlauf aus Datei)
 fake = Path(tempfile.mkdtemp(prefix="jv_node_auto_"))
 
 
-def auto(major: int, sim: str, konf: str = "") -> subprocess.CompletedProcess:
+def auto(major: int, sim: str, konf: str = "", extra: dict | None = None) -> subprocess.CompletedProcess:
     (fake / "node").write_text(
         "#!/bin/sh\n"
         f'case "$1" in --version) echo v{major}.0.0;; -p) echo {major};; esac\n')
     (fake / "node").chmod(0o755)
     (fake / "sim.txt").write_text(sim)
     (fake / "broker.conf").write_text(konf)
+    env = dict(os.environ, PATH=f"{fake}:{os.environ.get('PATH', '')}",
+               JARVIS_NODE_TEST="1", JARVIS_NODE_SIM=str(fake / "sim.txt"),
+               JARVIS_BROKER_CONF=str(fake / "broker.conf"), JARVIS_DIR=str(fake / "kein-jv"))
+    env.update(extra or {})
     return subprocess.run(["bash", str(NODE_SKRIPT), "--automatisch"], capture_output=True, text=True,
-                          timeout=60, env=dict(os.environ, PATH=f"{fake}:{os.environ.get('PATH', '')}",
-                                               JARVIS_NODE_TEST="1", JARVIS_NODE_SIM=str(fake / "sim.txt"),
-                                               JARVIS_BROKER_CONF=str(fake / "broker.conf")))
+                          timeout=60, env=env)
 
 
 SAUBER = "Kandidat: 24.21.0-1nodesource1\n  Inst nodejs [20.20.2] (24.21.0)\n  Remv npm [9.2.0]\n  Remv libnode115 [20.19.2]\n"
@@ -431,8 +442,11 @@ check("--automatisch: nur Node-eigene Pakete betroffen -> stellt um",
 r = auto(20, FREMD)
 check("--automatisch: fremde Pakete wuerden entfernt -> NICHT umstellen, Warnung nennt sie",
       r.returncode == 4 and "webpack" in r.stderr and "wuerde jetzt" not in r.stdout, (r.returncode, r.stderr))
-r = auto(ziel, SAUBER)
-check("--automatisch: Ziel-Linie erreicht -> nichts", r.returncode == 0 and "erreicht" in r.stdout, r.stdout)
+_GLEICH = {"JARVIS_NODE_INST": f"{ziel}.22.1-1nodesource1", "JARVIS_NODE_KAND": f"{ziel}.22.1-1nodesource1"}
+r = auto(ziel, SAUBER, extra=_GLEICH)
+check("--automatisch: Ziel-Linie erreicht und neuester Stand -> nichts",
+      r.returncode == 0 and "erreicht" in r.stdout and "neueste Stand" in r.stdout
+      and "wuerde jetzt" not in r.stdout, (r.returncode, r.stdout, r.stderr))
 r = auto(20, SAUBER, "NODE_AUTO=aus\n")
 check("--automatisch: NODE_AUTO=aus -> nichts", r.returncode == 0 and "NODE_AUTO=aus" in r.stdout
       and "wuerde jetzt" not in r.stdout, r.stdout)
@@ -496,6 +510,65 @@ r = auto_echt(20, SAUBER, SAUBER, {"FAKE_EIGNER": "jarvis"})
 check("Positivkontrolle: Bridge gehoert jarvis -> npm rebuild als jarvis",
       "-u jarvis" in _log.read_text() and "npm rebuild" in _log.read_text(),
       (_log.read_text(), r.stderr[-200:]))
+
+# ── Nachziehen innerhalb der Ziel-Linie (2026-10-26, CVE-2026-111497) ──
+# Trockenlauf eines Patch-Updates: nur nodejs selbst
+NACH_SAUBER = f"  Inst nodejs [{ziel}.21.0-1nodesource1] ({ziel}.22.1-1nodesource1)\n"
+
+
+def nach(inst, kand, sim_echt=NACH_SAUBER, konf=""):
+    # eigene Konfigurationsdatei: auto_echt schreibt broker.conf leer
+    _log.write_text("")
+    (fake / "broker_nach.conf").write_text(konf)
+    return auto_echt(ziel, SAUBER, sim_echt, {"FAKE_EIGNER": "jarvis", "JARVIS_NODE_INST": inst,
+                                              "JARVIS_NODE_KAND": kand,
+                                              "JARVIS_BROKER_CONF": str(fake / "broker_nach.conf")})
+
+
+r = nach(f"{ziel}.21.0-1nodesource1", f"{ziel}.22.1-1nodesource1")
+check("Positivkontrolle: neuerer Stand in der Linie -> zieht nach",
+      r.returncode == 0 and "wuerde jetzt nachziehen" in r.stdout
+      and f"{ziel}.21.0-1nodesource1 -> {ziel}.22.1-1nodesource1" in r.stdout, (r.returncode, r.stdout, r.stderr))
+check("…und startet die Bridge-Module danach neu (als Dienstbenutzer)",
+      "-u jarvis" in _log.read_text() and "npm rebuild" in _log.read_text(), _log.read_text())
+r = nach(f"{ziel}.9.0-1nodesource1", f"{ziel}.10.0-1nodesource1")
+check("Versionsvergleich nach dpkg, nicht als Text (.9 < .10)",
+      r.returncode == 0 and "wuerde jetzt nachziehen" in r.stdout, (r.returncode, r.stdout, r.stderr))
+r = nach(f"{ziel}.22.1-1nodesource1", f"{ziel}.21.0-1nodesource1")
+check("aelterer Kandidat -> nichts", r.returncode == 0 and "wuerde jetzt" not in r.stdout
+      and _log.read_text() == "", (r.returncode, r.stdout))
+r = nach(f"{ziel}.22.1-1nodesource1", f"{ziel + 2}.1.0-1nodesource1")
+check("⚠ Kandidat einer ANDEREN Linie -> kein Nachziehen (Linienwechsel nur ueber ZIEL)",
+      r.returncode == 4 and "wuerde jetzt" not in r.stdout and "ausserhalb der Linie" in r.stderr,
+      (r.returncode, r.stdout, r.stderr))
+r = nach(f"{ziel}.21.0-1nodesource1", f"{ziel}.22.1-1nodesource1", NACH_SAUBER + "  Remv webpack [5.0]\n")
+check("⚠ Nachziehen wuerde fremde Pakete entfernen -> Abbruch, Warnung nennt sie",
+      r.returncode == 4 and "webpack" in r.stderr and "wuerde jetzt" not in r.stdout,
+      (r.returncode, r.stdout, r.stderr))
+# Leerer Kandidat (apt-cache ohne Candidate-Zeile): dpkg haelt "" fuer NICHT
+# groesser – ohne eigene Schranke stuende "neuester Stand" mit Exit 0 im Journal.
+# ("(none)" eignet sich als Probe nicht: dpkg haelt es fuer GROESSER, und die
+# Linien-Schranke faengt es zusaetzlich – zwei Wege zum selben Ergebnis.)
+r = nach(f"{ziel}.21.0-1nodesource1", "")
+check("Stand nicht bestimmbar -> Exit 4 statt still 'aktuell'",
+      r.returncode == 4 and "wuerde jetzt" not in r.stdout, (r.returncode, r.stdout, r.stderr))
+r = nach(f"{ziel}.21.0-1nodesource1", f"{ziel}.22.1-1nodesource1", konf="NODE_AUTO=aus\n")
+check("NODE_AUTO=aus gilt auch fuers Nachziehen",
+      r.returncode == 0 and "wuerde jetzt" not in r.stdout, (r.returncode, r.stdout))
+# Echter Weg (root, apt) als REGEL: im Rumpf von _linie_nachziehen steht die
+# Fremd-Schranke VOR dem einzigen Installationsaufruf, und der ist --only-upgrade
+# (ein blosses install koennte eine andere Quelle/Linie ziehen).
+_rumpf_m = re.search(r"(?ms)^_linie_nachziehen\(\) \{\n(.*?)^\}\n", ohne_kommentare(ns))
+_rumpf = _rumpf_m.group(1) if _rumpf_m else ""
+_p_fremd = _rumpf.find('if [ -n "$f" ]; then')
+_p_upg = _rumpf.find("apt-get install -y --only-upgrade")
+# gezaehlt wird der AUFRUF mit -y – die Fehlermeldung nennt den Befehl ebenfalls
+check("echter Weg: Fremd-Schranke vor dem einzigen apt-get install, und der ist --only-upgrade",
+      bool(_rumpf) and 0 <= _p_fremd < _p_upg and _rumpf.count("apt-get install -y") == 1
+      and _rumpf.find("_fremde_entfernungen", 0, _p_fremd) >= 0, (_p_fremd, _p_upg))
+check("--automatisch ruft auf der Ziel-Linie _linie_nachziehen",
+      bool(re.search(r'Ziel-Linie \$ZIEL erreicht\."\n\s*_linie_nachziehen\n\s*exit \$\?', ohne_kommentare(ns))))
+
 # Der echte Installationsweg (root, apt) laeuft hier nicht – als REGEL am
 # Skript: die Schranke steht VOR dem einzigen `apt-get install -y nodejs`, und
 # ihr Ergebnis bricht ab (Code-Review 2026-10-07).

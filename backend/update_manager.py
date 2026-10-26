@@ -11,6 +11,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
+# Reiht Fetch der Pruefung und Pull des Updates hintereinander (Vorfall
+# 2026-10-26, siehe check_update). Wirkt nur innerhalb des Dienstes; gegen
+# fremde Prozesse schuetzt ``--no-write-fetch-head`` in der Pruefung.
+_GIT_SPERRE = threading.Lock()
+
 # ─── Eigentuemer-Diagnose ────────────────────────────────────────────────────
 #
 # Der Fall, der das gebaut hat (ECHT, 2026-07-31): `/opt/jarvis/tests` gehoerte
@@ -317,7 +322,19 @@ def check_update() -> dict:
     branch = branch or "master"
 
     # Remote abrufen (Silent Fetch)
-    rc_fetch, _, fetch_err = _git("fetch", "origin", branch, timeout=15)
+    #
+    # ``--no-write-fetch-head``: die Pruefung braucht nur origin/<branch>.
+    # ⚠ VORFALL 2026-10-26 (ECHT): der Update-Knopf meldete "Kann nicht zu
+    # mehreren Branches vorspulen", der zweite Klick lief durch. git fetch
+    # KUERZT FETCH_HEAD zu Beginn und HAENGT am Ende an - laufen zwei Fetches
+    # gleichzeitig (Pruefung beim Oeffnen der Pill + Pull des Knopfs), stehen
+    # danach zwei Merge-Zeilen darin, und ``pull --ff-only`` bricht ab. Im
+    # Sandkasten nachgestellt: 199 von 200 Laeufen. Ohne FETCH_HEAD-Schreiben
+    # kann die Pruefung den Pull nicht mehr stoeren - auch nicht einen
+    # ``git pull`` aus einem anderen Prozess (Auto-Update per Agent-Shell).
+    with _GIT_SPERRE:
+        rc_fetch, _, fetch_err = _git("fetch", "--no-write-fetch-head", "origin", branch,
+                                      timeout=15)
     if rc_fetch != 0:
         # Auch der Fetch kann an Rechten scheitern: er schreibt .git/FETCH_HEAD.
         return {
@@ -392,7 +409,15 @@ _ERZEUGTE_DATEIEN = (
 
 
 def apply_update() -> dict:
-    """Führt git pull aus. Lokal geänderte Dateien werden per stash/pop bewahrt."""
+    """Führt git pull aus. Lokal geänderte Dateien werden per stash/pop bewahrt.
+
+    Unter ``_GIT_SPERRE``: zwei Updates (zwei Reiter) oder Update + Pruefung
+    duerfen nicht gleichzeitig holen - siehe Vorfall in check_update()."""
+    with _GIT_SPERRE:
+        return _apply_update_gesperrt()
+
+
+def _apply_update_gesperrt() -> dict:
     if image_betrieb():
         return {"ok": False, "image": True, "error": IMAGE_HINWEIS}
     # Aktuellen Branch ermitteln (für gezieltes Pull ohne Upstream-Tracking)

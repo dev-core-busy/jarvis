@@ -183,17 +183,56 @@ jobs:
   go:
     name: Go – govulncheck (Windows-Client)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 40 statt 20 Minuten nur fuer den ersten Lauf ohne Paket-Zwischenspeicher
+    # (siehe unten); mit gefuelltem Speicher braucht der Job wenige Minuten.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: windows-app-go
     env:
       GOVULNCHECK_VERSION: 'v1.9.0'
       CYCLONEDX_GOMOD_VERSION: 'v1.12.0'
+      APT_ABLAGE: ${{ github.workspace }}/.apt-mingw
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6 (Commit gepinnt, Code-Review 2026-10-18)
+      # ⚠ PAKET-ZWISCHENSPEICHER (2026-10-26): der Ubuntu-Spiegel des Runners
+      # lieferte zweimal hintereinander nur ~40 KB/s – die rund 100 MB mingw
+      # liefen in den 20-Minuten-Deckel, und der ganze Sicherheitslauf stand auf
+      # "cancelled", obwohl nichts am Code war. Die .deb-Dateien liegen jetzt in
+      # APT_ABLAGE (apt Dir::Cache::Archives) und werden zwischengespeichert.
+      # Schluessel: Runner-Abbild + Paketliste – ein neues Abbild bringt evtl.
+      # neue Paketfassungen, dann wird einmal frisch geladen.
+      # ImageOS/ImageVersion stehen nur in der Prozessumgebung des Runners,
+      # NICHT im env-Kontext der Workflow-Ausdruecke – daher dieser Schritt.
+      - name: Schluessel des Zwischenspeichers (Runner-Abbild)
+        id: abbild
+        run: echo "kennung=${ImageOS:-unbekannt}-${ImageVersion:-unbekannt}" >> "$GITHUB_OUTPUT"
+      - name: mingw-Pakete aus dem Zwischenspeicher
+        id: aptcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)
+        with:
+          path: .apt-mingw/*.deb
+          key: apt-mingw-${{ steps.abbild.outputs.kennung }}-gcc-g++-x86-64
+          restore-keys: |
+            apt-mingw-
       - name: mingw-w64 (cgo-Cross-Bau fuer Windows)
-        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+        run: |
+          # apt laedt als _apt herunter und braucht dafuer ein schreibbares partial/
+          mkdir -p "$APT_ABLAGE/partial"
+          sudo chown -R _apt:root "$APT_ABLAGE/partial"
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            -o Dir::Cache::Archives="$APT_ABLAGE" \
+            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+          ls "$APT_ABLAGE"/*.deb | wc -l
+      # Sofort sichern, nicht erst am Jobende: scheitert govulncheck danach,
+      # muss der naechste Lauf die 100 MB trotzdem nicht erneut laden.
+      - name: mingw-Pakete zwischenspeichern
+        if: steps.aptcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)
+        with:
+          path: .apt-mingw/*.deb
+          key: apt-mingw-${{ steps.abbild.outputs.kennung }}-gcc-g++-x86-64
       - name: govulncheck (Toolchain aus go.mod)
         run: |
           tc=$(awk '$1 == "toolchain" {print $2}' go.mod)

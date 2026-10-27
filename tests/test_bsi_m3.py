@@ -17,6 +17,9 @@ Gemessen an der WIRKUNG:
       ausserhalb einer Anfrage unveraendert; Kennwortwechsel erbt das Merkmal;
       ``totp_disable`` verweigert Admins unter der Pflicht; Add-in-SSO stellt
       kein Token "mit 2FA" aus.
+  [D] AI-Maus (Betreiberentscheid 2026-10-27): keine 2FA-Abfrage fuer IRGENDEIN
+      Konto, dafuer gilt die Sitzung nur auf /api/ai-mouse/* und /api/generated/*
+      (ohne Admin-Seiten) und nie als Admin.
 
 ``backend.config`` nur als Stub. Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
 """
@@ -275,7 +278,7 @@ EINST.update({"ad_admins": "andreas", "ad_server": "dc.firma.local", "ad_domain"
 # BSI H4: Token-Antworten laufen ueber _sitzung_antwort – mit dem ECHTEN Modul
 NS["_sitzung_cookie"] = __import__("backend.sitzung_cookie", fromlist=["x"])
 exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "_admin_2fa_pflicht", "_sitzung_ohne_admin",
-                 "_ist_app_anmeldung", "_user_is_admin",
+                 "_ist_app_anmeldung", "_ist_ai_maus_anmeldung", "_user_is_admin",
                  "_is_admin_user", "_admin_verweigert_text", "require_local_auth",
                  "_check_rate_limit", "_record_login_attempt", "_konto_sperre_antwort",
                  "_totp_vormerken", "login", "_login_ablauf", "_anmeldung_protokollieren",
@@ -549,6 +552,94 @@ gen_aufrufe = [k for k in ast.walk(sso) if isinstance(k, ast.Call)
                and isinstance(k.func, ast.Name) and k.func.id == "generate_token"]
 check("addin_sso stellt genau ein Token aus", len(gen_aufrufe) == 1)
 check("…ohne mit_2fa", all(not any(kw.arg == "mit_2fa" for kw in k.keywords) for k in gen_aufrufe))
+
+# ── [D] AI-Maus: ohne 2FA, nur eigene Schnittstellen ────────────────────────
+print("\n[D] AI-Maus-Anmeldung")
+_neu()
+# [C] hat bei totp_disable die Sitzungs-Epoche von bert gesetzt (Widerruf aller
+# Tokens) – fuer die Tokens unten mit Zeitstempel davor waere sonst jedes ungueltig
+NS["_revoked_logins"].clear()
+STATE["bert"] = {"totp_enabled": True, "totp_secret": "BS"}
+STATE["andreas"] = {"totp_enabled": True, "totp_secret": "AS"}
+r = anmelden("bert")
+if r.inhalt.get("requires_totp") is not True:
+    abbruch("Positivkontrolle: Nicht-Admin mit 2FA im Browser wird nicht nach dem Code gefragt")
+for wer in ("bert", "andreas"):
+    r = anmelden(wer, client="ai-mouse")
+    check("AI-Maus: %s mit 2FA bekommt ein Token ohne Code" % wer,
+          r.status_code == 200 and bool(r.inhalt.get("token")) and "requires_totp" not in r.inhalt)
+    check("…Sitzung 'nur AI-Maus' und 'ohne Admin', nicht 'mit 2FA'",
+          ST.nur_ai_maus(_sig(r)) and ST.ohne_admin(_sig(r)) and not ST.mit_2fa(_sig(r)))
+    check("…Antwort meldet is_admin false", r.inhalt.get("is_admin") is False)
+r = anmelden("bert", client="AI-Mouse ")
+check("Kennung unabhaengig von Gross/Klein und Leerraum", ST.nur_ai_maus(_sig(r)))
+r = anmelden("bert", client="ai-mouse", pw="falsch")
+check("AI-Maus: falsches Kennwort bleibt 401 ohne Token",
+      r.status_code == 401 and not r.inhalt.get("token"))
+STATE.pop("andreas")
+r = anmelden("andreas", client="ai-mouse")
+check("AI-Maus: Admin OHNE 2FA unter der Pflicht – keine Einrichtung, Token",
+      bool(r.inhalt.get("token")) and "requires_totp_setup" not in r.inhalt)
+r = anmelden("bert", client="android")
+check("andere App: Nicht-Admin mit 2FA braucht weiter den Code",
+      r.inhalt.get("requires_totp") is True and not r.inhalt.get("token"))
+r = anmelden("carla")
+check("Browser-Anmeldung traegt KEIN Merkmal 'nur AI-Maus'",
+      bool(r.inhalt.get("token")) and not ST.nur_ai_maus(_sig(r)))
+
+_jetzt = int(time.time())
+maus = NS["generate_token"]("bert", ts=_jetzt - 60, ohne_admin=True, nur_ai_maus=True)
+normal = NS["generate_token"]("bert", ts=_jetzt - 70)
+maus_admin = NS["generate_token"]("andreas", ts=_jetzt - 80, ohne_admin=True, nur_ai_maus=True)
+
+
+def auf_pfad(tok, pfad, fn=None):
+    """verify_token (und danach ``fn``) mit gesetztem Anfrage-Pfad, wie die Middleware."""
+    def lauf():
+        if pfad is not None:
+            ST.ANFRAGE_PFAD.set(pfad)
+        u = verify(tok)
+        return (u, fn()) if fn else u
+    return in_kontext(lauf)
+
+
+if auf_pfad(normal, "/api/chat") != "bert":
+    abbruch("Positivkontrolle: normales Token gilt auf /api/chat nicht")
+for pfad in ("/api/ai-mouse/analyze", "/api/ai-mouse/health", "/api/ai-mouse/paket",
+             "/api/ai-mouse/fragen", "/api/generated/abc.png"):
+    check("AI-Maus-Sitzung gilt auf %s" % pfad, auf_pfad(maus, pfad) == "bert")
+for pfad in ("/api/chat", "/api/me", "/api/auth/totp/setup", "/api/change-password",
+             "/api/ai-mouse/admin/areas", "/api/ai-mousex/analyze", "/ws", ""):
+    check("AI-Maus-Sitzung gilt NICHT auf %r" % pfad, auf_pfad(maus, pfad) is None)
+check("AI-Maus-Sitzung ohne bekannten Pfad: ungueltig (fail-closed)", auf_pfad(maus, None) is None)
+check("normales Token ohne bekannten Pfad: unveraendert gueltig", auf_pfad(normal, None) == "bert")
+check("AI-Maus-Sitzung eines Admins: auf ihrem Pfad kein Admin",
+      auf_pfad(maus_admin, "/api/ai-mouse/analyze", lambda: is_admin("andreas"))
+      == ("andreas", False))
+ST._zuruecksetzen_fuer_test()
+check("Merkmal 'nur AI-Maus' ueberlebt einen Neustart", ST.nur_ai_maus(maus.split(":", 2)[2])
+      and auf_pfad(maus, "/api/chat") is None)
+ST.widerrufe(maus.split(":", 2)[2], _jetzt - 60)
+check("abgemeldete AI-Maus-Sitzung gilt auch auf ihrem Pfad nicht mehr",
+      auf_pfad(maus, "/api/ai-mouse/analyze") is None)
+
+# Client: die AI-Maus muss sich ausweisen, sonst greift nichts davon
+CS = (ROOT / "ai-mouse" / "src" / "AiMouse" / "Vision" / "JarvisClient.cs").read_text(encoding="utf-8")
+check("JarvisClient.cs schickt client=ai-mouse bei der Anmeldung",
+      '["client"] = "ai-mouse"' in CS)
+
+# Middleware: muss AEUSSERSTE Schicht sein (zuletzt registriert), sonst sieht
+# eine aeussere Schicht, die verify_token ruft, keinen Pfad
+_reg = [n for n in BAUM.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
+        and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "add_middleware"]
+_dek = [n for n in BAUM.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                and d.func.attr == "middleware" for d in n.decorator_list)]
+_letzte = max([n.lineno for n in _reg] + [n.lineno for n in _dek], default=0)
+_pfad_mw = [n for n in _reg if n.value.args and isinstance(n.value.args[0], ast.Name)
+            and n.value.args[0].id == "_AnfragePfadMiddleware"]
+check("_AnfragePfadMiddleware ist registriert und als letzte (aeusserste) Schicht",
+      len(_pfad_mw) == 1 and _pfad_mw[0].lineno == _letzte)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\n" + "=" * 60)

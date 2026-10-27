@@ -35,6 +35,14 @@ Anmeldungen ueber die Android-/Windows-App: die Apps koennen keinen zweiten
 Faktor, ein Admin-Konto bekommt dort deshalb eine Sitzung OHNE Admin-Rechte,
 unabhaengig von der 2FA-Pflicht.
 
+**Merkmal "nur AI-Maus"** (Entscheidung des Betreibers 2026-10-27) – die
+AI-Maus fragt fuer KEIN Konto nach dem zweiten Faktor. Weil sich die Kennung
+``client: ai-mouse`` faelschen laesst, gilt eine solche Sitzung nur fuer die
+Schnittstellen der AI-Maus (``pfad_erlaubt``); sonst hebelte das Kennwort
+allein die 2FA jedes Benutzers fuer die ganze Oberflaeche aus. Den Pfad der
+laufenden Anfrage setzt eine ASGI-Middleware in ``main`` (``ANFRAGE_PFAD``);
+ohne gesetzten Pfad (WebSocket vor dem Setzen, Hintergrund) gilt sie nicht.
+
 GESPEICHERT WIRD NIE DAS TOKEN, nur ``sha256(sig)`` gekuerzt – die Datei
 ``data/auth_sitzungen.json`` gibt damit keine Vollmacht her, auch wenn sie
 jemand liest.
@@ -57,6 +65,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import contextvars
 import threading
 import time
 from pathlib import Path
@@ -78,6 +87,16 @@ _zuletzt: dict[str, float] = {}      # Schluessel -> zuletzt gesehen (epoch)
 _widerrufen: dict[str, int] = {}     # Schluessel -> Ausstellungszeit (zum Aufraeumen)
 _mit_2fa: dict[str, int] = {}        # Schluessel -> Ausstellungszeit (zum Aufraeumen)
 _ohne_admin: dict[str, int] = {}     # Schluessel -> Ausstellungszeit (zum Aufraeumen)
+_nur_ai_maus: dict[str, int] = {}    # Schluessel -> Ausstellungszeit (zum Aufraeumen)
+
+# Pfad der laufenden Anfrage (``scope["path"]``), gesetzt von der Middleware in
+# ``main``. None = unbekannt -> eine AI-Maus-Sitzung gilt dann nicht.
+ANFRAGE_PFAD: contextvars.ContextVar = contextvars.ContextVar("anfrage_pfad", default=None)
+# Was eine AI-Maus-Sitzung erreichen darf: genau das, was der Client aufruft
+# (ai-mouse/src/AiMouse/Vision/JarvisClient.cs). Die Admin-Seiten nicht – die
+# waeren wegen "ohne Admin" ohnehin zu, aber eine Regel genuegt hier nicht.
+AI_MAUS_PFADE = ("/api/ai-mouse/", "/api/generated/")
+AI_MAUS_GESPERRT = ("/api/ai-mouse/admin/",)
 # Tokens, die VOR diesem Zeitpunkt ausgestellt wurden, gelten nicht (0 = aus).
 # Gesetzt, wenn der Speicherstand unlesbar war – siehe _laden_unlocked.
 _alle_vor = 0
@@ -164,10 +183,12 @@ def _laden_unlocked() -> None:
                 _mit_2fa[str(k)] = int(v)
             for k, v in (d.get("ohne_admin") or {}).items():
                 _ohne_admin[str(k)] = int(v)
+            for k, v in (d.get("nur_ai_maus") or {}).items():
+                _nur_ai_maus[str(k)] = int(v)
     except Exception as e:  # noqa: BLE001 – kaputte Datei darf den Start nicht kippen
         print(f"[Sitzung] Speicherstand nicht lesbar ({e}) – alle vorher "
               f"ausgestellten Tokens gelten als widerrufen", flush=True)
-        for d_ in (_zuletzt, _widerrufen, _mit_2fa, _ohne_admin):
+        for d_ in (_zuletzt, _widerrufen, _mit_2fa, _ohne_admin, _nur_ai_maus):
             d_.clear()
         _alle_vor = int(time.time())
         try:
@@ -186,7 +207,7 @@ def _aufraeumen_unlocked(jetzt: float, max_s: int, idle_s: int) -> None:
     global _alle_vor
     for k in [k for k, ts in _widerrufen.items() if jetzt - ts > max_s + ZUKUNFT_TOLERANZ]:
         _widerrufen.pop(k, None)
-    for d in (_mit_2fa, _ohne_admin):
+    for d in (_mit_2fa, _ohne_admin, _nur_ai_maus):
         for k in [k for k, ts in d.items() if jetzt - ts > max_s + ZUKUNFT_TOLERANZ]:
             d.pop(k, None)
     for k in [k for k, t in _zuletzt.items() if jetzt - t > idle_s]:
@@ -202,6 +223,7 @@ def _schreiben_unlocked() -> None:
         tmp = STORE_PATH.with_suffix(".tmp")
         tmp.write_text(json.dumps({"zuletzt": _zuletzt, "widerrufen": _widerrufen,
                                    "mit_2fa": _mit_2fa, "ohne_admin": _ohne_admin,
+                                   "nur_ai_maus": _nur_ai_maus,
                                    "alle_vor": _alle_vor}),
                        encoding="utf-8")
         try:
@@ -272,11 +294,13 @@ def sitzung_besteht(kennung: str, ts: int, jetzt: float | None = None) -> bool:
         return str(kennung) not in _widerrufen
 
 
-def neu(sig: str, ts: int, mit_2fa: bool = False, ohne_admin: bool = False) -> None:
+def neu(sig: str, ts: int, mit_2fa: bool = False, ohne_admin: bool = False,
+        nur_ai_maus: bool = False) -> None:
     """Frisch ausgestelltes Token: zuletzt gesehen = Ausstellung. Nur der
     Vollstaendigkeit halber (unbekannt heisst ohnehin Ausstellungszeit) –
     aber so steht es sofort in der Datei, falls der Dienst gleich neu startet.
-    ``mit_2fa``/``ohne_admin`` siehe Modulkopf; dann sofort geschrieben."""
+    ``mit_2fa``/``ohne_admin``/``nur_ai_maus`` siehe Modulkopf; dann sofort
+    geschrieben."""
     global _dirty
     with _lock:
         _laden_unlocked()
@@ -286,7 +310,9 @@ def neu(sig: str, ts: int, mit_2fa: bool = False, ohne_admin: bool = False) -> N
             _mit_2fa[schluessel(sig)] = int(ts)
         if ohne_admin:
             _ohne_admin[schluessel(sig)] = int(ts)
-        if mit_2fa or ohne_admin:
+        if nur_ai_maus:
+            _nur_ai_maus[schluessel(sig)] = int(ts)
+        if mit_2fa or ohne_admin or nur_ai_maus:
             _schreiben_unlocked()
 
 
@@ -304,6 +330,25 @@ def ohne_admin(sig: str) -> bool:
     with _lock:
         _laden_unlocked()
         return schluessel(sig) in _ohne_admin
+
+
+def nur_ai_maus(sig: str) -> bool:
+    """Wurde diese Sitzung von der AI-Maus ohne zweiten Faktor ausgestellt?"""
+    with _lock:
+        _laden_unlocked()
+        return schluessel(sig) in _nur_ai_maus
+
+
+def pfad_erlaubt(sig: str) -> bool:
+    """Darf das Token fuer die laufende Anfrage gelten? Nur eine AI-Maus-Sitzung
+    ist beschraenkt – auf ``AI_MAUS_PFADE`` ohne ``AI_MAUS_GESPERRT``; ein
+    unbekannter Pfad heisst dann NEIN (fail-closed)."""
+    if not nur_ai_maus(sig):
+        return True
+    pfad = ANFRAGE_PFAD.get()
+    if not isinstance(pfad, str):
+        return False
+    return pfad.startswith(AI_MAUS_PFADE) and not pfad.startswith(AI_MAUS_GESPERRT)
 
 
 def mit_2fa(sig: str) -> bool:
@@ -324,6 +369,7 @@ def widerrufe(sig: str, ts: int) -> None:
         _zuletzt.pop(k, None)
         _mit_2fa.pop(k, None)
         _ohne_admin.pop(k, None)
+        _nur_ai_maus.pop(k, None)
         _dirty = True
         _schreiben_unlocked()
 
@@ -336,6 +382,7 @@ def _zuruecksetzen_fuer_test() -> None:
         _widerrufen.clear()
         _mit_2fa.clear()
         _ohne_admin.clear()
+        _nur_ai_maus.clear()
         _geladen = False
         _dirty = False
         _letzter_flush = 0.0

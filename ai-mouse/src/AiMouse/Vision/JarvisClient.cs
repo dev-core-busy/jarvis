@@ -114,6 +114,10 @@ internal sealed class JarvisClient : IDisposable
         {
             ["username"] = benutzer,
             ["password"] = kennwort,
+            // Kennung fuer den Server: die AI-Maus wird nie nach der 2FA
+            // gefragt (Betreiberentscheid 2026-10-27). Die Sitzung gilt dafuer
+            // nur fuer die AI-Maus-Schnittstellen (backend/sitzung_token.py).
+            ["client"] = "ai-mouse",
         };
         if (!string.IsNullOrWhiteSpace(totp))
         {

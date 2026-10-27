@@ -21,6 +21,7 @@ WAECHTER = ROOT / "tests" / "test_bsi_m3.py"
 MAIN = "backend/main.py"
 AS = "backend/anmelde_schutz.py"
 ST = "backend/sitzung_token.py"
+CLIENT = "ai-mouse/src/AiMouse/Vision/JarvisClient.cs"
 
 PROBEN = [
     # ── Konto-Sperre ──
@@ -48,9 +49,11 @@ PROBEN = [
      "                return JSONResponse(\n"
      "                    {\"success\": False, \"requires_totp\": True,\n"),
     ("Erfolg setzt den Konto-Zaehler nicht zurueck", MAIN,
-     "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin)\n"
+     "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin,\n"
+     "                           nur_ai_maus=_ai_maus)\n"
      "    _anmelde_schutz.erfolg(_norm_login(username))\n",
-     "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin)\n"),
+     "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin,\n"
+     "                           nur_ai_maus=_ai_maus)\n"),
     ("Zaehler nur im Speicher (Datei wird nie gelesen)", AS,
      "        if STORE_PATH.exists():\n            d = json.loads(",
      "        if False:\n            d = json.loads("),
@@ -69,8 +72,8 @@ PROBEN = [
      "            _record_login_attempt(client_ip, username)\n"
      "            return JSONResponse({\"success\": False, \"requires_totp_setup\": True,\n"),
     ("Token nach 2FA ohne Merkmal", MAIN,
-     "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin)\n",
-     "    token = generate_token(username, ohne_admin=_ohne_admin)\n"),
+     "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin,\n",
+     "    token = generate_token(username, ohne_admin=_ohne_admin,\n"),
     ("Pflicht-Schalter wird ignoriert (immer an)", MAIN,
      '    return not (v is False or str(v).strip().lower() in ("false", "0", "nein", "off"))\n',
      "    return True\n"),
@@ -116,20 +119,45 @@ PROBEN = [
      '    return ua.startswith("okhttp/") or ua.startswith("go-http-client/")\n',
      '    return "okhttp" in ua or ua.startswith("go-http-client/")\n'),
     ("App-Zweig auch fuer Nicht-Admins (2FA-Umweg)", MAIN,
-     "    _ohne_admin = _ist_app_anmeldung(request, body) and _is_admin_user(username)\n",
-     "    _ohne_admin = _ist_app_anmeldung(request, body)\n"),
+     "    _ohne_admin = _ai_maus or (_ist_app_anmeldung(request, body) and _is_admin_user(username))\n",
+     "    _ohne_admin = _ai_maus or _ist_app_anmeldung(request, body)\n"),
     ("App-Token ohne Merkmal", MAIN,
-     "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin)\n",
-     "    token = generate_token(username, mit_2fa=_mit_2fa)\n"),
+     "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin,\n",
+     "    token = generate_token(username, mit_2fa=_mit_2fa,\n"),
     ("Merkmal 'ohne Admin' wird bei der Pruefung ignoriert", MAIN,
      "    if len(kx) > 2 and kx[2]:\n        return True\n", ""),
     ("Login-Antwort meldet die Konto- statt der Sitzungsrechte", MAIN,
      "    _sitzung_kontext.set((_norm_login(username), _mit_2fa, _ohne_admin))\n", ""),
     ("Kennwortwechsel verliert 'ohne Admin'", MAIN,
      "            ohne_admin = _sitzung.ohne_admin(_sig)\n", ""),
+    # ── AI-Maus (2026-10-27): ohne 2FA, nur eigene Schnittstellen ──
+    ("AI-Maus wird nicht erkannt", MAIN,
+     '    return str((body or {}).get("client") or "").strip().lower() == "ai-mouse"\n',
+     "    return False\n"),
+    ("AI-Maus-Sitzung nicht 'ohne Admin'", MAIN,
+     "    _ohne_admin = _ai_maus or (_ist_app_anmeldung(request, body) and _is_admin_user(username))\n",
+     "    _ohne_admin = _ist_app_anmeldung(request, body) and _is_admin_user(username)\n"),
+    ("AI-Maus-Token ohne Merkmal 'nur AI-Maus'", MAIN,
+     "                           nur_ai_maus=_ai_maus)\n", "                           )\n"),
+    ("verify_token prueft den Pfad nicht", MAIN,
+     "            if not _sitzung.pfad_erlaubt(sig):\n                return None\n", ""),
+    ("Pfad-Middleware nicht registriert", MAIN,
+     "app.add_middleware(_AnfragePfadMiddleware)\n", ""),
+    ("unbekannter Pfad gilt als erlaubt", ST,
+     "    if not isinstance(pfad, str):\n        return False\n",
+     "    if not isinstance(pfad, str):\n        return True\n"),
+    ("AI-Maus-Admin-Seiten nicht gesperrt", ST,
+     "    return pfad.startswith(AI_MAUS_PFADE) and not pfad.startswith(AI_MAUS_GESPERRT)\n",
+     "    return pfad.startswith(AI_MAUS_PFADE)\n"),
+    ("Merkmal 'nur AI-Maus' wird nicht gespeichert", ST,
+     '                                   "nur_ai_maus": _nur_ai_maus,\n', ""),
+    ("Merkmal 'nur AI-Maus' wird nicht vermerkt", ST,
+     "        if nur_ai_maus:\n            _nur_ai_maus[schluessel(sig)] = int(ts)\n", ""),
+    ("AI-Maus schickt keine Kennung", CLIENT,
+     '            ["client"] = "ai-mouse",\n', ""),
 ]
 
-DATEIEN = [MAIN, AS, ST, "tests/test_bsi_m3.py"]
+DATEIEN = [MAIN, AS, ST, CLIENT, "tests/test_bsi_m3.py"]
 
 
 def md5(pfad: str) -> str:

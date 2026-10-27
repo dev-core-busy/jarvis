@@ -1231,6 +1231,26 @@ def _admin_pruefung_merken(fn):
     return _innen
 
 
+class _AnfragePfadMiddleware:
+    """Setzt ``_sitzung.ANFRAGE_PFAD`` fuer ``verify_token``: eine AI-Maus-
+    Sitzung gilt nur auf deren Pfaden. Reines ASGI und als LETZTE registriert,
+    also aeusserste Schicht – jede innere Middleware und jeder Endpunkt sieht
+    den Wert. Derselbe Pfad wie ``_routing_pfad`` (``scope["path"]``)."""
+
+    def __init__(self, app_):
+        self.app = app_
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        marke = _sitzung.ANFRAGE_PFAD.set(str(scope.get("path") or ""))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _sitzung.ANFRAGE_PFAD.reset(marke)
+
+
 @app.middleware("http")
 async def _sicherheits_protokoll_mw(request: Request, call_next):
     if request.method not in _AENDERNDE_METHODEN or not _routing_pfad(request).startswith("/api/"):
@@ -1263,21 +1283,26 @@ async def _sicherheits_protokoll_mw(request: Request, call_next):
     return response
 
 
+app.add_middleware(_AnfragePfadMiddleware)
+
+
 def generate_token(username: str, ts: int | None = None, mit_2fa: bool = False,
-                   ohne_admin: bool = False) -> str:
+                   ohne_admin: bool = False, nur_ai_maus: bool = False) -> str:
     """Token aus Benutzername + Timestamp erzeugen.
 
     ``ts`` nur fuer den Kennwortwechsel: das Ersatz-Token muss NACH der
     Widerrufs-Epoche liegen (siehe change_password).
     ``mit_2fa``: die Anmeldung hat den zweiten Faktor bestanden (BSI M3).
-    ``ohne_admin``: Sitzung ohne Admin-Rechte, auch fuer ein Admin-Konto (App)."""
+    ``ohne_admin``: Sitzung ohne Admin-Rechte, auch fuer ein Admin-Konto (App).
+    ``nur_ai_maus``: gilt nur fuer die Schnittstellen der AI-Maus (ohne 2FA)."""
     ts = str(int(time.time()) if ts is None else int(ts))
     sig = hmac.new(
         config.SECRET_KEY.encode(),
         f"{username}:{ts}".encode(),
         hashlib.sha256,
     ).hexdigest()
-    _sitzung.neu(sig, int(ts), mit_2fa=mit_2fa, ohne_admin=ohne_admin)
+    _sitzung.neu(sig, int(ts), mit_2fa=mit_2fa, ohne_admin=ohne_admin,
+                 nur_ai_maus=nur_ai_maus)
     return f"{username}:{ts}:{sig}"
 
 
@@ -1344,6 +1369,9 @@ def verify_token(token: str) -> str | None:
             # dem Widerrufszeitpunkt ausgestellt wurden, sind ungueltig. Ein
             # neuer Login (frischer Timestamp) hebt den Widerruf faktisch auf.
             if _epoche_widerrufen(username, int(ts)):
+                return None
+            # AI-Maus-Sitzung (ohne 2FA) ausserhalb ihrer Schnittstellen: ungueltig
+            if not _sitzung.pfad_erlaubt(sig):
                 return None
             if not _sitzung.pruefe_und_beruehre(sig, int(ts)):
                 return None
@@ -3738,6 +3766,13 @@ def _ist_app_anmeldung(request: Request, body: dict) -> bool:
     return ua.startswith("okhttp/") or ua.startswith("go-http-client/")
 
 
+def _ist_ai_maus_anmeldung(body: dict) -> bool:
+    """Kommt die Anmeldung aus der AI-Maus (``client: ai-mouse``)? Faelschbar –
+    die Sitzung gilt deshalb nur fuer die AI-Maus-Schnittstellen und nie als
+    Admin (``sitzung_token.pfad_erlaubt``)."""
+    return str((body or {}).get("client") or "").strip().lower() == "ai-mouse"
+
+
 def _admin_2fa_pflicht() -> bool:
     """Brauchen Administratoren eine 2FA (BSI M3)? Vorgabe: ja. Abschalten nur
     ausdruecklich (``admin_2fa_pflicht: false`` in settings.json)."""
@@ -5032,9 +5067,18 @@ async def _login_ablauf(request: Request):
     # gibt es eine Sitzung OHNE Admin-Rechte – ohne 2FA-Abfrage und ohne
     # Pflicht-Einrichtung. Fuer Nicht-Admins aendert sich nichts: wer eine 2FA
     # hat, braucht den Code auch in der App.
+    #
+    # AI-Maus (Betreiberentscheid 2026-10-27): KEIN Konto wird nach der 2FA
+    # gefragt, auch kein Nicht-Admin mit eingerichteter 2FA. Die Sitzung ist
+    # dafuer "ohne Admin" und gilt nur fuer /api/ai-mouse/* und
+    # /api/generated/* – sonst oeffnete die faelschbare Kennung mit dem
+    # Kennwort allein die ganze Oberflaeche an der 2FA vorbei.
     _mit_2fa = False
-    _ohne_admin = _ist_app_anmeldung(request, body) and _is_admin_user(username)
-    if _ohne_admin:
+    _ai_maus = _ist_ai_maus_anmeldung(body)
+    _ohne_admin = _ai_maus or (_ist_app_anmeldung(request, body) and _is_admin_user(username))
+    if _ai_maus:
+        print(f"[AUTH] AI-Maus-Anmeldung ohne 2FA, nur AI-Maus-Zugriff: {username}", flush=True)
+    elif _ohne_admin:
         print(f"[AUTH] App-Anmeldung eines Admin-Kontos ohne Admin-Rechte: {username}",
               flush=True)
     # 2FA aktiviert? → TOTP-Code prüfen
@@ -5123,7 +5167,8 @@ async def _login_ablauf(request: Request):
         print(f"[Lizenz] Anmeldung abgewiesen (Benutzergrenze): {username}", flush=True)
         return JSONResponse({"success": False, "error": _lic_grund}, status_code=403)
 
-    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin)
+    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin,
+                           nur_ai_maus=_ai_maus)
     _anmelde_schutz.erfolg(_norm_login(username))
     # Anwesenheits-Buchhaltung: ab hier ist die Anmeldung erfolgreich. Auch ein
     # gesperrter Account kommt bis hierher (er sieht danach nur den Sperrhinweis)

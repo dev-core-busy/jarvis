@@ -107,6 +107,8 @@ if vt:
           "_sitzung": types.SimpleNamespace(
               pruefe_und_beruehre=lambda sig, ts, jetzt=None: True,
               mit_2fa=lambda sig: False, ohne_admin=lambda sig: False,
+              # seit 2026-10-27: AI-Maus-Sitzungen gelten nur auf ihren Pfaden
+              pfad_erlaubt=lambda sig: True,
               schluessel=lambda sig: "k" * 32),
           # seit 2026-10-04 (BSI M3) setzt verify_token den Sitzungskontext
           "_sitzung_kontext": __import__("contextvars").ContextVar("_sk", default=None),

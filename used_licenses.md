@@ -386,6 +386,11 @@ in der Spalte „Rolle":
 | `telegram` | `python-telegram-bot` (LGPL-3.0) |
 | `vision` | `face-recognition`, `opencv-python-headless`, `setuptools` + `cmake`, `libboost-all-dev` (apt) |
 | `whatsapp` | `faster-whisper`, `httpx` |
+| `ai_mouse` (Anonymisieren) | `presidio-analyzer` (MIT), `spacy` (MIT), Modell `de_core_news_md` 3.8.0 (MIT), `opencv-python-headless` (Apache-2.0) |
+
+Das Gesichtsmodell **YuNet** (`backend/modelle/face_detection_yunet_2023mar.onnx`,
+MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneben in
+`backend/modelle/LICENSE-yunet.txt`.
 
 ---
 

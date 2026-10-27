@@ -84,6 +84,17 @@ Dafuer braucht es zwei Dateien, und beide sind neu:
 
 Was sich NICHT geaendert hat: das ORIGINAL geht weiterhin nirgendwo dauerhaft
 hin, und protokolliert wird der Bildinhalt nach wie vor nicht.
+
+AKTION "ANONYMISIEREN" (seit 2026-10-27, Vorgabe des Betreibers)
+================================================================
+Traegt die gewaehlte Frage die Aktion ``anonymisieren`` (nur eine VORGABE kann
+sie setzen, ``ai_mouse_fragen.AKTIONEN``), laeuft statt des Modellaufrufs
+``backend/anonymisieren.py``: Namen, E-Mail, Telefon, IBAN und Gesichter werden
+unkenntlich gemacht. Das BILD geht dabei an KEIN Modell - nur der erkannte Text
+(zur Ergaenzung der Namenserkennung). Das Ergebnis liegt ebenfalls unter
+``data/generated_images/``, aber mit einer eigenen Frist von **30 Minuten**
+(``anonymisieren.ttl_minuten``) statt der 30 Tage der Bildablage, und ohne
+Eintrag in einem Verlauf.
 """
 
 from __future__ import annotations
@@ -786,6 +797,51 @@ async def _agent_lauf(sysp: str, auftrag: str, bild_parts: list,
     return (roh or ""), str(getattr(agent, "current_model", "") or ""), bilder
 
 
+def aktion_der_frage(user: str, frage: str) -> str:
+    """Die Aktion der gewaehlten Frage (``ai_mouse_fragen.aktion_fuer``) oder ``""``.
+
+    **Fail-open auf die gewoehnliche Frage:** ist der Fragenbestand nicht
+    lesbar, geht der Ausschnitt den normalen Weg an das Modell – das ist
+    derselbe Weg wie vor dieser Funktion, also kein neuer Datenfluss. Die
+    Gegenrichtung (im Zweifel anonymisieren) gaebe es nicht: ohne Bestand ist
+    nicht bekannt, dass die Frage eine Aktion traegt.
+    """
+    try:
+        from backend import ai_mouse_fragen as _amf  # noqa: PLC0415
+        return _amf.aktion_fuer(user, frage)
+    except Exception as e:  # noqa: BLE001
+        print("[ai-mouse] Aktion nicht bestimmbar: %s" % e, flush=True)
+        return ""
+
+
+async def _anonymisieren(daten: bytes, lang: str) -> dict:
+    """Die Aktion „Anonymisieren": KEIN Modellaufruf mit dem Bild, kein Agent.
+
+    Antwort in derselben Form wie ``analysieren`` – der Client kennt keinen
+    Unterschied und zeigt Text und Bild wie beim Uebersetzen. ``modell`` ist
+    leer, weil das Bild an kein Modell ging (nur der erkannte TEXT, zur
+    Ergaenzung der Namenserkennung; siehe ``backend/anonymisieren.py``).
+    """
+    from backend import anonymisieren as _anon  # noqa: PLC0415
+    try:
+        erg = await _anon.ausfuehren(daten, lang)
+    except _anon.AnonymFehler as f:
+        raise MausFehler(str(f)) from f
+    except Exception as e:  # noqa: BLE001
+        from backend.llm import scrub_secrets  # noqa: PLC0415
+        raise MausFehler("Das Anonymisieren ist fehlgeschlagen: %s"
+                         % scrub_secrets(str(e))) from e
+    return {
+        "ok": True,
+        "text": str(erg.get("text") or "")[:MAX_ANTWORT],
+        "modell": "",
+        "bild": str(erg.get("bild") or ""),
+        "bereiche": [],
+        "bild_bytes": len(daten),
+        "aktion": "anonymisieren",
+    }
+
+
 async def analysieren(bild_roh: str, frage_roh: str, user: str,
                       lang: str = "de", mime_wunsch: str = "") -> dict:
     """Bildausschnitt und Frage auswerten. Der eine Einstiegspunkt des Moduls.
@@ -808,6 +864,11 @@ async def analysieren(bild_roh: str, frage_roh: str, user: str,
     frage = frage_pruefen(frage_roh)
     daten, mime = bild_pruefen(bild_roh, mime_wunsch)
     _drosseln(user)
+
+    # AKTION STATT MODELLAUFRUF (seit 2026-10-27). Entschieden an der Frage,
+    # die der Benutzer gewaehlt hat – nie am Bildinhalt und nie am Modell.
+    if aktion_der_frage(user, frage) == "anonymisieren":
+        return await _anonymisieren(daten, lang)
 
     bereiche = freigegebene_bereiche()
     werkzeuge = werkzeuge_fuer(bereiche)

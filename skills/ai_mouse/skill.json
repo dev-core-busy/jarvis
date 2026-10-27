@@ -9,7 +9,12 @@
   "icon": "mouse-pointer",
   "system": false,
   "enabled": false,
-  "dependencies": [],
+  "dependencies": [
+    "presidio-analyzer==2.2.365",
+    "spacy==3.8.18",
+    "de-core-news-md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl#sha256=b903f59220f1e76dd672acdaa7fa454d6703fe056c5ccd6457820e70874116d0",
+    "opencv-python-headless==4.13.0.92"
+  ],
   "system_packages": [
     "osslsigncode"
   ],
@@ -40,6 +45,6 @@
       "Text aus einem Screenshot herausziehen, der sich nicht markieren laesst",
       "Eine Tabelle oder ein Diagramm einrahmen und zusammenfassen lassen"
     ],
-    "notes": "Das aktive LLM-Profil muss Bilder verstehen – ein reines Textmodell antwortet auf einen Bildausschnitt oft mit gar nichts. Pruefen laesst sich das unter KI & System → Profile ueber das ⓘ neben dem Modell.\n\nDer Bildausschnitt selbst wird nicht dauerhaft gespeichert. Ein bearbeitetes Ergebnisbild (etwa mit uebersetztem Text) bleibt bis zur Frist der Bildablage (Vorgabe 30 Tage) und ist seit 2026-10-15 nur nach Anmeldung abrufbar. Ein Bildschirmfoto kann alles enthalten, was gerade offen ist."
+    "notes": "Das aktive LLM-Profil muss Bilder verstehen – ein reines Textmodell antwortet auf einen Bildausschnitt oft mit gar nichts. Pruefen laesst sich das unter KI & System → Profile ueber das ⓘ neben dem Modell.\n\nDer Bildausschnitt selbst wird nicht dauerhaft gespeichert. Ein bearbeitetes Ergebnisbild (etwa mit uebersetztem Text) bleibt bis zur Frist der Bildablage (Vorgabe 30 Tage) und ist seit 2026-10-15 nur nach Anmeldung abrufbar. Ausnahme: das Ergebnis der Aktion 'Anonymisieren' wird nach 30 Minuten geloescht.\n\nANONYMISIEREN: Ein Administrator legt unter Einstellungen → AI-Maus eine Vorgabe-Frage mit der Art 'Anonymisieren' an. Waehlt ein Benutzer sie, werden im Ausschnitt Personennamen, E-Mail-Adressen, Telefonnummern, IBANs (geschwaerzt) und Gesichter (verpixelt) unkenntlich gemacht; das Bild geht dabei an kein Sprachmodell, nur der erkannte Text zur Ergaenzung der Namenserkennung. Dafuer braucht der Server die Python-Pakete dieses Skills (Namenserkennung, Gesichtserkennung) – fehlen sie, laeuft die Aktion mit dem Rest weiter und nennt die Luecke im Ergebnis. Der Erkennungsdienst belegt rund 800 MB Arbeitsspeicher und beendet sich nach 15 Minuten ohne Nutzung. Ein Bildschirmfoto kann alles enthalten, was gerade offen ist."
   }
 }

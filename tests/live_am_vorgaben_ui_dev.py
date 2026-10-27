@@ -89,38 +89,52 @@ while j < len(SH):
     j += 1
 MARKUP = SH[i:j + 6]
 
+# ⚠ KEIN INLINE-SKRIPT: der Dienst setzt `script-src 'self'` (CSP). Bis
+# 2026-10-27 stand der Aufbau hier inline – er lief seit der CSP-Haertung NIE,
+# die Seite blieb leer, und „ohne JS-Fehler" war trivial wahr, weil auch der
+# Fehlerfaenger inline stand (eine CSP-Sperre loest kein `error`-Ereignis aus).
+# Deshalb: Vor- und Aufbau als ausgelieferte Dateien, und die Positivkontrolle
+# `__probeGelaufen` prueft, dass sie WIRKLICH liefen.
 SEITE = """<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
 <link rel="stylesheet" href="/static/css/theme.css">
 <link rel="stylesheet" href="/static/css/style.css">
+<script src="/static/_probe_amvorg_vor.js"></script>
 </head><body><div class="modal-card" style="max-width:820px;padding:20px;">
 __MARKUP__
 </div>
 <script src="/static/js/icons.js"></script>
-<script>
+<script src="/static/js/ai_mouse_admin.js"></script>
+<script src="/static/_probe_amvorg_auf.js"></script>
+</body></html>"""
+
+VOR_JS = """window.__fehler = '';
+window.addEventListener('error', function (e) { window.__fehler += e.message + ' | '; });
 window.t = function (k, f) { return f || k; };
 window.getLang = function () { return 'de'; };
 localStorage.setItem('jarvis_token', 'probe');
-</script>
-<script src="/static/js/ai_mouse_admin.js"></script>
-<script>
-window.__fehler = '';
-window.addEventListener('error', function (e) { window.__fehler += e.message + ' | '; });
-// Den ECHTEN Renderer mit den ECHTEN Vorgaben fuettern (kein Serveraufruf).
+"""
+
+AUF_JS = """// Den ECHTEN Renderer mit den ECHTEN Vorgaben fuettern (kein Serveraufruf).
 try {
   AiMouseAdmin._vorgaben = __VORGABEN__;
   AiMouseAdmin.bind();
   AiMouseAdmin.vorgabenZeichnen();
+  window.__probeGelaufen = true;
 } catch (e) { window.__fehler += 'WURF: ' + e.message; }
-</script></body></html>"""
+"""
 
 ZIEL = ROOT / "frontend" / "_probe_amvorg.html"
-ZIEL.write_text(SEITE.replace("__MARKUP__", MARKUP)
-                     .replace("__VORGABEN__", json.dumps(VORG, ensure_ascii=False)),
-                encoding="utf-8")
-try:
-    os.chown(ZIEL, os.stat(ROOT / "frontend").st_uid, os.stat(ROOT / "frontend").st_gid)
-except Exception:  # noqa: BLE001
-    pass
+ZIEL_VOR = ROOT / "frontend" / "_probe_amvorg_vor.js"
+ZIEL_AUF = ROOT / "frontend" / "_probe_amvorg_auf.js"
+ZIEL.write_text(SEITE.replace("__MARKUP__", MARKUP), encoding="utf-8")
+ZIEL_VOR.write_text(VOR_JS, encoding="utf-8")
+ZIEL_AUF.write_text(AUF_JS.replace("__VORGABEN__", json.dumps(VORG, ensure_ascii=False)),
+                    encoding="utf-8")
+for _z in (ZIEL, ZIEL_VOR, ZIEL_AUF):
+    try:
+        os.chown(_z, os.stat(ROOT / "frontend").st_uid, os.stat(ROOT / "frontend").st_gid)
+    except Exception:  # noqa: BLE001
+        pass
 
 PROFIL = tempfile.mkdtemp(prefix="chrome-amv-", dir=str(Path.home()))
 os.chmod(PROFIL, 0o700)
@@ -199,6 +213,15 @@ try:
             time.sleep(0.4)
             print(f"\n── Thema: {thema} " + "─" * 40)
 
+            if not js(sock, "window.__probeGelaufen === true"):
+                print("ABBRUCH (Exit 2): das Aufbau-Skript der Probeseite lief nicht "
+                      "(CSP? Pfad?) – jede Messung darunter waere trivial.")
+                for _z in (ZIEL, ZIEL_VOR, ZIEL_AUF):
+                    _z.unlink(missing_ok=True)
+                chrome.kill()
+                shutil.rmtree(PROFIL, ignore_errors=True)
+                sys.exit(2)
+            check(f"[{thema}] Positivkontrolle: das Aufbau-Skript lief", True)
             fehler = js(sock, "window.__fehler || ''")
             check(f"[{thema}] der Renderer lief ohne JS-Fehler", not fehler, str(fehler)[:120])
             n = js(sock, "document.querySelectorAll('.am-vorg-card').length")
@@ -260,6 +283,53 @@ try:
             check(f"[{thema}] das Textfeld ist mehrzeilig hoch (>= 70 px)",
                   f and f["feldHoehe"] >= 70, str((f or {}).get("feldHoehe")))
 
+            # Die Art „Anonymisieren" (2026-10-27): Auswahl, Hinweis, Beschriftung.
+            a = js(sock, """(function(){
+              var s=document.getElementById('amvorg-f-art');
+              if(!s) return null;
+              s.value='anonymisieren'; s.dispatchEvent(new Event('change'));
+              var fo=document.getElementById('amvorg-form').getBoundingClientRect();
+              var h=document.getElementById('amvorg-f-art-hint');
+              // ⚠ BIS ZUR ERSTEN DECKENDEN Flaeche: das Formular hat einen
+              // Hauch von 3 % Deckkraft, und `farbe()` verwirft den Alphawert –
+              // die erste Fassung rechnete im dunklen Thema damit gegen Weiss
+              // (2,56:1 gemeldet, eine Sonde, keine Schrift).
+              var e=h, g=null;
+              while(e && !g){var c=getComputedStyle(e).backgroundColor;
+                var m=c.match(/rgba\\([^)]*,\\s*([0-9.]+)\\)$/);
+                if(c && (!m || parseFloat(m[1]) >= 0.95)) g=c; e=e.parentElement;}
+              return {breite:Math.round(fo.width),
+                      feldA:Math.round(s.getBoundingClientRect().width),
+                      hinweisHoehe:Math.round(h.getBoundingClientRect().height),
+                      label:document.getElementById('amvorg-f-prompt-label').textContent,
+                      vg:getComputedStyle(h).color,
+                      bg:g||getComputedStyle(document.body).backgroundColor};
+            })()""")
+            check(f"[{thema}] die Auswahl der Art ist da und nutzt die Breite (>= 70 %)",
+                  a and a["feldA"] >= a["breite"] * 0.7, json.dumps(a))
+            check(f"[{thema}] der Hinweis zu „Anonymisieren“ ist sichtbar (Hoehe > 0)",
+                  a and a["hinweisHoehe"] > 0, json.dumps(a))
+            check(f"[{thema}] die Beschriftung sagt nicht mehr „Anweisung an das Modell“",
+                  a and "Anweisung an das Modell" not in a["label"], str((a or {}).get("label")))
+            if a:
+                ka = kontrast(farbe(a["vg"]), farbe(a["bg"]))
+                check(f"[{thema}] Hinweis zu „Anonymisieren“ lesbar (>= 4,5:1)", ka >= 4.5,
+                      f"{ka:.2f}:1  {a['vg']} auf {a['bg']}")
+                # Eigene Aufnahme des Formulars: es liegt im scrollbaren Kasten
+                # unterhalb der Liste und war auf dem Gesamtbild nicht zu sehen.
+                js(sock, """(function(){
+                  var fo=document.getElementById('amvorg-form'), k=fo;
+                  while(k && k.scrollHeight<=k.clientHeight+1) k=k.parentElement;
+                  if(k) k.scrollTop += fo.getBoundingClientRect().top - k.getBoundingClientRect().top - 10;
+                  window.scrollTo(0, 0);
+                })()""")
+                time.sleep(0.3)
+                r = cdp(sock, "Page.captureScreenshot", format="png",
+                        clip={"x": 0, "y": 0, "width": 900, "height": 800, "scale": 1})
+                pa = BILDER / f"vorgaben-anon-{thema}.png"
+                pa.write_bytes(base64.b64decode(r["data"]))
+                print(f"       Screenshot: {pa}")
+
             # Kontrast des Hinweistextes (er traegt die wichtigste Aussage).
             kf = js(sock, """(function(){
               var p=document.querySelector('#am-sect-vorg-body .kb-hint');
@@ -283,8 +353,10 @@ finally:
     except Exception:  # noqa: BLE001
         pass
     shutil.rmtree(PROFIL, ignore_errors=True)
-    ZIEL.unlink(missing_ok=True)
-    check("Probeseite wieder entfernt", not ZIEL.exists())
+    for _z in (ZIEL, ZIEL_VOR, ZIEL_AUF):
+        _z.unlink(missing_ok=True)
+    check("Probeseite wieder entfernt",
+          not any(_z.exists() for _z in (ZIEL, ZIEL_VOR, ZIEL_AUF)))
 
 print("\n" + "=" * 74)
 print(f"Ergebnis: {_ok} OK, {_fail} FAIL")

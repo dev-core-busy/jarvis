@@ -142,10 +142,28 @@ def ocr_absaetze(pfad, sprache: str = "eng") -> list:
             shutil.rmtree(_tmp, ignore_errors=True)
 
 
-def _ocr_roh(pfad, sprache: str) -> list:
+def ocr_woerter(pfad, sprache: str, min_konf: float = _MIN_KONF,
+                psm: int | None = None, timeout: float = 180) -> list:
+    """tesseract TSV -> einzelne WOERTER mit Box und Konfidenz.
+
+    Die Grundlage von ``_ocr_roh`` und eigenstaendig nutzbar: das Anonymisieren
+    (``backend/anonymisieren.py``) braucht die Boxen je WORT, nicht je Absatz –
+    ein Name ist ein Wort in einer Zeile, und wer den ganzen Absatz uebermalt,
+    loescht den Inhalt, um den es dem Benutzer ging.
+
+    ``min_konf`` ist ein Parameter, weil die Abwaegung je Zweck umgekehrt ist:
+    beim Uebersetzen ist ein Rauschwort teuer (es wird uebersetzt und gesetzt),
+    beim Anonymisieren ist ein UEBERSEHENES Wort teuer (der Name bleibt lesbar).
+    ``psm`` reicht den Seitenmodus durch (11 = verstreuter Text, passt zu
+    Bildschirmfotos mit Spalten und Feldern). ``timeout`` in Sekunden – das
+    Anonymisieren hat einen Client vor sich, der nach 120 s aufgibt.
+    """
+    befehl = ["tesseract", str(pfad), "stdout", "-l", sprache]
+    if psm is not None:
+        befehl += ["--psm", str(int(psm))]
     r = subprocess.run(
-        ["tesseract", str(pfad), "stdout", "-l", sprache, "tsv"],
-        capture_output=True, text=True, timeout=180,
+        befehl + ["tsv"],
+        capture_output=True, text=True, timeout=timeout,
         # OMP_THREAD_LIMIT=1: tesseract belegt sonst alle Kerne und wird bei
         # mehreren gleichzeitigen Laeufen langsamer, nicht schneller (am
         # Haus-Server gemessen, siehe pdf_formular.py).
@@ -173,7 +191,7 @@ def _ocr_roh(pfad, sprache: str) -> list:
         except ValueError:
             continue
         wort = t[idx["text"]].strip()
-        if konf < _MIN_KONF or not wort:
+        if konf < min_konf or not wort:
             continue
         woerter.append({
             "block": int(t[idx["block_num"]]), "par": int(t[idx["par_num"]]),
@@ -182,6 +200,11 @@ def _ocr_roh(pfad, sprache: str) -> list:
             "w": int(t[idx["width"]]), "h": int(t[idx["height"]]),
             "text": wort, "konf": konf,
         })
+    return woerter
+
+
+def _ocr_roh(pfad, sprache: str) -> list:
+    woerter = ocr_woerter(pfad, sprache)
 
     gruppen = defaultdict(list)
     for w in woerter:
@@ -191,6 +214,11 @@ def _ocr_roh(pfad, sprache: str) -> list:
     for _schluessel, ws in sorted(gruppen.items()):
         roh.extend(_nach_luecken_trennen(ws))
 
+    return _zu_absaetzen(roh)
+
+
+def _zu_absaetzen(roh: list) -> list:
+    """Wortgruppen -> Absaetze mit Box, Text, Zeilenzahl und Zeilenhoehe."""
     absaetze = []
     for ws in roh:
         zeilen_map = defaultdict(list)

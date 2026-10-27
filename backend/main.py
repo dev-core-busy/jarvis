@@ -6866,6 +6866,15 @@ async def startup_attachment_cleanup():
         while True:
             try:
                 await asyncio.to_thread(_attachments.cleanup)
+                # Ergebnisse der AI-Maus-Aktion "Anonymisieren": eigene Frist
+                # (30 min) statt der 30 Tage der Bildablage. Hier und nicht in
+                # deren Tagesschleife – ein Takt von einem Tag wuerde die Zusage
+                # um bis zu 24 Stunden ueberziehen.
+                try:
+                    from backend import anonymisieren as _anon
+                    await asyncio.to_thread(_anon.aufraeumen)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[Anonymisieren] Aufraeumen fehlgeschlagen: {e}", flush=True)
                 # Abgelaufene Arbeitsverzeichnisse (privates /tmp je Benutzer):
                 # im getrennten Betrieb ueber den Broker, weil darin
                 # Unterverzeichnisse des Sandbox-Benutzers liegen, die das
@@ -17714,7 +17723,11 @@ async def ai_mouse_vorgaben_lesen(user: str = Depends(require_local_auth)):
 @app.post("/api/ai-mouse/admin/vorgaben")
 async def ai_mouse_vorgabe_speichern(request: Request,
                                      user: str = Depends(require_local_auth)):
-    """Vorgabe anlegen oder aendern. Body: ``{id?, titel, prompt}``."""
+    """Vorgabe anlegen oder aendern. Body: ``{id?, titel, prompt, aktion?}``.
+
+    ``aktion`` (leer oder ``anonymisieren``) gibt es NUR hier – der
+    Benutzer-Endpunkt fuer Fragen nimmt es nicht an (``ai_mouse_fragen.AKTIONEN``).
+    """
     from backend import ai_mouse_fragen as amf  # noqa: PLC0415
     try:
         body = await request.json()
@@ -17724,7 +17737,8 @@ async def ai_mouse_vorgabe_speichern(request: Request,
     try:
         eintrag = amf.vorgabe_speichern(str(body.get("id") or "").strip(),
                                         str(body.get("titel") or ""),
-                                        str(body.get("prompt") or ""))
+                                        str(body.get("prompt") or ""),
+                                        str(body.get("aktion") or ""))
     except amf.FragenFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     return JSONResponse({"ok": True, "vorgabe": eintrag})

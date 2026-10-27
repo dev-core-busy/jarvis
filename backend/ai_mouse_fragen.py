@@ -38,6 +38,15 @@ PROMPT_MAX = 2000
 MAX_JE_BENUTZER = 40
 MAX_GEMEINSAM = 40
 
+# Aktionen, die eine Frage STATT des Modellaufrufs ausloest. Eine WHITELIST:
+# ein unbekannter Wert wird abgelehnt, nicht durchgereicht. Leer = gewoehnliche
+# Frage an das Modell.
+#
+# ⚠ NUR EINE VORGABE DARF EINE AKTION SETZEN (Festlegung 2026-10-27). Ueber den
+# Benutzerweg (``speichern``) kommt das Feld nie aus dem Request – beim Aendern
+# einer kopierten Vorgabe bleibt es erhalten, beim Neuanlegen gibt es keines.
+AKTIONEN = ("anonymisieren",)
+
 
 def _pfad() -> Path:
     return Path(__file__).resolve().parent.parent / "data" / "ai_mouse_fragen.json"
@@ -252,7 +261,8 @@ def _uebernehmen(d: dict, user: str) -> bool:
         if len(eigen) >= MAX_JE_BENUTZER:
             continue
         have.append(vid)
-        eigen.append(_neu(e.get("titel", ""), e.get("prompt", ""), vid))
+        eigen.append(_neu(e.get("titel", ""), e.get("prompt", ""), vid,
+                          _aktion_oder_leer(e.get("aktion"))))
         geaendert = True
     # `gesaet_fuer` weiter pflegen: ein Rueckschritt auf den alten Stand darf
     # nicht die ganze Liste ein zweites Mal kopieren.
@@ -263,7 +273,7 @@ def _uebernehmen(d: dict, user: str) -> bool:
     return geaendert
 
 
-def _neu(titel: str, prompt: str, von: str = "") -> dict:
+def _neu(titel: str, prompt: str, von: str = "", aktion: str = "") -> dict:
     """Ein neuer Eintrag. ``von`` ist die Kennung der QUELL-Vorgabe.
 
     ⚠ ``von`` IST DER GANZE UNTERSCHIED ZWISCHEN „einmal gesät" UND „wird
@@ -275,7 +285,28 @@ def _neu(titel: str, prompt: str, von: str = "") -> dict:
     e = {"id": secrets.token_hex(6), "titel": titel, "prompt": prompt}
     if von:
         e["von_vorgabe"] = von
+    if aktion:
+        e["aktion"] = aktion
     return e
+
+
+def _aktion_oder_leer(roh) -> str:
+    """Gespeicherten Wert lesen: nur Bekanntes, sonst leer (fail-closed)."""
+    a = str(roh or "").strip()
+    return a if a in AKTIONEN else ""
+
+
+def aktion_pruefen(roh) -> str:
+    """Wert aus einem REQUEST pruefen: leer oder bekannt, sonst ``FragenFehler``.
+
+    Anders als ``_aktion_oder_leer`` wird ein unbekannter Wert hier ABGELEHNT
+    und nicht still zu „leer" – der Administrator soll sehen, dass seine
+    Auswahl nicht ankam, statt eine gewoehnliche Frage zu speichern.
+    """
+    a = str(roh or "").strip()
+    if a and a not in AKTIONEN:
+        raise FragenFehler("Unbekannte Aktion: %s" % a[:40])
+    return a
 
 
 def _pruefe(titel: str, prompt: str) -> tuple[str, str]:
@@ -341,6 +372,13 @@ def speichern(user: str, fid: str, titel: str, prompt: str,
             raise FragenFehler("Diese Frage gehört allen – nur ein "
                                "Administrator darf sie ändern.")
         eintrag = {"id": fid or secrets.token_hex(6), "titel": t, "prompt": p}
+        # Die AKTION kommt nie aus dem Request (nur Vorgaben setzen sie) – sie
+        # bleibt beim Aendern erhalten. Ohne diese Zeilen verloere eine kopierte
+        # Anonymisieren-Frage ihre Wirkung, sobald der Benutzer den Titel aendert,
+        # und wuerde zu einer gewoehnlichen Frage an das Modell.
+        alt = alt_g if alt_g is not None else alt_e
+        if alt is not None and _aktion_oder_leer(alt.get("aktion")):
+            eintrag["aktion"] = _aktion_oder_leer(alt.get("aktion"))
         # Aus beiden Töpfen entfernen, dann in den gewählten legen.
         d["global_"] = [e for e in d["global_"] if e.get("id") != eintrag["id"]]
         d["benutzer"][k] = [e for e in eigen if e.get("id") != eintrag["id"]]
@@ -366,7 +404,7 @@ def vorgaben_liste() -> list[dict]:
         return [dict(e) for e in (d.get("vorgaben") or []) if isinstance(e, dict)]
 
 
-def vorgabe_speichern(fid: str, titel: str, prompt: str) -> dict:
+def vorgabe_speichern(fid: str, titel: str, prompt: str, aktion: str = "") -> dict:
     """Vorgabe anlegen (``fid`` leer) oder aendern.
 
     ⚠ EINE NEUE VORGABE ERREICHT AUCH BESTANDSBENUTZER – seit 2026-09-15. Sie
@@ -380,6 +418,7 @@ def vorgabe_speichern(fid: str, titel: str, prompt: str) -> dict:
     eine Aenderung bei allen sehen will, nimmt eine gemeinsame Frage.
     """
     t, p = _pruefe(titel, prompt)
+    a = aktion_pruefen(aktion)
     with _SPERRE:
         d = _laden()
         _saeen(d)
@@ -389,15 +428,48 @@ def vorgabe_speichern(fid: str, titel: str, prompt: str) -> dict:
             if alt is None:
                 raise FragenFehler("Die Vorgabe wurde nicht gefunden.")
             alt["titel"], alt["prompt"] = t, p
+            if a:
+                alt["aktion"] = a
+            else:
+                alt.pop("aktion", None)
             eintrag = alt
         else:
             if len(vor) >= MAX_GEMEINSAM:
                 raise FragenFehler("Es sind höchstens %d Vorgaben möglich."
                                    % MAX_GEMEINSAM)
-            eintrag = _neu(t, p)
+            eintrag = _neu(t, p, aktion=a)
             vor.append(eintrag)
         _speichern(d)
     return dict(eintrag)
+
+
+def aktion_fuer(user: str, prompt: str) -> str:
+    """Die Aktion der Frage dieses Benutzers, deren Text ``prompt`` ist – sonst ``""``.
+
+    ⚠ WARUM UEBER DEN TEXT UND NICHT UEBER EINE KENNUNG: der Client (bis
+    mindestens 1.0.13) schickt nur ``prompt`` – er liest von einer Frage
+    ausschliesslich Titel und Text. Ueber den Text zu gehen heisst, dass die
+    Aktion OHNE neue Client-Version wirkt. Verglichen wird EXAKT (nach
+    ``strip``), nicht als Teilstring: eine freie Frage, die den Text nur
+    enthaelt, loest nichts aus.
+
+    Gesucht wird nur in den Fragen DIESES Benutzers (eigene + gemeinsame) – ein
+    anderer kann ihm keine Aktion unterschieben. Ohne Seiteneffekt: kein Saeen,
+    kein Uebernehmen, kein Schreiben.
+    """
+    gesucht = (prompt or "").strip()
+    if not gesucht:
+        return ""
+    with _SPERRE:
+        d = _laden()
+        eigen = d["benutzer"].get(_norm(user)) or []
+        for e in list(d["global_"]) + list(eigen):
+            if not isinstance(e, dict):
+                continue
+            a = _aktion_oder_leer(e.get("aktion"))
+            if a and str(e.get("prompt") or "").strip() == gesucht:
+                return a
+    return ""
 
 
 def vorgabe_loeschen(fid: str) -> bool:

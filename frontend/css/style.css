@@ -9468,8 +9468,23 @@ body.light #service-restart-status.svc-err  { color: #c62828; }   /* 5,15:1 */
    schmal; die Messung war gruen, gesehen hat es erst der Screenshot.
    `box-sizing` dazu, sonst laeuft das Feld samt Polster ueber den Rand. */
 .am-vorg-form input[type="text"],
+.am-vorg-form select,
 .am-vorg-form textarea {
     width: 100%;
     box-sizing: border-box;
 }
 .am-vorg-form textarea { resize: vertical; min-height: 76px; }
+/* Hinweis unter der Auswahl der Art – ohne Abstand klebt er am Feld
+   (am Screenshot gesehen, 2026-10-27). */
+.am-vorg-hint { margin-top: 6px; }
+/* Kennzeichnung einer Vorgabe mit Aktion (z.B. „Anonymisieren") in der Liste.
+   Text UND Rahmen, keine Farbe allein (Projektregel). */
+.am-vorg-art {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.8em;
+    color: var(--text-secondary);
+}

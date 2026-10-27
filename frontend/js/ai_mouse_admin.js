@@ -481,6 +481,10 @@
                 return '<div class="am-vorg-card" data-vid="' + esc(v.id) + '">'
                     + '<div class="am-vorg-row">'
                     + '<div class="am-vorg-main"><b>' + esc(v.titel) + '</b>'
+                    + (v.aktion === 'anonymisieren'
+                        ? ' <span class="am-vorg-art">'
+                          + esc(t('amvorg.badge_anon', 'Anonymisieren')) + '</span>'
+                        : '')
                     + '<span class="kb-hint" style="display:block;">' + esc(v.prompt) + '</span>'
                     + '</div>'
                     + '<button type="button" class="am-vorg-act" data-akt="edit" title="'
@@ -521,7 +525,21 @@
             form.innerHTML =
                 '<div class="form-group"><label>' + esc(t('amvorg.f_titel', 'Titel (Menüzeile)'))
                 + '</label><input type="text" id="amvorg-f-titel" maxlength="80"></div>'
-                + '<div class="form-group"><label>' + esc(t('amvorg.f_prompt', 'Anweisung an das Modell'))
+                + '<div class="form-group"><label>' + esc(t('amvorg.f_art', 'Art'))
+                + '</label><select id="amvorg-f-art">'
+                + '<option value="">' + esc(t('amvorg.art_frage', 'Frage an das Modell')) + '</option>'
+                + '<option value="anonymisieren">'
+                + esc(t('amvorg.art_anon', 'Anonymisieren – Namen und Gesichter unkenntlich machen'))
+                + '</option></select>'
+                + '<span class="kb-hint am-vorg-hint" id="amvorg-f-art-hint" style="display:none;">'
+                + esc(t('amvorg.anon_hint',
+                        'Statt einer Antwort kommt ein Bild zurück, in dem Namen, E-Mail-Adressen, '
+                        + 'Telefonnummern und IBANs geschwärzt und Gesichter verpixelt sind. Das Bild '
+                        + 'geht an kein Sprachmodell, nur der erkannte Text. Das Ergebnis wird nach '
+                        + '30 Minuten gelöscht.'))
+                + '</span></div>'
+                + '<div class="form-group"><label id="amvorg-f-prompt-label">'
+                + esc(t('amvorg.f_prompt', 'Anweisung an das Modell'))
                 + '</label><textarea id="amvorg-f-prompt" rows="4" maxlength="2000"></textarea></div>'
                 + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
                 + '<button type="button" class="btn-primary" id="amvorg-f-save">'
@@ -535,9 +553,17 @@
                 : null;
             if (karte) { karte.appendChild(form); }
             else { ($('amvorg-liste') || document.body).appendChild(form); }
-            var ti = $('amvorg-f-titel'), pr = $('amvorg-f-prompt');
+            var ti = $('amvorg-f-titel'), pr = $('amvorg-f-prompt'), art = $('amvorg-f-art');
             if (ti) { ti.value = v.titel || ''; }
             if (pr) { pr.value = v.prompt || ''; }
+            // ⚠ Erst NACH dem Einhaengen setzen – vorher gibt es die Option nicht
+            // sicher, und `sel.value` auf eine fehlende Option verpufft still
+            // (Register).
+            if (art) {
+                art.value = v.aktion === 'anonymisieren' ? 'anonymisieren' : '';
+                art.addEventListener('change', function () { Admin._artAnzeigen(true); });
+            }
+            this._artAnzeigen(false);
             var sv = $('amvorg-f-save'), ab = $('amvorg-f-abort');
             if (sv) { sv.addEventListener('click', function () { Admin.vorgabeSpeichern(vid || ''); }); }
             if (ab) {
@@ -550,15 +576,38 @@
             if (ti && !wieder) { ti.focus(); }
         },
 
+        /** Beschriftung und Hinweis an die gewaehlte Art anpassen.
+         *  Bei „Anonymisieren" ist der Text keine Anweisung an ein Modell,
+         *  sondern nur eine Beschreibung – eine Beschriftung, die weiter
+         *  „Anweisung an das Modell" sagt, behauptet eine Wirkung, die es
+         *  nicht gibt. ``vorbelegen``: ein LEERES Feld bekommt einen Text,
+         *  weil der Server einen verlangt. */
+        _artAnzeigen: function (vorbelegen) {
+            var art = $('amvorg-f-art'), lbl = $('amvorg-f-prompt-label');
+            var hint = $('amvorg-f-art-hint'), pr = $('amvorg-f-prompt');
+            var anon = !!art && art.value === 'anonymisieren';
+            if (lbl) {
+                lbl.textContent = anon
+                    ? t('amvorg.f_beschreibung', 'Beschreibung (wird nicht an ein Modell geschickt)')
+                    : t('amvorg.f_prompt', 'Anweisung an das Modell');
+            }
+            if (hint) { hint.style.display = anon ? 'block' : 'none'; }
+            if (anon && vorbelegen && pr && !pr.value.trim()) {
+                pr.value = t('amvorg.anon_default',
+                             'Namen und Gesichter im Ausschnitt unkenntlich machen.');
+            }
+        },
+
         vorgabeSpeichern: function (vid) {
-            var ti = $('amvorg-f-titel'), pr = $('amvorg-f-prompt');
+            var ti = $('amvorg-f-titel'), pr = $('amvorg-f-prompt'), art = $('amvorg-f-art');
             if (!ti || !pr) { return; }
             setStatus('amvorg-status', t('common.saving', 'Speichere…'));
             var self = this;
             fetch('/api/ai-mouse/admin/vorgaben', {
                 method: 'POST',
                 headers: authHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ id: vid || '', titel: ti.value, prompt: pr.value })
+                body: JSON.stringify({ id: vid || '', titel: ti.value, prompt: pr.value,
+                                       aktion: art ? art.value : '' })
             }).then(function (r) { return r.json(); })
               .then(function (d) {
                     if (!d || d.ok === false) {

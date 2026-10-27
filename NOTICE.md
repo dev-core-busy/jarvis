@@ -74,6 +74,7 @@ Dateien wurde geändert; damit entstehen keine weitergehenden Pflichten.
 | Chart.js 4.4.9 | MIT | © Chart.js Contributors |
 | clippy.js | MIT | © Smore Inc. |
 | noVNC 1.6.0 | MPL-2.0 | serverseitig ausgeliefert |
+| YuNet (Gesichtserkennung, `backend/modelle/`) | MIT | © 2020 Shiqi Yu – Lizenztext in `backend/modelle/LICENSE-yunet.txt` |
 
 ### ⚠ Die Avatar-Figur ist NICHT mitlizenziert
 

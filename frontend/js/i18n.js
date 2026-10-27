@@ -120,6 +120,10 @@ const _I18N = {
         'amshare.saving':        'Wird gespeichert…',
         'amshare.ok':            'Gespeichert – die Kachel zeigt jetzt den Pfad.',
         'amshare.ok_off':        'Gespeichert – die Kachel bietet wieder den Download an.',
+        'amshare.ver':           'Aktuelle Version:',
+        'amshare.ver_built':     'gebaut am',
+        'amshare.ver_unknown':   'unbekannt',
+        'amshare.ver_none':      'Noch keine Anwendung gebaut.',
         // ── Code-Signatur (B) ──────────────────────────────────────────────
         'amsign.h':              'Code-Signatur',
         'amsign.intro':          'Ist hier ein Zertifikat hinterlegt, wird die Anwendung <b>nach jedem Bau</b> signiert. Damit sieht der Benutzer in den Dateieigenschaften, von wem sie stammt, und eine nachträgliche Veränderung fällt auf. Für ein Zertifikat der <b>Firmen-CA</b> ist das der übliche Weg – die Domänenrechner vertrauen ihr bereits.',
@@ -4629,6 +4633,10 @@ const _I18N = {
         'amshare.saving':        'Saving…',
         'amshare.ok':            'Saved – the tile now shows the path.',
         'amshare.ok_off':        'Saved – the tile offers the download again.',
+        'amshare.ver':           'Current version:',
+        'amshare.ver_built':     'built on',
+        'amshare.ver_unknown':   'unknown',
+        'amshare.ver_none':      'No application built yet.',
         // ── Code-Signatur (B) ──────────────────────────────────────────────
         'amsign.h':              'Code signing',
         'amsign.intro':          'With a certificate stored here, the application is signed <b>after every build</b>. Users then see in the file properties who it came from, and any later modification becomes visible. For a certificate from your <b>company CA</b> this is the usual route – domain machines already trust it.',

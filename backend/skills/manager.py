@@ -219,6 +219,31 @@ class SkillManager:
             "commands": [c.get("cmd") for c in self._pending_install_commands(info)],
         }
 
+    def fehlende_pip_aktiver_skills(self) -> dict[str, list[str]]:
+        """Skill -> fehlende pip-Specs, nur fuer EINGESCHALTETE Skills.
+
+        Fuer die Start-Automatik (``abhaengigkeiten.skill_pakete_nachziehen``):
+        ein Skill, der schon an ist, bekommt neue `dependencies` sonst nie
+        (``enable_skill`` ist der einzige automatische Installationsweg).
+        Ausgeschaltete Skills bleiben unberuehrt – ihre Pakete kommen beim
+        Einschalten, wie bisher.
+        """
+        zustaende = config.get_skill_states() or {}
+        installiert = self._installed_packages()
+        erg: dict[str, list[str]] = {}
+        for info in self.loader.discover_skills():
+            if "error" in info:
+                continue
+            name = Path(info["path"]).name
+            # Dieselbe Regel wie list_skills/load_all: ohne gespeicherten
+            # Zustand gilt die Vorgabe des Manifests.
+            if not (zustaende.get(name) or {}).get("enabled", info.get("enabled", True)):
+                continue
+            fehlt = self._missing_dependencies(info, installiert)
+            if fehlt:
+                erg[name] = fehlt
+        return erg
+
     def install_missing(self, name: str) -> dict:
         """Installiert fehlende Abhaengigkeiten OHNE den Ein/Aus-Zustand anzufassen."""
         info = self._skill_info(name)

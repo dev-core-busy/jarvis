@@ -103,6 +103,7 @@
                     self._bereiche = d.bereiche || [];
                     self.renderAreas();
                     self.renderState(d);
+                    self.renderVersion(d);
                     // ⚠ NUR FUELLEN, WENN DER BENUTZER NICHT GERADE TIPPT –
                     //   ein Sprachwechsel ruft `load()` erneut, und eine halb
                     //   eingegebene Adresse waere sonst weg.
@@ -379,6 +380,30 @@
 
         /** Zustand: beantwortet „warum passiert nichts?" ohne einen Blick in
          *  die Skill-Liste oder aufs Portal. */
+        /** Version des AUSGELIEFERTEN Pakets neben dem Download-Knopf – damit
+         *  sichtbar ist, ob die Freigabe nach einem Versionswechsel nachgezogen
+         *  werden muss. "" vom Server heisst unbekannt, nicht "keine". */
+        renderVersion: function (d) {
+            var el = $('amshare-ver');
+            if (!el) { return; }
+            if (!d.paket_bereit) {
+                el.textContent = t('amshare.ver_none', 'Noch keine Anwendung gebaut.');
+                return;
+            }
+            var text = t('amshare.ver', 'Aktuelle Version:') + ' '
+                + (d.paket_version || t('amshare.ver_unknown', 'unbekannt'));
+            if (d.paket_gebaut) {
+                var datum = new Date(d.paket_gebaut);
+                if (!isNaN(datum.getTime())) {
+                    var sprache = (window.getLang && window.getLang()) || 'de';
+                    text += ' (' + t('amshare.ver_built', 'gebaut am') + ' '
+                        + datum.toLocaleString(sprache === 'en' ? 'en-GB' : 'de-DE',
+                            { dateStyle: 'medium', timeStyle: 'short' }) + ')';
+                }
+            }
+            el.textContent = text;
+        },
+
         renderState: function (d) {
             var box = $('amtool-state');
             if (!box) { return; }

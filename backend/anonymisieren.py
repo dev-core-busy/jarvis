@@ -97,6 +97,30 @@ _GESICHT_ZUSCHLAG = 0.25
 _MODELL = Path(__file__).resolve().parent / "modelle" / "face_detection_yunet_2023mar.onnx"
 _HELFER = Path(__file__).resolve().parent / "anonym_helfer.py"
 _NAME_RE = re.compile(r"[0-9a-f]{32}\.png\Z")
+# Importnamen, an denen die Erkennung haengt (anonym_helfer.py).
+_ERKENNUNG_MODULE = ("presidio_analyzer", "spacy", "de_core_news_md", "cv2")
+
+
+def _pakete_stand() -> tuple:
+    """Welche Erkennungs-Pakete sind JETZT auffindbar? Ohne sie zu importieren.
+
+    ⚠ WOZU (ECHT 2026-10-27): der Hilfsprozess liest seine Faehigkeiten EINMAL
+    beim Start. Lief er schon, als die Pakete fehlten, meldete er nach der
+    Nachinstallation weiter „nicht eingerichtet" – und jeder neue Versuch hielt
+    ihn ueber die Leerlauf-Frist hinaus am Leben. Verglichen wird der Stand bei
+    seinem Start mit dem jetzigen; nur eine Aenderung startet ihn neu, sonst
+    kostete ein dauerhaft fehlendes Paket jede Anfrage einen Neustart.
+    """
+    import importlib  # noqa: PLC0415
+    import importlib.util  # noqa: PLC0415
+    importlib.invalidate_caches()
+    stand = []
+    for m in _ERKENNUNG_MODULE:
+        try:
+            stand.append(importlib.util.find_spec(m) is not None)
+        except (ImportError, ValueError):
+            stand.append(False)
+    return tuple(stand)
 
 # Arten, die im Ergebnistext gezaehlt werden – Schluessel wie Presidio sie nennt,
 # plus die Ergaenzung durch das Sprachmodell.
@@ -205,6 +229,7 @@ class _Helfer:
         self._proc = None
         self._sperre = None
         self._faehig: dict = {}
+        self._pakete: tuple = ()
         self._zuletzt = 0.0
         self._waechter = None
 
@@ -222,6 +247,7 @@ class _Helfer:
         env = {"PATH": "/usr/bin:/bin", "HOME": os.environ.get("HOME", "/tmp"),
                "LANG": "C.UTF-8", "OMP_THREAD_LIMIT": "1", "PYTHONUNBUFFERED": "1",
                "PYTHONDONTWRITEBYTECODE": "1"}
+        self._pakete = _pakete_stand()
         self._proc = await asyncio.create_subprocess_exec(
             sys.executable, "-I", str(_HELFER), str(_MODELL),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -271,6 +297,12 @@ class _Helfer:
 
     async def faehigkeiten(self) -> dict:
         async with self._lock():
+            if (self.laeuft()
+                    and not (self._faehig.get("personen") and self._faehig.get("gesichter"))
+                    and _pakete_stand() != self._pakete):
+                print("[Anonymisieren] Erkennungs-Pakete haben sich geaendert – "
+                      "Hilfsprozess wird neu gestartet", flush=True)
+                await self.beenden()
             if not self.laeuft():
                 await self._starten()
             self._zuletzt = time.time()

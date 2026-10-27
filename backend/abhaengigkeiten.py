@@ -34,6 +34,8 @@ ein Heben holte die CUDA-Variante zurueck, ~6 GB), und keine Hauptversions-
 Spruenge ueber Grenzen hinweg, die requirements.txt setzt.
 
 Abschalten: ``JARVIS_ABH_AUTO=0`` (nur pruefen und melden, nichts installieren).
+Derselbe Schalter gilt fuer :func:`skill_pakete_nachziehen` (fehlende Pakete
+AKTIVER Skills, seit 2026-10-27).
 
 LOCK-MODUS (Phase 2 der Lock-Datei, 2026-10-21) – Schalter ``JARVIS_ABH_LOCK=1``:
 der Server folgt ``requirements.lock`` (exakte Versionen + Hashes) statt der
@@ -483,6 +485,141 @@ def zustand() -> dict:
         return json.loads(ZUSTAND.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
+
+
+# ── Pakete AKTIVER Skills ───────────────────────────────────────────────────
+#
+# ⚠ WOZU (ECHT 2026-10-27): die Anonymisierung der AI-Maus brachte vier neue
+# `dependencies` in skills/ai_mouse/skill.json. Der Skill war auf ECHT laengst
+# eingeschaltet – und Skill-Pakete installiert der Server NUR beim Einschalten.
+# Der Pull holte den Code, `abgleichen()` sieht nur requirements.txt, und die
+# Aktion meldete „Namenserkennung auf diesem Server nicht eingerichtet". Ein
+# Fix, der nur ueber einen Knopf wirksam wird, erreicht keinen Server (Register).
+#
+# ⚠ DIE AUTOMATIK VERAENDERT KEIN VORHANDENES PAKET: jedes installierte Paket
+# wird per Constraint auf GENAU seinen Ist-Stand genagelt. Ein Skill-Paket, das
+# eine andere Kernversion verlangt (numpy >= 2.1 auf einer CPU ohne SSE4.2),
+# scheitert damit laut, statt den Dienst still umzubauen – das bleibt dem
+# Reparatur-Knopf vorbehalten, den ein Mensch drueckt.
+#
+# Nur pip: Systempakete laufen ueber `shell_root`, und das wartet im Broker
+# IMMER auf eine Freigabe – eine Automatik erzeugte dort nur Eintraege.
+SKILL_ZUSTAND = ZUSTAND.with_name("skill_pakete.json")
+
+
+def _skill_zustand() -> dict:
+    try:
+        return json.loads(SKILL_ZUSTAND.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _skill_zustand_schreiben(daten: dict) -> None:
+    try:
+        SKILL_ZUSTAND.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SKILL_ZUSTAND.with_suffix(".tmp")
+        tmp.write_text(json.dumps(daten, indent=1, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, SKILL_ZUSTAND)
+    except OSError:
+        pass
+
+
+def _spec_name(spec: str) -> str:
+    """Normierter Paketname einer Spec (auch ``name @ url``)."""
+    try:
+        return _norm(Requirement(spec).name)
+    except Exception:  # noqa: BLE001
+        return _norm(re.split(r"[<>=!~\[@; ]", spec.strip(), 1)[0])
+
+
+def _ist_stand_constraints(inst: dict[str, str]) -> str:
+    """Jedes installierte Paket genau auf seinem Ist-Stand."""
+    return "".join(f"{n}=={v}\n" for n, v in sorted(inst.items()))
+
+
+def skill_pakete_nachziehen(fehlend: dict[str, list[str]],
+                            installieren: bool | None = None) -> dict:
+    """Fehlende pip-Pakete aktiver Skills nachinstallieren. ``fehlend``: Skill -> Specs.
+
+    Rueckgabe: ``{installieren, geaendert: {skill: [...]}, fehler: {skill: grund},
+    uebersprungen: [skill]}``.
+
+    ⚠ EIN GESCHEITERTER SATZ WIRD NICHT BEI JEDEM START WIEDERHOLT. Gemerkt
+    werden Skill UND genau die Specs; aendert sich das Manifest, gilt es als
+    neuer Satz. Sonst kostete ein dauerhaft unloesbares Paket jeden Neustart
+    einen pip-Lauf (Register: ein Zeitdeckel ohne Gedaechtnis ist eine
+    wiederkehrende Rechnung). Der Reparatur-Knopf bleibt der Weg dafuer.
+    """
+    if installieren is None:
+        installieren = os.environ.get("JARVIS_ABH_AUTO", "1") != "0"
+    erg: dict = {"installieren": installieren, "geaendert": {}, "fehler": {},
+                 "uebersprungen": []}
+    fehlend = {s: sorted(set(p)) for s, p in (fehlend or {}).items() if p}
+    if not fehlend or not installieren:
+        erg["offen"] = fehlend
+        return erg
+    if not _sperre.acquire(blocking=False):
+        erg["fehler"]["*"] = "laeuft bereits"
+        return erg
+    gemerkt = _skill_zustand()
+    gescheitert = dict(gemerkt.get("gescheitert") or {})
+    try:
+        for skill, specs in sorted(fehlend.items()):
+            if gescheitert.get(skill, {}).get("specs") == specs:
+                erg["uebersprungen"].append(skill)
+                continue
+            vorher = installiert()
+            # ⚠ NEU NACHSEHEN, NICHT DER LISTE VON VORHIN GLAUBEN: zwei Skills
+            #   koennen dasselbe Paket brauchen (vision und ai_mouse beide
+            #   opencv, DEV 2026-10-27) – nach dem ersten fehlt es dem zweiten
+            #   nicht mehr, und ein leerer pip-Lauf meldete "nachinstalliert".
+            offen = [s for s in specs if _spec_name(s) not in vorher]
+            if not offen:
+                gescheitert.pop(skill, None)
+                continue
+            pc_vorher = _pip("check", timeout=120).returncode == 0
+            import tempfile
+            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as cf:
+                cf.write(_ist_stand_constraints(vorher))
+            try:
+                r = _pip("install", "-c", cf.name, *offen, timeout=1800)
+            finally:
+                os.unlink(cf.name)
+            nachher = installiert()
+            grund = ""
+            if r.returncode != 0:
+                grund = "pip install: " + (r.stderr or r.stdout or "").strip()[-300:]
+            else:
+                # ⚠ NUR EINE VERSCHLECHTERUNG ZAEHLT: meldet `pip check` schon
+                # vorher etwas, waere jede Installation ein Fehlschlag.
+                pc_ok = _pip("check", timeout=120).returncode == 0 or not pc_vorher
+                imp_ok, imp_txt = _import_test()
+                if not pc_ok:
+                    grund = "pip check nach der Installation fehlgeschlagen"
+                elif not imp_ok:
+                    grund = "Import-Test: " + imp_txt
+            if grund:
+                if nachher != vorher:
+                    erg.setdefault("zurueckgesetzt", {})[skill] = _zuruecksetzen(vorher, nachher)
+                erg["fehler"][skill] = grund
+                gescheitert[skill] = {"specs": specs, "grund": grund,
+                                      "zeit": time.strftime("%Y-%m-%dT%H:%M:%S")}
+            else:
+                erg["geaendert"][skill] = sorted(f"{n} {vorher.get(n, '-')} -> {v}"
+                                                 for n, v in nachher.items()
+                                                 if vorher.get(n) != v)
+                gescheitert.pop(skill, None)
+    except Exception as e:  # noqa: BLE001
+        erg["fehler"]["*"] = f"{type(e).__name__}: {e}"
+    finally:
+        _sperre.release()
+    _skill_zustand_schreiben({"zeit": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                              "gescheitert": gescheitert, "letzter_lauf": erg})
+    if erg["geaendert"] or erg["fehler"]:
+        _melden("abhaengigkeiten", ergebnis="skill_pakete",
+                geaendert={s: v[:20] for s, v in erg["geaendert"].items()},
+                fehler={s: g[:200] for s, g in erg["fehler"].items()})
+    return erg
 
 
 if __name__ == "__main__":

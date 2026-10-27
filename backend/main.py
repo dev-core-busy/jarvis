@@ -6227,6 +6227,37 @@ async def startup_abhaengigkeiten():
     """
     from backend import abhaengigkeiten as _abh
 
+    async def _skill_pakete():
+        """Fehlende pip-Pakete EINGESCHALTETER Skills nachziehen (ECHT 2026-10-27:
+        neue `dependencies` eines laengst aktiven Skills kamen nie an).
+        Regeln in abhaengigkeiten.skill_pakete_nachziehen."""
+        # Im Thread: ohne fertigen Agenten baut _get_skill_manager einen.
+        sm = await asyncio.to_thread(_get_skill_manager)
+        fehlend = await asyncio.to_thread(sm.fehlende_pip_aktiver_skills)
+        if not fehlend:
+            return
+        se = await asyncio.to_thread(_abh.skill_pakete_nachziehen, fehlend)
+        for skill, zeilen in (se.get("geaendert") or {}).items():
+            print(f"[Abhängigkeiten] Skill {skill}: nachinstalliert – {', '.join(zeilen)}",
+                  flush=True)
+            try:
+                # Wie der Reparatur-Knopf: Modul frisch laden, Werkzeuge neu.
+                await asyncio.to_thread(sm.loader.load_skill, skill, True)
+            except Exception as e:  # noqa: BLE001
+                print(f"[Abhängigkeiten] Skill {skill} nicht neu geladen: {e}", flush=True)
+        if se.get("geaendert"):
+            _reload_agent_tools()
+        for skill, grund in (se.get("fehler") or {}).items():
+            print(f"[Abhängigkeiten] Skill {skill}: Pakete NICHT installiert – {grund}",
+                  flush=True)
+        for skill in se.get("uebersprungen") or []:
+            print(f"[Abhängigkeiten] Skill {skill}: fehlende Pakete {fehlend.get(skill)} – "
+                  "voriger Versuch gescheitert, kein neuer (Reparatur-Knopf unter Skills)",
+                  flush=True)
+        if se.get("offen"):
+            print(f"[Abhängigkeiten] Skill-Pakete fehlen (Automatik aus): {se['offen']}",
+                  flush=True)
+
     async def _loop():
         await asyncio.sleep(90)
         while True:
@@ -6242,6 +6273,13 @@ async def startup_abhaengigkeiten():
                     from backend.update_manager import restart_service_delayed
                     restart_service_delayed(delay_sec=5.0,
                                             context="Python-Pakete nachgezogen (Sicherheit/requirements)")
+                else:
+                    # ⚠ NUR OHNE ANGESETZTEN NEUSTART: der kaeme nach 5 s und
+                    #   schoesse einen laufenden pip mitten in der Installation
+                    #   ab. Der naechste Start holt es dann nach. Und NACH
+                    #   `abgleichen`, nicht daneben: zwei pip-Laeufe in derselben
+                    #   venv gleichzeitig sind keine Option.
+                    await _skill_pakete()
             except Exception as e:  # noqa: BLE001
                 print(f"[Abhängigkeiten] Lauf fehlgeschlagen: {e}", flush=True)
             await asyncio.sleep(86400)
@@ -17782,7 +17820,24 @@ async def ai_mouse_areas_lesen(lang: str = "de",
         # Endpunkt beim Oeffnen ohnehin.
         "freigabe_pfad": ai_mouse.freigabe_pfad(),
         "max_pfad": ai_mouse.MAX_PFAD,
+        # ⚠ DIE VERSION DES PAKETS, NICHT DIE DES QUELLTEXTS: wer die Datei
+        #   auf die Freigabe legt, muss sehen, welchen Stand der Knopf
+        #   darunter liefert – und ob die Freigabe nach einem Versionswechsel
+        #   nachgezogen werden muss. "" heisst unbekannt.
+        "paket_version": ai_mouse.klient_version(),
+        "paket_gebaut": _ai_mouse_paket_gebaut(),
     })
+
+
+def _ai_mouse_paket_gebaut() -> str:
+    """Zeitstempel der ausgelieferten EXE als ISO-Text – "" ohne Datei."""
+    from datetime import datetime as _dt  # noqa: PLC0415
+    from backend import ai_mouse  # noqa: PLC0415
+    try:
+        st = ai_mouse.exe_pfad().stat()
+    except OSError:
+        return ""
+    return _dt.fromtimestamp(st.st_mtime).astimezone().isoformat(timespec="seconds")
 
 
 @app.post("/api/ai-mouse/admin/areas")

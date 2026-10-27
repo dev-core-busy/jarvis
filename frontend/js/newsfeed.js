@@ -21,6 +21,17 @@
    gemeinsam. Ein Zeitgeber, der einfach weiterliefe, liesse den Balken auf
    halber Strecke stehen und die Meldung trotzdem wechseln.
 
+   ⚠ ZWEI GRUENDE ZUM ANHALTEN, NICHT EINER. Maus/Fokus halten nur so lange
+   an, wie sie auf der Kachel sind; der Pause-Knopf haelt an, bis er wieder
+   gedrueckt wird. Laege beides auf EINEM Merker, liefe das Band nach einem
+   Klick auf „Pause" weiter, sobald die Maus die Kachel verlaesst.
+
+   VOR/ZURUECK nehmen denselben Rollschritt wie der Ablauf. Zurueck von der
+   ersten Meldung springt ohne Uebergang auf die Kopie hinter der letzten und
+   rollt von dort eine Stufe hoch – sonst liefe das Band sichtbar vorwaerts
+   durch alle Meldungen. Ein Klick mitten im Rollen schliesst den laufenden
+   Schritt ab und rollt ab dessen Ziel weiter.
+
    „Bewegung reduzieren" (prefers-reduced-motion): ueberblenden statt rollen.
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
@@ -89,6 +100,24 @@
         kopf.appendChild(kopfText);
         var zaehler = el('span', 'nf-zaehler');
         kopf.appendChild(zaehler);
+        // Ablauf-Steuerung nur, wo es etwas zu blaettern gibt.
+        var zurueckKnopf = null, pauseKnopf = null, vorKnopf = null;
+        function knopf(cls, symbol, ersatz, wirkung) {
+            var k = el('button', 'nf-knopf ' + cls);
+            k.type = 'button';
+            k.innerHTML = window.JarvisIcons ? window.JarvisIcons[symbol]() : ersatz;
+            k.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                wirkung();
+            });
+            kopf.appendChild(k);
+            return k;
+        }
+        if (n > 1) {
+            zurueckKnopf = knopf('nf-zurueck', 'prev', '\u2039', function () { springen(-1); });
+            pauseKnopf = knopf('nf-pause-knopf', 'pause', '\u2016', umschalten);
+            vorKnopf = knopf('nf-vor', 'next', '\u203a', function () { springen(1); });
+        }
         // Schliessen (×) nur, wo der Aufrufer weiss, was es bedeutet – im
         // Portal blendet es bis zur naechsten Neuigkeit aus, in der Vorschau
         // des Reiters gibt es nichts zu schliessen.
@@ -122,12 +151,23 @@
             var t = datum(erstellt), g = datum(geaendert);
             return (g && g !== t) ? t + ' \u00b7 ' + T('newsfeed.updated', 'aktualisiert') + ' ' + g : t;
         }
-        function zuTitel() {
-            if (!zu) return;
-            zu.title = T('newsfeed.hide', 'Ausblenden, bis es Neues gibt');
-            zu.setAttribute('aria-label', zu.title);
+        function beschriften(k, text) {
+            if (!k) return;
+            k.title = text;
+            k.setAttribute('aria-label', text);
         }
-        zuTitel();
+        function zuTitel() {
+            beschriften(zu, T('newsfeed.hide', 'Ausblenden, bis es Neues gibt'));
+            beschriften(zurueckKnopf, T('newsfeed.prev', 'Vorherige Meldung'));
+            beschriften(vorKnopf, T('newsfeed.next', 'Nächste Meldung'));
+            if (pauseKnopf) {
+                beschriften(pauseKnopf, fest ? T('newsfeed.play', 'Weiterlaufen lassen')
+                                             : T('newsfeed.pause', 'Anhalten'));
+                pauseKnopf.setAttribute('aria-pressed', fest ? 'true' : 'false');
+                if (window.JarvisIcons) pauseKnopf.innerHTML = fest ? window.JarvisIcons.play() : window.JarvisIcons.pause();
+                else pauseKnopf.textContent = fest ? '\u25b7' : '\u2016';
+            }
+        }
 
         var datumsFelder = [];
         function block(e, kopie) {
@@ -170,8 +210,10 @@
         }
         messen();
 
-        var idx = 0, zeitgeber = null, pausiert = false, gestoppt = false;
+        // pausiert = Maus/Fokus auf der Kachel, fest = Pause-Knopf (Kopf).
+        var idx = 0, zeitgeber = null, pausiert = false, fest = false, gestoppt = false;
         var startZeit = 0, rest = verweilMs;
+        zuTitel();
 
         function zaehlerSetzen() {
             zaehler.textContent = ((idx % n) + 1) + '/' + n;
@@ -192,7 +234,9 @@
             rest = dauer;
             zeitgeber = setTimeout(weiter, dauer);
         }
-        function weiter() {
+        function weiter() { schritt(1); }
+        // Ein Schritt um `richtung` (+1/-1) – fuer den Ablauf wie fuer die Knoepfe.
+        function schritt(richtung) {
             zeitgeber = null;
             // `startZeit` = 0 heisst: es laeuft gerade kein Verweilen, sondern
             // ein Rollschritt – den darf `anhalten` nicht abbrechen.
@@ -205,7 +249,7 @@
                 band.style.opacity = '0';
                 zeitgeber = setTimeout(function () {
                     if (gestoppt) return;
-                    idx = (idx + 1) % n;
+                    idx = (idx % n + richtung + n) % n;
                     band.style.transform = idx ? 'translateY(' + (-100 * idx / schritte) + '%)' : '';
                     band.style.opacity = '1';
                     zaehlerSetzen();
@@ -213,7 +257,13 @@
                 }, scrollMs / 2);
                 return;
             }
-            idx += 1;
+            if (richtung < 0 && idx === 0) {
+                // Von der ersten zurueck: erst ohne Uebergang auf die Kopie.
+                idx = n;
+                verschieben(idx, false);
+                void band.offsetWidth;   // Sprung festschreiben, bevor gerollt wird
+            }
+            idx += richtung;
             verschieben(idx, true);
             zaehlerSetzen();
             zeitgeber = setTimeout(function () {
@@ -226,16 +276,14 @@
         function naechsteRunde() {
             zeitgeber = null;
             if (gestoppt) return;
-            if (pausiert) { rest = verweilMs; balkenStarten(verweilMs); return; }
+            if (pausiert || fest) { rest = verweilMs; balkenStarten(verweilMs); return; }
             balkenStarten(verweilMs);
             verweilen(verweilMs);
         }
 
         // Anhalten nur WAEHREND des Verweilens: ein halber Rollschritt, der
         // stehen bleibt, zeigte zwei angeschnittene Meldungen.
-        function anhalten() {
-            if (pausiert || !bewegt) return;
-            pausiert = true;
+        function einfrieren() {
             wurzel.classList.add('nf-pause');
             if (zeitgeber && startZeit) {
                 // Nur ein laufendes VERWEILEN wird angehalten (startZeit gesetzt).
@@ -245,11 +293,39 @@
                 startZeit = 0;
             }
         }
+        function loslassen() {
+            if (pausiert || fest) return;   // der andere Grund haelt noch
+            wurzel.classList.remove('nf-pause');
+            if (!zeitgeber && !gestoppt) verweilen(rest);
+        }
+        function anhalten() {
+            if (pausiert || !bewegt) return;
+            pausiert = true;
+            einfrieren();
+        }
         function fortsetzen() {
             if (!pausiert) return;
             pausiert = false;
-            wurzel.classList.remove('nf-pause');
-            if (!zeitgeber && !gestoppt) verweilen(rest);
+            loslassen();
+        }
+        // Pause-Knopf: haelt an, bis er wieder gedrueckt wird.
+        function umschalten() {
+            if (gestoppt || !bewegt) return;
+            fest = !fest;
+            if (fest) einfrieren(); else loslassen();
+            zuTitel();
+        }
+        // Vor/Zurueck: ein laufender Zeitgeber (Verweilen ODER Rollschritt)
+        // wird abgebrochen; ein halb gerollter Schritt auf der Kopie wird erst
+        // auf die echte erste Meldung gesetzt. Danach beginnt die Verweilzeit
+        // neu – ist das Band angehalten, bleibt es auf der neuen Meldung stehen.
+        function springen(richtung) {
+            if (gestoppt || !bewegt) return;
+            if (zeitgeber) clearTimeout(zeitgeber);
+            zeitgeber = null;
+            startZeit = 0;
+            if (weich && idx >= n) { idx = 0; verschieben(0, false); void band.offsetWidth; }
+            schritt(richtung);
         }
         function sprache() {
             kopfText.textContent = T('newsfeed.title', 'Neuigkeiten');
@@ -289,7 +365,10 @@
                 window.removeEventListener('jarvis-lang-changed', sprache);
             },
             // Fuer Pruefstaende: der Index der gerade gezeigten Meldung.
-            index: function () { return idx % n; }
+            index: function () { return idx % n; },
+            vor: function () { springen(1); },
+            zurueck: function () { springen(-1); },
+            pause: umschalten
         };
     }
 

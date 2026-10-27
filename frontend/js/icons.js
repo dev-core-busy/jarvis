@@ -157,7 +157,28 @@
         '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>' +
         '<path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
 
+    // ABLAUF-STEUERUNG eines Laufbands (Newsfeed): zurueck, vor, anhalten,
+    // weiterlaufen. Sie loeschen nichts und schliessen nichts. Anhalten und
+    // Weiterlaufen sind ZWEI FORMEN (Balken/Dreieck) – der Zustand steht
+    // zusaetzlich in aria-pressed und im Tooltip des Knopfes.
+    var ZURUECK = '<svg class="jv-ico jv-ico-prev" ' + GEMEINSAM + '>' +
+        '<polyline points="15 18 9 12 15 6"/></svg>';
+    var VOR = '<svg class="jv-ico jv-ico-next" ' + GEMEINSAM + '>' +
+        '<polyline points="9 18 15 12 9 6"/></svg>';
+    var PAUSE = '<svg class="jv-ico jv-ico-pause" ' + GEMEINSAM + '>' +
+        '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+    var ABSPIELEN = '<svg class="jv-ico jv-ico-play" ' + GEMEINSAM + '>' +
+        '<polygon points="5 3 19 12 5 21 5 3"/></svg>';
+
     window.JarvisIcons = {
+        /** Winkel nach links – vorheriger Eintrag eines Laufbands. */
+        prev: function () { return ZURUECK; },
+        /** Winkel nach rechts – naechster Eintrag eines Laufbands. */
+        next: function () { return VOR; },
+        /** Zwei Balken – Ablauf anhalten. */
+        pause: function () { return PAUSE; },
+        /** Dreieck – Ablauf weiterlaufen lassen. */
+        play: function () { return ABSPIELEN; },
         /** Schloss – Zustand "beschraenkt/abgesichert", keine Aktion. */
         lock: function () { return SCHLOSS; },
         /** Muelleimer – NUR fuer dauerhaftes Loeschen/Entfernen. */

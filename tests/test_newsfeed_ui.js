@@ -24,6 +24,10 @@
  *  10. Admin-Reiter (echtes settings.html-Markup): deaktivierte Meldung ist
  *      gekennzeichnet, ohne Deaktivieren-Knopf, fehlt in der Vorschau und
  *      zaehlt nicht zu „im Portal sichtbar"; Deaktivieren ruft den Endpunkt.
+ *  11. Vor/Zurueck/Pause (echte Klicks): zurueck von der ersten ueber die
+ *      Kopie zur letzten, vor ab dem Ziel eines halben Rollschritts, Pause
+ *      haelt ueber das Verlassen der Maus hinweg, Weiter mit Restzeit; bei
+ *      einer Meldung keine Knoepfe; mit reduzierter Bewegung blaettern.
  *
  *   node tests/test_newsfeed_ui.js
  */
@@ -346,6 +350,90 @@ const zaehler = (w) => (w.document.querySelector('#w .nf-zaehler') || {}).textCo
         const d = w.document.querySelectorAll('#w .nf-datum');
         pruefe(d[0] && /01\.10\.2026.*aktualisiert 20\.10\.2026/.test(d[0].textContent), 'bearbeitet an anderem Tag: Zusatz „aktualisiert"', d[0] && d[0].textContent);
         pruefe(d[1] && !/aktualisiert/.test(d[1].textContent), 'am selben Tag bearbeitet: kein Zusatz', d[1] && d[1].textContent);
+    }
+
+    abschnitt('11. Vor/Zurueck/Pause');
+    {
+        const { w, vor } = fenster();
+        w.eval(lies('frontend/js/icons.js'));
+        const wurzel = w.document.getElementById('w');
+        const t = w.JarvisNewsfeed.ticker(wurzel, DREI, { verweil_s: 3, scroll_s: 0.8 });
+        const k = (cls) => wurzel.querySelector('.nf-kopf .' + cls);
+        // Positivkontrolle: die drei Knoepfe sind da.
+        if (!k('nf-zurueck') || !k('nf-pause-knopf') || !k('nf-vor')) {
+            console.log('ABBRUCH: Knoepfe fehlen'); process.exit(2);
+        }
+        pruefe(['nf-zurueck', 'nf-pause-knopf', 'nf-vor'].every((c) => k(c).type === 'button' && k(c).querySelector('svg')),
+               'drei Knoepfe mit Symbol aus icons.js');
+        pruefe(k('nf-zurueck').title === 'Vorherige Meldung' && k('nf-vor').title === 'Nächste Meldung'
+               && k('nf-pause-knopf').title === 'Anhalten' && k('nf-pause-knopf').getAttribute('aria-pressed') === 'false',
+               'Tooltips nennen die Wirkung', k('nf-pause-knopf').title);
+        // Zurueck von der ersten: ueber die Kopie zur letzten, nicht rueckwaerts durchs Band.
+        vor(1000);
+        k('nf-zurueck').click();
+        pruefe(band(w).style.transform === 'translateY(-50%)' && /transform 0\.8s/.test(band(w).style.transition),
+               'zurueck von 1: rollt zur letzten (Index 2)', band(w).style.transform);
+        pruefe(zaehler(w) === '3/3' && t.index() === 2, 'Zaehler 3/3', zaehler(w));
+        vor(800 + 2999);
+        pruefe(band(w).style.transform === 'translateY(-50%)', 'danach volle Verweilzeit (nicht der Rest der alten)');
+        vor(1);
+        pruefe(band(w).style.transform === 'translateY(-75%)', 'Ablauf geht von dort weiter (auf die Kopie)', band(w).style.transform);
+        // Vor mitten im Rollen auf die Kopie: Schritt abschliessen, dann weiter zu 2.
+        vor(400);
+        k('nf-vor').click();
+        pruefe(band(w).style.transform === 'translateY(-25%)' && zaehler(w) === '2/3',
+               'vor mitten im Rollen: von der ersten weiter zur zweiten', band(w).style.transform + ' ' + zaehler(w));
+        vor(800);
+        // Pause: haelt auch, wenn die Maus die Kachel verlaesst.
+        vor(1000);
+        k('nf-pause-knopf').click();
+        pruefe(wurzel.classList.contains('nf-pause') && k('nf-pause-knopf').getAttribute('aria-pressed') === 'true'
+               && k('nf-pause-knopf').title === 'Weiterlaufen lassen', 'Pause gedrueckt: angehalten, Knopf zeigt Weiter');
+        wurzel.dispatchEvent(new w.Event('mouseenter'));
+        wurzel.dispatchEvent(new w.Event('mouseleave'));
+        vor(20000);
+        pruefe(band(w).style.transform === 'translateY(-25%)' && wurzel.classList.contains('nf-pause'),
+               'Maus weg: bleibt trotzdem stehen', band(w).style.transform);
+        // Blaettern waehrend Pause: wechselt, bleibt aber stehen.
+        k('nf-vor').click();
+        vor(800 + 20000);
+        pruefe(band(w).style.transform === 'translateY(-50%)', 'vor waehrend Pause: Meldung 3, kein Weiterlaufen', band(w).style.transform);
+        // Weiter: volle Verweilzeit (nach dem Blaettern), dann Ablauf.
+        k('nf-pause-knopf').click();
+        pruefe(!wurzel.classList.contains('nf-pause') && k('nf-pause-knopf').getAttribute('aria-pressed') === 'false',
+               'Weiter gedrueckt: laeuft wieder');
+        vor(2999);
+        pruefe(band(w).style.transform === 'translateY(-50%)', 'Weiter: Verweilzeit laeuft');
+        vor(1);
+        pruefe(band(w).style.transform === 'translateY(-75%)', 'dann naechster Schritt', band(w).style.transform);
+        t.stoppen();
+    }
+    {
+        // Pause mit Restzeit: 1 s verweilt, Pause, Weiter -> noch 2 s.
+        const { w, vor } = fenster();
+        const wurzel = w.document.getElementById('w');
+        const t = w.JarvisNewsfeed.ticker(wurzel, DREI, { verweil_s: 3, scroll_s: 0.8 });
+        vor(1000);
+        t.pause(); vor(10000); t.pause();
+        vor(1999);
+        pruefe(band(w).style.transform === '', 'Pause/Weiter: Rest 2 s noch nicht um');
+        vor(1);
+        pruefe(band(w).style.transform === 'translateY(-25%)', 'Pause/Weiter: Wechsel nach Restzeit', band(w).style.transform);
+        t.stoppen();
+    }
+    {
+        const { w } = fenster();
+        w.JarvisNewsfeed.ticker(w.document.getElementById('w'), DREI.slice(0, 1), {});
+        pruefe(!w.document.querySelector('#w .nf-knopf'), 'eine Meldung: keine Ablauf-Knoepfe');
+    }
+    {
+        const { w, vor } = fenster({ ruhig: true });
+        const wurzel = w.document.getElementById('w');
+        w.JarvisNewsfeed.ticker(wurzel, DREI, { verweil_s: 3, scroll_s: 0.8 });
+        wurzel.querySelector('.nf-zurueck').click();
+        vor(400);
+        pruefe(band(w).style.opacity === '1' && band(w).style.transform === 'translateY(-66.66666666666667%)' && zaehler(w) === '3/3',
+               'reduzierte Bewegung: zurueck blendet die letzte ein', band(w).style.transform);
     }
 
     abschnitt('10. Admin-Reiter');

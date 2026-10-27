@@ -78,6 +78,27 @@
 .nf-zu svg { width: 14px; height: 14px; }
 .nf-zu:hover, .nf-zu:focus-visible { background: rgba(var(--fg-rgb), .10); color: var(--text-primary); outline: none; }
 .nf-zu:disabled { opacity: .5; cursor: default; }
+/* Ablauf-Steuerung (zurueck, Pause, vor): dieselbe ruhige Form wie das ×.
+   Der Zustand des Pause-Knopfs steckt im Symbol (Balken/Dreieck), nicht in
+   einer Farbe. */
+.nf-knopf {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px; height: 24px;
+    margin: -4px -2px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.nf-knopf svg { width: 14px; height: 14px; }
+.nf-knopf:hover, .nf-knopf:focus-visible { background: rgba(var(--fg-rgb), .10); color: var(--text-primary); outline: none; }
+/* Vom Pause-Knopf angehalten: der Knopf bleibt hervorgehoben, solange er gilt. */
+.nf-knopf[aria-pressed="true"] { color: var(--text-primary); }
 /* Fehlschlag: Farbe UND Tooltip-Text (Farbe allein ist keine Information). */
 .nf-zu.nf-zu-fehler { color: var(--warning); }
 

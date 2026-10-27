@@ -4,6 +4,8 @@ Vollständiges Verzeichnis der Fremdkomponenten in Jarvis, gruppiert nach Lizenz
 
 **Stand:** 2026-07-31 · **Erhoben auf:** DEV (10.0.0.1), Python 3.13.5, Node 20, Go 1.24.4
 
+**Nachtrag 2026-10-27:** die 20 Python-Pakete der AI-Maus-Anonymisierung (Skill `ai_mouse`, festgelegt in `skills/ai_mouse/requirements.lock`) – Lizenzen aus den Paket-Metadaten auf DEV, Versionen wie auf ECHT. Der übrige Bestand ist der vom 2026-07-31.
+
 ---
 
 ## 1. Wie diese Liste entstanden ist – und was sie nicht leistet
@@ -394,9 +396,9 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 
 ---
 
-## 9. Python – Backend, Skills, Wissenssuche (171 Distributionen)
+## 9. Python – Backend, Skills, Wissenssuche (191 Distributionen)
 
-### MIT (62)
+### MIT (78)
 
 | Paket | Version | Rolle |
 |---|---|---|
@@ -408,9 +410,14 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `attrs` | 25.4.0 | transitiv |
 | `backoff` | 2.2.1 | transitiv |
 | `build` | 1.4.0 | transitiv |
+| `catalogue` | 2.0.10 | transitiv |
 | `cffi` | 2.0.0 | transitiv |
 | `charset-normalizer` | 3.4.4 | transitiv |
+| `cloudpathlib` | 0.26.0 | transitiv |
+| `confection` | 1.3.4 | transitiv |
 | `ctranslate2` | 4.7.1 | transitiv |
+| `cymem` | 2.0.16 | transitiv |
+| `de_core_news_md` | 3.8.0 | Skill `ai_mouse` (Sprachmodell) |
 | `docstring_parser` | 0.17.0 | transitiv |
 | `durationpy` | 0.10 | transitiv |
 | `et_xmlfile` | 2.0.0 | transitiv |
@@ -430,6 +437,7 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `mcp` | 1.25.0 | Kern |
 | `mdurl` | 0.1.2 | transitiv |
 | `mmh3` | 5.2.1 | transitiv |
+| `murmurhash` | 1.0.16 | transitiv |
 | `onnxruntime` | 1.24.2 | transitiv |
 | `openpyxl` | 3.1.5 | Kern, Skill `office` |
 | `pdf2image` | 1.17.0 | Kern |
@@ -437,6 +445,8 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `pdfplumber` | 0.11.9 | Kern, Skill `knowledge` |
 | `pip` | 25.1.1 | transitiv |
 | `posthog` | 7.9.12 | transitiv |
+| `preshed` | 3.0.13 | transitiv |
+| `presidio_analyzer` | 2.2.365 | Skill `ai_mouse` |
 | `pydantic` | 2.12.5 | transitiv |
 | `pydantic-settings` | 2.13.1 | transitiv |
 | `pydantic_core` | 2.41.5 | transitiv |
@@ -453,17 +463,25 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `rpds-py` | 0.30.0 | transitiv |
 | `setuptools` | 74.1.3 | Skill `vision` |
 | `six` | 1.17.0 | Kern |
+| `smart_open` | 8.0.4 | transitiv |
+| `spacy` | 3.8.18 | Skill `ai_mouse` |
+| `spacy-legacy` | 3.0.12 | transitiv |
+| `spacy-loggers` | 1.0.5 | transitiv |
+| `srsly` | 2.5.5 | transitiv |
 | `tabulate` | 0.10.0 | transitiv |
+| `thinc` | 8.3.14 | transitiv |
 | `typer` | 0.24.1 | transitiv |
 | `typer-slim` | 0.24.0 | transitiv |
 | `typing-inspection` | 0.4.2 | transitiv |
 | `tzlocal` | 5.3.1 | transitiv |
 | `urllib3` | 2.6.3 | transitiv |
+| `wasabi` | 1.1.3 | transitiv |
 | `watchfiles` | 1.1.1 | transitiv |
+| `weasel` | 1.0.1 | transitiv |
 | `WsgiDAV` | 4.3.3 | Kern |
 | `zipp` | 3.23.0 | transitiv |
 
-### Apache-2.0 (47)
+### Apache-2.0 (49)
 
 | Paket | Version | Rolle |
 |---|---|---|
@@ -488,7 +506,7 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `json5` | 0.13.0 | transitiv |
 | `kubernetes` | 35.0.0 | transitiv |
 | `multidict` | 6.7.1 | transitiv |
-| `opencv-python-headless` | 4.13.0.92 | Skill `vision` |
+| `opencv-python-headless` | 4.13.0.92 | Skill `vision`, Skill `ai_mouse` |
 | `opentelemetry-api` | 1.40.0 | transitiv |
 | `opentelemetry-exporter-otlp-proto-common` | 1.40.0 | transitiv |
 | `opentelemetry-exporter-otlp-proto-grpc` | 1.40.0 | transitiv |
@@ -500,12 +518,14 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `opentelemetry-semantic-conventions` | 0.61b0 | transitiv |
 | `opentelemetry-util-http` | 0.61b0 | transitiv |
 | `overrides` | 7.7.0 | transitiv |
+| `phonenumbers` | 9.0.42 | transitiv |
 | `propcache` | 0.4.1 | transitiv |
 | `proto-plus` | 1.27.1 | transitiv |
 | `PyPika` | 0.51.1 | transitiv |
 | `pytesseract` | 0.3.13 | Kern |
 | `python-multipart` | 0.0.20 | Kern |
 | `requests` | 2.32.5 | transitiv |
+| `requests-file` | 3.0.1 | transitiv |
 | `safetensors` | 0.7.0 | transitiv |
 | `sentence-transformers` | 3.4.1 | Kern |
 | `tenacity` | 9.1.4 | transitiv |
@@ -515,11 +535,12 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `websocket-client` | 1.9.0 | transitiv |
 | `yarl` | 1.23.0 | transitiv |
 
-### BSD (19)
+### BSD (20)
 
 | Paket | Version | Rolle |
 |---|---|---|
 | `asgiref` | 3.11.1 | transitiv |
+| `blis` | 1.3.4 | transitiv |
 | `httpx` | 0.28.1 | Skill `whatsapp` |
 | `Jinja2` | 3.1.6 | transitiv |
 | `mpmath` | 1.3.0 | transitiv |
@@ -539,7 +560,7 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `wrapt` | 1.17.3 | transitiv |
 | `xlsxwriter` | 3.2.9 | transitiv |
 
-### BSD-3-Clause (17)
+### BSD-3-Clause (18)
 
 | Paket | Version | Rolle |
 |---|---|---|
@@ -559,6 +580,7 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `pypdf` | 6.11.0 | transitiv |
 | `scikit-learn` | 1.8.0 | transitiv |
 | `sse-starlette` | 3.0.3 | Kern |
+| `tldextract` | 5.4.0 | transitiv |
 | `torch` | 2.10.0+cpu | transitiv |
 
 ### LGPL-3.0 (3)

@@ -293,22 +293,39 @@ class SkillManager:
 
             if missing_pip:
                 log.append(f"Installiere Python-Pakete: {', '.join(missing_pip)} …")
+                tmp_lock = ""
                 try:
-                    proc = subprocess.Popen(
-                        [sys.executable, "-m", "pip", "install", *missing_pip],
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                    )
-                    for line in proc.stdout:
-                        line = line.rstrip()
-                        if line:
-                            log.append(line)
-                    proc.wait(timeout=1800)
-                    if proc.returncode != 0:
-                        log.append(f"pip install fehlgeschlagen (rc={proc.returncode})")
-                        ok = False
+                    # Mit Skill-Lock nur die fehlenden Eintraege daraus, mit
+                    # Hash-Pflicht und ohne Aufloesung (abhaengigkeiten.py).
+                    from backend import abhaengigkeiten as _abh
+                    aufruf, tmp_lock = _abh.skill_pip_aufruf(
+                        name, missing_pip, _abh.installiert())
+                    if tmp_lock:
+                        log.append("… aus der Skill-Lock (geprueft per Hash)")
+                    if not aufruf:
+                        log.append("Laut Skill-Lock ist nichts mehr zu installieren.")
+                    else:
+                        proc = subprocess.Popen(
+                            [sys.executable, "-m", "pip", *aufruf],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                        )
+                        for line in proc.stdout:
+                            line = line.rstrip()
+                            if line:
+                                log.append(line)
+                        proc.wait(timeout=1800)
+                        if proc.returncode != 0:
+                            log.append(f"pip install fehlgeschlagen (rc={proc.returncode})")
+                            ok = False
                 except Exception as e:  # noqa: BLE001
                     log.append(f"pip install Fehler: {e}")
                     ok = False
+                finally:
+                    if tmp_lock:
+                        try:
+                            os.unlink(tmp_lock)
+                        except OSError:
+                            pass
 
             for cmd in pending_cmds:
                 argv = cmd.get("cmd") or []

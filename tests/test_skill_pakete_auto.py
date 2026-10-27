@@ -78,6 +78,9 @@ except Exception as e:  # noqa: BLE001
 SK = Path(tempfile.mkdtemp(prefix="jv_skp_"))
 A.ZUSTAND = SK / "abh.json"
 A.SKILL_ZUSTAND = SK / "skill_pakete.json"
+# Eigener Skill-Baum: der echte traegt skills/ai_mouse/requirements.lock, und die
+# Abschnitte 1a-1f messen den Weg OHNE Skill-Lock.
+A.SKILLS = SK / "skills"
 A._melden = lambda art, **d: None
 
 
@@ -223,6 +226,62 @@ finally:
     if A._sperre.locked():
         A._sperre.release()
 check("Sperre belegt: kein pip install", not any(x[0] == "install" for x in aufrufe), aufrufe)
+
+print("\n── 1g. Mit Skill-Lock: nur Fehlendes, mit Hash-Pflicht, ohne Aufloesung")
+LOCK_TEXT = """# Kopf
+numpy==2.0.2 \\
+    --hash=sha256:aaa \\
+    --hash=sha256:bbb
+    # via -c kern.txt
+spacy==3.8.18 \\
+    --hash=sha256:ccc
+    # via
+    #   skill.json
+de-core-news-md @ https://beispiel.de/m.whl#sha256=ddd \\
+    --hash=sha256:ddd
+    # via skill.json
+"""
+(A.SKILLS / "mitlock").mkdir(parents=True, exist_ok=True)
+(A.SKILLS / "mitlock" / "requirements.lock").write_text(LOCK_TEXT)
+bl = A.lock_bloecke(LOCK_TEXT)
+check("Positivkontrolle: drei Eintraege gelesen (auch 'name @ url')",
+      sorted(bl) == ["de-core-news-md", "numpy", "spacy"], sorted(bl))
+check("…ein Eintrag traegt ALLE seine Hashes, keine Kommentare",
+      bl.get("numpy", "").count("--hash=") == 2 and "#" not in bl.get("numpy", "").replace(
+          "--hash=sha256", ""), bl.get("numpy"))
+gelesen = {}
+
+
+def pip_lock(*args, timeout=900):
+    aufrufe.append(args)
+    if args[0] == "check":
+        return R(0)
+    if args[0] == "install" and "-r" in args:
+        gelesen["text"] = Path(args[args.index("-r") + 1]).read_text()
+        stand["inst"].update({"spacy": "3.8.18", "de-core-news-md": "3.8.0"})
+    return R(0)
+
+
+neu_lauf(BASIS, {})
+A._pip = pip_lock
+erg = A.skill_pakete_nachziehen({"mitlock": ["spacy==3.8.18"]}, installieren=True)
+A._pip = pip_attrappe
+inst_aufrufe = [x for x in aufrufe if x[0] == "install"]
+check("Positivkontrolle: ein pip install lief", len(inst_aufrufe) == 1, aufrufe)
+erster = inst_aufrufe[0] if inst_aufrufe else ()
+check("…mit --require-hashes und --no-deps", "--require-hashes" in erster
+      and "--no-deps" in erster, erster)
+check("…ohne Constraints (keine Aufloesung)", "-c" not in erster, erster)
+check("…nur die FEHLENDEN Eintraege (spacy, Modell), nicht numpy",
+      "spacy==3.8.18" in gelesen.get("text", "") and "de-core-news-md" in gelesen.get("text", "")
+      and "numpy" not in gelesen.get("text", ""), gelesen.get("text"))
+check("…samt Hash", "--hash=sha256:ccc" in gelesen.get("text", ""), gelesen.get("text"))
+check("…Aenderung gemeldet", bool(erg["geaendert"].get("mitlock")), erg)
+args, tmp = A.skill_pip_aufruf("ohnelock", ["x==1"], {})
+check("ohne Skill-Lock: bisheriger Aufruf", args == ["install", "x==1"] and tmp == "", args)
+args, tmp = A.skill_pip_aufruf("mitlock", ["spacy==3.8.18"],
+                               {"numpy": "2.0.2", "spacy": "3.8.18", "de-core-news-md": "3.8.0"})
+check("mit Skill-Lock und nichts fehlt: kein Aufruf", args == [] and tmp == "", args)
 
 print("\n── 2. Welche Skills zaehlen")
 

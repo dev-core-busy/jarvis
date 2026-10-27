@@ -505,6 +505,63 @@ def zustand() -> dict:
 # Nur pip: Systempakete laufen ueber `shell_root`, und das wartet im Broker
 # IMMER auf eine Freigabe – eine Automatik erzeugte dort nur Eintraege.
 SKILL_ZUSTAND = ZUSTAND.with_name("skill_pakete.json")
+SKILLS = WURZEL / "skills"
+
+
+# ── Skill-Lock (skills/<name>/requirements.lock) ────────────────────────────
+#
+# ⚠ WOZU (BSI-Abgleich 2026-10-27): die Manifest-`dependencies` nennen nur
+# Versionen, keine Pruefsummen – die Kernpakete installiert die Lock dagegen mit
+# `--require-hashes`. Liegt eine Skill-Lock vor (erzeugt mit
+# `deploy/lock_erneuern.py --skill NAME`, Kern-Lock als Constraint), wird aus
+# ihr nur installiert, was FEHLT: `--no-deps`, weil der Baum darin schon
+# vollstaendig aufgeloest ist, und `--require-hashes`, damit pip nur genau die
+# geprueften Dateien annimmt. Ein Kernpaket kann so nicht bewegt werden.
+
+def skill_lock(skill: str) -> Path | None:
+    p = SKILLS / skill / "requirements.lock"
+    return p if p.is_file() else None
+
+
+def lock_bloecke(text: str) -> dict[str, str]:
+    """Normierter Name -> Eintrag samt Hash-Zeilen (ohne die `# via`-Kommentare)."""
+    bloecke: dict[str, list[str]] = {}
+    aktuell = None
+    for zeile in text.splitlines():
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", zeile)
+        if m:
+            aktuell = _norm(m.group(1))
+            bloecke[aktuell] = [zeile]
+        elif aktuell and zeile.strip().startswith("--hash="):
+            bloecke[aktuell].append(zeile)
+        elif not zeile.strip().startswith("#") and zeile.strip():
+            aktuell = None
+    return {n: "\n".join(z) for n, z in bloecke.items()}
+
+
+def lock_fehlend(lock: Path, inst: dict[str, str]) -> list[str]:
+    """Eintraege der Skill-Lock, deren Paket nicht installiert ist."""
+    return [b for n, b in lock_bloecke(lock.read_text(encoding="utf-8")).items()
+            if n not in inst]
+
+
+def skill_pip_aufruf(skill: str, specs: list[str], inst: dict[str, str]) -> tuple[list, str]:
+    """pip-Argumente fuer die Installation eines Skills und die Temp-Datei dazu.
+
+    Mit Skill-Lock: ``install --no-deps --require-hashes -r <fehlende Eintraege>``;
+    leere Liste, wenn nichts fehlt. Ohne: ``install <specs>`` (bisheriger Weg).
+    Die Temp-Datei raeumt der Aufrufer ab ("" = keine).
+    """
+    lock = skill_lock(skill)
+    if lock is None:
+        return ["install", *specs], ""
+    offen = lock_fehlend(lock, inst)
+    if not offen:
+        return [], ""
+    import tempfile  # noqa: PLC0415
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as tf:
+        tf.write("\n".join(offen) + "\n")
+    return ["install", "--no-deps", "--require-hashes", "-r", tf.name], tf.name
 
 
 def _skill_zustand() -> dict:
@@ -561,6 +618,13 @@ def skill_pakete_nachziehen(fehlend: dict[str, list[str]],
     if not _sperre.acquire(blocking=False):
         erg["fehler"]["*"] = "laeuft bereits"
         return erg
+    import hashlib  # noqa: PLC0415
+    for skill in list(fehlend):
+        # Eine geaenderte Skill-Lock ist ein neuer Satz (Gedaechtnis unten).
+        lk = skill_lock(skill)
+        if lk is not None:
+            fehlend[skill] = fehlend[skill] + [
+                "lock:" + hashlib.sha256(lk.read_bytes()).hexdigest()[:16]]
     gemerkt = _skill_zustand()
     gescheitert = dict(gemerkt.get("gescheitert") or {})
     try:
@@ -573,8 +637,13 @@ def skill_pakete_nachziehen(fehlend: dict[str, list[str]],
             #   koennen dasselbe Paket brauchen (vision und ai_mouse beide
             #   opencv, DEV 2026-10-27) – nach dem ersten fehlt es dem zweiten
             #   nicht mehr, und ein leerer pip-Lauf meldete "nachinstalliert".
-            offen = [s for s in specs if _spec_name(s) not in vorher]
+            offen = [s for s in specs
+                     if not s.startswith("lock:") and _spec_name(s) not in vorher]
             if not offen:
+                gescheitert.pop(skill, None)
+                continue
+            aufruf, tmp_lock = skill_pip_aufruf(skill, offen, vorher)
+            if not aufruf:
                 gescheitert.pop(skill, None)
                 continue
             pc_vorher = _pip("check", timeout=120).returncode == 0
@@ -582,9 +651,15 @@ def skill_pakete_nachziehen(fehlend: dict[str, list[str]],
             with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as cf:
                 cf.write(_ist_stand_constraints(vorher))
             try:
-                r = _pip("install", "-c", cf.name, *offen, timeout=1800)
+                if tmp_lock:
+                    # Skill-Lock: ohne Aufloesung, also auch ohne Constraints.
+                    r = _pip(*aufruf, timeout=1800)
+                else:
+                    r = _pip("install", "-c", cf.name, *offen, timeout=1800)
             finally:
                 os.unlink(cf.name)
+                if tmp_lock:
+                    os.unlink(tmp_lock)
             nachher = installiert()
             grund = ""
             if r.returncode != 0:

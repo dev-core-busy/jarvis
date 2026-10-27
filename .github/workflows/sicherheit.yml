@@ -113,6 +113,26 @@ jobs:
         if: always()
         run: werkzeug/bin/cyclonedx-py environment venv --output-format JSON --output-file sbom-python.cdx.json
 
+      # Skill-Locks (skills/*/requirements.lock, seit 2026-10-27, BSI-Abgleich der
+      # AI-Maus-Pakete): diese Pakete installiert der Server beim Einschalten bzw.
+      # beim Start nach – Audit und SBOM oben sehen nur die Kern-Lock. ERST NACH
+      # deren SBOM, damit die genau den Kern-Stand zeigt; die Skill-SBOM ist eine
+      # eigene Datei. --no-deps wie auf dem Server: der Baum steht vollstaendig in
+      # der Lock, und Kernpakete stehen dort mit derselben Version
+      # (tests/test_skill_lock.py), die Installation bewegt also keines.
+      - name: Skill-Locks – Installation, pip-audit, SBOM
+        if: always()
+        run: |
+          for f in skills/*/requirements.lock; do
+            echo "== $f"
+            venv/bin/pip install -q --require-hashes --no-deps -r "$f"
+          done
+          venv/bin/pip check
+          ARGS=$(python3 deploy/security/pip_audit_ausnahmen.py --argumente)
+          werkzeug/bin/pip-audit --progress-spinner off \
+            --path "$(ls -d venv/lib/python3*/site-packages)" $ARGS
+          werkzeug/bin/cyclonedx-py environment venv --output-format JSON --output-file sbom-python-skills.cdx.json
+
       # ⚠ OHNE PAKETNAMEN - die Fassungen stehen in package.json und sind dort
       # FESTGENAGELT (keine ^-Spanne). Vorher stand hier "jsdom acorn", also
       # bei JEDEM Lauf die jeweils aktuelle Fassung, waehrend der Arbeitsplatz
@@ -140,7 +160,9 @@ jobs:
         if: always()
         with:
           name: sbom-python
-          path: sbom-python.cdx.json
+          path: |
+            sbom-python.cdx.json
+            sbom-python-skills.cdx.json
           if-no-files-found: warn
 
   # ── Node: npm audit + SBOM der WhatsApp-Bridge ──────────────────────────────

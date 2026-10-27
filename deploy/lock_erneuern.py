@@ -30,9 +30,18 @@ Lauf:  python3 deploy/lock_erneuern.py            # schreibt requirements.lock
        python3 deploy/lock_erneuern.py --vorlieben freeze.txt   # Vorlieben aus pip freeze
        python3 deploy/lock_erneuern.py --neueste  # ohne Vorlieben (alles so neu wie erlaubt)
        python3 deploy/lock_erneuern.py --pruefen  # Exit 1, wenn die Lock veraltet ist
+       python3 deploy/lock_erneuern.py --skill ai_mouse [--pruefen]   # Skill-Lock, s. u.
 uv:    UV=/pfad/zu/uv (sonst "uv" aus PATH), Fassung UV_FASSUNG – andere Fassungen
        brechen ab, damit derselbe Eingang dieselbe Datei ergibt.
 Exit 0 = ok, 1 = veraltet (--pruefen), 2 = konnte nicht laufen
+
+SKILL-LOCK (2026-10-27, BSI-Abgleich der AI-Maus-Pakete): `--skill NAME` schreibt
+``skills/NAME/requirements.lock`` aus den `dependencies` des Manifests – exakte
+Versionen MIT Hashes fuer den ganzen Abhaengigkeitsbaum. Die Kern-Lock ist dabei
+CONSTRAINT: jedes Paket, das auch dort steht, bekommt dieselbe Version. Damit
+installiert der Server aus der Skill-Lock nur, was FEHLT (``--no-deps
+--require-hashes``), und ein Kernpaket wird nie bewegt. Die CI prueft die
+Skill-Locks mit pip-audit und legt eine eigene SBOM an.
 """
 import os
 import re
@@ -128,7 +137,86 @@ def erzeugen(ziel: Path, vorlieben: str | None) -> None:
     ziel.write_text(kopf + inhalt, encoding="utf-8")
 
 
+def skill_erzeugen(skill: str, ziel: Path, vorlieben: str | None) -> None:
+    """Skill-Lock: Manifest-`dependencies`, Kern-Lock als Constraint."""
+    import json  # noqa: PLC0415
+    manifest = WURZEL / "skills" / skill / "skill.json"
+    if not manifest.is_file():
+        abbruch(f"{manifest} fehlt")
+    deps = json.loads(manifest.read_text(encoding="utf-8")).get("dependencies") or []
+    if not deps:
+        abbruch(f"Skill {skill} deklariert keine dependencies")
+    if not LOCK.is_file():
+        abbruch(f"{LOCK} fehlt – die Kern-Lock ist der Constraint der Skill-Lock")
+    uv = uv_pfad()
+    befehl = f"{BEFEHL} --skill {skill}"
+    ziel.write_text(vorlieben or "", encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        ein = Path(tmp) / "skill.in"
+        ein.write_text("\n".join(deps) + "\n", encoding="utf-8")
+        # ⚠ Constraint OHNE Hashes: uv verlangt sie dort nicht, und mit ihnen
+        #   wuerden die Hashes der Kern-Lock zur Bedingung fuer die Aufloesung.
+        con = Path(tmp) / "kern.txt"
+        con.write_text("".join(f"{n}=={v}\n" for n, v in _lock_versionen().items()),
+                       encoding="utf-8")
+        r = subprocess.run(
+            [uv, "pip", "compile", str(ein), "--constraint", str(con),
+             "--generate-hashes", "--quiet",
+             "--extra-index-url", TORCH_INDEX, "--index-strategy", "unsafe-best-match",
+             "--python-version", PYTHON, "--python-platform", PLATTFORM,
+             "--custom-compile-command", befehl, "--no-header", "-o", str(ziel)],
+            capture_output=True, text=True, cwd=tmp, env=dict(os.environ, UV_NO_CACHE="0"))
+        if r.returncode != 0:
+            abbruch("uv pip compile: " + (r.stderr or r.stdout).strip()[-800:])
+    kopf = (
+        f"# ERZEUGT von {befehl} – NICHT von Hand bearbeiten.\n"
+        f"# Quelle: dependencies in skills/{skill}/skill.json, Kern-Lock als Constraint.\n"
+        f"# uv {UV_FASSUNG}, Python {PYTHON}, {PLATTFORM}. Der Server installiert daraus nur\n"
+        "# FEHLENDE Pakete (pip install --no-deps --require-hashes); Kernpakete stehen hier\n"
+        "# mit derselben Version wie in requirements.lock und bleiben unberuehrt.\n")
+    inhalt = ziel.read_text(encoding="utf-8").replace(str(Path(tempfile.gettempdir())), "")
+    # uv nennt die Eingabedatei als "-r <tmp>/skill.in"; der Pfad wechselt je Lauf
+    inhalt = re.sub(r"(# via )?-r \S*skill\.in", r"\1skill.json", inhalt)
+    ziel.write_text(kopf + inhalt, encoding="utf-8")
+
+
+def _lock_versionen() -> dict:
+    erg = {}
+    for z in LOCK.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+)", z)
+        if m:
+            erg[m.group(1)] = m.group(2)
+    return erg
+
+
+def skill_main(args: list) -> int:
+    i = args.index("--skill")
+    if i + 1 >= len(args) or args[i + 1].startswith("-"):
+        abbruch("--skill braucht den Namen des Skill-Ordners")
+    skill = args[i + 1]
+    if not re.fullmatch(r"[a-z0-9_]+", skill):
+        abbruch(f"ungueltiger Skill-Name: {skill}")
+    ziel = WURZEL / "skills" / skill / "requirements.lock"
+    bestehend = ziel.read_text(encoding="utf-8") if ziel.is_file() else None
+    if "--pruefen" in args:
+        with tempfile.TemporaryDirectory() as tmp:
+            neu = Path(tmp) / "requirements.lock"
+            skill_erzeugen(skill, neu, bestehend)
+            if bestehend is None or neu.read_text(encoding="utf-8") != bestehend:
+                print(f"{ziel.relative_to(WURZEL)} ist VERALTET – neu erzeugen: "
+                      f"{BEFEHL} --skill {skill}")
+                return 1
+        print(f"{ziel.relative_to(WURZEL)} passt zu skill.json und requirements.lock")
+        return 0
+    skill_erzeugen(skill, ziel, None if "--neueste" in args else bestehend)
+    n = sum(1 for z in ziel.read_text(encoding="utf-8").splitlines() if re.match(r"^[A-Za-z0-9]", z))
+    print(f"{ziel.relative_to(WURZEL)} geschrieben: {n} Pakete")
+    return 0
+
+
 def main() -> int:
+    if "--skill" in sys.argv[1:]:
+        return skill_main(sys.argv[1:])
     if not REQ.is_file():
         abbruch(f"{REQ} fehlt")
     args = sys.argv[1:]

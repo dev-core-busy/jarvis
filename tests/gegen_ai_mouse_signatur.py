@@ -181,8 +181,10 @@ PROBEN: list[tuple[str, str, str, str]] = [
      "    if False:"),
     ("Zustand gibt das Kennwort heraus",
      "backend/ai_mouse_signatur.py",
-     '        "werkzeug_hinweis": werkzeug_hinweis(),',
-     '        "werkzeug_hinweis": werkzeug_hinweis(),\n        "pw_enc": d.get("pw_enc", ""),'),
+     # Anker seit 2026-10-27: der Zustand nennt das Werkzeug des GELTENDEN
+     # Weges (PFX oder Key Vault) ueber eine Variable.
+     '        "werkzeug_hinweis": hinweis,',
+     '        "werkzeug_hinweis": hinweis,\n        "pw_enc": d.get("pw_enc", ""),'),
     ("Sperrliste: PFX aus _APP_DENY_REL",
      "backend/sandbox.py",
      '    "data/ai_mouse_signatur.json", "data/.aimousesignkey",\n    "data/.aimouse_sign.pfx",',

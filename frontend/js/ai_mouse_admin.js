@@ -78,6 +78,12 @@
             if (sgSave) { sgSave.addEventListener('click', this.saveSignatur.bind(this)); }
             var sgDel = $('amsign-del');
             if (sgDel) { sgDel.addEventListener('click', this.delSignatur.bind(this)); }
+            var kvDel = $('amsign-kv-del');
+            if (kvDel) { kvDel.addEventListener('click', this.delKeyvault.bind(this)); }
+            var wege = document.querySelectorAll('input[name="amsign-weg"]');
+            for (var i = 0; i < wege.length; i++) {
+                wege[i].addEventListener('change', function () { Admin.wegZeigen(Admin._wegGewaehlt()); });
+            }
             window.addEventListener('jarvis-lang-changed', function () {
                 // Nur nachladen, wenn der Reiter überhaupt schon einmal
                 // gefüllt wurde – sonst holt ein Sprachwechsel auf einer
@@ -257,6 +263,26 @@
                 });
         },
 
+        /** Gewaehlter Signierweg im Formular ('pfx' | 'keyvault'). */
+        _wegGewaehlt: function () {
+            var kv = $('amsign-weg-kv');
+            return kv && kv.checked ? 'keyvault' : 'pfx';
+        },
+
+        /** Felder und Entfernen-Knopf des gewaehlten Weges zeigen. Wirksam
+         *  wird der Weg erst beim Speichern. */
+        wegZeigen: function (weg) {
+            var kv = weg === 'keyvault';
+            var r = $(kv ? 'amsign-weg-kv' : 'amsign-weg-pfx');
+            if (r) { r.checked = true; }
+            var pfxBox = $('amsign-pfx-box'), kvBox = $('amsign-kv-box');
+            if (pfxBox) { pfxBox.hidden = kv; }
+            if (kvBox) { kvBox.hidden = !kv; }
+            var del = $('amsign-del'), kvDel = $('amsign-kv-del');
+            if (del) { del.hidden = kv; }
+            if (kvDel) { kvDel.hidden = !kv; }
+        },
+
         /** Der Zustand in Worten. Farbe ist hier die zweite Ebene, nicht die
          *  Aussage – dieselbe Regel wie bei den Anwesenheits-Pillen. */
         renderSignatur: function (d) {
@@ -266,15 +292,43 @@
                 tsa.value = d.tsa || '';
                 tsa.placeholder = d.tsa_standard || 'http://timestamp.digicert.com';
             }
+            // Key-Vault-Felder: alles ausser dem Secret kommt zurueck. Ein
+            // gespeichertes Secret wird NIE angezeigt – der Platzhalter sagt,
+            // dass ein leeres Feld es behaelt.
+            var kv = d.keyvault || {};
+            var felder = { 'amsign-kv-vault': kv.vault, 'amsign-kv-tenant': kv.tenant,
+                           'amsign-kv-client': kv.client, 'amsign-kv-cert': kv.zertifikat,
+                           'amsign-kv-auth': kv.anmeldung, 'amsign-kv-jsign': kv.jsign_quelle };
+            Object.keys(felder).forEach(function (id) {
+                var el = $(id);
+                if (el && document.activeElement !== el) { el.value = felder[id] || ''; }
+            });
+            // Die Vorgaben kommen vom Server (eine Quelle) und stehen als
+            // Platzhalter da – ein leeres Feld heisst „Vorgabe".
+            var auth = $('amsign-kv-auth');
+            if (auth && kv.anmeldung_standard) { auth.placeholder = kv.anmeldung_standard; }
+            var jq = $('amsign-kv-jsign');
+            if (jq && kv.jsign_quelle_standard) { jq.placeholder = kv.jsign_quelle_standard; }
+            var sec = $('amsign-kv-secret');
+            if (sec) {
+                sec.placeholder = kv.secret_gesetzt
+                    ? t('amsign.kv_secret_keep', 'gespeichert – leer lassen = unverändert')
+                    : t('amsign.pw_ph', 'wird verschlüsselt gespeichert');
+            }
+            this._stand = d;
+            this.wegZeigen(d.verfahren === 'keyvault' ? 'keyvault' : 'pfx');
             if (!box) { return; }
             var zeilen = [];
+            zeilen.push(esc(d.verfahren === 'keyvault'
+                ? t('amsign.st_weg_kv', 'Signiert wird über den Azure Key Vault.')
+                : t('amsign.st_weg_pfx', 'Signiert wird mit der hinterlegten Zertifikatsdatei.')));
 
             if (!d.werkzeug_da) {
                 // Ohne das Programm passiert gar nichts – das gehoert zuerst
                 // gesagt, samt Weg (keine Aufforderung zur Handarbeit ohne ihn).
                 zeilen.push('⚠ ' + esc(d.werkzeug_hinweis || ''));
             }
-            if (!d.zertifikat) {
+            if (!d.eingerichtet) {
                 zeilen.push(esc(t('amsign.st_none',
                     'Kein Zertifikat hinterlegt – die Anwendung wird unsigniert ausgeliefert.')));
             } else {
@@ -307,6 +361,7 @@
         },
 
         saveSignatur: function () {
+            if (this._wegGewaehlt() === 'keyvault') { return this.saveKeyvault(); }
             var datei = $('amsign-datei');
             var pw = $('amsign-pw');
             var tsa = $('amsign-tsa');
@@ -323,6 +378,12 @@
                 fd.append('kennwort', pw ? pw.value : '');
             }
             if (tsa) { fd.append('tsa', tsa.value); }
+            // Liegt eine Zertifikatsdatei schon bereit und ist gerade der Key
+            // Vault wirksam, stellt Speichern auf die Datei zurueck – ohne
+            // erneuten Upload.
+            if (!f && this._stand && this._stand.zertifikat && this._stand.verfahren === 'keyvault') {
+                fd.append('verfahren', 'pfx');
+            }
 
             setStatus('amsign-status', f
                 ? t('amsign.saving', 'Zertifikat wird geprüft und die Anwendung signiert…')
@@ -348,6 +409,68 @@
                 setStatus('amsign-status',
                     d.hinweis || t('amsign.ok', 'Gespeichert.'),
                     d.hinweis ? 'error' : 'ok');
+            }).catch(function (e) {
+                setStatus('amsign-status', e.message, 'error');
+            });
+        },
+
+        saveKeyvault: function () {
+            var self = this;
+            var wert = function (id) { var el = $(id); return el ? el.value.trim() : ''; };
+            var tsa = $('amsign-tsa');
+            var body = {
+                vault: wert('amsign-kv-vault'), tenant: wert('amsign-kv-tenant'),
+                client: wert('amsign-kv-client'), secret: wert('amsign-kv-secret'),
+                zertifikat: wert('amsign-kv-cert'),
+                anmeldung: wert('amsign-kv-auth'), jsign_quelle: wert('amsign-kv-jsign')
+            };
+            if (tsa) { body.tsa = tsa.value; }
+            setStatus('amsign-status', t('amsign.kv_saving',
+                'Anmeldung, Zertifikat und Probesignatur werden geprüft…'));
+            fetch('/api/ai-mouse/admin/signatur/keyvault', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(body)
+            }).then(function (r) {
+                return r.json().catch(function () { return null; }).then(function (d) {
+                    if (!r.ok || !d || !d.ok) {
+                        throw new Error((d && (d.error || d.detail)) || ('HTTP ' + r.status));
+                    }
+                    return d;
+                });
+            }).then(function (d) {
+                self.renderSignatur(d);
+                // Das Secret nie stehen lassen – auslesbar ist es ohnehin nicht.
+                var sec = $('amsign-kv-secret');
+                if (sec) { sec.value = ''; }
+                setStatus('amsign-status',
+                    d.hinweis || t('amsign.ok', 'Gespeichert.'),
+                    d.hinweis ? 'error' : 'ok');
+            }).catch(function (e) {
+                setStatus('amsign-status', e.message, 'error');
+            });
+        },
+
+        delKeyvault: function () {
+            if (!window.confirm(t('amsign.kv_del_ask',
+                'Key-Vault-Zugang wirklich entfernen? Liegt eine Zertifikatsdatei bereit, wird ab jetzt damit signiert, sonst gar nicht.'))) {
+                return;
+            }
+            var self = this;
+            setStatus('amsign-status', t('amsign.deleting', 'Wird entfernt…'));
+            fetch('/api/ai-mouse/admin/signatur/keyvault', {
+                method: 'DELETE', headers: authHeaders()
+            }).then(function (r) {
+                return r.json().catch(function () { return null; }).then(function (d) {
+                    if (!r.ok || !d || !d.ok) {
+                        throw new Error((d && (d.error || d.detail)) || ('HTTP ' + r.status));
+                    }
+                    return d;
+                });
+            }).then(function (d) {
+                self.renderSignatur(d);
+                setStatus('amsign-status', t('amsign.kv_del_ok',
+                    'Entfernt. Die bereits gebaute Anwendung bleibt unverändert.'), 'ok');
             }).catch(function (e) {
                 setStatus('amsign-status', e.message, 'error');
             });

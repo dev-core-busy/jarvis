@@ -18130,8 +18130,12 @@ async def ai_mouse_signatur_setzen(
         datei: UploadFile = File(None),
         kennwort: str = Form(""),
         tsa: str = Form(None),
+        verfahren: str = Form(""),
         user: str = Depends(require_local_auth)):
     """Zertifikat hinterlegen – oder nur den Zeitstempel-Dienst aendern.
+
+    ``verfahren=pfx`` stellt ausserdem auf die Zertifikatsdatei zurueck, wenn
+    daneben ein Key-Vault-Zugang hinterlegt ist (ohne erneuten Upload).
 
     ⚠ OHNE DATEI WIRD NUR DER ZEITSTEMPEL GEAENDERT. Sonst muesste ein
     Administrator, der die TSA-Adresse korrigieren will, das ganze Zertifikat
@@ -18144,7 +18148,7 @@ async def ai_mouse_signatur_setzen(
     der Zeitstempel-Dienst ein FREMDER Server – im Event-Loop staende der
     Dienst fuer alle (Register: `Path.is_mount` auf totem CIFS, 20,4 s).
     """
-    from backend import ai_mouse, ai_mouse_signatur  # noqa: PLC0415
+    from backend import ai_mouse_signatur  # noqa: PLC0415
 
     rohdaten = b""
     if datei is not None:
@@ -18164,10 +18168,12 @@ async def ai_mouse_signatur_setzen(
                 tsa if tsa is not None else "")
         elif tsa is not None:
             zustand = await asyncio.to_thread(ai_mouse_signatur.tsa_setzen, tsa)
-        else:
+        elif not verfahren:
             return JSONResponse(
                 {"ok": False, "error": "Es wurde weder eine Zertifikatsdatei "
                  "noch ein Zeitstempel-Dienst uebergeben."}, status_code=400)
+        if verfahren and not rohdaten:
+            await asyncio.to_thread(ai_mouse_signatur.verfahren_setzen, verfahren)
     except ai_mouse_signatur.SignaturFehler as f:
         # 400 mit Klartext, nicht 200 mit ok:false – ein Fehlschlag muss auch
         # dort sichtbar sein, wo nur der Status gelesen wird.
@@ -18175,15 +18181,64 @@ async def ai_mouse_signatur_setzen(
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-    hinweis = ""
-    if ai_mouse_signatur.zertifikat_da() and ai_mouse.paket_vorhanden():
-        ok, grund = await asyncio.to_thread(
-            ai_mouse_signatur.signieren, ai_mouse.exe_pfad())
-        hinweis = grund if grund else ""
-        if not ok and not grund:
-            hinweis = ""
-    return JSONResponse({"ok": True, "hinweis": hinweis,
+    return JSONResponse({"ok": True, "hinweis": await _ai_mouse_nachsignieren(),
                          **ai_mouse_signatur.zustand()})
+
+
+async def _ai_mouse_nachsignieren() -> str:
+    """Die bereitliegende Anwendung mit dem GELTENDEN Weg nachsignieren.
+    Rueckgabe: Hinweis fuer die Anzeige (``""`` = nichts zu melden)."""
+    from backend import ai_mouse, ai_mouse_signatur  # noqa: PLC0415
+    if not (ai_mouse_signatur.eingerichtet() and ai_mouse.paket_vorhanden()):
+        return ""
+    _ok, grund = await asyncio.to_thread(ai_mouse_signatur.signieren, ai_mouse.exe_pfad())
+    return grund or ""
+
+
+@app.post("/api/ai-mouse/admin/signatur/keyvault")
+async def ai_mouse_signatur_keyvault(request: Request,
+                                     user: str = Depends(require_local_auth)):
+    """Azure-Key-Vault-Zugang hinterlegen (zweiter Signierweg).
+
+    Wie beim Zertifikat: erst pruefen (Anmeldung, Zertifikat, Probesignatur),
+    dann speichern, dann die bereitliegende Anwendung nachsignieren. Ein
+    leeres ``secret`` behaelt das gespeicherte – nur fuer denselben Zugang.
+    Alles im Thread: Anmeldung, Vault und Zeitstempel sind FREMDE Server.
+    """
+    from backend import ai_mouse_signatur  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = None
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Ungueltige Anfrage."}, status_code=400)
+
+    def _f(name: str) -> str:
+        return str(body.get(name) or "")[:500]
+
+    try:
+        await asyncio.to_thread(
+            ai_mouse_signatur.keyvault_setzen, _f("vault"), _f("tenant"), _f("client"),
+            _f("secret"), _f("zertifikat"),
+            _f("tsa") if body.get("tsa") is not None else None,
+            _f("anmeldung"), _f("jsign_quelle"))
+    except ai_mouse_signatur.SignaturFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "hinweis": await _ai_mouse_nachsignieren(),
+                         **ai_mouse_signatur.zustand()})
+
+
+@app.delete("/api/ai-mouse/admin/signatur/keyvault")
+async def ai_mouse_signatur_keyvault_entfernen(user: str = Depends(require_local_auth)):
+    """Key-Vault-Zugang loeschen. Liegt ein Zertifikat bereit, gilt danach das."""
+    from backend import ai_mouse_signatur  # noqa: PLC0415
+    try:
+        zustand = await asyncio.to_thread(ai_mouse_signatur.keyvault_entfernen)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, **zustand})
 
 
 @app.delete("/api/ai-mouse/admin/signatur")

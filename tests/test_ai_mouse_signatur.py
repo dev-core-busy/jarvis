@@ -66,6 +66,8 @@ sig._DATA = SAND / "data"
 sig.PFX_DATEI = sig._DATA / ".aimouse_sign.pfx"
 sig.SCHLUESSEL_DATEI = sig._DATA / ".aimousesignkey"
 sig.KONFIG_DATEI = sig._DATA / "ai_mouse_signatur.json"
+# Key-Vault-Weg (2026-10-27): das Werkzeug landet sonst im echten vendor/.
+sig.JSIGN_JAR = SAND / "vendor" / "jsign.jar"
 
 # ⚠ DIE SCHRANKE ALS REGEL, NICHT ALS LISTE: JEDES Modul-Attribut, das auf
 # einen Pfad zeigt, muss im Sandkasten liegen. Ein kuenftiges viertes faellt
@@ -187,7 +189,11 @@ check("der Zustand nennt das Zertifikat", isinstance(z, dict) and z.get("zertifi
 check("⚠ der Zustand gibt WEDER Kennwort NOCH Zertifikat heraus",
       isinstance(z, dict)
       and KENNWORT not in repr(z)
-      and "pw_enc" not in z and "pfx" not in repr(z).lower())
+      and "pw_enc" not in z and "secret_enc" not in repr(z)
+      # Seit 2026-10-27 steht der WERT "pfx" als Signierweg im Zustand –
+      # gemeint war immer: kein Schluessel, kein Pfad, keine Datei.
+      and not any("pfx" in str(k).lower() for k in z)
+      and str(sig.PFX_DATEI) not in repr(z) and ".aimouse_sign" not in repr(z))
 check("der Zeitstempel-Dienst ist uebernommen",
       isinstance(z, dict) and z.get("tsa") == "http://ts.example/tsa")
 
@@ -448,8 +454,8 @@ def endpunkte():
 
 
 gefunden = list(endpunkte())
-check("es gibt die vier Admin-Endpunkte (3x Signatur, 1x Bereitstellung)",
-      len(gefunden) == 4)
+check("es gibt die sechs Admin-Endpunkte (3x Signatur, 2x Key Vault, 1x Bereitstellung)",
+      len(gefunden) == 6)
 for txt, n in gefunden:
     args = [a.arg for a in n.args.args]
     vorgaben = {}

@@ -42,6 +42,7 @@ import json
 import httpx
 
 from backend.llm import clean_api_key, scrub_secrets
+from backend import llm_tls  # verankerte Serverzertifikate auch fuer Metadaten-Abfragen
 
 # 1x1 PNG (weiss) – kleinste zulaessige Bildeingabe fuer die Vision-Probe.
 _PIXEL_PNG = base64.b64decode(
@@ -86,7 +87,7 @@ async def ermitteln(provider: str, api_url: str = "", api_key: str = "",
         "roh": [], "hinweise": [],
     }
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, **llm_tls.client_args()) as c:
             if provider == "google":
                 await _aus_google(c, key, model, erg)
             elif provider == "openrouter":
@@ -355,7 +356,7 @@ async def _probe_openai(api_url: str, key: str, model: str, frage: str, b64: str
                    "messages": [{"role": "user", "content": "."}]}
     else:
         return None
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, **llm_tls.client_args()) as c:
         r = await c.post(f"{api_url}/chat/completions", json=payload, headers=kopf)
     # 400/422 = der Server lehnt genau dieses Merkmal ab → kann er nicht.
     # 5xx/401/404 sagen nichts ueber das Merkmal.
@@ -385,7 +386,7 @@ async def _probe_google(key: str, model: str, frage: str, b64: str):
                 "generationConfig": {"maxOutputTokens": 1}}
     else:
         return None
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, **llm_tls.client_args()) as c:
         r = await c.post(url, params={"key": key}, json=body)
     if r.status_code < 300:
         return True
@@ -414,7 +415,7 @@ async def _probe_anthropic(key: str, model: str, frage: str, b64: str):
                 "messages": [{"role": "user", "content": "."}]}
     else:
         return None
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, **llm_tls.client_args()) as c:
         r = await c.post("https://api.anthropic.com/v1/messages",
                          json=body, headers=kopf)
     if r.status_code < 300:

@@ -834,6 +834,23 @@ class Config:
                 return p
         return None
 
+    def set_profile_cert(self, profile_id: str, eintrag: dict | None) -> bool:
+        """Zertifikatsanker eines Profils setzen (``None`` = entfernen).
+
+        Eigene Methode und NICHT Teil von ``update_profile``: der Eintrag traegt
+        ein PEM, und das darf nur aus ``llm_tls.anker_bauen`` kommen (Zertifikat
+        selbst geholt, Fingerabdruck verglichen) – nie aus einem Request-Rumpf.
+        """
+        for p in self.profiles:
+            if p["id"] == profile_id:
+                if eintrag:
+                    p["cert"] = eintrag
+                else:
+                    p.pop("cert", None)
+                self._save_to_file()
+                return True
+        return False
+
     def delete_profile(self, profile_id: str) -> bool:
         """Löscht ein Profil. Mindestens eines muss bestehen bleiben."""
         if len(self.profiles) <= 1:

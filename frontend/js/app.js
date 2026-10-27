@@ -585,6 +585,13 @@
         const inputKey = document.getElementById('profile-api-key');
         const inputSessionKey = document.getElementById('profile-session-key');
         const apikeyHint = document.querySelector('.apikey-hint');
+        // Serverzertifikat per Fingerabdruck (backend/llm_tls.py)
+        const certGroup = document.getElementById('profile-cert-group');
+        const inputCertFp = document.getElementById('profile-cert-fp');
+        const btnCertProbe = document.getElementById('btn-profile-cert-probe');
+        const certState = document.getElementById('profile-cert-state');
+        const certBox = document.getElementById('profile-cert-box');
+        let _certGespeichert = null;   // Anker des bearbeiteten Profils (ohne PEM)
         const checkTts = document.getElementById('setting-tts');
         const selectTtsVoice = document.getElementById('setting-tts-voice');
         const inputAgentKey = document.getElementById('setting-agent-api-key');
@@ -2376,6 +2383,13 @@
                 radioApiKey.checked = true;
             }
 
+            // Zertifikatsanker: gespeicherten Fingerabdruck vorbelegen – ein
+            // unveraendertes Feld heisst beim Speichern "Anker bleibt".
+            _certGespeichert = (profile && profile.cert && profile.cert.fingerprint) ? profile.cert : null;
+            if (inputCertFp) inputCertFp.value = _certGespeichert ? _certGespeichert.fingerprint : '';
+            if (certBox) { certBox.hidden = true; certBox.textContent = ''; }
+            _certZustand();
+
             // Provider-abhängige Felder initialisieren
             updateProviderUI();
 
@@ -2442,6 +2456,125 @@
             if (promptToolGroup) {
                 promptToolGroup.style.display = isOpenAICompat ? '' : 'none';
             }
+            _certSichtbarkeit();
+        }
+
+        // ── Serverzertifikat (Fingerabdruck) ──
+        // Nur wo der Anker WIRKT: frei waehlbare https-Adresse, Aufrufe ueber
+        // den httpx-Weg (openai_compatible, openrouter). Google und Anthropic
+        // laufen ueber deren SDK – ein Feld dort waere eine Zusage ohne Wirkung.
+        function _certSichtbar() {
+            const p = selectProvider.value;
+            return (p === 'openai_compatible' || p === 'openrouter')
+                && /^https:\/\//i.test((inputUrl.value || '').trim());
+        }
+        function _certSichtbarkeit() {
+            if (certGroup) certGroup.style.display = _certSichtbar() ? '' : 'none';
+        }
+        function _certMelde(text, art) {
+            if (!certState) return;
+            certState.textContent = text || '';
+            certState.className = 'sapcert-state' + (art ? ' is-' + art : '');
+        }
+        function _certZustand() {
+            // Zeigt den GESPEICHERTEN Anker – auch, dass er zur Adresse nicht
+            // (mehr) passt. Ohne diese Zeile waere ein wirkungsloser Anker
+            // unsichtbar.
+            const g = _certGespeichert;
+            if (!g) { _certMelde(''); return; }
+            if (g.aktiv === false) {
+                _certMelde(window.t('profile.cert_inactive')
+                    .replace('{ziel}', g.host + ':' + g.port), 'err');
+                return;
+            }
+            let d = '';
+            try { d = g.gebunden_am ? new Date(Number(g.gebunden_am) * 1000).toLocaleString() : ''; }
+            catch (e) { d = ''; }
+            _certMelde(window.t('profile.cert_pinned').replace('{datum}', d || '?'), 'ok');
+        }
+        function _certFeldWert() {
+            // Unsichtbar = kein Anker (die Adresse ist kein https bzw. der
+            // Anbieter benutzt ihn nicht).
+            return (inputCertFp && _certSichtbar()) ? inputCertFp.value.trim() : '';
+        }
+        function _certZeichne(z) {
+            // Alle Angaben stammen vom FREMDEN Server: nur textContent, nie
+            // innerHTML (siehe sapcert.js).
+            certBox.textContent = '';
+            certBox.hidden = false;
+            const el = (tag, cls, text) => {
+                const e = document.createElement(tag);
+                if (cls) e.className = cls;
+                if (text !== undefined && text !== null) e.textContent = String(text);
+                return e;
+            };
+            const tab = el('div', 'sapcert-grid');
+            const zeile = (k, v) => {
+                if (!v) return;
+                tab.appendChild(el('span', 'sapcert-k', k));
+                tab.appendChild(el('span', 'sapcert-v', v));
+            };
+            zeile(window.t('sapcert.server'), z.host + ':' + z.port);
+            zeile(window.t('sapcert.subject'), z.inhaber);
+            zeile(window.t('sapcert.issuer'), z.aussteller);
+            if (z.gueltig_von || z.gueltig_bis) {
+                zeile(window.t('sapcert.valid'), (z.gueltig_von || '?') + ' – ' + (z.gueltig_bis || '?'));
+            }
+            if (z.namen && z.namen.length) zeile(window.t('sapcert.names'), z.namen.join(', '));
+            tab.appendChild(el('span', 'sapcert-k', window.t('sapcert.fp')));
+            tab.appendChild(el('span', 'sapcert-v sapcert-fp', z.fingerprint || ''));
+            certBox.appendChild(tab);
+
+            const urteil = el('p', 'sapcert-verdict');
+            if (z.system_ok) {
+                urteil.className += ' is-ok';
+                urteil.textContent = window.t('profile.cert_v_ok');
+            } else if (z.pin_ok) {
+                urteil.className += ' is-warn';
+                urteil.textContent = window.t('profile.cert_v_pin').replace('{grund}', z.system_grund || '—');
+            } else {
+                urteil.className += ' is-warn';
+                urteil.textContent = window.t('profile.cert_v_name')
+                    .replace('{grund}', z.system_grund || '—')
+                    .replace('{name}', z.pin_grund || '—');
+            }
+            certBox.appendChild(urteil);
+
+            const btnUebernehmen = el('button', 'sapcert-btn is-primary', window.t('profile.cert_take'));
+            btnUebernehmen.type = 'button';
+            btnUebernehmen.addEventListener('click', () => {
+                inputCertFp.value = z.fingerprint || '';
+                certBox.hidden = true;
+                _certMelde('✓ ' + window.t('profile.cert_taken'), 'ok');
+            });
+            certBox.appendChild(btnUebernehmen);
+            certBox.appendChild(el('p', 'sapcert-hint', window.t('profile.cert_browser_hint')));
+        }
+        if (inputUrl) inputUrl.addEventListener('input', _certSichtbarkeit);
+        if (btnCertProbe) {
+            btnCertProbe.addEventListener('click', async () => {
+                btnCertProbe.disabled = true;
+                _certMelde(window.t('profile.cert_checking'));
+                try {
+                    const res = await fetch('/api/profiles/zertifikat/probe', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ api_url: inputUrl.value.trim() }),
+                    });
+                    const d = await res.json().catch(() => ({}));
+                    if (!res.ok || !d.ok) {
+                        certBox.hidden = true;
+                        _certMelde(d.error || window.t('profile.cert_failed'), 'err');
+                        return;
+                    }
+                    _certMelde('');
+                    _certZeichne(d.zert || {});
+                } catch (e) {
+                    _certMelde(window.t('profile.cert_failed'), 'err');
+                } finally {
+                    btnCertProbe.disabled = false;
+                }
+            });
         }
 
         // Event-Listener für Provider/Auth-Wechsel
@@ -2486,6 +2619,9 @@
                 // Rohwert senden ("", "auto" oder Zahl als Text) – die Validierung
                 // und Begrenzung auf 0..2 macht das Backend (config._valid_temperature).
                 temperature: inputTemperature ? inputTemperature.value.trim() : '',
+                // Leer = kein Anker. Der Server holt das Zertifikat selbst und
+                // verankert nur bei gleichem Fingerabdruck (llm_tls.anker_bauen).
+                cert_fingerprint: _certFeldWert(),
             };
 
             btnSaveProfile.textContent = window.t('common.saving');
@@ -2558,6 +2694,8 @@
                         session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
                         // leeres Schluesselfeld → Server nimmt den gespeicherten (BSI M5)
                         profile_id: editingProfileId || '',
+                        // noch nicht gespeicherter Fingerabdruck gilt fuer den Test mit
+                        cert_fingerprint: _certFeldWert(),
                     };
                     const res = await fetch(`/api/profiles/test`, {
                         method: 'POST',
@@ -2672,6 +2810,7 @@
                         auth_method: (radioSession && radioSession.checked) ? 'session' : 'api_key',
                         session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
                         profile_id: editingProfileId || '',
+                        cert_fingerprint: _certFeldWert(),
                     };
                     const res = await fetch('/api/profiles/models', {
                         method: 'POST',

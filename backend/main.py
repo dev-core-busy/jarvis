@@ -10467,14 +10467,60 @@ async def upload_custom_cert(request: Request, user: str = Depends(require_local
 
 
 # ─── Profil-Verwaltung ─────────────────────────────────────────────
+def _profil_oeffentlich(p: dict) -> dict:
+    """Profil fuer eine Antwort: Schluessel maskiert, Zertifikatsanker ohne PEM
+    (mit ``aktiv`` – passt er noch zur Adresse?)."""
+    from backend import llm_tls
+    sp = {**p, "api_key": _mask_key(p.get("api_key", "")),
+          "session_key": _mask_key(p.get("session_key", ""))}
+    if p.get(llm_tls.FELD):
+        sp[llm_tls.FELD] = llm_tls.info(p.get(llm_tls.FELD), p.get("api_url", ""))
+    else:
+        sp.pop(llm_tls.FELD, None)
+    return sp
+
+
+async def _profil_anker(body: dict, api_url: str, bisher: dict | None):
+    """Was das Speichern mit dem Zertifikatsanker tut: ``("bleibt"|"setzen"|
+    "entfernen", eintrag)``. Wirft ``llm_tls.AnkerFehler``.
+
+    ``cert_fingerprint`` fehlt  -> unveraendert
+    leer                        -> Anker entfernen (normale Pruefung)
+    gleich dem gespeicherten und passend zur Adresse -> unveraendert (kein
+                                   erneuter Abruf bei jedem Speichern)
+    sonst -> Zertifikat holen, Fingerabdruck vergleichen, Bindung messen.
+    """
+    from backend import llm_tls
+    if not isinstance(body, dict) or "cert_fingerprint" not in body:
+        return "bleibt", None
+    roh = str(body.get("cert_fingerprint") or "").strip()
+    if not roh:
+        return ("entfernen" if bisher else "bleibt"), None
+    fp = llm_tls.fingerabdruck_normieren(roh)
+    if bisher and bisher.get("fingerprint") == fp and llm_tls.passt(bisher, api_url):
+        return "bleibt", None
+    return "setzen", await asyncio.to_thread(llm_tls.anker_bauen, api_url, fp)
+
+
+@app.post("/api/profiles/zertifikat/probe")
+async def profile_zertifikat_probe(request: Request, user: str = Depends(require_local_auth)):
+    """Serverzertifikat der Formular-Adresse holen und beurteilen (vor dem
+    Speichern, wie bei SAP). Rumpf: {api_url}. Antwort ohne PEM."""
+    from backend import llm_tls
+    body = await _json_rumpf(request)
+    try:
+        erg = await asyncio.to_thread(llm_tls.pruefen, str(body.get("api_url") or ""))
+    except llm_tls.AnkerFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "zert": erg})
+
+
 @app.get("/api/profiles")
 async def get_profiles(user: str = Depends(require_auth)):
     """Gibt alle Profile und das aktive Profil zurück."""
-    safe_profiles = []
-    for p in config.profiles:
-        sp = {**p, "api_key": _mask_key(p.get("api_key", "")),
-              "session_key": _mask_key(p.get("session_key", ""))}
-        safe_profiles.append(sp)
+    safe_profiles = [_profil_oeffentlich(p) for p in config.profiles]
     return JSONResponse({
         "profiles": safe_profiles,
         "active_profile_id": config.active_profile_id,
@@ -10490,8 +10536,23 @@ async def create_profile(request: Request, user: str = Depends(require_local_aut
     if not ok:
         return JSONResponse({"success": False, "error": grund}, status_code=403)
     body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse({"success": False, "error": "Objekt erwartet"}, status_code=400)
+    # Anker VOR dem Anlegen bauen: scheitert er, entsteht kein halbes Profil.
+    from backend import llm_tls
+    url = body.get("api_url") or config.DEFAULT_PROVIDERS.get(
+        body.get("provider", "google"), {}).get("url", "")
+    try:
+        aktion, eintrag = await _profil_anker(body, url, None)
+    except llm_tls.AnkerFehler as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
     profile = config.create_profile(body)
-    return JSONResponse({"success": True, "profile": profile})
+    if aktion == "setzen":
+        config.set_profile_cert(profile["id"], eintrag)
+        print("[LLM] Zertifikat verankert von %s fuer Profil %s: %s:%s %s"
+              % (user, profile["id"], eintrag["host"], eintrag["port"],
+                 eintrag["fingerprint"]), flush=True)
+    return JSONResponse({"success": True, "profile": _profil_oeffentlich(profile)})
 
 
 def _profil_umleitung(profile_id: str, body: dict) -> bool:
@@ -10533,9 +10594,27 @@ async def update_profile(profile_id: str, request: Request, user: str = Depends(
                                       "Schlüssel neu eingeben, sonst ginge der gespeicherte "
                                       "an das neue Ziel."},
                             status_code=400)
+    from backend import llm_tls
+    bisher = next((p for p in config.profiles if p.get("id") == profile_id), None)
+    if not bisher:
+        return JSONResponse({"success": False, "error": "Profil nicht gefunden"}, status_code=404)
+    try:
+        aktion, eintrag = await _profil_anker(
+            body, body.get("api_url", bisher.get("api_url", "")), bisher.get(llm_tls.FELD))
+    except llm_tls.AnkerFehler as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
     profile = config.update_profile(profile_id, body)
     if profile:
-        return JSONResponse({"success": True, "profile": profile})
+        if aktion == "setzen":
+            config.set_profile_cert(profile_id, eintrag)
+            print("[LLM] Zertifikat verankert von %s fuer Profil %s: %s:%s %s"
+                  % (user, profile_id, eintrag["host"], eintrag["port"],
+                     eintrag["fingerprint"]), flush=True)
+        elif aktion == "entfernen":
+            config.set_profile_cert(profile_id, None)
+            print("[LLM] Zertifikatsanker entfernt von %s fuer Profil %s"
+                  % (user, profile_id), flush=True)
+        return JSONResponse({"success": True, "profile": _profil_oeffentlich(profile)})
     return JSONResponse({"success": False, "error": "Profil nicht gefunden"}, status_code=404)
 
 
@@ -10805,7 +10884,8 @@ async def get_profile_key(profile_id: str, request: Request,
 
 async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
                                 model: str, auth_method: str = "api_key",
-                                session_key: str = "") -> dict:
+                                session_key: str = "",
+                                anker_zusatz: dict | None = None) -> dict:
     """Prüft die Erreichbarkeit eines LLM-Endpoints und ob das Modell existiert.
 
     Rückgabe-Dict (kompatibel zu /api/profiles/test):
@@ -10831,7 +10911,11 @@ async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
         headers["Authorization"] = f"Bearer {api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+        # Verankerte Serverzertifikate gelten auch hier (llm_tls) – sonst
+        # meldete der Test einen Zertifikatsfehler, den der Chat nicht hat.
+        from backend import llm_tls
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0),
+                                     **llm_tls.client_args(anker_zusatz)) as client:
             # Schritt 1: Models-Endpoint (schnell)
             if provider == "openai_compatible":
                 models_url = f"{api_url}/models"
@@ -10923,6 +11007,10 @@ async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
 async def test_profile_connection(request: Request, user: str = Depends(require_local_auth)):
     """Testet die Verbindung mit den aktuellen Formularwerten (nicht gespeicherten)."""
     body = await request.json()
+    try:
+        zusatz = await _formular_anker(body)
+    except Exception as e:  # noqa: BLE001 – AnkerFehler und Netzfehler gleich melden
+        return JSONResponse({"success": False, "error": f"Zertifikat: {e}"})
     # BSI M5: beim Bearbeiten bleibt das Schluesselfeld leer – mit profile_id
     # nimmt _caps_key/_caps_session den gespeicherten (er verlaesst den Server nicht).
     result = await _probe_llm_connection(
@@ -10932,13 +11020,30 @@ async def test_profile_connection(request: Request, user: str = Depends(require_
         model=body.get("model", ""),
         auth_method=body.get("auth_method", "api_key"),
         session_key=_caps_session(body),
+        anker_zusatz=zusatz,
     )
     return JSONResponse(result)
 
 
+async def _formular_anker(body: dict) -> dict:
+    """Ungespeicherter Zertifikatsanker aus dem Formular (``cert_fingerprint``)
+    fuer Test und Modellsuche – sonst meldete der Test vor dem Speichern einen
+    Zertifikatsfehler, den das gespeicherte Profil gar nicht haette. Leer, wenn
+    kein Fingerabdruck angegeben ist; ein schon gespeicherter Anker fuer
+    dasselbe Ziel gilt ohnehin (llm_tls.anker)."""
+    from backend import llm_tls
+    if not isinstance(body, dict) or not str(body.get("cert_fingerprint") or "").strip():
+        return {}
+    return await asyncio.to_thread(llm_tls.zusatz_fuer, str(body.get("api_url") or ""),
+                                   str(body.get("cert_fingerprint")))
+
+
 async def _list_llm_models(provider: str, api_url: str, api_key: str,
-                           auth_method: str = "api_key", session_key: str = "") -> dict:
-    """Liefert die VOLLE Liste verfuegbarer Modelle eines Providers (fuer 'Discover')."""
+                           auth_method: str = "api_key", session_key: str = "",
+                           anker_zusatz: dict | None = None) -> dict:
+    """Liefert die VOLLE Liste verfuegbarer Modelle eines Providers (fuer 'Discover').
+
+    ``anker_zusatz``: ungespeicherter Zertifikatsanker aus dem Formular (llm_tls)."""
     from backend.llm import clean_api_key, scrub_secrets
     raw_key, raw_session = api_key, session_key
     api_url = (api_url or "").strip().rstrip("/")
@@ -10946,7 +11051,11 @@ async def _list_llm_models(provider: str, api_url: str, api_key: str,
     session_key = clean_api_key(session_key)
     key = session_key if (auth_method == "session" and session_key) else api_key
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+        # Verankerte Serverzertifikate gelten auch hier (llm_tls) – sonst
+        # meldete der Test einen Zertifikatsfehler, den der Chat nicht hat.
+        from backend import llm_tls
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0),
+                                     **llm_tls.client_args(anker_zusatz)) as client:
             if provider == "google":
                 if not key:
                     return {"success": False, "error": "API-Key fehlt"}
@@ -11090,12 +11199,17 @@ async def profile_capabilities_probe(request: Request, user: str = Depends(requi
 async def list_profile_models(request: Request, user: str = Depends(require_local_auth)):
     """Liefert verfuegbare Modelle fuer die aktuellen Formularwerte (Discover-Button)."""
     body = await request.json()
+    try:
+        zusatz = await _formular_anker(body)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"success": False, "error": f"Zertifikat: {e}"})
     result = await _list_llm_models(
         provider=body.get("provider", ""),
         api_url=body.get("api_url", ""),
         api_key=_caps_key(body),
         auth_method=body.get("auth_method", "api_key"),
         session_key=_caps_session(body),
+        anker_zusatz=zusatz,
     )
     return JSONResponse(result)
 

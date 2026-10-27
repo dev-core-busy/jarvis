@@ -237,7 +237,12 @@ def _system_kontext(kanal: str) -> tuple[ssl.SSLContext, str]:
       * odata -> was ``requests.get(..., verify=True)`` nimmt (inkl. der
         Umgebungsvariablen, die requests selbst auswertet)
       * hana  -> hdbcli laeuft ueber OpenSSL, also der Systemspeicher
+      * llm   -> httpx nimmt certifi (bzw. SSL_CERT_FILE/SSL_CERT_DIR), also
+        genau dessen eigenen Kontext (``llm_tls``)
     """
+    if kanal == "llm":
+        import httpx
+        return httpx.create_ssl_context(), "certifi (httpx)"
     if kanal == "odata":
         pfad = (os.environ.get("REQUESTS_CA_BUNDLE")
                 or os.environ.get("CURL_CA_BUNDLE"))

@@ -486,6 +486,8 @@ def _parse_sse_to_completion(sse_text: str) -> dict:
 # Shared httpx.AsyncClient mit Connection-Pooling (vermeidet neue Verbindung pro Request)
 _shared_client: httpx.AsyncClient | None = None
 _client_lock = asyncio.Lock()
+# Abdruck der Zertifikatsanker, mit dem _shared_client gebaut wurde (llm_tls).
+_shared_anker: tuple | None = None
 
 
 def _llm_timeout() -> "httpx.Timeout":
@@ -748,16 +750,32 @@ async def _get_shared_client() -> httpx.AsyncClient:
     """Gibt den shared AsyncClient zurueck (lazy init, thread-safe).
 
     Der Default-Timeout des Clients wird pro Anfrage ohnehin durch
-    ``_get_timeout()`` ueberschrieben; hier nur als Fallback gesetzt."""
-    global _shared_client
-    if _shared_client is None or _shared_client.is_closed:
+    ``_get_timeout()`` ueberschrieben; hier nur als Fallback gesetzt.
+
+    Zertifikatsanker (``llm_tls``): aendert sich ein verankerter Fingerabdruck
+    in einem Profil, entsteht ein NEUER Client – sonst liefe der alte mit den
+    Ankern vom Dienststart weiter, und ein frisch verankertes Profil scheiterte
+    bis zum Neustart. Der alte wird erst nach Ablauf des LLM-Timeouts
+    geschlossen, damit laufende Antworten nicht abreissen."""
+    global _shared_client, _shared_anker
+    from backend import llm_tls
+    stand = llm_tls.stand()
+    if _shared_client is None or _shared_client.is_closed or stand != _shared_anker:
         async with _client_lock:
-            if _shared_client is None or _shared_client.is_closed:
+            if _shared_client is None or _shared_client.is_closed or stand != _shared_anker:
+                alt = _shared_client
+                limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
                 _shared_client = httpx.AsyncClient(
                     timeout=_llm_timeout(),
-                    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                    limits=limits,
                     follow_redirects=True,
+                    **llm_tls.client_args(limits=limits),
                 )
+                _shared_anker = stand
+                if alt is not None and not alt.is_closed:
+                    frist = (_llm_timeout().read or 180.0) + 30.0
+                    asyncio.get_running_loop().call_later(
+                        frist, lambda: asyncio.ensure_future(alt.aclose()))
     return _shared_client
 
 

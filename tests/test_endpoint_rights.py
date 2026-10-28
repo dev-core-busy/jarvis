@@ -381,6 +381,10 @@ ASYM_OK = {
     # Lesen liefert Schluessel MASKIERT (_mask_key, unten eigens geprueft),
     # Schreiben ist Admin.
     "/api/settings", "/api/profiles",
+    # Portal-Info-Dokumente: jeder Angemeldete liest die Sammlung, nur
+    # Administratoren laden hoch bzw. loeschen (2026-10-28). Gleicher Pfad,
+    # bewusst verschiedene Ebene – wie Logo/Video oben.
+    "/api/info_files", "/api/info_files/{name}",
 }
 asym = []
 writes = {}

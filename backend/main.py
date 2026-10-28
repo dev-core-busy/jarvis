@@ -28231,7 +28231,65 @@ async def info_files_list(user: str = Depends(require_auth)):
     """
     from backend import info_files as _info
     files = _info.list_files()
-    return JSONResponse({"files": files, "count": len(files)})
+    # `verwalten` blendet im Portal Hochladen/Loeschen ein (und das Ordnersymbol
+    # auch bei leerem Ordner). Nur Anzeige – die Schreib-Endpunkte pruefen
+    # selbst ueber require_local_auth.
+    return JSONResponse({"files": files, "count": len(files),
+                         "verwalten": _user_is_admin(user)})
+
+
+@app.post("/api/info_files")
+async def info_files_upload(file: UploadFile = File(...), ersetzen: str = Form(""),
+                            user: str = Depends(require_local_auth)):
+    """Legt ein Info-Dokument ab (nur Administratoren).
+
+    Die Datei ist danach fuer JEDEN angemeldeten Benutzer im Portal sichtbar.
+    Ein vorhandener Name wird nur mit ``ersetzen=1`` ueberschrieben, sonst 409 –
+    das Portal fragt dann nach. Name, Endung und Groesse prueft
+    ``info_files.speichern()``; geschrieben wird im Thread, weil eine grosse
+    Datei den Event-Loop sonst fuer alle Benutzer anhaelt.
+    """
+    from backend import info_files as _info
+    name = file.filename or ""
+    def _bloecke():
+        while True:
+            b = file.file.read(1024 * 1024)
+            if not b:
+                return
+            yield b
+    try:
+        eintrag = await asyncio.to_thread(_info.speichern, name, _bloecke(),
+                                          ersetzen in ("1", "true", "ja"))
+    except FileExistsError:
+        return JSONResponse({"error": "Eine Datei mit diesem Namen gibt es schon.",
+                             "code": "exists", "name": name}, status_code=409)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except OSError as e:
+        print(f"[InfoFiles] Hochladen von {name!r} fehlgeschlagen: {e}", flush=True)
+        return JSONResponse({"error": "Datei konnte nicht gespeichert werden."}, status_code=500)
+    print(f"[InfoFiles] {eintrag['name']} ({eintrag['size']} Bytes) hochgeladen von {user}", flush=True)
+    return JSONResponse({"ok": True, "file": eintrag})
+
+
+@app.delete("/api/info_files/{name}")
+async def info_files_delete(name: str, user: str = Depends(require_local_auth)):
+    """Entfernt ein Info-Dokument (nur Administratoren).
+
+    Der Name geht ueber dieselbe Pruefung wie beim Abrufen
+    (``info_files.resolve()``): kein Pfad, keine versteckte Datei, nichts
+    ausserhalb des Ordners.
+    """
+    from backend import info_files as _info
+    try:
+        weg = _info.loeschen(name)
+    except OSError as e:
+        print(f"[InfoFiles] Loeschen von {name!r} fehlgeschlagen: {e}", flush=True)
+        return JSONResponse({"error": "Datei konnte nicht geloescht werden."}, status_code=500)
+    if not weg:
+        return JSONResponse({"error": "nicht gefunden"}, status_code=404)
+    print(f"[InfoFiles] {name} geloescht von {user}", flush=True)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/info_files/{name}")

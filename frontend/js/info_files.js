@@ -11,6 +11,13 @@
 
    Farben ausschliesslich ueber Theme-Variablen (CSS-Klassen .pt-ico-*), Texte
    ueber i18n – sonst bricht Branding/Hell-Modus oder die EN-Oberflaeche.
+
+   Verwaltung (seit 2026-10-28): meldet /api/info_files `verwalten: true`
+   (Administrator), zeigt das Fenster zusaetzlich „Hochladen“ (Knopf oder
+   Dateien auf das Fenster ziehen) und je Datei einen Muelleimer. Das
+   Ordnersymbol erscheint fuer Administratoren auch bei leerem Ordner – sonst
+   gaebe es keinen Weg zum ersten Upload. Die Rechte prueft der Server
+   (POST/DELETE an require_local_auth); `verwalten` steuert nur die Anzeige.
    ═══════════════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';
@@ -104,6 +111,8 @@
 
     var Mgr = {
         _files: [],
+        _admin: false,
+        _statusTimer: null,
         _open: false,
         _bound: false,
 
@@ -129,6 +138,136 @@
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape' && Mgr._open) Mgr.close();
             });
+            this._bindVerwaltung();
+        },
+
+        /* ── Verwaltung (nur Administratoren) ─────────────────────────────── */
+        _bindVerwaltung: function () {
+            var up = $('pt-info-upload'), inp = $('pt-info-input'), panel = $('pt-info-panel');
+            if (up && inp) {
+                up.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    inp.click();
+                });
+                inp.addEventListener('change', function () {
+                    var dateien = Array.prototype.slice.call(inp.files || []);
+                    inp.value = '';
+                    if (dateien.length) Mgr.hochladen(dateien);
+                });
+            }
+            // Loeschen per Delegation: die Liste wird bei jedem Laden neu gebaut.
+            var list = $('pt-info-list');
+            if (list) list.addEventListener('click', function (e) {
+                var b = e.target.closest ? e.target.closest('.pt-info-del') : null;
+                if (!b) return;
+                e.preventDefault();
+                // Sonst schliesst der Dokument-Klick das Fenster, sobald die
+                // Liste neu gebaut ist und der Knopf nicht mehr im DOM haengt.
+                e.stopPropagation();
+                Mgr.loeschen(b.getAttribute('data-name') || '');
+            });
+            // Dateien auf das Fenster ziehen
+            if (panel) {
+                panel.addEventListener('dragover', function (e) {
+                    if (!Mgr._admin) return;
+                    e.preventDefault();
+                    panel.classList.add('pt-info-drop');
+                });
+                panel.addEventListener('dragleave', function (e) {
+                    if (e.target === panel) panel.classList.remove('pt-info-drop');
+                });
+                panel.addEventListener('drop', function (e) {
+                    panel.classList.remove('pt-info-drop');
+                    if (!Mgr._admin) return;
+                    e.preventDefault();
+                    var dateien = Array.prototype.slice.call((e.dataTransfer && e.dataTransfer.files) || []);
+                    if (dateien.length) Mgr.hochladen(dateien);
+                });
+            }
+        },
+
+        // Meldung unten im Fenster, direkt bei den Knoepfen. Ein Fehler bleibt
+        // stehen (man muss ihn lesen koennen), ein Erfolg verschwindet.
+        _status: function (text, fehler) {
+            var el = $('pt-info-status');
+            if (!el) return;
+            clearTimeout(Mgr._statusTimer);
+            el.textContent = text || '';
+            el.classList.toggle('pt-info-status-err', !!fehler);
+            if (text && !fehler) {
+                Mgr._statusTimer = setTimeout(function () { el.textContent = ''; }, 4000);
+            }
+        },
+
+        _senden: function (datei, ersetzen) {
+            var fd = new FormData();
+            fd.append('file', datei, datei.name);
+            if (ersetzen) fd.append('ersetzen', '1');
+            // Kein Content-Type setzen – der Browser setzt multipart samt Grenze.
+            return fetch('/api/info_files', {
+                method: 'POST', headers: window.JarvisSitzung.kopfsatz(), body: fd
+            }).then(function (r) {
+                return r.json().catch(function () { return {}; })
+                    .then(function (d) { return { status: r.status, d: d || {} }; });
+            });
+        },
+
+        hochladen: function (dateien) {
+            var ok = 0, fehler = [];
+            var weiter = function (i) {
+                if (i >= dateien.length) {
+                    Mgr.load();
+                    if (fehler.length) {
+                        Mgr._status(fehler.join(' · '), true);
+                    } else if (ok) {
+                        Mgr._status(T('portal.info_uploaded', 'Hochgeladen:') + ' ' + ok, false);
+                    } else {
+                        Mgr._status('', false);
+                    }
+                    return;
+                }
+                var f = dateien[i];
+                Mgr._status(T('portal.info_uploading', 'Wird hochgeladen …') + ' ' + f.name, false);
+                Mgr._senden(f, false).then(function (a) {
+                    if (a.status === 409) {
+                        var frage = T('portal.info_replace_confirm', '„{name}“ gibt es schon. Ersetzen?')
+                            .replace('{name}', f.name);
+                        if (!window.confirm(frage)) return a;
+                        return Mgr._senden(f, true);
+                    }
+                    return a;
+                }).then(function (a) {
+                    if (a.status === 200 && a.d.ok) ok++;
+                    else if (a.status !== 409) fehler.push(f.name + ': ' + (a.d.error || a.d.detail || ('HTTP ' + a.status)));
+                    weiter(i + 1);
+                }).catch(function () {
+                    fehler.push(f.name + ': ' + T('portal.info_net_error', 'Verbindung fehlgeschlagen'));
+                    weiter(i + 1);
+                });
+            };
+            weiter(0);
+        },
+
+        loeschen: function (name) {
+            if (!name) return;
+            var frage = T('portal.info_delete_confirm', '„{name}“ löschen? Die Datei ist danach für alle Benutzer weg.')
+                .replace('{name}', name);
+            if (!window.confirm(frage)) return;
+            fetch('/api/info_files/' + encodeURIComponent(name), {
+                method: 'DELETE', headers: window.JarvisSitzung.kopfsatz()
+            }).then(function (r) {
+                return r.json().catch(function () { return {}; })
+                    .then(function (d) { return { status: r.status, d: d || {} }; });
+            }).then(function (a) {
+                if (a.status === 200 && a.d.ok) {
+                    Mgr._status(T('portal.info_deleted', 'Gelöscht:') + ' ' + name, false);
+                } else {
+                    Mgr._status(name + ': ' + (a.d.error || a.d.detail || ('HTTP ' + a.status)), true);
+                }
+                Mgr.load();
+            }).catch(function () {
+                Mgr._status(name + ': ' + T('portal.info_net_error', 'Verbindung fehlgeschlagen'), true);
+            });
         },
 
         load: function () {
@@ -140,9 +279,14 @@
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
                     Mgr._files = (d && Array.isArray(d.files)) ? d.files : [];
-                    // Kernanforderung: ohne Dateien kein Ordnersymbol.
-                    wrap.style.display = Mgr._files.length ? '' : 'none';
-                    if (!Mgr._files.length) Mgr.close();
+                    Mgr._admin = !!(d && d.verwalten);
+                    var adm = $('pt-info-admin');
+                    if (adm) adm.hidden = !Mgr._admin;
+                    // Kernanforderung: ohne Dateien kein Ordnersymbol – ausser fuer
+                    // Administratoren, die sonst keinen Weg zum ersten Upload haetten.
+                    var zeigen = Mgr._files.length || Mgr._admin;
+                    wrap.style.display = zeigen ? '' : 'none';
+                    if (!zeigen) Mgr.close();
                     Mgr._render();
                 })
                 .catch(function () { /* Fehler => Symbol bleibt aus */ });
@@ -156,43 +300,60 @@
                 : '';
             if (!Mgr._files.length) {
                 list.innerHTML = '<div class="pt-info-meta" style="padding:10px;">'
-                    + esc(T('portal.info_files_empty', 'Keine Dokumente vorhanden.')) + '</div>';
+                    + esc(Mgr._admin
+                        ? T('portal.info_files_empty_admin', 'Noch keine Dokumente – über „Hochladen“ hinzufügen oder Dateien hierher ziehen.')
+                        : T('portal.info_files_empty', 'Keine Dokumente vorhanden.')) + '</div>';
                 return;
             }
-            var tk = token();
             list.innerHTML = Mgr._files.map(function (f) {
-                // ── Verknuepfung (.url): oeffnet das Ziel, nicht die Datei ──
-                if (f.kind === 'link' && isWebUrl(f.url)) {
-                    // rel="noreferrer" zusaetzlich zu noopener: die Zieladresse
-                    // soll nicht erfahren, aus welcher internen Seite der Klick kam.
-                    return '<a class="pt-info-item" href="' + esc(f.url)
-                         + '" target="_blank" rel="noopener noreferrer"'
-                         + ' title="' + esc(f.url) + '">'
-                         + icon('link')
-                         + '<span class="pt-info-name">' + esc(f.label || f.name) + '</span>'
-                         + '<span class="pt-info-meta">' + esc(hostOf(f.url)) + '</span>'
-                         + '</a>';
-                }
-                // Der Schluessel gehoert NUR ins DOM (wie chatlib.js::_withToken):
-                // die Liste wird bei jedem Laden neu gebaut, nichts gespeichert.
-                // Seit 2026-09-02 ist das ein Abruf-Schluessel, kein Sitzungstoken.
-                var href = '/api/info_files/' + encodeURIComponent(f.name)
-                         + (_dlk() ? '?token=' + encodeURIComponent(_dlk()) : '');
-                var inline = !!INLINE[f.kind];
-                var attrs = inline
-                    ? 'target="_blank" rel="noopener"'
-                    : 'download="' + esc(f.name) + '"';
-                // Eine Verknuepfung, die hier landet, hatte kein brauchbares Ziel
-                // (das Backend degradiert sie normalerweise schon). Dann auch das
-                // Datei-Symbol zeigen – ein Globus, der eine Datei herunterlaedt,
-                // waere eine falsche Ansage.
-                return '<a class="pt-info-item" href="' + esc(href) + '" ' + attrs
-                     + ' title="' + esc(f.name) + '">'
-                     + icon(f.kind === 'link' ? 'file' : f.kind)
-                     + '<span class="pt-info-name">' + esc(f.name) + '</span>'
-                     + '<span class="pt-info-meta">' + esc(fmtSize(f.size)) + '</span>'
-                     + '</a>';
+                return Mgr._zeile(f, Mgr._eintrag(f));
             }).join('');
+        },
+
+        // Fuer Administratoren steht neben jedem Eintrag ein Muelleimer. Der
+        // Knopf liegt NEBEN dem Link (nicht darin) – ein Knopf in einem <a>
+        // loeste beim Klick auch den Download aus.
+        _zeile: function (f, html) {
+            if (!Mgr._admin) return html;
+            var titel = T('portal.info_delete', 'Löschen');
+            return '<div class="pt-info-row">' + html
+                 + '<button type="button" class="pt-info-del" data-name="' + esc(f.name) + '"'
+                 + ' title="' + esc(titel) + ': ' + esc(f.name) + '" aria-label="' + esc(titel) + ': ' + esc(f.name) + '">'
+                 + (window.JarvisIcons ? window.JarvisIcons.trash() : '') + '</button></div>';
+        },
+
+        _eintrag: function (f) {
+            // ── Verknuepfung (.url): oeffnet das Ziel, nicht die Datei ──
+            if (f.kind === 'link' && isWebUrl(f.url)) {
+                // rel="noreferrer" zusaetzlich zu noopener: die Zieladresse
+                // soll nicht erfahren, aus welcher internen Seite der Klick kam.
+                return '<a class="pt-info-item" href="' + esc(f.url)
+                     + '" target="_blank" rel="noopener noreferrer"'
+                     + ' title="' + esc(f.url) + '">'
+                     + icon('link')
+                     + '<span class="pt-info-name">' + esc(f.label || f.name) + '</span>'
+                     + '<span class="pt-info-meta">' + esc(hostOf(f.url)) + '</span>'
+                     + '</a>';
+            }
+            // Der Schluessel gehoert NUR ins DOM (wie chatlib.js::_withToken):
+            // die Liste wird bei jedem Laden neu gebaut, nichts gespeichert.
+            // Seit 2026-09-02 ist das ein Abruf-Schluessel, kein Sitzungstoken.
+            var href = '/api/info_files/' + encodeURIComponent(f.name)
+                     + (_dlk() ? '?token=' + encodeURIComponent(_dlk()) : '');
+            var inline = !!INLINE[f.kind];
+            var attrs = inline
+                ? 'target="_blank" rel="noopener"'
+                : 'download="' + esc(f.name) + '"';
+            // Eine Verknuepfung, die hier landet, hatte kein brauchbares Ziel
+            // (das Backend degradiert sie normalerweise schon). Dann auch das
+            // Datei-Symbol zeigen – ein Globus, der eine Datei herunterlaedt,
+            // waere eine falsche Ansage.
+            return '<a class="pt-info-item" href="' + esc(href) + '" ' + attrs
+                 + ' title="' + esc(f.name) + '">'
+                 + icon(f.kind === 'link' ? 'file' : f.kind)
+                 + '<span class="pt-info-name">' + esc(f.name) + '</span>'
+                 + '<span class="pt-info-meta">' + esc(fmtSize(f.size)) + '</span>'
+                 + '</a>';
         },
 
         toggle: function () { this._open ? this.close() : this.open(); },

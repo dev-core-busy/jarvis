@@ -206,6 +206,131 @@ def resolve(name: str) -> Path | None:
     return rp
 
 
+# ── Verwaltung durch Administratoren (Hochladen, Loeschen) ──────────────────
+# Bis 2026-10-28 kam eine Datei nur per Dateisystem in den Ordner (scp, Freigabe).
+# Jetzt kann ein Administrator sie im Portal-Fenster hochladen und loeschen; die
+# Rechtepruefung macht der Endpunkt (require_local_auth), hier stehen nur die
+# Dateiregeln – damit sie ohne FastAPI pruefbar sind.
+
+# Obergrenze je Datei. Das groesste Dokument auf ECHT (Benutzerhandbuch) hat
+# rund 24 MB; 200 MB laesst Platz fuer Videos, ohne dass ein versehentlich
+# gewaehltes Abbild die Platte fuellt.
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+MAX_NAME_LEN = 200
+
+# Vorlaeufige Dateien beginnen mit einem Punkt: list_files() und resolve()
+# blenden sie damit von selbst aus, ein halb geschriebener Upload ist nie
+# sichtbar oder abrufbar.
+_TEMP_PREFIX = ".upload-"
+
+
+def pruefe_name(name: str) -> str:
+    """Prueft den Dateinamen eines Uploads und gibt ihn bereinigt zurueck.
+
+    Wirft ValueError mit einem Grund in Klartext. Erlaubt ist nur ein reiner
+    Dateiname (kein Pfadanteil, kein fuehrender Punkt, keine Steuerzeichen) mit
+    einer Endung, die das Portal kennt (``_KINDS``) – eine unbekannte Endung
+    erschiene nur als namenloses Dateisymbol.
+    """
+    n = (name or "").strip()
+    if not n:
+        raise ValueError("Dateiname fehlt")
+    if "/" in n or "\\" in n:
+        raise ValueError("Dateiname darf keinen Pfad enthalten")
+    if n.startswith("."):
+        raise ValueError("Dateiname darf nicht mit einem Punkt beginnen")
+    if any(ord(c) < 32 or ord(c) == 127 for c in n):
+        raise ValueError("Dateiname enthaelt Steuerzeichen")
+    if len(n) > MAX_NAME_LEN:
+        raise ValueError(f"Dateiname ist laenger als {MAX_NAME_LEN} Zeichen")
+    ext = Path(n).suffix.lstrip(".").lower()
+    if not ext or ext not in _KINDS:
+        raise ValueError(f"Dateityp .{ext} wird nicht unterstuetzt" if ext
+                         else "Dateiname ohne Endung")
+    return n
+
+
+def existiert(name: str) -> bool:
+    """Liegt unter diesem Namen schon eine Datei im Ordner?"""
+    return resolve(name) is not None
+
+
+def speichern(name: str, bloecke, ersetzen: bool = False) -> dict:
+    """Schreibt einen Upload in den Ordner und gibt seinen Listeneintrag zurueck.
+
+    ``bloecke``: Iterable aus ``bytes`` (die Datei in Stuecken). Geschrieben
+    wird erst in eine versteckte Zwischendatei, dann per ``os.replace`` an den
+    Zielnamen – ein abgebrochener Upload hinterlaesst keine halbe Datei unter
+    dem echten Namen. Ueberschreitet die Datei ``MAX_UPLOAD_BYTES``, wird
+    abgebrochen und die Zwischendatei entfernt (ValueError).
+    FileExistsError, wenn der Name belegt ist und ``ersetzen`` nicht gesetzt.
+    """
+    n = pruefe_name(name)
+    if not ensure_dir():
+        raise OSError("Ablage-Ordner nicht verfuegbar")
+    ziel = INFO_DIR / n
+    if ziel.exists() and not ersetzen:
+        raise FileExistsError(n)
+    if ziel.is_symlink() or (ziel.exists() and not ziel.is_file()):
+        # Ein Symlink oder Ordner unter diesem Namen wird nicht ueberschrieben –
+        # os.replace wuerde sonst den Verweis ersetzen bzw. scheitern.
+        raise ValueError("Unter diesem Namen liegt keine normale Datei")
+    alte_zwischendateien_entfernen()
+    temp = INFO_DIR / f"{_TEMP_PREFIX}{os.getpid()}-{os.urandom(6).hex()}"
+    groesse = 0
+    try:
+        with open(temp, "wb") as f:
+            for b in bloecke:
+                groesse += len(b)
+                if groesse > MAX_UPLOAD_BYTES:
+                    raise ValueError(f"Datei ist groesser als "
+                                     f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+                f.write(b)
+        os.chmod(temp, 0o644)
+        os.replace(temp, ziel)
+    finally:
+        if temp.exists():
+            try:
+                temp.unlink()
+            except OSError:
+                pass
+    st = ziel.stat()
+    return {"name": n, "size": st.st_size, "mtime": int(st.st_mtime), "kind": kind_of(n)}
+
+
+def loeschen(name: str) -> bool:
+    """Entfernt eine Datei aus dem Ordner. False, wenn es sie nicht gibt.
+
+    Geht ueber ``resolve()`` – dieselbe Schranke wie beim Abrufen: kein Pfad,
+    keine versteckte Datei, kein Symlink aus dem Ordner heraus.
+    """
+    if not resolve(name):
+        return False
+    # Den EINTRAG im Ordner entfernen, nicht das aufgeloeste Ziel: ein Verweis
+    # auf eine andere Datei im Ordner soll nur selbst verschwinden.
+    (INFO_DIR / name.strip()).unlink()
+    return True
+
+
+def alte_zwischendateien_entfernen(max_alter_s: int = 3600) -> int:
+    """Raeumt Zwischendateien abgebrochener Uploads weg (z. B. nach einem
+    Dienstabbruch mitten im Schreiben). Nur Dateien mit ``_TEMP_PREFIX``, die
+    aelter als ``max_alter_s`` sind – ein gerade laufender Upload bleibt."""
+    import time
+    n = 0
+    try:
+        for p in INFO_DIR.glob(_TEMP_PREFIX + "*"):
+            try:
+                if p.is_file() and time.time() - p.stat().st_mtime > max_alter_s:
+                    p.unlink()
+                    n += 1
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return n
+
+
 def media_type(name: str) -> str:
     """MIME-Typ fuer die Auslieferung (Fallback: Download-Strom)."""
     import mimetypes

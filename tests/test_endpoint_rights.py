@@ -489,11 +489,27 @@ def _rumpf(fn):
     return rest if j < 0 else rest[:j]
 
 
+def _def_quelle(name):
+    """Quelltext einer Modul-Funktion per AST (auch ohne folgende Route)."""
+    import ast
+    for n in ast.parse(SRC).body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name:
+            return ast.get_source_segment(SRC, n) or ""
+    return ""
+
+
 for fn in ("get_settings", "get_profiles"):
     body = _rumpf(fn)
     # Positivkontrolle: der Schnitt hat wirklich diese Funktion erfasst und
     # endet vor der naechsten Route.
     check(f"{fn}: Rumpf geschnitten", f"async def {fn}(" in body and body.count("@app.") == 0)
+    # Seit dem Zertifikatsanker (2026-10-27) baut get_profiles jedes Profil
+    # ueber _profil_oeffentlich - die Maskierung steht dann DORT. Gemessen wird
+    # die Kette: jedes Profil geht durch den Helfer, und der maskiert.
+    if fn == "get_profiles":
+        check("get_profiles: jedes Profil geht durch _profil_oeffentlich",
+              "[_profil_oeffentlich(p) for p in config.profiles]" in body)
+        body = _def_quelle("_profil_oeffentlich")
     check(f"{fn} maskiert api_key", '"api_key": _mask_key(' in body)
     check(f"{fn} maskiert session_key", '"session_key": _mask_key(' in body)
 check("get_settings maskiert den Agent-API-Key",

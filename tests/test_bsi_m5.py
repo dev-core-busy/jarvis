@@ -771,7 +771,12 @@ class _Cfg:
 
 CF = _Cfg()
 ns = {"config": CF, "JSONResponse": Antwort, "Request": Anfrage, "Depends": lambda x: None,
-      "require_local_auth": None}
+      "require_local_auth": None, "asyncio": asyncio}
+# Seit dem Zertifikatsanker (2026-10-27) ruft update_profile zusaetzlich
+# _profil_anker und antwortet ueber _profil_oeffentlich - beide echt
+# ausgeschnitten, nicht nachgebaut.
+for _hilfe in ("_mask_key", "_profil_oeffentlich", "_profil_anker"):
+    schneide(_hilfe, ns)
 schneide("_profil_umleitung", ns)
 upd = schneide("update_profile", ns)
 for rumpf, was in (({"api_url": "https://angreifer.example/v1", "api_key": ""}, "Schluessel leer"),

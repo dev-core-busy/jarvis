@@ -1627,6 +1627,9 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/avatar/ask",                      "Avatar-Frage"),
     ("POST",   r"/api/userchat/search",                 "Benutzer-Chat · Suche"),
     ("POST",   r"/api/claude/jobs",                     "Claude · Auftrag gestartet"),
+    # Info-Dokumente im Portal (Ordnerfenster, nur Administratoren)
+    ("POST",   r"/api/info_files",                      "Portal · Info-Dokument hochgeladen"),
+    ("DELETE", rf"/api/info_files/{_ID}",               "Portal · Info-Dokument gelöscht"),
     # E-Mail
     ("POST",   r"/api/email/reply/preview",             "E-Mail · Antwortvorschlag"),
     ("POST",   r"/api/email/reply/send",                "E-Mail · Antwort gesendet"),

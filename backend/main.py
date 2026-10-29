@@ -8046,6 +8046,31 @@ async def system_cve_pruefen(req: Request, user: str = Depends(require_local_aut
     return JSONResponse({"ok": True, "laeuft": True, "beheben": beheben}, status_code=202)
 
 
+@app.post("/api/system/cve/einzeln")
+async def system_cve_einzeln(req: Request, user: str = Depends(require_local_auth)):
+    """Ein einzelnes Debian-Quellpaket aktualisieren (Knopf in der Detailzeile).
+
+    Angenommen wird nur ein Quellpaket, das das letzte Ergebnis als behebbar
+    fuehrt (``cve_pruefung.einzeln_pakete``); die Grenzen der Broker-Op gelten
+    unveraendert. Laeuft im Hintergrund wie die Pruefung (202).
+    """
+    from backend import cve_pruefung
+    body = await req.json()
+    quelle = body.get("quelle") if isinstance(body, dict) else None
+    if not isinstance(quelle, str) or not quelle:
+        raise HTTPException(400, "quelle fehlt")
+    if cve_pruefung.status()["laeuft"]:
+        return JSONResponse({"ok": False, "laeuft": True,
+                             "error": "Es läuft bereits eine Prüfung."}, status_code=409)
+    pakete = cve_pruefung.einzeln_pakete(cve_pruefung.zustand_ergebnis(), quelle)
+    if not pakete:
+        raise HTTPException(400, "Für dieses Paket liegt kein Update vor – bitte neu prüfen.")
+    import threading
+    threading.Thread(target=cve_pruefung.lauf_einzeln, daemon=True,
+                     kwargs={"quelle": quelle, "von": user}).start()
+    return JSONResponse({"ok": True, "laeuft": True, "pakete": pakete}, status_code=202)
+
+
 @app.post("/api/system/cve/quittieren")
 async def system_cve_quittieren(req: Request, user: str = Depends(require_local_auth)):
     """Befunde ohne eigene Abhilfe als gesehen markieren (``ids`` oder ``alle``).

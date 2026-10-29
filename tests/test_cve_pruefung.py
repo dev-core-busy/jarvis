@@ -249,11 +249,66 @@ p3 = cve_pruefung.plan(ERG, {"schwelle": "ab_niedrig", "regulaere_quelle": False
 check(p3["debian"] == ["p1", "p2"] and p3["index"] is True,
       "Auftrags-Schwelle 'alle' ueberstimmt die Vorgabe", str(p3))
 check(p1["python"] is True, "Python-Behebung im Plan")
-ERG_LOCK = dict(ERG, bereiche={"python": {"lock_modus": True}})
-check(cve_pruefung.plan(ERG_LOCK, cve_pruefung.VORGABEN)["python"] is False,
+# Lock-Modus: python_pruefen mit einer Attrappe von abhaengigkeiten, die die
+# ECHTEN Namen und Rueckgabeformen stellt (installiert/schwachstellen/lock_modus).
+import types  # noqa: E402
+_abh = types.ModuleType("backend.abhaengigkeiten")
+_abh.installiert = lambda: {"filelock": "3.29.1"}
+_abh.schwachstellen = lambda inst: [
+    {"paket": "filelock", "version": "3.29.1", "id": "GHSA-x", "aliase": ["CVE-2026-1", "GHSA-x"],
+     "behoben_in": "4.2.1", "ausgenommen": False},
+    {"paket": "filelock", "version": "3.29.1", "id": "GHSA-y", "aliase": ["GHSA-y"],
+     "behoben_in": None, "ausgenommen": False}]
+_abh_alt = sys.modules.get("backend.abhaengigkeiten")
+sys.modules["backend.abhaengigkeiten"] = _abh
+import backend as _backend_pkg  # noqa: E402
+_attr_alt = getattr(_backend_pkg, "abhaengigkeiten", None)
+_backend_pkg.abhaengigkeiten = _abh
+try:
+    _abh.lock_modus = lambda: True
+    _pl = cve_pruefung.python_pruefen()
+    _abh.lock_modus = lambda: False
+    _pf = cve_pruefung.python_pruefen()
+finally:
+    if _abh_alt is not None:
+        sys.modules["backend.abhaengigkeiten"] = _abh_alt
+    else:
+        sys.modules.pop("backend.abhaengigkeiten", None)
+    if _attr_alt is not None:
+        _backend_pkg.abhaengigkeiten = _attr_alt
+    else:
+        delattr(_backend_pkg, "abhaengigkeiten")
+check([b["klasse"] for b in _pl["befunde"]] == ["lock", "offen"],
+      "Lock-Modus: Python-Behebung heisst 'lock', nicht 'behebbar'", str([b["klasse"] for b in _pl["befunde"]]))
+check([b["klasse"] for b in _pf["befunde"]] == ["behebbar", "offen"],
+      "ohne Lock-Modus bleibt es 'behebbar'")
+_erg_lock = {"befunde": _pl["befunde"], "bereiche": {"python": _pl["info"]}}
+check(cve_pruefung.plan(_erg_lock, cve_pruefung.VORGABEN)["python"] is False,
       "im Lock-Modus wird Python nie automatisch gehoben")
+_z = {"lock": 1, "behebbar": 0}
+_kb = cve_pruefung.kurzbericht({"ok": True, "zaehler": _z, "beheben": True, "bereiche": {},
+                                "behebung": {"plan": {"nur_regulaere_quelle": 3}, "debian": []}})
+check("Lock-Datei" in _kb and "regulären Quelle" in _kb,
+      "der Kurzbericht nennt, WARUM nichts gehoben wurde", _kb)
 check(not any(b["klasse"] == "offen" and "p4" in cve_pruefung.plan(ERG, cve_pruefung.VORGABEN)["debian"]
               for b in ERG["befunde"]), "offene Luecken (ohne Behebung) stehen nie im Plan")
+
+_ein = {"befunde": [
+    {"bereich": "debian", "quelle": "brotli", "klasse": "behebbar", "beheben_mit": ["libbrotli1", "brotli"]},
+    {"bereich": "debian", "quelle": "brotli", "klasse": "offen", "beheben_mit": ["fremd1"]},
+    {"bereich": "debian", "quelle": "anders", "klasse": "behebbar", "beheben_mit": ["anders1"]},
+    {"bereich": "python", "quelle": "brotli", "klasse": "behebbar", "beheben_mit": ["pip1"]}]}
+check(cve_pruefung.einzeln_pakete(_ein, "brotli") == ["brotli", "libbrotli1"],
+      "Einzel-Update: genau die behebbaren Pakete DIESES Debian-Quellpakets",
+      str(cve_pruefung.einzeln_pakete(_ein, "brotli")))
+check(cve_pruefung.einzeln_pakete(_ein, "gibtsnicht") == [] and cve_pruefung.einzeln_pakete(None, "brotli") == [],
+      "unbekanntes Quellpaket oder kein Ergebnis -> nichts")
+_lr = ""
+for _n in ast.walk(ast.parse((ROOT / "backend" / "cve_pruefung.py").read_text(encoding="utf-8"))):
+    if isinstance(_n, ast.FunctionDef) and _n.name == "lauf_einzeln":
+        _lr = ast.unparse(_n)
+check("einzeln_pakete(" in _lr and "_sperre.acquire(blocking=False)" in _lr,
+      "lauf_einzeln nimmt nur Pakete aus dem Ergebnis und haelt die Laufsperre")
 
 # ═══════════════════════════════════════════════════════════════════════════
 abschnitt("4. Beheben (Broker-Seite) mit Attrappe fuer apt/dpkg")
@@ -449,6 +504,15 @@ check(b1["anzahl"] == 1 and b1["posten"][0]["titel"] == "brotli",
       "nach Quittung bleibt nur das Behebbare", json.dumps(b1)[:200])
 cve_pruefung.quittieren(ids=[bef7[2]["id"]])
 check(cve_pruefung.badge()["anzahl"] == 1, "behebbar laesst sich NICHT quittieren")
+_lk = {"bereich": "python", "quelle": "filelock", "cve": "CVE-5", "klasse": "lock"}
+_lk["id"] = cve_pruefung.schluessel(_lk)
+_lk["quittierbar"] = _lk["klasse"] in cve_pruefung.QUITTIERBAR
+check(_lk["quittierbar"] is False, "Lock-Fall ist nicht als gesehen markierbar (Vorgabe 2026-10-29)")
+cve_pruefung._speichern({"ts": 3, "befunde": bef7 + [_lk]})
+cve_pruefung.quittieren(alle=True)
+cve_pruefung.quittieren(ids=[_lk["id"]])
+check(any(x["titel"] == "filelock" for x in cve_pruefung.badge()["posten"]),
+      "Lock-Fall bleibt nach 'alle als gesehen' in der Badge")
 neu = dict(bef7[0], cve="CVE-9")
 neu["id"] = cve_pruefung.schluessel(neu)
 cve_pruefung._speichern({"ts": 2, "befunde": bef7 + [neu]})

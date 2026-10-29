@@ -129,6 +129,18 @@ if behebbar:
     s, d = hol("/api/system/cve/quittieren", tok, "POST", {"ids": behebbar[:1]})
     check("ein behebbarer Befund wird NICHT quittiert", s == 200 and d.get("quittiert") == 0, d)
 
+print("\n3b) Einzel-Update: nur fuer behebbare Quellpakete, nur fuer Admins")
+s, d = hol("/api/system/cve/einzeln", tok_user, "POST", {"quelle": "brotli"})
+check("Nicht-Admin -> 403", s == 403, s)
+s, d = hol("/api/system/cve/einzeln", tok, "POST", {})
+check("ohne quelle -> 400", s == 400, (s, d))
+s, d = hol("/api/system/cve/einzeln", tok, "POST", {"quelle": "gibt-es-nicht-xyz"})
+check("Quellpaket ohne Update -> 400 (es wird nichts angestossen)", s == 400, (s, d))
+offen_q = sorted({b["quelle"] for b in bef if b["bereich"] == "debian" and b["klasse"] == "offen"})
+if offen_q:
+    s, d = hol("/api/system/cve/einzeln", tok, "POST", {"quelle": offen_q[0]})
+    check("Quellpaket nur mit offenen Luecken -> 400", s == 400, (offen_q[0], s, d))
+
 print("\n4) Einstellungen: ungueltig abgelehnt, gueltig unveraendert zurueckgeschrieben")
 vorher = z.get("einstellungen") or {}
 s, d = hol("/api/system/cve/einstellungen", tok, "PUT", {"schwelle": "kritisch"})

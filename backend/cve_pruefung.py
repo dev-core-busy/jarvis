@@ -86,7 +86,13 @@ SCHWELLE_RANG = {"alle": 0, "ab_niedrig": 1, "ab_mittel": 2}
 # Diese Klassen kann der Administrator als gesehen markieren: er kann an ihnen
 # nichts tun. "behebbar" und "neustart" bleiben stehen, bis sie erledigt sind.
 QUITTIERBAR = ("offen", "nicht_im_index", "zurueckgehalten")
-KLASSEN = ("behebbar", "neustart", "nicht_im_index", "zurueckgehalten", "offen", "ausgenommen")
+# "lock": Python-Paket mit bekannter Behebung auf einem Server im Lock-Modus
+# (JARVIS_ABH_LOCK=1). Dort hebt der Server NIE selbst – behoben wird ueber eine
+# neue requirements.lock im Repo (deploy/lock_erneuern.py). Als eigene Klasse,
+# weil "behebbar" hier eine falsche Zusage waere: auf DEV am 2026-10-29 stand
+# "7 behebbar · behebt automatisch · 0 gehoben" ohne jeden Grund da.
+KLASSEN = ("behebbar", "neustart", "nicht_im_index", "zurueckgehalten", "lock", "offen",
+           "ausgenommen")
 _META_KERNEL = re.compile(r"^linux-(image|headers)-(?!\d)[a-z0-9-]+$")
 
 _sperre = threading.Lock()
@@ -432,7 +438,7 @@ def python_pruefen() -> dict:
             "cve": cves[0] if cves else f["id"], "aliase": f.get("aliase") or [],
             "version": f["version"], "fix": f.get("behoben_in") or "", "einstufung": "",
             "klasse": "ausgenommen" if f.get("ausgenommen")
-                      else ("behebbar" if f.get("behoben_in") else "offen"),
+                      else (("lock" if lock else "behebbar") if f.get("behoben_in") else "offen"),
             "text": "", "kernel": False})
     return {"info": {"geprueft": True, "grund": "", "lock_modus": lock}, "befunde": befunde}
 
@@ -568,9 +574,9 @@ def plan(erg: dict, einst: dict, schwelle: str | None = None) -> dict:
             elif b["klasse"] == "nicht_im_index":
                 index = True
         elif b["bereich"] == "python" and b["klasse"] == "behebbar":
+            # Im Lock-Modus gibt es kein "behebbar" fuer Python (Klasse "lock",
+            # python_pruefen) – die Entscheidung steht an EINER Stelle.
             python = True
-    if (erg.get("bereiche") or {}).get("python", {}).get("lock_modus"):
-        python = False
     return {"schwelle": schwelle, "debian": sorted(pakete), "index": index,
             "python": python, "nur_regulaere_quelle": nur_regulaer}
 
@@ -655,6 +661,52 @@ def lauf(beheben: bool = False, schwelle: str | None = None, ausloeser: str = "m
         restart_service_delayed(delay_sec=5.0,
                                 context="Python-Pakete nach CVE-Prüfung gehoben")
     return erg
+
+
+def einzeln_pakete(erg: dict | None, quelle: str) -> list[str]:
+    """Binaerpakete, die ein Update EINES Debian-Quellpakets anfasst.
+
+    Je Quellpaket, nicht je Binaerpaket: ``libbrotli1`` ohne ``brotli`` zu
+    heben, liesse Teile desselben Pakets auf verschiedenen Versionen stehen.
+    Nur was das letzte Ergebnis als behebbar fuehrt – der Knopf kann nichts
+    anstossen, was die Pruefung nicht gesehen hat.
+    """
+    return sorted({n for b in (erg or {}).get("befunde") or []
+                   if b["bereich"] == "debian" and b["quelle"] == quelle
+                   and b["klasse"] == "behebbar" for n in b.get("beheben_mit") or []})
+
+
+def lauf_einzeln(quelle: str, von: str = "") -> dict:
+    """Ein Quellpaket von Hand aktualisieren, danach neu pruefen.
+
+    Bewusst AUCH aus der regulaeren Quelle (Vorgabe 2026-10-29): der Klick ist
+    eine einzelne, ausdrueckliche Entscheidung, die Rueckfrage nennt die
+    Quelle. Der Schalter in den Einstellungen gilt fuer die Automatik und den
+    Sammelknopf.
+    """
+    if not _sperre.acquire(blocking=False):
+        return {"ok": False, "fehler": "Es läuft bereits eine Prüfung."}
+    _status.update(laeuft=True, seit=time.time(), schritt="beheben", ausloeser="einzeln")
+    try:
+        alt = zustand_ergebnis()
+        vorher = {b["id"] for b in (alt or {}).get("befunde") or [] if b["klasse"] == "behebbar"}
+        pakete = einzeln_pakete(alt, quelle)
+        if not pakete:
+            return {"ok": False, "fehler": "Für dieses Paket liegt kein Update vor – bitte neu prüfen."}
+        res = _broker_beheben(pakete, False, False, von)
+        _status["schritt"] = "pruefen"
+        erg = pruefen()
+        erg["behebung"] = {"plan": {"einzeln": quelle, "debian": pakete}, "debian": [res],
+                           "python": None}
+        erg.update(ok=True, ausloeser="einzeln", von=von, beheben=True)
+        _speichern(erg)
+        _melden(erg, vorher)
+        return erg
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "fehler": f"{type(e).__name__}: {e}"}
+    finally:
+        _status.update(laeuft=False, schritt="")
+        _sperre.release()
 
 
 def _speichern(erg: dict) -> None:
@@ -751,11 +803,19 @@ def kurzbericht(erg: dict) -> str:
     z = erg.get("zaehler") or {}
     teile = [f"{z.get('behebbar', 0)} behebbar", f"{z.get('neustart', 0)} Neustart",
              f"{z.get('offen', 0)} ohne Update"]
+    if z.get("lock"):
+        teile.append(f"{z['lock']} Python nur über die Lock-Datei")
     beh = erg.get("behebung") or {}
     n = sum(len(r.get("installiert") or []) for r in beh.get("debian") or [])
     py = len((beh.get("python") or {}).get("geaendert") or [])
     if erg.get("beheben"):
         teile.append(f"{n} Debian-Paket(e) und {py} Python-Paket(e) gehoben")
+        # WARUM nichts gehoben wurde, gehoert in die Zeile – sonst steht dort
+        # "behebbar" neben "0 gehoben" und niemand weiss, was zu tun ist.
+        pl = beh.get("plan") or {}
+        if pl.get("nur_regulaere_quelle"):
+            teile.append(f"{pl['nur_regulaere_quelle']} nur in der regulären Quelle "
+                         "(in den Einstellungen nicht freigegeben)")
         fehl = [r.get("fehler") for r in beh.get("debian") or [] if r.get("fehler")]
         if fehl:
             teile.append("Fehler: " + "; ".join(fehl)[:200])
@@ -790,7 +850,8 @@ def badge() -> dict:
         e = je.setdefault(k, {"art": "cve", "bereich": b["bereich"], "titel": b["quelle"],
                               "zaehler": {}, "ts": int(erg.get("ts") or 0)})
         e["zaehler"][b["klasse"]] = e["zaehler"].get(b["klasse"], 0) + 1
-    rang = {"behebbar": 0, "neustart": 1, "nicht_im_index": 2, "zurueckgehalten": 3, "offen": 4}
+    rang = {"behebbar": 0, "neustart": 1, "nicht_im_index": 2, "zurueckgehalten": 3,
+            "lock": 4, "offen": 5}
     posten = sorted(je.values(), key=lambda e: (min(rang.get(k, 9) for k in e["zaehler"]),
                                                 e["titel"]))
     return {"anzahl": len(posten), "posten": posten}

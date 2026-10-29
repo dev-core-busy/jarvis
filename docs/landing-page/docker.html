@@ -208,6 +208,7 @@
             <tbody>
                 <tr><td>Docker Engine</td><td><strong>20.10+</strong></td><td><span class="code-inline">docker --version</span></td></tr>
                 <tr><td>Docker Compose</td><td><strong>v2.0+ (Plugin)</strong></td><td><span class="code-inline">docker compose version</span></td></tr>
+                <tr><td><span class="t-de">Prozessor</span><span class="t-en">Processor</span></td><td><strong>x86-64 (amd64)</strong></td><td><span class="code-inline">uname -m</span> → x86_64</td></tr>
             </tbody>
         </table>
 
@@ -216,11 +217,24 @@
             <div><span class="t-de">Docker Desktop (Windows/Mac) und Docker Engine (Linux) sind beide kompatibel. Auf Linux empfiehlt sich das offizielle <a href="https://docs.docker.com/engine/install/" target="_blank">Docker-Repository</a> statt der Paketquellen der Distribution.</span><span class="t-en">Docker Desktop (Windows/Mac) and Docker Engine (Linux) are both compatible. On Linux the official <a href="https://docs.docker.com/engine/install/" target="_blank">Docker repository</a> is recommended over the distribution's package sources.</span></div>
         </div>
 
-        <h3><span class="t-de">Docker auf Debian/Ubuntu installieren (falls noch nicht vorhanden)</span><span class="t-en">Install Docker on Debian/Ubuntu (if not already installed)</span></h3>
+        <h3><span class="t-de">Docker auf Debian installieren (falls noch nicht vorhanden)</span><span class="t-en">Install Docker on Debian (if not already installed)</span></h3>
+        <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Aus der offiziellen Docker-Paketquelle, als root. Der Fingerabdruck des Schlüssels muss <span class="code-inline">9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88</span> lauten – weicht er ab, nicht weitermachen.</span><span class="t-en">From the official Docker package repository, as root. The key fingerprint must read <span class="code-inline">9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88</span> – if it differs, stop.</span></p>
         <div class="code-block">
             <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
-            <code>curl -fsSL https://get.docker.com | sh
-systemctl enable --now docker</code>
+            <code>apt-get update &amp;&amp; apt-get install -y ca-certificates curl gpg
+install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+<span class="comment"># <span class="t-de">Fingerabdruck prüfen (siehe oben)</span><span class="t-en">Check the fingerprint (see above)</span></span>
+gpg --show-keys /etc/apt/keyrings/docker.asc
+printf '%s\n' "Types: deb" "URIs: https://download.docker.com/linux/debian" \
+  "Suites: $(. /etc/os-release &amp;&amp; echo $VERSION_CODENAME)" "Components: stable" \
+  "Signed-By: /etc/apt/keyrings/docker.asc" &gt; /etc/apt/sources.list.d/docker.sources
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin</code>
+        </div>
+        <div class="info-box info">
+            <span class="icon">ℹ️</span>
+            <div><span class="t-de">Ubuntu: in beiden Adressen <span class="code-inline">debian</span> durch <span class="code-inline">ubuntu</span> ersetzen. Bewusst nicht <span class="code-inline">curl … get.docker.com | sh</span>: das führt ein ungeprüftes Skript aus dem Netz mit root-Rechten aus.</span><span class="t-en">Ubuntu: replace <span class="code-inline">debian</span> with <span class="code-inline">ubuntu</span> in both URLs. Deliberately not <span class="code-inline">curl … get.docker.com | sh</span>: that runs an unverified script from the internet with root privileges.</span></div>
         </div>
     </div>
 
@@ -234,7 +248,7 @@ systemctl enable --now docker</code>
                 <div class="step-num">1</div>
                 <div class="step-content">
                     <div class="step-title"><span class="t-de">Herunterladen &amp; Starten</span><span class="t-en">Download &amp; Start</span></div>
-                    <div class="step-desc"><span class="t-de">Lädt die <span class="code-inline">docker-compose.yml</span> herunter und startet Jarvis. Das Docker-Image (~600 MB) wird beim ersten Mal automatisch gezogen.</span><span class="t-en">Downloads the <span class="code-inline">docker-compose.yml</span> and starts Jarvis. The Docker image (~600 MB) is pulled automatically on first run.</span></div>
+                    <div class="step-desc"><span class="t-de">Lädt die <span class="code-inline">docker-compose.yml</span> herunter und startet Jarvis. Das Docker-Image (~1,4 GB Download) wird beim ersten Mal automatisch gezogen.</span><span class="t-en">Downloads the <span class="code-inline">docker-compose.yml</span> and starts Jarvis. The Docker image (~1.4 GB download) is pulled automatically on first run.</span></div>
                     <div class="code-block highlight">
                         <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
                         <code>curl -fsSL https://jarvis-ai.info/downloads/docker-compose.yml -o docker-compose.yml
@@ -278,7 +292,8 @@ Login: jarvis / initial password  <span class="comment"># docker logs jarvis | g
             <thead><tr><th>Variable</th><th><span class="t-de">Standard</span><span class="t-en">Default</span></th><th><span class="t-de">Beschreibung</span><span class="t-en">Description</span></th></tr></thead>
             <tbody>
                 <tr><td>JARVIS_DOCKER</td><td><strong>1</strong></td><td><span class="t-de">Aktiviert Docker-Modus (ENV-Auth statt Linux-PAM). <strong>Nicht ändern.</strong></span><span class="t-en">Enables Docker mode (ENV auth instead of Linux-PAM). <strong>Do not change.</strong></span></td></tr>
-                <tr><td>JARVIS_PASSWORD</td><td><strong>jarvis</strong></td><td><span class="t-de">Passwort für den Web-Login (Benutzername ist immer <strong>jarvis</strong>)</span><span class="t-en">Password for web login (username is always <strong>jarvis</strong>)</span></td></tr>
+                <tr><td>JARVIS_PASSWORD</td><td>–</td><td><span class="t-de">Startkennwort für den Web-Login (Benutzer <strong>jarvis</strong>). Leer = Zufallskennwort im Log. Gilt nur, bis das Kennwort in der Oberfläche geändert wurde.</span><span class="t-en">Initial password for the web login (user <strong>jarvis</strong>). Empty = random password in the log. Only applies until the password is changed in the UI.</span></td></tr>
+                <tr><td>SERVER_IP</td><td>127.0.0.1</td><td><span class="t-de">Adresse des Hosts – steht im SSL-Zertifikat. <strong>Auf die eigene IP setzen</strong>, sonst lehnen Windows-Clients das Zertifikat ab.</span><span class="t-en">Address of the host – written into the SSL certificate. <strong>Set it to your own IP</strong>, otherwise Windows clients reject the certificate.</span></td></tr>
                 <tr><td>GEMINI_API_KEY</td><td>–</td><td><span class="t-de">Google Gemini API-Key (alternativ im Web-UI eintragen)</span><span class="t-en">Google Gemini API key (or enter via Web-UI)</span></td></tr>
                 <tr><td>ANTHROPIC_API_KEY</td><td>–</td><td><span class="t-de">Anthropic Claude API-Key</span><span class="t-en">Anthropic Claude API key</span></td></tr>
                 <tr><td>OPENROUTER_API_KEY</td><td>–</td><td><span class="t-de">OpenRouter API-Key (Zugang zu vielen Modellen)</span><span class="t-en">OpenRouter API key (access to many models)</span></td></tr>
@@ -301,12 +316,18 @@ Login: jarvis / initial password  <span class="comment"># docker logs jarvis | g
                 <tr><td>jarvis-data</td><td>/app/data</td><td><span class="t-de"><strong>Memory, Wissensdatenbank, Logs</strong> – bitte regelmäßig sichern</span><span class="t-en"><strong>Memory, knowledge base, logs</strong> – please back up regularly</span></td></tr>
                 <tr><td>jarvis-certs</td><td>/app/certs</td><td><span class="t-de">SSL-Zertifikate (werden beim ersten Start automatisch erstellt)</span><span class="t-en">SSL certificates (created automatically on first start)</span></td></tr>
                 <tr><td>wa-session</td><td>/app/services/whatsapp-bridge/auth</td><td><span class="t-de"><strong>WhatsApp-Session</strong> (Baileys Auth-Daten, bleibt bei Updates erhalten)</span><span class="t-en"><strong>WhatsApp session</strong> (Baileys auth data, preserved across updates)</span></td></tr>
+                <tr><td>jarvis-etc</td><td>/etc/jarvis</td><td><span class="t-de"><strong>Systemkonfiguration</strong> (Broker-Richtlinie, Freigabe-Schlüssel, ggf. Hauptschlüssel) – getrennt von jarvis-data sichern und aufbewahren</span><span class="t-en"><strong>System configuration</strong> (broker policy, approval keys, master key if any) – back up and store separately from jarvis-data</span></td></tr>
             </tbody>
         </table>
 
         <div class="info-box warn">
             <span class="icon">⚠️</span>
-            <div><span class="t-de">Beim <span class="code-inline">docker compose down -v</span> werden Volumes <strong>gelöscht</strong>. Ohne <span class="code-inline">-v</span> bleiben sie erhalten. Für Backups: <span class="code-inline">docker run --rm -v jarvis-data:/data -v $(pwd):/backup alpine tar czf /backup/jarvis-backup.tar.gz /data</span></span><span class="t-en">Running <span class="code-inline">docker compose down -v</span> will <strong>delete</strong> volumes. Without <span class="code-inline">-v</span> they are preserved. For backups: <span class="code-inline">docker run --rm -v jarvis-data:/data -v $(pwd):/backup alpine tar czf /backup/jarvis-backup.tar.gz /data</span></span></div>
+            <div><span class="t-de">Beim <span class="code-inline">docker compose down -v</span> werden Volumes <strong>gelöscht</strong>. Ohne <span class="code-inline">-v</span> bleiben sie erhalten. Für Backups (unten) <span class="code-inline">--volumes-from</span> verwenden, nicht <span class="code-inline">-v jarvis-data:/data</span>: Compose stellt dem Volume den Verzeichnisnamen voran (z.&nbsp;B. <span class="code-inline">jarvis_jarvis-data</span>), der kurze Name legt ein neues, leeres Volume an.</span><span class="t-en">Running <span class="code-inline">docker compose down -v</span> will <strong>delete</strong> volumes. Without <span class="code-inline">-v</span> they are preserved. For backups (below) use <span class="code-inline">--volumes-from</span>, not <span class="code-inline">-v jarvis-data:/data</span>: Compose prefixes the volume with the directory name (e.g. <span class="code-inline">jarvis_jarvis-data</span>), the short name creates a new, empty volume.</span></div>
+        </div>
+        <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
+            <code>docker run --rm --volumes-from jarvis -v "$PWD":/backup alpine tar czf /backup/jarvis-data.tar.gz /app/data
+docker run --rm --volumes-from jarvis -v "$PWD":/backup alpine tar czf /backup/jarvis-etc.tar.gz /etc/jarvis</code>
         </div>
 
         <!-- Ports -->
@@ -319,6 +340,11 @@ Login: jarvis / initial password  <span class="comment"># docker logs jarvis | g
                 <tr><td><span class="port-badge">80</span></td><td>80</td><td><strong>HTTP → HTTPS Redirect</strong></td></tr>
             </tbody>
         </table>
+
+        <div class="info-box warn">
+            <span class="icon">⚠️</span>
+            <div><span class="t-de">Docker veröffentlicht diese Ports <strong>an der Host-Firewall vorbei</strong> – Regeln in ufw oder in der nftables-INPUT-Kette greifen nicht. Wer den Zugang einschränken will, regelt das in der Kette <span class="code-inline">DOCKER-USER</span> oder vor dem Host.</span><span class="t-en">Docker publishes these ports <strong>bypassing the host firewall</strong> – rules in ufw or in the nftables INPUT chain do not apply. To restrict access, use the <span class="code-inline">DOCKER-USER</span> chain or filter in front of the host.</span></div>
+        </div>
 
         <p style="color:var(--text-secondary); font-size:0.88rem; margin-top:8px;"><span class="t-de">Anderen Port verwenden (z.B. wenn 443 belegt ist):</span><span class="t-en">Use a different port (e.g. if 443 is already in use):</span></p>
         <div class="code-block">
@@ -349,36 +375,29 @@ location / {
     <div class="doc-section" id="passwort">
         <h2><span class="h-icon">🔑</span> <span class="t-de">Passwort ändern</span><span class="t-en">Change Password</span></h2>
 
-        <p style="color:var(--text-secondary); margin-bottom:16px;"><span class="t-de">Das Passwort wird über die ENV-Variable <span class="code-inline">JARVIS_PASSWORD</span> gesetzt. Änderung:</span><span class="t-en">The password is set via the ENV variable <span class="code-inline">JARVIS_PASSWORD</span>. To change it:</span></p>
-
-        <div class="code-block">
-            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
-            <code><span class="comment"># 1. Edit docker-compose.yml</span>
-<span class="key">environment</span>:
-  <span class="key">JARVIS_DOCKER</span>: <span class="str">"1"</span>
-  <span class="key">JARVIS_PASSWORD</span>: <span class="str">"my-new-password"</span>
-
-<span class="comment"># 2. Restart the container</span>
-docker compose up -d --force-recreate</code>
-        </div>
+        <p style="color:var(--text-secondary); margin-bottom:16px;"><span class="t-de">Das Kennwort wird in der Web-Oberfläche geändert: <strong>Einstellungen (⚙) → Sicherheit → Kennwort ändern</strong>. Beim ersten Login ist der Wechsel Pflicht.</span><span class="t-en">The password is changed in the web UI: <strong>Settings (⚙) → Security → Change Password</strong>. Changing it on first login is mandatory.</span></p>
 
         <div class="info-box warn">
             <span class="icon">⚠️</span>
-            <div><span class="t-de">Das Passwort steht als Klartext in der <span class="code-inline">docker-compose.yml</span>. Für Produktionsumgebungen empfiehlt sich eine <span class="code-inline">.env</span>-Datei:</span><span class="t-en">The password is stored as plain text in <span class="code-inline">docker-compose.yml</span>. For production environments a <span class="code-inline">.env</span> file is recommended:</span></div>
+            <div><span class="t-de"><span class="code-inline">JARVIS_PASSWORD</span> ist nur ein <strong>Startkennwort</strong>: Sobald in der Oberfläche ein eigenes Kennwort vergeben wurde, gilt dieses, und eine geänderte Variable bleibt wirkungslos. Bekannte oder triviale Werte (z.&nbsp;B. <span class="code-inline">jarvis</span>, <span class="code-inline">password</span>, <span class="code-inline">12345678</span>) werden ignoriert – dann gilt das Zufallskennwort aus dem Log.</span><span class="t-en"><span class="code-inline">JARVIS_PASSWORD</span> is only an <strong>initial password</strong>: once a password has been set in the UI, that one applies and a changed variable has no effect. Well-known or trivial values (e.g. <span class="code-inline">jarvis</span>, <span class="code-inline">password</span>, <span class="code-inline">12345678</span>) are ignored – the random password from the log applies instead.</span></div>
         </div>
 
-        <h3><span class="t-de">Sicherer: .env-Datei verwenden</span><span class="t-en">More secure: use a .env file</span></h3>
+        <h3><span class="t-de">Erstkennwort anzeigen</span><span class="t-en">Show the initial password</span></h3>
         <div class="code-block">
             <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
-            <code><span class="comment"># Create .env file (loaded automatically by docker compose)</span>
-echo "JARVIS_PASSWORD=my-secure-password" > .env
-echo "GEMINI_API_KEY=AIza..." >> .env
+            <code>docker logs jarvis | grep Erstkennwort</code>
+        </div>
 
-<span class="comment"># Then in docker-compose.yml:</span>
-<span class="key">environment</span>:
-  <span class="key">JARVIS_DOCKER</span>: <span class="str">"1"</span>
-  <span class="key">JARVIS_PASSWORD</span>: <span class="str">"${JARVIS_PASSWORD}"</span>
-  <span class="key">GEMINI_API_KEY</span>: <span class="str">"${GEMINI_API_KEY}"</span></code>
+        <h3><span class="t-de">Eigenes Startkennwort vorgeben (vor dem ersten Start)</span><span class="t-en">Set your own initial password (before the first start)</span></h3>
+        <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Neben der <span class="code-inline">docker-compose.yml</span> eine Datei <span class="code-inline">.env</span> anlegen – Compose liest sie automatisch:</span><span class="t-en">Create a file <span class="code-inline">.env</span> next to the <span class="code-inline">docker-compose.yml</span> – Compose reads it automatically:</span></p>
+        <div class="code-block">
+            <code><span class="comment"># .env</span>
+JARVIS_PASSWORD=<span class="t-de">&lt;eigenes Kennwort&gt;</span><span class="t-en">&lt;your password&gt;</span>
+SERVER_IP=<span class="t-de">&lt;IP des Hosts&gt;</span><span class="t-en">&lt;host IP&gt;</span>
+
+<span class="comment"># <span class="t-de">nur für root lesbar, dann starten</span><span class="t-en">readable by root only, then start</span></span>
+chmod 600 .env
+docker compose up -d</code>
         </div>
     </div>
 

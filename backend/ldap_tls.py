@@ -184,6 +184,51 @@ def _schliessen(conn) -> None:
         pass
 
 
+def _vorgelegter_fingerabdruck(host: str, port: int, ldaps: bool, timeout: int) -> str:
+    """Fingerabdruck des Zertifikats, das der DC WIRKLICH zeigt – ungeprueft,
+    ohne Bind und ohne Anmeldedaten. Nur fuer die Begruendung eines Fehlschlags;
+    leer, wenn sich nichts holen laesst."""
+    try:
+        conn = _oeffnen(host, port, ldaps, _tls(host, port, None, pruefen=False),
+                        timeout=timeout)
+    except Exception:  # noqa: BLE001
+        return ""
+    try:
+        return sap_cert.fingerabdruck(conn.socket.getpeercert(binary_form=True) or b"")
+    except Exception:  # noqa: BLE001
+        return ""
+    finally:
+        _schliessen(conn)
+
+
+def _anker_grund(host: str, port: int, ldaps: bool, eintrag: dict | None,
+                 fehler: BaseException, timeout: int) -> str:
+    """Fehlergrund, der den Anker mitdenkt.
+
+    Ein gesetzter Anker ist der EINZIGE Vertrauensanker (``ca_certs_data``), und
+    ``sap_cert.passt`` prueft nur Host und Port – nicht den Fingerabdruck. Legt
+    der DC ein anderes Zertifikat vor (nach einer Erneuerung der Regelfall),
+    meldet OpenSSL ``unable to get local issuer certificate``, und
+    ``_verify_grund`` macht daraus "Aussteller unbekannt". Das liest sich wie
+    eine fehlende Zertifizierungsstelle und schickt die Suche in die falsche
+    Richtung: am 2026-10-29 lag auf DEV jede AD-Anmeldung, weil das
+    DC-Zertifikat am Vortag erneuert worden war – der Grund stand dem Dienst
+    zur Verfuegung und wurde nicht genannt.
+
+    Deshalb wird hier GEMESSEN, was der DC vorlegt, statt es zu vermuten. Passt
+    der Fingerabdruck doch (abgelaufen, Name, StartTLS weg) oder laesst sich
+    nichts holen, bleibt der urspruengliche Grund stehen.
+    """
+    verankert = str((eintrag or {}).get("fingerprint") or "")
+    vorgelegt = _vorgelegter_fingerabdruck(host, port, ldaps, timeout)
+    if not vorgelegt or not verankert or vorgelegt == verankert:
+        return str(fehler)
+    return ("der Domain-Controller legt ein anderes Zertifikat vor als das "
+            "verankerte – vermutlich wurde es erneuert (verankert %s, "
+            "vorgelegt %s). Einstellungen → Sicherheit → Verbindung: "
+            "Zertifikat pruefen und neu verankern." % (verankert, vorgelegt))
+
+
 def verbinden(ad_server: str, user=None, password=None,
               timeout: int = VERBINDUNGS_TIMEOUT, info: dict | None = None):
     """Offene, TLS-gesicherte, GEPRUEFTE Verbindung – der Aufrufer bindet.
@@ -203,9 +248,13 @@ def verbinden(ad_server: str, user=None, password=None,
     eintrag = anker()
     try:
         return _oeffnen(host, port, ldaps, _tls(host, port, eintrag), user, password, timeout)
-    except TlsFehler:
+    except TlsFehler as e:
+        if sap_cert.passt(eintrag, host, port):
+            # Ein gesetzter, passender Anker faellt nie in den Uebergang (das
+            # waere der Angriffsfall) – hier wird nur der GRUND genauer.
+            raise TlsFehler(_anker_grund(host, port, ldaps, eintrag, e, timeout)) from None
         ue = uebergang()
-        if not ue["aktiv"] or sap_cert.passt(eintrag, host, port):
+        if not ue["aktiv"]:
             raise
     # Zweiter Aufbau ohne Pruefung – TLS bleibt Pflicht: ein DC ohne StartTLS
     # scheitert hier genauso und wirft weiter TlsFehler.

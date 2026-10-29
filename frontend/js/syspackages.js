@@ -686,6 +686,8 @@
                 + '<span class="jv-pkg-cve jv-pkg-cve-' + esc(b.klasse) + ' ist-klein">'
                 + esc(klasseText(b.klasse)) + '</span> '
                 + '<span class="jv-pkg-cve-e">' + esc(einstufungText(b.einstufung)) + '</span>'
+                + (b.veroeffentlicht ? ' <span class="jv-pkg-cve-e">· '
+                    + esc(T('pkg.cve_veroeff', 'veröffentlicht') + ' ' + b.veroeffentlicht) + '</span>' : '')
                 + (gesehen[b.id] ? ' <span class="jv-pkg-cve-e">· ' + esc(T('pkg.cve_gesehen', 'gesehen')) + '</span>' : '')
                 + (zusatz.length ? '<div class="jv-pkg-cve-z">' + esc(zusatz.join(' · ')) + '</div>' : '')
                 + (b.text ? '<div class="jv-pkg-cve-t">' + esc(b.text) + '</div>' : '')
@@ -709,7 +711,8 @@
         var plan = _cve.plan || {};
         var teile = [];
         if (_cve.laeuft) {
-            teile.push(esc(T('pkg.cve_laeuft', 'Prüfung läuft …'))
+            teile.push('<span class="jv-pkg-spin" aria-hidden="true"></span>'
+                + esc(T('pkg.cve_laeuft', 'Prüfung läuft …'))
                 + (_cve.schritt === 'beheben' ? ' (' + esc(T('pkg.cve_schritt_beheben', 'Pakete werden aktualisiert')) + ')' : ''));
         } else if (!erg) {
             teile.push(esc(T('pkg.cve_nie', 'Noch nicht auf Sicherheitslücken geprüft.')));

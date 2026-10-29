@@ -77,6 +77,14 @@ TRACKER_MAX_BYTES = 400 * 1024 * 1024
 BRIDGE = WURZEL / "services" / "whatsapp-bridge"
 OSV_BATCH = os.environ.get("JARVIS_ABH_OSV", "https://api.osv.dev/v1/querybatch")
 OSV_VULN = os.environ.get("JARVIS_ABH_OSV_VULN", "https://api.osv.dev/v1/vulns/")
+# Veroeffentlichungsdatum je Kennung – der Debian-Tracker fuehrt keines, OSV
+# schon (fuer CVE-Kennungen das NVD-Datum). Es aendert sich nicht, deshalb
+# dauerhaft gecacht; nur Unbekanntes wird nach VEROEFF_NEU_S erneut gefragt.
+VEROEFF = DATEN / "veroeffentlicht.json"
+VEROEFF_NEU_S = 7 * 86400
+VEROEFF_DECKEL_S = 180
+VEROEFF_PARALLEL = 8
+_DATUM = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 SCHWELLEN = ("alle", "ab_niedrig", "ab_mittel")
 VORGABEN = {"schwelle": "ab_niedrig", "regulaere_quelle": False}
@@ -520,6 +528,73 @@ def npm_pruefen() -> dict:
         return {"info": {"geprueft": False, "grund": f"{type(e).__name__}: {e}"}, "befunde": []}
 
 
+# ── Veroeffentlichungsdatum (OSV) ────────────────────────────────────────────
+
+def _osv_datum(kennung: str) -> str | None:
+    """``JJJJ-MM-TT`` aus OSV; ``""`` = OSV kennt die Kennung (noch) nicht oder
+    nennt kein Datum; ``None`` = Abruf gescheitert (nicht cachen).
+
+    Bei CVE-Kennungen zuerst ``DEBIAN-CVE-…``: auf DEV am 2026-10-29 fehlten
+    517 von 2706 CVEs unter der reinen Kennung (404), ihr Debian-Eintrag trug
+    das Datum – dasselbe wie die NVD (gegengeprueft an CVE-2022-47111 und
+    CVE-2026-100229). Die reine Kennung bleibt Rueckfall fuer PyPI/npm.
+    """
+    kandidaten = ([f"DEBIAN-{kennung}"] if kennung.startswith("CVE-") else []) + [kennung]
+    for k in kandidaten:
+        try:
+            with urllib.request.urlopen(OSV_VULN + k, timeout=20) as a:  # nosec B310
+                d = json.loads(a.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                continue
+            return None
+        except Exception:  # noqa: BLE001
+            return None
+        m = _DATUM.match(str(d.get("published") or ""))
+        if m:
+            return m.group(0)
+    return ""
+
+
+def veroeffentlichung_ergaenzen(befunde: list[dict], holen=None) -> dict:
+    """Setzt ``veroeffentlicht`` an jedem Befund (``""`` = unbekannt).
+
+    Gefragt wird nur, was der Cache nicht kennt; ein gescheiterter Abruf wird
+    NICHT gemerkt (sonst bliebe das Datum eine Woche lang leer). Ein harter
+    Zeitdeckel haelt den Lauf begrenzt – was nicht drankam, folgt beim
+    naechsten Lauf. Rueckgabe: Zahlen fuer ``bereiche``.
+    """
+    from concurrent.futures import ThreadPoolExecutor, wait
+    holen = holen or _osv_datum
+    cache = _lesen(VEROEFF, {})
+    if not isinstance(cache, dict):
+        cache = {}
+    jetzt = time.time()
+    ids = sorted({b["cve"] for b in befunde if b.get("cve")})
+    offen = [k for k in ids
+             if not (isinstance(cache.get(k), dict)
+                     and (cache[k].get("d") or jetzt - float(cache[k].get("t") or 0) < VEROEFF_NEU_S))]
+    gescheitert = 0
+    if offen:
+        pool = ThreadPoolExecutor(max_workers=VEROEFF_PARALLEL)
+        auftraege = {pool.submit(holen, k): k for k in offen}
+        fertig, _rest = wait(auftraege, timeout=VEROEFF_DECKEL_S)
+        # Nicht auf Nachzuegler warten: ausstehende Auftraege verwerfen.
+        pool.shutdown(wait=False, cancel_futures=True)
+        for f in fertig:
+            d = f.result() if not f.exception() else None
+            if d is None:
+                gescheitert += 1
+                continue
+            cache[auftraege[f]] = {"d": d, "t": jetzt}
+        _schreiben(VEROEFF, cache)
+    for b in befunde:
+        e = cache.get(b.get("cve")) if b.get("cve") else None
+        b["veroeffentlicht"] = (e.get("d") or "") if isinstance(e, dict) else ""
+    return {"gefragt": len(offen), "gescheitert": gescheitert,
+            "ohne_datum": sum(1 for b in befunde if not b["veroeffentlicht"])}
+
+
 # ── Pruefen, Plan, Beheben ───────────────────────────────────────────────────
 
 def schluessel(b: dict) -> str:
@@ -541,6 +616,12 @@ def pruefen() -> dict:
     for b in befunde:
         b["id"] = schluessel(b)
         b["quittierbar"] = b["klasse"] in QUITTIERBAR or b["bereich"] == "npm"
+    try:
+        veroeff = veroeffentlichung_ergaenzen(befunde)
+    except Exception as e:  # noqa: BLE001 – ein fehlendes Datum darf die Pruefung nicht kippen
+        veroeff = {"fehler": f"{type(e).__name__}: {e}"}
+        for b in befunde:
+            b.setdefault("veroeffentlicht", "")
     zaehler = {k: 0 for k in KLASSEN}
     for b in befunde:
         zaehler[b["klasse"]] = zaehler.get(b["klasse"], 0) + 1
@@ -548,7 +629,8 @@ def pruefen() -> dict:
     return {"version": 1, "ts": jetzt,
             "erzeugt_am": dt.datetime.fromtimestamp(jetzt).astimezone().isoformat(timespec="seconds"),
             "host": socket.gethostname(), "dauer_s": round(jetzt - t0, 1),
-            "bereiche": bereiche, "befunde": befunde, "zaehler": zaehler, "behebung": None}
+            "bereiche": bereiche, "befunde": befunde, "zaehler": zaehler, "behebung": None,
+            "veroeffentlichung": veroeff}
 
 
 def einstellungen() -> dict:

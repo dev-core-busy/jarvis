@@ -972,6 +972,22 @@ body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000);
     overflow-y: auto;
 }
 .jv-pkg-cve-st { line-height: 1.8; }
+/* Drehender Kreis vor "Pruefung laeuft" – dieselbe Gestalt wie
+   .kb-files-loading/.kb-cl-laeuft in style.css. Eigene Keyframes, weil
+   @keyframes spin nur in style.css steht und das nicht jede Seite laedt. */
+.jv-pkg-spin {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    margin-right: 6px;
+    vertical-align: -2px;
+    box-sizing: border-box;
+    border: 2px solid rgba(var(--accent-rgb), 0.25);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: jv-pkg-spin 0.7s linear infinite;
+}
+@keyframes jv-pkg-spin { to { transform: rotate(360deg); } }
 .jv-pkg-cve-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
 .jv-pkg-cve-btn {
     background: rgba(var(--accent-rgb), .14);

@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -607,5 +608,143 @@ SP = (ROOT / "frontend" / "js" / "syspackages.js").read_text(encoding="utf-8")
 check("d.cve_badge" in SP and "jv-pkg-badge" in SP, "syspackages.js malt die Badge aus cve_badge")
 SB = (ROOT / "frontend" / "js" / "settings_btn.js").read_text(encoding="utf-8")
 check("cve" not in SB.lower(), "settings_btn.js (Zahnrad) kennt keine CVE-Posten mehr")
+
+# ═══════════════════════════════════════════════════════════════════════════
+abschnitt("9. Veroeffentlichungsdatum (OSV, dauerhaft gecacht)")
+# ═══════════════════════════════════════════════════════════════════════════
+# Attrappe mit der ECHTEN Signatur von _osv_datum (Kennung -> "JJJJ-MM-TT" |
+# "" unbekannt | None gescheitert) und Zaehler der Abrufe.
+_gefragt = []
+_antwort = {"CVE-2022-47111": "2025-04-19", "CVE-2099-0001": "", "CVE-2099-0002": None}
+
+
+def _holen(k):
+    _gefragt.append(k)
+    return _antwort.get(k, "2024-01-02")
+
+
+def _bf(cve):
+    return {"bereich": "debian", "quelle": "x", "cve": cve, "klasse": "offen"}
+
+
+cve_pruefung.VEROEFF.unlink(missing_ok=True)
+_b = [_bf("CVE-2022-47111"), _bf("CVE-2022-47111"), _bf("CVE-2099-0001"), _bf("CVE-2099-0002")]
+_r = cve_pruefung.veroeffentlichung_ergaenzen(_b, holen=_holen)
+check(sorted(_gefragt) == ["CVE-2022-47111", "CVE-2099-0001", "CVE-2099-0002"],
+      "jede Kennung genau EINMAL gefragt (auch wenn zwei Befunde sie teilen)", str(_gefragt))
+check([x["veroeffentlicht"] for x in _b] == ["2025-04-19", "2025-04-19", "", ""],
+      "Datum an jedem Befund, unbekannt/gescheitert = leer", str([x["veroeffentlicht"] for x in _b]))
+check(_r.get("gescheitert") == 1 and _r.get("ohne_datum") == 2, "Zahlen im Ergebnis", str(_r))
+_c = json.loads(cve_pruefung.VEROEFF.read_text(encoding="utf-8"))
+check("CVE-2099-0002" not in _c, "ein GESCHEITERTER Abruf wird nicht gemerkt")
+check(_c.get("CVE-2099-0001", {}).get("d") == "", "\"unbekannt\" wird gemerkt (mit Zeitpunkt)")
+
+_gefragt.clear()
+_b2 = [_bf("CVE-2022-47111"), _bf("CVE-2099-0001"), _bf("CVE-2099-0002")]
+cve_pruefung.veroeffentlichung_ergaenzen(_b2, holen=_holen)
+check(_gefragt == ["CVE-2099-0002"], "zweiter Lauf fragt nur das Gescheiterte nach", str(_gefragt))
+check(_b2[0]["veroeffentlicht"] == "2025-04-19", "bekanntes Datum kommt aus dem Cache")
+
+# "unbekannt" laeuft nach VEROEFF_NEU_S ab – OSV kennt neue CVEs oft erst spaeter.
+_c = json.loads(cve_pruefung.VEROEFF.read_text(encoding="utf-8"))
+_c["CVE-2099-0001"]["t"] = time.time() - cve_pruefung.VEROEFF_NEU_S - 1
+cve_pruefung._schreiben(cve_pruefung.VEROEFF, _c)
+_gefragt.clear()
+_antwort["CVE-2099-0001"] = "2026-10-01"
+cve_pruefung.veroeffentlichung_ergaenzen([_bf("CVE-2099-0001")], holen=_holen)
+check(_gefragt == ["CVE-2099-0001"], "abgelaufenes \"unbekannt\" wird neu gefragt", str(_gefragt))
+
+# Ein Abruf, der WIRFT, darf die Pruefung nicht kippen und nicht gecacht werden.
+def _wirft(k):
+    raise RuntimeError("netz weg")
+
+
+_b3 = [_bf("CVE-2099-0003")]
+_r3 = cve_pruefung.veroeffentlichung_ergaenzen(_b3, holen=_wirft)
+check(_b3[0]["veroeffentlicht"] == "" and _r3.get("gescheitert") == 1,
+      "werfender Abruf: leeres Datum, als gescheitert gezaehlt", str(_r3))
+
+# Zeitdeckel: was nicht fertig wird, bleibt leer und ungemerkt – der Lauf wartet nicht.
+_alt_deckel = cve_pruefung.VEROEFF_DECKEL_S
+cve_pruefung.VEROEFF_DECKEL_S = 0.3
+
+
+def _langsam(k):
+    time.sleep(2)
+    return "2020-01-01"
+
+
+_t0 = time.time()
+_b4 = [_bf("CVE-2099-0004")]
+cve_pruefung.veroeffentlichung_ergaenzen(_b4, holen=_langsam)
+_dauer = time.time() - _t0
+cve_pruefung.VEROEFF_DECKEL_S = _alt_deckel
+check(_dauer < 1.5, "Zeitdeckel haelt den Lauf begrenzt", f"{_dauer:.2f} s")
+check(_b4[0]["veroeffentlicht"] == ""
+      and "CVE-2099-0004" not in json.loads(cve_pruefung.VEROEFF.read_text(encoding="utf-8")),
+      "nicht fertig gewordene Kennung bleibt leer und ungemerkt")
+
+# Die echte Abfrage: Datum aus "published", 404 = unbekannt, anderes = gescheitert.
+import io  # noqa: E402
+import urllib.error  # noqa: E402
+_orig_urlopen = cve_pruefung.urllib.request.urlopen
+
+
+class _Antw(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+_abgerufen = []
+_osv = {"DEBIAN-CVE-1": b'{"published": "2025-04-19T21:15:45.217Z"}',
+        "CVE-1": b'{"published": "1999-01-01T00:00:00Z"}',
+        "CVE-4": b'{"id": "CVE-4"}',
+        "CVE-5": b'{"published": "2024-05-06T00:00:00Z"}',
+        "GHSA-aaaa-bbbb-cccc": b'{"published": "2023-07-08T00:00:00Z"}'}
+
+
+def _urlopen(url, timeout=None):
+    k = url.rsplit("/", 1)[-1]
+    _abgerufen.append(k)
+    if k == "DEBIAN-CVE-3":
+        raise urllib.error.HTTPError(url, 503, "Busy", {}, None)
+    if k not in _osv:
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+    return _Antw(_osv[k])
+
+
+cve_pruefung.urllib.request.urlopen = _urlopen
+try:
+    _w = [cve_pruefung._osv_datum(k)
+          for k in ("CVE-1", "CVE-2", "CVE-3", "CVE-4", "CVE-5", "GHSA-aaaa-bbbb-cccc")]
+finally:
+    cve_pruefung.urllib.request.urlopen = _orig_urlopen
+check(_w[:4] == ["2025-04-19", "", None, ""],
+      "_osv_datum: Debian-Eintrag zuerst / 404 / 503 / ohne Feld", str(_w))
+check(_w[4] == "2024-05-06", "ohne Debian-Eintrag gilt die reine Kennung", str(_w))
+check(_w[5] == "2023-07-08" and "DEBIAN-GHSA-aaaa-bbbb-cccc" not in _abgerufen,
+      "Nicht-CVE-Kennung wird direkt gefragt", str(_abgerufen))
+
+# pruefen() fuellt das Feld – Regel am Syntaxbaum: der Aufruf steht im Rumpf.
+_pf = next(n for n in ast.walk(ast.parse(Path(cve_pruefung.__file__).read_text(encoding="utf-8")))
+           if isinstance(n, ast.FunctionDef) and n.name == "pruefen")
+check(any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "veroeffentlichung_ergaenzen"
+          for n in ast.walk(_pf)), "pruefen() ruft veroeffentlichung_ergaenzen")
+SP2 = (ROOT / "frontend" / "js" / "syspackages.js").read_text(encoding="utf-8")
+check("b.veroeffentlicht" in SP2, "die Befundliste zeigt das Datum (syspackages.js)")
+# Der drehende Kreis vor "Pruefung laeuft": syspackages.js laeuft auf JEDER
+# Seite, style.css (mit @keyframes spin) nicht – Klasse UND Animation muessen
+# deshalb in theme.css stehen, sonst steht dort ein stiller, starrer Ring.
+import re as _re  # noqa: E402
+TH = (ROOT / "frontend" / "css" / "theme.css").read_text(encoding="utf-8")
+_zweig = SP2[SP2.find("if (_cve.laeuft)"):SP2.find("} else if (!erg)")]
+check('class="jv-pkg-spin"' in _zweig, "Kreis steht im Zweig \"Pruefung laeuft\"")
+_regel = _re.search(r"\n\.jv-pkg-spin\s*\{([^}]*)\}", TH)
+_anim = _re.search(r"animation:\s*([\w-]+)", _regel.group(1)) if _regel else None
+check(bool(_anim) and _re.search(r"@keyframes\s+" + _re.escape(_anim.group(1)) + r"\b", TH) is not None,
+      "theme.css definiert .jv-pkg-spin samt seiner Keyframes", str(_anim and _anim.group(1)))
 
 ende()

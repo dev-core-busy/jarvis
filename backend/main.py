@@ -8060,7 +8060,7 @@ async def system_cve_pruefen(req: Request, user: str = Depends(require_local_aut
 
 @app.post("/api/system/cve/einzeln")
 async def system_cve_einzeln(req: Request, user: str = Depends(require_local_auth)):
-    """Ein einzelnes Debian-Quellpaket aktualisieren (Knopf in der Detailzeile).
+    """Ein einzelnes Quellpaket aktualisieren (Debian oder Node.js; Knopf in der Detailzeile).
 
     Angenommen wird nur ein Quellpaket, das das letzte Ergebnis als behebbar
     fuehrt (``cve_pruefung.einzeln_pakete``); die Grenzen der Broker-Op gelten

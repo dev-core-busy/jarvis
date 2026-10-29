@@ -101,10 +101,27 @@ check("es wurde NICHT behoben", erg.get("beheben") is False and erg.get("behebun
 ber = erg.get("bereiche") or {}
 check("Debian wurde geprueft", (ber.get("debian") or {}).get("geprueft") is True, ber.get("debian"))
 check("Python wurde geprueft", (ber.get("python") or {}).get("geprueft") is True, ber.get("python"))
-check("npm: Bereich genannt (geprueft oder mit Grund uebersprungen)",
-      "npm" in ber and ((ber["npm"].get("geprueft") is True) or bool(ber["npm"].get("grund"))),
-      ber.get("npm"))
-print("     -> npm:", ber.get("npm"))
+# Ohne installierte Bridge gibt es keinen npm-Bereich (kein "nicht geprueft"
+# ohne Informationswert) – fehlen darf er also NUR, wenn node_modules fehlt.
+from pathlib import Path  # noqa: E402
+_bridge = (Path("/opt/jarvis") / "services" / "whatsapp-bridge" / "node_modules").is_dir()
+check("npm: Bereich da, wenn die Bridge installiert ist – sonst nicht",
+      ("npm" in ber and ((ber["npm"].get("geprueft") is True) or bool(ber["npm"].get("grund"))))
+      if _bridge else "npm" not in ber, (_bridge, ber.get("npm")))
+print("     -> npm:", ber.get("npm"), "(Bridge installiert)" if _bridge else "(Bridge nicht installiert)")
+# Node.js-Laufzeit: auf DEV aus NodeSource, muss also geprueft sein und darf
+# nicht mehr unter "nicht ueber Debian pruefbar" stehen.
+from backend import cve_pruefung as _cp  # noqa: E402
+_ni = _cp.node_installiert(_cp.release())
+_nb = ber.get("node") or {}
+if _ni and _ni.get("debian") is False:
+    check("Node.js (Fremdquelle) wurde geprueft", _nb.get("geprueft") is True, _nb)
+    check("Node.js steht nicht mehr in der Fremdliste",
+          _ni["paket"] not in ((ber.get("debian") or {}).get("fremd") or []), ber.get("debian", {}).get("fremd"))
+    check("Ende der Unterstuetzung ist bekannt", bool(_nb.get("unterstuetzt_bis")), _nb)
+else:
+    check("ohne Node.js aus Fremdquelle kein Node-Bereich", "node" not in ber, (_ni, _nb))
+print("     -> node:", _nb, "| fremd:", (ber.get("debian") or {}).get("fremd"))
 deb = ber.get("debian") or {}
 check("Release und Tracker-Stand stehen im Ergebnis",
       bool(deb.get("release")) and bool(deb.get("tracker_stand")), deb)
@@ -115,7 +132,8 @@ check("jeder Befund hat id, Klasse und Pakete",
 check("Zaehler und Befunde stimmen ueberein",
       sum((erg.get("zaehler") or {}).values()) == len(bef))
 check("behebbar ist nie quittierbar",
-      not any(b["klasse"] == "behebbar" and b["quittierbar"] and b["bereich"] != "npm" for b in bef))
+      not any(b["klasse"] == "behebbar" and b["quittierbar"] and b["bereich"] != "npm"
+              and not (b["bereich"] == "node" and not b.get("beheben_mit")) for b in bef))
 check("Plan liegt bei", isinstance(z.get("plan"), dict), z.get("plan"))
 print("     -> Plan:", json.dumps(z.get("plan"))[:300])
 

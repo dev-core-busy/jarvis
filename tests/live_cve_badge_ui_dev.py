@@ -158,6 +158,49 @@ try:
             if r.get("data"):
                 open(os.path.expanduser("~/cve_details_%s.png" % thema), "wb").write(
                     base64.b64decode(r["data"]))
+        # Haekchen "Nur noch nicht gesehene" (2026-10-29): Soll aus der API
+        # gerechnet (quittierbar und nicht quittiert, mit Paketzeile), nicht
+        # aus der Oberflaeche – sonst prueft die Probe sich selbst.
+        soll_neu = js("fetch('/api/system/cve',{headers:{Authorization:'Bearer '+localStorage.getItem('jarvis_token')}})"
+                      ".then(function(r){return r.json();}).then(function(d){"
+                      "var q={};(d.quittiert||[]).forEach(function(k){q[k]=true;});"
+                      "var n=0,p={};((d.ergebnis||{}).befunde||[]).forEach(function(b){"
+                      "if(!b.quittierbar||q[b.id])return;n++;"
+                      "if(b.bereich==='debian'||(b.bereich==='node'&&(b.pakete||[]).length))"
+                      "(b.pakete||[]).forEach(function(x){p[x]=true;});});"
+                      "return [n,Object.keys(p).sort()];})") or [0, []]
+        haken = js("!!document.getElementById('jv-pkg-nurungesehen')")
+        if not soll_neu[0]:
+            check("[%s] nichts ungesehen -> kein Haekchen 'Nur noch nicht gesehene'" % thema, haken is False)
+        else:
+            check("[%s] %d ungesehen -> Haekchen 'Nur noch nicht gesehene' da" % (thema, soll_neu[0]),
+                  haken is True)
+            js("document.getElementById('jv-pkg-nurungesehen').click()")
+            time.sleep(1)
+            ist = js("(function(){var r=document.querySelectorAll('.jv-pkg-tab tbody tr:not(.jv-pkg-cve-zeile) td.jv-pkg-n');"
+                     "var n=[];for(var i=0;i<r.length;i++)n.push(r[i].firstChild.textContent.trim());"
+                     "var c=document.getElementById('jv-pkg-nurungesehen');return [n.sort(), !!c&&c.checked];})()")
+            # Zeilendeckel aus der ausgelieferten Datei, nicht abgetippt.
+            import re as _re
+            _m = _re.search(r"var ZEILEN_MAX = (\d+);",
+                            open("/opt/jarvis/frontend/js/syspackages.js", encoding="utf-8").read())
+            deckel = int(_m.group(1)) if _m else 0
+            check("[%s] angehakt: genau die Pakete mit ungesehenen Befunden" % thema,
+                  bool(ist) and deckel > 0 and ist[1] is True and ist[0] == soll_neu[1][:len(ist[0])]
+                  and len(ist[0]) == min(len(soll_neu[1]), deckel), (ist, soll_neu[1][:10], deckel))
+            # Ungesehenes OHNE Paketzeile (Python, npm, Node ohne Paket) steht
+            # im Sammelblock – unter dem Filter aufgeklappt.
+            andere = js("(function(){var d=document.querySelector('.jv-pkg-cve-andere');"
+                        "return d?[d.open,d.querySelectorAll('li').length]:null;})()")
+            print("     -> ungesehen: %d Befunde, Pakete %s, Sammelblock %s"
+                  % (soll_neu[0], soll_neu[1][:10], andere))
+            if andere:
+                check("[%s] angehakt: Sammelblock aufgeklappt" % thema, andere[0] is True, andere)
+            js("document.getElementById('jv-pkg-nurungesehen').click()")
+            time.sleep(1)
+            check("[%s] abgehakt: Liste wieder wie vorher" % thema,
+                  js("document.querySelectorAll('.jv-pkg-tab tbody tr:not(.jv-pkg-cve-zeile)').length")
+                  == zeilen[0], zeilen)
         js("document.querySelector('.jv-pkg-close').click()")
 finally:
     try:

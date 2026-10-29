@@ -956,4 +956,285 @@ _anim = _re.search(r"animation:\s*([\w-]+)", _regel.group(1)) if _regel else Non
 check(bool(_anim) and _re.search(r"@keyframes\s+" + _re.escape(_anim.group(1)) + r"\b", TH) is not None,
       "theme.css definiert .jv-pkg-spin samt seiner Keyframes", str(_anim and _anim.group(1)))
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+abschnitt("9. Node.js-Laufzeit und vollstaendige Fremdpaket-Liste")
+# ═══════════════════════════════════════════════════════════════════════════
+# Anlass (2026-10-29, DEV und ECHT gemessen): nodejs 24.22.2-1nodesource1 war
+# nur als "nicht ueber Debian pruefbar" genannt und GAR NICHT geprueft; und
+# Fremdpakete ohne Debian-Namen (google-chrome-stable, sentinelagent) standen
+# nicht einmal in dieser Liste.
+NB = cve_pruefung.node_im_bereich
+V = (24, 22, 0)
+_faelle = [
+    ("22.x || 24.x || 26.x", V, True), ("22.x || 26.x", V, False),
+    ("^22.23.4 || ^24.22.1 || ^26.12.1", V, False), ("^24.22.1", (24, 22, 1), True),
+    ("^24.22.1", (24, 30, 0), True), ("^24.22.1", (25, 0, 0), False),
+    ("^24.1", (24, 0, 9), False), ("^24.1", (24, 9, 0), True),
+    ("^0.10.5", (0, 10, 9), True), ("^0.10.5", (0, 11, 0), False),
+    ("~24.22.1", (24, 22, 5), True), ("~24.22.1", (24, 23, 0), False),
+    ("24.22.x", V, True), ("24.21.x", V, False), ("24.22.0", V, True), ("24.22.1", V, False),
+    (">=4.0.0 <4.8.2", (4, 8, 1), True), (">=4.0.0 <4.8.2", (4, 8, 2), False),
+    ("<= 4", (4, 9, 9), True), ("<= 4", (5, 0, 0), False),
+    (">= 24.22.1", V, False), (">= 24.22.1", (26, 0, 0), True),
+    ("*", V, True),
+]
+_falsch = [f"{a!r} {v}: {NB(a, v)}" for a, v, soll in _faelle if NB(a, v) is not soll]
+check(not _falsch, f"semver-Bereiche ({len(_faelle)} Faelle, alle Formen der Datenbank)",
+      "; ".join(_falsch))
+_unklar = [a for a in ("", "vielleicht 24", "24.x &&& 26.x", ">", "24.x || kaputt")
+           if NB(a, V) is not None]
+check(not _unklar, "nicht deutbare Bereiche liefern None, nie 'nicht betroffen'", str(_unklar))
+
+_DB = {
+    "1": {"cve": ["CVE-2026-100"], "vulnerable": "22.x || 24.x", "patched": "^22.23.4 || ^24.22.1",
+          "severity": "high", "description": "Brotli", "ref": "https://nodejs.org/en/blog/x"},
+    "2": {"cve": ["CVE-2026-101"], "vulnerable": "24.x || 26.x", "patched": "^26.12.1",
+          "severity": "critical", "ref": "http://unsicher.example/"},
+    "3": {"cve": ["CVE-2026-102"], "vulnerable": "22.x", "patched": "^22.23.4", "severity": "low"},
+    "4": {"cve": ["CVE-2026-103"], "vulnerable": "24.x", "patched": "^24.10.0", "severity": "medium"},
+    "5": {"cve": [], "vulnerable": "24.x", "patched": "^24.30.0", "severity": "unknown"},
+    "6": {"cve": ["CVE-2026-104"], "vulnerable": "irgendwas", "patched": "^24.30.0"},
+    "7": {"cve": ["CVE-2026-100"], "vulnerable": "24.x", "patched": "^24.25.0", "severity": "high"},
+}
+_PLAN = {"v20": {"lts": "2023-10-24", "end": "2026-04-30"},
+         "v22": {"lts": "2024-10-29", "end": "2027-04-30"},
+         "v24": {"lts": "2025-10-28", "end": "2028-04-30"},
+         "v25": {"end": "2026-06-01"}, "v28": {"lts": "2028-10-01", "end": "2031-04-30"}}
+_nb = cve_pruefung.node_bewerten("24.22.0", _DB, _PLAN, "2026-10-29")
+_k = {b["cve"]: b for b in _nb["befunde"]}
+check(sorted(_k) == ["CVE-2026-100", "CVE-2026-101", "nodejs-core-5"],
+      "betroffen nur, was die Version trifft und nicht behoben ist", str(sorted(_k)))
+check(_k.get("CVE-2026-100", {}).get("fix") == "24.25.0",
+      "doppelte CVE gebuendelt, die hoehere Behebung gilt", str(_k.get("CVE-2026-100")))
+check(_k.get("CVE-2026-101", {}).get("fix") == "" and _k["CVE-2026-101"].get("fix_andere") == "26.12.1",
+      "nur in anderer Hauptversion behoben -> kein fix, aber fix_andere", str(_k.get("CVE-2026-101")))
+check(_k.get("CVE-2026-101", {}).get("einstufung") == "critical"
+      and _k.get("nodejs-core-5", {}).get("einstufung") == "",
+      "Einstufung uebernommen, 'unknown' gilt als nicht eingestuft")
+check(_k.get("CVE-2026-100", {}).get("ref", "").startswith("https://nodejs.org/")
+      and _k.get("CVE-2026-101", {}).get("ref") == "", "nur https-Verweise werden uebernommen")
+check(_nb["undeutbar"] == ["CVE-2026-104"], "nicht deutbarer Eintrag wird GENANNT", str(_nb["undeutbar"]))
+check(_nb["ende"] == "2028-04-30" and not any(b.get("eol") for b in _nb["befunde"]),
+      "unterstuetzte Hauptversion: kein EOL-Befund")
+_eol = cve_pruefung.node_bewerten("20.19.2", _DB, _PLAN, "2026-10-29")
+_e = [b for b in _eol["befunde"] if b.get("eol")]
+check(len(_e) == 1 and _e[0]["cve"] == "nodejs-20-eol" and "2026-04-30" in _e[0]["text"],
+      "Hauptversion nach ihrem Ende -> eigener Befund", str(_e))
+check(bool(_e) and _e[0]["fix_andere"] == "22.x, 24.x",
+      "EOL nennt nur unterstuetzte LTS-Linien (keine ungerade, keine kuenftige)", str(_e and _e[0]["fix_andere"]))
+check("nicht im Release-Plan" in cve_pruefung.node_bewerten("23.1.0", _DB, _PLAN, "2026-10-29")["hinweis"],
+      "Hauptversion ohne Plan-Eintrag: Hinweis statt Schweigen")
+check("nicht verfügbar" in cve_pruefung.node_bewerten("24.22.0", _DB, {}, "2026-10-29")["hinweis"],
+      "ohne Release-Plan: Hinweis, dass das Ende nicht geprueft ist")
+
+# node_pruefen: Klassen je Installationsart (Paketindex/Netz als Attrappen).
+_n_orig = (cve_pruefung.node_installiert, cve_pruefung._node_quelle_holen)
+cve_pruefung._node_quelle_holen = lambda url, cache: (_DB if "security-wg" in url else _PLAN, "")
+
+
+def _np(inst):
+    cve_pruefung.node_installiert = lambda rel: inst
+    return cve_pruefung.node_pruefen()
+
+
+try:
+    _dpkg = {"paket": "nodejs", "version": "24.22.0-1nodesource1", "status": "ii",
+             "kandidat": "24.26.0-1nodesource1", "debian": False}
+    _r1 = _np(_dpkg)
+    _r2 = _np(dict(_dpkg, kandidat="24.22.0-1nodesource1"))
+    _r3 = _np(dict(_dpkg, status="hi"))
+    _r4 = _np({"paket": "", "pfad": "/usr/local/bin/node", "version": "v24.22.0", "status": "",
+               "kandidat": "", "debian": False})
+    _r5 = _np(dict(_dpkg, version="20.19.2+dfsg-1+deb13u3", debian=True))
+    _r6 = _np(None)
+    _r7 = _np(dict(_dpkg, debian=None))
+finally:
+    cve_pruefung.node_installiert, cve_pruefung._node_quelle_holen = _n_orig
+_kl = lambda r: {b["cve"]: b["klasse"] for b in r["befunde"]}  # noqa: E731
+check(_r1["info"].get("geprueft") is True and _r1["info"].get("unterstuetzt_bis") == "2028-04-30",
+      "Positivkontrolle: NodeSource-Paket wird geprueft", str(_r1["info"]))
+check(_kl(_r1) == {"CVE-2026-100": "behebbar", "CVE-2026-101": "offen", "nodejs-core-5": "nicht_im_index"},
+      "Kandidat >= Behebung -> behebbar, darunter -> nicht im Index, ohne Behebung -> offen", str(_kl(_r1)))
+_b1 = next((b for b in _r1["befunde"] if b["cve"] == "CVE-2026-100"), {})
+check(_b1.get("beheben_mit") == ["nodejs"] and _b1.get("pakete") == ["nodejs"]
+      and _b1.get("aus_fremdquelle") is True and _b1.get("aus_sicherheitsquelle") is False,
+      "behebbar traegt Paket, Zielpaket und die Fremdquelle", str(_b1))
+check(_kl(_r2).get("CVE-2026-100") == "nicht_im_index", "Kandidat = installiert -> nicht im Index")
+check(set(_kl(_r3).values()) <= {"zurueckgehalten", "offen"} and "zurueckgehalten" in _kl(_r3).values(),
+      "hold -> zurueckgehalten", str(_kl(_r3)))
+check(_kl(_r4).get("CVE-2026-100") == "behebbar"
+      and all(not b.get("beheben_mit") and b["pakete"] == [] for b in _r4["befunde"]),
+      "Node ohne Paketverwaltung: Update verfuegbar, aber nichts zum Heben", str(_r4["befunde"][:1]))
+check(_r5["info"].get("entfaellt") is True and not _r5["befunde"],
+      "nodejs aus Debian -> Bereich entfaellt (der Tracker prueft es)")
+check(_r6["info"].get("entfaellt") is True, "ohne Node.js -> Bereich entfaellt")
+check(_r7["info"].get("geprueft") is True,
+      "Herkunft unbekannt (keine apt-Auskunft) -> wird geprueft, nicht Debian unterstellt")
+check("CVE-2026-104" in _r1["info"].get("hinweis", ""),
+      "nicht auswertbare Eintraege stehen im Hinweis des Bereichs", _r1["info"].get("hinweis", ""))
+
+# node_installiert: echte Funktion, dpkg-query/apt/which als Attrappen mit
+# der echten Aufrufform (subprocess.run -> CompletedProcess).
+class _Lauf:
+    def __init__(self, rc, out):
+        self.returncode, self.stdout, self.stderr = rc, out, ""
+
+
+_ni_orig = (cve_pruefung.subprocess.run, cve_apt.apt_policy, cve_pruefung.shutil.which)
+
+
+def _ni(dpkg_out, pol, which=None, version_out=""):
+    def run(cmd, **k):
+        if cmd[0] == "dpkg-query":
+            return _Lauf(0 if dpkg_out else 1, dpkg_out)
+        return _Lauf(0, version_out)
+    cve_pruefung.subprocess.run = run
+    cve_apt.apt_policy = lambda namen: pol
+    cve_pruefung.shutil.which = lambda name, path=None: which
+    return cve_pruefung.node_installiert("trixie")
+
+
+try:
+    _ns = {"nodejs": {"installiert": "24.22.2-1nodesource1", "kandidat": "24.22.2-1nodesource1",
+                      "quellen": {"24.22.2-1nodesource1": ["nodistro/main"]}}}
+    _deb = {"nodejs": {"installiert": "20.19.2+dfsg-1+deb13u3", "kandidat": "20.19.2+dfsg-1+deb13u3",
+                       "quellen": {"20.19.2+dfsg-1+deb13u3": ["trixie-security/main"]}}}
+    _i1 = _ni("ii \t24.22.2-1nodesource1", _ns)
+    _i2 = _ni("ii \t20.19.2+dfsg-1+deb13u3", _deb)
+    _i3 = _ni("ii \t24.22.2-1nodesource1", {})
+    _i4 = _ni("rc \t24.22.2-1nodesource1", {}, which="/usr/local/bin/node", version_out="v24.11.0\n")
+    _i5 = _ni("", {}, which=None)
+finally:
+    cve_pruefung.subprocess.run, cve_apt.apt_policy, cve_pruefung.shutil.which = _ni_orig
+check(_i1 and _i1["paket"] == "nodejs" and _i1["debian"] is False
+      and _i1["kandidat"] == "24.22.2-1nodesource1", "NodeSource-Paket erkannt, nicht Debian", str(_i1))
+check(_i2 and _i2["debian"] is True, "Debians nodejs erkannt", str(_i2))
+check(_i3 and _i3["debian"] is None, "ohne apt-Auskunft: Herkunft unbekannt (None), nicht Debian", str(_i3))
+check(_i4 and _i4["paket"] == "" and _i4["version"] == "v24.11.0" and _i4["pfad"] == "/usr/local/bin/node",
+      "nur Konfigurationsreste (rc) -> node ausserhalb der Paketverwaltung", str(_i4))
+check(_i5 is None, "weder Paket noch node -> keine Laufzeit")
+
+# Abruf: gespeicherter Stand mit Hinweis, ohne ihn ein Grund.
+_orig_uo = cve_pruefung.urllib.request.urlopen
+
+
+def _kaputt(*a, **k):
+    raise OSError("Netz weg")
+
+
+cve_pruefung.urllib.request.urlopen = _kaputt
+try:
+    _cache = SANDKASTEN / "node_probe.json"
+    _o1 = cve_pruefung._node_quelle_holen("https://x.example/db.json", _cache)
+    cve_pruefung._schreiben(_cache, {"1": {"cve": ["CVE-1"]}})
+    _o2 = cve_pruefung._node_quelle_holen("https://x.example/db.json", _cache)
+finally:
+    cve_pruefung.urllib.request.urlopen = _orig_uo
+check(_o1[0] is None and "nicht erreichbar" in _o1[1], "ohne Netz und ohne Stand: kein Ergebnis, mit Grund", str(_o1))
+check(_o2[0] == {"1": {"cve": ["CVE-1"]}} and "gespeicherter Stand" in _o2[1],
+      "ohne Netz mit Stand: gespeicherter Stand, laut", str(_o2))
+
+# Plan, Einzel-Update, Kurzbericht, Quittierbarkeit
+_nerg = {"befunde": [dict(_b1, id="node:x")]}
+_pl = cve_pruefung.plan(_nerg, {"schwelle": "alle", "regulaere_quelle": True})
+check(_pl["debian"] == [] and _pl["node_von_hand"] == 1,
+      "Node.js nie automatisch – auch nicht mit freigegebener regulaerer Quelle", str(_pl))
+check(cve_pruefung.einzeln_pakete(_nerg, "nodejs") == ["nodejs"], "Einzel-Update hebt nodejs")
+check("Node.js nur von Hand" in cve_pruefung.kurzbericht(
+          {"ok": True, "zaehler": {"behebbar": 1}, "beheben": True, "bereiche": {},
+           "behebung": {"plan": _pl, "debian": [], "python": None}}),
+      "Kurzbericht sagt, warum Node.js nicht gehoben wurde")
+
+# Fremdpaket-Liste ueber ALLE Pakete (nicht nur die mit Befund).
+_FP = PAKETE + [pk("google-chrome-stable", "google-chrome-stable", "150.0-1"),
+                pk("linux-image-6.12.73+deb13-amd64", "linux-signed-amd64", "6.12.73+1"),
+                pk("ohnepolicy", "ohnepolicy", "1.0")]
+_echt_pol = cve_apt.apt_policy
+_gefragt = []
+
+
+def _pol(namen):
+    _gefragt.extend(namen)
+    return {"nodejs": {"installiert": "24.22.2-1nodesource1",
+                       "quellen": {"24.22.2-1nodesource1": ["nodistro/main"]}},
+            "libfoo1": {"installiert": "2.0-1", "quellen": {"2.0-1": ["trixie/main"]}},
+            "google-chrome-stable": {"installiert": "150.0-1", "quellen": {"150.0-1": ["stable/main"]}},
+            "linux-image-6.12.73+deb13-amd64": {"installiert": "6.12.73+1", "quellen": {}}}
+
+
+cve_apt.apt_policy = _pol
+try:
+    _bf2 = [{"pakete": ["libfoo1"], "cve": "C"}]
+    _fr2 = cve_pruefung.herkunft_pruefen(_bf2, _FP, "trixie")
+finally:
+    cve_apt.apt_policy = _echt_pol
+check(_fr2 == ["google-chrome-stable", "nodejs"],
+      "Fremdpakete OHNE Befund werden genannt; Kernel-Images und Pakete ohne Auskunft nicht", str(_fr2))
+check("linux-image-6.12.73+deb13-amd64" not in _gefragt and "google-chrome-stable" in _gefragt,
+      "gefragt werden alle Pakete ausser versionierten Kernelpaketen", str(_gefragt))
+
+# pruefen(): nodejs steht nicht mehr unter "nicht ueber Debian pruefbar",
+# wenn der Node-Bereich es geprueft hat.
+_p_orig = (cve_pruefung._debian_im_prozess, cve_pruefung.python_pruefen, cve_pruefung.npm_pruefen,
+           cve_pruefung.node_pruefen, cve_pruefung.veroeffentlichung_ergaenzen)
+cve_pruefung._debian_im_prozess = lambda: {"info": {"geprueft": True,
+                                                    "fremd": ["google-chrome-stable", "nodejs"]},
+                                           "befunde": []}
+cve_pruefung.python_pruefen = lambda: {"info": {"geprueft": True}, "befunde": []}
+cve_pruefung.npm_pruefen = lambda: {"info": {"geprueft": False, "entfaellt": True}, "befunde": []}
+cve_pruefung.veroeffentlichung_ergaenzen = lambda befunde: {}
+try:
+    cve_pruefung.node_pruefen = lambda: {"info": {"geprueft": True, "paket": "nodejs"},
+                                         "befunde": [dict(_b1), dict(_b1, cve="X", klasse="offen",
+                                                                     beheben_mit=None)]}
+    _pr = cve_pruefung.pruefen()
+    cve_pruefung.node_pruefen = lambda: {"info": {"geprueft": False, "paket": "nodejs",
+                                                  "grund": "Netz"}, "befunde": []}
+    _pr2 = cve_pruefung.pruefen()
+finally:
+    (cve_pruefung._debian_im_prozess, cve_pruefung.python_pruefen, cve_pruefung.npm_pruefen,
+     cve_pruefung.node_pruefen, cve_pruefung.veroeffentlichung_ergaenzen) = _p_orig
+_d = _pr["bereiche"]["debian"]
+check(_d.get("fremd") == ["google-chrome-stable"] and _d.get("fremd_geprueft") == ["nodejs"],
+      "geprueftes nodejs wandert aus der Fremdliste", str(_d))
+check(_pr2["bereiche"]["debian"].get("fremd") == ["google-chrome-stable", "nodejs"],
+      "scheitert die Node-Pruefung, bleibt nodejs als nicht pruefbar genannt",
+      str(_pr2["bereiche"]["debian"]))
+_q = {b["cve"]: b["quittierbar"] for b in _pr["befunde"]}
+check(_q == {"CVE-2026-100": False, "X": True}, "Node: behebbar nicht quittierbar, offen schon", str(_q))
+
+# Fehlt die WhatsApp-Bridge, gibt es keinen npm-Bereich – er steht NICHT als
+# "nicht geprueft" im Ergebnis (das hatte keinen Informationswert). Die
+# Wirkung wird an pruefen() gemessen, Debian/Python/Datum als Attrappen.
+abschnitt("npm: fehlende Bridge ist kein Bereich")
+_leer = Path(tempfile.mkdtemp(prefix="bridge_", dir=SANDKASTEN))
+_orig = (cve_pruefung.BRIDGE, cve_pruefung._debian_im_prozess,
+         cve_pruefung.python_pruefen, cve_pruefung.veroeffentlichung_ergaenzen,
+         cve_pruefung.node_pruefen)
+cve_pruefung._debian_im_prozess = lambda: {"info": {"geprueft": True}, "befunde": []}
+cve_pruefung.python_pruefen = lambda: {"info": {"geprueft": True}, "befunde": []}
+cve_pruefung.veroeffentlichung_ergaenzen = lambda befunde: {}
+cve_pruefung.node_pruefen = lambda: {"info": {"geprueft": False, "entfaellt": True}, "befunde": []}
+try:
+    cve_pruefung.BRIDGE = _leer
+    _ohne = cve_pruefung.pruefen()
+    (_leer / "node_modules").mkdir()
+    (_leer / "package-lock.json").write_text("{kaputt", encoding="utf-8")
+    _mit = cve_pruefung.pruefen()
+finally:
+    (cve_pruefung.BRIDGE, cve_pruefung._debian_im_prozess,
+     cve_pruefung.python_pruefen, cve_pruefung.veroeffentlichung_ergaenzen,
+     cve_pruefung.node_pruefen) = _orig
+# Positivkontrolle: mit installierter (hier kaputter) Bridge erscheint der
+# Bereich – sonst waere die folgende Pruefung trivial wahr.
+check(not (_mit["bereiche"].get("npm") or {}).get("geprueft", True),
+      "Positivkontrolle: installierte Bridge mit Fehler steht als nicht geprueft da",
+      str(_mit["bereiche"].get("npm")))
+check("npm" not in _ohne["bereiche"] and set(_ohne["bereiche"]) == {"debian", "python"},
+      "ohne Bridge kein npm-Bereich im Ergebnis", str(_ohne["bereiche"]))
+check("npm" not in cve_pruefung.kurzbericht(dict(_ohne, ok=True)),
+      "Kurzbericht fuehrt npm nicht als nicht geprueft",
+      cve_pruefung.kurzbericht(dict(_ohne, ok=True)))
+
 ende()

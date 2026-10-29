@@ -36,16 +36,25 @@ let rang = null;
     }
 })(baum);
 
-const NOETIG = ['esc', 'klasseText', 'einstufungText', 'trackerLink', 'nodsaText', 'anderswoText', 'befundZeilen'];
+const NOETIG = ['esc', 'klasseText', 'einstufungText', 'trackerLink', 'befundLink', 'nodsaText', 'anderswoText',
+                'befundZeilen', 'inPaketliste', 'einzelKnopf', 'quittierbareIds', 'paketGezeigt',
+                'andereGezeigt', 'zeichnen', 'cveBlock'];
 const fehlt = NOETIG.filter(function (n) { return !funktionen[n]; });
 if (fehlt.length || !rang) {
     console.log('ABBRUCH: nicht gefunden: ' + fehlt.concat(rang ? [] : ['CVE_RANG']).join(', '));
     process.exit(2);
 }
 // T liefert die deutsche Vorgabe; "gesehen" ist leer.
-const prolog = 'function T(k, d) { return d; }\nfunction cveGesehen() { return {}; }\nvar CVE_RANG = ' + rang + ';\n';
-const api = new Function(prolog + NOETIG.map(function (n) { return funktionen[n]; }).join('\n')
-    + '\nreturn { befundZeilen: befundZeilen };')();
+// Filterzustand als Closure-Variablen (nicht als Parameter – eine Zuweisung
+// traefe sonst nur die lokale Kopie), gesetzt ueber setze().
+const prolog = 'function T(k, d) { return d; }\nvar _gesehen = {}, _nurLuecken = false, _nurUngesehen = false;\n'
+    + 'function cveGesehen() { return _gesehen; }\nvar _cve = { laeuft: false };\n'
+    + 'var CVE_RANG = ' + rang + ';\n';
+const AUSFUEHREN = NOETIG.filter(function (n) { return n !== 'zeichnen' && n !== 'cveBlock'; });
+const api = new Function(prolog + AUSFUEHREN.map(function (n) { return funktionen[n]; }).join('\n')
+    + '\nreturn { befundZeilen: befundZeilen, inPaketliste: inPaketliste, einzelKnopf: einzelKnopf,'
+    + ' paketGezeigt: paketGezeigt, andereGezeigt: andereGezeigt,'
+    + ' setze: function (o) { _nurLuecken = !!o.l; _nurUngesehen = !!o.u; _gesehen = o.g || {}; } };')();
 
 function zeile(b) {
     return api.befundZeilen([Object.assign({ id: 'x', bereich: 'debian', cve: 'CVE-2026-1',
@@ -92,6 +101,77 @@ check(/Debian behebt ohne Sicherheitsmeldung: Minor issue/.test(minor), 'ohne Ar
 const alt = zusatz(zeile({ nodsa: 'ignored' }));
 check(/Debian behebt das in dieser Version nicht$/.test(alt) && !/: ignored/.test(alt),
       'Altbestand ("ignored" im Textfeld) wird als Art gelesen', alt);
+
+console.log('\n4. Node.js-Laufzeit');
+// Anlass (2026-10-29): nodejs aus NodeSource war ungeprueft. Seine Befunde
+// stehen an der nodejs-Zeile, verlinken die Meldung von Node.js (nicht den
+// Debian-Tracker, der nur Debians nodejs kennt) und tragen ihr Einzel-Update.
+const nodeB = { bereich: 'node', quelle: 'nodejs', cve: 'CVE-2026-111497', klasse: 'behebbar',
+                pakete: ['nodejs'], beheben_mit: ['nodejs'], aus_fremdquelle: true, fix: '24.22.1',
+                einstufung: 'critical', ref: 'https://nodejs.org/en/blog/vulnerability/x' };
+const nz = zeile(nodeB);
+check(nz.indexOf('href="https://nodejs.org/en/blog/vulnerability/x"') >= 0
+      && nz.indexOf('security-tracker.debian.org') < 0,
+      'Node-Befund verlinkt die Meldung von Node.js, nicht den Debian-Tracker', nz.slice(0, 200));
+check(/Paketquelle außerhalb von Debian/.test(zusatz(nz)) && !/regulären Quelle/.test(zusatz(nz)),
+      'behebbar aus Fremdquelle heisst so – nicht "reguläre Quelle"', zusatz(nz));
+check(/kritisch/.test(nz), 'Einstufung critical wird als kritisch gezeigt', nz);
+const fremdRef = zeile(Object.assign({}, nodeB, { ref: 'javascript:alert(1)' }));
+check(fremdRef.indexOf('href=') < 0, 'nur nodejs.org-Verweise werden verlinkt', fremdRef.slice(0, 160));
+check(/behoben in anderen Hauptversionen: 26\.12\.1/.test(zusatz(zeile({ bereich: 'node', fix_andere: '26.12.1' }))),
+      'Behebung nur in anderen Hauptversionen wird genannt');
+check(api.inPaketliste(nodeB) && !api.inPaketliste(Object.assign({}, nodeB, { pakete: [] }))
+      && api.inPaketliste({ bereich: 'debian' }) && !api.inPaketliste({ bereich: 'npm', pakete: ['x'] }),
+      'Paketzeile: Debian und Node.js als Paket, nicht Node ohne Paket und nicht npm');
+check(/data-cve-quelle="nodejs"/.test(api.einzelKnopf([nodeB])),
+      'Node.js als Paket bekommt „Jetzt aktualisieren“', api.einzelKnopf([nodeB]));
+check(api.einzelKnopf([Object.assign({}, nodeB, { beheben_mit: [] })]) === ''
+      && api.einzelKnopf([Object.assign({}, nodeB, { pakete: [], beheben_mit: [] })]) === '',
+      'ohne Zielpaket kein Knopf (Node ohne Paketverwaltung)');
+// Gegenkontrolle: Debian-Knopf unveraendert.
+check(/data-cve-quelle="brotli"/.test(api.einzelKnopf([{ bereich: 'debian', quelle: 'brotli', klasse: 'behebbar',
+                                                          beheben_mit: ['libbrotli1'] }])),
+      'Debian-Einzelknopf bleibt');
+
+console.log('\n5. Filter "Nur noch nicht gesehene"');
+// Wunsch 2026-10-29: "1 noch nicht gesehen" soll sich auch anzeigen lassen.
+// "Noch nicht gesehen" heisst dasselbe wie im Zaehler: quittierbar und nicht
+// quittiert.
+const neu1 = { id: 'a', quittierbar: true, klasse: 'offen' };
+const ges1 = { id: 'b', quittierbar: true, klasse: 'offen' };
+const beh1 = { id: 'c', quittierbar: false, klasse: 'behebbar' };
+const G = { b: true };
+api.setze({ g: G });
+check(api.paketGezeigt(undefined) && api.paketGezeigt({ befunde: [ges1] }),
+      'ohne Filter: jedes Paket sichtbar');
+api.setze({ u: true, g: G });
+check(api.paketGezeigt({ befunde: [ges1, neu1] }), 'Filter an: Paket mit ungesehenem Befund bleibt');
+check(!api.paketGezeigt({ befunde: [ges1] }), 'Filter an: alles gesehen -> Paket faellt weg');
+check(!api.paketGezeigt({ befunde: [beh1] }), 'Filter an: nur Behebbares (nicht quittierbar) faellt weg');
+check(!api.paketGezeigt(undefined), 'Filter an: Paket ohne Befund faellt weg');
+check(JSON.stringify(api.andereGezeigt([neu1, ges1, beh1]).map(function (b) { return b.id; })) === '["a"]',
+      'Befunde ohne Paketzeile: nur die ungesehenen', JSON.stringify(api.andereGezeigt([neu1, ges1, beh1])));
+api.setze({ l: true, g: G });
+check(api.paketGezeigt({ befunde: [ges1] }) && !api.paketGezeigt(undefined), '"Nur betroffene" unveraendert');
+check(api.andereGezeigt([ges1]).length === 1, 'ohne den neuen Filter bleiben gesehene Befunde ohne Paket stehen');
+api.setze({});
+// Regel am Syntaxbaum: Liste und Sammelblock benutzen GENAU diese Filter.
+function ruft(fn, name) {
+    let ja = false;
+    (function lauf(k) {
+        if (!k || typeof k.type !== 'string') return;
+        if (k.type === 'CallExpression' && k.callee && k.callee.name === name) ja = true;
+        for (const w of Object.values(k)) {
+            if (Array.isArray(w)) w.forEach(lauf);
+            else if (w && typeof w.type === 'string') lauf(w);
+        }
+    })(acorn.parse(funktionen[fn], { ecmaVersion: 'latest' }));
+    return ja;
+}
+check(ruft('zeichnen', 'paketGezeigt'), 'zeichnen() filtert die Paketliste ueber paketGezeigt');
+check(ruft('cveBlock', 'andereGezeigt'), 'cveBlock() filtert die Befunde ohne Paket ueber andereGezeigt');
+check(/id="jv-pkg-nurungesehen"/.test(funktionen.cveBlock) && /pkg\.cve_filter_neu/.test(funktionen.cveBlock),
+      'cveBlock() bietet das Haekchen an');
 
 fertig();
 console.log('\n' + ok + ' OK, ' + fail + ' FAIL');

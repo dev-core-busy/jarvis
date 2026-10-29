@@ -11,6 +11,11 @@ WAS GEPRUEFT WIRD – alles, was auf DIESEM Server installiert ist, und nur das:
   * npm-Pakete der WhatsApp-Bridge ueber OSV – NUR, wenn sie installiert ist
     (``node_modules`` vorhanden). Die ``package-lock.json`` liegt im Repo und
     damit auf jedem Server; sie allein heisst nicht, dass etwas laeuft.
+  * die Node.js-LAUFZEIT gegen die Luecken-Datenbank der Node.js Security WG
+    und deren Release-Plan – NUR, wenn sie nicht aus Debian stammt (NodeSource,
+    Tarball); Debians nodejs prueft der Tracker.
+  * Pakete, die aus keiner Debian-Quelle dieses Releases stammen, werden
+    GENANNT (``bereiche.debian.fremd``) – der Tracker kann sie nicht pruefen.
 Was NICHT geprueft wurde, steht mit Grund im Ergebnis (``bereiche``) – eine
 fehlende Pruefung darf nicht wie "keine Luecken" aussehen.
 
@@ -41,7 +46,8 @@ BEHEBEN: Debian ueber die Broker-Op ``cve_beheben`` (``backend/cve_apt.py``:
 nur benannte, installierte Pakete, ``--only-upgrade --no-remove``, kein
 Aufraeumen, kein Neustart). Python ueber ``abhaengigkeiten.abgleichen`` mit
 dessen Regeln (Grenzen, Ausnahmen, Ruecknahme; im Lock-Modus nur melden).
-npm wird nur gemeldet.
+npm wird nur gemeldet. Node.js (als Paket einer Fremdquelle) nur ueber das
+Einzel-Update, nie automatisch.
 """
 from __future__ import annotations
 
@@ -51,6 +57,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -76,6 +83,19 @@ TRACKER_LINK = "https://security-tracker.debian.org/tracker/"
 # ein Deckel gegen eine Antwort, die den Speicher fuellt.
 TRACKER_MAX_BYTES = 400 * 1024 * 1024
 BRIDGE = WURZEL / "services" / "whatsapp-bridge"
+# Node.js-Laufzeit: Luecken-Datenbank der Node.js Security WG (je Eintrag CVE,
+# betroffene und behobene semver-Bereiche, Einstufung) und der Release-Plan
+# (Ende der Unterstuetzung je Hauptversion). Beide klein (~150 KB / ~3 KB).
+NODE_DB_URL = os.environ.get(
+    "JARVIS_CVE_NODE_DB",
+    "https://raw.githubusercontent.com/nodejs/security-wg/main/vuln/core/index.json")
+NODE_PLAN_URL = os.environ.get(
+    "JARVIS_CVE_NODE_PLAN",
+    "https://raw.githubusercontent.com/nodejs/Release/main/schedule.json")
+NODE_DB_CACHE = DATEN / "node_core.json"
+NODE_PLAN_CACHE = DATEN / "node_plan.json"
+NODE_MAX_BYTES = 20 * 1024 * 1024
+NODE_EINSTUFUNGEN = ("low", "medium", "high", "critical")
 OSV_BATCH = os.environ.get("JARVIS_ABH_OSV", "https://api.osv.dev/v1/querybatch")
 OSV_VULN = os.environ.get("JARVIS_ABH_OSV_VULN", "https://api.osv.dev/v1/vulns/")
 # Veroeffentlichungsdatum je Kennung – der Debian-Tracker fuehrt keines, OSV
@@ -103,6 +123,7 @@ QUITTIERBAR = ("offen", "nicht_im_index", "zurueckgehalten")
 KLASSEN = ("behebbar", "neustart", "nicht_im_index", "zurueckgehalten", "lock", "offen",
            "ausgenommen")
 _META_KERNEL = re.compile(r"^linux-(image|headers)-(?!\d)[a-z0-9-]+$")
+_KERNEL_VERSIONIERT = re.compile(r"^linux-(image|headers|modules|kbuild)-\d")
 
 _sperre = threading.Lock()
 _status = {"laeuft": False, "seit": 0.0, "schritt": "", "ausloeser": ""}
@@ -356,13 +377,28 @@ def herkunft_pruefen(befunde: list[dict], pakete: list[dict], rel: str) -> list[
     """Nimmt Binaerpakete fremder Herkunft aus den Befunden; liefert ihre Namen.
 
     Ein Befund ohne verbleibendes Paket faellt weg – er betraf nur Fremdes.
+
+    ⚠ GEFRAGT WERDEN ALLE INSTALLIERTEN PAKETE, nicht nur die mit Befund. Bis
+    2026-10-29 stand hier nur, was der Tracker kannte – ein Fremdpaket, dessen
+    Name in Debian nicht vorkommt (``google-chrome-stable``, ``sentinelagent``
+    auf ECHT), bekam nie einen Befund und tauchte deshalb auch in der Liste
+    "nicht ueber Debian pruefbar" nie auf: es sah aus wie "keine Luecken".
+    Kosten gemessen: ``apt-cache policy`` ueber 2331 Pakete 1,7 s (DEV).
+    Ohne Policy-Auskunft (apt-cache ohne Eintrag) wird nichts behauptet – das
+    Paket gilt weder als fremd noch wird sein Befund entfernt.
     """
     native = cve_apt._arch()
     nach_name = {p["paket"]: p for p in pakete}
-    namen = sorted({n for b in befunde for n in b["pakete"] if n in nach_name})
+    # Versionierte Kernelpakete fallen aus dem Archiv, sobald ein neuerer da
+    # ist (DEV: linux-image-6.12.73+deb13-amd64). Sie sind Debian, und fuer
+    # den Kernel ist ohnehin der LAUFENDE massgeblich (debian_bewerten).
+    namen = sorted(n for n in nach_name if not _KERNEL_VERSIONIERT.match(n))
     pol = cve_apt.apt_policy([_apt_name(nach_name[n], native) for n in namen])
-    fremd = {n for n in namen
-             if fremde_herkunft(pol.get(_apt_name(nach_name[n], native)) or {}, rel)}
+    fremd = set()
+    for n in namen:
+        info = pol.get(_apt_name(nach_name[n], native))
+        if info and fremde_herkunft(info, rel):
+            fremd.add(n)
     if not fremd:
         return []
     behalten = []
@@ -531,8 +567,11 @@ def _npm_fix(vuln: dict, name: str) -> str:
 def npm_pruefen() -> dict:
     lock = BRIDGE / "package-lock.json"
     if not (BRIDGE / "node_modules").is_dir():
-        return {"info": {"geprueft": False, "grund": "WhatsApp-Bridge nicht installiert"},
-                "befunde": []}
+        # Ohne Bridge gibt es nichts zu pruefen – das ist keine Luecke in der
+        # Pruefung, sondern ein fehlender Bereich. pruefen() laesst ihn weg,
+        # statt ihn als "nicht geprueft" anzuzeigen (ohne Informationswert).
+        return {"info": {"geprueft": False, "entfaellt": True,
+                         "grund": "WhatsApp-Bridge nicht installiert"}, "befunde": []}
     try:
         daten = json.loads(lock.read_text(encoding="utf-8"))
         pakete = []
@@ -572,6 +611,276 @@ def npm_pruefen() -> dict:
         return {"info": {"geprueft": True, "grund": "", "pakete": len(pakete)}, "befunde": befunde}
     except Exception as e:  # noqa: BLE001
         return {"info": {"geprueft": False, "grund": f"{type(e).__name__}: {e}"}, "befunde": []}
+
+
+# ── Node.js-Laufzeit ─────────────────────────────────────────────────────────
+#
+# ⚠ AUF DEV UND ECHT GEMESSEN (2026-10-29): ``nodejs 24.22.2-1nodesource1``
+# stammt aus NodeSource. Der Debian-Tracker fuehrt unter dem Quellpaket
+# ``nodejs`` nur Debians nodejs 20 – seine Befunde gelten fuer dieses Paket
+# nicht und werden entfernt (herkunft_pruefen). Ohne diesen Bereich war die
+# Laufzeit, auf der die WhatsApp-Bridge laeuft, also GAR NICHT geprueft und
+# nur als "nicht ueber Debian pruefbar" genannt.
+#
+# Stammt nodejs aus Debian, prueft es der Tracker – dann entfaellt der Bereich.
+
+_NODE_V = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
+_NODE_VERGLEICH = re.compile(r"^(<=|>=|<|>|=|\^|~)?\s*v?(\d+|[xX*])(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?$")
+
+
+def _node_v(text: str) -> tuple[int, int, int] | None:
+    """``24.22.2`` / ``v24.22.2`` / ``24.22.2-1nodesource1`` -> (24, 22, 2)."""
+    m = _NODE_V.match(re.sub(r"^\d+:", "", str(text or "").strip()))
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _node_vergleich(teil: str, v: tuple) -> bool | None:
+    """Ein Vergleich (``^24.22.1``, ``22.x``, ``>= 4.8.2``, ``<= 4``) gegen v.
+
+    ``None`` = nicht deutbar. Teilversionen vergleichen nur die genannten
+    Stellen – ``<= 4`` heisst "Hauptversion hoechstens 4" (semver: < 5.0.0).
+    """
+    m = _NODE_VERGLEICH.match(teil.strip())
+    if not m:
+        return None
+    op = m.group(1) or "="
+    stellen = []
+    for g in m.group(2, 3, 4):
+        if g is None or not g.isdigit():
+            break
+        stellen.append(int(g))
+    k = len(stellen)
+    p = tuple(stellen)
+    if op == "=":
+        return v[:k] == p
+    if not k:
+        return None if op != "=" else True
+    if op in ("^", "~"):
+        unten = p + (0,) * (3 - k)
+        if v < unten:
+            return False
+        if op == "~":
+            # ~1 = 1.x, ~1.2 und ~1.2.3 = 1.2.x
+            return v[:min(k, 2)] == p[:min(k, 2)]
+        # Caret: fest bleibt die erste genannte Stelle ungleich 0
+        # (^1.2.3 = 1.x, ^0.2.3 = 0.2.x, ^0.0.3 = genau 0.0.3).
+        if p[0] or k == 1:
+            return v[0] == p[0]
+        if p[1] or k == 2:
+            return v[:2] == p[:2]
+        return v == unten
+    return {"<": v[:k] < p, "<=": v[:k] <= p, ">": v[:k] > p, ">=": v[:k] >= p}[op]
+
+
+def node_im_bereich(ausdruck: str, v: tuple) -> bool | None:
+    """semver-Bereich der Security WG (``22.x || ^24.22.1``, ``>=4.0.0 <4.8.2``).
+
+    ODER ueber ``||``, UND ueber Leerraum innerhalb einer Alternative.
+    ``None`` = nicht deutbar – nie zu "nicht betroffen" umgedeutet.
+    """
+    alternativen = [a.strip() for a in str(ausdruck or "").split("||") if a.strip()]
+    if not alternativen:
+        return None
+    # ALLE Alternativen deuten, bevor eine entscheidet: ein kaputter Teil
+    # hinter einem Treffer heisst, dass der Eintrag nicht verstanden ist –
+    # er gehoert dann als "nicht auswertbar" genannt (Waechter-Fund).
+    treffer = False
+    for alt in alternativen:
+        # ">= 4.8.2" ist EIN Vergleich: Operator und Version zusammenziehen.
+        teile = re.findall(r"(?:<=|>=|<|>|=|\^|~)?\s*v?[\dxX*]+(?:\.[\dxX*]+){0,2}", alt)
+        if not teile or re.sub(r"\s+", "", "".join(teile)) != re.sub(r"\s+", "", alt):
+            return None
+        werte = [_node_vergleich(t, v) for t in teile]
+        if None in werte:
+            return None
+        treffer = treffer or all(werte)
+    return treffer
+
+
+def _node_untergrenzen(ausdruck: str) -> list[tuple[int, int, int]]:
+    """Untere Grenzen der behebenden Alternativen (``^24.22.1`` -> (24, 22, 1))."""
+    erg = []
+    for alt in str(ausdruck or "").split("||"):
+        m = re.match(r"^\s*(?:\^|~|>=|=)?\s*v?(\d+)\.(\d+)\.(\d+)", alt)
+        if m:
+            erg.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+    return sorted(set(erg))
+
+
+def _v_text(v: tuple) -> str:
+    return ".".join(str(x) for x in v)
+
+
+def node_bewerten(version: str, db: dict, release_plan: dict, heute: str) -> dict:
+    """Befunde fuer EINE Node.js-Version – rein, ohne Netz und Paketindex.
+
+    Rueckgabe: {befunde, undeutbar, ende, hinweis}. Ein Befund traegt
+    ``fix`` (behebende Version DERSELBEN Hauptversion) oder ``fix_andere``
+    (behoben nur in anderen Hauptversionen). Die Klasse setzt node_pruefen.
+
+    ⚠ DAS ENDE DER UNTERSTUETZUNG IST EIN EIGENER BEFUND, nicht nur ein
+    Hinweis: die Security WG nennt in ``vulnerable`` nur die Hauptversionen,
+    die sie noch betreut (``22.x || 24.x || 26.x``). Eine Version nach ihrem
+    Ende bekommt fuer neue Luecken also KEINEN Eintrag mehr – ohne diesen
+    Befund saehe sie mit jedem Monat sauberer aus.
+    """
+    v = _node_v(version)
+    if v is None:
+        raise ValueError(f"Node.js-Version nicht lesbar: {version!r}")
+    je: dict[str, dict] = {}
+    undeutbar = []
+    for nr in sorted(db, key=lambda k: (len(str(k)), str(k))):
+        e = db[nr] if isinstance(db[nr], dict) else {}
+        cves = sorted(c for c in e.get("cve") or [] if isinstance(c, str) and c)
+        kennung = cves[0] if cves else f"nodejs-core-{nr}"
+        betroffen = node_im_bereich(e.get("vulnerable") or "", v)
+        behoben = node_im_bereich(e["patched"], v) if e.get("patched") else False
+        if betroffen is None or behoben is None:
+            undeutbar.append(kennung)
+            continue
+        if not betroffen or behoben:
+            continue
+        grenzen = _node_untergrenzen(e.get("patched") or "")
+        gleich = [g for g in grenzen if g[0] == v[0] and g > v]
+        andere = [g for g in grenzen if g[0] > v[0]]
+        sev = str(e.get("severity") or "").lower()
+        ref = str(e.get("ref") or "")
+        neu = {"bereich": "node", "quelle": "nodejs", "pakete": [], "cve": kennung,
+               "aliase": cves, "version": _v_text(v),
+               "fix": _v_text(min(gleich)) if gleich else "",
+               "fix_andere": ", ".join(_v_text(g) for g in andere),
+               "einstufung": sev if sev in NODE_EINSTUFUNGEN else "",
+               "text": str(e.get("description") or e.get("overview") or "")[:240],
+               "ref": ref if ref.startswith("https://") else "", "kernel": False}
+        if kennung in je:
+            _vereinen(je[kennung], neu, "fix")
+        else:
+            je[kennung] = neu
+    befunde = list(je.values())
+    plan_eintrag = release_plan.get(f"v{v[0]}") if isinstance(release_plan, dict) else None
+    ende = str((plan_eintrag or {}).get("end") or "")
+    hinweis = ""
+    if not release_plan:
+        hinweis = "Release-Plan von Node.js nicht verfügbar – Ende der Unterstützung nicht geprüft"
+    elif not ende:
+        hinweis = (f"Node.js {v[0]} steht nicht im Release-Plan – ob diese Hauptversion "
+                   "noch Sicherheitsupdates erhält, ist unbekannt")
+    elif ende < heute:
+        nachfolger = sorted(int(k[1:]) for k, w in release_plan.items()
+                            if re.fullmatch(r"v\d+", k) and isinstance(w, dict)
+                            and str(w.get("end") or "") >= heute
+                            and "" < str(w.get("lts") or "") <= heute)
+        befunde.append({
+            "bereich": "node", "quelle": "nodejs", "pakete": [], "cve": f"nodejs-{v[0]}-eol",
+            "aliase": [], "version": _v_text(v), "fix": "",
+            "fix_andere": ", ".join(f"{n}.x" for n in nachfolger if n > v[0]),
+            "einstufung": "", "ref": "https://nodejs.org/en/about/previous-releases",
+            "text": (f"Node.js {v[0]} erhält seit {ende} keine Sicherheitsupdates mehr. "
+                     "Neue Lücken werden für diese Hauptversion nicht mehr veröffentlicht "
+                     "und fehlen deshalb auch in dieser Prüfung."),
+            "kernel": False, "eol": True})
+    return {"befunde": befunde, "undeutbar": undeutbar, "ende": ende, "hinweis": hinweis}
+
+
+def _node_quelle_holen(url: str, cache: Path) -> tuple[dict | None, str]:
+    """JSON-Quelle holen; scheitert es, den gespeicherten Stand benutzen – laut."""
+    try:
+        anf = urllib.request.Request(url, headers={"User-Agent": "jarvis-cve-pruefung"})
+        with urllib.request.urlopen(anf, timeout=60) as a:  # nosec B310 – feste https-Adresse
+            roh = a.read(NODE_MAX_BYTES + 1)
+        if len(roh) > NODE_MAX_BYTES:
+            raise ValueError("Antwort ist unplausibel gross")
+        daten = json.loads(roh)
+        if not isinstance(daten, dict) or not daten:
+            raise ValueError("Antwort ist kein gefuelltes JSON-Objekt")
+        _schreiben(cache, daten)
+        return daten, ""
+    except Exception as e:  # noqa: BLE001
+        fehler = f"{type(e).__name__}: {e}"[:200]
+    alt = _lesen(cache, None)
+    if isinstance(alt, dict) and alt:
+        return alt, f"{url} nicht erreichbar ({fehler}) – gespeicherter Stand benutzt"
+    return None, f"{url} nicht erreichbar ({fehler})"
+
+
+def node_installiert(rel: str) -> dict | None:
+    """Welche Node.js-Laufzeit liegt hier? ``None`` = keine.
+
+    Zuerst das Debian-Paket ``nodejs`` (aus Debian ODER einer Fremdquelle wie
+    NodeSource), sonst ein ``node`` ausserhalb der Paketverwaltung
+    (``/usr/local/bin``, Tarball). ``debian`` ist ``None``, wenn apt-cache
+    keine Auskunft gibt – dann wird geprueft, statt Debian zu unterstellen.
+    """
+    umg = {"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"}
+    r = subprocess.run(["dpkg-query", "-W", "-f=${db:Status-Abbrev}\t${Version}", "--", "nodejs"],
+                       capture_output=True, text=True, timeout=30, env=umg)
+    st, _, ver = (r.stdout or "").partition("\t")
+    st = st.strip()
+    if r.returncode == 0 and len(st) >= 2 and st[1] == "i" and ver.strip():
+        info = cve_apt.apt_policy(["nodejs"]).get("nodejs")
+        return {"paket": "nodejs", "version": ver.strip(), "status": st,
+                "kandidat": (info or {}).get("kandidat") or "",
+                "debian": (not fremde_herkunft(info, rel)) if info else None}
+    pfad = shutil.which("node", path="/usr/local/bin:/usr/bin:/bin")
+    if not pfad:
+        return None
+    r = subprocess.run([pfad, "--version"], capture_output=True, text=True, timeout=30, env=umg)
+    return {"paket": "", "pfad": pfad, "version": (r.stdout or "").strip(), "status": "",
+            "kandidat": "", "debian": False}
+
+
+def node_pruefen() -> dict:
+    try:
+        inst = node_installiert(release())
+        if not inst:
+            return {"info": {"geprueft": False, "entfaellt": True,
+                             "grund": "Node.js nicht installiert"}, "befunde": []}
+        if inst["debian"]:
+            return {"info": {"geprueft": False, "entfaellt": True,
+                             "grund": "Node.js stammt aus Debian und wird dort geprüft"},
+                    "befunde": []}
+        info = {"geprueft": False, "grund": "", "version": inst["version"],
+                "paket": inst["paket"], "pfad": inst.get("pfad", ""), "hinweis": ""}
+        if _node_v(inst["version"]) is None:
+            info["grund"] = f"Node.js-Version nicht lesbar: {inst['version']!r}"[:200]
+            return {"info": info, "befunde": []}
+        db, h_db = _node_quelle_holen(NODE_DB_URL, NODE_DB_CACHE)
+        if db is None:
+            info["grund"] = "Lücken-Datenbank von Node.js " + h_db
+            return {"info": info, "befunde": []}
+        plan_, h_plan = _node_quelle_holen(NODE_PLAN_URL, NODE_PLAN_CACHE)
+        bew = node_bewerten(inst["version"], db, plan_ or {}, dt.date.today().isoformat())
+        befunde = bew["befunde"]
+        kand = _node_v(inst["kandidat"])
+        for b in befunde:
+            if inst["paket"]:
+                b["pakete"] = [inst["paket"]]
+            if not b["fix"]:
+                b["klasse"] = "offen"
+            elif not inst["paket"]:
+                # Ohne Paketverwaltung hebt hier niemand – wie bei npm gilt
+                # "Update verfuegbar" als Tatsache, nicht als Zusage.
+                b["klasse"] = "behebbar"
+            elif inst["status"] == "hi":
+                b["klasse"] = "zurueckgehalten"
+            else:
+                ok = kand is not None and kand >= _node_v(b["fix"])
+                b["klasse"] = "behebbar" if ok else "nicht_im_index"
+                b["kandidat"] = inst["kandidat"] or "–"
+                if ok:
+                    b["beheben_mit"] = [inst["paket"]]
+                    b["aus_sicherheitsquelle"] = False
+                    b["aus_fremdquelle"] = True
+        hinweise = [h for h in (h_db, h_plan if plan_ else "", bew["hinweis"]) if h]
+        if bew["undeutbar"]:
+            hinweise.append(f"{len(bew['undeutbar'])} Einträge der Lücken-Datenbank nicht "
+                            "auswertbar: " + ", ".join(bew["undeutbar"][:5]))
+        info.update(geprueft=True, eintraege=len(db), unterstuetzt_bis=bew["ende"],
+                    hinweis=" · ".join(hinweise))
+        return {"info": info, "befunde": befunde}
+    except Exception as e:  # noqa: BLE001
+        return {"info": {"geprueft": False, "grund": f"{type(e).__name__}: {e}"[:300]},
+                "befunde": []}
 
 
 # ── Veroeffentlichungsdatum (OSV) ────────────────────────────────────────────
@@ -656,12 +965,26 @@ def pruefen() -> dict:
     except Exception as e:  # noqa: BLE001
         deb = {"info": {"geprueft": False, "grund": f"Debian-Pruefung gescheitert: {e}"},
                "befunde": []}
-    for name, teil in (("debian", deb), ("python", python_pruefen()), ("npm", npm_pruefen())):
+    node = node_pruefen()
+    for name, teil in (("debian", deb), ("python", python_pruefen()), ("npm", npm_pruefen()),
+                       ("node", node)):
+        if teil["info"].get("entfaellt"):
+            continue
         bereiche[name] = teil["info"]
         befunde.extend(teil["befunde"])
+    # Was der Node-Bereich geprueft hat, ist nicht mehr "nicht ueber Debian
+    # pruefbar" – sonst stuende nodejs dort UND haette Befunde daneben.
+    deb_info = bereiche.get("debian") or {}
+    np_ = node["info"].get("paket")
+    if node["info"].get("geprueft") and np_ and np_ in (deb_info.get("fremd") or []):
+        deb_info["fremd"] = [n for n in deb_info["fremd"] if n != np_]
+        deb_info["fremd_geprueft"] = [np_]
     for b in befunde:
         b["id"] = schluessel(b)
-        b["quittierbar"] = b["klasse"] in QUITTIERBAR or b["bereich"] == "npm"
+        # npm und Node.js ohne Paketverwaltung hebt hier niemand – auch
+        # "behebbar" laesst sich dort nur zur Kenntnis nehmen.
+        b["quittierbar"] = (b["klasse"] in QUITTIERBAR or b["bereich"] == "npm"
+                            or (b["bereich"] == "node" and not b.get("beheben_mit")))
     try:
         veroeff = veroeffentlichung_ergaenzen(befunde)
     except Exception as e:  # noqa: BLE001 – ein fehlendes Datum darf die Pruefung nicht kippen
@@ -717,6 +1040,7 @@ def plan(erg: dict, einst: dict, schwelle: str | None = None) -> dict:
     index = False
     python = False
     nur_regulaer = 0
+    node_von_hand = 0
     for b in erg.get("befunde") or []:
         if b["bereich"] == "debian" and erreicht_schwelle(b.get("einstufung", ""), schwelle):
             if b["klasse"] == "behebbar":
@@ -730,8 +1054,14 @@ def plan(erg: dict, einst: dict, schwelle: str | None = None) -> dict:
             # Im Lock-Modus gibt es kein "behebbar" fuer Python (Klasse "lock",
             # python_pruefen) – die Entscheidung steht an EINER Stelle.
             python = True
+        elif b["bereich"] == "node" and b["klasse"] == "behebbar":
+            # Bewusst NICHT automatisch: der Schalter "regulaere Quelle" meint
+            # Debian, eine Fremdquelle wie NodeSource haengt nicht daran. Das
+            # Einzel-Update (Knopf an der nodejs-Zeile) hebt es ausdruecklich.
+            node_von_hand += 1
     return {"schwelle": schwelle, "debian": sorted(pakete), "index": index,
-            "python": python, "nur_regulaere_quelle": nur_regulaer}
+            "python": python, "nur_regulaere_quelle": nur_regulaer,
+            "node_von_hand": node_von_hand}
 
 
 def _broker_beheben(pakete: list[str], nur_sicherheit: bool, index: bool, user: str) -> dict:
@@ -817,7 +1147,7 @@ def lauf(beheben: bool = False, schwelle: str | None = None, ausloeser: str = "m
 
 
 def einzeln_pakete(erg: dict | None, quelle: str) -> list[str]:
-    """Binaerpakete, die ein Update EINES Debian-Quellpakets anfasst.
+    """Binaerpakete, die ein Update EINES Quellpakets anfasst (Debian, Node.js).
 
     Je Quellpaket, nicht je Binaerpaket: ``libbrotli1`` ohne ``brotli`` zu
     heben, liesse Teile desselben Pakets auf verschiedenen Versionen stehen.
@@ -825,7 +1155,7 @@ def einzeln_pakete(erg: dict | None, quelle: str) -> list[str]:
     anstossen, was die Pruefung nicht gesehen hat.
     """
     return sorted({n for b in (erg or {}).get("befunde") or []
-                   if b["bereich"] == "debian" and b["quelle"] == quelle
+                   if b["bereich"] in ("debian", "node") and b["quelle"] == quelle
                    and b["klasse"] == "behebbar" for n in b.get("beheben_mit") or []})
 
 
@@ -1107,6 +1437,9 @@ def kurzbericht(erg: dict) -> str:
         if pl.get("nur_regulaere_quelle"):
             teile.append(f"{pl['nur_regulaere_quelle']} nur in der regulären Quelle "
                          "(in den Einstellungen nicht freigegeben)")
+        if pl.get("node_von_hand"):
+            teile.append(f"{pl['node_von_hand']} Node.js nur von Hand "
+                         "(Paketquelle außerhalb von Debian)")
         fehl = [r.get("fehler") for r in beh.get("debian") or [] if r.get("fehler")]
         if fehl:
             teile.append("Fehler: " + "; ".join(fehl)[:200])

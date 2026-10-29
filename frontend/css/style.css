@@ -5970,8 +5970,13 @@ body.light .kb-cl-spanne { color: #5b6678; }
     flex-direction: column;
     gap: 0.3rem;
 }
+/* Bricht um: ohne flex-wrap drueckten Code, Knoepfe und Schalter den Namen
+   auf schmalen Fenstern auf Breite 0 (gemessen 2026-10-29 bei 400 px – der
+   Auftragsname war ganz weg). Der Name behaelt eine Mindestbreite, der Rest
+   rutscht in die naechste Zeile. */
 .cron-item-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     min-width: 0;
@@ -5985,7 +5990,8 @@ body.light .kb-cl-spanne { color: #5b6678; }
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-primary);
-    flex: 1;
+    flex: 1 1 12em;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -6038,11 +6044,17 @@ body.light .kb-cl-spanne { color: #5b6678; }
 .cron-item-code[data-tip]:hover::before {
     opacity: 1;
 }
+/* Die Knopfgruppe darf schrumpfen und SELBST umbrechen – mit flex-shrink:0
+   nimmt sie ihre volle Breite mit und steht bei sechs Bedienelementen und
+   320 px trotzdem ueber (gemessen: 5 px). */
 .cron-item-actions {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 4px;
     align-items: center;
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
     margin-left: auto;
 }
 .cron-item-task {

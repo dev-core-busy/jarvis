@@ -26,6 +26,9 @@ window.cronManager = new (class JarvisCronManager {
         // ein offenes Protokoll unter der Hand wieder zu.
         this._logOffen = new Set();
         this._logDaten = {};   // job_id -> {eintraege, mehr}
+        // Zustand der automatischen Sicherheitsupdates (GET /api/security/unattended)
+        this._system = null;
+        this._sysLogOffen = false;
     }
 
     init() {
@@ -37,6 +40,7 @@ window.cronManager = new (class JarvisCronManager {
             this._initialized = true;
         }
         this._loadJobs();
+        this._loadSystem();
         this._loadWatchers();
     }
 
@@ -135,6 +139,12 @@ window.cronManager = new (class JarvisCronManager {
                         </div>
                         <p id="cron-form-error" class="kb-form-error" style="display:none;"></p>
                     </div>
+
+                    <!-- Automatische Sicherheitsupdates des Systems: KEIN Auftrag
+                         dieser Liste, sondern Debians eigener Timer. Eigener
+                         Container, damit das Neuzeichnen der Liste nach jedem
+                         Lauf ihn nicht anfasst (und keinen Broker-Aufruf ausloest). -->
+                    <div id="cron-system"></div>
 
                     <!-- Job-Liste -->
                     <div id="cron-list">
@@ -321,7 +331,7 @@ window.cronManager = new (class JarvisCronManager {
 
         // Cron Toolbar
         document.getElementById('cron-add-btn').onclick     = () => this._showJobForm();
-        document.getElementById('cron-refresh-btn').onclick = () => this._loadJobs();
+        document.getElementById('cron-refresh-btn').onclick = () => { this._loadJobs(); this._loadSystem(); };
         document.getElementById('cron-cancel-btn').onclick  = () => this._hideJobForm();
 
         // Watcher Toolbar
@@ -563,6 +573,177 @@ window.cronManager = new (class JarvisCronManager {
             this._renderLog(id);
             this._loadLog(id);
         });
+    }
+
+    // ─── Automatische Sicherheitsupdates (Vorgabe 2026-10-29) ──────────────
+    // Debians unattended-upgrades laeuft ueber einen systemd-Timer und damit
+    // auch dann, wenn der Dienst steht – deshalb bewusst KEIN Auftrag dieser
+    // Liste. Gefragt wurde "unter Aufgaben finde ich nichts dazu": der Eintrag
+    // zeigt den Timer nur an. Ein- und ausgeschaltet wird unter
+    // Einstellungen -> Sicherheit (dort stehen auch die Begrenzungen).
+
+    async _loadSystem() {
+        try {
+            const r = await fetch('/api/security/unattended', { headers: _authHeaders() });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || d.detail || ('HTTP ' + r.status));
+            this._system = d;
+        } catch (e) {
+            // Kein "ausgeschaltet" bei einem Abruffehler: das waere eine
+            // Falschaussage ueber einen Timer, der vielleicht taeglich laeuft.
+            this._system = { fehler: e.message || String(e) };
+        }
+        this._renderSystem();
+    }
+
+    /* {marke} wie in security_incidents.js einsetzen – window.t() kennt keine
+     * Platzhalter, sonst stuende er woertlich im Tooltip. */
+    _sysT(key) {
+        const v = window.t(key);
+        if (typeof v !== 'string' || v.indexOf('{marke}') < 0) return v;
+        let marke = 'Jarvis';
+        try { if (window.jarvisMarke) marke = window.jarvisMarke() || marke; } catch (e) { /* Rueckfall bleibt */ }
+        return v.split('{marke}').join(marke);
+    }
+
+    _sysZeit(s) {
+        return (typeof s === 'number' && s > 0) ? new Date(s * 1000).toLocaleString(_cronOrt()) : '—';
+    }
+
+    _sysNamen(e) {
+        const n = (e.pakete || []).map(p => p.name);
+        return n.slice(0, 4).join(', ') + (n.length > 4 ? ` +${n.length - 4}` : '');
+    }
+
+    /* Zustand in EINEM Wort. "unbekannt" ist eine eigene Stufe: fehlt ein Feld,
+     * wird daraus kein "aus". */
+    _sysZustand(d) {
+        if (d.fehler) return { aktiv: false, text: window.t('cron.sys_fehler').replace('{e}', d.fehler), warn: true };
+        if (typeof d.package_installed !== 'boolean' || typeof d.enabled !== 'boolean')
+            return { aktiv: false, text: window.t('cron.sys_unbekannt'), warn: true };
+        if (!d.package_installed) return { aktiv: false, text: window.t('cron.sys_nicht_installiert'), warn: true };
+        if (!d.enabled) return { aktiv: false, text: window.t('cron.sys_aus'), warn: true };
+        if (d.ok !== true) return { aktiv: true, text: window.t('cron.sys_unvollstaendig'), warn: true };
+        return { aktiv: true, text: '', warn: false };
+    }
+
+    /* Was hat der LETZTE Lauf eingespielt? Ein Eintrag aus history.log gehoert
+     * zu ihm, wenn er nach dem Ausloesen des Timers begann – eine Grenze aus
+     * den Daten, kein geratenes Zeitfenster. */
+    _sysEingespieltText(d) {
+        const liste = d.eingespielt;
+        if (!Array.isArray(liste)) return window.t('cron.sys_verlauf_unlesbar');
+        if (!liste.length) return window.t('cron.sys_nie_eingespielt');
+        const letzter = (d.zeitplan || {}).letzter;
+        const dabei = typeof letzter === 'number'
+            ? liste.filter(e => typeof e.start === 'number' && e.start >= letzter) : [];
+        if (dabei.length) {
+            const n = dabei.reduce((s, e) => s + (e.pakete || []).length, 0);
+            return window.t('cron.sys_dabei').replace('{n}', n)
+                + ': ' + dabei.map(e => this._sysNamen(e)).join(', ');
+        }
+        const neu = liste[0];
+        return (typeof letzter === 'number' ? window.t('cron.sys_dabei_nichts') + ' · ' : '')
+            + window.t('cron.sys_zuletzt').replace('{zeit}', this._sysZeit(neu.start))
+            + ': ' + this._sysNamen(neu);
+    }
+
+    _renderSystem() {
+        const el = document.getElementById('cron-system');
+        if (!el) return;
+        const d = this._system;
+        if (!d) { el.innerHTML = ''; return; }
+        const z = this._sysZustand(d);
+        const zp = d.zeitplan || {};
+        let meta = `<span class="cron-owner-badge cron-badge-user" title="${this._esc(this._sysT('cron.sys_hint'))}">`
+            + `${this._esc(window.t('cron.sys_badge'))}</span> `
+            + (z.text ? `<span class="cron-owner-badge cron-badge-none">${this._esc(z.text)}</span> ` : '');
+        if (!d.fehler) {
+            const erg = zp.ergebnis === 'success' ? window.t('cron.log_ok')
+                      : zp.ergebnis ? window.t('cron.log_err') + ' (' + zp.ergebnis + ')' : '';
+            meta += this._esc(window.t('cron.last_run') + ': ' + this._sysZeit(zp.letzter)
+                    + (erg && zp.letzter ? ' · ' + erg : '')
+                    + ' · ' + window.t('cron.sys_naechster') + ': ' + this._sysZeit(zp.naechster)
+                    + ' · ' + this._sysEingespieltText(d));
+        }
+        const hatReiter = !!document.querySelector('.settings-tab-btn[data-settings-tab="security"]');
+        el.innerHTML = `<div class="kb-folder-list">
+            <div class="cron-item cron-item-system" data-id="system-updates">
+                <div class="cron-item-row">
+                    <span class="cron-item-dot ${z.aktiv ? 'active' : 'inactive'}"></span>
+                    <span class="cron-item-label">${this._esc(window.t('cron.sys_label'))}</span>
+                    <code class="cron-item-code" data-tip="${this._esc(this._sysT('cron.sys_hint'))}">${this._esc(window.t('cron.sys_timer'))}</code>
+                    <div class="cron-item-actions">
+                        <button class="kb-btn-icon cron-sys-log-btn" type="button" aria-expanded="${this._sysLogOffen ? 'true' : 'false'}" title="${this._esc(window.t('cron.sys_log_hint'))}">${this._esc(window.t('cron.log_btn'))}</button>
+                        ${hatReiter ? `<button class="kb-btn-icon cron-sys-einst-btn" type="button" title="${this._esc(window.t('cron.sys_einst_hint'))}">${this._esc(window.t('cron.sys_einst'))}</button>` : ''}
+                    </div>
+                </div>
+                <div class="cron-item-task">${this._esc(window.t('cron.sys_task'))}</div>
+                <div class="cron-item-meta">${meta}</div>
+                <div class="cron-log cron-sys-log"${this._sysLogOffen ? '' : ' hidden'}></div>
+            </div></div>`;
+        const lb = el.querySelector('.cron-sys-log-btn');
+        lb.onclick = () => {
+            this._sysLogOffen = !this._sysLogOffen;
+            lb.setAttribute('aria-expanded', this._sysLogOffen ? 'true' : 'false');
+            el.querySelector('.cron-sys-log').hidden = !this._sysLogOffen;
+            if (this._sysLogOffen) this._renderSystemLog();
+        };
+        const eb = el.querySelector('.cron-sys-einst-btn');
+        if (eb) eb.onclick = () => {
+            const tab = document.querySelector('.settings-tab-btn[data-settings-tab="security"]');
+            if (tab) tab.click();
+        };
+        if (this._sysLogOffen) this._renderSystemLog();
+    }
+
+    _renderSystemLog() {
+        const box = document.querySelector('#cron-system .cron-sys-log');
+        if (!box) return;
+        const d = this._system || {};
+        if (d.fehler) {
+            box.innerHTML = `<div class="cron-log-fehlermeldung">${this._esc(window.t('cron.sys_fehler').replace('{e}', d.fehler))}</div>`;
+            return;
+        }
+        // Der letzte Lauf des Zeitplans steht oben, AUCH wenn er nichts
+        // eingespielt hat (Vorgabe 2026-10-29) – history.log kennt solche Laeufe
+        // nicht, ohne diese Zeile endete das Protokoll beim letzten Paket und
+        // der Lauf von heute frueh fehlte. Hat er etwas eingespielt, steht er
+        // als Eintrag darunter (Grenze wie in _sysEingespieltText).
+        const zp = d.zeitplan || {};
+        const liste = Array.isArray(d.eingespielt) ? d.eingespielt : [];
+        let lauf = '';
+        if (typeof zp.letzter === 'number' && zp.letzter > 0
+                && !liste.some(e => typeof e.start === 'number' && e.start >= zp.letzter)) {
+            const ok = zp.ergebnis === 'success';
+            lauf = `<details class="cron-log-eintrag ${ok ? 'ok' : 'fehler'} cron-sys-lauf">`
+                + `<summary><span class="cron-log-status">${this._esc(window.t(ok ? 'cron.log_ok' : 'cron.log_err'))}</span>`
+                + `<span class="cron-log-zeit">${this._esc(this._sysZeit(zp.letzter))}</span>`
+                + `<span class="cron-log-wer">${this._esc(window.t('cron.log_schedule'))}</span>`
+                + `<span class="cron-log-kurz">${this._esc(window.t('cron.sys_lauf_nichts'))}</span></summary>`
+                + `<pre class="cron-log-voll">${this._esc(window.t('cron.sys_lauf_nichts')
+                    + (ok || !zp.ergebnis ? '' : '\n' + zp.ergebnis + (zp.exit != null ? ' (Exit ' + zp.exit + ')' : '')))}</pre></details>`;
+        }
+        if (!Array.isArray(d.eingespielt)) {
+            box.innerHTML = lauf + `<div class="cron-log-fehlermeldung">${this._esc(window.t('cron.sys_verlauf_unlesbar'))}</div>`;
+            return;
+        }
+        if (!d.eingespielt.length) {
+            box.innerHTML = lauf + `<div class="cron-log-leer">${this._esc(window.t('cron.sys_nie_eingespielt'))}</div>`;
+            return;
+        }
+        box.innerHTML = lauf + d.eingespielt.map(e => {
+            const ok = !e.fehler;
+            const voll = (e.pakete || []).map(p => p.name + '  '
+                + (p.neu ? window.t('cron.sys_neu') + ' ' + p.nach : (p.von + ' → ' + p.nach))).join('\n')
+                + (e.fehler ? '\n\n' + e.fehler : '');
+            return `<details class="cron-log-eintrag ${ok ? 'ok' : 'fehler'}">`
+                + `<summary><span class="cron-log-status">${this._esc(window.t(ok ? 'cron.log_ok' : 'cron.log_err'))}</span>`
+                + `<span class="cron-log-zeit">${this._esc(this._sysZeit(e.start))}</span>`
+                + `<span class="cron-log-dauer">${this._esc(window.t('cron.sys_pakete').replace('{n}', (e.pakete || []).length))}</span>`
+                + `<span class="cron-log-kurz">${this._esc(this._sysNamen(e))}</span></summary>`
+                + `<pre class="cron-log-voll">${this._esc(voll)}</pre></details>`;
+        }).join('');
     }
 
     // ─── Protokoll je Auftrag (Vorgabe 2026-09-28) ─────────────────────────

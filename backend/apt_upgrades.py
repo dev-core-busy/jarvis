@@ -30,6 +30,7 @@ verdrahtet, es gibt keinen dynamischen Input -> keine Shell-Injection.
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 PKG = "unattended-upgrades"
@@ -40,7 +41,16 @@ PERIODIC_CONF = "/etc/apt/apt.conf.d/20auto-upgrades"
 # fuer eine hoehere Nummer als 50unattended-upgrades (spaeter gelesen = gewinnt).
 LIMITS_CONF = "/etc/apt/apt.conf.d/52jarvis-unattended"
 LOG = "/var/log/unattended-upgrades/unattended-upgrades.log"
+# Verlauf der EINGESPIELTEN Pakete. Bewusst nicht LOG: das ist lokalisiert
+# ("Pakete, welche aktualisiert werden: …") und vermischt echte Laeufe mit den
+# Download-Laeufen von apt-daily und den Trockenlaeufen aus status(live=True)
+# (auf DEV und ECHT am 2026-10-29 gesehen). history.log hat feste englische
+# Schluessel und schreibt nur, was dpkg wirklich angefasst hat.
+HISTORY = ("/var/log/apt/history.log", "/var/log/apt/history.log.1.gz")
 TIMERS = ("apt-daily.timer", "apt-daily-upgrade.timer")
+# Der Timer, der wirklich einspielt (apt-daily.timer frischt nur den Index auf).
+UPGRADE_TIMER = "apt-daily-upgrade.timer"
+UPGRADE_DIENST = "apt-daily-upgrade.service"
 # Obergrenze fuer den Trockenlauf (siehe status(live=True)).
 DRY_RUN_TIMEOUT = 45
 
@@ -149,6 +159,110 @@ def _last_run() -> str:
         return ""
 
 
+_PAKET = re.compile(r"([^\s,()]+) \(([^()]*)\)")
+
+
+def _zeit(wert: str) -> float | None:
+    """``2026-10-25  06:59:50`` (Ortszeit, doppelter Leerraum) -> Epoche."""
+    try:
+        return time.mktime(time.strptime(" ".join(wert.split()), "%Y-%m-%d %H:%M:%S"))
+    except (ValueError, OverflowError):
+        return None
+
+
+def verlauf_parsen(text: str) -> list[dict]:
+    """Bloecke aus apt/history.log, die ``unattended-upgrade`` geschrieben hat.
+
+    Ein Lauf kann MEHRERE Bloecke schreiben (DEV 2026-10-28: thunderbird und
+    openjdk im Abstand von einer Sekunde) – jeder Block bleibt ein Eintrag,
+    zusammengefasst wird nicht: eine Grenze "gehoert zum selben Lauf" waere
+    ein geratenes Zeitfenster.
+    ``Upgrade:`` traegt ``(alt, neu)``, ``Install:`` ``(neu[, automatic])``.
+    """
+    erg = []
+    for block in re.split(r"\n\s*\n", text or ""):
+        felder = {}
+        for zeile in block.splitlines():
+            k, sep, v = zeile.partition(": ")
+            if sep:
+                felder[k.strip()] = v.strip()
+        if "unattended-upgrade" not in felder.get("Commandline", ""):
+            continue
+        pakete = []
+        for art in ("Upgrade", "Install"):
+            for name, inhalt in _PAKET.findall(felder.get(art, "")):
+                teile = [t.strip() for t in inhalt.split(",")]
+                if art == "Upgrade":
+                    von, nach = teile[0], (teile[1] if len(teile) > 1 else "")
+                else:
+                    von, nach = "", teile[0]
+                pakete.append({"name": name.split(":")[0], "von": von, "nach": nach,
+                               "neu": art == "Install"})
+        erg.append({"start": _zeit(felder.get("Start-Date", "")),
+                    "ende": _zeit(felder.get("End-Date", "")),
+                    "pakete": pakete,
+                    "fehler": felder.get("Error", "")[:300]})
+    return erg
+
+
+def eingespielt(max_n: int = 20) -> list[dict] | None:
+    """Die letzten ``max_n`` Einspielungen, neueste zuerst.
+
+    ``None`` heisst "nicht lesbar" – das ist etwas anderes als die leere Liste
+    ("es wurde noch nichts eingespielt"). Gelesen wird auch die rotierte Datei:
+    direkt nach dem Monatswechsel ist history.log sonst leer.
+    """
+    import gzip
+    texte, gelesen = [], False
+    for pfad in HISTORY:
+        try:
+            if pfad.endswith(".gz"):
+                with gzip.open(pfad, "rt", errors="replace") as f:
+                    texte.append(f.read())
+            else:
+                texte.append(Path(pfad).read_text(errors="replace"))
+            gelesen = True
+        except FileNotFoundError:
+            continue
+        except Exception:  # noqa: BLE001
+            continue
+    if not gelesen:
+        return None
+    alle = [e for t in texte for e in verlauf_parsen(t)]
+    alle.sort(key=lambda e: e["start"] or 0, reverse=True)
+    return alle[:max_n]
+
+
+def zeitplan() -> dict:
+    """Naechster und letzter Lauf des Einspiel-Timers samt Ergebnis des Dienstes.
+
+    Zeiten als Epoche oder ``None`` (= unbekannt, NICHT "nie"). Die JSON-Ausgabe
+    von ``list-timers`` liefert Mikrosekunden; die Textform von ``systemctl show``
+    ist lokalisiert und wird deshalb nicht gelesen.
+    """
+    import json
+    erg = {"naechster": None, "letzter": None, "ergebnis": "", "exit": None}
+    r = _run([SYSTEMCTL, "list-timers", UPGRADE_TIMER, "--all", "--output=json"], timeout=15)
+    try:
+        for t in json.loads(r.stdout or "[]"):
+            if t.get("unit") == UPGRADE_TIMER:
+                for feld, ziel in (("next", "naechster"), ("last", "letzter")):
+                    us = t.get(feld)
+                    if isinstance(us, (int, float)) and us > 0:
+                        erg[ziel] = us / 1e6
+    except (ValueError, TypeError, AttributeError):
+        pass
+    r = _run([SYSTEMCTL, "show", UPGRADE_DIENST, "-p", "Result", "-p", "ExecMainStatus"],
+             timeout=15)
+    for zeile in (r.stdout or "").splitlines():
+        k, _, v = zeile.partition("=")
+        if k == "Result":
+            erg["ergebnis"] = v.strip()
+        elif k == "ExecMainStatus" and v.strip().lstrip("-").isdigit():
+            erg["exit"] = int(v)
+    return erg
+
+
 def effective_origins() -> list[str]:
     """Ursprungs-Liste, die apt TATSAECHLICH anwendet (ueber alle conf.d-Dateien).
 
@@ -193,6 +307,10 @@ def status(live: bool = False) -> dict:
         "origins": effective_origins(),
         "timers": {u: _timer_enabled(u) for u in TIMERS},
         "last_run": _last_run(),
+        # Fuer den Eintrag in der Auftragsliste (cron.js): wann laeuft der
+        # Timer, und was hat er zuletzt wirklich eingespielt.
+        "zeitplan": zeitplan(),
+        "eingespielt": eingespielt(),
         "dry_run": None,
         "security_only": None,
     }

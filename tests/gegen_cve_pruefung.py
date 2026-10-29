@@ -56,6 +56,13 @@ PROBEN = [
      '            for n in b.get("beheben_mit") or []})'),
     ("Kurzbericht verschweigt die regulaere Quelle", CP,
      '        if pl.get("nur_regulaere_quelle"):', '        if False:'),
+    ("gespeichertes Ergebnis nicht an den laufenden Kernel angeglichen", CP,
+     '        _cache.update(mtime=m, wert=kernel_nachfuehren(_lesen(ERGEBNIS, None),\n'
+     '                                                       laufender_kernel()))',
+     '        _cache.update(mtime=m, wert=_lesen(ERGEBNIS, None))'),
+    ("Angleichung verwirft auch Kernel-Befunde, die der Kernel NICHT behebt", CP,
+     '                       and cve_apt.vergleiche(kernel, b["fix"]) >= 0)]',
+     '                       )]'),
     ("Badge zaehlt Quittiertes mit", CP,
      'if b["klasse"] == "ausgenommen" or b["id"] in q:', 'if b["klasse"] == "ausgenommen":'),
     ("Lock-Fall quittierbar", CP,

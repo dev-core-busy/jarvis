@@ -518,6 +518,49 @@ neu["id"] = cve_pruefung.schluessel(neu)
 cve_pruefung._speichern({"ts": 2, "befunde": bef7 + [neu]})
 check(cve_pruefung.badge()["anzahl"] == 2, "eine NEUE Luecke im quittierten Paket erscheint wieder")
 
+# Nach einem Neustart prueft niemand neu – die Klasse "neustart" darf dann
+# nicht aus dem gespeicherten Ergebnis weiterleben (ECHT 2026-10-29: 672).
+_kb = []
+for _cve, _fix, _kl in (("CVE-K1", "6.12.113-1", "neustart"), ("CVE-K2", "6.12.112-1", "neustart"),
+                        ("CVE-K3", "6.12.120-1", "behebbar"), ("CVE-K4", "", "offen")):
+    _b = {"bereich": "debian", "quelle": "linux", "cve": _cve, "klasse": _kl, "fix": _fix,
+          "kernel": True}
+    _b["id"] = cve_pruefung.schluessel(_b)
+    _kb.append(_b)
+_kd = {"bereich": "debian", "quelle": "brotli", "cve": "CVE-K5", "klasse": "behebbar",
+       "fix": "1.0", "kernel": False}
+_kd["id"] = cve_pruefung.schluessel(_kd)
+_kerg = {"ts": 4, "befunde": _kb + [_kd], "zaehler": {"neustart": 2, "offen": 1, "behebbar": 2},
+         "bereiche": {"debian": {"kernel": "6.12.111-1", "neustart_noetig": True}}}
+_orig_lk = cve_pruefung.laufender_kernel
+try:
+    cve_pruefung.laufender_kernel = lambda: "6.12.111-1"
+    cve_pruefung._speichern(_kerg)
+    _z = cve_pruefung.zustand_ergebnis()
+    check(_z["zaehler"].get("neustart") == 2,
+          "Positivkontrolle: unter dem Kernel der Pruefung bleibt 'neustart' stehen",
+          str(_z["zaehler"]))
+    cve_pruefung.laufender_kernel = lambda: "6.12.113-1"
+    cve_pruefung._speichern(dict(_kerg, ts=5))
+    _z = cve_pruefung.zustand_ergebnis()
+    _ids = {b.get("cve") for b in _z.get("befunde") or []}
+    check(_z["zaehler"].get("neustart") == 0,
+          "nach dem Neustart auf den behobenen Kernel: 0 'neustart'", str(_z["zaehler"]))
+    check(_ids == {"CVE-K3", "CVE-K4", "CVE-K5"},
+          "nur Kernel-Befunde mit Fix <= laufendem Kernel fallen weg", str(sorted(_ids)))
+    check(_z["zaehler"].get("offen") == 1 and _z["zaehler"].get("behebbar") == 2,
+          "uebrige Zaehler bleiben", str(_z["zaehler"]))
+    check(_z["bereiche"]["debian"]["kernel"] == "6.12.113-1"
+          and _z["bereiche"]["debian"].get("kernel_bei_pruefung") == "6.12.111-1",
+          "Anzeige nennt den laufenden und den gepruefen Kernel")
+    check(not any(p["titel"] == "linux" and p["zaehler"].get("neustart")
+                  for p in cve_pruefung.badge()["posten"]),
+          "Badge zaehlt keinen erledigten Neustart mehr")
+    check(json.loads(cve_pruefung.ERGEBNIS.read_text()).get("zaehler", {}).get("neustart") == 2,
+          "die Datei selbst bleibt unberuehrt (Angleichung nur beim Lesen)")
+finally:
+    cve_pruefung.laufender_kernel = _orig_lk
+
 # ═══════════════════════════════════════════════════════════════════════════
 abschnitt("8. Ort der Badge: am Paket-Symbol, nicht am Zahnrad")
 # ═══════════════════════════════════════════════════════════════════════════

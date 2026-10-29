@@ -755,8 +755,37 @@ def zustand_ergebnis() -> dict | None:
         return None
     m = (st.st_mtime_ns, st.st_size, st.st_ino)
     if _cache["mtime"] != m:
-        _cache.update(mtime=m, wert=_lesen(ERGEBNIS, None))
+        _cache.update(mtime=m, wert=kernel_nachfuehren(_lesen(ERGEBNIS, None),
+                                                       laufender_kernel()))
     return _cache["wert"]
+
+
+def kernel_nachfuehren(erg: dict | None, kernel: str) -> dict | None:
+    """Gespeichertes Ergebnis an den JETZT laufenden Kernel angleichen.
+
+    ⚠ AUF ECHT GEMESSEN (2026-10-29): Pruefung um 09:41 unter 6.12.111-1,
+    Neustart um 10:51 auf 6.12.113-1 – die Anzeige stand weiter auf
+    "Neustart noetig: 672", weil nach einem Neustart niemand neu prueft und
+    die Klasse im gespeicherten Ergebnis eingefroren ist. Der Neustart ist
+    aber genau die Abhilfe dieser Klasse. Kernel-Befunde, deren Behebung der
+    laufende Kernel schon traegt, fallen deshalb beim LESEN weg; die Datei
+    bleibt unberuehrt (der naechste Lauf schreibt ohnehin neu).
+    """
+    if not erg or not kernel:
+        return erg
+    deb = (erg.get("bereiche") or {}).get("debian") or {}
+    if not deb.get("kernel") or deb["kernel"] == kernel:
+        return erg
+    befunde = [b for b in erg.get("befunde") or []
+               if not (b.get("kernel") and b.get("fix")
+                       and cve_apt.vergleiche(kernel, b["fix"]) >= 0)]
+    zaehler = {k: 0 for k in KLASSEN}
+    for b in befunde:
+        zaehler[b["klasse"]] = zaehler.get(b["klasse"], 0) + 1
+    deb = dict(deb, kernel=kernel, kernel_bei_pruefung=deb["kernel"],
+               neustart_noetig=cve_apt.neustart_noetig())
+    return dict(erg, befunde=befunde, zaehler=zaehler,
+                bereiche=dict(erg.get("bereiche") or {}, debian=deb))
 
 
 def quittiert() -> dict:

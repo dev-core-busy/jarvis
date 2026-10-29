@@ -2697,6 +2697,16 @@ body.light .modal-header h2 {
 .ldap-members-btn:hover, .ldap-members-btn:focus-visible {
     color: var(--accent); text-decoration: underline solid var(--accent);
 }
+/* Gruppenmitgliedschaften eines Benutzers (Unter-Popup) */
+.ldap-groups-info { font-size: 0.8rem; color: var(--text-muted); min-height: 1.2em; margin-bottom: 8px; word-break: break-all; }
+.ldap-groups-info.is-fehler { color: var(--danger); }
+.ldap-groups-h { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin: 12px 0 5px; }
+.ldap-groups-ou { font-size: 0.9rem; color: var(--text-primary); }
+.ldap-groups-dn { font-size: 0.72rem; color: var(--text-muted); word-break: break-all; margin-top: 2px; }
+.ldap-groups-list { max-height: 30vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
+.ldap-row-leer { cursor: default; color: var(--text-muted); font-size: 0.85rem; }
+.ldap-groups-hint { font-size: 0.72rem; color: var(--text-muted); margin-top: 10px; }
+.token-label.ldap-members-btn { font-size: 0.86rem; font-weight: 400; min-width: 0; }
 
 /* ── Token-Liste (Chips mit ✕) für AD-Felder ── */
 .token-list { margin: 2px 0 2px; }

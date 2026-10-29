@@ -39,6 +39,17 @@
     };
 
     var _cred = { user: '', password: '' };
+
+    // Escape EINMAL je Seite und unabhaengig vom Picker: die Unter-Popups lassen
+    // sich auch ohne ihn oeffnen (Benutzer-Chip). Hing der Zuhoerer in
+    // ensureModal, schloss Escape dort nichts, solange der Picker nie offen war.
+    // Zuerst das oberste Unter-Popup, sonst schloesse Escape den Picker darunter.
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        if (closeTopmost()) return;
+        var m = el('ldap-picker-modal');
+        if (m && m.classList.contains('open')) close();
+    });
     var _state = null;
     var _searchTimer = null;
 
@@ -96,13 +107,6 @@
 
         el('ldap-picker-close').addEventListener('click', close);
         m.addEventListener('click', function (e) { if (e.target === m) close(); });
-        document.addEventListener('keydown', function (e) {
-            if (e.key !== 'Escape') return;
-            // Zuerst das obere Popup: sonst schliesst Escape den Picker UNTER der
-            // noch offenen Mitgliederliste, und die bliebe ohne Bezug stehen.
-            if (membersOpen()) { closeMembers(); return; }
-            if (m.classList.contains('open')) close();
-        });
         el('ldap-picker-search').addEventListener('input', function () {
             clearTimeout(_searchTimer);
             _searchTimer = setTimeout(runSearch, 300);
@@ -118,6 +122,7 @@
 
     function close() {
         closeMembers();   // kein verwaistes Unter-Popup zuruecklassen
+        closeGroups();
         var m = el('ldap-picker-modal');
         if (m) m.classList.remove('open');
         _state = null;
@@ -190,7 +195,7 @@
             // Bei Gruppen ist der NAME zusaetzlich ein Knopf: er oeffnet die
             // Mitgliederliste. Der restliche Eintrag schaltet die Auswahl um.
             var mainHtml = users
-                ? '<span class="ldap-row-main">' + esc(main) + '</span>'
+                ? userBtn(r.sam, main)
                 : '<button type="button" class="ldap-row-main ldap-members-btn" data-group="' + esc(key) +
                   '" title="' + esc(window.t('ldap.show_members_title')) + '">' + esc(main) + ' 👥</button>';
             if (_state.multi) {
@@ -227,13 +232,47 @@
         });
         // Mitglieder-Knopf: darf die Auswahl NICHT umschalten und das <label>
         // nicht aktivieren -> preventDefault + stopPropagation.
-        box.querySelectorAll('.ldap-members-btn').forEach(function (b) {
+        // Nur Gruppen-Knoepfe (data-group): der Benutzer-Knopf traegt dieselbe
+        // Klasse fuers Aussehen, bekommt aber seinen eigenen Zuhoerer.
+        box.querySelectorAll('.ldap-members-btn[data-group]').forEach(function (b) {
             b.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
                 openMembers(b.getAttribute('data-group'));
             });
         });
+        bindUserBtns(box);
+    }
+
+    // Benutzername als Knopf: oeffnet die Gruppenmitgliedschaften. Dieselbe
+    // Klasse wie der Gruppen-Knopf (sieht wie Text aus, Klick daneben waehlt aus).
+    function userBtn(sam, label) {
+        if (!sam) return '<span class="ldap-row-main">' + esc(label) + '</span>';
+        return '<button type="button" class="ldap-row-main ldap-members-btn ldap-groups-btn" data-user="' +
+            esc(sam) + '" title="' + esc(window.t('ldap.show_groups_title')) + '">' + esc(label) + '</button>';
+    }
+    function bindUserBtns(root) {
+        root.querySelectorAll('.ldap-groups-btn').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                openGroups(b.getAttribute('data-user'));
+            });
+        });
+    }
+
+    // Unter-Popups (Mitglieder, Mitgliedschaften) koennen sich gegenseitig
+    // oeffnen – das zuletzt geoeffnete liegt oben, Escape schliesst genau das.
+    var _zOben = 10003;
+    function nachOben(m) { _zOben += 1; m.style.zIndex = String(_zOben); }
+    function closeTopmost() {
+        var offen = ['ldap-members-modal', 'ldap-groups-modal'].map(el).filter(function (m) {
+            return m && m.classList.contains('open');
+        });
+        if (!offen.length) return false;
+        offen.sort(function (a, b) { return (parseInt(b.style.zIndex, 10) || 0) - (parseInt(a.style.zIndex, 10) || 0); });
+        offen[0].classList.remove('open');
+        return true;
     }
 
     // ── Mitglieder einer Gruppe (Unter-Popup ueber dem Picker) ────────────
@@ -270,11 +309,6 @@
         if (m) m.classList.remove('open');
     }
 
-    function membersOpen() {
-        var m = el('ldap-members-modal');
-        return !!(m && m.classList.contains('open'));
-    }
-
     function openMembers(group) {
         if (!group) return;
         ensureMembersModal();
@@ -284,6 +318,7 @@
         var inf = el('ldap-members-info');
         inf.style.color = 'var(--text-muted)';
         inf.textContent = window.t('ldap.members_loading');
+        nachOben(el('ldap-members-modal'));
         el('ldap-members-modal').classList.add('open');
 
         var payload = { group: group };
@@ -330,10 +365,128 @@
             var sub = (r.sam || '') + (r.mail ? ' · ' + r.mail : '');
             return '<div class="ldap-row" style="cursor:default;">' +
                 '<span style="flex-shrink:0;">' + (isGrp ? '🗂️' : '👤') + '</span>' +
-                '<span class="ldap-row-main">' + esc(r.display) + '</span>' +
+                (isGrp ? '<span class="ldap-row-main">' + esc(r.display) + '</span>' : userBtn(r.sam, r.display)) +
                 '<span class="ldap-row-sub">' + esc(sub) +
                 (isGrp ? ' · ' + esc(window.t('ldap.members_nested')) : '') + '</span></div>';
         }).join('');
+        bindUserBtns(list);
+    }
+
+    // ── Gruppenmitgliedschaften eines Benutzers (Unter-Popup) ─────────────
+    function ensureGroupsModal() {
+        if (el('ldap-groups-modal')) return;
+        var m = document.createElement('div');
+        m.id = 'ldap-groups-modal';
+        m.className = 'modal';
+        m.style.zIndex = '10003';
+        m.innerHTML =
+            '<div class="modal-content glass" style="max-width:600px;">' +
+              '<div class="modal-header">' +
+                '<h2 id="ldap-groups-title" data-i18n="ldap.groups_title">' + window.t('ldap.groups_title') + '</h2>' +
+                '<button class="btn-icon" id="ldap-groups-close" aria-label="' + window.t('common.close') + '">' +
+                  window.JarvisIcons.close() +
+                '</button>' +
+              '</div>' +
+              '<div class="modal-body" style="overflow-y:auto;">' +
+                '<div id="ldap-groups-info" class="ldap-groups-info"></div>' +
+                '<div id="ldap-groups-body"></div>' +
+                '<div class="ldap-groups-hint" data-i18n="ldap.groups_hint">' + window.t('ldap.groups_hint') + '</div>' +
+              '</div>' +
+            '</div>';
+        document.body.appendChild(m);
+        el('ldap-groups-close').addEventListener('click', closeGroups);
+        m.addEventListener('click', function (e) { if (e.target === m) closeGroups(); });
+    }
+
+    function closeGroups() {
+        var m = el('ldap-groups-modal');
+        if (m) m.classList.remove('open');
+    }
+
+    function openGroups(user) {
+        if (!user) return;
+        ensureGroupsModal();
+        el('ldap-groups-title').textContent = user;
+        el('ldap-groups-body').innerHTML = '';
+        var inf = el('ldap-groups-info');
+        inf.classList.remove('is-fehler');
+        inf.textContent = window.t('ldap.groups_loading');
+        nachOben(el('ldap-groups-modal'));
+        el('ldap-groups-modal').classList.add('open');
+
+        var payload = { user: user };
+        if (_cred.password) { payload.password = _cred.password; payload.bind_user = _cred.user; }
+        fetch('/api/ldap/user_groups', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token() },
+            body: JSON.stringify(payload)
+        }).then(function (r) {
+            return r.json().then(function (j) { return { status: r.status, j: j }; });
+        }).then(function (res) {
+            if (res.status !== 200) {
+                // Ein Fehler bleibt stehen (nicht von selbst weg) – er muss lesbar sein
+                inf.classList.add('is-fehler');
+                inf.textContent = (res.j && (res.j.error === 'NO_CREDENTIALS'
+                    ? window.t('ldap.cred_hint')
+                    : res.j.error)) || (window.t('common.error') + ' ' + res.status);
+                return;
+            }
+            renderGroups(res.j);
+        }).catch(function () {
+            inf.classList.add('is-fehler');
+            inf.textContent = window.t('ldap.network_error');
+        });
+    }
+
+    function ouPfad(lage) {
+        var teile = ((lage && lage.ou) || []).slice();
+        if (lage && lage.domaene) teile.unshift(lage.domaene);
+        return teile.join(' › ');
+    }
+
+    function gruppenListe(rows, leerKey) {
+        if (!rows.length) {
+            return '<div class="ldap-row ldap-row-leer">' + esc(window.t(leerKey)) + '</div>';
+        }
+        return rows.map(function (g) {
+            return '<div class="ldap-row" style="cursor:default;" title="' + esc(g.dn) + '">' +
+                '<button type="button" class="ldap-row-main ldap-members-btn" data-group="' + esc(g.dn) +
+                '" title="' + esc(window.t('ldap.show_members_title')) + '">' + esc(g.cn) + '</button>' +
+                '<span class="ldap-row-sub">' + esc(ouPfad(g.lage)) + '</span></div>';
+        }).join('');
+    }
+
+    function renderGroups(d) {
+        el('ldap-groups-title').textContent = d.display || d.sam || '';
+        var inf = el('ldap-groups-info');
+        inf.classList.remove('is-fehler');
+        inf.textContent = [d.sam, d.mail || d.upn].filter(Boolean).join(' · ');
+        var direkt = d.direkt || [];
+        var html =
+            '<div class="ldap-groups-h">' + esc(window.t('ldap.groups_ou')) + '</div>' +
+            '<div class="ldap-groups-ou">' + esc(ouPfad(d.lage) || '—') + '</div>' +
+            '<div class="ldap-groups-dn">' + esc(d.dn || '') + '</div>' +
+            '<div class="ldap-groups-h">' + esc(window.t('ldap.groups_direct')) + ' (' + direkt.length + ')</div>' +
+            '<div class="ldap-groups-list">' + gruppenListe(direkt, 'ldap.groups_none') + '</div>';
+        if (d.indirekt === null || d.indirekt === undefined) {
+            html += '<div class="ldap-groups-h">' + esc(window.t('ldap.groups_indirect')) + '</div>' +
+                '<div class="ldap-groups-ou">' + esc(window.t('ldap.groups_indirect_unknown')) + '</div>';
+        } else if (d.indirekt.length) {
+            html += '<div class="ldap-groups-h">' + esc(window.t('ldap.groups_indirect')) + ' (' + d.indirekt.length + ')</div>' +
+                '<div class="ldap-groups-list">' + gruppenListe(d.indirekt, 'ldap.groups_none') + '</div>';
+        }
+        if (d.primaer) {
+            html += '<div class="ldap-groups-h">' + esc(window.t('ldap.groups_primary')) + '</div>' +
+                '<div class="ldap-groups-list">' + gruppenListe([d.primaer], 'ldap.groups_none') + '</div>';
+        }
+        var body = el('ldap-groups-body');
+        body.innerHTML = html;
+        body.querySelectorAll('.ldap-members-btn[data-group]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.preventDefault();
+                openMembers(b.getAttribute('data-group'));
+            });
+        });
     }
 
     function applyMulti() {
@@ -375,8 +528,12 @@
             } else {
                 items.innerHTML = toks.map(function (t, i) {
                     var label = cfg.kind === 'groups' ? shortDn(t) : t;
-                    return '<span class="token" title="' + esc(t) + '"><span class="token-label">' + esc(label) +
-                           '</span><button type="button" class="token-x" data-i="' + i + '" aria-label="' + window.t('ldap.remove') + '">×</button></span>';
+                    var lbl = cfg.kind === 'groups'
+                        ? '<span class="token-label">' + esc(label) + '</span>'
+                        : '<button type="button" class="token-label ldap-members-btn ldap-groups-btn" data-user="' + esc(t) +
+                          '" title="' + esc(window.t('ldap.show_groups_title')) + '">' + esc(label) + '</button>';
+                    return '<span class="token" title="' + esc(t) + '">' + lbl +
+                           '<button type="button" class="token-x" data-i="' + i + '" aria-label="' + window.t('ldap.remove') + '">×</button></span>';
                 }).join('');
             }
             items.querySelectorAll('.token-x').forEach(function (b) {
@@ -387,6 +544,7 @@
                     render();
                 });
             });
+            bindUserBtns(items);
         }
         function add() {
             var v = addInp.value.trim();
@@ -443,7 +601,8 @@
         return _cred.password ? { password: _cred.password, bind_user: _cred.user } : {};
     }
 
-    window.LdapPicker = { open: open, attachButtons: attachButtons, attachField: attachField, zugang: zugang };
+    window.LdapPicker = { open: open, attachButtons: attachButtons, attachField: attachField, zugang: zugang,
+                         gruppenVon: openGroups };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', attachButtons);

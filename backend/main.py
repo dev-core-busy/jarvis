@@ -9235,6 +9235,35 @@ async def ldap_group_members(request: Request, user: str = Depends(require_local
         return JSONResponse({"error": str(e)[:200]}, status_code=500)
 
 
+@app.post("/api/ldap/user_groups")
+async def ldap_user_groups(request: Request, user: str = Depends(require_local_auth)):
+    """Ort (OU-Pfad) und Gruppenmitgliedschaften EINES AD-Benutzers (Admin) – das
+    Gegenstueck zur Mitglieder-Ansicht einer Gruppe.
+
+    Body: ``{user, [password], [bind_user]}`` – ``user`` darf Anmeldename,
+    ``DOMAENE\\name``, UPN oder Mailadresse sein. Antwort siehe
+    ``ldap_directory.user_groups`` (``direkt`` zaehlt fuer die Freigaben,
+    ``indirekt`` und ``primaer`` nicht), oder 428 NO_CREDENTIALS /
+    401 BIND_FAILED / 400 bei unbekanntem oder mehrdeutigem Namen."""
+    from backend import ldap_directory
+    import asyncio as _asyncio
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    wer = (body.get("user") or "").strip()
+    if not wer:
+        return JSONResponse({"error": "Kein Benutzer angegeben."}, status_code=400)
+    try:
+        bind_user, bind_pw = _ldap_creds(body, user)
+        res = await _asyncio.to_thread(ldap_directory.user_groups, wer, bind_user, bind_pw)
+        return JSONResponse(res)
+    except RuntimeError as e:
+        return _ldap_error_response(e)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+
 @app.get("/api/cert")
 async def download_cert():
     """Zertifikat zum Download anbieten (DER-Format .cer für Windows)."""

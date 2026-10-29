@@ -217,6 +217,168 @@ def group_members(group, bind_user=None, bind_password=None, limit=500):
             pass
 
 
+def _dn_wert(v):
+    """Escapes eines DN-Werts aufloesen (RFC 4514): ``\\,`` -> ``,``; ``\\c3\\a4`` sind
+    UTF-8-Bytes (-> ``ae``-Umlaut) und werden deshalb als Bytes gesammelt."""
+    v = v or ""
+    out = bytearray()
+    i = 0
+    while i < len(v):
+        if v[i] == "\\" and i + 1 < len(v):
+            h = v[i + 1:i + 3]
+            if len(h) == 2 and all(x in "0123456789abcdefABCDEF" for x in h):
+                out.append(int(h, 16))
+                i += 3
+                continue
+            out += v[i + 1].encode("utf-8")
+            i += 2
+            continue
+        out += v[i].encode("utf-8")
+        i += 1
+    return out.decode("utf-8", "replace")
+
+
+def dn_lage(dn):
+    """Ort eines Objekts aus seinem DN: ``{"name", "ou", "container", "domaene"}``.
+
+    ``ou`` ist der Pfad aus OUs/Containern von AUSSEN nach INNEN (so liest ihn ein
+    Mensch in "Active Directory-Benutzer und -Computer"), ``container`` der DN ohne
+    den eigenen RDN. Kommata im Namen (``CN=Muster\\, Erika``) bleiben Teil des
+    Namens – deshalb ueber ``parse_dn`` und nicht ueber ``split(",")``."""
+    from ldap3.utils.dn import parse_dn
+    leer = {"name": dn or "", "ou": [], "container": "", "domaene": ""}
+    try:
+        teile = parse_dn(dn or "")
+    except Exception:  # noqa: BLE001 – kaputter DN: roh zeigen statt werfen
+        return leer
+    if not teile:
+        return leer
+    ou = [_dn_wert(w) for a, w, _s in teile[1:] if a.upper() in ("OU", "CN")]
+    return {"name": _dn_wert(teile[0][1]),
+            "ou": list(reversed(ou)),
+            "container": ",".join("%s=%s" % (a, w) for a, w, _s in teile[1:]),
+            "domaene": ".".join(_dn_wert(w) for a, w, _s in teile if a.upper() == "DC")}
+
+
+def _sid_text(roh):
+    """objectSid als ``S-1-5-21-…``. ldap3 liefert ihn ohne Schema (``get_info=NONE``,
+    siehe ldap_tls) als Bytes, mit Schema schon als Text."""
+    if isinstance(roh, str):
+        return roh if roh.startswith("S-") else ""
+    if not isinstance(roh, (bytes, bytearray)) or len(roh) < 8:
+        return ""
+    b = bytes(roh)
+    anzahl = b[1]
+    if len(b) < 8 + 4 * anzahl:
+        return ""
+    autoritaet = int.from_bytes(b[2:8], "big")
+    unter = [str(int.from_bytes(b[8 + 4 * i:12 + 4 * i], "little")) for i in range(anzahl)]
+    return "S-%d-%d%s" % (b[0], autoritaet, "".join("-" + u for u in unter))
+
+
+def _benutzer_filter(benutzer):
+    """Suchfilter fuer EINEN Benutzer aus dem, was ein Admin eintippt:
+    ``name``, ``DOMAENE\\name``, ``name@domaene`` (UPN) oder eine Mailadresse."""
+    b = (benutzer or "").strip()
+    if "\\" in b:
+        b = b.split("\\", 1)[1]
+    q = _esc(b)
+    basis = "(&(objectCategory=person)(objectClass=user)%s)"
+    if "@" in b:
+        return basis % ("(|(userPrincipalName=%s)(mail=%s)(proxyAddresses=smtp:%s))" % (q, q, q))
+    return basis % ("(sAMAccountName=%s)" % q)
+
+
+def user_groups(benutzer, bind_user=None, bind_password=None):
+    """Wo steht ein Benutzer im Verzeichnis, und in welchen Gruppen ist er?
+
+    Antwort ``{"sam","display","mail","upn","dn","lage","direkt","indirekt",
+    "primaer"}`` – ``lage`` aus ``dn_lage``; ``direkt``/``indirekt`` je
+    ``[{cn, dn, lage}]``, alphabetisch.
+
+    ``direkt`` ist ``memberOf`` – GENAU die Liste, die auch die Anmeldung und
+    die Bereichs-Freigaben pruefen (``_ad_user_allowed``). ``indirekt`` sind
+    Gruppen, in die der Benutzer nur ueber eine verschachtelte Gruppe gelangt
+    (``LDAP_MATCHING_RULE_IN_CHAIN``); sie stehen hier, damit man sieht, warum
+    jemand "doch in der Gruppe ist" – fuer die Freigaben zaehlen sie NICHT.
+    ``indirekt`` ist ``None``, wenn das Verzeichnis die Kettenabfrage nicht
+    beantwortet hat (unbekannt ist nicht leer). ``primaer`` ist die Gruppe aus
+    ``primaryGroupID`` (typisch "Domaenen-Benutzer"); sie steht bei AD nie in
+    ``memberOf`` und zaehlt deshalb ebenfalls nicht. ``None``, wenn nicht
+    aufloesbar.
+
+    Wirft RuntimeError, wenn der Benutzer nicht gefunden wird oder der Name
+    mehrdeutig ist (eine Mailadresse kann an zwei Konten haengen)."""
+    if not (benutzer or "").strip():
+        raise RuntimeError("Kein Benutzer angegeben.")
+    conn, base = _bind(bind_user, bind_password)
+    try:
+        conn.search(search_base=base, search_filter=_benutzer_filter(benutzer),
+                    attributes=["sAMAccountName", "displayName", "mail", "userPrincipalName",
+                                "distinguishedName", "memberOf", "primaryGroupID", "objectSid"],
+                    paged_size=3)
+        treffer = list(conn.entries)
+        if not treffer:
+            raise RuntimeError("Benutzer '%s' nicht im Verzeichnis gefunden." % benutzer.strip()[:120])
+        if len(treffer) > 1:
+            raise RuntimeError("'%s' passt auf mehrere Konten (%s) – bitte den Anmeldenamen angeben."
+                               % (benutzer.strip()[:120],
+                                  ", ".join(_val(e, "sAMAccountName") for e in treffer)))
+        e = treffer[0]
+        dn = _val(e, "distinguishedName") or str(e.entry_dn)
+
+        def gruppe(gdn):
+            lage = dn_lage(gdn)
+            return {"cn": lage["name"], "dn": gdn, "lage": lage}
+
+        direkt_dns = []
+        try:
+            if "memberOf" in e and e["memberOf"]:
+                direkt_dns = [str(g) for g in e["memberOf"].values]
+        except Exception:  # noqa: BLE001
+            direkt_dns = []
+        direkt = sorted((gruppe(g) for g in direkt_dns), key=lambda g: g["cn"].lower())
+
+        indirekt = None
+        try:
+            conn.search(search_base=base,
+                        search_filter="(&(objectClass=group)(member:1.2.840.113556.1.4.1941:=%s))"
+                                      % _esc(dn),
+                        attributes=["distinguishedName"], paged_size=1000)
+            schon = {g.lower() for g in direkt_dns}
+            alle = [_val(g, "distinguishedName") or str(g.entry_dn) for g in conn.entries]
+            indirekt = sorted((gruppe(g) for g in alle if g.lower() not in schon),
+                              key=lambda g: g["cn"].lower())
+        except Exception:  # noqa: BLE001 – Kettenabfrage ist Zusatz, kein Muss
+            indirekt = None
+
+        primaer = None
+        try:
+            rid = int(str(_val(e, "primaryGroupID")) or "0")
+            sid = _sid_text(e["objectSid"].value) if "objectSid" in e else ""
+            if rid and sid.count("-") >= 3:
+                gruppen_sid = sid.rsplit("-", 1)[0] + "-" + str(rid)
+                conn.search(search_base=base,
+                            search_filter="(&(objectClass=group)(objectSid=%s))" % _esc(gruppen_sid),
+                            attributes=["distinguishedName"], paged_size=1)
+                if conn.entries:
+                    primaer = gruppe(_val(conn.entries[0], "distinguishedName")
+                                     or str(conn.entries[0].entry_dn))
+        except Exception:  # noqa: BLE001
+            primaer = None
+
+        return {"sam": _val(e, "sAMAccountName"),
+                "display": _val(e, "displayName") or _val(e, "sAMAccountName"),
+                "mail": _val(e, "mail"), "upn": _val(e, "userPrincipalName"),
+                "dn": dn, "lage": dn_lage(dn),
+                "direkt": direkt, "indirekt": indirekt, "primaer": primaer}
+    finally:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def search_groups(query, bind_user=None, bind_password=None, limit=100):
     q = _esc((query or "").strip())
     conn, base = _bind(bind_user, bind_password)

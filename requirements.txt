@@ -132,3 +132,14 @@ APScheduler>=3.10,<4.0
 watchdog>=3.0
 pyotp>=2.9.0
 qrcode[pil]>=7.4.2
+# Sicherheits-Untergrenzen ohne eigenen Bedarf (CVE-Pruefung, 2026-10-29). Beide
+# kommen nur MITTELBAR ins venv, stehen aber hier, weil die Lock nur so eine
+# Behebung uebernimmt (sie bevorzugt die bestehende Fassung):
+#   filelock  ueber torch/transformers/huggingface-hub/tldextract – 3.29.1 traegt
+#             CVE-2026-112909/-112910/-112915/-112935/-112936/-112939, behoben in 4.2.1.
+#   dnspython ueber exchangelib (E-Mail-Skill) – 2.8.0 traegt CVE-2026-114605,
+#             behoben in 2.9.0. Ueber das Skill-Manifest ginge es nicht: die
+#             Skill-Automatik installiert nur FEHLENDE Pakete und nagelt vorhandene
+#             auf ihren Ist-Stand (abhaengigkeiten.skill_pakete_nachziehen).
+filelock>=4.2.1
+dnspython>=2.9.0

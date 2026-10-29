@@ -335,9 +335,9 @@ cymem==2.0.16 \
 de-core-news-md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl#sha256=b903f59220f1e76dd672acdaa7fa454d6703fe056c5ccd6457820e70874116d0 \
     --hash=sha256:b903f59220f1e76dd672acdaa7fa454d6703fe056c5ccd6457820e70874116d0
     # via skill.json
-filelock==3.29.1 \
-    --hash=sha256:85199dfd706869641b72b2e8955d5416a4b2b7dc4b0e8e6d97b4cc1299a6983b \
-    --hash=sha256:d97e6b1b9757569626c58caa07dc4beb1613f4a2938b1e8cc81afca398906c9e
+filelock==4.2.4 \
+    --hash=sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e \
+    --hash=sha256:c6d8663535e1650ee430507b4ffbac7b464dd64b7647ea0112a9f406499d163d
     # via
     #   -c kern.txt
     #   tldextract

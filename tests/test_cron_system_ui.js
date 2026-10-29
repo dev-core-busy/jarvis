@@ -12,7 +12,12 @@
  *   - ein Abruffehler oder fehlende Felder werden NICHT zu "ausgeschaltet";
  *   - "dabei eingespielt" nur fuer Eintraege nach dem letzten Timer-Lauf;
  *   - ein nicht lesbarer Verlauf ist nicht "nichts eingespielt";
- *   - das Neuzeichnen der Liste (nach jedem Lauf) ruft den Status NICHT neu ab.
+ *   - das Neuzeichnen der Liste (nach jedem Lauf) ruft den Status NICHT neu ab;
+ *   - "Einstellungen" fuehrt zum SCHALTER (KI & System -> System-Einstellungen),
+ *     nicht nach "Sicherheit" – dort steht er seit 2026-07-28 nicht mehr
+ *     (gemeldet 2026-10-29: "oeffnet nicht den korrekten Punkt"; dieser
+ *     Waechter hatte das falsche Ziel selbst festgeschrieben). Wo der Schalter
+ *     wirklich steht, misst Abschnitt 5 an der echten settings.html.
  * Antwortform wie GET /api/security/unattended (backend/apt_upgrades.status).
  *
  * Lauf:  timeout 60 node tests/test_cron_system_ui.js [pfad/zu/cron.js]
@@ -62,7 +67,10 @@ const ST = (o) => Object.assign({
 function baue(opt) {
     const o = Object.assign({ status: ST(), code: 200, reiter: true }, opt || {});
     const dom = new JSDOM('<!doctype html><html><body>'
-        + (o.reiter ? '<button class="settings-tab-btn" data-settings-tab="security">S</button>' : '')
+        + '<button class="settings-tab-btn" data-settings-tab="security">S</button>'
+        + (o.reiter ? '<button class="settings-tab-btn" data-settings-tab="profiles">P</button>'
+            + '<div id="prof-sect-tuning-hdr"></div><div id="prof-sect-tuning-body" style="display:none;">'
+            + '<div class="tuning-group" id="gruppe-unatt"><div id="sec-unatt-status"></div></div></div>' : '')
         + '<div id="cron-tab-content"></div></body></html>',
         { url: 'https://localhost/settings', runScripts: 'outside-only' });
     const { window } = dom;
@@ -153,10 +161,34 @@ async function aufbau(opt) {
         check('Aktualisieren-Knopf ruft ihn neu ab', statusRufe(rufe) === n0 + 1);
 
         section('5. Einstellungen-Knopf');
-        let geklickt = 0;
-        doc.querySelector('.settings-tab-btn[data-settings-tab="security"]').addEventListener('click', () => geklickt++);
-        doc.querySelector('#cron-system .cron-sys-einst-btn').click();
-        check('oeffnet den Reiter Sicherheit', geklickt === 1);
+        // Erst an der ECHTEN settings.html: steht der Schalter dort, wo der Knopf hinfuehrt?
+        const echt = new JSDOM(fs.readFileSync(path.join(ROOT, 'frontend', 'settings.html'), 'utf8')).window.document;
+        const schalter = echt.getElementById('sec-unatt-status');
+        const tuning = echt.getElementById('prof-sect-tuning-body');
+        check('settings.html: Schalter steht in KI & System -> System-Einstellungen',
+            !!schalter && !!tuning && tuning.contains(schalter) && !!echt.getElementById('prof-sect-tuning-hdr')
+            && !!echt.getElementById('settings-tab-profiles') && echt.getElementById('settings-tab-profiles').contains(tuning)
+            && !!echt.querySelector('.settings-tab-btn[data-settings-tab="profiles"]'));
+        check('settings.html: Schalter steht NICHT im Reiter Sicherheit',
+            !!schalter && !!echt.getElementById('settings-tab-security') && !echt.getElementById('settings-tab-security').contains(schalter));
+        let sicherheit = 0, profile = 0, kopf = 0, gesprungen = null;
+        const hdr = doc.getElementById('prof-sect-tuning-hdr'), body = doc.getElementById('prof-sect-tuning-body');
+        doc.querySelector('.settings-tab-btn[data-settings-tab="security"]').addEventListener('click', () => sicherheit++);
+        doc.querySelector('.settings-tab-btn[data-settings-tab="profiles"]').addEventListener('click', () => profile++);
+        // Kopfzeilen-Handler wie _collapseInit (app.js): schaltet um.
+        hdr.addEventListener('click', () => { kopf++; body.style.display = body.style.display === 'none' ? '' : 'none'; });
+        window.Element.prototype.scrollIntoView = function () { gesprungen = this; };
+        const eb = () => doc.querySelector('#cron-system .cron-sys-einst-btn');
+        check('Positivkontrolle: Knopf vorhanden', !!eb());
+        if (eb()) eb().click();
+        await sleep(40);
+        check('oeffnet den Reiter KI & System', profile === 1, profile);
+        check('⚠ oeffnet NICHT den Reiter Sicherheit', sicherheit === 0, sicherheit);
+        check('klappt System-Einstellungen auf', body.style.display !== 'none' && kopf === 1, kopf);
+        check('springt zum Schalter (seine Gruppe)', !!gesprungen && gesprungen.id === 'gruppe-unatt', gesprungen && gesprungen.id);
+        if (eb()) eb().click();
+        await sleep(40);
+        check('⚠ zweiter Klick klappt den offenen Abschnitt NICHT wieder zu', body.style.display !== 'none' && kopf === 1, kopf);
         window.close();
         ({ window, doc } = await aufbau({ reiter: false }));
         check('ohne Reiter kein toter Knopf', !doc.querySelector('#cron-system .cron-sys-einst-btn'));

@@ -580,7 +580,8 @@ window.cronManager = new (class JarvisCronManager {
     // auch dann, wenn der Dienst steht – deshalb bewusst KEIN Auftrag dieser
     // Liste. Gefragt wurde "unter Aufgaben finde ich nichts dazu": der Eintrag
     // zeigt den Timer nur an. Ein- und ausgeschaltet wird unter
-    // Einstellungen -> Sicherheit (dort stehen auch die Begrenzungen).
+    // KI & System -> System-Einstellungen (dorthin seit 2026-07-28 aus
+    // Sicherheit verschoben; die IDs sec-unatt-* blieben).
 
     async _loadSystem() {
         try {
@@ -666,7 +667,11 @@ window.cronManager = new (class JarvisCronManager {
                     + ' · ' + window.t('cron.sys_naechster') + ': ' + this._sysZeit(zp.naechster)
                     + ' · ' + this._sysEingespieltText(d));
         }
-        const hatReiter = !!document.querySelector('.settings-tab-btn[data-settings-tab="security"]');
+        // Ziel ist der Schalter selbst, nicht irgendein Reiter: bis 2026-10-29
+        // sprang der Knopf nach "Sicherheit", wo der Schalter seit 2026-07-28
+        // nicht mehr steht.
+        const hatReiter = !!document.querySelector('.settings-tab-btn[data-settings-tab="profiles"]')
+            && !!document.getElementById('sec-unatt-status');
         el.innerHTML = `<div class="kb-folder-list">
             <div class="cron-item cron-item-system" data-id="system-updates">
                 <div class="cron-item-row">
@@ -690,11 +695,32 @@ window.cronManager = new (class JarvisCronManager {
             if (this._sysLogOffen) this._renderSystemLog();
         };
         const eb = el.querySelector('.cron-sys-einst-btn');
-        if (eb) eb.onclick = () => {
-            const tab = document.querySelector('.settings-tab-btn[data-settings-tab="security"]');
-            if (tab) tab.click();
-        };
+        if (eb) eb.onclick = () => this._sysZumSchalter();
         if (this._sysLogOffen) this._renderSystemLog();
+    }
+
+    /* Oeffnet KI & System, klappt "System-Einstellungen" auf und springt zum
+     * Schalter. Der Reiter-Klick laeuft ueber den vorhandenen Handler (er
+     * verdrahtet dabei die Knoepfe des Schalters, app.js). */
+    _sysZumSchalter() {
+        const tab = document.querySelector('.settings-tab-btn[data-settings-tab="profiles"]');
+        const ziel = document.getElementById('sec-unatt-status');
+        if (!tab || !ziel) return;
+        tab.click();
+        // Aufklappen NUR, wenn er zu ist: ein blindes click() wuerde einen
+        // offenen Abschnitt ZUklappen. Geklickt wird der Kopfzeilen-Handler,
+        // damit der gemerkte Auf-/Zu-Zustand mitgeschrieben wird.
+        const hdr = document.getElementById('prof-sect-tuning-hdr');
+        const body = document.getElementById('prof-sect-tuning-body');
+        if (hdr && body && body.style.display === 'none') hdr.click();
+        // Erst im naechsten Frame springen: das Aufklappen aendert die Hoehen.
+        const spaeter = window.requestAnimationFrame || (cb => setTimeout(cb, 0));
+        spaeter(() => {
+            try {
+                const gruppe = ziel.closest('.tuning-group') || ziel;
+                if (gruppe.scrollIntoView) gruppe.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            } catch (e) { /* kein Sprung – Reiter und Abschnitt stehen trotzdem richtig */ }
+        });
     }
 
     _renderSystemLog() {

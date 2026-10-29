@@ -106,6 +106,17 @@
         .doc-table tr:last-child td { border-bottom: none; }
         .doc-table tr:hover td { background: var(--bg-glass); }
         .doc-table td:first-child { font-family: var(--font-mono); font-size: 0.8rem; color: var(--cyan); white-space: nowrap; }
+        /* Handy-Breite: Zellen duerfen umbrechen; bleibt eine Tabelle zu breit,
+           rollt sie in sich – die Seite selbst laeuft nie waagerecht ueber */
+        @media (max-width: 600px) {
+            .doc-table { display: block; overflow-x: auto; }
+            .doc-table th, .doc-table td { padding: 8px 10px; }
+            .doc-table td, .doc-table td:first-child, .doc-table .code-inline { white-space: normal; overflow-wrap: anywhere; }
+            /* Kopfleiste: sonst schiebt der Ruecklink die Seite um einige Pixel auf */
+            nav { padding: 0 16px; }
+            .nav-badge { display: none; }
+            nav > div:last-child, .nav-back { min-width: 0; text-align: right; }
+        }
         .doc-table td strong { color: var(--text-primary); font-weight: 500; }
 
         /* Steps */

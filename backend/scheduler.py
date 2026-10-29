@@ -112,6 +112,10 @@ class CronManager:
                        Werkzeuge - ein Modell zu bitten, einen Reindex
                        anzustossen, waere teuer, unzuverlaessig und voellig
                        unnoetig fuer eine deterministische Wartungsaufgabe.
+          'cve_pruefung' – Sicherheitsluecken der installierten Pakete pruefen
+                       (seit 2026-10-29, backend/cve_pruefung.py), `payload` =
+                       {beheben: bool, schwelle: ""|alle|ab_niedrig|ab_mittel}.
+                       Ebenfalls ohne LLM und ohne Werkzeuge.
 
         ⚠ EINE NEUE ART GEHOERT IN DIE WHITELIST WEITER UNTEN. Steht sie nicht
         darin, wird der Job STILL zu einem Agentenlauf - er laeuft dann, tut
@@ -125,7 +129,8 @@ class CronManager:
             "task": task,
             "enabled": enabled,
             "once": once,   # True → Job löscht sich nach einmaligem Ausführen
-            "kind": kind if kind in ("agent", "reminder", "wissensabgleich") else "agent",
+            "kind": kind if kind in ("agent", "reminder", "wissensabgleich",
+                                     "cve_pruefung") else "agent",
             "payload": dict(payload or {}),
             "owner": owner or "",
             "owner_privileged": bool(owner_privileged),
@@ -159,6 +164,25 @@ class CronManager:
     # `aussenwirkung` (BSI H8/H9-Rest) IST dabei: der PUT ist admin-only
     # (_require_trigger_admin), und genau dort setzt ein Admin die Freigabe.
     UPDATABLE_FIELDS = {"label", "cron", "task", "enabled", "once", "aussenwirkung"}
+
+    def set_cve_payload(self, job_id: str, payload: dict) -> dict:
+        """Optionen eines CVE-Pruefauftrags aendern – NUR fuer diese Art.
+
+        `payload` steht bewusst NICHT in UPDATABLE_FIELDS (ein Erinnerungs-
+        Auftrag liesse sich sonst umschreiben). Hier geht es ausschliesslich
+        um den Haken "beheben" und die Schwelle eines Auftrags, der schon
+        `cve_pruefung` IST; die Art selbst bleibt unveraenderlich.
+        """
+        from backend import cve_pruefung
+        self._schreibbar()
+        job = self.get_job(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} nicht gefunden")
+        if job.get("kind") != "cve_pruefung":
+            raise ValueError("Nur CVE-Pruefauftraege haben diese Optionen")
+        job["payload"] = cve_pruefung.auftrag_payload(payload)
+        self._save()
+        return job
 
     def update_job(self, job_id: str, **fields) -> dict:
         self._schreibbar()
@@ -294,6 +318,17 @@ class CronManager:
                 result = str(erg.get("grund") or "")
                 if cf.get("aktiv"):
                     result += " · Confluence: " + str(cf.get("grund") or "")
+            elif job.get("kind") == "cve_pruefung":
+                # Wartungsauftrag OHNE Agent: pruefen und – nur wenn im Auftrag
+                # angehakt – beheben. Die Behebung laeuft ueber die Broker-Op
+                # cve_beheben mit deren eigenen Grenzen.
+                from backend import cve_pruefung
+                pl = job.get("payload") or {}
+                erg = await asyncio.to_thread(
+                    cve_pruefung.lauf, beheben=pl.get("beheben") is True,
+                    schwelle=pl.get("schwelle") or None, ausloeser="auftrag",
+                    von=f"Auftrag '{label}'")
+                result = cve_pruefung.kurzbericht(erg)
             elif _agent_manager:
                 agent = _agent_manager.get_or_create_main()
                 from backend import wirkung as _wirkung

@@ -728,6 +728,29 @@ body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000);
     transition: color .15s ease, background .15s ease;
 }
 .jv-pkg-btn:hover { background: rgba(var(--accent-rgb), .12); color: var(--text-primary); }
+/* Badge "Pakete mit Sicherheitsluecken" (syspackages.js, cve_pruefung.badge).
+   Bauform wie die Zahnrad-Badge; `position: relative` am Knopf gibt ihr den
+   Bezug. Rot, wenn ein Update bereitliegt oder ein Neustart faellig ist. */
+.jv-pkg-btn { position: relative; }
+.jv-pkg-badge {
+    position: absolute;
+    top: -4px;
+    right: -6px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 8px;
+    background: var(--warning);
+    color: var(--on-signal);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--bg-primary);
+    cursor: pointer;
+}
+.jv-pkg-badge.is-danger { background: var(--danger); }
 .jv-pkg-btn:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
 
 /* Der Kasten liegt ueber der ganzen Seite: eine Paketliste braucht Platz, und
@@ -930,6 +953,82 @@ body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000);
     background: rgba(239, 68, 68, .16);
     border-color: rgba(239, 68, 68, .5);
 }
+
+/* ── Sicherheitsluecken im Paket-Popup (syspackages.js, cve_pruefung.py) ──────
+   Die Markierung traegt ihre Aussage als TEXT ("Update verfuegbar · 3") –
+   Farbe allein ist keine Information. Flaechen getoent, Schrift in
+   --text-primary: so haelt der Kontrast in beiden Themes, ohne dass eine
+   Signalfarbe als Schriftfarbe herhalten muss (Register: --danger als Schrift). */
+.jv-pkg-cvebar {
+    flex: 0 0 auto;
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-primary, var(--bg-secondary));
+    font-size: .78rem;
+    color: var(--text-secondary);
+    max-height: 34vh;
+    overflow-y: auto;
+}
+.jv-pkg-cve-st { line-height: 1.8; }
+.jv-pkg-cve-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.jv-pkg-cve-btn {
+    background: rgba(var(--accent-rgb), .14);
+    border: 1px solid rgba(var(--accent-rgb), .40);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: .76rem;
+    cursor: pointer;
+}
+.jv-pkg-cve-btn:hover { background: rgba(var(--accent-rgb), .26); }
+.jv-pkg-cve-btn:disabled { opacity: .55; cursor: default; }
+.jv-pkg-cve-btn.ist-haupt { background: rgba(var(--danger-rgb), .18); border-color: rgba(var(--danger-rgb), .55); }
+.jv-pkg-cve-btn.ist-haupt:hover { background: rgba(var(--danger-rgb), .30); }
+.jv-pkg-cve-filter { display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); cursor: pointer; }
+.jv-pkg-cve-meldung, .jv-pkg-cve-fehler { color: var(--text-primary); }
+.jv-pkg-cve-meldung { margin-top: 6px; padding: 4px 8px; border-radius: 6px;
+    background: rgba(var(--danger-rgb), .14); border: 1px solid rgba(var(--danger-rgb), .45); }
+.jv-pkg-cve-fehler { padding: 0 4px; border-radius: 4px; background: rgba(var(--danger-rgb), .14); }
+.jv-pkg-cve-beh { color: var(--text-primary); }
+.jv-pkg-cve {
+    display: inline-block;
+    font: inherit;
+    font-size: .72rem;
+    line-height: 1.4;
+    padding: 1px 7px;
+    border-radius: 9px;
+    border: 1px solid rgba(var(--fg-rgb, 148,163,184), .35);
+    background: rgba(var(--fg-rgb, 148,163,184), .10);
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+button.jv-pkg-cve { cursor: pointer; }
+.jv-pkg-cve.ist-klein { font-size: .7rem; }
+.jv-pkg-cve-behebbar { background: rgba(var(--danger-rgb), .20); border-color: rgba(var(--danger-rgb), .60); }
+.jv-pkg-cve-neustart,
+.jv-pkg-cve-nicht_im_index,
+.jv-pkg-cve-zurueckgehalten { background: rgba(var(--warning-rgb), .20); border-color: rgba(var(--warning-rgb), .60); }
+.jv-pkg-cve-offen { background: rgba(var(--warning-rgb), .12); border-color: rgba(var(--warning-rgb), .45); }
+.jv-pkg-cve-leise, .jv-pkg-cve-ausgenommen { color: var(--text-secondary); }
+/* Die Markierung darf umbrechen: mit `nowrap` drueckte die neue Spalte die
+   Tabelle ueber den Rand (waagerechter Rollbalken, auf DEV im Bild gesehen). */
+.jv-pkg-l .jv-pkg-cve { white-space: normal; text-align: left; }
+/* Mindestbreite: ohne sie brach "ohne Debian-Update · 151" in drei Zeilen um. */
+.jv-pkg-tab td.jv-pkg-l { min-width: 10.5em; }
+.jv-pkg-cve-zeile td { background: var(--bg-primary, var(--bg-secondary)); }
+.jv-pkg-cve-liste { list-style: none; margin: 0 0 6px; padding: 0; }
+.jv-pkg-cve-liste li { padding: 4px 0; border-bottom: 1px solid rgba(var(--fg-rgb, 148,163,184), .10); }
+.jv-pkg-cve-liste li.ist-gesehen { opacity: .75; }
+.jv-pkg-cve-id { font-family: var(--font-mono, monospace); color: var(--text-primary); }
+.jv-pkg-cve-id a { color: inherit; text-decoration: underline; }
+.jv-pkg-cve-e, .jv-pkg-cve-z, .jv-pkg-cve-t { color: var(--text-secondary); }
+.jv-pkg-cve-z { margin-top: 2px; }
+.jv-pkg-cve-t { margin-top: 2px; font-size: .74rem; }
+.jv-pkg-cve-andere { margin-top: 6px; }
+.jv-pkg-cve-andere > summary { cursor: pointer; color: var(--text-primary); }
 
 @media (max-width: 720px) {
     /* Auf schmalen Fenstern faellt die Beschreibung heraus – sie ist die

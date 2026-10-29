@@ -86,7 +86,33 @@ window.cronManager = new (class JarvisCronManager {
                               .map(([l,c]) => `<button class="kb-chip cron-example-btn" data-cron="${c}">${l} <code>${c}</code></button>`).join('')}
                         </div>
 
+                        <!-- Art des Auftrags (seit 2026-10-29). Die Sicherheitslücken-
+                             Prüfung läuft OHNE Agent (backend/cve_pruefung.py); die Art
+                             ist nach dem Anlegen nicht mehr änderbar. -->
                         <div class="kb-form-row">
+                            <label class="kb-label" for="cron-kind">${window.t('cron.kind_label')}</label>
+                            <select id="cron-kind" class="kb-input">
+                                <option value="agent">${window.t('cron.kind_agent')}</option>
+                                <option value="cve_pruefung">${window.t('cron.kind_cve')}</option>
+                            </select>
+                        </div>
+
+                        <div class="kb-form-row" id="cron-cve-opts" hidden>
+                            <label class="kb-form-checkbox-label">
+                                <input id="cron-cve-beheben" type="checkbox"> ${window.t('cron.cve_beheben')}
+                            </label>
+                            <p class="kb-hint" style="margin:2px 0 6px 24px;">${window.t('cron.cve_beheben_hint')}</p>
+                            <p class="kb-hint" id="cron-cve-unatt" style="margin:0 0 6px 24px;" hidden>${window.t('cron.cve_unatt_hint')}</p>
+                            <label class="kb-label" for="cron-cve-schwelle">${window.t('cron.cve_schwelle')}</label>
+                            <select id="cron-cve-schwelle" class="kb-input">
+                                <option value="">${window.t('cron.cve_schwelle_vorgabe')}</option>
+                                <option value="alle">${window.t('cve.schwelle_alle')}</option>
+                                <option value="ab_niedrig">${window.t('cve.schwelle_ab_niedrig')}</option>
+                                <option value="ab_mittel">${window.t('cve.schwelle_ab_mittel')}</option>
+                            </select>
+                        </div>
+
+                        <div class="kb-form-row" id="cron-task-row">
                             <label class="kb-label" for="cron-task">Aufgabe für Jarvis</label>
                             <textarea id="cron-task" rows="3" class="kb-input"
                                 placeholder="Was soll Jarvis tun? z.B.: Prüfe Server-Auslastung und sende Zusammenfassung per WhatsApp."></textarea>
@@ -477,7 +503,18 @@ window.cronManager = new (class JarvisCronManager {
             // sehen koennen, sonst haelt ein Admin den Auftragstext fuer etwas,
             // das ein Modell ausfuehrt.
             const isWiss = job.kind === 'wissensabgleich';
-            const kindBadge = isRem
+            // Sicherheitsluecken-Pruefung (kind='cve_pruefung'): ebenfalls ohne
+            // Agent. Ob sie automatisch BEHEBT, muss man in der Liste sehen –
+            // das ist der Unterschied zwischen Bericht und Eingriff.
+            const isCve = job.kind === 'cve_pruefung';
+            const cveBadge = isCve
+                ? `<span class="cron-owner-badge cron-badge-user" title="${this._esc(window.t('cron.kind_cve_hint'))}">`
+                  + `${this._esc(window.t('cron.kind_cve'))}</span> `
+                  + ((job.payload || {}).beheben === true
+                      ? `<span class="cron-owner-badge cron-badge-none" title="${this._esc(window.t('cron.cve_beheben_hint'))}">`
+                        + `${this._esc(window.t('cron.cve_badge_beheben'))}</span> ` : '')
+                : '';
+            const kindBadge = isCve ? cveBadge : isRem
                 ? `<span class="cron-owner-badge cron-badge-user" title="${this._esc(window.t('cron.kind_reminder_hint'))}">`
                   + `${this._esc(window.t('cron.kind_reminder'))}</span> `
                 : (isWiss
@@ -486,7 +523,7 @@ window.cronManager = new (class JarvisCronManager {
             // Übernehmen (= Systemrechte) ist bei einer Erinnerung sinnlos: sie
             // fuehrt nichts aus. Dasselbe gilt fuer den Wissensabgleich - er
             // ruft eine Funktion im Dienst, keine Rechte im Spiel.
-            const claimBtn = (!job.owner_privileged && !isRem && !isWiss)
+            const claimBtn = (!job.owner_privileged && !isRem && !isWiss && !isCve)
                 ? `<button class="kb-btn-icon cron-claim-btn" data-id="${job.id}" `
                   + `title="${this._esc(window.t('cron.claim_title'))}">🔑</button>` : '';
             return `
@@ -624,6 +661,15 @@ window.cronManager = new (class JarvisCronManager {
         document.getElementById('cron-enabled').checked = job ? job.enabled : true;
         // BSI H8/H9-Rest: nur ein echtes true ist eine Freigabe; neu = aus.
         document.getElementById('cron-aussenwirkung').checked = !!job && job.aussenwirkung === true;
+        const kindSel = document.getElementById('cron-kind');
+        kindSel.value = job && job.kind === 'cve_pruefung' ? 'cve_pruefung' : 'agent';
+        // Die Art ist nach dem Anlegen fest (der Server aendert `kind` nie).
+        kindSel.disabled = !!job;
+        const pl = (job && job.payload) || {};
+        document.getElementById('cron-cve-beheben').checked = pl.beheben === true;
+        document.getElementById('cron-cve-schwelle').value = pl.schwelle || '';
+        kindSel.onchange = () => this._artUmschalten();
+        this._artUmschalten();
         document.getElementById('cron-form-error').style.display = 'none';
         document.getElementById('cron-form-wrap').style.display  = '';
         this._placeForm('cron-form-wrap', 'cron-list', this._editingJobId);
@@ -631,6 +677,25 @@ window.cronManager = new (class JarvisCronManager {
         const prev = document.getElementById('cron-schedule-preview');
         if (prev) prev.textContent = job ? this._cronToText(job.cron) : '';
         document.getElementById('cron-label').focus();
+    }
+
+    /* Blendet je nach Art das Auftragsfeld oder die Pruefoptionen ein. Ein
+     * Erinnerungs- oder Wissensauftrag wird hier nicht bearbeitet, er
+     * erscheint als "Agent" nur, wenn man ihn neu anlegt. */
+    _artUmschalten() {
+        const cve = document.getElementById('cron-kind').value === 'cve_pruefung';
+        document.getElementById('cron-cve-opts').hidden = !cve;
+        document.getElementById('cron-task-row').hidden = cve;
+        const lab = document.getElementById('cron-label');
+        if (cve && !lab.value.trim()) lab.value = window.t('cron.cve_label_vorgabe');
+        if (!cve) return;
+        // Hinweis, wenn unattended-upgrades schon laeuft: dann behebt diese
+        // Option vor allem Luecken, deren Behebung nur im regulaeren Release liegt.
+        const hint = document.getElementById('cron-cve-unatt');
+        fetch('/api/security/unattended', { headers: _authHeaders() })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { hint.hidden = !(d && d.enabled); })
+            .catch(() => { hint.hidden = true; });
     }
 
     _hideJobForm() {
@@ -651,7 +716,10 @@ window.cronManager = new (class JarvisCronManager {
         const enabled = document.getElementById('cron-enabled').checked;
         const aussenwirkung = document.getElementById('cron-aussenwirkung').checked;
         const errEl   = document.getElementById('cron-form-error');
-        if (!label || !cron || !task) {
+        const istCve  = document.getElementById('cron-kind').value === 'cve_pruefung';
+        const cveOpt  = { beheben: document.getElementById('cron-cve-beheben').checked,
+                          schwelle: document.getElementById('cron-cve-schwelle').value };
+        if (!label || !cron || (!task && !istCve)) {
             errEl.textContent  = window.t('cron.error_fill_all');
             errEl.style.display = 'block';
             return;
@@ -663,7 +731,10 @@ window.cronManager = new (class JarvisCronManager {
             const r = await fetch(url, {
                 method,
                 headers: { ..._authHeaders(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ label, cron, task, enabled, aussenwirkung })
+                body: JSON.stringify(istCve
+                    ? Object.assign({ label, cron, enabled, cve: cveOpt },
+                                    this._editingJobId ? {} : { kind: 'cve_pruefung' })
+                    : { label, cron, task, enabled, aussenwirkung })
             });
             if (!r.ok) {
                 const e = await r.json().catch(() => ({}));

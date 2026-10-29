@@ -79,6 +79,28 @@
     var _sortAb = false;
     var _laeuft = false;
 
+    /* SICHERHEITSLUECKEN (CVE, backend/cve_pruefung.py). Der Stand kommt aus
+     * einem EIGENEN Abruf (`/api/system/cve`) und wird NICHT abgewartet: die
+     * Paketliste erscheint sofort, die Markierungen kommen dazu, sobald sie da
+     * sind (Register: eine Liste wartet nie auf eine zweite Anfrage).
+     * Markiert wird je BINAERPAKET, obwohl Debian die Luecke am Quellpaket
+     * fuehrt – der Befund nennt die betroffenen Binaerpakete selbst. */
+    var _cve = null;          // Antwort von /api/system/cve
+    var _cvePoll = null;
+    var _nurLuecken = false;  // Filter "nur betroffene Pakete"
+    var _cveOffen = {};       // aufgeklappte Detailzeilen je Paket
+    var _cveMeldung = '';     // Ergebnis/Fehler am Knopf (bleibt stehen)
+    /* BADGE AM ⓘ-KNOPF (Vorgabe 2026-10-29: nicht am Zahnrad). Die Zahl kommt
+     * aus `/api/me` (`cve_badge`, nur fuer Admins) – derselbe Abruf, der den
+     * Knopf ueberhaupt einblendet. Gezaehlt werden PAKETE mit Handlungsbedarf
+     * oder ungesehenen Luecken (backend/cve_pruefung.badge). */
+    var _cveBadge = null;
+    var _badgeTimer = null;
+    var BADGE_MS = 60000;
+    // Rangfolge der Markierung: die dringlichste Klasse eines Pakets zeigt sich.
+    var CVE_RANG = { behebbar: 0, neustart: 1, nicht_im_index: 2,
+                     zurueckgehalten: 3, offen: 4, ausgenommen: 5 };
+
     function T(key, fallback) {
         try { if (window.t) return window.t(key) || fallback; } catch (e) {}
         return fallback;
@@ -183,6 +205,10 @@
         // Der Bericht wird NICHT behalten: beim naechsten Oeffnen soll ein
         // frischer Stand geholt werden, nicht der von vorhin.
         _bericht = null;
+        _cve = null;
+        _cveOffen = {};
+        _cveMeldung = '';
+        if (_cvePoll) { clearTimeout(_cvePoll); _cvePoll = null; }
         document.removeEventListener('keydown', beiTaste);
         var b = knopf();
         if (b) b.focus();
@@ -216,10 +242,14 @@
             + '</div>';
     }
 
-    function oeffnen() {
+    function oeffnen(opt) {
         if (_laeuft) return;
         if (offen()) { schliessen(); return; }
+        // Aus der Zahnrad-Badge: gleich auf die betroffenen Pakete gefiltert.
+        // (Ein Klick-Ereignis als Argument ist KEIN Wunsch nach dem Filter.)
+        _nurLuecken = !!(opt && opt.nurLuecken === true);
         _laeuft = true;
+        cveLaden();
         rahmen(kopfzeile('') + '<div class="jv-pkg-lade">'
             + esc(T('pkg.loading', 'Paketbestand wird ermittelt …')) + '</div>');
         var t = token();
@@ -259,7 +289,7 @@
         kopie.sort(function (a, b) {
             var x = a[s], y = b[s];
             var r;
-            if (s === 'size_kb') r = (Number(x) || 0) - (Number(y) || 0);
+            if (s === 'size_kb' || s === 'cve') r = (Number(x) || 0) - (Number(y) || 0);
             else r = String(x || '').localeCompare(String(y || ''), undefined,
                                                    { numeric: true, sensitivity: 'base' });
             // Gleichstand nach Namen: sonst springt die Anzeige bei jedem
@@ -338,7 +368,13 @@
         if (!_bericht) return;
         var suchfeld = document.getElementById('jv-pkg-suche');
         var q = (suchfeld ? suchfeld.value : '').trim().toLowerCase();
-        var alle = _bericht.pakete || [];
+        var jePaket = cveJePaket();
+        var alle = (_bericht.pakete || []).map(function (p) {
+            // Sortierschluessel fuer die Spalte „Lücken" (Kopie, der Bericht bleibt roh).
+            var i = jePaket[p.package];
+            return Object.assign({}, p, { cve: i ? i.rang : 99 });
+        });
+        if (_nurLuecken) alle = alle.filter(function (p) { return p.cve < 99; });
         var treffer = !q ? alle : alle.filter(function (p) {
             return (p.package || '').toLowerCase().indexOf(q) >= 0
                 || (p.summary || '').toLowerCase().indexOf(q) >= 0
@@ -367,7 +403,17 @@
                 + '<td class="jv-pkg-v">' + esc(p.version) + '</td>'
                 + '<td class="jv-pkg-r">' + esc(groesse(p.size_kb)) + '</td>'
                 + '<td class="jv-pkg-d">' + esc((p.update_date || '').slice(0, 10)) + '</td>'
-                + '<td class="jv-pkg-s">' + esc(p.summary) + '</td></tr>';
+                + '<td class="jv-pkg-l">' + cveChip(p.package, jePaket[p.package]) + '</td>'
+                + '<td class="jv-pkg-s">' + esc(p.summary) + '</td></tr>'
+                + (_cveOffen[p.package] && jePaket[p.package]
+                    ? '<tr class="jv-pkg-cve-zeile"><td colspan="6"><ul class="jv-pkg-cve-liste">'
+                      + befundZeilen(jePaket[p.package].befunde) + '</ul>'
+                      + (quittierbareIds(jePaket[p.package].befunde).length
+                          ? '<button type="button" class="jv-pkg-cve-btn" data-cve-aktion="gesehen" data-cve-paket="'
+                            + esc(p.package) + '">' + esc(T('pkg.cve_gesehen_btn', 'Als gesehen markieren')) + '</button>'
+                          : '')
+                      + '</td></tr>'
+                    : '');
         }).join('');
 
         var meta = esc(T('pkg.count', '{n} Pakete').replace('{n}', String(_bericht.anzahl)))
@@ -379,6 +425,7 @@
             kopfzeile('<button type="button" class="jv-pkg-dl">'
                 + esc(T('pkg.download', 'JSON herunterladen')) + '</button>')
             + '<div class="jv-pkg-meta">' + meta + '</div>'
+            + cveBlock()
             + '<input type="search" id="jv-pkg-suche" class="jv-pkg-suche" autocomplete="off"'
             + ' placeholder="' + esc(T('pkg.search', 'Paket, Version oder Beschreibung suchen …'))
             + '" value="' + esc(q) + '">'
@@ -387,6 +434,7 @@
             + th('version', T('pkg.col_version', 'Version'))
             + th('size_kb', T('pkg.col_size', 'Größe'), 'jv-pkg-r')
             + th('update_date', T('pkg.col_date', 'Stand'))
+            + th('cve', T('pkg.col_cve', 'Lücken'))
             + th('summary', T('pkg.col_summary', 'Beschreibung'))
             + '</tr></thead><tbody>' + zeilen + '</tbody></table></div>'
             // ⚠ DIE RESTZAHL MUSS DASTEHEN – ohne sie haelt der Leser die
@@ -436,6 +484,352 @@
         });
         var dl = box.querySelector('.jv-pkg-dl');
         if (dl) dl.addEventListener('click', herunterladen);
+        var nl = document.getElementById('jv-pkg-nurluecken');
+        if (nl) nl.addEventListener('change', function () { _nurLuecken = nl.checked; zeichnen(); });
+        Array.prototype.forEach.call(box.querySelectorAll('button.jv-pkg-cve[data-cve-paket]'), function (c) {
+            c.addEventListener('click', function () {
+                var n = c.getAttribute('data-cve-paket');
+                _cveOffen[n] = !_cveOffen[n];
+                zeichnen();
+            });
+        });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-cve-aktion]'), function (k) {
+            k.addEventListener('click', function () {
+                cveAktion(k.getAttribute('data-cve-aktion'), k.getAttribute('data-cve-paket'));
+            });
+        });
+    }
+
+    /* ── Sicherheitsluecken ──────────────────────────────────────────── */
+
+    /* Malt die Badge in den Knopf (bzw. entfernt sie). Die Aufschluesselung
+     * steht als `title` an der Badge: das Fenster dahinter zeigt alles
+     * Weitere, ein Klick auf die Badge oeffnet es gefiltert. */
+    function badgeMalen() {
+        var b = knopf();
+        if (!b) return;
+        var el = b.querySelector('.jv-pkg-badge');
+        var n = (_admin && _cveBadge && _cveBadge.anzahl) || 0;
+        if (!n) {
+            if (el) el.parentNode.removeChild(el);
+            return;
+        }
+        if (!el) {
+            el = document.createElement('span');
+            el.className = 'jv-pkg-badge';
+            // Eigener Klick: die Badge fuehrt direkt zu den betroffenen
+            // Paketen, der Knopf darunter oeffnet die ganze Liste.
+            el.addEventListener('click', function (e) {
+                e.stopPropagation();
+                window.JarvisSysPackages.oeffnenLuecken();
+            });
+            b.appendChild(el);
+        }
+        var posten = _cveBadge.posten || [];
+        var dringend = posten.some(function (p) {
+            var z = p.zaehler || {};
+            return z.behebbar || z.neustart;
+        });
+        el.textContent = n > 99 ? '99+' : String(n);
+        el.classList.toggle('is-danger', dringend);
+        var zeilen = posten.map(function (p) {
+            var z = p.zaehler || {};
+            var teile = ['behebbar', 'neustart', 'nicht_im_index', 'zurueckgehalten', 'offen']
+                .filter(function (k) { return z[k]; })
+                .map(function (k) { return z[k] + ' ' + klasseText(k); });
+            return (p.bereich && p.bereich !== 'debian' ? bereichText(p.bereich) + ' ' : '')
+                + p.titel + ': ' + teile.join(', ');
+        });
+        if (n > posten.length) {
+            zeilen.push(T('pkg.cve_badge_mehr', '… und {n} weitere').replace('{n}', String(n - posten.length)));
+        }
+        var kopf = T('pkg.cve_badge', 'Pakete mit Sicherheitslücken: {n}').replace('{n}', String(n));
+        el.title = kopf + '\n' + zeilen.join('\n');
+        el.setAttribute('aria-label', kopf);
+    }
+
+    function badgeHolen() {
+        var t = token();
+        if (!t || !_admin) return;
+        fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + t } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                _cveBadge = d.cve_badge || null;
+                badgeMalen();
+            })
+            .catch(function () { /* letzter Stand bleibt stehen */ });
+    }
+
+    function cveLaden() {
+        var t = token();
+        return fetch('/api/system/cve', { headers: { 'Authorization': 'Bearer ' + t } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!offen()) return;
+                _cve = d;
+                if (_bericht) zeichnen();
+                // Laeuft gerade eine Pruefung, nachfragen, bis sie fertig ist.
+                if (d && d.laeuft) {
+                    if (_cvePoll) clearTimeout(_cvePoll);
+                    _cvePoll = setTimeout(cveLaden, 3000);
+                } else {
+                    // Nach Lauf oder Quittung: die Badge dem neuen Stand folgen lassen.
+                    badgeHolen();
+                }
+            })
+            .catch(function () { /* Liste bleibt stehen, nur ohne Markierung */ });
+    }
+
+    function cveBefunde() { return (_cve && _cve.ergebnis && _cve.ergebnis.befunde) || []; }
+
+    function cveGesehen() {
+        var m = {};
+        ((_cve && _cve.quittiert) || []).forEach(function (k) { m[k] = true; });
+        return m;
+    }
+
+    /** Binaerpaket -> {rang, klasse, befunde[]} (nur Debian). */
+    function cveJePaket() {
+        var m = {};
+        cveBefunde().forEach(function (b) {
+            if (b.bereich !== 'debian') return;
+            (b.pakete || []).forEach(function (n) {
+                var e = m[n] || (m[n] = { rang: 99, klasse: '', befunde: [] });
+                e.befunde.push(b);
+                var r = CVE_RANG[b.klasse] != null ? CVE_RANG[b.klasse] : 9;
+                if (r < e.rang) { e.rang = r; e.klasse = b.klasse; }
+            });
+        });
+        return m;
+    }
+
+    /* Woertliche Schluessel statt zusammengesetzter: der Waechter
+     * (test_system_packages.py) prueft, dass jeder benutzte Schluessel in
+     * i18n.js existiert – ein `'pkg.cve_k_' + k` kann er nicht nachsehen. */
+    function klasseText(k) {
+        switch (k) {
+            case 'behebbar': return T('pkg.cve_k_behebbar', 'Update verfügbar');
+            case 'neustart': return T('pkg.cve_k_neustart', 'Neustart nötig');
+            case 'nicht_im_index': return T('pkg.cve_k_nicht_im_index', 'Update noch nicht im Paketindex');
+            case 'zurueckgehalten': return T('pkg.cve_k_zurueckgehalten', 'zurückgehalten');
+            case 'offen': return T('pkg.cve_k_offen', 'ohne Debian-Update');
+            case 'ausgenommen': return T('pkg.cve_k_ausgenommen', 'bewertet');
+        }
+        return String(k || '');
+    }
+
+    function einstufungText(e) {
+        switch (e) {
+            case 'unimportant': return T('pkg.cve_e_unimportant', 'unwichtig');
+            case 'low': return T('pkg.cve_e_low', 'niedrig');
+            case 'medium': return T('pkg.cve_e_medium', 'mittel');
+            case 'high': return T('pkg.cve_e_high', 'hoch');
+        }
+        return T('pkg.cve_e_keine', 'nicht eingestuft');
+    }
+
+    function bereichText(b) {
+        switch (b) {
+            case 'debian': return T('pkg.cve_ber_debian', 'Debian');
+            case 'python': return T('pkg.cve_ber_python', 'Python');
+            case 'npm': return T('pkg.cve_ber_npm', 'WhatsApp-Bridge');
+        }
+        return String(b || '');
+    }
+
+    /** Markierung in der Spalte „Lücken": dringlichste Klasse + Anzahl. */
+    function cveChip(name, info) {
+        if (!info) return '';
+        var gesehen = cveGesehen();
+        var alleGesehen = info.befunde.every(function (b) { return gesehen[b.id]; });
+        var nurUnwichtig = info.klasse === 'offen' && info.befunde.every(function (b) {
+            return b.einstufung === 'unimportant';
+        });
+        var stufe = nurUnwichtig || (alleGesehen && info.klasse === 'offen')
+            ? 'leise' : info.klasse;
+        return '<button type="button" class="jv-pkg-cve jv-pkg-cve-' + esc(stufe)
+            + '" data-cve-paket="' + esc(name) + '" title="'
+            + esc(klasseText(info.klasse) + ' – ' + T('pkg.cve_details', 'Details anzeigen'))
+            + '">' + esc(klasseText(info.klasse)) + ' · ' + info.befunde.length + '</button>';
+    }
+
+    function trackerLink(cve) {
+        // Nur CVE-Kennungen verlinken – eine OSV-/GHSA-Kennung kennt der Tracker nicht.
+        if (!/^CVE-\d{4}-\d+$/.test(cve || '')) return esc(cve);
+        return '<a href="https://security-tracker.debian.org/tracker/' + esc(cve)
+            + '" target="_blank" rel="noopener noreferrer">' + esc(cve) + '</a>';
+    }
+
+    function befundZeilen(befunde) {
+        var gesehen = cveGesehen();
+        var rang = function (b) { return CVE_RANG[b.klasse] != null ? CVE_RANG[b.klasse] : 9; };
+        return befunde.slice().sort(function (a, b) {
+            return rang(a) - rang(b) || String(a.cve).localeCompare(String(b.cve));
+        }).map(function (b) {
+            var zusatz = [];
+            if (b.fix) zusatz.push(T('pkg.cve_fix', 'behoben in') + ' ' + b.fix);
+            if (b.kandidat && b.klasse !== 'offen') zusatz.push(T('pkg.cve_kand', 'verfügbar') + ' ' + b.kandidat);
+            if (b.klasse === 'behebbar' && b.bereich === 'debian') {
+                zusatz.push(b.aus_sicherheitsquelle ? T('pkg.cve_q_sich', 'aus der Sicherheitsquelle')
+                                                    : T('pkg.cve_q_reg', 'nur in der regulären Quelle'));
+            }
+            if (b.nodsa) zusatz.push(T('pkg.cve_nodsa', 'Debian behebt ohne Sicherheitsmeldung') + ': ' + b.nodsa);
+            return '<li class="' + (gesehen[b.id] ? 'ist-gesehen' : '') + '">'
+                + '<span class="jv-pkg-cve-id">' + trackerLink(b.cve) + '</span> '
+                + '<span class="jv-pkg-cve jv-pkg-cve-' + esc(b.klasse) + ' ist-klein">'
+                + esc(klasseText(b.klasse)) + '</span> '
+                + '<span class="jv-pkg-cve-e">' + esc(einstufungText(b.einstufung)) + '</span>'
+                + (gesehen[b.id] ? ' <span class="jv-pkg-cve-e">· ' + esc(T('pkg.cve_gesehen', 'gesehen')) + '</span>' : '')
+                + (zusatz.length ? '<div class="jv-pkg-cve-z">' + esc(zusatz.join(' · ')) + '</div>' : '')
+                + (b.text ? '<div class="jv-pkg-cve-t">' + esc(b.text) + '</div>' : '')
+                + '</li>';
+        }).join('');
+    }
+
+    function quittierbareIds(befunde) {
+        var gesehen = cveGesehen();
+        return befunde.filter(function (b) { return b.quittierbar && !gesehen[b.id]; })
+                      .map(function (b) { return b.id; });
+    }
+
+    /** Kopfblock: Stand der Pruefung, Zaehler, Knoepfe. */
+    function cveBlock() {
+        if (!_cve) {
+            return '<div class="jv-pkg-cvebar"><span class="jv-pkg-cve-st">'
+                + esc(T('pkg.cve_laedt', 'Sicherheitslücken werden geladen …')) + '</span></div>';
+        }
+        var erg = _cve.ergebnis;
+        var plan = _cve.plan || {};
+        var teile = [];
+        if (_cve.laeuft) {
+            teile.push(esc(T('pkg.cve_laeuft', 'Prüfung läuft …'))
+                + (_cve.schritt === 'beheben' ? ' (' + esc(T('pkg.cve_schritt_beheben', 'Pakete werden aktualisiert')) + ')' : ''));
+        } else if (!erg) {
+            teile.push(esc(T('pkg.cve_nie', 'Noch nicht auf Sicherheitslücken geprüft.')));
+        } else if (erg.ok === false) {
+            teile.push('<span class="jv-pkg-cve-fehler">' + esc(erg.fehler || '') + '</span>');
+        } else {
+            var z = erg.zaehler || {};
+            var unges = quittierbareIds(cveBefunde()).length;
+            teile.push(esc(T('pkg.cve_stand', 'Geprüft {zeit}').replace('{zeit}', zeitpunkt(erg.erzeugt_am))));
+            ['behebbar', 'neustart', 'nicht_im_index', 'zurueckgehalten', 'offen'].forEach(function (k) {
+                if (z[k]) teile.push('<span class="jv-pkg-cve jv-pkg-cve-' + k + ' ist-klein">'
+                    + esc(klasseText(k)) + ': ' + z[k] + '</span>');
+            });
+            if (!z.behebbar && !z.neustart && !z.offen && !z.nicht_im_index && !z.zurueckgehalten) {
+                teile.push(esc(T('pkg.cve_keine', 'keine bekannten Lücken')));
+            }
+            if (unges) teile.push(esc(T('pkg.cve_neu', '{n} noch nicht gesehen').replace('{n}', String(unges))));
+            // Was NICHT geprueft wurde, steht da – sonst saehe es wie "keine Luecken" aus.
+            var ber = erg.bereiche || {};
+            ['debian', 'python', 'npm'].forEach(function (k) {
+                var b = ber[k];
+                if (b && !b.geprueft) {
+                    teile.push(esc(bereichText(k) + ': '
+                        + T('pkg.cve_nicht', 'nicht geprüft') + (b.grund ? ' (' + b.grund + ')' : '')));
+                }
+            });
+            if (ber.debian && ber.debian.tracker_hinweis) teile.push(esc(ber.debian.tracker_hinweis));
+            // Pakete aus Fremdquellen (z. B. NodeSource) kennt der Debian-Tracker
+            // nicht – sie werden genannt, damit "keine Markierung" nicht wie
+            // "keine Luecken" aussieht.
+            if (ber.debian && ber.debian.fremd && ber.debian.fremd.length) {
+                teile.push(esc(T('pkg.cve_fremd', 'Nicht über Debian prüfbar (andere Paketquelle)')
+                    + ': ' + ber.debian.fremd.join(', ')));
+            }
+            // Ergebnis einer Behebung bleibt stehen, bis die naechste Pruefung
+            // laeuft – ein Fehler darf nicht von selbst verschwinden (Register).
+            var beh = erg.behebung;
+            if (beh) {
+                var inst = [], fehl = [];
+                (beh.debian || []).forEach(function (r) {
+                    (r.installiert || []).forEach(function (i) { inst.push(i.paket + ' ' + i.auf); });
+                    if (r.fehler) fehl.push(r.fehler);
+                    Object.keys(r.uebersprungen || {}).forEach(function (n) {
+                        fehl.push(n + ': ' + r.uebersprungen[n]);
+                    });
+                });
+                var py = (beh.python && beh.python.geaendert) || [];
+                if (beh.python && beh.python.fehler) fehl.push('Python: ' + beh.python.fehler);
+                teile.push('<span class="jv-pkg-cve-beh">' + esc(
+                    T('pkg.cve_behoben', 'Aktualisiert: {n} Debian- und {p} Python-Pakete')
+                        .replace('{n}', String(inst.length)).replace('{p}', String(py.length)))
+                    + (inst.length ? ' (' + esc(inst.join(', ')) + ')' : '') + '</span>');
+                if (fehl.length) teile.push('<span class="jv-pkg-cve-fehler">' + esc(fehl.join(' · ')) + '</span>');
+            }
+            if (ber.debian && ber.debian.neustart_noetig) {
+                teile.push(esc(T('pkg.cve_reboot', 'Das System meldet: Neustart erforderlich')));
+            }
+        }
+        var knoepfe = '<button type="button" class="jv-pkg-cve-btn" data-cve-aktion="pruefen"'
+            + (_cve.laeuft ? ' disabled' : '') + '>' + esc(T('pkg.cve_pruefen', 'Auf Sicherheitslücken prüfen')) + '</button>';
+        var nDeb = (plan.debian || []).length;
+        if (!_cve.laeuft && (nDeb || plan.python || plan.index)) {
+            knoepfe += '<button type="button" class="jv-pkg-cve-btn ist-haupt" data-cve-aktion="beheben">'
+                + esc(T('pkg.cve_beheben', 'Behebbare jetzt beheben')
+                      + (nDeb ? ' (' + nDeb + ')' : '')) + '</button>';
+        }
+        if (!_cve.laeuft && erg && quittierbareIds(cveBefunde()).length) {
+            knoepfe += '<button type="button" class="jv-pkg-cve-btn" data-cve-aktion="alle_gesehen">'
+                + esc(T('pkg.cve_alle_gesehen', 'Alle ohne Abhilfe als gesehen markieren')) + '</button>';
+        }
+        var filter = '<label class="jv-pkg-cve-filter"><input type="checkbox" id="jv-pkg-nurluecken"'
+            + (_nurLuecken ? ' checked' : '') + '> ' + esc(T('pkg.cve_filter', 'Nur betroffene Pakete')) + '</label>';
+        // Python- und npm-Befunde haben keine Zeile in der Debian-Liste.
+        var andere = cveBefunde().filter(function (b) { return b.bereich !== 'debian'; });
+        var andereBlock = andere.length
+            ? '<details class="jv-pkg-cve-andere"><summary>'
+              + esc(T('pkg.cve_andere', 'Python- und npm-Pakete: {n} Lücken').replace('{n}', String(andere.length)))
+              + '</summary><ul class="jv-pkg-cve-liste">' + andere.map(function (b) {
+                  return befundZeilen([b]).replace('<li', '<li data-quelle="' + esc(b.bereich + ':' + b.quelle) + '"')
+                      .replace('<span class="jv-pkg-cve-id">', '<span class="jv-pkg-cve-id">'
+                               + esc(bereichText(b.bereich) + ' ' + b.quelle + ' ' + b.version) + ' – ');
+              }).join('') + '</ul></details>'
+            : '';
+        return '<div class="jv-pkg-cvebar"><div class="jv-pkg-cve-st">' + teile.join(' · ') + '</div>'
+            + '<div class="jv-pkg-cve-knoepfe">' + knoepfe + filter + '</div>'
+            + (_cveMeldung ? '<div class="jv-pkg-cve-meldung">' + esc(_cveMeldung) + '</div>' : '')
+            + andereBlock + '</div>';
+    }
+
+    function cvePost(pfad, daten) {
+        return fetch(pfad, { method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(daten || {}) })
+            .then(function (r) {
+                return r.json().catch(function () { return {}; })
+                    .then(function (d) { return { ok: r.ok, d: d }; });
+            });
+    }
+
+    function cveAktion(art, paket) {
+        if (art === 'pruefen' || art === 'beheben') {
+            if (art === 'beheben') {
+                var plan = (_cve && _cve.plan) || {};
+                var text = T('pkg.cve_frage', 'Diese Pakete jetzt aktualisieren?') + '\n\n'
+                    + (plan.debian || []).join(', ')
+                    + (plan.python ? '\n' + T('pkg.cve_frage_py', 'Dazu Python-Pakete mit bekannter Behebung (der Dienst startet danach neu).') : '')
+                    + (plan.index ? '\n' + T('pkg.cve_frage_idx', 'Vorher wird der Paketindex aktualisiert.') : '')
+                    + '\n\n' + T('pkg.cve_frage_grenzen', 'Es werden keine Pakete entfernt und der Server startet nicht neu.');
+                if (!window.confirm(text)) return;
+            }
+            _cveMeldung = '';
+            cvePost('/api/system/cve/pruefen', { beheben: art === 'beheben' }).then(function (a) {
+                if (!a.ok) _cveMeldung = (a.d && a.d.error) || T('pkg.cve_err', 'Die Prüfung konnte nicht gestartet werden.');
+                cveLaden();
+            }).catch(function () {
+                _cveMeldung = T('pkg.err_net', 'Der Server war nicht erreichbar.');
+                if (_bericht) zeichnen();
+            });
+            return;
+        }
+        var ids = art === 'alle_gesehen' ? null
+            : quittierbareIds((cveJePaket()[paket] || { befunde: [] }).befunde);
+        cvePost('/api/system/cve/quittieren', ids ? { ids: ids } : { alle: true }).then(function (a) {
+            if (!a.ok) _cveMeldung = (a.d && a.d.detail) || T('pkg.cve_err_q', 'Markieren fehlgeschlagen.');
+            cveLaden();
+        });
     }
 
     function zeitpunkt(iso) {
@@ -487,6 +881,9 @@
             .then(function (d) {
                 _admin = !!(d && d.is_admin);
                 zeige(_admin);
+                _cveBadge = (d && d.cve_badge) || null;
+                badgeMalen();
+                if (_admin && !_badgeTimer) _badgeTimer = setInterval(badgeHolen, BADGE_MS);
                 return _admin;
             })
             // Kein Zustandswechsel bei Netzfehler: ohne belegten Admin-Status
@@ -496,7 +893,13 @@
     }
 
     window.JarvisSysPackages = { pruefe: pruefe, oeffnen: oeffnen,
-                                 schliessen: schliessen };
+                                 schliessen: schliessen,
+                                 klasseText: klasseText, bereichText: bereichText,
+                                 // Zahnrad-Badge: direkt auf die betroffenen Pakete
+                                 oeffnenLuecken: function () {
+                                     if (offen()) schliessen();
+                                     oeffnen({ nurLuecken: true });
+                                 } };
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', pruefe);
@@ -513,5 +916,6 @@
             b.setAttribute('aria-label', b.title);
         }
         if (offen() && _bericht) zeichnen();
+        badgeMalen();
     });
 })();

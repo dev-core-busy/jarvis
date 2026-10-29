@@ -8006,6 +8006,70 @@ async def system_packages(request: Request, user: str = Depends(require_local_au
     return JSONResponse(bericht, headers=kopf)
 
 
+# ── Sicherheitsluecken (CVE) der installierten Pakete (backend/cve_pruefung.py) ──
+# ADMIN-ONLY aus demselben Grund wie /api/system/packages: das Ergebnis ist die
+# Liste der offenen Tueren dieses Servers.
+
+@app.get("/api/system/cve")
+async def system_cve(user: str = Depends(require_local_auth)):
+    """Letztes Pruefergebnis, laufender Lauf, Einstellungen, Quittungen und Plan."""
+    from backend import cve_pruefung
+    return JSONResponse(await asyncio.to_thread(cve_pruefung.zustand))
+
+
+@app.post("/api/system/cve/pruefen")
+async def system_cve_pruefen(req: Request, user: str = Depends(require_local_auth)):
+    """Startet eine Pruefung im Hintergrund; ``{"beheben": true}`` behebt danach.
+
+    Die Antwort kommt sofort (202): eine Behebung kann Minuten dauern, und eine
+    offene HTTP-Anfrage darueber waere ein Timeout im Browser. Den Fortschritt
+    liefert ``GET /api/system/cve`` (``laeuft``/``schritt``).
+    """
+    from backend import cve_pruefung
+    try:
+        body = await req.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if cve_pruefung.status()["laeuft"]:
+        return JSONResponse({"ok": False, "laeuft": True,
+                             "error": "Es läuft bereits eine Prüfung."}, status_code=409)
+    beheben = isinstance(body, dict) and body.get("beheben") is True
+    import threading
+    threading.Thread(target=cve_pruefung.lauf, daemon=True,
+                     kwargs={"beheben": beheben, "ausloeser": "manuell", "von": user}).start()
+    return JSONResponse({"ok": True, "laeuft": True, "beheben": beheben}, status_code=202)
+
+
+@app.post("/api/system/cve/quittieren")
+async def system_cve_quittieren(req: Request, user: str = Depends(require_local_auth)):
+    """Befunde ohne eigene Abhilfe als gesehen markieren (``ids`` oder ``alle``).
+
+    Nur quittierbare Befunde (keine Behebung in Debian, Behebung nicht im
+    Index, zurueckgehalten, npm) – "behebbar" und "Neustart noetig" bleiben in
+    der Badge, bis sie erledigt sind.
+    """
+    from backend import cve_pruefung
+    body = await req.json()
+    try:
+        n = await asyncio.to_thread(cve_pruefung.quittieren, body.get("ids"),
+                                    body.get("alle") is True)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse({"ok": True, "quittiert": n})
+
+
+@app.put("/api/system/cve/einstellungen")
+async def system_cve_einstellungen(req: Request, user: str = Depends(require_local_auth)):
+    """Schwelle und Quelle der automatischen Behebung (Vorgabe fuer Knopf und Auftraege)."""
+    from backend import cve_pruefung
+    body = await req.json()
+    try:
+        erg = await asyncio.to_thread(cve_pruefung.einstellungen_setzen, body or {})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return JSONResponse({"ok": True, "einstellungen": erg})
+
+
 @app.get("/api/system/load")
 async def system_load(user: str = Depends(require_local_auth)):
     """Systemauslastung + die 20 staerksten CPU-Verbraucher (Popup der CPU-Anzeige).
@@ -8250,8 +8314,21 @@ async def get_me(user: str = Depends(require_auth)):
     ist_admin = _is_admin_user(user)
     banner = ""
     badge = dict(_ADMIN_BADGE_LEER)
+    # Badge am Symbol "Installierte Pakete" (syspackages.js): Pakete mit
+    # Sicherheitsluecken (backend/cve_pruefung.badge). Bewusst NICHT im
+    # Zahnrad – dort stehen Rechte-Aufgaben, die Luecken gehoeren an die
+    # Paketliste, die sie erklaert und behebt (Vorgabe 2026-10-29). Nur fuer
+    # Administratoren, wie die Liste selbst. Liest eine kleine gemerkte Datei,
+    # kein Broker, kein Netz – im Thread trotzdem, es ist Datei-I/O.
+    cve_badge = {"anzahl": 0, "posten": []}
     if ist_admin:
         badge = await asyncio.to_thread(_admin_badge, user)
+        try:
+            from backend import cve_pruefung as _cve
+            cve_badge = await asyncio.to_thread(_cve.badge)
+            cve_badge = {"anzahl": cve_badge["anzahl"], "posten": cve_badge["posten"][:12]}
+        except Exception:  # noqa: BLE001
+            cve_badge = {"anzahl": 0, "posten": []}
         try:
             from backend import license as _lic
             z = _lic.zustand()
@@ -8332,6 +8409,7 @@ async def get_me(user: str = Depends(require_auth)):
         },
         "license_banner": banner,
         "admin_badge": badge,
+        "cve_badge": cve_badge,
     })
 
 
@@ -28116,6 +28194,21 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
     """
     body = await req.json()
     _require_trigger_admin(user, body, "POST /api/cron")
+    if body.get("kind") == "cve_pruefung":
+        # Wartungsauftrag ohne Agent (backend/cve_pruefung.py): kein Auftragstext,
+        # nur gepruefte Optionen. Jede andere `kind` bleibt hier ein Agentenauftrag.
+        from backend import cve_pruefung
+        try:
+            job = cron_manager.add_job(
+                label=body.get("label") or "Sicherheitslücken prüfen",
+                cron=body["cron"], task="CVE-Prüfung der installierten Pakete",
+                enabled=body.get("enabled", True), once=body.get("once", False),
+                owner=user, owner_privileged=True, created_via="api",
+                kind="cve_pruefung",
+                payload=cve_pruefung.auftrag_payload(body.get("cve") or {}))
+            return JSONResponse(job, status_code=201)
+        except (ValueError, KeyError) as e:
+            raise HTTPException(400, str(e))
     try:
         job = cron_manager.add_job(
             label=body.get("label", "Job"),
@@ -28148,6 +28241,9 @@ async def cron_update(job_id: str, req: Request, user: str = Depends(require_aut
     body = await req.json()
     _require_trigger_admin(user, body, "PUT /api/cron")
     try:
+        if "cve" in body:
+            # Nur fuer CVE-Pruefauftraege; set_cve_payload lehnt jede andere Art ab.
+            cron_manager.set_cve_payload(job_id, body.get("cve"))
         job = cron_manager.update_job(job_id, **body)
         return JSONResponse(job)
     except ValueError as e:

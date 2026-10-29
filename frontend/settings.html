@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=36">
+    <link rel="stylesheet" href="/static/css/theme.css?v=40">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
     <link rel="stylesheet" href="/static/css/style.css?v=217">
@@ -1950,6 +1950,33 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                     <div id="sec-unatt-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.unattended_desc">Spielt Debian-Sicherheitspatches automatisch ein (unattended-upgrades). Bewusst eng gefasst: nur die Sicherheits-Quelle – keine allgemeinen Versionssprünge unter dem laufenden Dienst, kein automatischer Neustart und kein automatisches Aufräumen von Paketen (Letzteres würde Abhängigkeiten des Agenten entfernen, etwa cmake/boost für die Gesichtserkennung, ffmpeg für die Sprachausgabe oder LibreOffice-Teile). Die tägliche Aktualisierung des Paketindex bleibt beim Ausschalten aktiv – ein veralteter Index lässt Paketinstallationen mit „404 Not Found“ scheitern.</small>
+                                </div>
+
+                                <!-- Sicherheitslücken-Prüfung (CVE): Vorgaben für die
+                                     automatische Behebung. Prüfen/Beheben selbst sitzt im
+                                     Fenster „Installierte Pakete" (syspackages.js) und in
+                                     Aufträgen der Art „Sicherheitslücken prüfen" (cron.js).
+                                     Verdrahtung: security_incidents.js (cve*). -->
+                                <div class="tuning-group" id="cve-einstellungen">
+                                    <h4 class="tuning-group-title" data-i18n="cve.titel">Sicherheitslücken-Prüfung</h4>
+                                    <div id="cve-stand" class="kb-hint" style="margin:0 0 8px;"></div>
+                                    <label for="cve-schwelle" style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;" data-i18n="cve.schwelle">Automatisch beheben ab Debian-Einstufung</label>
+                                    <select id="cve-schwelle" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.8rem;">
+                                        <option value="alle" data-i18n="cve.schwelle_alle">alle Lücken, auch „unwichtig“</option>
+                                        <option value="ab_niedrig" data-i18n="cve.schwelle_ab_niedrig">ohne „unwichtig“ (Vorgabe)</option>
+                                        <option value="ab_mittel" data-i18n="cve.schwelle_ab_mittel">ohne „unwichtig“ und „niedrig“</option>
+                                    </select>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin:4px 0 8px;" data-i18n="cve.schwelle_hint">Debian stuft die meisten Lücken nicht ein – darunter fast alle, für die es eine Sicherheitsmeldung gibt. Nicht eingestufte Lücken werden deshalb immer behoben.</small>
+                                    <label style="display:flex;gap:6px;align-items:flex-start;font-size:0.8rem;color:var(--text-primary);cursor:pointer;">
+                                        <input type="checkbox" id="cve-regulaer" style="margin-top:2px;">
+                                        <span data-i18n="cve.regulaer">Behebungen auch aus der regulären Debian-Quelle einspielen</span>
+                                    </label>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin:4px 0 8px 22px;" data-i18n="cve.regulaer_hint">Lücken, die Debian ohne Sicherheitsmeldung behebt, kommen erst mit dem nächsten Zwischenrelease – und zwar über die reguläre Quelle, die die automatischen Sicherheitsupdates oben bewusst nicht anfassen. Eingeschaltet hebt die Behebung genau die betroffenen Pakete von dort, ohne Aufräumen und ohne Neustart.</small>
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                        <button class="btn-secondary btn-small" id="cve-speichern" type="button" style="flex:0 0 auto;padding:4px 12px;font-size:0.78rem;" data-i18n="profile.save_btn">Speichern</button>
+                                        <span id="cve-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                                    </div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="cve.hinweis">Geprüft werden alle installierten Debian-Pakete gegen den Debian Security Tracker sowie die Python-Pakete und – falls installiert – die WhatsApp-Bridge. Von Hand im Fenster „Installierte Pakete“ (Info-Symbol in der Titelleiste), regelmäßig über einen Auftrag der Art „Sicherheitslücken prüfen“. Diese Vorgaben gelten für den Knopf und für Aufträge ohne eigene Schwelle.</small>
                                 </div>
 
                                 <!-- Lizenz. Steht hier, weil die Lizenz den Funktionsumfang des
@@ -6096,9 +6123,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=378"></script>
+    <script src="/static/js/i18n.js?v=381"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
-    <script src="/static/js/cron.js?v=29"></script>
+    <script src="/static/js/cron.js?v=30"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=5"></script>
     <script src="/static/js/sicherheitsprotokoll.js?v=1"></script>
@@ -6133,7 +6160,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=13"></script>
     <script src="/static/js/branding.js?v=29"></script>
     <script src="/static/js/theme.js?v=3"></script>
-    <script src="/static/js/security_incidents.js?v=39"></script>
+    <script src="/static/js/security_incidents.js?v=40"></script>
     <script src="/static/js/fernzugang.js?v=3"></script>
     <script src="/static/js/totp_admin.js?v=3"></script>
     <script src="/static/js/ldap_picker.js?v=14"></script>

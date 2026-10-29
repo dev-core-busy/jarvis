@@ -573,6 +573,22 @@ def _op_apt_upgrades_status(args, stream):
             "stdout": "", "stderr": ""}
 
 
+def _op_cve_beheben(args, stream):
+    """Gezielte Paket-Hebung nach einer CVE-Pruefung (``backend/cve_apt.py``).
+
+    Die Validierung liegt in ``cve_apt.beheben`` selbst und vertraut dem
+    Backend nichts an: Namensmuster, installiert, nicht zurueckgehalten, ein
+    neuerer Kandidat, bei ``nur_sicherheit`` aus einer Sicherheitsquelle,
+    Trockenlauf ohne Entfernung. ``nur_sicherheit`` gilt fail-closed: nur ein
+    ausdrueckliches ``False`` oeffnet die regulaere Quelle.
+    """
+    from backend import cve_apt
+    erg = cve_apt.beheben(args.get("pakete") or [],
+                          nur_sicherheit=args.get("nur_sicherheit") is not False,
+                          index=args.get("index") is True)
+    return {"ok": True, "rc": 0, "result": erg, "stdout": "", "stderr": ""}
+
+
 def _op_tika_setup(args, stream):
     """Java + tika-app.jar bereitstellen (OneNote-Import, ``*.one``).
 
@@ -1540,6 +1556,15 @@ _REGISTRY = {
     "apt_upgrades_status": (
         _op_apt_upgrades_status, lambda a: "apt_upgrades_status",
         lambda a: "Status der automatischen Sicherheitsupdates abfragen (inkl. Trockenlauf)",
+        True, (),
+    ),
+    "cve_beheben": (
+        _op_cve_beheben, lambda a: "cve_beheben",
+        lambda a: (f"Sicherheitsluecken beheben: {len(a.get('pakete') or [])} Paket(e) "
+                   f"heben (" + ("nur Sicherheitsquelle" if a.get("nur_sicherheit") is not False
+                                 else "auch regulaere Quelle")
+                   + (", vorher Paketindex aktualisieren" if a.get("index") is True else "")
+                   + "; kein Aufraeumen, kein Neustart)"),
         True, (),
     ),
     "tika_setup": (

@@ -53,7 +53,7 @@
         onShow: function () { this._bind(); this.load(); },
         // Nur der Teil, der im Reiter "KI & System" gebraucht wird (der
         // Update-Schalter liegt dort). _bind() ist idempotent (this._bound).
-        onShowUnattended: function () { this._bind(); this.loadUnattended(false); },
+        onShowUnattended: function () { this._bind(); this.loadUnattended(false); this.loadCve(); },
 
         _bind: function () {
             if (this._bound) return;
@@ -135,6 +135,9 @@
             if (uuVerify) uuVerify.addEventListener('click', function () { Mgr.loadUnattended(true); });
             var uuDown = $('sec-unatt-teardown');
             if (uuDown) uuDown.addEventListener('click', function () { Mgr.teardownUnattended(); });
+            // Sicherheitsluecken-Pruefung: Vorgaben speichern
+            var cveSave = $('cve-speichern');
+            if (cveSave) cveSave.addEventListener('click', function () { Mgr.saveCve(); });
             // Erinnerungs-Freigaben (Messenger): speichern / neu laden
             var remSave = $('sec-rem-save');
             if (remSave) remSave.addEventListener('click', function () { Mgr.saveReminders(); });
@@ -935,6 +938,54 @@
                   if (st) st.textContent = '✗ ' + T('security.sandbox_save_fail', 'Speichern fehlgeschlagen');
                   zurueck();
               });
+        },
+
+        // ── Sicherheitsluecken-Pruefung (backend/cve_pruefung.py) ────────
+        loadCve: function () {
+            if (!$('cve-einstellungen')) return;
+            fetch('/api/system/cve', { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    if (!d) return;
+                    var e = d.einstellungen || {};
+                    if ($('cve-schwelle')) $('cve-schwelle').value = e.schwelle || 'ab_niedrig';
+                    if ($('cve-regulaer')) $('cve-regulaer').checked = e.regulaere_quelle === true;
+                    var st = $('cve-stand');
+                    if (!st) return;
+                    var erg = d.ergebnis;
+                    if (!erg) { st.textContent = T('cve.nie', 'Noch nicht geprüft.'); return; }
+                    var z = erg.zaehler || {};
+                    st.textContent = T('cve.letzte', 'Letzte Prüfung') + ': '
+                        + new Date(erg.erzeugt_am).toLocaleString() + ' · '
+                        + (z.behebbar || 0) + ' ' + T('pkg.cve_k_behebbar', 'Update verfügbar') + ' · '
+                        + (z.offen || 0) + ' ' + T('pkg.cve_k_offen', 'ohne Debian-Update');
+                })
+                .catch(function () {});
+        },
+
+        saveCve: function () {
+            var st = $('cve-status');
+            var daten = { schwelle: ($('cve-schwelle') || {}).value,
+                          regulaere_quelle: !!($('cve-regulaer') || {}).checked };
+            fetch('/api/system/cve/einstellungen', {
+                method: 'PUT', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(daten)
+            }).then(function (r) {
+                return r.json().catch(function () { return {}; })
+                    .then(function (d) { return { ok: r.ok, d: d }; });
+            }).then(function (a) {
+                if (!st) return;
+                if (a.ok) {
+                    var gut = '✓ ' + T('common.saved', 'Gespeichert');
+                    st.textContent = gut;
+                    setTimeout(function () { if (st.textContent === gut) st.textContent = ''; }, 2500);
+                } else {
+                    // Ein Fehler bleibt stehen (Register).
+                    st.textContent = '✗ ' + ((a.d && a.d.detail) || T('security.sandbox_save_fail', 'Speichern fehlgeschlagen'));
+                }
+            }).catch(function () {
+                if (st) st.textContent = '✗ ' + T('security.sandbox_save_fail', 'Speichern fehlgeschlagen');
+            });
         },
 
         // ── Automatische Sicherheitsupdates (unattended-upgrades) ────────

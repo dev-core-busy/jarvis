@@ -6,30 +6,14 @@
 # werden. Ohne Grund oder ohne Datum bricht der Lauf ab
 # (deploy/security/pip_audit_ausnahmen.py).
 #
-# ── sentence-transformers 3.x / transformers 4.x (Stand 2026-10-06) ──────────
-# Die Behebungen liegen in neuen Hauptversionen (sentence-transformers 5.6,
-# transformers 5.x) – ein Wechsel der Einbettungs-Bibliothek ist ein eigener
-# Umbau (Index-Kompatibilitaet, torch-Bindung, numpy<2.1 auf der DEV-VM).
-# Bewertung: Jarvis laedt genau EIN Modell, fest im Code
-# (backend/tools/vector_store.py: MODEL_NAME = "intfloat/multilingual-e5-small"),
-# ohne trust_remote_code, ohne Trainer, ohne save_pretrained, ohne
-# Checkpoint-Konvertierung; transformers wird sonst nirgends importiert.
-# Alle Funde setzen ein vom Angreifer bestimmtes Modell/Repo/Verzeichnis voraus.
-PYSEC-2026-4164  2027-01-31  # sentence-transformers – lokaler Modellpfad umgeht trust_remote_code; Pfad ist fest, das HF-Cache-Verzeichnis gehoert dem Dienstbenutzer
-PYSEC-2025-217   2027-01-31  # transformers – X-CLIP-Checkpoint-Konvertierung; nicht benutzt
-PYSEC-2026-2288  2027-01-31  # transformers – Trainer._load_rng_state; kein Training
-PYSEC-2026-2289  2027-01-31  # transformers – boeswillige config.json eines fremden Repos; Modell fest
-PYSEC-2026-2290  2027-01-31  # transformers – LightGlue-Ladepfad; nicht benutzt
-PYSEC-2026-3929  2027-01-31  # transformers – save_pretrained-Pfadtraversal; wird nicht aufgerufen
-PYSEC-2026-4174  2027-01-31  # transformers – load_custom_generate; nicht benutzt
-#
-# ── Bestand der Server (backend/abhaengigkeiten.py, 2026-10-06) ──────────────
-# torch kommt aus dem CPU-Index mit lokalem Suffix (+cpu) und wird nie
-# automatisch gehoben (ein Heben von PyPI holte die CUDA-Variante, ~6 GB).
-GHSA-rrmf-rvhw-rf47  2027-01-31  # torch – torch.jit.script Speicherfehler (lokal); Jarvis ruft jit.script nicht auf
-# setuptools 83 entfernt pkg_resources weiter; face_recognition_models (Vision)
-# und onnxruntime laden es zur Laufzeit. Funde betreffen nur das BAUEN von Paketen.
-PYSEC-2025-49        2027-01-31  # setuptools – PackageIndex-Pfad beim Herunterladen; Jarvis baut keine Pakete
+# ── setuptools 81.0.0 (Stand 2026-10-29) ─────────────────────────────────────
+# sentence-transformers, transformers und torch sind seit 2026-10-29 ueber die
+# Lock gehoben (5.7.0 / 5.21.1 / 2.13.0+cpu) und brauchen keine Ausnahme mehr;
+# setuptools 81.0.0 behebt PYSEC-2025-49. Die beiden Funde unten behebt erst
+# setuptools 83 bzw. 84 – und ab 82 fehlt pkg_resources (gemessen), das
+# face_recognition_models (Vision) und onnxruntime zur Laufzeit laden; torch
+# 2.13 verlangt ausserdem selbst setuptools<82. Beide betreffen nur das BAUEN
+# von Paketen.
 PYSEC-2026-3447      2027-01-31  # setuptools – MANIFEST.in beim sdist-Bau; Jarvis baut keine Pakete
 GHSA-xmj3-9gf7-h52w  2027-01-31  # setuptools – Pfadausbruch beim Alt-Rad-Einbau, nur Windows; Jarvis laeuft auf Linux und baut keine Pakete
 #

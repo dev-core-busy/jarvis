@@ -6334,6 +6334,18 @@ async def startup_abhaengigkeiten():
                     #   `abgleichen`, nicht daneben: zwei pip-Laeufe in derselben
                     #   venv gleichzeitig sind keine Option.
                     await _skill_pakete()
+                    # Haben Pakete gewechselt, ist das gespeicherte CVE-Ergebnis
+                    # veraltet (ECHT 2026-10-29: vier laengst gehobene Pakete
+                    # standen weiter im Paket-Fenster). Erst NACH dem
+                    # Skill-Abgleich – der kann ebenfalls Pakete wechseln.
+                    from backend import cve_pruefung as _cve
+                    try:
+                        if await asyncio.to_thread(_cve.nach_paketwechsel):
+                            print("[Abhängigkeiten] Pakete gewechselt – Sicherheitslücken "
+                                  "neu geprüft", flush=True)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[Abhängigkeiten] CVE-Neuprüfung fehlgeschlagen: {e}",
+                              flush=True)
             except Exception as e:  # noqa: BLE001
                 print(f"[Abhängigkeiten] Lauf fehlgeschlagen: {e}", flush=True)
             await asyncio.sleep(86400)

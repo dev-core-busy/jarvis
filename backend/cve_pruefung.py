@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import datetime as dt
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -467,7 +468,8 @@ def _debian_im_prozess() -> dict:
 def python_pruefen() -> dict:
     try:
         from backend import abhaengigkeiten as abh
-        funde = abh.schwachstellen(abh.installiert())
+        inst = abh.installiert()
+        funde = abh.schwachstellen(inst)
         lock = abh.lock_modus()
     except Exception as e:  # noqa: BLE001
         return {"info": {"geprueft": False, "grund": f"{type(e).__name__}: {e}"}, "befunde": []}
@@ -492,7 +494,18 @@ def python_pruefen() -> dict:
             "klasse": "ausgenommen" if f.get("ausgenommen")
                       else (("lock" if lock else "behebbar") if f.get("behoben_in") else "offen"),
             "text": "", "kernel": False})
-    return {"info": {"geprueft": True, "grund": "", "lock_modus": lock}, "befunde": befunde}
+    return {"info": {"geprueft": True, "grund": "", "lock_modus": lock,
+                     "stand": python_stand(inst)}, "befunde": befunde}
+
+
+def python_stand(inst: dict[str, str]) -> str:
+    """Fingerabdruck der installierten Python-Pakete (Name + Version).
+
+    Steht im Ergebnis, damit ``nach_paketwechsel`` erkennt, dass seit der
+    Pruefung Pakete gewechselt haben – ueber DIESELBE Quelle
+    (``abhaengigkeiten.installiert``) erzeugt wie verglichen."""
+    roh = "\n".join(f"{n}=={v}" for n, v in sorted(inst.items()))
+    return hashlib.sha256(roh.encode("utf-8")).hexdigest()[:16]
 
 
 def _vereinen(ziel: dict, f: dict, fix_feld: str) -> None:
@@ -893,11 +906,120 @@ def zustand_ergebnis() -> dict | None:
         st = ERGEBNIS.stat()
     except OSError:
         return None
-    m = (st.st_mtime_ns, st.st_size, st.st_ino)
+    # Der Stempel der site-packages gehoert in den Schluessel: ein Paketwechsel
+    # benennt dessen dist-info-Verzeichnis um und aendert damit die mtime des
+    # Elternverzeichnisses – ohne ihn bliebe die Angleichung bis zur naechsten
+    # Pruefung beim alten Stand stehen.
+    m = (st.st_mtime_ns, st.st_size, st.st_ino, _site_stempel())
     if _cache["mtime"] != m:
-        _cache.update(mtime=m, wert=kernel_nachfuehren(_lesen(ERGEBNIS, None),
-                                                       laufender_kernel()))
+        erg = kernel_nachfuehren(_lesen(ERGEBNIS, None), laufender_kernel())
+        _cache.update(mtime=m, wert=python_nachfuehren(erg, python_installiert()))
     return _cache["wert"]
+
+
+def _site_stempel() -> tuple:
+    stempel = []
+    for p in sys.path:
+        if p.endswith(("site-packages", "dist-packages")):
+            try:
+                stempel.append((p, os.stat(p).st_mtime_ns))
+            except OSError:
+                pass
+    return tuple(stempel)
+
+
+def _py_norm(name: str) -> str:
+    """Wie ``abhaengigkeiten._norm`` – mit diesem Namen stehen die Befunde da."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def python_installiert() -> dict[str, str] | None:
+    """Normierter Name -> Version der LAUFENDEN Umgebung, ohne pip-Aufruf.
+
+    ``None`` heisst "nicht ermittelbar" – dann wird nichts angeglichen."""
+    try:
+        from importlib import metadata
+        dists = list(metadata.distributions())
+    except Exception:  # noqa: BLE001
+        return None
+    inst = {}
+    for d in dists:
+        try:
+            name = d.metadata.get("Name")
+            if name:
+                # Erster Treffer gewinnt – in sys.path-Reihenfolge ist das die
+                # Fassung, die ein Import tatsaechlich laedt.
+                inst.setdefault(_py_norm(name), d.version)
+        except Exception:  # noqa: BLE001 – ein kaputtes dist-info kippt nicht alle
+            continue
+    return inst or None
+
+
+def _py_behoben(installiert: str, fix: str) -> bool:
+    if not fix:
+        return False
+    try:
+        from packaging.version import Version
+        return Version(installiert) >= Version(fix)
+    except Exception:  # noqa: BLE001 – unlesbare Fassung: nichts behaupten
+        return False
+
+
+def python_nachfuehren(erg: dict | None, inst: dict[str, str] | None) -> dict | None:
+    """Gespeichertes Ergebnis an die JETZT installierten Python-Pakete angleichen.
+
+    ⚠ AUF ECHT GEMESSEN (2026-10-29): Pruefung um 13:16:11, Lock-Install um
+    13:17:31–48 (setuptools 74.1.3 -> 81.0.0, sentence-transformers 3.4.1 ->
+    5.7.0, torch, transformers) – das Paket-Fenster zeigte danach weiter vier
+    Pakete mit Luecken, die alle behoben waren. Dieselbe Klasse wie
+    ``kernel_nachfuehren``: Befunde, deren Behebung die installierte Fassung
+    schon traegt, fallen beim LESEN weg; die Datei bleibt unberuehrt.
+
+    Bewusst NUR bei nachgewiesener Behebung (installiert >= fix). Ein Befund
+    ohne Behebung oder ein nicht mehr gefundenes Paket bleibt stehen, bis neu
+    geprueft ist – ob die neue Fassung betroffen ist, weiss hier niemand (den
+    Neulauf stoesst ``nach_paketwechsel`` an).
+    """
+    if not erg or not inst:
+        return erg
+    rest, weg = [], set()
+    for b in erg.get("befunde") or []:
+        if b.get("bereich") == "python":
+            v = inst.get(_py_norm(b.get("quelle") or ""))
+            if v and v != b.get("version") and _py_behoben(v, b.get("fix") or ""):
+                weg.add(f"{b.get('quelle')} {b.get('version')} → {v}")
+                continue
+        rest.append(b)
+    if not weg:
+        return erg
+    zaehler = {k: 0 for k in KLASSEN}
+    for b in rest:
+        zaehler[b["klasse"]] = zaehler.get(b["klasse"], 0) + 1
+    py = dict((erg.get("bereiche") or {}).get("python") or {}, nachgefuehrt=sorted(weg))
+    return dict(erg, befunde=rest, zaehler=zaehler,
+                bereiche=dict(erg.get("bereiche") or {}, python=py))
+
+
+def nach_paketwechsel() -> bool:
+    """Neu pruefen (ohne Behebung), wenn die Python-Pakete seit der letzten
+    Pruefung gewechselt haben. Blockierend – aus einem Thread rufen.
+
+    Aufgerufen nach dem Paket-Abgleich (main.startup_abhaengigkeiten): der
+    Lock-Install hebt Pakete und startet neu, aber niemand prueft danach – die
+    Angleichung beim Lesen deckt nur nachgewiesen Behobenes ab, nicht neue
+    oder weggefallene Funde. Nie geprueft -> keine Pruefung aus eigenem
+    Antrieb (die Funktion hat dann niemand benutzt). Ein Ergebnis OHNE Stand
+    (vor dieser Aenderung) gilt als gewechselt: unbekannt ist nicht gleich.
+    """
+    erg = _lesen(ERGEBNIS, None)
+    if not erg or _status["laeuft"]:
+        return False
+    from backend import abhaengigkeiten as abh
+    jetzt = python_stand(abh.installiert())
+    if ((erg.get("bereiche") or {}).get("python") or {}).get("stand") == jetzt:
+        return False
+    lauf(beheben=False, ausloeser="paketwechsel")
+    return True
 
 
 def kernel_nachfuehren(erg: dict | None, kernel: str) -> dict | None:

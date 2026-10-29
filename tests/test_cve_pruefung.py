@@ -336,6 +336,9 @@ check([b["klasse"] for b in _pl["befunde"]] == ["lock", "offen", "ausgenommen"],
       "Lock-Modus: Python-Behebung heisst 'lock', nicht 'behebbar'", str([b["klasse"] for b in _pl["befunde"]]))
 check([b["klasse"] for b in _pf["befunde"]] == ["behebbar", "offen", "ausgenommen"],
       "ohne Lock-Modus bleibt es 'behebbar'")
+check(_pl["info"].get("stand") == cve_pruefung.python_stand({"filelock": "3.29.1"}),
+      "das Ergebnis traegt den Stand der installierten Pakete (fuer nach_paketwechsel)",
+      str(_pl["info"]))
 _fl = [b for b in _pf["befunde"] if b["cve"] == "CVE-2026-1"]
 check(len(_fl) == 1, "GHSA- und PYSEC-Eintrag derselben CVE sind EIN Befund", str(len(_fl)))
 check(len(_fl) == 1 and _fl[0]["fix"] == "4.10.0"
@@ -623,6 +626,142 @@ try:
 finally:
     cve_pruefung.laufender_kernel = _orig_lk
 
+# Nach einem Lock-Install prueft niemand neu – Python-Befunde, deren Behebung
+# die installierte Fassung traegt, duerfen nicht weiterleben (ECHT 2026-10-29:
+# setuptools/sentence-transformers/torch/transformers, alle laengst gehoben).
+_pyb = []
+for _q, _v, _cve, _fix, _kl in (
+        ("setuptools", "74.1.3", "CVE-P1", "78.1.1", "lock"),         # weg: 81.0.0 >= 78.1.1
+        ("setuptools", "74.1.3", "CVE-P2", "83.0.0", "ausgenommen"),  # bleibt: 81 < 83
+        ("sentence-transformers", "3.4.1", "CVE-P3", "5.6.0", "lock"),  # weg
+        ("torch", "2.12.0+cpu", "CVE-P4", "2.13.0", "lock"),          # weg: lokales Suffix
+        ("transformers", "4.57.6", "CVE-P5", "", "offen"),            # bleibt: keine Behebung
+        ("zahlpaket", "8.0", "CVE-P6", "9.1", "lock"),                # weg: 10.0 > 9.1 numerisch
+        ("kaputtpaket", "1.0", "CVE-P7", "1.1", "lock"),              # bleibt: unlesbare Fassung
+        ("verschwunden", "1.0", "CVE-P8", "1.1", "lock"),             # bleibt: nicht gefunden
+        ("gleichpaket", "2.0", "CVE-P9", "1.0", "lock")):             # bleibt: unveraendert
+    _b = {"bereich": "python", "quelle": _q, "cve": _cve, "version": _v, "fix": _fix,
+          "klasse": _kl, "kernel": False}
+    _b["id"] = cve_pruefung.schluessel(_b)
+    _pyb.append(_b)
+# Gleicher Name, anderer Bereich: das Debian-Paket "setuptools" ist ein anderes.
+_pdeb = {"bereich": "debian", "quelle": "setuptools", "cve": "CVE-P10", "version": "78.1.1-0.1",
+         "fix": "78.1.1", "klasse": "offen", "kernel": False}
+_pdeb["id"] = cve_pruefung.schluessel(_pdeb)
+_perg = {"ts": 6, "befunde": _pyb + [_pdeb],
+         "zaehler": {"lock": 6, "ausgenommen": 1, "offen": 2},
+         "bereiche": {"python": {"geprueft": True, "lock_modus": True}}}
+_ALT = {"setuptools": "74.1.3", "sentence-transformers": "3.4.1", "torch": "2.12.0+cpu",
+        "transformers": "4.57.6", "zahlpaket": "8.0", "kaputtpaket": "1.0", "gleichpaket": "2.0",
+        "verschwunden": "1.0"}
+_NEU = {"setuptools": "81.0.0", "sentence-transformers": "5.7.0", "torch": "2.13.0+cpu",
+        "transformers": "5.21.1", "zahlpaket": "10.0", "kaputtpaket": "nicht-pep440!",
+        "gleichpaket": "2.0"}
+_orig_pi, _orig_ss = cve_pruefung.python_installiert, cve_pruefung._site_stempel
+_inst = {"wert": _ALT}
+_stempel = {"wert": ("a", 1)}
+try:
+    cve_pruefung.laufender_kernel = lambda: ""
+    cve_pruefung.python_installiert = lambda: _inst["wert"]
+    cve_pruefung._site_stempel = lambda: _stempel["wert"]
+    cve_pruefung._speichern(_perg)
+    _z = cve_pruefung.zustand_ergebnis()
+    check(len(_z["befunde"]) == 10 and "nachgefuehrt" not in _z["bereiche"]["python"],
+          "Positivkontrolle: unter den Fassungen der Pruefung bleibt alles stehen",
+          str(len(_z["befunde"])))
+    # Cache: dieselbe Datei, derselbe Stempel -> der gemerkte Stand (gegen
+    # diese Kontrolle beweist erst der naechste Schritt den Stempel im Schluessel).
+    _inst["wert"] = _NEU
+    _z = cve_pruefung.zustand_ergebnis()
+    check(len(_z["befunde"]) == 10, "Positivkontrolle: ohne neuen Stempel bleibt der Cache stehen",
+          str(len(_z["befunde"])))
+    _stempel["wert"] = ("a", 2)
+    _z = cve_pruefung.zustand_ergebnis()
+    _ids = {b["cve"] for b in _z["befunde"]}
+    check(_ids == {"CVE-P2", "CVE-P5", "CVE-P7", "CVE-P8", "CVE-P9", "CVE-P10"},
+          "nach dem Paketwechsel (neuer Stempel der site-packages) fallen genau die "
+          "nachweislich behobenen Python-Befunde weg", str(sorted(_ids)))
+    check("CVE-P4" not in _ids, "Lokales Suffix: 2.13.0+cpu traegt die Behebung 2.13.0")
+    check("CVE-P6" not in _ids, "Versionsvergleich numerisch, nicht als Text (10.0 > 9.1)")
+    check("CVE-P10" in _ids, "ein Debian-Paket gleichen Namens bleibt unberuehrt")
+    check(_z["zaehler"].get("lock") == 3 and _z["zaehler"].get("ausgenommen") == 1
+          and _z["zaehler"].get("offen") == 2,
+          "Zaehler neu gerechnet", str(_z["zaehler"]))
+    check(_z["bereiche"]["python"].get("nachgefuehrt") == sorted([
+              "sentence-transformers 3.4.1 → 5.7.0", "setuptools 74.1.3 → 81.0.0",
+              "torch 2.12.0+cpu → 2.13.0+cpu", "zahlpaket 8.0 → 10.0"])
+          and _z["bereiche"]["python"].get("lock_modus") is True,
+          "der Bereich nennt, was angeglichen wurde, und behaelt seine Felder",
+          str(_z["bereiche"]["python"]))
+    check(not any(p["titel"] in ("sentence-transformers", "torch") for p in cve_pruefung.badge()["posten"]),
+          "Badge zaehlt die gehobenen Pakete nicht mehr")
+    check(len(json.loads(cve_pruefung.ERGEBNIS.read_text()).get("befunde") or []) == 10,
+          "die Datei selbst bleibt unberuehrt (Angleichung nur beim Lesen)")
+    _inst["wert"] = None
+    _stempel["wert"] = ("a", 3)
+    check(len(cve_pruefung.zustand_ergebnis()["befunde"]) == 10,
+          "Fassungen nicht ermittelbar -> nichts angeglichen")
+finally:
+    cve_pruefung.laufender_kernel = _orig_lk
+    cve_pruefung.python_installiert, cve_pruefung._site_stempel = _orig_pi, _orig_ss
+_echt = cve_pruefung.python_installiert()
+check(_echt is None or (isinstance(_echt, dict) and all(isinstance(v, str) for v in _echt.values())),
+      "python_installiert liefert Name -> Fassung (oder None)")
+check(cve_pruefung.python_stand({"a": "1", "b": "2"}) == cve_pruefung.python_stand({"b": "2", "a": "1"})
+      and cve_pruefung.python_stand({"a": "1"}) != cve_pruefung.python_stand({"a": "1.1"}),
+      "der Stand haengt an Name+Fassung, nicht an der Reihenfolge")
+
+# nach_paketwechsel: neu pruefen genau dann, wenn der Stand abweicht.
+def _npw():
+    """Ein Wurf ist ein FAIL, kein Abbruch ohne Bilanz (Register)."""
+    try:
+        return cve_pruefung.nach_paketwechsel()
+    except Exception as e:  # noqa: BLE001
+        return f"WURF {type(e).__name__}: {e}"
+
+
+_abh2 = types.ModuleType("backend.abhaengigkeiten")
+_abh2.installiert = lambda: dict(_NEU)
+_aufrufe = []
+_orig_lauf = cve_pruefung.lauf
+_abh_alt = sys.modules.get("backend.abhaengigkeiten")
+_attr_alt = getattr(_backend_pkg, "abhaengigkeiten", None)
+sys.modules["backend.abhaengigkeiten"] = _abh2
+_backend_pkg.abhaengigkeiten = _abh2
+try:
+    cve_pruefung.lauf = lambda **kw: _aufrufe.append(kw)
+    cve_pruefung.ERGEBNIS.unlink()
+    check(_npw() is False and not _aufrufe,
+          "nie geprueft -> keine Pruefung aus eigenem Antrieb")
+    _st = cve_pruefung.python_stand(_NEU)
+    cve_pruefung._speichern({"ts": 7, "befunde": [], "bereiche": {"python": {"stand": _st}}})
+    check(_npw() is False and not _aufrufe,
+          "Positivkontrolle: gleicher Stand -> keine Pruefung")
+    cve_pruefung._speichern({"ts": 8, "befunde": [],
+                             "bereiche": {"python": {"stand": cve_pruefung.python_stand(_ALT)}}})
+    check(_npw() is True
+          and _aufrufe == [{"beheben": False, "ausloeser": "paketwechsel"}],
+          "anderer Stand -> eine Pruefung OHNE Behebung", str(_aufrufe))
+    _aufrufe.clear()
+    cve_pruefung._speichern({"ts": 9, "befunde": [], "bereiche": {"python": {"geprueft": True}}})
+    check(_npw() is True and len(_aufrufe) == 1,
+          "Ergebnis ohne Stand (Altbestand) gilt als gewechselt – unbekannt ist nicht gleich")
+    _aufrufe.clear()
+    cve_pruefung._status["laeuft"] = True
+    check(_npw() is False and not _aufrufe,
+          "laeuft schon eine Pruefung -> keine zweite")
+finally:
+    cve_pruefung._status["laeuft"] = False
+    cve_pruefung.lauf = _orig_lauf
+    if _abh_alt is not None:
+        sys.modules["backend.abhaengigkeiten"] = _abh_alt
+    else:
+        sys.modules.pop("backend.abhaengigkeiten", None)
+    if _attr_alt is not None:
+        _backend_pkg.abhaengigkeiten = _attr_alt
+    else:
+        delattr(_backend_pkg, "abhaengigkeiten")
+
 # ═══════════════════════════════════════════════════════════════════════════
 abschnitt("8. Ort der Badge: am Paket-Symbol, nicht am Zahnrad")
 # ═══════════════════════════════════════════════════════════════════════════
@@ -652,6 +791,29 @@ SP = (ROOT / "frontend" / "js" / "syspackages.js").read_text(encoding="utf-8")
 check("d.cve_badge" in SP and "jv-pkg-badge" in SP, "syspackages.js malt die Badge aus cve_badge")
 SB = (ROOT / "frontend" / "js" / "settings_btn.js").read_text(encoding="utf-8")
 check("cve" not in SB.lower(), "settings_btn.js (Zahnrad) kennt keine CVE-Posten mehr")
+
+# Nach dem Paket-Abgleich wird neu geprueft – aber nur im Zweig OHNE angesetzten
+# Neustart (der kaeme mitten in den Lauf) und NACH dem Skill-Abgleich (der kann
+# selbst Pakete wechseln). Regel am Syntaxbaum: echte Aufrufe, keine Woerter.
+def _ruft(knoten, name):
+    return [n for n in ast.walk(knoten) if isinstance(n, ast.Call)
+            and (getattr(n.func, "attr", None) == name or getattr(n.func, "id", None) == name
+                 or any(getattr(a, "attr", None) == name for a in n.args))]
+
+
+_weiche = [n for n in ast.walk(_mfn.get("startup_abhaengigkeiten") or ast.Module(body=[]))
+           if isinstance(n, ast.If) and any(_ruft(x, "restart_service_delayed") for x in n.body)]
+if len(_weiche) != 1:
+    print("ABBRUCH: Neustart-Weiche in startup_abhaengigkeiten nicht eindeutig:", len(_weiche))
+    ende(2)
+_sonst = ast.Module(body=_weiche[0].orelse, type_ignores=[])
+_np = _ruft(_sonst, "nach_paketwechsel")
+_sk = _ruft(_sonst, "_skill_pakete")
+check(len(_np) == 1, "nach_paketwechsel wird im Zweig ohne Neustart aufgerufen", str(len(_np)))
+check(not any(_ruft(x, "nach_paketwechsel") for x in _weiche[0].body),
+      "nicht im Zweig mit angesetztem Neustart")
+check(len(_np) == 1 and len(_sk) == 1 and _sk[0].lineno < _np[0].lineno,
+      "erst der Skill-Abgleich, dann die Neupruefung")
 
 # ═══════════════════════════════════════════════════════════════════════════
 abschnitt("9. Veroeffentlichungsdatum (OSV, dauerhaft gecacht)")

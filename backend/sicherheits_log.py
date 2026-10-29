@@ -37,6 +37,25 @@ Der Anfang der Kette darf fehlen: die Aufbewahrungsfrist schneidet alte Zeilen
 vorne ab, die erste verbliebene Zeile ist dann der Anker (``pruefen()`` meldet
 ihn, wertet ihn aber nicht als Bruch).
 
+ANERKANNTE BRUECHE (BSI M2, 2026-10-29)
+---------------------------------------
+Eine Zeile OHNE Merkmal mitten in der Kette (am 21.10.2026 schrieb ein von Hand
+gestarteter Wartungsbefehl ohne Schluessel hinein) bleibt ein Bruch, bis die
+Frist sie entfernt – umgeschrieben wird das Protokoll nie. Sie kann aber
+protokolliert ANERKANNT werden: ein spaeterer Eintrag ``kette_bruch_anerkannt``
+mit Merkmal nennt ihren Hash, den Grund, wer anerkannt hat, und den Beleg aus
+Ablage 2. ``pruefen()`` fuehrt sie dann unter ``anerkannt`` statt ``brueche``.
+Anerkennbar ist NUR "ohne Schluessel", und nur wenn der Inhalt trotzdem
+festliegt: Verweis auf die Zeile davor intakt, eigener Hash stimmt, und die
+naechste Zeile MIT gueltigem Merkmal haengt an ihr – direkt oder ueber weitere,
+lueckenlos verkettete Zeilen ohne Merkmal (DEV 21.10.: zwei hintereinander).
+Wer eine davon aendert, aendert jeden Hash bis zur gesicherten Zeile, und die
+ist ohne Schluessel nicht neu zu rechnen. Geaenderter Inhalt, entfernte oder eingeschobene Zeilen
+sind nie anerkennbar. Anerkannt wird nur ueber die Konsole (``anerkennen``,
+root + Hauptschluessel, Journal-Kopie per stdin), nie ueber die Oberflaeche:
+ein Web-Weg zum Quittieren waere ein Weg, Spuren wegzuerklaeren. Die
+Anerkennung geht wie jedes Ereignis auch nach syslog, als Warnung.
+
 AUFBEWAHRUNG
 ------------
 Nur nach Alter (keine Stueckzahl-Schranke): ``JARVIS_SICHERHEITS_LOG_TAGE``,
@@ -75,7 +94,9 @@ _SCHWERE = {
     "anmeldung_fehlgeschlagen": logging.WARNING,
     "konto_gesperrt": logging.WARNING,
     "admin_verweigert": logging.WARNING,
+    "kette_bruch_anerkannt": logging.WARNING,
 }
+ART_ANERKANNT = "kette_bruch_anerkannt"
 
 _lock = threading.Lock()
 _letzter_hash: str | None = None
@@ -335,13 +356,24 @@ def pruefen(pfad: Path | None = None) -> dict:
     Der Anker (``prev`` der ersten Zeile) ist kein Bruch: dort hat die Frist
     abgeschnitten oder die Datei begonnen. Ohne Schluessel (``schluessel_setzen``)
     sind Zeilen mit ``mac`` nicht pruefbar – das ist dann KEIN ``ok``.
+    Protokolliert anerkannte Brueche (Modul-Docstring) stehen unter
+    ``anerkannt`` statt unter ``brueche`` und kippen ``ok`` nicht.
     """
-    pfad = pfad or DATEI
-    ergebnis = {"ok": True, "zeilen": 0, "anker": None, "brueche": []}
+    return _pruefen(pfad or DATEI)[0]
+
+
+def _pruefen(pfad: Path) -> tuple[dict, dict]:
+    """``pruefen()`` plus die Zeilen ohne Merkmal (Hash -> Befund) fuer ``anerkennen``."""
+    ergebnis = {"ok": True, "zeilen": 0, "anker": None, "brueche": [], "anerkannt": []}
+    # Zeilen ohne Merkmal hinter einer mit Merkmal, je Hash: liegt ihr Inhalt
+    # fest (verbunden, inhalt, umschlossen) und gibt es eine gueltige Anerkennung?
+    ohne: dict[str, dict] = {}
+    # Folge aufeinanderfolgender Zeilen ohne Merkmal (DEV 21.10.: zwei hintereinander)
+    folge: list[dict] = []
     mac_gesehen = False
     letzte_ohne_mac = None
     if not pfad.exists():
-        return ergebnis
+        return ergebnis, ohne
     prev = None
     with pfad.open(encoding="utf-8", errors="replace") as f:
         for nr, zeile in enumerate(f, 1):
@@ -353,11 +385,16 @@ def pruefen(pfad: Path | None = None) -> dict:
             except Exception:  # noqa: BLE001
                 ergebnis["brueche"].append({"zeile": nr, "grund": "kein JSON"})
                 prev = None
+                folge = []
                 continue
+            verbunden = True
             if prev is None and ergebnis["anker"] is None:
                 ergebnis["anker"] = e.get("prev")
             elif prev is not None and e.get("prev") != prev:
                 ergebnis["brueche"].append({"zeile": nr, "grund": "Kette unterbrochen"})
+                verbunden = False
+            if prev is None:
+                verbunden = False
             letzte_ohne_mac = (nr, not e.get("mac"))
             if e.get("mac"):
                 mac_gesehen = True
@@ -373,12 +410,124 @@ def pruefen(pfad: Path | None = None) -> dict:
                 passt = True
             if not passt:
                 ergebnis["brueche"].append({"zeile": nr, "grund": "Inhalt veraendert"})
+            # mit Schluessel geprueft – nur das bindet den Vorgaenger fest
+            gesichert = bool(e.get("mac")) and _mac_schluessel is not None and passt
+            # Jede Zeile der Folge haengt am Hash der vorigen, die gesicherte Zeile
+            # danach am Hash der letzten: dann liegt die GANZE Folge fest – ein
+            # geaendertes Glied aendert jeden Hash dahinter bis zur gesicherten Zeile.
+            if folge and gesichert and e.get("prev") == folge[-1]["hash"]:
+                for k in folge:
+                    k["umschlossen"] = True
+            kandidat = mac_gesehen and not e.get("mac") and bool(e.get("hash"))
+            if not (kandidat and folge and e.get("prev") == folge[-1]["hash"]):
+                folge = []
+            if kandidat:
+                k = {"zeile": nr, "hash": str(e["hash"]), "zeit": e.get("zeit", ""),
+                     "art": e.get("art", ""), "verbunden": verbunden,
+                     "inhalt": passt, "umschlossen": False, "anerkannt": None,
+                     "eintrag": e}
+                ohne.setdefault(k["hash"], k)
+                # ein Glied mit falschem Hash bindet seinen Vorgaenger nicht
+                folge = folge + [k] if passt else []
+            if gesichert and verbunden and e.get("art") == ART_ANERKANNT:
+                d = e.get("details") if isinstance(e.get("details"), dict) else {}
+                k = ohne.get(str(d.get("zeile_hash") or ""))
+                if k is not None and k["anerkannt"] is None:
+                    k["anerkannt"] = {"zeile": nr, "am": e.get("zeit", ""),
+                                      "von": e.get("benutzer", ""),
+                                      "grund": d.get("grund", "")}
             prev = e.get("hash")
     if _mac_schluessel and letzte_ohne_mac and letzte_ohne_mac[1]:
         ergebnis["brueche"].append({"zeile": letzte_ohne_mac[0],
                                     "grund": "letzte Zeile ohne Schluessel"})
+    # Nur "ohne Schluessel" wird anerkannt, und nur bei festliegendem Inhalt.
+    # Jeder andere Bruch derselben Zeile bleibt stehen.
+    nach_zeile = {k["zeile"]: k for k in ohne.values() if _anerkennbar(k) and k["anerkannt"]}
+    rest = []
+    for b in ergebnis["brueche"]:
+        k = nach_zeile.get(b["zeile"]) if b["grund"] == "ohne Schluessel" else None
+        if k is None:
+            rest.append(b)
+            continue
+        ergebnis["anerkannt"].append({"zeile": k["zeile"], "zeit": k["zeit"], "art": k["art"],
+                                      "grund": k["anerkannt"]["grund"],
+                                      "von": k["anerkannt"]["von"],
+                                      "am": k["anerkannt"]["am"]})
+    ergebnis["brueche"] = rest
     ergebnis["ok"] = not ergebnis["brueche"]
-    return ergebnis
+    return ergebnis, ohne
+
+
+def _anerkennbar(k: dict) -> bool:
+    # "inhalt" steht hier bewusst NICHT: ein Glied mit falschem Hash kommt gar
+    # nicht in die Folge (_pruefen), ist also nie umschlossen – eine zweite
+    # Schranke fuer dieselbe Frage machte jede Gegenprobe darauf stumm.
+    return bool(k["verbunden"] and k["umschlossen"])
+
+
+def _journal_beleg(eintrag: dict, journal_zeilen) -> str:
+    """Hash der Journal-Kopie (Ablage 2), die der Dateizeile GLEICHT – sonst "".
+
+    Die syslog-Kopie ist die Zeile ohne ``prev`` (siehe ``ereignis``). Verglichen
+    wird der ganze Inhalt, nicht nur der Hash: eine Journal-Zeile, die nur den
+    Hash nennt, belegt nichts ueber den Inhalt."""
+    soll = {k: v for k, v in eintrag.items() if k != "prev"}
+    for roh in journal_zeilen:
+        text = str(roh).strip()
+        if text.startswith(SYSLOG_KENNUNG + ":"):
+            text = text[len(SYSLOG_KENNUNG) + 1:].strip()
+        if not text.startswith("{"):
+            continue
+        try:
+            ist = json.loads(text)
+        except Exception:  # noqa: BLE001
+            continue
+        if ist == soll:
+            return hashlib.sha256(_kanonisch(ist).encode("utf-8")).hexdigest()
+    return ""
+
+
+def anerkennen(zeile_hash: str, *, grund: str, von: str, journal_zeilen) -> dict:
+    """Eine Zeile ohne Merkmal protokolliert anerkennen (Modul-Docstring).
+
+    Schreibt NUR an das Ende der Kette, aendert keine bestehende Zeile.
+    Abgelehnt wird, was nicht nachweislich festliegt oder keine identische
+    Kopie im Journal hat – ``journal_zeilen`` liest root (``journalctl -t
+    jarvis-security -o cat``), der Dienstbenutzer sieht das Journal nicht."""
+    grund = str(grund or "").strip()
+    von = str(von or "").strip()
+    if not grund or not von:
+        return {"ok": False, "fehler": "Grund und Bearbeiter sind Pflicht."}
+    if not _schluessel():
+        return {"ok": False, "abbruch": True,
+                "fehler": "Schluessel der Kette fehlt in diesem Prozess – "
+                          "ueber deploy/als_dienst.sh starten"}
+    _, ohne = _pruefen(DATEI)
+    k = ohne.get(str(zeile_hash or "").strip())
+    if k is None:
+        return {"ok": False, "fehler": "Keine Zeile ohne Pruefmerkmal mit diesem Hash."}
+    if k["anerkannt"] is not None:
+        return {"ok": False, "fehler": "Diese Zeile ist bereits anerkannt (Zeile %s)."
+                % k["anerkannt"]["zeile"]}
+    if not _anerkennbar(k):
+        fehlt = [n for n, w in (("Verweis auf die Zeile davor", k["verbunden"]),
+                                ("eigener Hash", k["inhalt"]),
+                                ("gesicherte Folgezeile", k["umschlossen"])) if not w]
+        return {"ok": False, "fehler": "Inhalt liegt nicht fest (%s) – nicht anerkennbar."
+                % ", ".join(fehlt)}
+    beleg = _journal_beleg(k["eintrag"], journal_zeilen)
+    if not beleg:
+        return {"ok": False, "fehler": "Keine identische Kopie im Journal (jarvis-security)."}
+    fehler_vorher = dict(_fehler)
+    ereignis(ART_ANERKANNT, benutzer=von, ergebnis="anerkannt", zeile_hash=k["hash"],
+             zeile_zeit=k["zeit"], zeile_art=k["art"], grund=grund,
+             beleg="journal:" + beleg)
+    nach = pruefen()
+    if not any(a["zeile"] == k["zeile"] for a in nach["anerkannt"]):
+        return {"ok": False, "fehler": "Anerkennung nicht in der Kette angekommen "
+                "(Schreibfehler %s)." % {n: _fehler[n] - fehler_vorher.get(n, 0) for n in _fehler},
+                "kette": nach}
+    return {"ok": True, "zeile": k["zeile"], "kette": nach}
 
 
 def prune_older_than(cutoff_ts: float) -> int:
@@ -472,9 +621,30 @@ def zustand() -> dict:
             "syslog": os.path.exists("/dev/log"), "aufbewahrung_tage": aufbewahrung_tage()}
 
 
-if __name__ == "__main__":  # python3 -m backend.sicherheits_log [pruefen|zeigen]
+if __name__ == "__main__":  # python3 -m backend.sicherheits_log [pruefen|zeigen|anerkennen]
     import sys
     befehl = sys.argv[1] if len(sys.argv) > 1 else "pruefen"
+    if befehl == "anerkennen":
+        # Aufruf (als root, auf dem Server) – das Journal liest root, der Rest
+        # laeuft als Dienstbenutzer mit Hauptschluessel:
+        #   journalctl -t jarvis-security -o cat --since <tag> --until <tag+1> |
+        #     bash deploy/als_dienst.sh venv/bin/python -m backend.sicherheits_log \
+        #       anerkennen --hash <hash> --grund "<text>" --von "<name>"
+        import argparse
+        ap = argparse.ArgumentParser(prog="sicherheits_log anerkennen")
+        ap.add_argument("befehl")
+        ap.add_argument("--hash", required=True)
+        ap.add_argument("--grund", required=True)
+        ap.add_argument("--von", required=True)
+        a = ap.parse_args()
+        if sys.stdin.isatty():
+            print(json.dumps({"ok": None, "fehler": "Journal-Kopie fehlt: Ausgabe von "
+                              "journalctl -t jarvis-security -o cat per stdin uebergeben"},
+                             ensure_ascii=False), flush=True)
+            sys.exit(2)
+        r = anerkennen(a.hash, grund=a.grund, von=a.von, journal_zeilen=sys.stdin)
+        print(json.dumps(r, ensure_ascii=False, indent=2))
+        sys.exit(0 if r["ok"] else (2 if r.get("abbruch") else 1))
     if befehl == "pruefen":
         # Ohne Schluessel ist jede Zeile mit Merkmal unpruefbar – das waere eine
         # Liste von Scheinbruechen, kein Ergebnis (BSI-Abgleich 2026-10-26).

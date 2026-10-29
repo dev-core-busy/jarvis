@@ -2780,6 +2780,8 @@ const _I18N = {
         'telemetry.sprot_kette_ok':  'Unverändert: die Prüfkette über alle {n} Einträge ist intakt.',
         'telemetry.sprot_kette_bruch':'Prüfkette unterbrochen an {n} Stelle(n) – Einträge wurden geändert, entfernt oder eingefügt:',
         'telemetry.sprot_kette_leer':'Noch keine Einträge im Protokoll.',
+        'telemetry.sprot_kette_ok_anerkannt':'Unverändert: die Prüfkette über alle {n} Einträge ist intakt – {a} Stelle(n) ohne Prüfmerkmal wurde(n) geklärt und anerkannt:',
+        'telemetry.sprot_anerkannt_zeile':'Zeile {z} ({t}, {e}): {g} – anerkannt von {v} am {d}',
         'telemetry.sprot_zeile':     'Zeile {z}: {g}',
         'telemetry.sprot_weitere':   '… und {n} weitere',
         'telemetry.sprot_aufbewahrung':'Aufbewahrung: {n} Tage',
@@ -2810,6 +2812,7 @@ const _I18N = {
         'sprot.art.stt_quelle_geaendert':'Spracherkennung umgestellt',
         'sprot.art.lernnotiz_geloescht':'Lernnotiz gelöscht',
         'sprot.art.abhaengigkeiten': 'Abhängigkeiten geändert',
+        'sprot.art.kette_bruch_anerkannt': 'Unterbrechung der Prüfkette anerkannt',
         'sprot.art.cve_pruefung': 'Sicherheitslücken geprüft',
         'sprot.art.fehleranalyse': 'Fehleranalyse abgerufen',
         // Weitere Protokolle (protokolle.js)
@@ -7405,6 +7408,8 @@ const _I18N = {
         'telemetry.sprot_kette_ok':  'Unchanged: the verification chain across all {n} entries is intact.',
         'telemetry.sprot_kette_bruch':'Verification chain broken at {n} point(s) – entries were changed, removed or inserted:',
         'telemetry.sprot_kette_leer':'No entries in the log yet.',
+        'telemetry.sprot_kette_ok_anerkannt':'Unchanged: the verification chain across all {n} entries is intact – {a} point(s) without a verification mark were clarified and acknowledged:',
+        'telemetry.sprot_anerkannt_zeile':'Line {z} ({t}, {e}): {g} – acknowledged by {v} on {d}',
         'telemetry.sprot_zeile':     'Line {z}: {g}',
         'telemetry.sprot_weitere':   '… and {n} more',
         'telemetry.sprot_aufbewahrung':'Retention: {n} days',
@@ -7435,6 +7440,7 @@ const _I18N = {
         'sprot.art.stt_quelle_geaendert':'Speech recognition switched',
         'sprot.art.lernnotiz_geloescht':'Learning note deleted',
         'sprot.art.abhaengigkeiten': 'Dependencies changed',
+        'sprot.art.kette_bruch_anerkannt': 'Verification chain gap acknowledged',
         'sprot.art.cve_pruefung': 'Vulnerabilities checked',
         'sprot.art.fehleranalyse': 'Error analysis retrieved',
         // Weitere Protokolle (protokolle.js)

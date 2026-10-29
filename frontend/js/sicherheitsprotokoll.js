@@ -17,7 +17,7 @@ window.sicherheitsProtokoll = (function () {
     var WARN = {
         anmeldung_fehlgeschlagen: 1, konto_gesperrt: 1, admin_verweigert: 1,
         spruehangriff: 1, kennwort_pruefung: 1, geheimnis_schluessel_fehlt: 1,
-        tls_pruefung_aus: 1
+        tls_pruefung_aus: 1, kette_bruch_anerkannt: 1
     };
     var OK = { anmeldung: 1, abmeldung: 1, dienst_start: 1 };
     // Gruende aus sicherheits_log.pruefen() -> i18n-Schluessel
@@ -166,6 +166,11 @@ window.sicherheitsProtokoll = (function () {
         if (!k.zeilen) {
             el.className = 'sprot-kette';
             zeile.textContent = T('telemetry.sprot_kette_leer', 'Noch keine Einträge im Protokoll.');
+        } else if (k.ok && k.anzahl_anerkannt) {
+            el.className = 'sprot-kette sprot-kette-ok';
+            zeile.textContent = T('telemetry.sprot_kette_ok_anerkannt',
+                'Unverändert: die Prüfkette über alle {n} Einträge ist intakt – {a} Stelle(n) ohne Prüfmerkmal wurde(n) geklärt und anerkannt:')
+                .replace('{n}', k.zeilen).replace('{a}', k.anzahl_anerkannt);
         } else if (k.ok) {
             el.className = 'sprot-kette sprot-kette-ok';
             zeile.textContent = T('telemetry.sprot_kette_ok',
@@ -192,6 +197,26 @@ window.sicherheitsProtokoll = (function () {
                 ul.appendChild(li2);
             }
             el.appendChild(ul);
+        }
+        // Anerkannte Stellen stehen IMMER da – auch neben echten Bruechen, damit
+        // "intakt" nie eine geklaerte Luecke verschweigt
+        if ((k.anerkannt || []).length) {
+            var ula = document.createElement('ul');
+            ula.className = 'sprot-anerkannt';
+            k.anerkannt.forEach(function (a) {
+                var li = document.createElement('li');
+                // Ersetzung per Funktion und in EINEM Durchgang: Grund und Name sind
+                // Freitext – ein "$&" oder "{v}" darin darf nichts umschreiben
+                var werte = {
+                    z: a.zeile, t: zeit(Date.parse(a.zeit) / 1000), e: artName(a.art),
+                    g: a.grund || '', v: a.von || '', d: zeit(Date.parse(a.am) / 1000)
+                };
+                li.textContent = T('telemetry.sprot_anerkannt_zeile',
+                    'Zeile {z} ({t}, {e}): {g} – anerkannt von {v} am {d}')
+                    .replace(/\{([ztegvd])\}/g, function (m, n) { return String(werte[n]); });
+                ula.appendChild(li);
+            });
+            el.appendChild(ula);
         }
         // Rahmenangaben: Frist, zweite Ablage, Schreibfehler
         var info = document.createElement('div');

@@ -28561,7 +28561,11 @@ async def sicherheitsprotokoll_lesen(limit: int = 200, art: str = "", benutzer: 
     return JSONResponse({
         "ok": True, "eintraege": aus, "arten": arten,
         "kette": {"ok": bool(kette.get("ok")), "zeilen": kette.get("zeilen", 0),
-                  "brueche": brueche[:10], "anzahl_brueche": len(brueche)},
+                  "brueche": brueche[:10], "anzahl_brueche": len(brueche),
+                  # protokolliert anerkannte Brueche (sicherheits_log.anerkennen) –
+                  # mitgeliefert, damit "intakt" nie die geklaerte Stelle verschweigt
+                  "anerkannt": (kette.get("anerkannt") or [])[:10],
+                  "anzahl_anerkannt": len(kette.get("anerkannt") or [])},
         "aufbewahrung_tage": zustand.get("aufbewahrung_tage"),
         "syslog": bool(zustand.get("syslog")),
         "schreibfehler": zustand.get("fehler") or {},

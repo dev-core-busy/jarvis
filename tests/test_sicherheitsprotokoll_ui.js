@@ -72,6 +72,19 @@ const ANTWORT_BRUCH = Object.assign({}, ANTWORT_OK, {
              brueche: [{ zeile: 17, grund: 'Inhalt veraendert' },
                        { zeile: 18, grund: 'Kette unterbrochen' }] },
 });
+// Anerkannte Stelle (sicherheits_log.anerkennen). Grund und Name sind Freitext:
+// "$&" und "{v}" darin pruefen, dass die Ersetzung nichts umschreibt.
+const ANERKANNT = [{ zeile: 1322, zeit: '2026-10-21T15:19:42Z', art: 'abhaengigkeiten',
+                     grund: 'Wartungslauf $& {v}', von: 'betreiber', am: '2026-10-29T10:00:00Z' }];
+const ANTWORT_ANERKANNT = Object.assign({}, ANTWORT_OK, {
+    kette: { ok: true, zeilen: 4600, brueche: [], anzahl_brueche: 0,
+             anerkannt: ANERKANNT, anzahl_anerkannt: 1 },
+});
+const ANTWORT_BRUCH_UND_ANERKANNT = Object.assign({}, ANTWORT_OK, {
+    kette: { ok: false, zeilen: 4600, anzahl_brueche: 1,
+             brueche: [{ zeile: 17, grund: 'Inhalt veraendert' }],
+             anerkannt: ANERKANNT, anzahl_anerkannt: 1 },
+});
 
 function baue(antwort, status) {
     const dom = new JSDOM(HTML, { url: 'https://x/settings', runScripts: 'outside-only' });
@@ -179,6 +192,39 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 60));
     pruefe(/12 Stelle/.test(k2.textContent), 'Anzahl der Brueche genannt', k2.textContent);
     pruefe(/Zeile 17: Inhalt verändert/.test(k2.textContent), 'Grund lesbar (mit Umlaut) und Zeile genannt');
     pruefe(/10 weitere/.test(k2.textContent), 'nicht gelieferte Brueche werden beziffert');
+    w.close();
+
+    abschnitt('6b. Anerkannte Stelle');
+    ({ w, d, rufe } = baue(ANTWORT_ANERKANNT));
+    d.querySelector('[data-klick="sprot-klappen"]').click();
+    await warte(80);
+    const k3 = d.getElementById('sprot-kette');
+    pruefe(k3.classList.contains('sprot-kette-ok'), 'anerkannte Stelle: Kette gilt als intakt');
+    pruefe(/geklärt und anerkannt/.test(k3.textContent) && /4600/.test(k3.textContent),
+           'Kopfzeile nennt die geklaerte Stelle statt nur "intakt"', k3.textContent);
+    const la = k3.querySelectorAll('.sprot-anerkannt li');
+    const ta = la.length ? la[0].textContent : '';
+    pruefe(la.length === 1, 'eine Zeile je anerkannter Stelle', String(la.length));
+    pruefe(/Zeile 1322/.test(ta) && ta.includes('Abhängigkeiten geändert') && ta.includes('betreiber'),
+           'Zeile, Art (lesbar) und Bearbeiter genannt', ta);
+    pruefe(ta.includes('Wartungslauf $& {v}'), 'Grund bleibt woertlich ($& und {v} unveraendert)', ta);
+    // der Grund traegt "{v}" absichtlich – ohne ihn darf kein Platzhalter bleiben
+    pruefe(!/\{[ztegvd]\}/.test(ta.replace('Wartungslauf $& {v}', '')), 'kein Platzhalter bleibt stehen', ta);
+    w.close();
+    ({ w, d, rufe } = baue(ANTWORT_BRUCH_UND_ANERKANNT));
+    d.querySelector('[data-klick="sprot-klappen"]').click();
+    await warte(80);
+    const k4 = d.getElementById('sprot-kette');
+    pruefe(k4.classList.contains('sprot-kette-bruch') && /Zeile 17/.test(k4.textContent),
+           'echter Bruch bleibt hervorgehoben');
+    pruefe(k4.querySelectorAll('.sprot-anerkannt li').length === 1,
+           'und die anerkannte Stelle steht trotzdem da');
+    w.close();
+    ({ w, d, rufe } = baue(ANTWORT_OK));
+    d.querySelector('[data-klick="sprot-klappen"]').click();
+    await warte(80);
+    pruefe(!d.querySelector('#sprot-kette .sprot-anerkannt') && !/anerkannt/.test(d.getElementById('sprot-kette').textContent),
+           'ohne Anerkennung keine Anerkennungs-Zeile');
     w.close();
 
     abschnitt('7. Ladefehler bleibt stehen');

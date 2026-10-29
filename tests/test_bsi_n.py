@@ -740,6 +740,9 @@ NS4 = {
     "_totp_vormerken": lambda u: {"secret": "S", "qr_code": "q", "uri": "u"},
     # BSI H4: Token-Antworten laufen ueber _sitzung_antwort – mit dem ECHTEN Modul
     "_sitzung_cookie": __import__("backend.sitzung_cookie", fromlist=["x"]),
+    # Docker-Kennwortwechsel hasht ueber main._standard_zugang (Modul-Import in main.py)
+    # – das ECHTE Modul, keine Attrappe: es hat keine Abhaengigkeiten auf Modulebene
+    "_standard_zugang": __import__("backend.standard_zugang", fromlist=["x"]),
 }
 exec(_funktionen("_check_rate_limit", "_record_login_attempt", "_konto_sperre_antwort",
                  "_kennwort_schranke", "_kennwort_fehlversuch", "_sitzung_antwort",

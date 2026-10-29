@@ -430,17 +430,37 @@ def python_pruefen() -> dict:
         lock = abh.lock_modus()
     except Exception as e:  # noqa: BLE001
         return {"info": {"geprueft": False, "grund": f"{type(e).__name__}: {e}"}, "befunde": []}
-    befunde = []
+    # OSV fuehrt dieselbe Luecke oft doppelt (GHSA- und PYSEC-Eintrag zur selben
+    # CVE) – ungebuendelt zaehlte die Anzeige jede solche Luecke doppelt und
+    # vergab dieselbe ID zweimal. Gilt ein Eintrag als bewertet, gilt es die Luecke.
+    je: dict[tuple, dict] = {}
     for f in funde:
         cves = [a for a in f.get("aliase") or [] if a.startswith("CVE-")]
+        k = (f["paket"], f["version"], cves[0] if cves else f["id"])
+        if k in je:
+            _vereinen(je[k], f, "behoben_in")
+            je[k]["ausgenommen"] = bool(je[k].get("ausgenommen") or f.get("ausgenommen"))
+        else:
+            je[k] = dict(f, aliase=sorted(f.get("aliase") or []))
+    befunde = []
+    for (_p, _v, cve), f in je.items():
         befunde.append({
             "bereich": "python", "quelle": f["paket"], "pakete": [f["paket"]],
-            "cve": cves[0] if cves else f["id"], "aliase": f.get("aliase") or [],
+            "cve": cve, "aliase": f["aliase"],
             "version": f["version"], "fix": f.get("behoben_in") or "", "einstufung": "",
             "klasse": "ausgenommen" if f.get("ausgenommen")
                       else (("lock" if lock else "behebbar") if f.get("behoben_in") else "offen"),
             "text": "", "kernel": False})
     return {"info": {"geprueft": True, "grund": "", "lock_modus": lock}, "befunde": befunde}
+
+
+def _vereinen(ziel: dict, f: dict, fix_feld: str) -> None:
+    """Zweiten OSV-Eintrag derselben Luecke einarbeiten: Aliase vereinen, die
+    hoehere behebende Version gilt (erst sie behebt beide Eintraege)."""
+    ziel["aliase"] = sorted(set(ziel.get("aliase") or []) | set(f.get("aliase") or []))
+    a, b = ziel.get(fix_feld) or "", f.get(fix_feld) or ""
+    if b and (not a or cve_apt.vergleiche(b, a) > 0):
+        ziel[fix_feld] = b
 
 
 def _npm_fix(vuln: dict, name: str) -> str:
@@ -467,7 +487,7 @@ def npm_pruefen() -> dict:
                 continue
             pakete.append((pfad.rsplit("node_modules/", 1)[1], e["version"]))
         pakete = sorted(set(pakete))
-        befunde = []
+        je: dict[tuple, dict] = {}  # dieselbe Doppelung wie bei Python
         for i in range(0, len(pakete), 500):
             stueck = pakete[i:i + 500]
             anf = urllib.request.Request(OSV_BATCH, data=json.dumps({"queries": [
@@ -485,11 +505,16 @@ def npm_pruefen() -> dict:
                     aliase = sorted(set(vuln.get("aliases") or []) | {x["id"]})
                     cves = [a for a in aliase if a.startswith("CVE-")]
                     fix = _npm_fix(vuln, n)
-                    befunde.append({"bereich": "npm", "quelle": n, "pakete": [n],
-                                    "cve": cves[0] if cves else x["id"], "aliase": aliase,
-                                    "version": v, "fix": fix, "einstufung": "",
-                                    "klasse": "behebbar" if fix else "offen",
-                                    "text": (vuln.get("summary") or "")[:240], "kernel": False})
+                    neu = {"bereich": "npm", "quelle": n, "pakete": [n],
+                           "cve": cves[0] if cves else x["id"], "aliase": aliase,
+                           "version": v, "fix": fix, "einstufung": "",
+                           "text": (vuln.get("summary") or "")[:240], "kernel": False}
+                    k = (n, v, neu["cve"])
+                    if k in je:
+                        _vereinen(je[k], neu, "fix")
+                    else:
+                        je[k] = neu
+        befunde = [dict(b, klasse="behebbar" if b["fix"] else "offen") for b in je.values()]
         return {"info": {"geprueft": True, "grund": "", "pakete": len(pakete)}, "befunde": befunde}
     except Exception as e:  # noqa: BLE001
         return {"info": {"geprueft": False, "grund": f"{type(e).__name__}: {e}"}, "befunde": []}

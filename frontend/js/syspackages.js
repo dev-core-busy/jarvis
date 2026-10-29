@@ -784,9 +784,13 @@
             + (_nurLuecken ? ' checked' : '') + '> ' + esc(T('pkg.cve_filter', 'Nur betroffene Pakete')) + '</label>';
         // Python- und npm-Befunde haben keine Zeile in der Debian-Liste.
         var andere = cveBefunde().filter(function (b) { return b.bereich !== 'debian'; });
+        // Bewertete Funde (pip_audit_ausnahmen.txt) gesondert nennen – sonst
+        // sieht eine abgeschlossene Bewertung aus wie ein offener Alarm.
+        var bewertet = andere.filter(function (b) { return b.klasse === 'ausgenommen'; }).length;
         var andereBlock = andere.length
             ? '<details class="jv-pkg-cve-andere"><summary>'
-              + esc(T('pkg.cve_andere', 'Python- und npm-Pakete: {n} Lücken').replace('{n}', String(andere.length)))
+              + esc(T('pkg.cve_andere', 'Python- und npm-Pakete: {n} Lücken').replace('{n}', String(andere.length))
+                    + (bewertet ? ' ' + T('pkg.cve_andere_bew', '(davon {b} bewertet)').replace('{b}', String(bewertet)) : ''))
               + '</summary><ul class="jv-pkg-cve-liste">' + andere.map(function (b) {
                   return befundZeilen([b]).replace('<li', '<li data-quelle="' + esc(b.bereich + ':' + b.quelle) + '"')
                       .replace('<span class="jv-pkg-cve-id">', '<span class="jv-pkg-cve-id">'

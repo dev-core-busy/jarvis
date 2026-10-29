@@ -258,7 +258,16 @@ _abh.schwachstellen = lambda inst: [
     {"paket": "filelock", "version": "3.29.1", "id": "GHSA-x", "aliase": ["CVE-2026-1", "GHSA-x"],
      "behoben_in": "4.2.1", "ausgenommen": False},
     {"paket": "filelock", "version": "3.29.1", "id": "GHSA-y", "aliase": ["GHSA-y"],
-     "behoben_in": None, "ausgenommen": False}]
+     "behoben_in": None, "ausgenommen": False},
+    # Derselbe Fund wie GHSA-x unter seiner PYSEC-Kennung (OSV fuehrt beide).
+    {"paket": "filelock", "version": "3.29.1", "id": "PYSEC-x", "aliase": ["CVE-2026-1", "PYSEC-x"],
+     "behoben_in": "4.10.0", "ausgenommen": False},
+    # Zweimal dieselbe Luecke, nur der ZWEITE Eintrag bewertet -> die Luecke gilt
+    # als bewertet (der zweite, damit "erster gewinnt" auffaellt).
+    {"paket": "torch", "version": "2.12.0", "id": "PYSEC-t", "aliase": ["CVE-2026-2", "PYSEC-t"],
+     "behoben_in": None, "ausgenommen": False},
+    {"paket": "torch", "version": "2.12.0", "id": "GHSA-t", "aliase": ["CVE-2026-2", "GHSA-t"],
+     "behoben_in": "2.13.0", "ausgenommen": True}]
 _abh_alt = sys.modules.get("backend.abhaengigkeiten")
 sys.modules["backend.abhaengigkeiten"] = _abh
 import backend as _backend_pkg  # noqa: E402
@@ -278,10 +287,18 @@ finally:
         _backend_pkg.abhaengigkeiten = _attr_alt
     else:
         delattr(_backend_pkg, "abhaengigkeiten")
-check([b["klasse"] for b in _pl["befunde"]] == ["lock", "offen"],
+check([b["klasse"] for b in _pl["befunde"]] == ["lock", "offen", "ausgenommen"],
       "Lock-Modus: Python-Behebung heisst 'lock', nicht 'behebbar'", str([b["klasse"] for b in _pl["befunde"]]))
-check([b["klasse"] for b in _pf["befunde"]] == ["behebbar", "offen"],
+check([b["klasse"] for b in _pf["befunde"]] == ["behebbar", "offen", "ausgenommen"],
       "ohne Lock-Modus bleibt es 'behebbar'")
+_fl = [b for b in _pf["befunde"] if b["cve"] == "CVE-2026-1"]
+check(len(_fl) == 1, "GHSA- und PYSEC-Eintrag derselben CVE sind EIN Befund", str(len(_fl)))
+check(len(_fl) == 1 and _fl[0]["fix"] == "4.10.0"
+      and {"GHSA-x", "PYSEC-x"} <= set(_fl[0]["aliase"]),
+      "gebuendelt gilt die hoehere Behebung (numerisch, nicht als Text) und beide Kennungen",
+      str(_fl))
+_ids = [cve_pruefung.schluessel(b) for b in _pf["befunde"]]
+check(len(_ids) == len(set(_ids)), "keine Befund-ID doppelt", str(_ids))
 _erg_lock = {"befunde": _pl["befunde"], "bereiche": {"python": _pl["info"]}}
 check(cve_pruefung.plan(_erg_lock, cve_pruefung.VORGABEN)["python"] is False,
       "im Lock-Modus wird Python nie automatisch gehoben")

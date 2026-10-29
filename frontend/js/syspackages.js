@@ -705,6 +705,7 @@
     function cveBlock() {
         if (!_cve) {
             return '<div class="jv-pkg-cvebar"><span class="jv-pkg-cve-st">'
+                + '<span class="jv-pkg-spin" aria-hidden="true"></span>'
                 + esc(T('pkg.cve_laedt', 'Sicherheitslücken werden geladen …')) + '</span></div>';
         }
         var erg = _cve.ergebnis;

@@ -742,6 +742,9 @@ import re as _re  # noqa: E402
 TH = (ROOT / "frontend" / "css" / "theme.css").read_text(encoding="utf-8")
 _zweig = SP2[SP2.find("if (_cve.laeuft)"):SP2.find("} else if (!erg)")]
 check('class="jv-pkg-spin"' in _zweig, "Kreis steht im Zweig \"Pruefung laeuft\"")
+_laden = SP2[SP2.find("if (!_cve) {"):SP2.find("var erg = _cve.ergebnis;")]
+check('class="jv-pkg-spin"' in _laden and "pkg.cve_laedt" in _laden,
+      "Kreis steht im Zweig \"werden geladen\"")
 _regel = _re.search(r"\n\.jv-pkg-spin\s*\{([^}]*)\}", TH)
 _anim = _re.search(r"animation:\s*([\w-]+)", _regel.group(1)) if _regel else None
 check(bool(_anim) and _re.search(r"@keyframes\s+" + _re.escape(_anim.group(1)) + r"\b", TH) is not None,

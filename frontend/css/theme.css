@@ -972,7 +972,7 @@ body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000);
     overflow-y: auto;
 }
 .jv-pkg-cve-st { line-height: 1.8; }
-/* Drehender Kreis vor "Pruefung laeuft" – dieselbe Gestalt wie
+/* Drehender Kreis vor "Pruefung laeuft" und "werden geladen" – dieselbe Gestalt wie
    .kb-files-loading/.kb-cl-laeuft in style.css. Eigene Keyframes, weil
    @keyframes spin nur in style.css steht und das nicht jede Seite laedt. */
 .jv-pkg-spin {

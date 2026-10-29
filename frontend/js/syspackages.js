@@ -664,6 +664,30 @@
             + '" target="_blank" rel="noopener noreferrer">' + esc(cve) + '</a>';
     }
 
+    /* Art der Nicht-Meldung (nodsa_grund) + Begruendung (nodsa). Ein frueher
+     * gespeichertes Ergebnis trug die Art IM Textfeld – das wird erkannt,
+     * bis die naechste Pruefung es neu schreibt. */
+    function nodsaText(b) {
+        var text = String(b.nodsa || '');
+        var grund = String(b.nodsa_grund || '');
+        if (!grund && (text === 'ignored' || text === 'postponed')) { grund = text; text = ''; }
+        var art;
+        if (grund === 'ignored') art = T('pkg.cve_nodsa_ignored', 'Debian behebt das in dieser Version nicht');
+        else if (grund === 'postponed') art = T('pkg.cve_nodsa_postponed', 'Debian hat die Behebung verschoben');
+        else if (text) art = T('pkg.cve_nodsa', 'Debian behebt ohne Sicherheitsmeldung');
+        else return '';
+        return text ? art + ': ' + text : art;
+    }
+
+    /** [{version, releases}] -> „in anderen Debian-Versionen behoben: forky, sid 26.01 · …". */
+    function anderswoText(liste) {
+        if (!Array.isArray(liste) || !liste.length) return '';
+        return T('pkg.cve_anderswo', 'in anderen Debian-Versionen behoben') + ': '
+            + liste.map(function (g) {
+                return (g.releases || []).join(', ') + ' ' + g.version;
+            }).join(' · ');
+    }
+
     function befundZeilen(befunde) {
         var gesehen = cveGesehen();
         var rang = function (b) { return CVE_RANG[b.klasse] != null ? CVE_RANG[b.klasse] : 9; };
@@ -680,7 +704,11 @@
             if (b.klasse === 'lock') {
                 zusatz.push(T('pkg.cve_lock_hinweis', 'Dieser Server folgt der Lock-Datei des Repositorys und hebt Python-Pakete nicht selbst – behoben wird über eine neue Lock-Datei.'));
             }
-            if (b.nodsa) zusatz.push(T('pkg.cve_nodsa', 'Debian behebt ohne Sicherheitsmeldung') + ': ' + b.nodsa);
+            if (b.zwischenrelease) zusatz.push(T('pkg.cve_spu', 'Behebung fürs nächste Debian-Zwischenrelease eingeplant'));
+            var nd = nodsaText(b);
+            if (nd) zusatz.push(nd);
+            var aw = anderswoText(b.anderswo);
+            if (aw) zusatz.push(aw);
             return '<li class="' + (gesehen[b.id] ? 'ist-gesehen' : '') + '">'
                 + '<span class="jv-pkg-cve-id">' + trackerLink(b.cve) + '</span> '
                 + '<span class="jv-pkg-cve jv-pkg-cve-' + esc(b.klasse) + ' ist-klein">'

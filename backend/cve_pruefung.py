@@ -210,16 +210,39 @@ def tracker_holen() -> dict:
 
 
 def tracker_auszug(quellen: set[str], rel: str) -> dict:
-    """Nur die Eintraege der installierten Quellpakete fuer dieses Release."""
+    """Nur die Eintraege der installierten Quellpakete fuer dieses Release.
+
+    ``anderswo`` haelt fest, in welchen ANDEREN Debian-Releases die Luecke
+    behoben ist (Release -> Version). Fuer einen offenen Befund ist das die
+    einzige Auskunft, ob es ueberhaupt eine Behebung gibt – ohne sie sieht
+    "offen" wie "niemand hat etwas" aus (7zip, 2026-10-29: in trixie 13 offen,
+    11 davon in forky/sid behoben).
+    """
     with gzip.open(TRACKER_CACHE, "rt", encoding="utf-8") as f:
         alles = json.load(f)
     aus: dict = {}
     for q in quellen:
         for cve, e in (alles.get(q) or {}).items():
-            r = (e.get("releases") or {}).get(rel)
+            rels = e.get("releases") or {}
+            r = rels.get(rel)
             if r:
-                aus.setdefault(q, {})[cve] = {"r": r, "text": (e.get("description") or "")[:240]}
+                # fixed_version "0" heisst "nie betroffen" – keine Behebung.
+                anderswo = {n: str(o.get("fixed_version"))
+                            for n, o in rels.items()
+                            if n != rel and o.get("status") == "resolved"
+                            and str(o.get("fixed_version") or "0") != "0"}
+                aus.setdefault(q, {})[cve] = {"r": r, "text": (e.get("description") or "")[:240],
+                                              "anderswo": anderswo}
     return aus
+
+
+def _anderswo_gruppen(anderswo: dict) -> list[dict]:
+    """Release -> Version zu [{version, releases}], hoechste Version zuerst."""
+    je: dict[str, list[str]] = {}
+    for n, v in anderswo.items():
+        je.setdefault(v, []).append(n)
+    return [{"version": v, "releases": sorted(je[v])}
+            for v in sorted(je, key=_vschluessel, reverse=True)]
 
 
 # ── Debian bewerten (rein, testbar) ──────────────────────────────────────────
@@ -250,7 +273,13 @@ def debian_bewerten(pakete: list[dict], auszug: dict, rel: str, kernel: str = ""
             sich = repos.get(f"{rel}-security") or ""
             b = {"bereich": "debian", "quelle": quelle, "cve": cve, "einstufung": einst,
                  "fix": "", "aus_sicherheitsmeldung": False, "zwischenrelease": False,
-                 "nodsa": str(r.get("nodsa_reason") or r.get("nodsa") or ""),
+                 # Zwei Felder, nicht eines: ``nodsa`` ist die Begruendung
+                 # ("Only affects Windows NTFS …"), ``nodsa_reason`` die Art
+                 # ("ignored" = behebt Debian hier nicht, "postponed" =
+                 # verschoben, "" = ohne Sicherheitsmeldung). Frueher stand
+                 # die Art an Stelle des Textes, die Begruendung fiel weg.
+                 "nodsa": str(r.get("nodsa") or ""),
+                 "nodsa_grund": str(r.get("nodsa_reason") or ""),
                  "text": e.get("text") or "", "kernel": ist_kernel}
             if status == "resolved":
                 # fixed_version "0" (nie betroffen) braucht KEINEN eigenen Zweig:
@@ -280,6 +309,10 @@ def debian_bewerten(pakete: list[dict], auszug: dict, rel: str, kernel: str = ""
                 b["pakete"] = sorted({p["paket"] for p in bins})
                 b["version"] = kernel if ist_kernel else bins[0]["quell_version"]
                 b["klasse"] = "offen"
+                # Auch ein offener Eintrag kann fuers naechste Zwischenrelease
+                # eingeplant sein (Tracker: next-point-update.txt).
+                b["zwischenrelease"] = bool(r.get("next_point_update"))
+                b["anderswo"] = _anderswo_gruppen(e.get("anderswo") or {})
             else:
                 continue
             befunde.append(b)

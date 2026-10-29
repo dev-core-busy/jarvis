@@ -173,6 +173,50 @@ with gzip.open(cve_pruefung.TRACKER_CACHE, "wt", encoding="utf-8") as _f:
 _aus = cve_pruefung.tracker_auszug({"brotli"}, "trixie")
 check(list(_aus) == ["brotli"] and list(_aus["brotli"]) == ["CVE-2026-6"],
       "Auszug: nur installierte Quellen und nur Eintraege fuer DIESES Release", str(_aus)[:200])
+
+# Offene Eintraege: Behebung in ANDEREN Releases, Zwischenrelease, Art der
+# Nicht-Meldung (der 7zip-Fall vom 2026-10-29). Ueber den Auszug aus einer
+# echten gepackten Datei, damit Auszug UND Bewertung gemessen sind.
+_sz = {"7zip": {
+    "CVE-2026-48092": {"description": "a", "releases": {
+        "trixie": {"status": "open", "urgency": "unimportant", "repositories": {},
+                   "next_point_update": True},
+        "forky": {"status": "resolved", "fixed_version": "26.01+dfsg-1"},
+        "sid": {"status": "resolved", "fixed_version": "26.01+dfsg-1"},
+        "bookworm": {"status": "resolved", "fixed_version": "22.01+really26.01+dfsg-0+deb12u1"}}},
+    "CVE-2026-58052": {"description": "b", "releases": {
+        "trixie": {"status": "open", "urgency": "not yet assigned", "repositories": {},
+                   "nodsa": "Only affects Windows NTFS", "nodsa_reason": "ignored"},
+        "sid": {"status": "resolved", "fixed_version": "26.03+dfsg-1"},
+        "bookworm": {"status": "resolved", "fixed_version": "0"},
+        # Status entscheidet, nicht das Feld: ein offener Eintrag mit Version
+        # ist keine Behebung.
+        "forky": {"status": "open", "fixed_version": "26.04+dfsg-1"}}},
+    "CVE-2022-47111": {"description": "c", "releases": {
+        "trixie": {"status": "open", "urgency": "unimportant", "repositories": {}},
+        "sid": {"status": "open"}}}}}
+with gzip.open(cve_pruefung.TRACKER_CACHE, "wt", encoding="utf-8") as _f:
+    json.dump(_sz, _f)
+_bsz = {b["cve"]: b for b in cve_pruefung.debian_bewerten(
+    [pk("7zip", "7zip", "25.01+dfsg-1~deb13u1")], cve_pruefung.tracker_auszug({"7zip"}, "trixie"), "trixie")}
+check(_bsz.get("CVE-2026-48092", {}).get("klasse") == "offen"
+      and _bsz.get("CVE-2026-48092", {}).get("zwischenrelease") is True,
+      "offener Eintrag mit next_point_update -> Zwischenrelease markiert")
+check(_bsz.get("CVE-2026-48092", {}).get("anderswo") == [
+          {"version": "26.01+dfsg-1", "releases": ["forky", "sid"]},
+          {"version": "22.01+really26.01+dfsg-0+deb12u1", "releases": ["bookworm"]}],
+      "Behebung anderswo: je Version gruppiert, hoechste zuerst",
+      str(_bsz.get("CVE-2026-48092", {}).get("anderswo")))
+check(_bsz.get("CVE-2026-58052", {}).get("anderswo") == [{"version": "26.03+dfsg-1", "releases": ["sid"]}],
+      "fixed_version 0 (nie betroffen) und offene Releases zaehlen nicht als Behebung",
+      str(_bsz.get("CVE-2026-58052", {}).get("anderswo")))
+check(_bsz.get("CVE-2026-58052", {}).get("nodsa") == "Only affects Windows NTFS"
+      and _bsz.get("CVE-2026-58052", {}).get("nodsa_grund") == "ignored",
+      "nodsa behaelt die Begruendung, die Art steht getrennt",
+      str({k: _bsz.get("CVE-2026-58052", {}).get(k) for k in ("nodsa", "nodsa_grund")}))
+check(_bsz.get("CVE-2022-47111", {}).get("anderswo") == []
+      and _bsz.get("CVE-2022-47111", {}).get("zwischenrelease") is False,
+      "nirgends behoben, nichts eingeplant -> leere Angaben")
 check(len(_aus["brotli"]["CVE-2026-6"]["text"]) <= 240, "Beschreibung gekuerzt")
 
 KERNEL_PAKETE = [pk("linux-image-6.12.107+deb13-amd64", "linux", "6.12.107-1"),

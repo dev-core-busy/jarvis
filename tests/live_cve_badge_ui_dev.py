@@ -127,6 +127,37 @@ try:
                     "return [r.length,m];})()")
         check("[%s] jede gezeigte Zeile traegt eine Markierung" % thema,
               bool(zeilen) and zeilen[0] > 0 and zeilen[0] == zeilen[1], zeilen)
+        # Details eines OFFENEN Befunds: Zwischenrelease und Behebung in anderen
+        # Debian-Versionen stehen da (7zip-Fall 2026-10-29). Der Befund wird aus
+        # dem Ergebnis gewaehlt, nicht fest benannt – DEV aendert seine Pakete.
+        paket = js("fetch('/api/system/cve',{headers:{Authorization:'Bearer '+localStorage.getItem('jarvis_token')}})"
+                   ".then(function(r){return r.json();}).then(function(d){"
+                   "var bs=((d.ergebnis||{}).befunde)||[];for(var i=0;i<bs.length;i++){var b=bs[i];"
+                   "if(b.klasse==='offen'&&b.zwischenrelease&&(b.anderswo||[]).length&&(b.pakete||[]).length)"
+                   "return b.pakete[0];}return null;})")
+        if not paket:
+            print("  (kein offener Befund mit Zwischenrelease und Behebung anderswo – Abschnitt nicht messbar)")
+        else:
+            js("(function(){var k=document.querySelector('button.jv-pkg-cve[data-cve-paket=\"'+%s+'\"]');"
+               "if(k){k.scrollIntoView({block:'center'});k.click();}})()" % json.dumps(paket))
+            time.sleep(2)
+            z = js("(function(){var z=document.querySelectorAll('.jv-pkg-cve-z');var t=[];"
+                   "for(var i=0;i<z.length;i++)t.push(z[i].textContent);return t;})()") or []
+            check("[%s] Details von %s: Zwischenrelease genannt" % (thema, paket),
+                  any("Zwischenrelease eingeplant" in t for t in z), z[:3])
+            check("[%s] Details von %s: Behebung in anderen Debian-Versionen genannt" % (thema, paket),
+                  any("in anderen Debian-Versionen behoben:" in t for t in z), z[:3])
+            # Overlay muss den Text einrahmen, nicht abschneiden (Layout = nur im Browser messbar).
+            breite = js("(function(){var z=document.querySelector('.jv-pkg-cve-z');if(!z)return null;"
+                        "return [z.scrollWidth,z.clientWidth];})()")
+            check("[%s] die Zusatzzeile bricht um statt ueberzulaufen" % thema,
+                  bool(breite) and breite[0] <= breite[1] + 1, breite)
+            import base64
+            import os
+            r = cmd("Page.captureScreenshot", {"format": "png"})
+            if r.get("data"):
+                open(os.path.expanduser("~/cve_details_%s.png" % thema), "wb").write(
+                    base64.b64decode(r["data"]))
         js("document.querySelector('.jv-pkg-close').click()")
 finally:
     try:

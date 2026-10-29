@@ -29,6 +29,7 @@ CA = "backend/cve_apt.py"
 SC = "backend/scheduler.py"
 DA = "backend/broker/daemon.py"
 OP = "backend/broker/ops.py"
+SP = "frontend/js/syspackages.js"
 
 PROBEN = [
     ("/api/me ohne cve_badge", MA, '        "cve_badge": cve_badge,\n', ''),
@@ -100,12 +101,38 @@ PROBEN = [
     ("nur_sicherheit nicht fail-closed", OP,
      'nur_sicherheit=args.get("nur_sicherheit") is not False,',
      'nur_sicherheit=bool(args.get("nur_sicherheit")),'),
+    # Offene Eintraege (7zip, 2026-10-29): Auskunft ueber Behebung anderswo,
+    # Zwischenrelease und Art der Nicht-Meldung – Backend und Anzeige.
+    ("offener Eintrag ohne Zwischenrelease-Markierung", CP,
+     '                b["zwischenrelease"] = bool(r.get("next_point_update"))\n'
+     '                b["anderswo"]',
+     '                b["anderswo"]'),
+    ("anderswo zaehlt fixed_version 0 als Behebung", CP,
+     '                            and str(o.get("fixed_version") or "0") != "0"}',
+     '                            }'),
+    ("anderswo zaehlt offene Releases mit", CP,
+     'if n != rel and o.get("status") == "resolved"', 'if n != rel'),
+    ("anderswo niedrigste Version zuerst", CP,
+     'for v in sorted(je, key=_vschluessel, reverse=True)]',
+     'for v in sorted(je, key=_vschluessel)]'),
+    ("nodsa: Art ersetzt wieder die Begruendung", CP,
+     '"nodsa": str(r.get("nodsa") or ""),',
+     '"nodsa": str(r.get("nodsa_reason") or r.get("nodsa") or ""),'),
+    ("Anzeige verschweigt das Zwischenrelease", SP,
+     'if (b.zwischenrelease) zusatz.push(', 'if (false) zusatz.push('),
+    ("Anzeige verschweigt die Behebung anderswo", SP,
+     '            if (aw) zusatz.push(aw);\n', ''),
+    ("Anzeige: ignored als ohne Sicherheitsmeldung", SP,
+     "if (grund === 'ignored') art =", "if (false) art ="),
+    ("Anzeige: Altbestand nicht erkannt", SP,
+     "if (!grund && (text === 'ignored' || text === 'postponed')) { grund = text; text = ''; }", ''),
 ]
 
-DATEIEN = [CP, CA, SC, DA, OP, MA, "tests/test_cve_pruefung.py"]
+DATEIEN = [CP, CA, SC, DA, OP, MA, SP, "tests/test_cve_pruefung.py"]
 
 WAECHTER = [
     (["python3", "tests/test_cve_pruefung.py"], r"Ergebnis: (\d+) OK, (\d+) FAIL"),
+    (["node", "tests/test_cve_anzeige_ui.js"], r"^(\d+) OK, (\d+) FAIL"),
 ]
 
 
@@ -123,7 +150,7 @@ def lauf():
                                cwd=str(ROOT), env=env)
         except subprocess.TimeoutExpired:
             return -1, "timeout " + cmd[-1]
-        m = re.search(muster, r.stdout)
+        m = re.search(muster, r.stdout, re.M)
         if r.returncode == 2 or not m:
             return -1, f"{cmd[-1]} rc={r.returncode} {(r.stdout + r.stderr).strip()[-200:]}"
         summe += int(m.group(2))

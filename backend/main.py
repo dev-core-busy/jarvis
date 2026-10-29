@@ -3835,9 +3835,15 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
             state = _load_auth_state()
             docker_pw = state.get("docker_password", {}).get(username)
             if docker_pw is not None:
-                # Gespeichertes Passwort ist SHA-256-Hash
-                pw_hash = hashlib.sha256(password.encode()).hexdigest()
-                local_ok = hmac.compare_digest(pw_hash, docker_pw)
+                # scrypt mit Salz (standard_zugang.kennwort_pruefen). Ein Altwert
+                # (ungesalzenes SHA-256, bis 2026-10-29) gilt weiter und wird bei
+                # der ersten gelungenen Anmeldung umgeschrieben – sonst bliebe er
+                # auf jeder Bestandsinstallation liegen, bis jemand das Kennwort aendert.
+                local_ok, veraltet = _standard_zugang.kennwort_pruefen(password, docker_pw)
+                if local_ok and veraltet:
+                    state["docker_password"][username] = _standard_zugang.kennwort_hash(password)
+                    _save_auth_state(state)
+                    print(f"[AUTH] Docker-Kennwort fuer '{username}' auf scrypt umgestellt.", flush=True)
             else:
                 local_ok = password == _JARVIS_PASSWORD
         else:
@@ -5991,11 +5997,11 @@ async def change_password(request: Request, username: str = Depends(require_auth
 
     # Kennwort setzen
     if _DOCKER_MODE:
-        # Im Docker-Modus: Passwort als SHA-256-Hash in data/auth_state.json speichern
+        # Im Docker-Modus: Kennwort als scrypt-Hash mit Salz in data/auth_state.json
         state = _load_auth_state()
         if "docker_password" not in state:
             state["docker_password"] = {}
-        state["docker_password"][username] = hashlib.sha256(new_password.encode()).hexdigest()
+        state["docker_password"][username] = _standard_zugang.kennwort_hash(new_password)
         _save_auth_state(state)
         _set_user_auth_state(username, {"must_change_password": False})
         print(f"[AUTH] Docker-Kennwort für '{username}' erfolgreich geändert.", flush=True)

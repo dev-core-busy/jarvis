@@ -114,7 +114,7 @@
         .step:last-child { padding-bottom: 0; }
         .step:not(:last-child)::before { content: ''; position: absolute; left: 18px; top: 40px; bottom: 0; width: 2px; background: var(--border); }
         .step-num { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), #4f46e5); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; flex-shrink: 0; box-shadow: 0 0 16px var(--accent-glow); }
-        .step-content { flex: 1; padding-top: 6px; }
+        .step-content { flex: 1; min-width: 0; padding-top: 6px; }
         .step-title { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
         .step-desc { font-size: 0.88rem; color: var(--text-secondary); }
 
@@ -218,7 +218,7 @@
         </div>
 
         <h3><span class="t-de">Docker auf Debian installieren (falls noch nicht vorhanden)</span><span class="t-en">Install Docker on Debian (if not already installed)</span></h3>
-        <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Aus der offiziellen Docker-Paketquelle, als root. Der Fingerabdruck des Schlüssels muss <span class="code-inline">9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88</span> lauten – weicht er ab, nicht weitermachen.</span><span class="t-en">From the official Docker package repository, as root. The key fingerprint must read <span class="code-inline">9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88</span> – if it differs, stop.</span></p>
+        <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Aus der offiziellen Docker-Paketquelle, als root. Der Fingerabdruck des Schlüssels muss <span class="code-inline" style="white-space:normal">9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88</span> lauten – weicht er ab, nicht weitermachen.</span><span class="t-en">From the official Docker package repository, as root. The key fingerprint must read <span class="code-inline" style="white-space:normal">9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88</span> – if it differs, stop.</span></p>
         <div class="code-block">
             <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
             <code>apt-get update &amp;&amp; apt-get install -y ca-certificates curl gpg

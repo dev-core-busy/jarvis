@@ -225,6 +225,23 @@ sfunde = [str(p.relative_to(ROOT)) for p in skripte
                  for z in p.read_text(encoding="utf-8", errors="replace").splitlines()
                  if not z.lstrip().startswith("#"))]
 check("Skripte: kein NODE_TLS_REJECT_UNAUTHORIZED=0 (%d Dateien)" % len(skripte), not sfunde, sfunde)
+# Compose-Dateien (2026-10-29): die docker-compose.yml im Wurzelverzeichnis
+# setzte den Wert als environment-Eintrag weiter, nachdem er aus entrypoint.sh
+# entfernt war – der Container erbte ihn trotzdem. YAML-Form "KEY: 0" und
+# Listenform "KEY=0" zaehlen beide.
+_COMPOSE_MUSTER = r"NODE_TLS_REJECT_UNAUTHORIZED['\"]?\s*[:=]\s*['\"]?0"
+compose = sorted(set(ROOT.glob("*compose*.y*ml")) | set((ROOT / "docs").rglob("*compose*.y*ml")))
+if len(compose) < 2:
+    abbruch("nur %d Compose-Dateien gefunden" % len(compose))
+check("(Positivkontrolle) Compose-Muster trifft beide Schreibweisen",
+      all(re.search(_COMPOSE_MUSTER, z) for z in
+          ('      NODE_TLS_REJECT_UNAUTHORIZED: "0"', "      - NODE_TLS_REJECT_UNAUTHORIZED=0"))
+      and not re.search(_COMPOSE_MUSTER, '      NODE_TLS_REJECT_UNAUTHORIZED: "1"'))
+cfunde = [str(p.relative_to(ROOT)) for p in compose
+          if any(re.search(_COMPOSE_MUSTER, z)
+                 for z in p.read_text(encoding="utf-8", errors="replace").splitlines()
+                 if not z.lstrip().startswith("#"))]
+check("Compose: kein NODE_TLS_REJECT_UNAUTHORIZED=0 (%d Dateien)" % len(compose), not cfunde, cfunde)
 
 # ═════════════════════════════════════════════════════════════════════════════
 print("\n[B] Trigger-Webhook")

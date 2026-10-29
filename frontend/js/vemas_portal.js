@@ -785,9 +785,6 @@
         $('vm-instr-close').addEventListener('click', function () {
             $('vm-instr-overlay').classList.add('hidden');
         });
-        $('vm-instr-overlay').addEventListener('click', function (e) {
-            if (e.target === this) this.classList.add('hidden');
-        });
         $('vm-instr-save').addEventListener('click', saveInstructions);
 
         $('vm-hist-btn').addEventListener('click', function (e) {

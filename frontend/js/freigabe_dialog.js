@@ -96,7 +96,6 @@
         zu.addEventListener('click', schliessen);
         el('frg-abbrechen').addEventListener('click', schliessen);
         el('frg-speichern').addEventListener('click', speichern);
-        m.addEventListener('click', function (e) { if (e.target === m) schliessen(); });
         document.addEventListener('keydown', function (e) {
             if (e.key !== 'Escape' || !offen()) return;
             // Der Verzeichnis-Picker liegt darueber und schliesst sich selbst.

@@ -558,7 +558,6 @@
             document.body.appendChild(modal);
             function done(v) { modal.remove(); resolve(v); }
             $('wi-move-close').addEventListener('click', function () { done(null); });
-            modal.addEventListener('click', function (e) { if (e.target === modal) done(null); });
             Array.prototype.forEach.call(modal.querySelectorAll('.wi-move-opt'), function (b) {
                 b.addEventListener('click', function () { done(b.getAttribute('data-path')); });
             });
@@ -1411,7 +1410,6 @@
 
         $('wi-de-x').addEventListener('click', zu);
         $('wi-de-close').addEventListener('click', zu);
-        modal.addEventListener('click', function (e) { if (e.target === modal) zu(); });
         // Zeilen-Loeschen im Q&A-Audit (Paar komplett entfernen)
         modal.querySelectorAll('.wi-qa-del').forEach(function (btn) {
             btn.addEventListener('click', function () { btn.closest('.wi-qa-row').remove(); });

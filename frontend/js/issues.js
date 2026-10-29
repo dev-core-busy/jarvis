@@ -253,9 +253,6 @@
         `;
         document.body.appendChild(overlay);
         overlay.querySelector('.jv-iss-close').addEventListener('click', close);
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) close();
-        });
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && overlay.style.display !== 'none') close();
         });

@@ -385,7 +385,6 @@ class JarvisKnowledgeManager {
         const close = () => m.remove();
         m.querySelector('#kbgrp-perm-close').onclick = close;
         m.querySelector('#kbgrp-perm-cancel').onclick = close;
-        m.addEventListener('click', (e) => { if (e.target === m) close(); });
         m.querySelector('#kbgrp-perm-save').onclick = async () => {
             const patch = {
                 editors_users: (usersInp.value || '').trim(),
@@ -2602,7 +2601,6 @@ class JarvisKnowledgeManager {
             document.body.appendChild(modal);
             const done = (val) => { modal.remove(); resolve(val); };
             modal.querySelector('#kb-move-close').addEventListener('click', () => done(null));
-            modal.addEventListener('click', (e) => { if (e.target === modal) done(null); });
             modal.querySelectorAll('.kb-move-opt').forEach(btn => {
                 btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--bg-hover, rgba(255,255,255,0.06))'; });
                 btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
@@ -2968,7 +2966,6 @@ class JarvisKnowledgeManager {
         const close = () => modal.remove();
         modal.querySelector('#kb-file-view-close').onclick  = close;
         modal.querySelector('#kb-file-view-close2').onclick = close;
-        modal.addEventListener('click', e => { if (e.target === modal) close(); });
         document.addEventListener('keydown', function esc(e) {
             if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
         });
@@ -3147,7 +3144,6 @@ class JarvisKnowledgeManager {
         const close = () => m.remove();
         m.querySelector('#kbfld-close').onclick = close;
         m.querySelector('#kbfld-cancel').onclick = close;
-        m.addEventListener('click', (e) => { if (e.target === m) close(); });
 
         m.querySelector('#kbfld-save').onclick = async () => {
             const auth = {

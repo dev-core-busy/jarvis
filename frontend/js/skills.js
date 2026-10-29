@@ -807,10 +807,6 @@
 
             // Schließen via ×-Button (× = schliessen, siehe icons.js)
             overlay.querySelector('.sk-info-close').addEventListener('click', () => overlay.remove());
-            // Schließen via Backdrop-Klick
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) overlay.remove();
-            });
             // Schließen via Escape
             const onKey = (e) => {
                 if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }

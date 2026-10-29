@@ -64,9 +64,6 @@
                 try { window.print(); } catch (e) { cleanup(); }
             });
             var helpModal = $('support-api-modal');
-            if (helpModal) helpModal.addEventListener('click', function (e) {
-                if (e.target === helpModal) self._apiHelp(false);
-            });
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape' && helpModal && helpModal.classList.contains('open')) self._apiHelp(false);
             });

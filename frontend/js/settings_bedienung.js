@@ -37,31 +37,19 @@
 
     var KLICK = {
         // Wissens-Synchronisation: Funktionsbeschreibung + Freigabe-Dialog
-        'kbsync-info-hintergrund': function (event) {
-            if (event.target === this) window.KnowledgeSync.openInfo(false);
-        },
         'kbsync-info-drucken': function () { window.KnowledgeSync.drucken(); },
         'kbsync-info-schliessen': function () { window.KnowledgeSync.openInfo(false); },
         'kbsync-info-oeffnen': function (event) {
             event.stopPropagation();
             window.KnowledgeSync.openInfo(true);
         },
-        'kbsync-share-hintergrund': function (event) {
-            if (event.target === this) window.KnowledgeSync.closeShare();
-        },
         'kbsync-share-schliessen': function () { window.KnowledgeSync.closeShare(); },
 
         // Prompt optimieren (Aufraeumen) + Wissens-Verdichtung
-        'kb-cleanup-hintergrund': function (event) {
-            if (event.target === this) window.knowledgeManager.cleanupSchliessen();
-        },
         'kb-cleanup-schliessen': function () { window.knowledgeManager.cleanupSchliessen(); },
         'kb-cleanup-uebernehmen': function () { window.knowledgeManager.cleanupUebernehmen(); },
         'kb-cleanup-oeffnen': function () {
             if (window.knowledgeManager) window.knowledgeManager.cleanupOeffnen();
-        },
-        'kb-compact-hintergrund': function (event) {
-            if (event.target === this) window.knowledgeManager.showCompactInfo(false);
         },
         'kb-compact-schliessen': function () { window.knowledgeManager.showCompactInfo(false); },
 

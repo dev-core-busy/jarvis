@@ -2294,7 +2294,6 @@
             const close = () => m.remove();
             m.querySelector('#llm-perm-close').onclick = close;
             m.querySelector('#llm-perm-cancel').onclick = close;
-            m.addEventListener('click', (e) => { if (e.target === m) close(); });
             m.querySelector('#llm-perm-save').onclick = async () => {
                 try {
                     const res = await fetch(`/api/profiles/${id}`, {
@@ -3375,13 +3374,6 @@
 
         // Schließen
         btnClose.addEventListener('click', closeModal);
-
-        // Schließen bei Klick außerhalb
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                closeModal();
-            }
-        });
 
         // Tabs
         const tabs = document.querySelectorAll('.tab-btn');

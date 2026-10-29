@@ -85,9 +85,6 @@
         // DIREKTES KIND VON BODY: sonst erbt das Overlay Transformationen und
         // Stapelkontexte des Formulars und liegt womoeglich HINTER der Karte.
         document.body.appendChild(p);
-        p.addEventListener('click', function (ev) {
-            if (ev.target === p) { zu(); }            // Klick daneben
-        });
         p.querySelector('.jv-pc-x').addEventListener('click', zu);
         p.querySelector('.jv-pc-close').addEventListener('click', zu);
         p.querySelector('.jv-pc-take').addEventListener('click', uebernehmen);

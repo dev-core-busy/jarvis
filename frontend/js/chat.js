@@ -374,15 +374,11 @@
         if (_ppSave && !_ppSave._wired) { _ppSave._wired = true; _ppSave.addEventListener('click', _saveChatSettings); }
         const _ppClose = $('btn-chat-settings-close');
         if (_ppClose && !_ppClose._wired) { _ppClose._wired = true; _ppClose.addEventListener('click', _closeChatSettings); }
-        const _ppModal = $('chat-settings-modal');
-        if (_ppModal && !_ppModal._wired) { _ppModal._wired = true; _ppModal.addEventListener('click', (e) => { if (e.target === _ppModal) _closeChatSettings(); }); }
         // Prompt fuer EINEN Chat (Sprechblase an der Zeile in der Verlaufsleiste)
         const _spSave = $('btn-chat-prompt-save');
         if (_spSave && !_spSave._wired) { _spSave._wired = true; _spSave.addEventListener('click', _saveSessionPrompt); }
         const _spClose = $('btn-chat-prompt-close');
         if (_spClose && !_spClose._wired) { _spClose._wired = true; _spClose.addEventListener('click', _closeSessionPrompt); }
-        const _spModal = $('chat-prompt-modal');
-        if (_spModal && !_spModal._wired) { _spModal._wired = true; _spModal.addEventListener('click', (e) => { if (e.target === _spModal) _closeSessionPrompt(); }); }
         const _spTa = $('chat-prompt-text');
         if (_spTa && !_spTa._wired) { _spTa._wired = true; _spTa.addEventListener('input', _spZustand); }
         const _kbAll = $('chs-kb-all');
@@ -2237,9 +2233,6 @@
             const att = _lbAtts[_lbIdx];
             Object.assign(document.createElement('a'), { href: _dataUrl(att), download: att.name || 'bild' }).click();
         });
-        document.getElementById('uc-lightbox')?.addEventListener('click', e => {
-            if (e.target === document.getElementById('uc-lightbox')) closeLightbox();
-        });
     })();
 
     // Kontextmenü
@@ -3588,9 +3581,6 @@
     $('btn-totp-close').addEventListener('click', () => {
         totpModal.classList.add('hidden');
     });
-    totpModal.addEventListener('click', (e) => {
-        if (e.target === totpModal) totpModal.classList.add('hidden');
-    });
 
     // 2FA aktivieren (Code verifizieren)
     $('btn-totp-verify').addEventListener('click', async () => {
@@ -3659,9 +3649,6 @@
     const certModal = $('cert-modal');
     $('btn-cert')?.addEventListener('click', () => certModal.classList.remove('hidden'));
     $('btn-cert-close')?.addEventListener('click', () => certModal.classList.add('hidden'));
-    certModal?.addEventListener('click', (e) => {
-        if (e.target === certModal) certModal.classList.add('hidden');
-    });
 
     // ── SSL-/Verbindungs-Sicherheit: Warnbanner + Badge (wie im Hauptfenster) ──
     function _openCertModal() { if (certModal) certModal.classList.remove('hidden'); }

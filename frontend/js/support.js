@@ -386,19 +386,16 @@
         });
         $('sup-doc-close').addEventListener('click', closeDoc);
         if ($('sup-doc-max')) $('sup-doc-max').addEventListener('click', toggleDocMax);
-        $('sup-doc-modal').addEventListener('click', function (e) { if (e.target === this) closeDoc(); });
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { closeDoc(); $('sup-help-modal').classList.add('hidden'); }
         });
         // Hilfe-Popup (Score & Trefferzahl)
         $('sup-help-btn').addEventListener('click', function () { $('sup-help-modal').classList.remove('hidden'); });
         $('sup-help-close').addEventListener('click', function () { $('sup-help-modal').classList.add('hidden'); });
-        $('sup-help-modal').addEventListener('click', function (e) { if (e.target === this) this.classList.add('hidden'); });
 
         // ── Eigene Anweisungen (userspezifisch, dauerhaft) ──
         if ($('sup-instr-btn')) $('sup-instr-btn').addEventListener('click', openInstructions);
         if ($('sup-instr-close')) $('sup-instr-close').addEventListener('click', function () { $('sup-instr-overlay').classList.add('hidden'); });
-        if ($('sup-instr-overlay')) $('sup-instr-overlay').addEventListener('click', function (e) { if (e.target === this) this.classList.add('hidden'); });
         if ($('sup-instr-save')) $('sup-instr-save').addEventListener('click', saveInstructions);
 
         // ── Erweiterte Einstellungen ein-/ausklappen (benutzerbasiert gespeichert) ──

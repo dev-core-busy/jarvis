@@ -290,7 +290,6 @@
     function openCert(){ if (certModal) certModal.classList.remove('hidden'); }
     function closeCert(){ if (certModal) certModal.classList.add('hidden'); }
     var _bh = document.getElementById('btn-cert-close'); if (_bh) _bh.addEventListener('click', closeCert);
-    if (certModal) certModal.addEventListener('click', function(e){ if (e.target === certModal) closeCert(); });
     document.querySelectorAll('.cert-tab').forEach(function(btn){
         btn.addEventListener('click', function(){
             document.querySelectorAll('.cert-tab').forEach(function(b){ b.classList.remove('active'); });
@@ -345,7 +344,6 @@
             totpModal.classList.remove('hidden');
         });
         document.getElementById('btn-totp-close').addEventListener('click', function(){ totpModal.classList.add('hidden'); });
-        totpModal.addEventListener('click', function(e){ if (e.target === totpModal) totpModal.classList.add('hidden'); });
         document.getElementById('btn-totp-verify').addEventListener('click', function(){
             var code = document.getElementById('totp-verify-code').value.trim(); if (!code) return; tErr.textContent='';
             fetch('/api/auth/totp/verify', { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, H), body: JSON.stringify({ code }) })

@@ -1497,7 +1497,6 @@
             openFwdModal(_lbAtts[_lbIdx]);
             closeLightbox();
         });
-        lb.addEventListener('click', e => { if (e.target === lb) closeLightbox(); });
     })();
 
     // ── Kontextmenü ───────────────────────────────────────────────
@@ -1574,9 +1573,6 @@
     }
 
     document.getElementById('uc-fwd-cancel')?.addEventListener('click', closeFwdModal);
-    document.getElementById('uc-fwd-overlay')?.addEventListener('click', e => {
-        if (e.target === document.getElementById('uc-fwd-overlay')) closeFwdModal();
-    });
 
     // ── Long-Press für Mobile ────────────────────────────────────
     function addLongPress(el, callback) {

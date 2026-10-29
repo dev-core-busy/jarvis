@@ -1924,10 +1924,6 @@
         var ja = $('ad-ask-yes'), nein = $('ad-ask-no'), box = $('ad-ask');
         if (ja) ja.addEventListener('click', function () { askSchliessen(true); });
         if (nein) nein.addEventListener('click', function () { askSchliessen(false); });
-        // Klick auf die Flaeche = Abbrechen, Klick IN die Box nicht.
-        if (box) box.addEventListener('click', function (e) {
-            if (e.target === box) askSchliessen(false);
-        });
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape' && _askFertig) { e.preventDefault(); askSchliessen(false); }
         });

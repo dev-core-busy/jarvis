@@ -322,7 +322,6 @@ window.KbMatrix = (function () {
 
     function _bind(ov) {
         ov.querySelector('.kbm-close').onclick = () => close();
-        ov.addEventListener('mousedown', e => { if (e.target === ov) close(); });
 
         // Filter: sofort ueber den sichtbaren Zeilentext, zusaetzlich (debounced)
         // ueber den DATEI-INHALT via Server (extrahierte Text-Chunks, z.B. JSON).

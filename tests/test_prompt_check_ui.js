@@ -157,7 +157,7 @@ console.log('\n3) Mit Text: Anfrage, Popup, Inhalte');
     check(pop.hasAttribute('hidden'), 'das Popup schliesst nach dem Uebernehmen');
 }
 
-console.log('\n4) Schliessen: x, Fussknopf, Escape, Klick daneben');
+console.log('\n4) Schliessen: x, Fussknopf, Escape – ein Klick daneben NICHT');
 {
     const { w } = neueSeite({ ok: true, interpretation: 'A', beispiel: '' });
     formular(w, 'text');
@@ -166,8 +166,7 @@ console.log('\n4) Schliessen: x, Fussknopf, Escape, Klick daneben');
         ['das x oben rechts', p => klick(w, p.querySelector('.jv-pc-x'))],
         ['der Schliessen-Knopf', p => klick(w, p.querySelector('.jv-pc-close'))],
         ['Escape', () => w.document.dispatchEvent(
-            new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))],
-        ['ein Klick daneben', p => klick(w, p)]
+            new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))]
     ]) {
         klick(w, w.document.querySelector('.jv-pc-btn'));
         await warte();
@@ -175,6 +174,12 @@ console.log('\n4) Schliessen: x, Fussknopf, Escape, Klick daneben');
         wie(pop());
         check(pop().hasAttribute('hidden'), name + ' schliesst das Popup');
     }
+    // Gemeldet 2026-10-29: ein Klick auf den grauen Rand schloss jedes Popup
+    // (test_popup_kein_aussenklick.js). Der Rand ist keine Bedienflaeche.
+    klick(w, w.document.querySelector('.jv-pc-btn'));
+    await warte();
+    klick(w, pop());
+    check(!pop().hasAttribute('hidden'), 'ein Klick daneben schliesst das Popup NICHT');
     check(/JarvisIcons|svg/i.test(pop().querySelector('.jv-pc-x').innerHTML)
        || pop().querySelector('.jv-pc-x svg') !== null,
         'das Schliessen-Kreuz ist ein SVG aus icons.js, kein Emoji');

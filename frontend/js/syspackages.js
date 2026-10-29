@@ -190,10 +190,6 @@
         _kasten.setAttribute('role', 'dialog');
         _kasten.setAttribute('aria-modal', 'true');
         _kasten.setAttribute('aria-label', T('pkg.title', 'Installierte Pakete'));
-        // Klick auf die Flaeche DANEBEN schliesst – auf den Kasten selbst nicht.
-        _kasten.addEventListener('click', function (e) {
-            if (e.target === _kasten) schliessen();
-        });
         document.body.appendChild(_kasten);
         return _kasten;
     }

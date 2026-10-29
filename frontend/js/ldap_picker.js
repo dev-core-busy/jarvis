@@ -106,7 +106,6 @@
         document.body.appendChild(m);
 
         el('ldap-picker-close').addEventListener('click', close);
-        m.addEventListener('click', function (e) { if (e.target === m) close(); });
         el('ldap-picker-search').addEventListener('input', function () {
             clearTimeout(_searchTimer);
             _searchTimer = setTimeout(runSearch, 300);
@@ -301,7 +300,6 @@
             '</div>';
         document.body.appendChild(m);
         el('ldap-members-close').addEventListener('click', closeMembers);
-        m.addEventListener('click', function (e) { if (e.target === m) closeMembers(); });
     }
 
     function closeMembers() {
@@ -395,7 +393,6 @@
             '</div>';
         document.body.appendChild(m);
         el('ldap-groups-close').addEventListener('click', closeGroups);
-        m.addEventListener('click', function (e) { if (e.target === m) closeGroups(); });
     }
 
     function closeGroups() {

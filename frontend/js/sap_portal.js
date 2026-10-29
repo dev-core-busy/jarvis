@@ -884,9 +884,6 @@
 
         $('sp-instr-btn').addEventListener('click', openInstructions);
         $('sp-instr-close').addEventListener('click', function () { $('sp-instr-overlay').classList.add('hidden'); });
-        $('sp-instr-overlay').addEventListener('click', function (e) {
-            if (e.target === this) this.classList.add('hidden');
-        });
         $('sp-instr-save').addEventListener('click', saveInstructions);
 
         $('sp-hist-btn').addEventListener('click', function (e) {

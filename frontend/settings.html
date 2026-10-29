@@ -1068,8 +1068,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- Funktionsbeschreibung Pull-Synchronisation (druckbar, Muster wie die
          uebrigen ?-Popups: statischer deutscher Text, `is-print-doc` schaltet die
          gemeinsame Druckansicht frei). -->
-    <div id="kbsync-info-modal" class="modal is-print-doc" style="z-index:10002;"
-         data-klick="kbsync-info-hintergrund">
+    <div id="kbsync-info-modal" class="modal is-print-doc" style="z-index:10002;">
         <div class="modal-content glass" style="max-width:900px;">
             <div class="modal-header">
                 <h2>⇄ <span data-i18n="kbsync.info_head">Pull-Synchronisation – Funktionsweise</span></h2>
@@ -1386,8 +1385,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     </div>
 
     <!-- Freigabe eines Wissensordners fuer andere Standorte (Rolle Geber) -->
-    <div id="kbsync-share-modal" class="modal" style="z-index:10001;"
-         data-klick="kbsync-share-hintergrund">
+    <div id="kbsync-share-modal" class="modal" style="z-index:10001;">
         <div class="modal-content glass" style="max-width:680px;">
             <div class="modal-header">
                 <h2>🔗 <span data-i18n="kbsync.share_title">Ordner für andere Standorte freigeben</span></h2>
@@ -1403,8 +1401,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     </div>
 
     <!-- ═══ Wissen aufraeumen: Vorher/Nachher mit Bestaetigung ═══ -->
-    <div id="kb-cleanup-modal" class="modal" style="z-index:10001;"
-         data-klick="kb-cleanup-hintergrund">
+    <div id="kb-cleanup-modal" class="modal" style="z-index:10001;">
         <div class="modal-content" style="max-width:1000px;width:94%;max-height:88vh;display:flex;flex-direction:column;">
             <div class="modal-header">
                 <h2>🧹 <span data-i18n="knowledge.cleanup.title">Prompt optimieren</span></h2>
@@ -1423,7 +1420,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
         </div>
     </div>
 
-    <div id="kb-compact-modal" class="modal" style="z-index:10001;" data-klick="kb-compact-hintergrund">
+    <div id="kb-compact-modal" class="modal" style="z-index:10001;">
         <div class="modal-content glass">
             <div class="modal-header">
                 <h2>🗜️ Wissens-Verdichtung – Funktionsweise</h2>
@@ -6118,7 +6115,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): Klick-Zuhoerer der frueheren
          onclick-Attribute (data-klick). VOR allen anderen Skripten, damit vision.js
          den Platz el.onclick wie bisher danach ueberschreiben kann. -->
-    <script src="/static/js/settings_bedienung.js?v=4"></script>
+    <script src="/static/js/settings_bedienung.js?v=5"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
@@ -6132,12 +6129,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/protokolle.js?v=3"></script>
     <script src="/static/js/fehleranalyse.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=6"></script>
-    <script src="/static/js/skills.js?v=50"></script>
+    <script src="/static/js/skills.js?v=51"></script>
     <script src="/static/js/chatlib.js?v=25"></script>
     <script src="/static/js/skillcfg.js?v=13"></script>
     <script src="/static/js/google.js?v=15"></script>
     <script src="/static/js/whatsapp.js?v=20"></script>
-    <script src="/static/js/knowledge.js?v=140"></script>
+    <script src="/static/js/knowledge.js?v=141"></script>
     <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
          window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
     <script src="/static/js/knowledge_sync.js?v=6"></script>
@@ -6156,15 +6153,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/newsfeed.js?v=4"></script>
     <script src="/static/js/newsfeed_admin.js?v=2"></script>
     <script src="/static/js/kundenverwaltung.js?v=10"></script>
-    <script src="/static/js/support_admin.js?v=12"></script>
+    <script src="/static/js/support_admin.js?v=13"></script>
     <script src="/static/js/telemetry.js?v=13"></script>
     <script src="/static/js/branding.js?v=29"></script>
     <script src="/static/js/theme.js?v=3"></script>
-    <script src="/static/js/security_incidents.js?v=40"></script>
+    <script src="/static/js/security_incidents.js?v=41"></script>
     <script src="/static/js/fernzugang.js?v=3"></script>
     <script src="/static/js/totp_admin.js?v=3"></script>
-    <script src="/static/js/ldap_picker.js?v=15"></script>
-    <script src="/static/js/freigabe_dialog.js?v=2"></script>
+    <script src="/static/js/ldap_picker.js?v=16"></script>
+    <script src="/static/js/freigabe_dialog.js?v=3"></script>
     <script src="/static/js/rechte_matrix.js?v=6"></script>
     <script src="/static/js/excel_admin.js?v=9"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
@@ -6175,7 +6172,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- Suchfeld im Modal-Kopf. VOR app.js: dessen openModal ruft SettingsSearch.init(). -->
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
-    <script src="/static/js/app.js?v=231"></script>
+    <script src="/static/js/app.js?v=232"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

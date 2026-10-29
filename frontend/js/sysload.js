@@ -159,12 +159,11 @@
         if (_kasten) return _kasten;
         _kasten = document.createElement('div');
         // Rahmen, Kopf und Tabelle vom Paket-Fenster: gleiche Bauform, gleiche
-        // Regeln (deckend, Klick daneben schliesst).
+        // Regeln (deckend; ein Klick daneben schliesst NICHT).
         _kasten.className = 'jv-pkg-overlay jv-load-overlay';
         _kasten.setAttribute('role', 'dialog');
         _kasten.setAttribute('aria-modal', 'true');
         _kasten.addEventListener('click', function (e) {
-            if (e.target === _kasten) { schliessen(); return; }
             var h = e.target.closest && e.target.closest('th[data-sort]');
             if (h) umsortieren(h.getAttribute('data-sort'));
         });

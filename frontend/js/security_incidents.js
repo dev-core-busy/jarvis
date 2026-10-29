@@ -68,7 +68,6 @@
             var docClose = $('sec-secdoc-close');
             if (docClose) docClose.addEventListener('click', function () { Mgr._showDoc(false); });
             var docModal = $('sec-secdoc-modal');
-            if (docModal) docModal.addEventListener('click', function (e) { if (e.target === docModal) Mgr._showDoc(false); });
             var docPdf = $('sec-secdoc-pdf');
             if (docPdf) docPdf.addEventListener('click', function () {
                 document.body.classList.add('printing-secdoc');
@@ -88,7 +87,6 @@
             var fwClose = $('sec-fwdoc-close');
             if (fwClose) fwClose.addEventListener('click', function () { Mgr._showFwDoc(false); });
             var fwModal = $('sec-fwdoc-modal');
-            if (fwModal) fwModal.addEventListener('click', function (e) { if (e.target === fwModal) Mgr._showFwDoc(false); });
             var fwPdf = $('sec-fwdoc-pdf');
             if (fwPdf) fwPdf.addEventListener('click', function () {
                 document.body.classList.add('printing-fwdoc');
@@ -159,7 +157,6 @@
             var brkClose = $('sec-brkdoc-close');
             if (brkClose) brkClose.addEventListener('click', function () { Mgr._showBrkDoc(false); });
             var brkModal = $('sec-brkdoc-modal');
-            if (brkModal) brkModal.addEventListener('click', function (e) { if (e.target === brkModal) Mgr._showBrkDoc(false); });
             var brkPdf = $('sec-brkdoc-pdf');
             if (brkPdf) brkPdf.addEventListener('click', function () {
                 document.body.classList.add('printing-brkdoc');

@@ -416,7 +416,6 @@
             }
             ja.onclick = function () { schliessen(true); };
             nein.onclick = function () { schliessen(false); };
-            box.onclick = function (e) { if (e.target === box) schliessen(false); };
             document.addEventListener('keydown', taste);
         });
     }

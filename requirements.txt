@@ -108,13 +108,13 @@ faiss-cpu>=1.7.4,<1.14
 sentence-transformers>=5.6.0,<6
 transformers>=5.10.0,<6
 numpy<2.1
-# setuptools <82: der Vision-Skill (face_recognition_models) und onnxruntime laden
-# pkg_resources zur Laufzeit – 81.0.0 ist die letzte Fassung, die es mitbringt
-# (82/83/84 gemessen: fehlt). torch 2.12/2.13 verlangt selbst setuptools<82.
-# >=78.1.1 behebt CVE-2025-47273 (PackageIndex-Pfad). Die beiden Funde, die erst
-# 83/84 beheben, betreffen nur das BAUEN von Paketen und sind in
-# deploy/security/pip_audit_ausnahmen.txt bewertet.
-setuptools>=78.1.1,<82
+# setuptools >=84.1.0 (2026-10-29): behebt PYSEC-2026-3447 (ab 83.0.0) und
+# GHSA-xmj3-9gf7-h52w (ab 84.1.0). Ab 82 fehlt pkg_resources – auf DEV mit
+# gesperrtem pkg_resources ueber alle installierten Module gemessen: es brauchte
+# nur face_recognition_models (Vision-Skill, 0.3.0 ist die letzte Fassung);
+# dafuer haelt vision_engine.py einen Ersatz bereit. torch 2.13 verlangt nur
+# setuptools>=77.0.3, onnxruntime nutzt pkg_resources nur in Benchmark-Skripten.
+setuptools>=84.1.0
 # WICHTIG – torch VOR dieser Datei aus dem CPU-Index installieren:
 #   pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0+cpu"
 # (2.13.0 seit 2026-10-29: behebt CVE-2025-3000, auf der DEV-VM ohne SSE4.2/AVX

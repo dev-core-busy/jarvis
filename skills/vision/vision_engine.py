@@ -4,7 +4,10 @@ Laeuft als Hintergrund-Thread und erkennt bekannte Personen in Echtzeit.
 Pro Profil koennen Aktionen festgelegt werden: Webhook, LLM-Prompt oder Logging.
 """
 
+import contextlib
 import glob
+import importlib.resources
+import importlib.util
 import json
 import logging
 import os
@@ -12,8 +15,10 @@ import pickle
 import re
 import shutil
 import ssl
+import sys
 import threading
 import time
+import types
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
@@ -23,9 +28,62 @@ import urllib.request
 import cv2
 import numpy as np
 
+
+# ── Ersatz fuer pkg_resources beim Import von face_recognition ───────────────
+#
+# WARUM (2026-10-29): face_recognition_models 0.3.0 – die letzte Fassung auf
+# PyPI – holt seine Modelldateien mit `from pkg_resources import
+# resource_filename`. pkg_resources liefert setuptools ab 82 nicht mehr mit,
+# und Jarvis braucht setuptools >= 84.1.0 (PYSEC-2026-3447, GHSA-xmj3-9gf7-h52w).
+# Fehlt es, faengt face_recognition den ImportError selbst und ruft `quit()`,
+# also SystemExit – ohne Gegenmittel beendete der Import den ladenden Prozess.
+#
+# Der Ersatz liegt NUR waehrend des Imports in sys.modules: andere Pakete
+# (wrapt, passlib.pwd) pruefen per `import pkg_resources`, ob es da ist, und
+# braeuchten dann Funktionen, die der Ersatz nicht hat. face_recognition_models
+# bindet `resource_filename` beim Import an seinen eigenen Namensraum und
+# braucht das Modul danach nicht mehr.
+
+def _resource_filename(paket: str, ressource: str) -> str:
+    """Wie pkg_resources.resource_filename fuer ein entpacktes Paket."""
+    ziel = importlib.resources.files(paket).joinpath(*ressource.split("/"))
+    # dlib oeffnet die Modelle per Dateipfad – aus einem Archiv gaebe es keinen.
+    if not isinstance(ziel, os.PathLike):
+        raise FileNotFoundError(f"{paket}/{ressource} liegt nicht als Datei vor")
+    return os.fspath(ziel)
+
+
+def _pkg_resources_fehlt() -> bool:
+    if "pkg_resources" in sys.modules:
+        return False
+    try:
+        return importlib.util.find_spec("pkg_resources") is None
+    except (ImportError, ValueError):
+        return True
+
+
+@contextlib.contextmanager
+def _pkg_resources_ersatz():
+    """Stellt fuer die Dauer des Blocks ein Ersatz-pkg_resources bereit, falls es fehlt."""
+    if not _pkg_resources_fehlt():
+        yield False
+        return
+    ersatz = types.ModuleType("pkg_resources")
+    ersatz.resource_filename = _resource_filename
+    sys.modules["pkg_resources"] = ersatz
+    try:
+        yield True
+    finally:
+        if sys.modules.get("pkg_resources") is ersatz:
+            del sys.modules["pkg_resources"]
+
+
+# SystemExit gehoert dazu: face_recognition ruft `quit()`, wenn
+# face_recognition_models fehlt oder nicht laedt (siehe oben).
 try:
-    import face_recognition
-except ImportError:
+    with _pkg_resources_ersatz():
+        import face_recognition
+except (ImportError, SystemExit):
     face_recognition = None
 
 

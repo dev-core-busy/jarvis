@@ -386,7 +386,7 @@ in der Spalte „Rolle":
 | `office` | `python-docx`, `openpyxl`, `python-pptx` + LibreOffice (apt) |
 | `sap` | `hdbcli` (proprietär), optional `pyodata`, `pyrfc` |
 | `telegram` | `python-telegram-bot` (LGPL-3.0) |
-| `vision` | `face-recognition`, `opencv-python-headless`, `setuptools` + `cmake`, `libboost-all-dev` (apt) |
+| `vision` | `face-recognition`, `opencv-python-headless` + `cmake`, `libboost-all-dev` (apt) |
 | `whatsapp` | `faster-whisper`, `httpx` |
 | `ai_mouse` (Anonymisieren) | `presidio-analyzer` (MIT), `spacy` (MIT), Modell `de_core_news_md` 3.8.0 (MIT), `opencv-python-headless` (Apache-2.0) |
 
@@ -461,7 +461,7 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 | `referencing` | 0.37.0 | transitiv |
 | `rich` | 14.3.3 | transitiv |
 | `rpds-py` | 0.30.0 | transitiv |
-| `setuptools` | 74.1.3 | Skill `vision` |
+| `setuptools` | 74.1.3 | Kern |
 | `six` | 1.17.0 | Kern |
 | `smart_open` | 8.0.4 | transitiv |
 | `spacy` | 3.8.18 | Skill `ai_mouse` |

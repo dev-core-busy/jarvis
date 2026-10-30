@@ -17,6 +17,9 @@ nachbildet – keine ``requests``-Attrappe, denn genau die echte Anfrage
   4. Kein Kennwort, kein Token, keine Anmeldung aus der Adresse im Bericht
   5. Bearer-Token geht auch beim $metadata-Abruf mit (vorher fehlte er dort)
   6. Endpunkt ``/api/sap/test`` reicht den Bericht in BEIDEN Zweigen durch (AST)
+  7. Abfrage-Konsole: Katalog als Service-Pfade RELATIV zur Basis-URL – ein
+     fremder Host aus den Katalogdaten wird nie uebernommen
+  8. Endpunkte der Konsole: Service-Liste, EntitySets ohne Service (AST)
 
 Exit 2 heisst "konnte nicht laufen", 1 "Pruefung fehlgeschlagen", 0 bestanden.
 
@@ -82,6 +85,17 @@ except Exception as e:  # noqa: BLE001
 KENNWORT = "Kw-geheim-4711"
 TOKEN = "Tok-geheim-0815"
 SETS = ["Bestellungen", "Kunden", "Kunden", "Artikel"]   # doppelt: wird einmal gezaehlt
+# Katalog wie ein echter Gateway ihn liefert: absolute Adressen mit INTERNEM
+# Hostnamen, Versionen als ;v=, Gross-/Kleinschreibung, ein V4-Pfad ausserhalb
+# der Basis (Praefix-Falle: /odata4 beginnt mit /odata) und eine leere Adresse.
+PFAD_ZEILEN = [
+    {"ID": "ZB_SRV_0001", "Title": "B-Service", "ServiceUrl": "http://intern-gw:8000/sap/opu/odata/sap/ZB_SRV/"},
+    {"ID": "ZA_SRV_0002", "Title": "A v2", "ServiceUrl": "http://intern-gw:8000/sap/opu/odata/sap/ZA_SRV;v=0002/"},
+    {"ID": "ZA_SRV_0001", "Title": "A-Service", "ServiceUrl": "https://anderer-host/sap/opu/odata/sap/ZA_SRV"},
+    {"ID": "ZB_DOPPELT", "Title": "doppelt", "ServiceUrl": "http://intern-gw:8000/SAP/OPU/ODATA/sap/ZB_SRV/"},
+    {"ID": "ZV4", "Title": "V4", "ServiceUrl": "http://intern-gw:8000/sap/opu/odata4/sap/zv4/srvd/sap/zv4/0001/"},
+    {"ID": "LEER", "Title": "ohne Adresse", "ServiceUrl": ""},
+]
 
 # ── Gateway-Nachbildung ─────────────────────────────────────────────
 ZUSTAND = {"modus": "count", "zeilen": 3, "anfragen": []}
@@ -114,6 +128,8 @@ class _Gateway(http.server.BaseHTTPRequestHandler):
                    + '</EntityContainer></Schema></edmx:Edmx>')
             return self._antwort(200, xml, "application/xml")
         if teile.path.endswith("/ServiceCollection"):
+            if modus == "pfade":
+                return self._antwort(200, json.dumps({"d": {"results": PFAD_ZEILEN}}))
             if modus == "404":
                 return self._antwort(404, "nicht da", "text/plain")
             mit_zaehler = "$inlinecount" in q
@@ -312,6 +328,81 @@ check(all("info" in w for w in getestet), "jede Antwort nach einem Test traegt '
 bericht_aufrufe = [n for n in ast.walk(fn[0]) if isinstance(n, ast.Call)
                    and isinstance(n.func, ast.Attribute) and n.func.attr == "test_bericht"]
 check(len(bericht_aufrufe) >= 1, "Fehlerzweig holt den Bericht ueber test_bericht()")
+
+# ══ 7. Abfrage-Konsole: Service-Pfade aus dem Katalog ═══════════════
+section("7. Konsole: Service-Pfade relativ zur Basis-URL")
+for basis_variante in (BASIS, BASIS + "/"):
+    ZUSTAND.update({"modus": "pfade", "anfragen": []})
+    c = client(odata_base_url=basis_variante)
+    try:
+        r = c.odata.catalog_service_pfade()
+    except sc.SapError as e:
+        r = {"services": [], "fehler": str(e)}
+    namen = [x["service"] for x in r.get("services", [])]
+    zusatz = " (Basis mit /)" if basis_variante.endswith("/") else ""
+    check(namen == ["sap/ZA_SRV", "sap/ZA_SRV;v=0002", "sap/ZB_SRV"],
+          "relative Pfade, einmalig, sortiert" + zusatz, repr(r))
+    check(r.get("ausgelassen") == 2, "ausserhalb der Basis und ohne Adresse: 2 ausgelassen" + zusatz,
+          repr(r.get("ausgelassen")))
+check(all("://" not in n and "intern-gw" not in n and "anderer-host" not in n for n in namen),
+      "kein Host aus den Katalogdaten in den Pfaden", repr(namen))
+titel = {x["service"]: x["title"] for x in r.get("services", [])}
+check(titel.get("sap/ZB_SRV") == "B-Service", "Titel des ERSTEN Eintrags bleibt", repr(titel))
+check(r.get("genau") is True, "unter der Obergrenze: genau")
+
+# Der Pfad muss in genau der Form taugen, die die Konsole als Service schickt.
+ZUSTAND.update({"modus": "count", "anfragen": []})
+c = client()
+try:
+    c.odata.entity_sets("sap/ZB_SRV")
+    fehler = None
+except sc.SapError as e:
+    fehler = e
+pfade = [a["pfad"] for a in ZUSTAND["anfragen"]]
+check(fehler is None and pfade == ["/sap/opu/odata/sap/ZB_SRV/$metadata"],
+      "gelisteter Pfad erreicht den Service ueber die Basis-URL", repr((fehler, pfade)))
+
+ZUSTAND.update({"modus": "nocount", "zeilen": sc.KATALOG_ZAEHL_MAX + 5, "anfragen": []})
+r = client().odata.catalog_service_pfade()
+check(r.get("genau") is False, "an der Obergrenze: NICHT genau", repr(r.get("genau")))
+
+# ══ 8. Endpunkte der Konsole (AST) ══════════════════════════════════
+section("8. Endpunkte der Konsole")
+fns = {n.name: n for n in ast.walk(baum) if isinstance(n, ast.AsyncFunctionDef)}
+
+
+def _route(fn):
+    for d in fn.decorator_list:
+        if isinstance(d, ast.Call) and d.args and isinstance(d.args[0], ast.Constant):
+            return d.args[0].value
+    return None
+
+
+def _depends(fn):
+    return [ast.unparse(d) for d in fn.args.defaults if "Depends" in ast.unparse(d)]
+
+
+f_svc = fns.get("sap_odata_services_api")
+f_sets = fns.get("sap_odata_entity_sets_api")
+if f_svc is None or f_sets is None:
+    print("  ABBRUCH: Konsolen-Endpunkte nicht gefunden – Test kann nicht laufen.")
+    sys.exit(2)
+check(_route(f_svc) == "/api/sap/odata/services", "Service-Liste unter /api/sap/odata/services",
+      repr(_route(f_svc)))
+check(_depends(f_svc) == ["Depends(require_sap_access)"], "Service-Liste verlangt die SAP-Freigabe",
+      repr(_depends(f_svc)))
+check(any(isinstance(n, ast.Attribute) and n.attr == "catalog_service_pfade" for n in ast.walk(f_svc)),
+      "Service-Liste kommt aus catalog_service_pfade (relative Pfade)")
+# EntitySets ohne Service: Schranke VOR dem Abruf, und abgerufen wird der
+# GEPRUEFTE Wert, nicht wieder die rohe Eingabe.
+aufrufe = [n for n in ast.walk(f_sets) if isinstance(n, ast.Call) and ast.unparse(n.func) == "asyncio.to_thread"]
+check(len(aufrufe) == 1 and len(aufrufe[0].args) == 2 and ast.unparse(aufrufe[0].args[1]) == "svc",
+      "entity_sets wird mit dem geprueften Service gerufen", repr([ast.unparse(a) for a in aufrufe]))
+schranke = [n for n in ast.walk(f_sets) if isinstance(n, ast.If) and ast.unparse(n.test) == "not svc"
+            and any(isinstance(k, ast.Constant) and k.value == "kein_service"
+                    for x in ast.walk(n) if isinstance(x, ast.Dict) for k in x.keys)]
+check(len(schranke) == 1 and aufrufe and schranke[0].lineno < aufrufe[0].lineno,
+      "ohne Service: Antwort mit kein_service VOR dem Abruf")
 
 srv.shutdown()
 print(f"\nErgebnis: {_ok} OK, {_fail} FAIL")

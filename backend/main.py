@@ -13508,16 +13508,42 @@ async def sap_odata_query_api(entity_set: str, service: str = "", select: str = 
 
 @app.get("/api/sap/odata/entity-sets")
 async def sap_odata_entity_sets_api(service: str = "", user: str = Depends(require_sap_access)):
-    """EntitySets eines OData-Service (aus $metadata) – fuer den Reiter."""
+    """EntitySets eines OData-Service (aus $metadata) – fuer Reiter und die
+    Abfrage-Konsole in /sap. Ohne ``service`` gilt der Standard-Service des
+    Zugangs; ``service`` in der Antwort nennt, welcher tatsaechlich gefragt wurde."""
+    from backend.sap_client import SapError
+    c = _sap_client(user)
+    if not c.odata.configured:
+        return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
+    svc = service.strip().strip("/") or c.odata.default_service
+    if not svc:
+        # Ohne Service ginge die Anfrage an <Basis>/$metadata – das gibt es
+        # nicht, und der 404 saehe wie ein Serverfehler aus.
+        return JSONResponse({"ok": False, "kein_service": True,
+                             "error": "Kein Service angegeben und kein Standard-Service hinterlegt."})
+    try:
+        sets = await asyncio.to_thread(c.odata.entity_sets, svc)
+        return JSONResponse({"ok": True, "service": svc, "entity_sets": sets, "count": len(sets)})
+    except SapError as e:
+        return JSONResponse({"ok": False, "status": e.status, "service": svc, "error": str(e)})
+
+
+@app.get("/api/sap/odata/services")
+async def sap_odata_services_api(user: str = Depends(require_sap_access)):
+    """Services aus dem Gateway-Katalog, als Pfade relativ zur Basis-URL –
+    Auswahlliste fuer das Service-Feld der Abfrage-Konsole in /sap."""
     from backend.sap_client import SapError
     c = _sap_client(user)
     if not c.odata.configured:
         return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
     try:
-        sets = await asyncio.to_thread(c.odata.entity_sets, service.strip())
-        return JSONResponse({"ok": True, "entity_sets": sets, "count": len(sets)})
+        res = await asyncio.to_thread(c.odata.catalog_service_pfade)
     except SapError as e:
-        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+        return JSONResponse({"ok": False, "status": e.status, "kein_katalog": e.status == 404,
+                             "error": str(e)})
+    return JSONResponse({"ok": True, "services": res["services"],
+                         "count": len(res["services"]),
+                         "ausgelassen": res["ausgelassen"], "genau": res["genau"]})
 
 
 @app.post("/api/sap/sql")

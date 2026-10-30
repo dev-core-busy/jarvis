@@ -13,6 +13,7 @@
  *   6. Portal: Kachel nur bei permissions.sap
  *   7. "Mein SAP-Zugang": die Aussetzer-Meldung nennt den GRUND
  *  15. Verbindungstest: Bericht fuer den SAP-Administrator (auch im Fehlerfall)
+ *  16. Abfrage-Konsole: Auswahllisten fuer Service und EntitySet
  *
  * WICHTIG (Fallstrick vom 2026-07-30): am Ende window.close() + process.exit(),
  * sonst haelt der 30-Sekunden-Timer der LLM-Anzeige den Prozess fuer immer offen.
@@ -149,6 +150,18 @@ function build(htmlFile, me, opts) {
                 }
                 if (u.startsWith('/api/sap/stop')) return json({ ok: true });
                 if (u.startsWith('/api/sap/test') && opts.sapTest) return json(opts.sapTest);
+                if (u.startsWith('/api/sap/odata/services') && opts.odServices) {
+                    (opts.odCalls || []).push(u);
+                    return json(opts.odServices);
+                }
+                if (u.startsWith('/api/sap/odata/entity-sets') && opts.odSets) {
+                    (opts.odCalls || []).push(u);
+                    const q = new URLSearchParams(u.split('?')[1] || '');
+                    const r = opts.odSets(q.get('service') || '');
+                    const antwort = new Promise((res) => setTimeout(res, r.delay || 0)).then(() => json(r.data));
+                    (opts.odOffen || []).push(antwort);
+                    return antwort;
+                }
                 if (u.startsWith('/api/llm/active-status')) return json({ status: 'ok', profile_name: 'Test' });
                 if (u.startsWith('/api/support/status')) return json({ active: false });
                 if (u.startsWith('/api/wissen/scope')) return json({ ok: true, groups: [] });
@@ -801,6 +814,164 @@ function loadScript(dom, rel) {
               (r.kopiert[0] || '').slice(0, 200));
         r.d.window.close();
     }
+    // ══ 16. Abfrage-Konsole: Auswahllisten ══════════════════════════
+    // Gewuenscht 2026-10-30: unter Abfrage-Konsole -> EntitySet sollen Listen
+    // abrufbar sein. Geprueft wird die WIRKUNG am DOM: was in den <datalist>
+    // steht, wann geladen wird, und dass eine veraltete Antwort die Liste
+    // eines inzwischen anderen Service nicht ueberschreibt.
+    section('16. Abfrage-Konsole: Auswahllisten');
+    const SETS16 = {
+        '': { ok: true, service: 'sap/ZDEF_SRV', entity_sets: ['D1', 'D2'], count: 2 },
+        'sap/ZA_SRV': { ok: true, service: 'sap/ZA_SRV', entity_sets: ['A1', 'A2', 'A3'], count: 3 },
+        'sap/ZB_SRV': { ok: true, service: 'sap/ZB_SRV', entity_sets: ['B1'], count: 1 },
+    };
+    async function konsole(odServices, odSets, vorher) {
+        const calls = [], offen = [];
+        const d = build('sap.html', { username: 'anna', is_admin: true, permissions: { sap: true } },
+                        { odServices, odSets, odCalls: calls, odOffen: offen });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(140);
+        const doc = d.window.document;
+        if (vorher) vorher(doc);
+        // jsdom feuert `toggle` beim Setzen von `open` SELBST (nachgemessen) –
+        // ein zusaetzliches dispatchEvent waere ein zweites Oeffnen, das es im
+        // Browser nicht gibt, und verfaelschte die Zaehlung der Abrufe.
+        const con = doc.getElementById('sp-sect-console');
+        let toggles = 0;
+        con.addEventListener('toggle', () => { toggles++; });
+        con.open = true;
+        await sleep(60);
+        if (toggles !== 1) {
+            console.log('  ABBRUCH: erwartet genau ein toggle-Ereignis, gesehen ' + toggles + ' – Messaufbau unbrauchbar.');
+            process.exit(2);
+        }
+        return { d, doc, calls, offen };
+    }
+    // Vor dem Schliessen auf ALLE noch laufenden Antworten warten: eine
+    // verzoegerte Antwort, die nach close() ankommt, trifft ein geschlossenes
+    // Dokument – der Absturz machte aus einem Biss ein "konnte nicht laufen"
+    // (von der Gegenprobe "kein Gedaechtnis je Service" gefunden).
+    async function schliessen(r) {
+        await Promise.all(r.offen || []);
+        await sleep(10);
+        r.d.window.close();
+    }
+    const werte = (doc, id) => [...doc.querySelectorAll('#' + id + ' option')].map((o) => o.value);
+    const zaehle = (calls, teil) => calls.filter((u) => u.indexOf(teil) >= 0).length;
+    {
+        let callsVorOeffnen = -1;
+        const SVC = { ok: true, genau: true, ausgelassen: 2, count: 3, services: [
+            { service: 'sap/ZA_SRV', title: 'A-Service' },
+            { service: 'sap/ZB_SRV', title: '<img src=x onerror=1>' },
+            { service: 'sap/ZC_SRV', title: '' },
+        ] };
+        const r = await konsole(SVC, (svc) => ({
+            data: SETS16[svc] || { ok: false, error: 'unbekannt' },
+            delay: svc === 'sap/ZA_SRV' ? 150 : 5,
+        }), (doc) => { callsVorOeffnen = 0; });
+        const { doc, calls } = r;
+        check('Felder haengen an ihren Listen',
+              doc.getElementById('sp-od-service').getAttribute('list') === 'sp-od-service-list'
+              && doc.getElementById('sp-od-entity').getAttribute('list') === 'sp-od-entity-list'
+              && !!doc.getElementById('sp-od-service-list') && !!doc.getElementById('sp-od-entity-list'));
+        check('Service-Liste gefuellt (Werte = relative Pfade)',
+              JSON.stringify(werte(doc, 'sp-od-service-list')) === JSON.stringify(['sap/ZA_SRV', 'sap/ZB_SRV', 'sap/ZC_SRV']),
+              JSON.stringify(werte(doc, 'sp-od-service-list')));
+        const opt = doc.querySelector('#sp-od-service-list option[value="sap/ZA_SRV"]');
+        check('Titel als Beschriftung', !!opt && opt.getAttribute('label') === 'A-Service');
+        check('Titel wird nicht als Markup ausgewertet',
+              !doc.querySelector('#sp-od-service-list img')
+              && (doc.querySelector('#sp-od-service-list option[value="sap/ZB_SRV"]') || { getAttribute: () => '' })
+                  .getAttribute('label') === '<img src=x onerror=1>');
+        const sh = doc.getElementById('sp-od-svc-hint').textContent;
+        check('Service-Hinweis nennt Zahl und Ausgelassene', /3 Services/.test(sh) && /\(2 weitere/.test(sh), sh);
+        check('ohne Service: EntitySets des Standard-Service',
+              JSON.stringify(werte(doc, 'sp-od-entity-list')) === '["D1","D2"]', JSON.stringify(werte(doc, 'sp-od-entity-list')));
+        const eh = doc.getElementById('sp-od-entity-hint').textContent;
+        check('EntitySet-Hinweis nennt Zahl und tatsaechlichen Service', /2 EntitySets/.test(eh) && /sap\/ZDEF_SRV/.test(eh), eh);
+
+        // Langsame Antwort (ZA) darf die Liste des danach gewaehlten ZB nicht ueberschreiben.
+        const feld = doc.getElementById('sp-od-service');
+        feld.value = 'sap/ZA_SRV'; feld.dispatchEvent(new r.d.window.Event('change'));
+        await sleep(10);
+        feld.value = 'sap/ZB_SRV'; feld.dispatchEvent(new r.d.window.Event('change'));
+        await sleep(260);
+        check('veraltete Antwort ueberschreibt die neue Liste nicht',
+              JSON.stringify(werte(doc, 'sp-od-entity-list')) === '["B1"]', JSON.stringify(werte(doc, 'sp-od-entity-list')));
+        check('...und der Hinweis gehoert zum aktuellen Service',
+              /sap\/ZB_SRV/.test(doc.getElementById('sp-od-entity-hint').textContent),
+              doc.getElementById('sp-od-entity-hint').textContent);
+        const zaVorher = zaehle(calls, 'service=sap%2FZA_SRV');
+        feld.value = 'sap/ZA_SRV'; feld.dispatchEvent(new r.d.window.Event('change'));
+        await sleep(20);
+        check('zurueck auf ZA: aus dem Gedaechtnis, ohne neue Anfrage',
+              zaehle(calls, 'service=sap%2FZA_SRV') === zaVorher && zaVorher === 1
+              && JSON.stringify(werte(doc, 'sp-od-entity-list')) === '["A1","A2","A3"]',
+              zaVorher + ' / ' + JSON.stringify(werte(doc, 'sp-od-entity-list')));
+        doc.getElementById('sp-od-service').dispatchEvent(new r.d.window.Event('focus'));
+        doc.getElementById('sp-od-entity').dispatchEvent(new r.d.window.Event('focus'));
+        await sleep(20);
+        check('Katalog wird je Seite nur einmal abgefragt', zaehle(calls, '/odata/services') === 1,
+              String(zaehle(calls, '/odata/services')));
+        check('Fokus ohne Aenderung fragt nicht neu', zaehle(calls, 'service=sap%2FZA_SRV') === 1);
+        await schliessen(r);
+    }
+    {
+        // Geladen wird erst, wenn die OData-Konsole SICHTBAR ist.
+        const calls = [];
+        const d = build('sap.html', { username: 'anna', is_admin: true, permissions: { sap: true } },
+                        { odServices: { ok: true, services: [], count: 0, genau: true, ausgelassen: 0 },
+                          odSets: () => ({ data: SETS16[''] }), odCalls: calls });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(140);
+        const doc = d.window.document;
+        check('Seitenaufbau fragt keine Liste ab', calls.length === 0, calls.join(', '));
+        doc.getElementById('sp-tab-sql').click();
+        const con = doc.getElementById('sp-sect-console');
+        con.open = true;
+        await sleep(40);
+        check('Konsole auf SQL geoeffnet: keine OData-Liste', calls.length === 0, calls.join(', '));
+        doc.getElementById('sp-tab-odata').click();
+        await sleep(40);
+        check('Wechsel auf OData laedt beide Listen',
+              zaehle(calls, '/odata/services') === 1 && zaehle(calls, '/odata/entity-sets') === 1, calls.join(', '));
+        d.window.close();
+    }
+    {
+        // Fehlerfaelle: kein Katalog (Dauerzustand, kein Wiederholen) und
+        // kein Service (Hinweis, kein Fehler; beim naechsten Fokus neu).
+        const r = await konsole({ ok: false, kein_katalog: true, status: 404, error: 'HTTP 404' },
+                                () => ({ data: { ok: false, kein_service: true, error: 'Kein Service' } }));
+        const { doc, calls } = r;
+        const sh = doc.getElementById('sp-od-svc-hint');
+        check('kein Katalog: Hinweis als Fehler', /keinen Gateway-Katalog/.test(sh.textContent)
+              && sh.classList.contains('is-error'), sh.textContent);
+        const eh = doc.getElementById('sp-od-entity-hint');
+        check('kein Service: Anleitung, nicht als Fehler', /Standard-Service/.test(eh.textContent)
+              && !eh.classList.contains('is-error'), eh.textContent + ' ' + eh.className);
+        doc.getElementById('sp-od-service').dispatchEvent(new r.d.window.Event('focus'));
+        doc.getElementById('sp-od-entity').dispatchEvent(new r.d.window.Event('focus'));
+        await sleep(30);
+        check('kein Katalog: kein erneuter Abruf', zaehle(calls, '/odata/services') === 1,
+              String(zaehle(calls, '/odata/services')));
+        check('kein Service: naechster Fokus fragt erneut', zaehle(calls, '/odata/entity-sets') === 2,
+              String(zaehle(calls, '/odata/entity-sets')));
+        await schliessen(r);
+    }
+    {
+        const r = await konsole({ ok: false, status: 403, error: 'Keine Berechtigung' },
+                                () => ({ data: SETS16[''] }));
+        const sh = r.doc.getElementById('sp-od-svc-hint');
+        check('anderer Fehler: Grund steht am Feld', /Keine Berechtigung/.test(sh.textContent)
+              && sh.classList.contains('is-error'), sh.textContent);
+        r.doc.getElementById('sp-od-service').dispatchEvent(new r.d.window.Event('focus'));
+        await sleep(30);
+        check('anderer Fehler: naechster Fokus versucht es erneut', zaehle(r.calls, '/odata/services') === 2,
+              String(zaehle(r.calls, '/odata/services')));
+        await schliessen(r);
+    }
     {
         // Jeder im Modul benutzte sap.ti_*-Schluessel existiert in BEIDEN
         // Sprachen – gelesen aus dem Quelltext, nicht abgetippt. t() faellt
@@ -810,18 +981,19 @@ function loadScript(dom, rel) {
         // JEDES 'sap.ti_…'-Literal, nicht nur T('…'): die Zeilen laufen ueber
         // den Helfer add('sap.ti_…', …) – ein Muster nur auf T( war fuer sie
         // blind (von der Gegenprobe gefunden).
-        const keys = [...new Set([...quelle.matchAll(/'(sap\.ti_[a-z_]+)'/g)].map((m) => m[1]))];
+        const keys = [...new Set([...quelle.matchAll(/'(sap\.(?:ti|od)_[a-z_]+)'/g)].map((m) => m[1]))];
         const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
         const grenze = i18n.search(/\n\s*en\s*:\s*\{/);
         const bloecke = { de: grenze > 0 ? i18n.slice(0, grenze) : '', en: grenze > 0 ? i18n.slice(grenze) : '' };
-        check('Positivkontrolle: sap.ti_*-Schluessel im Modul gefunden', keys.length >= 20, String(keys.length));
+        check('Positivkontrolle: sap.ti_*/sap.od_*-Schluessel im Modul gefunden',
+              keys.length >= 30 && keys.some((k) => k.indexOf('sap.od_') === 0), String(keys.length));
         check('Positivkontrolle: Sprachgrenze in i18n.js gefunden',
               grenze > 0 && bloecke.de.indexOf("'sap.acc_removed':") >= 0 && bloecke.en.indexOf("'sap.acc_removed':") >= 0);
         const fehlt = [];
         keys.forEach((k) => ['de', 'en'].forEach((lg) => {
             if (bloecke[lg].indexOf("'" + k + "':") < 0) fehlt.push(lg + ':' + k);
         }));
-        check('alle sap.ti_*-Schluessel in DE und EN', fehlt.length === 0, fehlt.join(', '));
+        check('alle sap.ti_*/sap.od_*-Schluessel in DE und EN', fehlt.length === 0, fehlt.join(', '));
     }
 
     // ── Ergebnis ────────────────────────────────────────────────────

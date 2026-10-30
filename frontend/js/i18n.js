@@ -4018,6 +4018,16 @@ const _I18N = {
         'sap.ti_sets_show': 'EntitySets anzeigen',
         'sap.ti_foot': 'Es wurden keine Geschäftsdaten gelesen. Ob die Berechtigungen für die Daten selbst ausreichen, zeigt erst eine Auswertung.',
         'sap.ti_copy': 'Bericht für den SAP-Administrator kopieren',
+        'sap.od_svc_loading': 'Lade Service-Liste…',
+        'sap.od_svc_nocatalog': 'Dieser Server hat keinen Gateway-Katalog – den Service bitte von Hand eintragen.',
+        'sap.od_svc_failed': 'Service-Liste nicht abrufbar:',
+        'sap.od_svc_count': '{n} Services im Katalog – zur Auswahl ins Feld klicken oder tippen.',
+        'sap.od_svc_count_min': 'Mindestens {n} Services im Katalog – zur Auswahl ins Feld klicken oder tippen.',
+        'sap.od_svc_skipped': '({n} weitere liegen nicht unter der Basis-URL und fehlen in der Liste.)',
+        'sap.od_sets_noservice': 'Für die Liste zuerst einen Service eintragen – oder unter „Mein SAP-Zugang“ einen Standard-Service hinterlegen.',
+        'sap.od_sets_failed': 'EntitySet-Liste nicht abrufbar:',
+        'sap.od_sets_count': '{n} EntitySets in „{s}“ – zur Auswahl ins Feld klicken oder tippen.',
+        'sap.od_sets_loading': 'Lade EntitySets…',
 
         // Serverzertifikat pruefen/verankern (js/sapcert.js) – EIN Satz Texte
         // fuer beide Oberflaechen (Einstellungen → SAP und /sap).
@@ -8668,6 +8678,16 @@ const _I18N = {
         'sap.ti_sets_show': 'Show EntitySets',
         'sap.ti_foot': 'No business data was read. Whether the authorizations for the data itself are sufficient only shows up in an evaluation.',
         'sap.ti_copy': 'Copy report for the SAP administrator',
+        'sap.od_svc_loading': 'Loading service list…',
+        'sap.od_svc_nocatalog': 'This server has no Gateway catalog – please enter the service manually.',
+        'sap.od_svc_failed': 'Service list not available:',
+        'sap.od_svc_count': '{n} services in the catalog – click into the field or type to choose.',
+        'sap.od_svc_count_min': 'At least {n} services in the catalog – click into the field or type to choose.',
+        'sap.od_svc_skipped': '({n} more are not below the base URL and are missing from the list.)',
+        'sap.od_sets_noservice': 'For the list, enter a service first – or set a default service under “My SAP access”.',
+        'sap.od_sets_failed': 'EntitySet list not available:',
+        'sap.od_sets_count': '{n} EntitySets in “{s}” – click into the field or type to choose.',
+        'sap.od_sets_loading': 'Loading EntitySets…',
 
         // Pruefung / Pinning des Serverzertifikats (js/sapcert.js)
         'sapcert.check': 'Check certificate',

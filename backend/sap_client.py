@@ -383,6 +383,41 @@ class _ODataClient:
         svcs = self.catalog_services(limit=KATALOG_ZAEHL_MAX)
         return len(svcs), len(svcs) < KATALOG_ZAEHL_MAX
 
+    def catalog_service_pfade(self, limit: int = KATALOG_ZAEHL_MAX) -> dict:
+        """Services des Gateway-Katalogs als Pfade RELATIV zur Basis-URL – genau
+        die Form, die ``query``/``entity_sets`` als ``service`` erwarten
+        (Basis ``…/sap/opu/odata`` + ``sap/API_SALES_ORDER_SRV``).
+
+        Der Katalog nennt absolute Adressen, oft mit internem Hostnamen. Gewertet
+        wird deshalb nur der PFAD. Liegt er nicht unter dem Pfad der Basis-URL,
+        ist der Service ueber diese Basis nicht erreichbar und wird ausgelassen
+        (gezaehlt): die absolute Adresse zu uebernehmen hiesse, die Anmeldung an
+        einen Host aus den Katalogdaten zu schicken – vorbei an der
+        Server-Freigabe der persoenlichen Zugaenge.
+
+        Rueckgabe ``{services: [{service, title, version}], ausgelassen, genau}``;
+        ``genau`` ist False, wenn die Liste an ``limit`` gekappt wurde."""
+        basis = urlsplit(self.base).path.rstrip("/")
+        svcs = self.catalog_services(limit=limit)
+        gesehen: dict[str, dict] = {}
+        ausgelassen = 0
+        for s in svcs:
+            pfad = unquote(urlsplit(s.get("url") or "").path).rstrip("/")
+            if not pfad:
+                ausgelassen += 1
+                continue
+            if basis and not pfad.lower().startswith(basis.lower() + "/"):
+                ausgelassen += 1
+                continue
+            rel = pfad[len(basis):].strip("/")
+            if rel and rel not in gesehen:
+                gesehen[rel] = {"service": rel, "title": s.get("title") or "",
+                                "version": s.get("version") or ""}
+        return {"services": [gesehen[k] for k in sorted(gesehen, key=str.lower)],
+                "ausgelassen": ausgelassen,
+                "genau": len(svcs) < max(1, min(int(limit or KATALOG_ZAEHL_MAX),
+                                                KATALOG_ZAEHL_MAX))}
+
 
 # ── HANA SQL (hdbcli) ────────────────────────────────────────────────
 class _HanaClient:

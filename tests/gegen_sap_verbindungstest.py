@@ -6,6 +6,7 @@ als Argument bzw. Umgebungsvariable mit – die echten Dateien werden nie
 angefasst, ein abgebrochener Lauf hinterlaesst also keinen Rueckstand.
 
   * tests/test_sap_verbindungstest.py   (--modul sap_client.py, --main main.py)
+    – Verbindungstest UND Auswahllisten der Abfrage-Konsole
   * tests/test_sap_portal_ui.js         (SAP_PORTAL_JS=sap_portal.js)
 
 Exit 0 = alle Proben wie erwartet, 1 = mindestens eine nicht, 2 = konnte nicht laufen
@@ -68,7 +69,29 @@ PROBEN = [
     ("EntitySet-Namen fehlen im Bericht", "client",
      '            info["entity_sets"] = sets\n',
      "            pass\n", 1),
+    # ── sap_client.py: Service-Pfade der Konsole ──
+    ("Konsole uebernimmt die absolute Katalog-Adresse", "client",
+     '            rel = pfad[len(basis):].strip("/")\n',
+     '            rel = (s.get("url") or "").strip("/")\n', 1),
+    ("Praefix ohne Grenze (/odata4 gilt als unter /odata)", "client",
+     '            if basis and not pfad.lower().startswith(basis.lower() + "/"):\n',
+     '            if basis and not pfad.lower().startswith(basis.lower()):\n', 1),
+    ("Dubletten ueberschreiben den ersten Eintrag", "client",
+     "            if rel and rel not in gesehen:\n",
+     "            if rel:\n", 1),
+    ("Service-Liste immer 'genau'", "client",
+     '                "genau": len(svcs) < max(1, min(int(limit or KATALOG_ZAEHL_MAX),\n',
+     '                "genau": True or len(svcs) < max(1, min(int(limit or KATALOG_ZAEHL_MAX),\n', 1),
     # ── main.py ──
+    ("EntitySets wieder mit der rohen Eingabe", "main",
+     "        sets = await asyncio.to_thread(c.odata.entity_sets, svc)\n",
+     "        sets = await asyncio.to_thread(c.odata.entity_sets, service.strip())\n", 1),
+    ("Service-Liste ohne SAP-Freigabe", "main",
+     "async def sap_odata_services_api(user: str = Depends(require_sap_access)):\n",
+     "async def sap_odata_services_api(user: str = \"\"):\n", 1),
+    ("Service-Liste aus den absoluten Katalog-Adressen", "main",
+     "        res = await asyncio.to_thread(c.odata.catalog_service_pfade)\n",
+     "        res = await asyncio.to_thread(c.odata.catalog_services)\n", 1),
     ("Fehlerzweig ohne Bericht", "main",
      '                             "error": str(e), "info": info})\n',
      '                             "error": str(e)})\n', 1),
@@ -92,6 +115,24 @@ PROBEN = [
      "            add('sap.ti_mandant', 'Mandant', i.mandant\n"
      "                || T('sap.ti_mandant_default', '— nicht angegeben, es gilt der Standardmandant des Servers —'));\n",
      "            add('sap.ti_mandant', 'Mandant', i.mandant);\n", 1),
+    ("Konsole: veraltete Antwort ueberschreibt die neue Liste", "portal",
+     "                if (_odSetsFuer !== key) return;\n                odZeigeSets(d);\n",
+     "                odZeigeSets(d);\n", 1),
+    ("Konsole: kein Gedaechtnis je Service", "portal",
+     "        if (_odSets[key]) { odZeigeSets(_odSets[key]); return; }\n",
+     "", 1),
+    ("Konsole: laedt auch, wenn OData nicht sichtbar ist", "portal",
+     "        if (!odSichtbar()) return;\n",
+     "", 1),
+    ("Konsole: fehlender Katalog wird immer wieder abgefragt", "portal",
+     "                    if (!(d && d.kein_katalog)) _odSvc = null;\n",
+     "                    _odSvc = null;\n", 1),
+    ("Konsole: Titel als Markup eingesetzt", "portal",
+     "            if (it.label) o.setAttribute('label', it.label);\n",
+     "            if (it.label) o.innerHTML = it.label;\n", 1),
+    ("Konsole: neuer Schluessel ohne i18n-Eintrag", "portal",
+     "T('sap.od_sets_loading', 'Lade EntitySets…')",
+     "T('sap.od_sets_laden', 'Lade EntitySets…')", 1),
     ("neuer Zeilen-Schluessel ohne i18n-Eintrag (ueber add)", "portal",
      "add('sap.ti_time', 'Antwortzeit',",
      "add('sap.ti_zeit', 'Antwortzeit',", 1),

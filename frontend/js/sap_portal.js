@@ -575,6 +575,123 @@
             })
             .catch(function () { consoleError(T('sap.query_failed', 'Abfrage fehlgeschlagen.')); });
     }
+    // ── Auswahllisten der OData-Konsole ─────────────────────────────
+    // Service-Feld: Katalog des Gateway (einmal je Seite). EntitySet-Feld:
+    // EntitySets des eingetragenen Service bzw. des Standard-Service, je
+    // Eingabe gemerkt. Geladen wird erst, wenn die OData-Konsole sichtbar ist –
+    // die Seite fragt nicht bei jedem Aufruf den Katalog ab. Die Felder bleiben
+    // frei beschreibbar (<datalist>), die Liste ist ein Angebot, keine Schranke.
+    var _odSvc = null;        // laufende/erledigte Katalog-Abfrage (Promise)
+    var _odSets = {};         // Service-Eingabe -> erfolgreiche Antwort
+    var _odSetsFuer = null;   // fuer welche Eingabe die EntitySet-Liste gilt
+
+    function odHint(id, msg, kind) {
+        var el = $(id); if (!el) return;
+        el.textContent = msg || '';
+        el.className = 'sp-note sp-od-hint' + (kind === 'error' ? ' is-error' : '');
+    }
+    function odFill(listId, items) {
+        var dl = $(listId); if (!dl) return;
+        while (dl.firstChild) dl.removeChild(dl.firstChild);
+        items.forEach(function (it) {
+            var o = document.createElement('option');
+            o.value = it.value;
+            if (it.label) o.setAttribute('label', it.label);
+            dl.appendChild(o);
+        });
+    }
+    function odSichtbar() {
+        var sect = $('sp-sect-console'), pane = $('sp-pane-odata');
+        return !!(sect && sect.open && pane && !pane.classList.contains('hidden'));
+    }
+    function odServiceKey() {
+        return (($('sp-od-service') || {}).value || '').trim().replace(/^\/+|\/+$/g, '');
+    }
+
+    function odLadeServices() {
+        if (_odSvc) return _odSvc;
+        odHint('sp-od-svc-hint', T('sap.od_svc_loading', 'Lade Service-Liste…'));
+        _odSvc = fetch('/api/sap/odata/services', { headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) {
+                    // Kein Katalog ist ein Dauerzustand – sonst beim naechsten
+                    // Klick ins Feld neu versuchen (ein Klick = eine Anfrage).
+                    if (!(d && d.kein_katalog)) _odSvc = null;
+                    odHint('sp-od-svc-hint', (d && d.kein_katalog)
+                        ? T('sap.od_svc_nocatalog', 'Dieser Server hat keinen Gateway-Katalog – den Service bitte von Hand eintragen.')
+                        : T('sap.od_svc_failed', 'Service-Liste nicht abrufbar:') + ' ' + ((d && d.error) || ''), 'error');
+                    return;
+                }
+                var liste = Array.isArray(d.services) ? d.services : [];
+                odFill('sp-od-service-list', liste.map(function (x) {
+                    return { value: x.service, label: x.title };
+                }));
+                var msg = (d.genau ? T('sap.od_svc_count', '{n} Services im Katalog – zur Auswahl ins Feld klicken oder tippen.')
+                                   : T('sap.od_svc_count_min', 'Mindestens {n} Services im Katalog – zur Auswahl ins Feld klicken oder tippen.'))
+                    .replace('{n}', liste.length);
+                if (d.ausgelassen) {
+                    msg += ' ' + T('sap.od_svc_skipped', '({n} weitere liegen nicht unter der Basis-URL und fehlen in der Liste.)')
+                        .replace('{n}', d.ausgelassen);
+                }
+                odHint('sp-od-svc-hint', msg);
+            })
+            .catch(function () {
+                _odSvc = null;
+                odHint('sp-od-svc-hint', T('sap.od_svc_failed', 'Service-Liste nicht abrufbar:'), 'error');
+            });
+        return _odSvc;
+    }
+
+    function odZeigeSets(d) {
+        if (!d.ok) {
+            _odSetsFuer = null;   // beim naechsten Klick ins Feld neu fragen
+            odFill('sp-od-entity-list', []);
+            if (d.kein_service) {
+                odHint('sp-od-entity-hint', T('sap.od_sets_noservice',
+                    'Für die Liste zuerst einen Service eintragen – oder unter „Mein SAP-Zugang“ einen Standard-Service hinterlegen.'));
+            } else {
+                odHint('sp-od-entity-hint', T('sap.od_sets_failed', 'EntitySet-Liste nicht abrufbar:') + ' '
+                    + (d.error || ''), 'error');
+            }
+            return;
+        }
+        var sets = Array.isArray(d.entity_sets) ? d.entity_sets : [];
+        odFill('sp-od-entity-list', sets.map(function (n) { return { value: n }; }));
+        odHint('sp-od-entity-hint', T('sap.od_sets_count', '{n} EntitySets in „{s}“ – zur Auswahl ins Feld klicken oder tippen.')
+            .replace('{n}', sets.length).replace('{s}', d.service || ''));
+    }
+
+    function odLadeSets() {
+        var key = odServiceKey();
+        if (_odSetsFuer === key) return;            // gilt schon bzw. wird gerade geladen
+        _odSetsFuer = key;
+        if (_odSets[key]) { odZeigeSets(_odSets[key]); return; }
+        odFill('sp-od-entity-list', []);
+        odHint('sp-od-entity-hint', T('sap.od_sets_loading', 'Lade EntitySets…'));
+        fetch('/api/sap/odata/entity-sets?service=' + encodeURIComponent(key), { headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                d = d || {};
+                if (d.ok) _odSets[key] = d;          // nur Erfolge merken
+                // Inzwischen ein anderer Service eingetragen: diese Antwort
+                // ist veraltet und darf die neue Liste nicht ueberschreiben.
+                if (_odSetsFuer !== key) return;
+                odZeigeSets(d);
+            })
+            .catch(function () {
+                if (_odSetsFuer !== key) return;
+                _odSetsFuer = null;
+                odHint('sp-od-entity-hint', T('sap.od_sets_failed', 'EntitySet-Liste nicht abrufbar:'), 'error');
+            });
+    }
+
+    function odListenLaden() {
+        if (!odSichtbar()) return;
+        odLadeServices();
+        odLadeSets();
+    }
+
     function switchPane(name) {
         ['odata', 'sql'].forEach(function (p) {
             var tab = $('sp-tab-' + p), pane = $('sp-pane-' + p);
@@ -582,6 +699,7 @@
             if (pane) pane.classList.toggle('hidden', p !== name);
         });
         var out = $('sp-console-out'); if (out) out.innerHTML = '';
+        if (name === 'odata') odListenLaden();
     }
 
     // ── Verdrahtung ─────────────────────────────────────────────────
@@ -1072,6 +1190,11 @@
         $('sp-tab-odata').addEventListener('click', function () { switchPane('odata'); });
         $('sp-tab-sql').addEventListener('click', function () { switchPane('sql'); });
         $('sp-od-run').addEventListener('click', runOData);
+        var con = $('sp-sect-console');
+        if (con) con.addEventListener('toggle', odListenLaden);
+        $('sp-od-service').addEventListener('focus', odLadeServices);
+        $('sp-od-service').addEventListener('change', odLadeSets);
+        $('sp-od-entity').addEventListener('focus', odLadeSets);
         $('sp-sql-run').addEventListener('click', runSql);
 
         $('sp-logout-btn').addEventListener('click', function () {

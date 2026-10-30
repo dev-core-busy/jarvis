@@ -302,6 +302,10 @@
         .sp-tab.active { background: rgba(var(--accent-rgb), .15);
             color: var(--accent-hover); border-color: var(--accent); }
         .sp-console-pane.hidden { display: none; }
+        /* Hinweis unter einem Konsolenfeld (Zahl der Listeneintraege bzw. Grund,
+           warum es keine Liste gibt) – steht AM Feld, nicht am Abschnittsende. */
+        .sp-od-hint { display: block; margin-top: 4px; line-height: 1.4; }
+        .sp-od-hint:empty { display: none; }
         #sp-sql { width: 100%; min-height: 92px; resize: vertical;
             background: var(--bg-primary); border: 1px solid var(--border);
             border-radius: var(--radius-md); color: var(--text-primary); padding: 10px 12px;
@@ -631,11 +635,17 @@
                     <div class="sp-row">
                         <div class="sp-field">
                             <label class="sp-label" for="sp-od-entity" data-i18n="sap.entityset">EntitySet</label>
-                            <input class="sp-input" id="sp-od-entity" type="text" placeholder="z. B. A_JournalEntry">
+                            <input class="sp-input" id="sp-od-entity" type="text" placeholder="z. B. A_JournalEntry"
+                                   list="sp-od-entity-list" autocomplete="off">
+                            <datalist id="sp-od-entity-list"></datalist>
+                            <span class="sp-note sp-od-hint" id="sp-od-entity-hint"></span>
                         </div>
                         <div class="sp-field">
                             <label class="sp-label" for="sp-od-service" data-i18n="sap.service">Service (optional)</label>
-                            <input class="sp-input" id="sp-od-service" type="text" placeholder="API_JOURNALENTRYITEMBASIC_SRV">
+                            <input class="sp-input" id="sp-od-service" type="text" placeholder="sap/API_JOURNALENTRYITEMBASIC_SRV"
+                                   list="sp-od-service-list" autocomplete="off">
+                            <datalist id="sp-od-service-list"></datalist>
+                            <span class="sp-note sp-od-hint" id="sp-od-svc-hint"></span>
                         </div>
                         <div class="sp-field" style="flex:0 0 120px;">
                             <label class="sp-label" for="sp-od-top" data-i18n="sap.rows">Zeilen</label>
@@ -673,7 +683,7 @@
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=15"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=396"></script>
+<script src="/static/js/i18n.js?v=397"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
@@ -691,7 +701,7 @@
 <!-- sapcert.js VOR sap_portal.js: die Benutzerkachel haengt den Baustein
      beim Laden des Zugangs ein. -->
 <script src="/static/js/sapcert.js?v=3"></script>
-<script src="/static/js/sap_portal.js?v=11"></script>
+<script src="/static/js/sap_portal.js?v=12"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR

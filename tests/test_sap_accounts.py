@@ -469,10 +469,19 @@ check('def _sap_client(user: str = "")' in mainpy, "_sap_client nimmt den Benutz
 check(mainpy.count("    c = _sap_client()") == 0,
       "kein Aufruf von _sap_client() OHNE Benutzer (sonst liest der Endpunkt mit "
       "fremden SAP-Berechtigungen)")
-# Fuenf Endpunkte holen nur den Client, drei brauchen zusaetzlich Quelle+Hinweis
-# fuer die Anzeige (Test, Status, ask) und gehen ueber _sap_zugang.
-check(mainpy.count("_sap_client(user)") == 5,
-      "die fuenf reinen Abfrage-Endpunkte uebergeben den Benutzer",
+# Die reinen Abfrage-Endpunkte holen nur den Client, drei brauchen zusaetzlich
+# Quelle+Hinweis fuer die Anzeige (Test, Status, ask) und gehen ueber
+# _sap_zugang. Geprueft wird die EIGENSCHAFT "jeder Aufruf uebergibt den
+# Benutzer" am Syntaxbaum – hier stand bis 2026-10-30 die feste Zahl 5, und der
+# sechste, voellig richtige Endpunkt (Service-Liste der Konsole) machte sie rot.
+import ast as _ast
+_aufrufe = [n for n in _ast.walk(_ast.parse(mainpy)) if isinstance(n, _ast.Call)
+            and isinstance(n.func, _ast.Name) and n.func.id == "_sap_client"]
+check(len(_aufrufe) >= 5, "Positivkontrolle: Aufrufe von _sap_client gefunden",
+      str(len(_aufrufe)))
+check(all(len(n.args) == 1 and not n.keywords and isinstance(n.args[0], _ast.Name)
+          and n.args[0].id == "user" for n in _aufrufe),
+      "jeder Aufruf von _sap_client uebergibt den Benutzer",
       str(mainpy.count("_sap_client(user)")))
 check(mainpy.count("z = _sap_zugang(user") == 3,
       "Test, Status und ask holen zusaetzlich Quelle und Hinweis",

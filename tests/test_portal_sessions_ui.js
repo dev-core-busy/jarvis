@@ -455,6 +455,54 @@ async function main() {
     check('CSS: Grundfarbe ist NICHT die Warnfarbe',
           /\.pt-usr-idle\s*\{[^}]*var\(--text-secondary\)/.test(cssIdle));
 
+    section('17. Offline: letzte Handlung neben der letzten Anfrage');
+    // ECHT 2026-10-30: ein ueber Nacht offener Tab hielt last_seen bis 03:33,
+    // gearbeitet wurde zuletzt um 16:00 – "offline seit 3 Std." las sich als
+    // falsche Zeitangabe. Die Handlung muss daneben stehen, sobald sie
+    // spuerbar frueher liegt, und darf bei gleichem Zeitpunkt nicht doppeln.
+    const offl = {
+        ok: true, online_window: 120, online: 0, total: 3, may_block: true,
+        users: [
+            // der gemeldete Fall: Anfrage vor 3 Std., Handlung vor 14 Std.
+            { username: 'nacht', display: 'nacht', online: false, kind: 'user',
+              last_login: jetzt - 60000, last_seen: jetzt - 3 * 3600 - 360,
+              last_action: jetzt - 14 * 3600 - 600, last_action_label: 'AI-Maus',
+              idle_seconds: null },
+            // Anfrage und Handlung fast gleichzeitig: keine zweite Zeitangabe
+            { username: 'gleich', display: 'gleich', online: false, kind: 'user',
+              last_login: jetzt - 9000, last_seen: jetzt - 7200,
+              last_action: jetzt - 7260, last_action_label: 'Chat',
+              idle_seconds: null },
+            // nie etwas getan: ebenfalls keine
+            { username: 'nie', display: 'nie', online: false, kind: 'user',
+              last_login: jetzt - 9000, last_seen: jetzt - 7200,
+              last_action: 0, last_action_label: '', idle_seconds: null },
+        ],
+    };
+    window.fetch = function (url, opts) {
+        if (String(url).indexOf('/api/sessions') === 0 && (!opts || !opts.method)) {
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(offl) });
+        }
+        return alteFetch(url, opts);
+    };
+    window.UserSessions.load();
+    await sleep(80);
+    // Positivkontrolle: ohne die drei Zeilen misst nichts davon etwas.
+    if (!['nacht', 'gleich', 'nie'].every((u) => finde0(u))) {
+        console.log('ABBRUCH: Offline-Datensatz wurde nicht gerendert');
+        process.exit(2);
+    }
+    check('Fall ECHT: Dauer seit der letzten Anfrage bleibt',
+          /offline seit 3 Std\. 6 Min/.test(mtxt('nacht')), mtxt('nacht'));
+    check('Fall ECHT: letzte Handlung steht daneben',
+          /zuletzt aktiv: 14 Std\./.test(mtxt('nacht')), mtxt('nacht'));
+    check('Fall ECHT: Etikett folgt der Handlung, nicht der Anfrage',
+          /zuletzt aktiv: 14 Std\.\s*AI-Maus/.test(mtxt('nacht')), mtxt('nacht'));
+    check('gleicher Zeitpunkt: keine zweite Zeitangabe',
+          !/zuletzt aktiv/.test(mtxt('gleich')) && /Chat/.test(mtxt('gleich')), mtxt('gleich'));
+    check('ohne Handlung: keine zweite Zeitangabe',
+          !/zuletzt aktiv/.test(mtxt('nie')), mtxt('nie'));
+
     section('Dritte Pillen-Stufe: verbunden, aber untaetig');
     // Die Abschnitte davor haben eigene Datensaetze gerendert – erst den
     // Ausgangsdatensatz (USERS) zurueckholen, sonst prueft dieser Block ein

@@ -164,7 +164,20 @@
         var label = u.last_action_label ? ' <i>' + esc(u.last_action_label) + '</i>' : '';
         if (!u.online && u.last_seen) {
             kurz = esc(t('sessions.offline_for', 'offline seit {d}')
-                .replace('{d}', dauer(Math.floor(Date.now() / 1000 - u.last_seen)))) + label;
+                .replace('{d}', dauer(Math.floor(Date.now() / 1000 - u.last_seen))));
+            // ⚠ "offline seit" rechnet ab last_seen, also ab der letzten ANFRAGE
+            // irgendeines Clients – ein ueber Nacht offener Tab oder ein
+            // Add-in-Fenster schiebt sie weit hinter die letzte Handlung
+            // (ECHT 2026-10-30: offline seit 3 Std., gearbeitet zuletzt vor
+            // 14 Std. – gemeldet als "falsche Zeitangabe"). Liegt die letzte
+            // Handlung spuerbar davor, steht sie deshalb daneben; das Etikett
+            // gehoert zu IHR, nicht zur Anfrage. Ab IDLE_AB, damit die Zeile
+            // nicht zweimal dieselbe Zeit nennt.
+            if (u.last_action && u.last_seen - u.last_action >= IDLE_AB) {
+                kurz += ' · ' + esc(t('sessions.last_active', 'zuletzt aktiv: {d}')
+                    .replace('{d}', relativ(u.last_action)));
+            }
+            kurz += label;
         } else if (!u.last_action) {
             kurz = esc(t('sessions.no_action', 'noch keine Aktion'));
         } else if (u.online && u.idle_seconds != null && u.idle_seconds >= IDLE_AB) {

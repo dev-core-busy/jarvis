@@ -8,7 +8,9 @@ Verdrahtungszusagen der Endpunkte stehen als REGEL ueber den AST von main.py
 Zusagen:
   1. Anlegen setzt Kennung und Erstellungsdatum SERVERSEITIG; ein mitgeschicktes
      `erstellt` wird nicht uebernommen; Bearbeiten laesst das Datum stehen.
-  2. Gezeigt werden die DREI NEUESTEN, neueste zuerst.
+  2. Gezeigt werden die `anzahl` NEUESTEN AKTIVEN (Vorgabe drei), neueste
+     zuerst; `anzahl` ist 1..MAX_EINTRAEGE oder "alle", alles andere wird
+     abgewiesen; ein fehlendes Feld beim Speichern laesst den Wert stehen.
   3. Leere/zu lange Felder und Einstellungen ausserhalb des Bereichs werden
      ABGEWIESEN (nicht still beschnitten); der Bestand bleibt dabei unveraendert.
   4. Ein unlesbarer Bestand wird nicht ueberschrieben (fail-closed).
@@ -105,19 +107,67 @@ try:
     check("unbekannte Kennung wird abgewiesen",
           wirft(nf.eintrag_speichern, "gibtsnicht", "x", "y", art=nf.NewsfeedFehler))
 
-    print("\n2. Die drei neuesten, neueste zuerst")
+    print("\n2. Die neuesten (Vorgabe drei), neueste zuerst")
     d = json.loads(nf.DATEI.read_text(encoding="utf-8"))
     d["eintraege"] = [{"id": f"e{i}", "erstellt": f"2026-10-0{i}T10:00:00",
                        "titel": f"T{i}", "text": "x."} for i in range(1, 6)]
     nf.DATEI.write_text(json.dumps(d), encoding="utf-8")
     an = nf.anzeige()
     ids = [e["id"] for e in an["eintraege"]]
-    check("genau ANZEIGE_ANZAHL Eintraege", len(ids) == nf.ANZEIGE_ANZAHL == 3, str(ids))
+    check("Vorgabe: genau drei Eintraege", len(ids) == nf.ANZAHL_VORGABE == 3, str(ids))
+    check("Anzeige nennt die Vorgabe-Anzahl", an.get("anzahl") == 3, str(an.get("anzahl")))
     check("neueste zuerst", ids == ["e5", "e4", "e3"], str(ids))
     check("alle(): ebenfalls neueste zuerst, vollstaendig",
           [e["id"] for e in nf.alle()] == ["e5", "e4", "e3", "e2", "e1"])
     check("Anzeige traegt Vorgabe-Verweilzeit 3 s", an.get("verweil_s") == 3.0, str(an.get("verweil_s")))
     check("Anzeige traegt Scrolldauer", an.get("scroll_s") == nf.SCROLL_VORGABE)
+
+    print("\n2b. Anzahl einstellbar (1 bis alle)")
+    bestand = nf.DATEI.read_bytes()
+
+    def ids_bei(anzahl):
+        # Wirft nie: eine abgewiesene Anzahl ist ein FAIL, kein Absturz ohne Bilanz.
+        try:
+            nf.einstellungen_setzen(3, 0.8, anzahl)
+        except Exception as f:  # noqa: BLE001
+            return f"abgewiesen: {f}"
+        return [e["id"] for e in nf.anzeige()["eintraege"]]
+
+    check("anzahl 1 -> nur die neueste", ids_bei(1) == ["e5"], str(ids_bei(1)))
+    check("anzahl 4 -> vier neueste", ids_bei(4) == ["e5", "e4", "e3", "e2"], str(ids_bei(4)))
+    check("anzahl 'alle' -> alle fuenf", ids_bei("alle") == ["e5", "e4", "e3", "e2", "e1"],
+          str(ids_bei("alle")))
+    check("'alle' wird gespeichert und gelesen", nf.einstellungen()["anzahl"] == "alle")
+    check("Schreibweise 'ALLE' wird zu 'alle'", nf.einstellungen_setzen(3, 0.8, " ALLE ")["anzahl"] == "alle")
+    check("4.0 wird zu 4", nf.einstellungen_setzen(3, 0.8, 4.0)["anzahl"] == 4)
+    check("'7' (Text aus dem Feld) wird zu 7", nf.einstellungen_setzen(3, 0.8, "7")["anzahl"] == 7)
+    check("Obergrenze MAX_EINTRAEGE angenommen", not wirft(nf.einstellungen_setzen, 3, 0.8, nf.MAX_EINTRAEGE))
+    check("Untergrenze 1 angenommen", not wirft(nf.einstellungen_setzen, 3, 0.8, 1), str(nf.ANZAHL_MIN))
+    vor_ab = nf.DATEI.read_bytes()
+    for wert, was in ((0, "0"), (-1, "negativ"), (nf.MAX_EINTRAEGE + 1, "ueber MAX_EINTRAEGE"),
+                      (2.5, "Kommazahl"), (True, "bool"), ("x", "Text"), (float("nan"), "NaN"),
+                      ([], "Liste"), ("", "leer")):
+        check(f"Anzahl {was} abgewiesen", wirft(nf.einstellungen_setzen, 3, 0.8, wert, art=nf.NewsfeedFehler))
+    check("Bestand nach Anzahl-Abweisungen unveraendert", nf.DATEI.read_bytes() == vor_ab)
+    nf.einstellungen_setzen(3, 0.8, 4)
+    check("fehlende Anzahl laesst den gespeicherten Wert stehen",
+          nf.einstellungen_setzen(2, 0.8)["anzahl"] == 4 and nf.einstellungen()["anzahl"] == 4)
+    # Deaktivierte zaehlen NICHT mit: gekuerzt wird nach dem Filtern.
+    d2 = json.loads(nf.DATEI.read_text(encoding="utf-8"))
+    for e in d2["eintraege"]:
+        if e["id"] == "e4":
+            e["aktiv"] = False
+    d2["einstellungen"]["anzahl"] = 3
+    nf.DATEI.write_text(json.dumps(d2), encoding="utf-8")
+    ids = [e["id"] for e in nf.anzeige()["eintraege"]]
+    check("Deaktivierte zaehlt nicht mit (3 aktive trotz e4 aus)", ids == ["e5", "e3", "e2"], str(ids))
+    # Ein kaputter gespeicherter Wert faellt auf die Vorgabe (wie die Zeiten).
+    for kaputt in (0, "viele", None, 1000):
+        d2["einstellungen"]["anzahl"] = kaputt
+        nf.DATEI.write_text(json.dumps(d2), encoding="utf-8")
+        check(f"gespeicherte Anzahl {kaputt!r} -> Vorgabe", nf.einstellungen()["anzahl"] == nf.ANZAHL_VORGABE,
+              str(nf.einstellungen()["anzahl"]))
+    nf.DATEI.write_bytes(bestand)
 
     print("\n3. Abweisen statt beschneiden")
     vorher = nf.DATEI.read_bytes()
@@ -138,7 +188,8 @@ try:
         check(f"{was} abgewiesen", wirft(nf.einstellungen_setzen, verweil, scroll, art=nf.NewsfeedFehler))
     check("Bestand nach Abweisungen unveraendert", nf.DATEI.read_bytes() == vorher)
     e = nf.einstellungen_setzen("5", 1.5)
-    check("gueltige Einstellungen gespeichert", e == {"verweil_s": 5.0, "scroll_s": 1.5}, str(e))
+    check("gueltige Einstellungen gespeichert",
+          e == {"verweil_s": 5.0, "scroll_s": 1.5, "anzahl": nf.ANZAHL_VORGABE}, str(e))
     check("Anzeige liest sie zurueck", nf.anzeige()["verweil_s"] == 5.0)
     check("Grenzwerte angenommen",
           not wirft(nf.einstellungen_setzen, nf.VERWEIL_MIN, nf.SCROLL_MAX)
@@ -307,6 +358,22 @@ check("kein Endpunkt, der ohne Bearbeiten wieder aktiviert",
 lesen_benutzer = any(isinstance(x, ast.Call) and len(x.args) >= 2 and isinstance(x.args[1], ast.Call)
                      and getattr(x.args[1].func, "id", "") == "_norm_login" for x in ast.walk(lesen))
 check("Lesen reicht _norm_login(user) an die Anzeige", lesen_benutzer)
+
+setz = nf_routen.get(("post", "/api/newsfeed/admin/einstellungen"))
+anzahl_ok = False
+if setz:
+    for x in ast.walk(setz):
+        if (isinstance(x, ast.Call) and getattr(x.func, "attr", "") == "to_thread" and len(x.args) == 4
+                and getattr(x.args[0], "attr", "") == "einstellungen_setzen"):
+            a3 = x.args[3]
+            anzahl_ok = (isinstance(a3, ast.Call) and getattr(a3.func, "attr", "") == "get"
+                         and a3.args and getattr(a3.args[0], "value", None) == "anzahl")
+check("Einstellungen-Endpunkt reicht body.get('anzahl') an einstellungen_setzen", anzahl_ok)
+adm = nf_routen.get(("get", "/api/newsfeed/admin"))
+grenz_keys = {k.value for d in ast.walk(adm) if isinstance(d, ast.Dict)
+              for k in d.keys if isinstance(k, ast.Constant)} if adm else set()
+check("Admin-Lesen nennt anzahl_min/anzahl_max/anzahl_alle",
+      {"anzahl_min", "anzahl_max", "anzahl_alle"} <= grenz_keys, str(sorted(grenz_keys)))
 
 me = routen.get(("get", "/api/me"))
 treffer = False

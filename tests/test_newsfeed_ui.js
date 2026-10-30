@@ -28,6 +28,10 @@
  *      Kopie zur letzten, vor ab dem Ziel eines halben Rollschritts, Pause
  *      haelt ueber das Verlassen der Maus hinweg, Weiter mit Restzeit; bei
  *      einer Meldung keine Knoepfe; mit reduzierter Bewegung blaettern.
+ *  12. Anzahl im Admin-Reiter: das Feld zeigt den gespeicherten Wert, die
+ *      Vorschau folgt dem FELD (1 → eine Meldung, „alle" → alle aktiven,
+ *      Feld dann gesperrt), „im Portal sichtbar" folgt dem GESPEICHERTEN Wert;
+ *      Speichern schickt `anzahl` mit; gespeichertes „alle" hakt das Kaestchen.
  *
  *   node tests/test_newsfeed_ui.js
  */
@@ -451,8 +455,8 @@ const zaehler = (w) => (w.document.querySelector('#w .nf-zaehler') || {}).textCo
             console.log('ABBRUCH: NewsfeedAdmin oder #nfadm-liste fehlt'); process.exit(2);
         }
         const E = (id, aktiv, stand) => ({ id, titel: 'T-' + id, text: 'x.', erstellt: stand, aktiv });
-        let daten = { ok: true, skill_aktiv: true, einstellungen: { verweil_s: 3, scroll_s: 0.8 },
-            grenzen: { anzeige: 3, titel_max: 80, text_max: 400 },
+        let daten = { ok: true, skill_aktiv: true, einstellungen: { verweil_s: 3, scroll_s: 0.8, anzahl: 3 },
+            grenzen: { anzahl_min: 1, anzahl_max: 100, anzahl_alle: 'alle', titel_max: 80, text_max: 400 },
             eintraege: [E('a', true, '2026-10-20T10:00:00'), E('b', false, '2026-10-19T10:00:00'),
                         E('c', true, '2026-10-18T10:00:00'), E('d', true, '2026-10-17T10:00:00'),
                         E('e', true, '2026-10-16T10:00:00')] };
@@ -480,6 +484,73 @@ const zaehler = (w) => (w.document.querySelector('#w .nf-zaehler') || {}).textCo
         pruefe(aufrufe.some(([m, u]) => m === 'POST' && u === '/api/newsfeed/admin/eintraege/c/deaktivieren'),
                'Deaktivieren ruft POST …/c/deaktivieren', JSON.stringify(aufrufe));
         pruefe(aufrufe.some(([m, u]) => m === 'GET' && u === '/api/newsfeed/admin'), 'danach aus der Server-Antwort neu geladen');
+        w.close();
+    }
+
+    {
+        console.log('\n12. Anzahl im Admin-Reiter');
+        const dom = new JSDOM(lies('frontend/settings.html'), { url: 'https://localhost/settings', runScripts: 'outside-only' });
+        const w = dom.window;
+        w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
+        w.setInterval = () => 0;
+        sitzungLaden(w, { token: 'testtoken' });
+        w.eval(lies('frontend/js/icons.js'));
+        w.eval(lies('frontend/js/newsfeed.js'));
+        w.eval(lies('frontend/js/newsfeed_admin.js'));
+        const $ = (id) => w.document.getElementById(id);
+        if (!w.NewsfeedAdmin || !$('nfadm-anzahl') || !$('nfadm-anzahl-alle')) {
+            console.log('ABBRUCH: NewsfeedAdmin oder Anzahl-Felder fehlen im Markup'); process.exit(2);
+        }
+        const E = (id, aktiv, stand) => ({ id, titel: 'T-' + id, text: 'x.', erstellt: stand, aktiv });
+        const daten = { ok: true, skill_aktiv: true, einstellungen: { verweil_s: 3, scroll_s: 0.8, anzahl: 3 },
+            grenzen: { anzahl_min: 1, anzahl_max: 100, anzahl_alle: 'alle', titel_max: 80, text_max: 400 },
+            eintraege: [E('a', true, '2026-10-20T10:00:00'), E('b', false, '2026-10-19T10:00:00'),
+                        E('c', true, '2026-10-18T10:00:00'), E('d', true, '2026-10-17T10:00:00'),
+                        E('e', true, '2026-10-16T10:00:00')] };
+        let gesendet = null;
+        w.fetch = (url, o) => {
+            const pfad = url.split('?')[0];
+            if (pfad === '/api/newsfeed/admin/einstellungen') {
+                gesendet = JSON.parse(o.body);
+                const neu = Object.assign({}, gesendet);
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, einstellungen: neu }) });
+            }
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(daten) });
+        };
+        await w.NewsfeedAdmin.onShow();
+        const karte = (id) => w.document.querySelector('#nfadm-liste .am-vorg-card[data-nid="' + id + '"]');
+        if (!karte('a')) { console.log('ABBRUCH: Liste nicht gezeichnet'); process.exit(2); }
+        const sichtbar = () => ['a', 'b', 'c', 'd', 'e'].filter((id) => /im Portal sichtbar/.test(karte(id).textContent));
+        const vorschau = () => [...w.document.querySelectorAll('#nfadm-vorschau .nf-block:not([aria-hidden]) .nf-titel')].map((x) => x.textContent);
+        pruefe($('nfadm-anzahl').value === '3' && !$('nfadm-anzahl-alle').checked, 'Feld zeigt gespeicherte Anzahl 3', $('nfadm-anzahl').value);
+        pruefe($('nfadm-anzahl').min === '1', 'Untergrenze des Feldes = 1', $('nfadm-anzahl').min);
+        // Feld auf 1: Vorschau folgt sofort, die Liste (gespeichert) nicht.
+        $('nfadm-anzahl').value = '1';
+        $('nfadm-anzahl').dispatchEvent(new w.Event('input'));
+        pruefe(JSON.stringify(vorschau()) === '["T-a"]', 'Feld 1 -> Vorschau zeigt eine Meldung', JSON.stringify(vorschau()));
+        pruefe(JSON.stringify(sichtbar()) === '["a","c","d"]', 'Liste folgt dem GESPEICHERTEN Wert, nicht dem Feld', JSON.stringify(sichtbar()));
+        // „alle": Feld gesperrt, Vorschau mit allen aktiven.
+        $('nfadm-anzahl-alle').checked = true;
+        $('nfadm-anzahl-alle').dispatchEvent(new w.Event('change'));
+        pruefe($('nfadm-anzahl').disabled, '„alle" sperrt das Zahlenfeld');
+        pruefe(JSON.stringify(vorschau()) === '["T-a","T-c","T-d","T-e"]', '„alle" -> Vorschau mit allen aktiven', JSON.stringify(vorschau()));
+        $('nfadm-anz-save').click();
+        await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+        pruefe(gesendet && gesendet.anzahl === 'alle', 'Speichern schickt anzahl: "alle"', JSON.stringify(gesendet));
+        pruefe(JSON.stringify(sichtbar()) === '["a","c","d","e"]', 'nach dem Speichern: alle aktiven als sichtbar markiert', JSON.stringify(sichtbar()));
+        // Zurueck auf eine Zahl.
+        $('nfadm-anzahl-alle').checked = false;
+        $('nfadm-anzahl-alle').dispatchEvent(new w.Event('change'));
+        pruefe(!$('nfadm-anzahl').disabled && $('nfadm-anzahl').value !== '', 'Abwaehlen gibt das Feld mit einer Zahl frei', $('nfadm-anzahl').value);
+        $('nfadm-anzahl').value = '2';
+        $('nfadm-anz-save').click();
+        await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+        pruefe(gesendet && gesendet.anzahl === 2, 'Speichern schickt die Zahl als Zahl', JSON.stringify(gesendet));
+        pruefe(JSON.stringify(sichtbar()) === '["a","c"]', 'nach dem Speichern: zwei als sichtbar markiert', JSON.stringify(sichtbar()));
+        // Gespeichertes „alle" beim Laden.
+        daten.einstellungen.anzahl = 'alle';
+        await w.NewsfeedAdmin.laden();
+        pruefe($('nfadm-anzahl-alle').checked && $('nfadm-anzahl').disabled, 'gespeichertes „alle" hakt das Kaestchen und sperrt das Feld');
         w.close();
     }
 

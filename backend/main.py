@@ -18848,7 +18848,8 @@ async def newsfeed_admin_lesen(user: str = Depends(require_local_auth)):
     return JSONResponse({
         "ok": True, "eintraege": liste, "einstellungen": einst,
         "grenzen": {"titel_max": nf.TITEL_MAX, "text_max": nf.TEXT_MAX,
-                    "anzeige": nf.ANZEIGE_ANZAHL,
+                    "anzahl_min": nf.ANZAHL_MIN, "anzahl_max": nf.MAX_EINTRAEGE,
+                    "anzahl_alle": nf.ANZAHL_ALLE,
                     "verweil_min": nf.VERWEIL_MIN, "verweil_max": nf.VERWEIL_MAX,
                     "scroll_min": nf.SCROLL_MIN, "scroll_max": nf.SCROLL_MAX},
         "skill_aktiv": _skill_active("newsfeed"),
@@ -18918,7 +18919,8 @@ async def newsfeed_admin_loeschen(eid: str, user: str = Depends(require_local_au
 @app.post("/api/newsfeed/admin/einstellungen")
 async def newsfeed_admin_einstellungen(request: Request,
                                        user: str = Depends(require_local_auth)):
-    """Verweil- und Scrolldauer setzen. Body: ``{verweil_s, scroll_s}`` (Sekunden)."""
+    """Verweil-/Scrolldauer und Anzahl setzen. Body: ``{verweil_s, scroll_s, anzahl?}``
+    (Sekunden; ``anzahl`` ganze Zahl oder ``"alle"``, fehlt = unveraendert)."""
     from backend import newsfeed as nf  # noqa: PLC0415
     from backend import atomar  # noqa: PLC0415
     try:
@@ -18929,7 +18931,8 @@ async def newsfeed_admin_einstellungen(request: Request,
     body = body if isinstance(body, dict) else {}
     try:
         neu = await asyncio.to_thread(nf.einstellungen_setzen,
-                                      body.get("verweil_s"), body.get("scroll_s"))
+                                      body.get("verweil_s"), body.get("scroll_s"),
+                                      body.get("anzahl"))
     except nf.NewsfeedFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     except atomar.Unlesbar:

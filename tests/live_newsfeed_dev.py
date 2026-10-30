@@ -135,6 +135,10 @@ try:
     c("mitgeschicktes 'erstellt' NICHT uebernommen",
       all(not e["erstellt"].startswith("1999") for e in neu), [e["erstellt"] for e in neu])
 
+    # Die Zusage „drei" haengt an der Anzahl – fuer diese Messung ausdruecklich
+    # auf drei (die vorgefundene stellt der finally-Block wieder her).
+    ruf("/api/newsfeed/admin/einstellungen", TOKEN, "POST",
+        {"verweil_s": VOR_EINST.get("verweil_s", 3), "scroll_s": VOR_EINST.get("scroll_s", 0.8), "anzahl": 3})
     ruf("/api/skills/newsfeed/enable", TOKEN, "POST", {})
     s, me = ruf("/api/me", TOKEN)
     c("Skill an: permissions.newsfeed == True",
@@ -153,9 +157,27 @@ try:
     s, d = ruf("/api/newsfeed/admin/einstellungen", TOKEN, "POST", {"verweil_s": 0.5, "scroll_s": 1})
     c("Verweilzeit 0,5 s -> 400", s == 400, s)
     s, d = ruf("/api/newsfeed/admin/einstellungen", TOKEN, "POST", {"verweil_s": 4, "scroll_s": 1.2})
-    c("gueltige Einstellungen -> 200", s == 200 and d.get("einstellungen") == {"verweil_s": 4.0, "scroll_s": 1.2}, d)
+    c("gueltige Einstellungen -> 200, fehlende Anzahl bleibt 3",
+      s == 200 and d.get("einstellungen") == {"verweil_s": 4.0, "scroll_s": 1.2, "anzahl": 3}, d)
     s, d = ruf("/api/newsfeed", TOKEN)
     c("Anzeige liefert die neuen Werte", s == 200 and d.get("verweil_s") == 4.0 and d.get("scroll_s") == 1.2, d)
+
+    print("\n4b. Anzahl (1 bis alle)")
+    for wert, was in ((0, "0"), (2.5, "2,5"), ("viele", "Text"), (True, "bool")):
+        s, d = ruf("/api/newsfeed/admin/einstellungen", TOKEN, "POST",
+                   {"verweil_s": 4, "scroll_s": 1.2, "anzahl": wert})
+        c("Anzahl %s -> 400" % was, s == 400, (s, d))
+    ruf("/api/newsfeed/admin/einstellungen", TOKEN, "POST", {"verweil_s": 4, "scroll_s": 1.2, "anzahl": 1})
+    s, d = ruf("/api/newsfeed", TOKEN)
+    titel = [e["titel"] for e in (d or {}).get("eintraege", [])] if s == 200 else []
+    c("Anzahl 1 -> nur die neueste (Probe D)", titel == ["Probe D"] and d.get("anzahl") == 1, titel)
+    ruf("/api/newsfeed/admin/einstellungen", TOKEN, "POST", {"verweil_s": 4, "scroll_s": 1.2, "anzahl": "alle"})
+    s, d = ruf("/api/newsfeed", TOKEN)
+    s2, adm2 = ruf("/api/newsfeed/admin", TOKEN)
+    aktiv = [e["titel"] for e in (adm2 or {}).get("eintraege", []) if e.get("aktiv") is not False]
+    titel = [e["titel"] for e in (d or {}).get("eintraege", [])] if s == 200 else []
+    c("Anzahl 'alle' -> alle aktiven (%d)" % len(aktiv), titel == aktiv and len(titel) >= 4, (titel, aktiv))
+    ruf("/api/newsfeed/admin/einstellungen", TOKEN, "POST", {"verweil_s": 4, "scroll_s": 1.2, "anzahl": 3})
 
     print("\n5. Bearbeiten und Loeschen")
     s, d = ruf("/api/newsfeed/admin", TOKEN)

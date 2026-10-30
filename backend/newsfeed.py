@@ -1,12 +1,13 @@
 """Newsfeed: kurze Informationsbloecke, die Administratoren pflegen und /portal zeigt.
 
 WAS ES IST: ein Block hat eine Ueberschrift, einen Text von ein bis drei Saetzen
-und ein Erstellungsdatum. Das Portal zeigt die DREI NEUESTEN als Laufband in
-einer Kachel: ein Block bleibt ``verweil_s`` Sekunden stehen, rollt dann in
-``scroll_s`` Sekunden nach oben hinaus, der naechste rollt hinterher.
+und ein Erstellungsdatum. Das Portal zeigt die ``anzahl`` NEUESTEN (Vorgabe
+drei, einstellbar von einem bis „alle") als Laufband in einer Kachel: ein Block bleibt
+``verweil_s`` Sekunden stehen, rollt dann in ``scroll_s`` Sekunden nach oben
+hinaus, der naechste rollt hinterher.
 
 ⚠ ALLE ZEITSTEMPEL SETZT DER SERVER, NIE DER REQUEST. Sie entscheiden, welche
-drei Bloecke zu sehen sind – koennte ein Client sie mitschicken, liesse sich ein
+Bloecke zu sehen sind – koennte ein Client sie mitschicken, liesse sich ein
 alter Block nach vorn schieben, ohne dass es in der Liste auffaellt.
 
 ⚠ EINE BEARBEITUNG IST EINE NEUIGKEIT (Vorgabe des Betreibers 2026-10-20). Die
@@ -14,7 +15,7 @@ Reihenfolge haengt am STAND eines Blocks = Zeitpunkt der letzten Bearbeitung,
 sonst der Erstellung (``_stand``). Das Erstellungsdatum bleibt dabei stehen und
 wird weiter angezeigt. Ohne diese Regel liefe Vorgabe b) ins Leere: ein
 deaktivierter aelterer Block wird durch Bearbeiten wieder aktiv – stuende er
-nach Erstellung sortiert, kaeme er nie unter die drei sichtbaren.
+nach Erstellung sortiert, kaeme er nie unter die sichtbaren.
 
 DEAKTIVIEREN (``aktiv: False``): der Block bleibt im Einstellungs-Reiter
 sichtbar und bearbeitbar, erscheint im Portal aber nicht. Wieder aktiv wird er
@@ -38,6 +39,10 @@ Hinweis in der Oberflaeche nennt die Vorgabe.
 ⚠ AUSSERHALB DES BEREICHS WIRD ABGEWIESEN, NICHT STILL BESCHNITTEN. Wer 0,1 s
 Verweilzeit eintraegt und danach 1 s sieht, haelt die Einstellung fuer kaputt –
 ein stiller Fehlschlag mit Erfolgsmeldung (Register).
+
+⚠ „ALLE" IST EIN EIGENER WERT (``ANZAHL_ALLE``), KEINE 0. Eine 0 als
+„unbegrenzt" liefe in jede Falsyness-Pruefung (Register) und saehe in der
+Datei wie „keine" aus.
 
 Ablage in EINER kleinen Datei (``data/newsfeed.json``), atomar ueber
 ``backend.atomar`` geschrieben. Bauform wie ``feedback``: Kennungen aus
@@ -66,8 +71,12 @@ TITEL_MAX = 80
 # Drei normale Saetze passen hinein; mehr liest im Vorbeirollen niemand.
 TEXT_MAX = 400
 MAX_EINTRAEGE = 100
-# So viele Bloecke zeigt das Portal (Vorgabe des Betreibers 2026-10-20).
-ANZEIGE_ANZAHL = 3
+# So viele Bloecke zeigt das Portal: Vorgabe drei (Betreiber 2026-10-20),
+# einstellbar von einem bis „alle" (Betreiber 2026-10-30). Bei einem Block
+# steht das Laufband still (newsfeed.js zeigt dann keine Blaetterknoepfe).
+ANZAHL_VORGABE = 3
+ANZAHL_MIN = 1
+ANZAHL_ALLE = "alle"
 # Ausblend-Eintraege (je Benutzer einer). Darueber werden die aeltesten verworfen
 # – der Benutzer sieht den Newsfeed dann schlimmstenfalls einmal zu viel.
 MAX_AUSGEBLENDET = 5000
@@ -98,7 +107,8 @@ def _jetzt() -> str:
 
 def _vorgabe() -> dict:
     return {"einstellungen": {"verweil_s": VERWEIL_VORGABE,
-                              "scroll_s": SCROLL_VORGABE},
+                              "scroll_s": SCROLL_VORGABE,
+                              "anzahl": ANZAHL_VORGABE},
             "eintraege": []}
 
 
@@ -146,6 +156,25 @@ def _zahl(wert, feld: str, lo: float, hi: float) -> float:
     return round(z, 2)
 
 
+def _anzahl(wert) -> int | str:
+    """Anzahl sichtbarer Bloecke: ganze Zahl ANZAHL_MIN..MAX_EINTRAEGE oder ``ANZAHL_ALLE``."""
+    if isinstance(wert, str) and wert.strip().lower() == ANZAHL_ALLE:
+        return ANZAHL_ALLE
+    # bool ist eine Unterklasse von int – True waere sonst 1.
+    if isinstance(wert, bool):
+        raise NewsfeedFehler("Anzahl: ganze Zahl oder „alle“ erwartet.")
+    try:
+        z = float(wert)
+    except (TypeError, ValueError):
+        raise NewsfeedFehler("Anzahl: ganze Zahl oder „alle“ erwartet.") from None
+    if z != z or z != int(z):   # NaN oder Nachkommastellen
+        raise NewsfeedFehler("Anzahl: ganze Zahl oder „alle“ erwartet.")
+    if not (ANZAHL_MIN <= z <= MAX_EINTRAEGE):
+        raise NewsfeedFehler(f"Anzahl muss zwischen {ANZAHL_MIN} und {MAX_EINTRAEGE} liegen "
+                             f"(oder „alle“).")
+    return int(z)
+
+
 def einstellungen(d: dict | None = None) -> dict:
     """Die wirksamen Einstellungen – fehlende oder kaputte Werte durch die Vorgabe."""
     roh = (d if d is not None else _laden()).get("einstellungen") or {}
@@ -156,6 +185,10 @@ def einstellungen(d: dict | None = None) -> dict:
             aus[feld] = _zahl(roh.get(feld, vorgabe), feld, lo, hi)
         except NewsfeedFehler:
             aus[feld] = vorgabe
+    try:
+        aus["anzahl"] = _anzahl(roh.get("anzahl", ANZAHL_VORGABE))
+    except NewsfeedFehler:
+        aus["anzahl"] = ANZAHL_VORGABE
     return aus
 
 
@@ -190,7 +223,7 @@ def _ausgeblendet_laden() -> dict:
 
 
 def anzeige(benutzer: str = "") -> dict:
-    """Was das Portal braucht: die neuesten AKTIVEN Bloecke, ihr Stand, ob
+    """Was das Portal braucht: die ``anzahl`` neuesten AKTIVEN Bloecke, ihr Stand, ob
     ``benutzer`` diesen Stand ausgeblendet hat, und die Einstellungen.
 
     ⚠ Eine unlesbare Ausblend-Datei zeigt den Newsfeed (fail-open ist hier
@@ -199,7 +232,10 @@ def anzeige(benutzer: str = "") -> dict:
     """
     with _SPERRE:
         d = _laden()
-    sichtbar = [e for e in _sortiert(d["eintraege"]) if _aktiv(e)][:ANZEIGE_ANZAHL]
+    einst = einstellungen(d)
+    sichtbar = [e for e in _sortiert(d["eintraege"]) if _aktiv(e)]
+    if einst["anzahl"] != ANZAHL_ALLE:
+        sichtbar = sichtbar[:einst["anzahl"]]
     stand = max((_stand(e) for e in sichtbar), default="")
     weg = False
     if benutzer and stand:
@@ -208,8 +244,7 @@ def anzeige(benutzer: str = "") -> dict:
         except atomar.Unlesbar:
             gesehen = None
         weg = isinstance(gesehen, str) and gesehen >= stand
-    return {"eintraege": sichtbar, "stand": stand, "ausgeblendet": weg,
-            **einstellungen(d)}
+    return {"eintraege": sichtbar, "stand": stand, "ausgeblendet": weg, **einst}
 
 
 def ausblenden(benutzer: str, stand) -> str:
@@ -282,12 +317,20 @@ def eintrag_loeschen(eid: str) -> bool:
         return True
 
 
-def einstellungen_setzen(verweil_s, scroll_s) -> dict:
-    """Verweil- und Scrolldauer setzen (Sekunden). Ausserhalb → Fehler."""
+def einstellungen_setzen(verweil_s, scroll_s, anzahl=None) -> dict:
+    """Verweil- und Scrolldauer (Sekunden) und Anzahl setzen. Ausserhalb → Fehler.
+
+    ``anzahl`` FEHLT (``None``) = gespeicherten Wert behalten – ein Client mit
+    der alten Oberflaeche schickt das Feld nicht und soll es nicht still auf
+    die Vorgabe zuruecksetzen."""
     neu = {"verweil_s": _zahl(verweil_s, "Verweilzeit", VERWEIL_MIN, VERWEIL_MAX),
            "scroll_s": _zahl(scroll_s, "Scrolldauer", SCROLL_MIN, SCROLL_MAX)}
+    if anzahl is not None:
+        neu["anzahl"] = _anzahl(anzahl)
     with _SPERRE:
         d = _laden()
+        if anzahl is None:
+            neu["anzahl"] = einstellungen(d)["anzahl"]
         d["einstellungen"] = neu
         _speichern(d)
     return dict(neu)

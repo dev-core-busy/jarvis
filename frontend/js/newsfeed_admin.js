@@ -7,6 +7,10 @@
    gespeicherten: wer an der Geschwindigkeit dreht, will die Wirkung sehen,
    bevor er speichert.
 
+   ⚠ „IM PORTAL SICHTBAR" IN DER LISTE FOLGT DER GESPEICHERTEN ANZAHL, die
+   Vorschau der aus dem Feld. Die Liste sagt, was die Benutzer JETZT sehen;
+   die Vorschau, was sie nach dem Speichern saehen.
+
    ⚠ DIE LISTE ZEICHNET AUS DER SERVER-ANTWORT. Nach jedem Speichern/Loeschen
    wird neu geladen, statt den Zwischenstand der Oberflaeche anzuzeigen – das
    Erstellungsdatum und die Reihenfolge setzt der Server.
@@ -49,6 +53,7 @@
         _gebunden: false,
         _eintraege: [],
         _grenzen: {},
+        _einst: {},
         _offen: null,        // Kennung des aufgeklappten Formulars ('' = neu)
         _vorschau: null,
 
@@ -62,9 +67,14 @@
             if (neu) neu.addEventListener('click', function () { self.formular(''); });
             var sp = $('nfadm-anz-save');
             if (sp) sp.addEventListener('click', function () { self.anzeigeSpeichern(); });
-            ['nfadm-verweil', 'nfadm-scroll'].forEach(function (id) {
+            ['nfadm-verweil', 'nfadm-scroll', 'nfadm-anzahl'].forEach(function (id) {
                 var f = $(id);
                 if (f) f.addEventListener('input', function () { self.vorschau(); });
+            });
+            var alle = $('nfadm-anzahl-alle');
+            if (alle) alle.addEventListener('change', function () {
+                self._anzahlSperren();
+                self.vorschau();
             });
         },
 
@@ -75,9 +85,8 @@
                 .then(function (d) {
                     self._eintraege = d.eintraege || [];
                     self._grenzen = d.grenzen || {};
-                    var e = d.einstellungen || {};
-                    if ($('nfadm-verweil')) $('nfadm-verweil').value = e.verweil_s;
-                    if ($('nfadm-scroll')) $('nfadm-scroll').value = e.scroll_s;
+                    self._einst = d.einstellungen || {};
+                    self._felderSetzen(self._einst);
                     var aus = $('nfadm-skill-aus');
                     if (aus) aus.style.display = d.skill_aktiv ? 'none' : '';
                     self.liste();
@@ -88,7 +97,40 @@
                 });
         },
 
-        _anzahl: function () { return this._grenzen.anzeige || 3; },
+        _alle: function () { return this._grenzen.anzahl_alle || 'alle'; },
+
+        /** Anzahl als Obergrenze fuer slice/Zaehler – „alle" = unbegrenzt. */
+        _grenze: function (anzahl) {
+            if (anzahl === this._alle()) return Infinity;
+            var z = parseInt(anzahl, 10);
+            return isNaN(z) ? 3 : z;
+        },
+
+        /** Gespeicherte Anzahl (Server) – fuer die Marke in der Liste. */
+        _anzahl: function () { return this._grenze(this._einst.anzahl); },
+
+        _felderSetzen: function (e) {
+            if ($('nfadm-verweil')) $('nfadm-verweil').value = e.verweil_s;
+            if ($('nfadm-scroll')) $('nfadm-scroll').value = e.scroll_s;
+            var feld = $('nfadm-anzahl'), alle = $('nfadm-anzahl-alle');
+            var g = this._grenzen;
+            if (feld) {
+                if (g.anzahl_min != null) feld.min = g.anzahl_min;
+                if (g.anzahl_max != null) feld.max = g.anzahl_max;
+            }
+            var istAlle = e.anzahl === this._alle();
+            if (alle) alle.checked = istAlle;
+            // Bei „alle" bleibt die zuletzt sichtbare Zahl im Feld stehen, damit
+            // das Abwaehlen nicht bei einem leeren Feld landet.
+            if (feld && !istAlle && e.anzahl != null) feld.value = e.anzahl;
+            if (feld && !feld.value) feld.value = 3;
+            this._anzahlSperren();
+        },
+
+        _anzahlSperren: function () {
+            var feld = $('nfadm-anzahl'), alle = $('nfadm-anzahl-alle');
+            if (feld && alle) feld.disabled = alle.checked;
+        },
 
         liste: function () {
             var box = $('nfadm-liste'); if (!box) return;
@@ -243,8 +285,14 @@
         },
 
         _felder: function () {
+            var alle = $('nfadm-anzahl-alle');
+            // Eine Kommazahl geht unveraendert an den Server und wird dort mit
+            // Grund abgewiesen – nicht hier still abgeschnitten.
+            var anzahl = (alle && alle.checked) ? this._alle()
+                : Number(($('nfadm-anzahl') || {}).value);
             return { verweil_s: parseFloat(($('nfadm-verweil') || {}).value),
-                     scroll_s: parseFloat(($('nfadm-scroll') || {}).value) };
+                     scroll_s: parseFloat(($('nfadm-scroll') || {}).value),
+                     anzahl: anzahl };
         },
 
         anzeigeSpeichern: function () {
@@ -254,10 +302,11 @@
                 method: 'POST', headers: kopf({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(this._felder())
             }).then(antwort).then(function (d) {
-                var e = d.einstellungen || {};
-                $('nfadm-verweil').value = e.verweil_s;
-                $('nfadm-scroll').value = e.scroll_s;
+                self._einst = d.einstellungen || {};
+                self._felderSetzen(self._einst);
                 status('nfadm-anz-status', t('common.saved', 'Gespeichert'), 'ok');
+                // Die Marke „im Portal sichtbar" haengt an der Anzahl.
+                self.liste();
                 self.vorschau();
             }).catch(function (e) {
                 status('nfadm-anz-status', e.message, 'error');
@@ -269,8 +318,9 @@
             if (!wurzel || !window.JarvisNewsfeed) return;
             if (this._vorschau) this._vorschau.stoppen();
             var leer = $('nfadm-vorschau-leer');
-            var liste = this._eintraege.filter(function (e) { return e.aktiv !== false; })
-                .slice(0, this._anzahl());
+            var n = this._grenze(this._felder().anzahl);
+            var liste = this._eintraege.filter(function (e) { return e.aktiv !== false; });
+            if (n !== Infinity) liste = liste.slice(0, n);
             if (leer) leer.style.display = liste.length ? 'none' : '';
             this._vorschau = window.JarvisNewsfeed.ticker(wurzel, liste, this._felder());
         }

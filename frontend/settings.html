@@ -4406,7 +4406,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <span class="sk-openclaw-toggle" id="nf-sect-list-tog">▼</span>
                         </div>
                         <div class="kb-collapse-body" id="nf-sect-list-body">
-                            <p class="kb-hint" data-i18n-html="nfadm.intro">Jede Meldung hat eine <b>Überschrift</b> und <b>ein bis drei Sätze</b> Text. Im Portal erscheinen die <b>drei neuesten aktiven</b> als Laufband. <b>Bearbeiten gilt als Neuigkeit:</b> die Meldung rückt nach vorn und erscheint auch bei Benutzern wieder, die den Newsfeed ausgeblendet haben. Das Erstellungsdatum bleibt dabei stehen. <b>Deaktivieren</b> nimmt eine Meldung aus dem Portal; sichtbar wird sie erst nach dem nächsten Bearbeiten wieder.</p>
+                            <p class="kb-hint" data-i18n-html="nfadm.intro">Jede Meldung hat eine <b>Überschrift</b> und <b>ein bis drei Sätze</b> Text. Im Portal erscheinen die <b>neuesten aktiven</b> als Laufband – wie viele, legt <b>Anzeige</b> fest (Vorgabe: drei). <b>Bearbeiten gilt als Neuigkeit:</b> die Meldung rückt nach vorn und erscheint auch bei Benutzern wieder, die den Newsfeed ausgeblendet haben. Das Erstellungsdatum bleibt dabei stehen. <b>Deaktivieren</b> nimmt eine Meldung aus dem Portal; sichtbar wird sie erst nach dem nächsten Bearbeiten wieder.</p>
                             <p class="kb-hint" id="nfadm-skill-aus" style="display:none;color:var(--warning);" data-i18n-html="nfadm.skill_off">Der Skill <b>Newsfeed</b> ist ausgeschaltet – Meldungen lassen sich schon anlegen, im Portal erscheinen sie erst nach dem Einschalten unter <b>Skills</b>.</p>
                             <div id="nfadm-liste"></div>
                             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
@@ -4422,6 +4422,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <span class="sk-openclaw-toggle" id="nf-sect-anz-tog">▼</span>
                         </div>
                         <div class="kb-collapse-body" id="nf-sect-anz-body">
+                            <div class="form-group">
+                                <label for="nfadm-anzahl" data-i18n="nfadm.anzahl">Anzahl der Meldungen im Portal</label>
+                                <input type="number" id="nfadm-anzahl" min="1" max="100" step="1">
+                                <label class="checkbox-group" style="margin-top:8px;"><input type="checkbox" id="nfadm-anzahl-alle"><span data-i18n="nfadm.anzahl_alle">Alle aktiven Meldungen zeigen</span></label>
+                                <span class="kb-hint" data-i18n="nfadm.anzahl_hint">Die neuesten aktiven Meldungen laufen nacheinander durch; bei einer einzigen steht die Kachel still. Vorgabe: 3.</span>
+                            </div>
                             <div class="form-group">
                                 <label for="nfadm-verweil" data-i18n="nfadm.verweil">Verweilzeit je Meldung (Sekunden)</label>
                                 <input type="number" id="nfadm-verweil" min="1" max="60" step="0.5">
@@ -6120,7 +6126,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=399"></script>
+    <script src="/static/js/i18n.js?v=400"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=33"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6151,7 +6157,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/ai_mouse_admin.js?v=12"></script>
     <script src="/static/js/feedback_admin.js?v=7"></script>
     <script src="/static/js/newsfeed.js?v=4"></script>
-    <script src="/static/js/newsfeed_admin.js?v=2"></script>
+    <script src="/static/js/newsfeed_admin.js?v=3"></script>
     <script src="/static/js/kundenverwaltung.js?v=10"></script>
     <script src="/static/js/support_admin.js?v=13"></script>
     <script src="/static/js/telemetry.js?v=13"></script>

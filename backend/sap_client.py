@@ -29,12 +29,38 @@ via ``asyncio.to_thread`` ausfuehren, um den Event-Loop nicht zu blockieren.
 from __future__ import annotations
 
 import re
+import time
 import xml.etree.ElementTree as ET
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import requests
 
 # Standard-Timeout fuer HTTP-Aufrufe (OData). DB-Timeouts steuert hdbcli selbst.
 _HTTP_TIMEOUT = 30
+
+# Gateway-Katalog (V2), relativ zur OData-Basis-URL (…/sap/opu/odata).
+KATALOG_PFAD = "iwfnd/catalogservice;v=2/ServiceCollection"
+# Obergrenze fuer das Durchzaehlen, wenn der Server keinen $inlinecount liefert.
+# Gleich der Kappung in ``catalog_services`` – darueber waere die Zahl ohnehin
+# nicht mehr genau, und der Bericht sagt dann "mindestens".
+KATALOG_ZAEHL_MAX = 2000
+
+
+def _anzeige_url(url: str) -> str:
+    """Adresse fuer einen Bericht, der an Dritte geht (SAP-Administrator).
+
+    Prozent-Kodierung aufgeloest (``$top`` statt ``%24top``) und eine
+    Anmeldung in der Adresse (``benutzer:kennwort@host``) entfernt – sie waere
+    sonst im kopierten Bericht. Kennwort und Token stehen bei uns nie in der
+    Adresse (Basic-Auth bzw. Kopfzeile), die Basis-URL tippt aber der Benutzer."""
+    if not url:
+        return ""
+    try:
+        t = urlsplit(url)
+        netloc = t.netloc.rsplit("@", 1)[-1]
+        return unquote(urlunsplit((t.scheme, netloc, t.path, t.query, t.fragment)))
+    except ValueError:
+        return ""
 
 # Read-only Funktionsbausteine, die per RFC aufgerufen werden duerfen.
 _RFC_READONLY_WHITELIST = {
@@ -164,21 +190,47 @@ class _ODataClient:
         # Zugang teilen sich dieselbe Entscheidung.
         self.verify = _verify_odata(cfg, self.base)
         self.sap_client = (cfg.get("sap_client") or "").strip()  # Mandant (sap-client)
+        # Letzte HTTP-Anfrage {adresse, http_status, dauer_ms} – fuer den
+        # Bericht des Verbindungstests, auch im Fehlerfall.
+        self.letzte: dict | None = None
 
     @property
     def configured(self) -> bool:
         return bool(self.base)
 
-    def _auth(self):
+    @property
+    def anmeldeart(self) -> str:
+        """Welche Anmeldung tatsaechlich mitgeht: ``basic``, ``bearer`` oder
+        ``keine``. EINE Entscheidung fuer Anfrage UND Bericht – sonst nennt der
+        Bericht eine Anmeldeart, die gar nicht gesendet wurde."""
         if self.auth_kind == "basic" and self.user:
+            return "basic"
+        if self.auth_kind == "bearer" and self.bearer:
+            return "bearer"
+        return "keine"
+
+    def _auth(self):
+        if self.anmeldeart == "basic":
             return (self.user, self.password)
         return None
 
     def _headers(self) -> dict:
         h = {"Accept": "application/json"}
-        if self.auth_kind == "bearer" and self.bearer:
+        if self.anmeldeart == "bearer":
             h["Authorization"] = "Bearer " + self.bearer
         return h
+
+    def _merke(self, url: str, status: int, t0: float) -> None:
+        self.letzte = {"adresse": _anzeige_url(url), "http_status": int(status or 0),
+                       "dauer_ms": int((time.monotonic() - t0) * 1000)}
+
+    @staticmethod
+    def _url_mit(url: str, params: dict) -> str:
+        """Volle Adresse samt Parametern fuer den Fall ohne Antwort."""
+        try:
+            return requests.Request("GET", url, params=params).prepare().url or url
+        except Exception:  # noqa: BLE001
+            return url
 
     def _url(self, path: str) -> str:
         path = (path or "").strip()
@@ -195,11 +247,15 @@ class _ODataClient:
         p.setdefault("$format", "json")
         if self.sap_client:
             p.setdefault("sap-client", self.sap_client)
+        url = self._url(path)
+        t0 = time.monotonic()
         try:
-            r = requests.get(self._url(path), params=p, headers=self._headers(),
+            r = requests.get(url, params=p, headers=self._headers(),
                              auth=self._auth(), verify=self.verify, timeout=_HTTP_TIMEOUT)
         except requests.RequestException as e:
+            self._merke(self._url_mit(url, p), 0, t0)
             raise SapError(0, "Netzwerkfehler: %s" % e)
+        self._merke(r.url, r.status_code, t0)
         if r.status_code >= 400:
             msg = ""
             try:
@@ -224,11 +280,16 @@ class _ODataClient:
         p = {}
         if self.sap_client:
             p["sap-client"] = self.sap_client
+        h = self._headers()
+        h["Accept"] = "application/xml"
+        t0 = time.monotonic()
         try:
-            r = requests.get(url, params=p, headers={"Accept": "application/xml"},
+            r = requests.get(url, params=p, headers=h,
                              auth=self._auth(), verify=self.verify, timeout=_HTTP_TIMEOUT)
         except requests.RequestException as e:
+            self._merke(self._url_mit(url, p), 0, t0)
             raise SapError(0, "Netzwerkfehler: %s" % e)
+        self._merke(r.url, r.status_code, t0)
         if r.status_code >= 400:
             raise SapError(r.status_code, (r.text or "")[:300] or ("HTTP %s" % r.status_code))
         return r.text
@@ -289,8 +350,8 @@ class _ODataClient:
     def catalog_services(self, limit: int = 200) -> list[dict]:
         """Listet verfuegbare OData-Services ueber den Gateway-Katalog (V2).
         Faellt auf einen leeren Katalog zurueck, wenn nicht erreichbar."""
-        path = "iwfnd/catalogservice;v=2/ServiceCollection"
-        data = self.get(path, {"$top": max(1, min(int(limit or 200), 2000))})
+        data = self.get(KATALOG_PFAD,
+                        {"$top": max(1, min(int(limit or 200), KATALOG_ZAEHL_MAX))})
         out = []
         for r in self.rows_from(data):
             out.append({
@@ -300,6 +361,27 @@ class _ODataClient:
                 "version": r.get("TechnicalServiceVersion") or "",
             })
         return out
+
+    def catalog_count(self) -> tuple[int, bool]:
+        """Zahl der Services im Gateway-Katalog als ``(anzahl, genau)``.
+
+        Zuerst ueber ``$inlinecount`` – eine Zeile Nutzlast, der Server zaehlt.
+        Liefert er keinen Zaehler (oder lehnt den Parameter mit 400 ab), wird
+        bis ``KATALOG_ZAEHL_MAX`` gelistet; genau ist die Zahl dann nur
+        unterhalb dieser Grenze. Alle anderen Fehler (401/403/404/5xx) gehen
+        unveraendert an den Aufrufer."""
+        data = None
+        try:
+            data = self.get(KATALOG_PFAD, {"$top": 1, "$inlinecount": "allpages"})
+        except SapError as e:
+            if e.status != 400:
+                raise
+        d = data.get("d") if isinstance(data, dict) else None
+        n = str(d.get("__count") or "").strip() if isinstance(d, dict) else ""
+        if n.isdigit():
+            return int(n), True
+        svcs = self.catalog_services(limit=KATALOG_ZAEHL_MAX)
+        return len(svcs), len(svcs) < KATALOG_ZAEHL_MAX
 
 
 # ── HANA SQL (hdbcli) ────────────────────────────────────────────────
@@ -550,6 +632,9 @@ class SapClient:
         self.odata = _ODataClient(self.cfg)
         self.hana = _HanaClient(self.cfg)
         self.rfc = _RfcClient(self.cfg)
+        # Was der letzte ``test()`` geprueft hat – bleibt nach einer Ausnahme
+        # stehen, damit der Fehlerbericht dieselben Angaben traegt.
+        self.test_info: dict | None = None
 
     @property
     def configured(self) -> bool:
@@ -564,30 +649,99 @@ class SapClient:
         return {"odata": self.odata, "hana": self.hana,
                 "rfc": self.rfc}.get(self.connection_type, self.odata)
 
-    def test(self) -> dict:
-        """Prueft die aktive Verbindung; liefert ``{ok, detail}``-artiges dict."""
+    def _test_variante(self) -> str:
+        ct = self.connection_type
+        if ct in ("hana", "rfc"):
+            return ct
+        return "service" if self.odata.default_service else "katalog"
+
+    def _test_info_basis(self) -> dict:
+        """Die Angaben, die VOR dem Test feststehen (Ziel, Benutzer, Mandant).
+
+        Nie ein Kennwort oder Token – der Bericht wird kopiert und an den
+        SAP-Administrator weitergegeben. ``geschaeftsdaten_gelesen`` steht
+        ausdruecklich drin: kein Test liest Datensaetze, ein gruener Test sagt
+        also nichts ueber die fachlichen Berechtigungen."""
+        info: dict = {"variante": self._test_variante(),
+                      "geschaeftsdaten_gelesen": False}
         ct = self.connection_type
         if ct == "hana":
-            return {"type": "hana", "detail": self.hana.test()}
+            h = self.hana
+            info.update({"adresse": "%s:%d" % (h.host, h.port), "benutzer": h.user,
+                         "schema": h.schema, "verschluesselt": bool(h.encrypt)})
+        elif ct == "rfc":
+            p = self.rfc.params
+            info.update({"adresse": p.get("ashost", ""), "systemnummer": p.get("sysnr", ""),
+                         "mandant": p.get("client", ""), "benutzer": p.get("user", "")})
+        else:
+            o = self.odata
+            art = o.anmeldeart
+            info.update({"basis": _anzeige_url(o.base), "service": o.default_service,
+                         "mandant": o.sap_client, "anmeldeart": art,
+                         "benutzer": o.user if art == "basic" else ""})
+        return info
+
+    def test_bericht(self) -> dict:
+        """Bericht zum letzten ``test()`` – auch nach einer Ausnahme.
+
+        Bei OData kommen Adresse, HTTP-Status und Antwortzeit der LETZTEN
+        Anfrage dazu; das ist die, an der der Test entschieden wurde."""
+        info = dict(self.test_info or self._test_info_basis())
+        if info.get("variante") in ("service", "katalog", "katalog_fehlt") and self.odata.letzte:
+            info.update(self.odata.letzte)
+        return info
+
+    def test(self) -> dict:
+        """Prueft die aktive Verbindung; liefert ``{type, detail, info}``.
+
+        ``detail`` ist die Kurzzeile, ``info`` der Bericht fuer den
+        SAP-Administrator (siehe ``test_bericht``). Was geprueft wird:
+
+        * OData MIT Standard-Service: ``<service>/$metadata`` – gezaehlt werden
+          die dort DEFINIERTEN EntitySets (keine Datensaetze, keine Aussage
+          darueber, welche der Benutzer lesen darf).
+        * OData OHNE Standard-Service: der Gateway-Katalog
+          (``/IWFND/CATALOGSERVICE``), mit der echten Zahl der Services.
+        * HANA: Anmeldung samt ``CURRENT_USER``/Datenbankname; RFC: ``RFCPING``."""
+        info = self._test_info_basis()
+        self.test_info = info
+        ct = self.connection_type
+        t0 = time.monotonic()
+        if ct == "hana":
+            detail = self.hana.test()
+            info["dauer_ms"] = int((time.monotonic() - t0) * 1000)
+            return {"type": "hana", "detail": detail, "info": self.test_bericht()}
         if ct == "rfc":
             self.rfc.call("RFCPING")
-            return {"type": "rfc", "detail": "RFCPING ok (%s)" % self.rfc.params.get("ashost")}
-        # OData: leichter Metadaten-/Katalog-Ping
-        if self.odata.default_service:
-            n = len(self.odata.entity_sets())
-            return {"type": "odata", "detail": "%d EntitySet(s) im Service" % n}
+            info["dauer_ms"] = int((time.monotonic() - t0) * 1000)
+            return {"type": "rfc", "detail": "RFCPING ok (%s)" % self.rfc.params.get("ashost"),
+                    "info": self.test_bericht()}
+        if info["variante"] == "service":
+            sets = self.odata.entity_sets()
+            info["entity_sets"] = sets
+            return {"type": "odata",
+                    "detail": "Service %s: %d EntitySet(s) definiert"
+                              % (self.odata.default_service, len(sets)),
+                    "info": self.test_bericht()}
         try:
-            svcs = self.odata.catalog_services(limit=1)
-            return {"type": "odata", "detail": "Katalog erreichbar (%d+ Services)" % len(svcs)}
+            n, genau = self.odata.catalog_count()
         except SapError as e:
             # Kein SAP-Gateway-Katalog (z.B. S/4HANA Cloud) => 404. Der Server hat
             # geantwortet, die Verbindung steht – nur der Katalog-Pfad fehlt.
             # Auth-/Serverfehler (401/403/5xx) dagegen sind echte Fehler.
             if e.status == 404:
+                info["variante"] = "katalog_fehlt"
                 return {"type": "odata",
                         "detail": "Server erreichbar, aber kein Gateway-Katalog – "
-                                  "bitte Standard-Service angeben"}
+                                  "bitte Standard-Service angeben",
+                        "info": self.test_bericht()}
             raise
+        info["anzahl_services"] = n
+        info["anzahl_genau"] = genau
+        return {"type": "odata",
+                "detail": ("Gateway-Katalog erreichbar: %d Service(s)" % n) if genau
+                          else ("Gateway-Katalog erreichbar: mindestens %d Services" % n),
+                "info": self.test_bericht()}
 
 
 # ── Reporting-Tool-Anbindungen ────────────────────────────────────────

@@ -12,11 +12,16 @@
  *   5. Escape schliesst zuerst den Anweisungs-Dialog, dann das Verlaufsfeld
  *   6. Portal: Kachel nur bei permissions.sap
  *   7. "Mein SAP-Zugang": die Aussetzer-Meldung nennt den GRUND
+ *  15. Verbindungstest: Bericht fuer den SAP-Administrator (auch im Fehlerfall)
  *
  * WICHTIG (Fallstrick vom 2026-07-30): am Ende window.close() + process.exit(),
  * sonst haelt der 30-Sekunden-Timer der LLM-Anzeige den Prozess fuer immer offen.
  *
  * Lauf:  timeout 90 node tests/test_sap_portal_ui.js
+ *
+ * SAP_PORTAL_JS=<pfad> legt statt frontend/js/sap_portal.js eine KOPIE vor –
+ * fuer die Gegenprobe (gegen_sap_verbindungstest.py), die echte Datei wird
+ * dabei nie angefasst.
  */
 'use strict';
 
@@ -26,6 +31,7 @@ const path = require('path');
 const { JSDOM, VirtualConsole } = require('./lib/jsdom_laden')();
 
 const ROOT = path.resolve(__dirname, '..');
+const PORTAL_JS = process.env.SAP_PORTAL_JS || path.join(ROOT, 'frontend', 'js', 'sap_portal.js');
 const results = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -142,6 +148,7 @@ function build(htmlFile, me, opts) {
                                         : json({ ok: true });
                 }
                 if (u.startsWith('/api/sap/stop')) return json({ ok: true });
+                if (u.startsWith('/api/sap/test') && opts.sapTest) return json(opts.sapTest);
                 if (u.startsWith('/api/llm/active-status')) return json({ status: 'ok', profile_name: 'Test' });
                 if (u.startsWith('/api/support/status')) return json({ active: false });
                 if (u.startsWith('/api/wissen/scope')) return json({ ok: true, groups: [] });
@@ -163,7 +170,8 @@ function build(htmlFile, me, opts) {
 }
 
 function loadScript(dom, rel) {
-    const code = fs.readFileSync(path.join(ROOT, 'frontend', rel), 'utf8');
+    const code = fs.readFileSync(rel === 'js/sap_portal.js' ? PORTAL_JS
+                                                           : path.join(ROOT, 'frontend', rel), 'utf8');
     // sitzung.js vor jedem Modul-Eval: die Module lesen den Sitzungstoken
     // seit dem 2026-10-01 aus der gemeinsamen Quelle und rufen sie beim
     // LADEN auf. Jede echte Seite laedt sie davor.
@@ -676,6 +684,144 @@ function loadScript(dom, rel) {
         });
         check('sap.acc_last_error in beiden Sprachen', fehlt.length === 0, fehlt.join(', '));
         d7c.window.close();
+    }
+
+    // ══ 15. Verbindungstest: Bericht fuer den SAP-Administrator ══════
+    // Gemeldet 2026-10-30: "Katalog erreichbar (1+ Services)" bzw. "22
+    // EntitySet(s)" – der Administrator konnte nicht ablesen, WAS geprueft
+    // wurde. Geprueft wird der GERENDERTE Bericht samt kopiertem Text, im
+    // Erfolgs- UND im Fehlerfall (dann fragt der Administrator nach).
+    section('15. Verbindungstest: Bericht');
+    async function testLauf(antwort) {
+        const d = build('sap.html', { username: 'anna', is_admin: true, permissions: { sap: true } },
+                        { account: { vorhanden: true, connection_type: 'odata', aktiv: true,
+                                     erlaubte_hosts: [], host_ok: true, cert: {} },
+                          sapTest: antwort });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/chatlib.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(140);
+        const kopiert = [];
+        d.window.JarvisChatLib = Object.assign({}, d.window.JarvisChatLib || {}, {
+            copyTextToClipboard: (t) => { kopiert.push(t); return Promise.resolve(); },
+        });
+        const box = d.window.document.getElementById('sp-acc-testinfo');
+        const vorher = !!box && box.hidden === true;
+        d.window.document.getElementById('sp-acc-test').click();
+        await sleep(120);
+        return { d, box, vorher, kopiert, doc: d.window.document };
+    }
+    function zeilenVon(box) {
+        const z = {};
+        const dts = box.querySelectorAll('.sp-ti-grid dt');
+        dts.forEach((dt) => { z[dt.textContent] = dt.nextElementSibling ? dt.nextElementSibling.textContent : null; });
+        return z;
+    }
+    const SETS15 = ['Artikel', 'Bestellungen', 'Kunden'];
+    const ADR15 = 'https://sap.example/sap/opu/odata/ZSVC_SRV/$metadata?sap-client=100';
+    {
+        const r = await testLauf({
+            ok: true, configured: true, type: 'odata', quelle: 'persoenlich',
+            detail: 'Service ZSVC_SRV: 3 EntitySet(s) definiert',
+            info: { variante: 'service', geschaeftsdaten_gelesen: false,
+                    basis: 'https://sap.example/sap/opu/odata', service: 'ZSVC_SRV',
+                    mandant: '100', anmeldeart: 'basic', benutzer: 'SAPUSER1',
+                    entity_sets: SETS15, adresse: ADR15, http_status: 200, dauer_ms: 87 },
+        });
+        check('Bericht ist vor dem Test verborgen', r.vorher);
+        check('Bericht erscheint nach dem Test', !!r.box && r.box.hidden === false);
+        const z = r.box ? zeilenVon(r.box) : {};
+        check('Zeile: aufgerufene Adresse', z['Aufgerufene Adresse'] === ADR15, JSON.stringify(z));
+        check('Zeile: Standard-Service', z['Standard-Service'] === 'ZSVC_SRV', JSON.stringify(z));
+        check('Zeile: Mandant', z['Mandant'] === '100', JSON.stringify(z));
+        check('Zeile: SAP-Benutzer', z['SAP-Benutzer'] === 'SAPUSER1', JSON.stringify(z));
+        check('Zeile: Anmeldeart in Worten', /Basic/.test(z['Anmeldeart'] || ''), z['Anmeldeart']);
+        check('Zeile: HTTP-Status', z['HTTP-Status'] === '200', z['HTTP-Status']);
+        check('Zeile: Antwortzeit', z['Antwortzeit'] === '87 ms', z['Antwortzeit']);
+        check('Zeile: Zahl der EntitySets', z['EntitySets im Service'] === '3', z['EntitySets im Service']);
+        const li = r.box ? [...r.box.querySelectorAll('.sp-ti-sets li')].map((x) => x.textContent) : [];
+        check('EntitySet-Namen aufklappbar gelistet', JSON.stringify(li) === JSON.stringify(SETS15), JSON.stringify(li));
+        const head = (r.box && r.box.querySelector('.sp-ti-head')) ? r.box.querySelector('.sp-ti-head').textContent : '';
+        check('Kopfsatz erklaert die Pruefart ($metadata)', /\$metadata/.test(head) && /keine Datensätze/.test(head), head);
+        check('Fusszeile: keine Geschaeftsdaten gelesen',
+              /keine Geschäftsdaten/.test(r.box ? r.box.textContent : ''));
+        check('Bericht nicht als Fehler markiert', r.box && !r.box.classList.contains('is-error'));
+        check('Statuszeile bleibt die Kurzmeldung',
+              /3 EntitySet/.test(r.doc.getElementById('sp-acc-status').textContent),
+              r.doc.getElementById('sp-acc-status').textContent);
+
+        const knopf = r.doc.getElementById('sp-acc-ti-copy');
+        check('Kopierknopf vorhanden', !!knopf);
+        if (knopf) knopf.click();
+        await sleep(30);
+        const txt = r.kopiert[0] || '';
+        check('Kopieren liefert Text', txt.length > 0);
+        const fehlend = Object.keys(z).filter((k) => txt.indexOf(k + ': ' + z[k]) < 0);
+        check('kopierter Text enthaelt JEDE angezeigte Zeile woertlich', fehlend.length === 0 && Object.keys(z).length > 5,
+              fehlend.join(', '));
+        check('kopierter Text listet alle EntitySets', SETS15.every((n) => txt.indexOf('  ' + n) >= 0), txt);
+        check('kopierter Text nennt Ergebnis und Fusszeile',
+              /Ergebnis: erfolgreich/.test(txt) && /keine Geschäftsdaten/.test(txt), txt.slice(0, 200));
+        check('kein "undefined"/"null" im kopierten Text', !/undefined|null/.test(txt));
+        check('Rueckmeldung am Kopierknopf',
+              /kopiert/i.test((r.doc.getElementById('sp-acc-ti-note') || {}).textContent || ''));
+
+        // Sprachwechsel: der Bericht wird neu gezeichnet.
+        r.d.window.setLang('en');
+        await sleep(40);
+        const zEn = r.box ? zeilenVon(r.box) : {};
+        check('nach Sprachwechsel englische Beschriftung', zEn['Requested address'] === ADR15, JSON.stringify(Object.keys(zEn)));
+        r.d.window.close();
+    }
+    {
+        const r = await testLauf({
+            ok: false, configured: true, status: 401, type: 'odata', quelle: 'persoenlich',
+            error: 'Anmeldung abgelehnt',
+            info: { variante: 'katalog', geschaeftsdaten_gelesen: false,
+                    basis: 'https://sap.example/sap/opu/odata', service: '', mandant: '',
+                    anmeldeart: 'basic', benutzer: 'SAPUSER1',
+                    adresse: 'https://sap.example/sap/opu/odata/iwfnd/catalogservice;v=2/ServiceCollection?$top=1',
+                    http_status: 401, dauer_ms: 12 },
+        });
+        check('Fehlerfall: Bericht erscheint trotzdem', !!r.box && r.box.hidden === false);
+        check('Fehlerfall: als Fehler markiert', !!r.box && r.box.classList.contains('is-error'));
+        const z = r.box ? zeilenVon(r.box) : {};
+        check('Fehlerfall: HTTP-Status 401 sichtbar', z['HTTP-Status'] === '401', JSON.stringify(z));
+        check('Fehlerfall: leerer Mandant wird erklaert', /Standardmandant/.test(z['Mandant'] || ''), z['Mandant']);
+        check('Fehlerfall: kein Service = "keiner"', /keiner/.test(z['Standard-Service'] || ''), z['Standard-Service']);
+        check('Fehlerfall: Kopfsatz erklaert den Katalog-Test',
+              /CATALOGSERVICE/.test((r.box.querySelector('.sp-ti-head') || {}).textContent || ''));
+        check('Fehlerfall: Statuszeile nennt den Fehler',
+              /Anmeldung abgelehnt/.test(r.doc.getElementById('sp-acc-status').textContent));
+        const knopf = r.doc.getElementById('sp-acc-ti-copy');
+        if (knopf) knopf.click();
+        await sleep(30);
+        check('Fehlerfall: kopierter Bericht sagt "fehlgeschlagen" und nennt den Fehler',
+              /Ergebnis: fehlgeschlagen/.test(r.kopiert[0] || '') && /Anmeldung abgelehnt/.test(r.kopiert[0] || ''),
+              (r.kopiert[0] || '').slice(0, 200));
+        r.d.window.close();
+    }
+    {
+        // Jeder im Modul benutzte sap.ti_*-Schluessel existiert in BEIDEN
+        // Sprachen – gelesen aus dem Quelltext, nicht abgetippt. t() faellt
+        // auf Deutsch zurueck und `_I18N` ist im eval-Bereich nicht
+        // erreichbar, deshalb wird i18n.js an der Grenze `en: {` geteilt.
+        const quelle = fs.readFileSync(PORTAL_JS, 'utf8');
+        // JEDES 'sap.ti_…'-Literal, nicht nur T('…'): die Zeilen laufen ueber
+        // den Helfer add('sap.ti_…', …) – ein Muster nur auf T( war fuer sie
+        // blind (von der Gegenprobe gefunden).
+        const keys = [...new Set([...quelle.matchAll(/'(sap\.ti_[a-z_]+)'/g)].map((m) => m[1]))];
+        const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        const grenze = i18n.search(/\n\s*en\s*:\s*\{/);
+        const bloecke = { de: grenze > 0 ? i18n.slice(0, grenze) : '', en: grenze > 0 ? i18n.slice(grenze) : '' };
+        check('Positivkontrolle: sap.ti_*-Schluessel im Modul gefunden', keys.length >= 20, String(keys.length));
+        check('Positivkontrolle: Sprachgrenze in i18n.js gefunden',
+              grenze > 0 && bloecke.de.indexOf("'sap.acc_removed':") >= 0 && bloecke.en.indexOf("'sap.acc_removed':") >= 0);
+        const fehlt = [];
+        keys.forEach((k) => ['de', 'en'].forEach((lg) => {
+            if (bloecke[lg].indexOf("'" + k + "':") < 0) fehlt.push(lg + ':' + k);
+        }));
+        check('alle sap.ti_*-Schluessel in DE und EN', fehlt.length === 0, fehlt.join(', '));
     }
 
     // ── Ergebnis ────────────────────────────────────────────────────

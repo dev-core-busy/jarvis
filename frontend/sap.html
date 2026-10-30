@@ -249,6 +249,27 @@
             border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 12px;
             font-size: .84rem; line-height: 1.5; color: var(--text-primary); }
         .sp-acc-note.is-on { display: block; }
+        /* Bericht zum Verbindungstest. Bewusst OHNE eigenes `display`, damit das
+           `hidden`-Attribut greift (Klassen-Falle von `.sp-row`, s. u.).
+           Deckende Flaeche wie beim Hinweiskasten. */
+        .sp-acc-testinfo { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: 12px 14px; margin-top: 12px;
+            font-size: .84rem; line-height: 1.5; color: var(--text-primary); }
+        .sp-acc-testinfo.is-error { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+        .sp-ti-head { margin: 0 0 10px; color: var(--text-secondary); }
+        .sp-ti-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr);
+            gap: 4px 14px; margin: 0; }
+        .sp-ti-grid dt { color: var(--text-muted); }
+        .sp-ti-grid dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+        .sp-ti-sets { margin-top: 10px; }
+        .sp-ti-sets > summary { cursor: pointer; color: var(--text-secondary); }
+        .sp-ti-sets ul { margin: 6px 0 0; padding-left: 20px; columns: 2 220px;
+            font-family: var(--font-mono); font-size: .8rem; }
+        .sp-ti-foot { margin: 10px 0 0; color: var(--text-muted); font-size: .8rem; }
+        @media (max-width: 560px) {
+            .sp-ti-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+            .sp-ti-grid dd { margin-bottom: 6px; }
+        }
         /* FALLSTRICK: `.sp-row` setzt `display: flex` und ueberstimmt damit das
            UA-Stylesheet fuer [hidden] – ohne diese Regel bleibt eine per
            `hidden` verborgene Zeile sichtbar (im Screenshot aufgefallen: das
@@ -582,6 +603,7 @@
                     <button class="sp-hist-btn" id="sp-acc-del" type="button" data-i18n="sap.acc_remove">Eigenen Zugang entfernen</button>
                     <span class="sp-note" id="sp-acc-status"></span>
                 </div>
+                <div class="sp-acc-testinfo" id="sp-acc-testinfo" hidden></div>
                 <p class="sp-sect-hint" id="sp-acc-hosts"></p>
             </div>
         </details>
@@ -651,7 +673,7 @@
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=15"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=395"></script>
+<script src="/static/js/i18n.js?v=396"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
@@ -669,7 +691,7 @@
 <!-- sapcert.js VOR sap_portal.js: die Benutzerkachel haengt den Baustein
      beim Laden des Zugangs ein. -->
 <script src="/static/js/sapcert.js?v=3"></script>
-<script src="/static/js/sap_portal.js?v=10"></script>
+<script src="/static/js/sap_portal.js?v=11"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR

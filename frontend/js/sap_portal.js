@@ -807,6 +807,7 @@
                     return;
                 }
                 accClearSecrets();
+                accResetTestInfo();
                 accNote('✓ ' + T('sap.acc_saved', 'Gespeichert.'), 'ok');
                 loadAccount();
                 loadStatus();      // Pille und Verbindungsanzeige folgen sofort
@@ -816,11 +817,162 @@
             });
     }
 
+    // ── Bericht zum Verbindungstest ─────────────────────────────────
+    // Fuer den SAP-Administrator: WAS geprueft wurde (Gateway-Katalog oder
+    // Metadaten eines Service), gegen welche Adresse, mit welchem Benutzer und
+    // Mandanten, mit welchem HTTP-Status. Steht auch im FEHLERFALL da – genau
+    // dann wird nachgefragt. Kennwort und Token liefert der Server nie mit.
+    var _letzterTest = null;   // {d, zeit}
+
+    function tiVariante(v) {
+        switch (v) {
+            case 'service':
+                return T('sap.ti_v_service', 'Abgerufen wurde die Beschreibung ($metadata) des Standard-Service. '
+                    + 'Gezählt sind die darin definierten EntitySets (Datenmengen) – keine Datensätze, '
+                    + 'und keine Aussage darüber, welche davon dieser Benutzer lesen darf.');
+            case 'katalog':
+                return T('sap.ti_v_catalog', 'Kein Standard-Service eingetragen – abgerufen wurde deshalb der '
+                    + 'Service-Katalog des SAP Gateway (/IWFND/CATALOGSERVICE). Das belegt Erreichbarkeit, '
+                    + 'Anmeldung und das Recht, den Katalog aufzurufen. Für einen Test gegen einen bestimmten '
+                    + 'Service dessen Namen unter „Standard-Service“ eintragen.');
+            case 'katalog_fehlt':
+                return T('sap.ti_v_nocatalog', 'Der Server antwortet, hat aber keinen Gateway-Katalog (HTTP 404, '
+                    + 'z. B. bei S/4HANA Cloud). Bitte unter „Standard-Service“ einen Service eintragen.');
+            case 'hana':
+                return T('sap.ti_v_hana', 'Angemeldet an der HANA-Datenbank und Benutzer sowie Datenbankname abgefragt.');
+            case 'rfc':
+                return T('sap.ti_v_rfc', 'Erreichbarkeit und Anmeldung per RFCPING geprüft.');
+        }
+        return '';
+    }
+
+    function tiAnmeldeart(a) {
+        if (a === 'basic') return T('sap.ti_auth_basic', 'Benutzer und Kennwort (Basic)');
+        if (a === 'bearer') return T('sap.ti_auth_bearer', 'Token (Bearer)');
+        return T('sap.ti_auth_none', 'keine – es wurden keine Anmeldedaten gesendet');
+    }
+
+    // [Beschriftung, Wert] – EINE Quelle fuer Anzeige UND kopierten Bericht,
+    // sonst steht im Bericht etwas anderes als auf dem Bildschirm.
+    function tiZeilen(d) {
+        var i = (d && d.info) || {}, z = [];
+        var odata = (i.variante === 'service' || i.variante === 'katalog' || i.variante === 'katalog_fehlt');
+        function add(k, fb, v) {
+            if (v === undefined || v === null || v === '') return;
+            z.push([T(k, fb), String(v)]);
+        }
+        add('sap.ti_address', 'Aufgerufene Adresse', i.adresse);
+        if (odata && i.basis && !i.adresse) add('sap.ti_base', 'Basis-URL', i.basis);
+        if (odata) add('sap.ti_service', 'Standard-Service', i.service || T('sap.ti_none', '— keiner —'));
+        if (odata || i.variante === 'rfc') {
+            add('sap.ti_mandant', 'Mandant', i.mandant
+                || T('sap.ti_mandant_default', '— nicht angegeben, es gilt der Standardmandant des Servers —'));
+        }
+        if (i.variante === 'rfc') add('sap.ti_sysnr', 'Systemnummer', i.systemnummer);
+        add('sap.ti_user', 'SAP-Benutzer', i.benutzer);
+        if (odata) add('sap.ti_auth', 'Anmeldeart', tiAnmeldeart(i.anmeldeart));
+        if (i.variante === 'hana') {
+            add('sap.ti_schema', 'Schema', i.schema);
+            add('sap.ti_encrypt', 'Verschlüsselt', i.verschluesselt ? T('sap.ti_yes', 'ja') : T('sap.ti_no', 'nein'));
+        }
+        if (i.http_status !== undefined && i.http_status !== null) {
+            add('sap.ti_http', 'HTTP-Status', i.http_status === 0
+                ? T('sap.ti_http_none', 'keine Antwort (Netzwerk, Zertifikat oder Zeitüberschreitung)')
+                : i.http_status);
+        }
+        if (typeof i.dauer_ms === 'number') add('sap.ti_time', 'Antwortzeit', i.dauer_ms + ' ms');
+        if (typeof i.anzahl_services === 'number') {
+            add('sap.ti_services', 'Services im Katalog', i.anzahl_genau
+                ? i.anzahl_services
+                : T('sap.ti_at_least', 'mindestens') + ' ' + i.anzahl_services);
+        }
+        if (Array.isArray(i.entity_sets)) add('sap.ti_sets', 'EntitySets im Service', i.entity_sets.length);
+        return z;
+    }
+
+    function tiFuss() {
+        return T('sap.ti_foot', 'Es wurden keine Geschäftsdaten gelesen. Ob die Berechtigungen für die '
+            + 'Daten selbst ausreichen, zeigt erst eine Auswertung.');
+    }
+
+    function tiErgebnis(d) {
+        var q = (d.quelle === 'persoenlich')
+            ? T('sap.acc_pill_own', 'eigener Zugang')
+            : T('sap.acc_pill_shared', 'gemeinsamer Lesezugang');
+        return (d.ok ? T('sap.ti_ok', 'erfolgreich') : T('sap.ti_failed', 'fehlgeschlagen'))
+            + ' (' + q + ') – ' + (d.ok ? (d.detail || 'OK') : (d.error || ''));
+    }
+
+    function tiText() {
+        if (!_letzterTest) return '';
+        var d = _letzterTest.d, i = d.info || {};
+        var zeilen = [T('sap.ti_title', 'SAP-Verbindungstest') + ' – ' + _letzterTest.zeit,
+            T('sap.ti_result', 'Ergebnis') + ': ' + tiErgebnis(d), '', tiVariante(i.variante), ''];
+        tiZeilen(d).forEach(function (z) { zeilen.push(z[0] + ': ' + z[1]); });
+        if (Array.isArray(i.entity_sets) && i.entity_sets.length) {
+            zeilen.push('', T('sap.ti_sets', 'EntitySets im Service') + ':');
+            i.entity_sets.forEach(function (n) { zeilen.push('  ' + n); });
+        }
+        zeilen.push('', tiFuss());
+        return zeilen.join('\n');
+    }
+
+    function accRenderTestInfo() {
+        var box = $('sp-acc-testinfo'); if (!box) return;
+        var d = _letzterTest && _letzterTest.d;
+        if (!d || !d.info) { box.hidden = true; box.innerHTML = ''; return; }
+        var i = d.info, html = '';
+        var v = tiVariante(i.variante);
+        if (v) html += '<p class="sp-ti-head">' + esc(v) + '</p>';
+        html += '<dl class="sp-ti-grid">';
+        tiZeilen(d).forEach(function (z) {
+            html += '<dt>' + esc(z[0]) + '</dt><dd>' + esc(z[1]) + '</dd>';
+        });
+        html += '</dl>';
+        if (Array.isArray(i.entity_sets) && i.entity_sets.length) {
+            html += '<details class="sp-ti-sets"><summary>'
+                + esc(T('sap.ti_sets_show', 'EntitySets anzeigen') + ' (' + i.entity_sets.length + ')')
+                + '</summary><ul>' + i.entity_sets.map(function (n) {
+                    return '<li>' + esc(n) + '</li>';
+                }).join('') + '</ul></details>';
+        }
+        html += '<p class="sp-ti-foot">' + esc(tiFuss()) + '</p>'
+            + '<div class="sp-actions"><button class="sp-hist-btn" id="sp-acc-ti-copy" type="button">'
+            + esc(T('sap.ti_copy', 'Bericht für den SAP-Administrator kopieren')) + '</button>'
+            + '<span class="sp-note" id="sp-acc-ti-note"></span></div>';
+        box.innerHTML = html;
+        box.classList.toggle('is-error', !d.ok);
+        box.hidden = false;
+        var btn = $('sp-acc-ti-copy');
+        if (btn) btn.addEventListener('click', function () {
+            var txt = tiText();
+            var fertig = function () {
+                var n = $('sp-acc-ti-note');
+                if (n) { n.textContent = T('sap.copied', 'In die Zwischenablage kopiert.'); n.className = 'sp-note is-ok'; }
+            };
+            if (window.JarvisChatLib && window.JarvisChatLib.copyTextToClipboard) {
+                window.JarvisChatLib.copyTextToClipboard(txt).then(fertig);
+            } else if (navigator.clipboard) {
+                navigator.clipboard.writeText(txt).then(fertig);
+            }
+        });
+    }
+
+    function accResetTestInfo() {
+        _letzterTest = null;
+        accRenderTestInfo();
+    }
+
     function testAccount() {
         accNote(T('sap.acc_testing', 'Teste Verbindung…'));
+        accResetTestInfo();
         fetch('/api/sap/test', { headers: authHeaders() })
             .then(function (r) { return r.json(); })
             .then(function (d) {
+                if (d && d.info) {
+                    _letzterTest = { d: d, zeit: new Date().toLocaleString(lang() === 'en' ? 'en-GB' : 'de-DE') };
+                    accRenderTestInfo();
+                }
                 if (d && d.ok) {
                     var q = (d.quelle === 'persoenlich')
                         ? T('sap.acc_pill_own', 'eigener Zugang')
@@ -847,6 +999,7 @@
                 accClearSecrets();
                 if ($('sp-acc-type')) $('sp-acc-type').value = '';
                 accApplyType('');
+                accResetTestInfo();
                 accNote(T('sap.acc_removed', 'Eigener Zugang entfernt.'), 'ok');
                 loadAccount();
                 loadStatus();
@@ -880,6 +1033,11 @@
         if (accA) accA.addEventListener('change', accApplyAuth);
         var accS = $('sp-acc-save'); if (accS) accS.addEventListener('click', saveAccount);
         var accP = $('sp-acc-test'); if (accP) accP.addEventListener('click', testAccount);
+        // Der Bericht wird aus T() gebaut – nach einem Sprachwechsel neu zeichnen.
+        // accRenderTestInfo ruft kein applyLang(), loest also kein Ereignis aus.
+        window.addEventListener('jarvis-lang-changed', function () {
+            if (_letzterTest) accRenderTestInfo();
+        });
         var accD = $('sp-acc-del'); if (accD) accD.addEventListener('click', delAccount);
 
         $('sp-instr-btn').addEventListener('click', openInstructions);

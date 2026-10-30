@@ -13459,9 +13459,15 @@ async def sap_test(user: str = Depends(require_sap_access)):
                 sap_accounts.melde_fehler(user, e)
             except Exception:  # noqa: BLE001
                 pass
+        # Der Bericht (Adresse, HTTP-Status, Benutzer …) ist im FEHLERFALL am
+        # wichtigsten – genau dann fragt der SAP-Administrator nach.
+        try:
+            info = c.test_bericht()
+        except Exception:  # noqa: BLE001
+            info = None
         return JSONResponse({"ok": False, "configured": True, "status": e.status,
                              "type": c.connection_type, "quelle": quelle,
-                             "error": str(e)})
+                             "error": str(e), "info": info})
     if quelle == "persoenlich":
         try:
             from backend import sap_accounts
@@ -13471,7 +13477,7 @@ async def sap_test(user: str = Depends(require_sap_access)):
     return JSONResponse({"ok": True, "configured": True,
                          "type": res.get("type"), "product": c.product,
                          "quelle": quelle, "hinweis": z.get("hinweis") or "",
-                         "detail": res.get("detail")})
+                         "detail": res.get("detail"), "info": res.get("info")})
 
 
 @app.get("/api/sap/odata/query")

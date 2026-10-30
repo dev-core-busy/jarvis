@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""Waechter: Bericht des SAP-Verbindungstests (``SapClient.test``).
+
+Hintergrund (2026-10-30): der Test meldete nur "Katalog erreichbar (1+
+Services)" bzw. "22 EntitySet(s) im Service" – der SAP-Administrator konnte
+daraus weder ablesen, WAS geprueft wurde, noch gegen welche Adresse, mit
+welchem Benutzer und Mandanten. "1+" war zudem keine Zaehlung (``$top=1``).
+
+Geprueft wird gegen einen ECHTEN lokalen HTTP-Server, der den Gateway
+nachbildet – keine ``requests``-Attrappe, denn genau die echte Anfrage
+(Adresse samt Parametern, Kopfzeilen, Statuscode) ist hier die Zusage:
+
+  1. Standard-Service: $metadata, EntitySet-Namen, Adresse, Status, Mandant
+  2. Katalog: ECHTE Zahl ueber $inlinecount, Rueckfall durch Listen
+     (genau / "mindestens"), 400 auf $inlinecount, 404 = kein Katalog
+  3. Fehlerfall: der Bericht steht trotz Ausnahme (Status, Adresse, Variante)
+  4. Kein Kennwort, kein Token, keine Anmeldung aus der Adresse im Bericht
+  5. Bearer-Token geht auch beim $metadata-Abruf mit (vorher fehlte er dort)
+  6. Endpunkt ``/api/sap/test`` reicht den Bericht in BEIDEN Zweigen durch (AST)
+
+Exit 2 heisst "konnte nicht laufen", 1 "Pruefung fehlgeschlagen", 0 bestanden.
+
+    python3 tests/test_sap_verbindungstest.py [--modul <sap_client.py>] [--main <main.py>]
+
+Die Pfad-Argumente sind fuer die Gegenprobe (gegen_sap_verbindungstest.py): sie
+legt sabotierte KOPIEN vor, die echten Dateien werden nie angefasst.
+"""
+import argparse
+import ast
+import importlib.util
+import http.server
+import json
+import socket
+import sys
+import threading
+import types
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+_ok = _fail = 0
+
+
+def check(cond, label, detail=""):
+    global _ok, _fail
+    if cond:
+        _ok += 1
+        print(f"  OK   {label}")
+    else:
+        _fail += 1
+        print(f"  FAIL {label}" + (f" – {detail}" if detail else ""))
+
+
+def section(t):
+    print(f"\n{t}")
+
+
+# backend.config nur als Attrappe – der echte Import schreibt die Live-
+# settings.json zurueck. sap_client braucht ihn nur ohne uebergebene cfg.
+_cfg_mod = types.ModuleType("backend.config")
+_cfg_mod.config = types.SimpleNamespace(get_skill_states=lambda: {})
+sys.modules["backend.config"] = _cfg_mod
+
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--modul", default=str(ROOT / "backend" / "sap_client.py"))
+_ap.add_argument("--main", default=str(ROOT / "backend" / "main.py"))
+ARGS = _ap.parse_args()
+
+try:
+    import requests  # noqa: F401
+    import backend  # noqa: F401 – Paket fuer den Modulnamen backend.sap_client
+    _spec = importlib.util.spec_from_file_location("backend.sap_client", ARGS.modul)
+    sc = importlib.util.module_from_spec(_spec)
+    sys.modules["backend.sap_client"] = sc
+    _spec.loader.exec_module(sc)
+except Exception as e:  # noqa: BLE001
+    print(f"Voraussetzung fehlt ({e}) – Test kann nicht laufen.")
+    sys.exit(2)
+
+KENNWORT = "Kw-geheim-4711"
+TOKEN = "Tok-geheim-0815"
+SETS = ["Bestellungen", "Kunden", "Kunden", "Artikel"]   # doppelt: wird einmal gezaehlt
+
+# ── Gateway-Nachbildung ─────────────────────────────────────────────
+ZUSTAND = {"modus": "count", "zeilen": 3, "anfragen": []}
+
+
+class _Gateway(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):  # noqa: D401 – kein Rauschen im Testlauf
+        pass
+
+    def _antwort(self, status, body, art="application/json"):
+        daten = body.encode("utf-8") if isinstance(body, str) else body
+        self.send_response(status)
+        self.send_header("Content-Type", art)
+        self.send_header("Content-Length", str(len(daten)))
+        self.end_headers()
+        self.wfile.write(daten)
+
+    def do_GET(self):  # noqa: N802
+        teile = urlsplit(self.path)
+        q = parse_qs(teile.query)
+        ZUSTAND["anfragen"].append({"pfad": teile.path, "query": q,
+                                    "auth": self.headers.get("Authorization", "")})
+        modus = ZUSTAND["modus"]
+        if modus == "401":
+            return self._antwort(401, json.dumps(
+                {"error": {"message": {"value": "Anmeldung abgelehnt"}}}))
+        if teile.path.endswith("/$metadata"):
+            xml = ('<?xml version="1.0"?><edmx:Edmx xmlns:edmx="x"><Schema xmlns="y">'
+                   '<EntityContainer>' + "".join('<EntitySet Name="%s"/>' % n for n in SETS)
+                   + '</EntityContainer></Schema></edmx:Edmx>')
+            return self._antwort(200, xml, "application/xml")
+        if teile.path.endswith("/ServiceCollection"):
+            if modus == "404":
+                return self._antwort(404, "nicht da", "text/plain")
+            mit_zaehler = "$inlinecount" in q
+            if modus == "400" and mit_zaehler:
+                return self._antwort(400, json.dumps({"error": {"message": "unbekannt"}}))
+            top = int((q.get("$top") or ["100"])[0])
+            alle = [{"ID": "Z_SVC_%d" % i, "Title": "S%d" % i} for i in range(ZUSTAND["zeilen"])]
+            d = {"results": alle[:top]}
+            if modus == "count" and mit_zaehler:
+                d["__count"] = str(ZUSTAND["zeilen"])
+            return self._antwort(200, json.dumps({"d": d}))
+        return self._antwort(404, "unbekannter Pfad", "text/plain")
+
+
+srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Gateway)
+PORT = srv.server_address[1]
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+BASIS = "http://127.0.0.1:%d/sap/opu/odata" % PORT
+
+
+def client(**extra):
+    cfg = {"connection_type": "odata", "odata_base_url": BASIS, "auth_kind": "basic",
+           "username": "testuser", "password": KENNWORT, "sap_client": "100",
+           "verify_ssl": True}
+    cfg.update(extra)
+    return sc.SapClient(cfg)
+
+
+def lauf(modus, zeilen=3, **extra):
+    ZUSTAND.update({"modus": modus, "zeilen": zeilen, "anfragen": []})
+    c = client(**extra)
+    try:
+        return c, c.test(), None
+    except sc.SapError as e:
+        return c, None, e
+
+
+def ohne_geheimnis(obj):
+    t = json.dumps(obj, ensure_ascii=False)
+    return KENNWORT not in t and TOKEN not in t
+
+
+# ══ 0. Positivkontrolle: der Server wird WIRKLICH getroffen ══════════
+section("0. Positivkontrolle")
+c, res, err = lauf("count", odata_service="ZSVC_SRV")
+if err is not None or not ZUSTAND["anfragen"]:
+    print(f"  ABBRUCH: Gateway-Nachbildung nicht erreicht ({err}) – Test kann nicht laufen.")
+    sys.exit(2)
+check(True, "Gateway-Nachbildung beantwortet echte Anfragen (%d)" % len(ZUSTAND["anfragen"]))
+
+# ══ 1. Standard-Service ═════════════════════════════════════════════
+section("1. Mit Standard-Service: $metadata")
+info = res.get("info") or {}
+check(info.get("variante") == "service", "Variante 'service'", repr(info.get("variante")))
+check(info.get("entity_sets") == sorted(set(SETS)), "EntitySet-Namen sortiert und einmalig",
+      repr(info.get("entity_sets")))
+check("3 EntitySet" in (res.get("detail") or "") and "ZSVC_SRV" in (res.get("detail") or ""),
+      "Kurzzeile nennt Service und Zahl", res.get("detail"))
+adr = info.get("adresse") or ""
+check(adr.startswith(BASIS + "/ZSVC_SRV/$metadata"), "Adresse ist die aufgerufene $metadata-URL", adr)
+check("sap-client=100" in adr, "Adresse traegt den Mandanten-Parameter", adr)
+check(info.get("http_status") == 200, "HTTP-Status 200", repr(info.get("http_status")))
+check(isinstance(info.get("dauer_ms"), int) and info["dauer_ms"] >= 0, "Antwortzeit in ms",
+      repr(info.get("dauer_ms")))
+check(info.get("mandant") == "100" and info.get("benutzer") == "testuser",
+      "Mandant und SAP-Benutzer im Bericht", repr((info.get("mandant"), info.get("benutzer"))))
+check(info.get("anmeldeart") == "basic", "Anmeldeart basic", repr(info.get("anmeldeart")))
+check(info.get("geschaeftsdaten_gelesen") is False, "Bericht sagt: keine Geschaeftsdaten gelesen")
+check(ohne_geheimnis(res), "kein Kennwort im Ergebnis")
+
+# ══ 2. Katalog ══════════════════════════════════════════════════════
+section("2. Ohne Standard-Service: Gateway-Katalog")
+c, res, err = lauf("count", zeilen=137)
+info = (res or {}).get("info") or {}
+check(err is None and info.get("variante") == "katalog", "Variante 'katalog'", repr(err or info.get("variante")))
+check(info.get("anzahl_services") == 137 and info.get("anzahl_genau") is True,
+      "echte Zahl ueber $inlinecount (137, genau)",
+      repr((info.get("anzahl_services"), info.get("anzahl_genau"))))
+check("137" in (res or {}).get("detail", "") and "1+" not in (res or {}).get("detail", ""),
+      "Kurzzeile nennt 137 statt '1+'", (res or {}).get("detail"))
+check("$inlinecount=allpages" in (info.get("adresse") or ""),
+      "Adresse lesbar (Prozent-Kodierung aufgeloest)", info.get("adresse"))
+check(len(ZUSTAND["anfragen"]) == 1, "eine einzige Anfrage, wenn der Server zaehlt",
+      str(len(ZUSTAND["anfragen"])))
+
+c, res, err = lauf("nocount", zeilen=5)
+info = (res or {}).get("info") or {}
+check(info.get("anzahl_services") == 5 and info.get("anzahl_genau") is True,
+      "ohne Zaehler: durchgezaehlt (5, genau)",
+      repr((err, info.get("anzahl_services"), info.get("anzahl_genau"))))
+
+c, res, err = lauf("nocount", zeilen=sc.KATALOG_ZAEHL_MAX + 5)
+info = (res or {}).get("info") or {}
+check(info.get("anzahl_services") == sc.KATALOG_ZAEHL_MAX and info.get("anzahl_genau") is False,
+      "an der Obergrenze: NICHT genau",
+      repr((err, info.get("anzahl_services"), info.get("anzahl_genau"))))
+check("mindestens" in (res or {}).get("detail", ""), "Kurzzeile sagt 'mindestens'",
+      (res or {}).get("detail"))
+
+c, res, err = lauf("400", zeilen=7)
+info = (res or {}).get("info") or {}
+check(err is None and info.get("anzahl_services") == 7,
+      "400 auf $inlinecount: Rueckfall aufs Listen (7)", repr((err, info.get("anzahl_services"))))
+
+c, res, err = lauf("404")
+info = (res or {}).get("info") or {}
+check(err is None and info.get("variante") == "katalog_fehlt" and info.get("http_status") == 404,
+      "404: 'katalog_fehlt' mit Status 404", repr((err, info.get("variante"), info.get("http_status"))))
+
+# ══ 3. Fehlerfall ═══════════════════════════════════════════════════
+section("3. Fehlerfall: Bericht trotz Ausnahme")
+c, res, err = lauf("401", odata_service="ZSVC_SRV")
+check(isinstance(err, sc.SapError) and err.status == 401, "401 wird als Fehler gemeldet", repr(err))
+b = c.test_bericht()
+check(b.get("variante") == "service" and b.get("http_status") == 401,
+      "Bericht: Variante 'service', Status 401", repr((b.get("variante"), b.get("http_status"))))
+check("/ZSVC_SRV/$metadata" in (b.get("adresse") or ""), "Bericht: aufgerufene Adresse", b.get("adresse"))
+check(ohne_geheimnis(b), "kein Kennwort im Fehlerbericht")
+
+c, res, err = lauf("401")
+check(isinstance(err, sc.SapError) and err.status == 401,
+      "401 am Katalog wird NICHT als 'kein Katalog' verschluckt", repr((err, res)))
+
+# Geschlossener Port: keine Antwort -> Status 0, Adresse trotzdem da.
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    tot = s.getsockname()[1]
+ZUSTAND["anfragen"] = []
+c = client(odata_base_url="http://127.0.0.1:%d/sap/opu/odata" % tot)
+try:
+    c.test()
+    err = None
+except sc.SapError as e:
+    err = e
+b = c.test_bericht()
+check(isinstance(err, sc.SapError) and err.status == 0, "keine Antwort: SapError mit Status 0", repr(err))
+check(b.get("http_status") == 0 and (":%d/" % tot) in (b.get("adresse") or ""),
+      "Bericht: Status 0 und die versuchte Adresse samt Parametern",
+      repr((b.get("http_status"), b.get("adresse"))))
+check("$top=1" in (b.get("adresse") or ""), "versuchte Adresse traegt die Parameter", b.get("adresse"))
+
+# ══ 4. Keine Geheimnisse im Bericht ═════════════════════════════════
+section("4. Keine Geheimnisse")
+c, res, err = lauf("count", odata_service="ZSVC_SRV", auth_kind="bearer", username="",
+                   bearer_token=TOKEN)
+info = (res or {}).get("info") or {}
+check(err is None and info.get("anmeldeart") == "bearer" and info.get("benutzer") == "",
+      "Bearer: Anmeldeart bearer, kein Benutzername", repr((err, info.get("anmeldeart"), info.get("benutzer"))))
+check(ohne_geheimnis(res or {}), "kein Token im Ergebnis")
+meta = [a for a in ZUSTAND["anfragen"] if a["pfad"].endswith("/$metadata")]
+check(bool(meta) and meta[0]["auth"] == "Bearer " + TOKEN,
+      "Bearer-Token geht beim $metadata-Abruf mit", repr(meta[:1]))
+
+basis_mit = "http://anmelde:%s@127.0.0.1:%d/sap/opu/odata" % (KENNWORT, PORT)
+c, res, err = lauf("count", zeilen=3, odata_base_url=basis_mit)
+check(err is None, "Basis-URL mit Anmeldung laeuft", repr(err))
+check(ohne_geheimnis(res or {}) and ohne_geheimnis(c.test_bericht()),
+      "Anmeldung aus der Adresse steht nicht im Bericht",
+      json.dumps((res or {}).get("info"), ensure_ascii=False))
+
+c, res, err = lauf("count", username="")
+info = (res or {}).get("info") or {}
+check(info.get("anmeldeart") == "keine" and info.get("benutzer") == "",
+      "basic ohne Benutzer: Anmeldeart 'keine'", repr((info.get("anmeldeart"), info.get("benutzer"))))
+check(all(a["auth"] == "" for a in ZUSTAND["anfragen"]),
+      "...und tatsaechlich keine Anmeldung gesendet (Anzeige = Wirkung)",
+      repr([a["auth"] for a in ZUSTAND["anfragen"]]))
+
+# ══ 5. Endpunkt reicht den Bericht durch (AST) ══════════════════════
+section("5. /api/sap/test")
+baum = ast.parse(Path(ARGS.main).read_text(encoding="utf-8"))
+fn = [n for n in ast.walk(baum) if isinstance(n, ast.AsyncFunctionDef) and n.name == "sap_test"]
+if len(fn) != 1:
+    print(f"  ABBRUCH: sap_test nicht eindeutig gefunden ({len(fn)}) – Test kann nicht laufen.")
+    sys.exit(2)
+antworten = []
+for n in ast.walk(fn[0]):
+    if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "JSONResponse"
+            and n.args and isinstance(n.args[0], ast.Dict)):
+        werte = {k.value: v for k, v in zip(n.args[0].keys, n.args[0].values)
+                 if isinstance(k, ast.Constant)}
+        antworten.append(werte)
+
+
+def _konst(werte, k):
+    v = werte.get(k)
+    return v.value if isinstance(v, ast.Constant) else None
+
+
+getestet = [w for w in antworten if _konst(w, "configured") is True]
+check({_konst(w, "ok") for w in getestet} == {True, False},
+      "Antworten nach einem Test: Erfolg UND Fehler gefunden",
+      repr([_konst(w, "ok") for w in getestet]))
+check(all("info" in w for w in getestet), "jede Antwort nach einem Test traegt 'info'",
+      repr([sorted(w) for w in getestet]))
+bericht_aufrufe = [n for n in ast.walk(fn[0]) if isinstance(n, ast.Call)
+                   and isinstance(n.func, ast.Attribute) and n.func.attr == "test_bericht"]
+check(len(bericht_aufrufe) >= 1, "Fehlerzweig holt den Bericht ueber test_bericht()")
+
+srv.shutdown()
+print(f"\nErgebnis: {_ok} OK, {_fail} FAIL")
+sys.exit(1 if _fail else 0)

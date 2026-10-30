@@ -3,6 +3,7 @@
 import asyncio
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import threading
@@ -307,6 +308,108 @@ def _git(*args, timeout=20) -> tuple[int, str, str]:
         return -1, "", str(e)
 
 
+# ─── Commit-Liste im Update-Popup ────────────────────────────────────────────
+#
+# Je ausstehendem Commit ein Satz Beschreibung fuer den Administrator. Quelle
+# ist eine eigene Zeile ``Kurz: <Satz>`` im Commit-Text (darf ueber mehrere
+# Zeilen umbrechen, endet an der Leerzeile); fehlt sie, der erste Satz des
+# ersten Absatzes. Gelistet werden NUR die Commits, die das Update bringt
+# (HEAD..origin) – bis 2026-10-30 stand hier ``log origin/<branch> -5``, also
+# immer die letzten fuenf, auch bereits eingespielte, und bei mehr als fuenf
+# fehlte der Rest ohne Hinweis.
+
+MAX_COMMIT_LISTE = 30     # mehr liest im Popup niemand; der Rest wird beziffert
+MAX_BESCHREIBUNG = 240    # Zeichen; ein Satz, kein Absatz
+
+_KURZ_MARKE = "kurz:"
+# Git-Trailer (Co-Authored-By, Signed-off-by …) tragen einen Bindestrich im
+# Schluessel. "Gemeldet:" oder "Waechter:" sind Fliesstext und bleiben.
+_TRAILER = re.compile(r"^[A-Za-z]+(?:-[A-Za-z]+)+:\s")
+# Satzende: Punkt/Ausrufe-/Fragezeichen, danach Leerraum und KEIN Kleinbuchstabe
+# (sonst endet "z. B. der" nach dem "z.").
+_SATZENDE = re.compile(r"[.!?](?=\s+[^a-zäöüß\s]|\s*$)")
+# Abkuerzungen, an deren Punkt kein Satz endet (dazu jeder Einzelbuchstabe wie
+# in "z. B."). Gesehen: 'meldete nur "Katalog erreichbar" bzw.' als Satz.
+_ABKUERZUNGEN = {"bzw", "ggf", "usw", "vgl", "ca", "inkl", "evtl", "nr", "etc",
+                 "zzgl", "max", "min", "sog", "bspw", "eg", "ie", "vs"}
+
+
+def _kuerzen(text: str) -> str:
+    text = " ".join(text.split())
+    if len(text) <= MAX_BESCHREIBUNG:
+        return text
+    schnitt = text[:MAX_BESCHREIBUNG].rsplit(" ", 1)[0]
+    return schnitt.rstrip(" ,;:-") + " …"
+
+
+def kurzbeschreibung(text: str) -> str:
+    """Ein Satz aus dem Commit-Text (ohne Betreffzeile); leer, wenn es keinen gibt."""
+    zeilen = (text or "").replace("\r", "").split("\n")
+    # 1) Ausdrueckliche Zeile "Kurz: …" samt Fortsetzungszeilen bis zur Leerzeile
+    for i, z in enumerate(zeilen):
+        if z.strip().lower().startswith(_KURZ_MARKE):
+            teile = [z.strip()[len(_KURZ_MARKE):]]
+            for f in zeilen[i + 1:]:
+                if not f.strip() or _TRAILER.match(f.strip()):
+                    break
+                teile.append(f)
+            satz = _kuerzen(" ".join(teile))
+            if satz:
+                return satz
+    # 2) Rueckfall: erster Absatz; ist er ein Trailer-Block, gibt es keinen Satz
+    absatz: list[str] = []
+    for z in zeilen + [""]:
+        s = z.strip()
+        if s.lower().startswith(_KURZ_MARKE):
+            s = ""                 # leere Kurz-Zeile: ihr Absatz zaehlt nicht
+        if s:
+            absatz.append(s)
+            continue
+        if absatz:
+            break
+    if not absatz or all(_TRAILER.match(a) for a in absatz):
+        return ""
+    fliess = " ".join(absatz)
+    if fliess.startswith("- "):
+        fliess = fliess[2:]
+    for m in _SATZENDE.finditer(fliess):
+        wort = re.split(r"[\s(\"']", fliess[:m.start()])[-1]
+        if len(wort) <= 1 or wort.lower() in _ABKUERZUNGEN:
+            continue
+        return _kuerzen(fliess[:m.end()])
+    return _kuerzen(fliess)
+
+
+def ausstehende_commits(branch: str) -> dict:
+    """Die Commits, die ein Update bringen wuerde, neueste zuerst."""
+    bereich = f"HEAD..origin/{branch}"
+    # Feld- und Satztrenner als Steuerzeichen: Betreff und Text duerfen alles
+    # enthalten, auch "|" (die alte Zerlegung daran brach bei einem Betreff damit).
+    # NICHT \x1c-\x1f: Python zaehlt sie zum Leerraum, das strip() in _git
+    # frass damit beim aeltesten Commit ohne Text die letzten Trenner weg.
+    _, log_str, _ = _git(
+        "log", bereich, f"-{MAX_COMMIT_LISTE}", "--no-merges",
+        "--format=%H%x02%s%x02%ai%x02%an%x02%b%x03",
+    )
+    commits = []
+    for satz in log_str.split("\x03"):
+        felder = satz.lstrip("\n").split("\x02")
+        if len(felder) != 5:
+            continue
+        h, msg, date, author, text = felder
+        commits.append({
+            "hash": h[:7],
+            "message": msg.strip(),
+            "beschreibung": kurzbeschreibung(text),
+            "date": date.strip()[:16],
+            "author": author.strip(),
+        })
+    _, anzahl, _ = _git("rev-list", "--count", "--no-merges", bereich)
+    gesamt = int(anzahl) if anzahl.isdigit() else len(commits)
+    return {"recent_commits": commits,
+            "commits_weitere": max(0, gesamt - len(commits))}
+
+
 def check_update() -> dict:
     """Prüft ob Updates verfügbar sind. Führt git fetch aus."""
     if image_betrieb():
@@ -350,25 +453,9 @@ def check_update() -> dict:
     _, behind_str, _ = _git("rev-list", f"HEAD..origin/{branch}", "--count")
     commits_behind = int(behind_str) if behind_str.isdigit() else 0
 
-    # Letzte Commit-Info vom Remote
     latest_info = {}
     if commits_behind > 0:
-        _, log_str, _ = _git(
-            "log", f"origin/{branch}", "-5",
-            "--format=%H|%s|%ai|%an", "--no-merges"
-        )
-        commits = []
-        for line in log_str.splitlines():
-            parts = line.split("|", 3)
-            if len(parts) == 4:
-                h, msg, date, author = parts
-                commits.append({
-                    "hash": h[:7],
-                    "message": msg.strip(),
-                    "date": date.strip()[:16],
-                    "author": author.strip(),
-                })
-        latest_info = {"recent_commits": commits}
+        latest_info = ausstehende_commits(branch)
 
     return {
         "ok": True,

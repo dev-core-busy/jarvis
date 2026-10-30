@@ -104,13 +104,23 @@
                 : T('update.commits_plural', { n: d.commits_behind }))
             : (d.ok ? T('update.status_ok') : T('update.status_error', { msg: d.error || '?' }));
 
+        // Je Commit Betreff und ein Satz Beschreibung (aus "Kurz:" im
+        // Commit-Text, sonst dessen erster Satz; leer = keine Zeile).
         var commitsHtml = '';
         if (d.recent_commits && d.recent_commits.length) {
             commitsHtml = '<div class="upd-commit-list">' + d.recent_commits.map(function (c) {
+                var desc = c.beschreibung
+                    ? '<span class="upd-commit-desc">' + esc(c.beschreibung) + '</span>' : '';
                 return '<div class="upd-commit"><span class="upd-commit-hash">' + esc(c.hash) + '</span>'
-                    + '<span class="upd-commit-msg">' + esc(c.message) + '</span>'
+                    + '<span class="upd-commit-text"><span class="upd-commit-msg">' + esc(c.message) + '</span>'
+                    + desc + '</span>'
                     + '<span class="upd-commit-date">' + esc(c.date) + '</span></div>';
-            }).join('') + '</div>';
+            }).join('')
+                // Gekuerzte Liste beziffern - sonst sieht sie vollstaendig aus.
+                + (d.commits_weitere > 0
+                    ? '<div class="upd-commit-weitere">' + esc(T('update.weitere', { n: d.commits_weitere })) + '</div>'
+                    : '')
+                + '</div>';
         }
 
         var btnHtml = d.has_update

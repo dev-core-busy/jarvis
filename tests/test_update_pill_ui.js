@@ -252,6 +252,51 @@ const gleich = () => new Promise((r) => setImmediate(r));
         }
     }
 
+    abschnitt('4c. Commit-Liste: je Commit ein Satz, Rest beziffert (2026-10-30)');
+    {
+        const liste = [
+            { hash: 'aaa1111', message: 'feat: mit Satz', date: '2026-10-30',
+              beschreibung: 'Admins sehen <b>jetzt</b> einen Satz.' },
+            { hash: 'bbb2222', message: 'fix: ohne Satz', date: '2026-10-30', beschreibung: '' },
+        ];
+        const w = starte(0, true, null, { recent_commits: liste, commits_behind: 9, commits_weitere: 7 });
+        w.t = (k) => (k === 'update.weitere' ? 'WEITERE {n}' : k);
+        for (let i = 0; i < 6; i++) await gleich();
+        const body = w.document.getElementById('upd-body');
+        const zeilen = body.querySelectorAll('.upd-commit');
+        if (zeilen.length !== 2) {
+            console.log('ABBRUCH: Commit-Zeilen nicht gerendert (' + zeilen.length + ') - Messung blind');
+            process.exit(2);
+        }
+        const d0 = zeilen[0].querySelector('.upd-commit-desc');
+        pruefe(!!d0 && d0.textContent === 'Admins sehen <b>jetzt</b> einen Satz.',
+               'Beschreibung steht unter dem Betreff, als Text (escaped)', d0 && d0.textContent);
+        pruefe(!zeilen[0].querySelector('.upd-commit-desc b'), '... kein eingeschleustes Markup');
+        const t0 = zeilen[0].querySelector('.upd-commit-text');
+        pruefe(!!t0 && !!t0.querySelector('.upd-commit-msg') && t0.contains(d0),
+               'Betreff und Beschreibung in derselben Textspalte');
+        pruefe(!zeilen[1].querySelector('.upd-commit-desc'),
+               'leere Beschreibung -> keine leere Zeile');
+        const we = body.querySelector('.upd-commit-weitere');
+        pruefe(!!we && we.textContent === 'WEITERE 7', 'Rest beziffert ("WEITERE 7")', we && we.textContent);
+        pruefe(!!we && body.querySelector('.upd-commit-list').contains(we), '... am Ende der Liste');
+        w.close();
+    }
+    {   // ohne Rest kein Hinweis
+        const w = starte(3, true, null, { commits_weitere: 0 });
+        for (let i = 0; i < 6; i++) await gleich();
+        pruefe(!w.document.querySelector('.upd-commit-weitere'), 'ohne Rest kein "weitere"-Hinweis');
+        w.close();
+    }
+    {
+        const I18N = lies('frontend/js/i18n.js');
+        const n = (I18N.match(/^\s*'update\.weitere':\s*'[^']*\{n\}[^']*',$/gm) || []).length;
+        pruefe(n === 2, "'update.weitere' genau zweimal (DE+EN) mit {n}", String(n));
+        for (const k of ['upd-commit-text', 'upd-commit-desc', 'upd-commit-weitere']) {
+            pruefe(new RegExp('^\\.' + k + ' \\{', 'm').test(CSS), 'CSS-Regel .' + k + ' vorhanden');
+        }
+    }
+
     abschnitt('5. i18n: Nacharbeits-Text in DE und EN');
     {
         const I18N = lies('frontend/js/i18n.js');

@@ -32,7 +32,7 @@
    hinwies (gemeldet 2026-08-23, "der Button im Popup wieder abgeschnitten").
    Die Hoehe haengt am SICHTFENSTER, nicht an einer festen Zahl: 440 px passten
    auf einem kleinen Fenster ebenfalls nicht. */
-.update-dropdown { position:absolute;top:calc(100% + 10px);left:0;right:auto;width:360px;max-width:90vw;
+.update-dropdown { position:absolute;top:calc(100% + 10px);left:0;right:auto;width:420px;max-width:90vw;
     background:var(--bg-secondary,#111827);border:1px solid var(--border,rgba(255,255,255,.12));border-radius:var(--radius,12px);
     box-shadow:0 8px 32px rgba(0,0,0,0.6);z-index:9999;overflow:hidden;
     display:flex;flex-direction:column;max-height:calc(100vh - 84px); }
@@ -60,10 +60,20 @@
 .upd-image-befehl { display:block;font-family:monospace;font-size:.75rem;padding:6px 8px;border-radius:6px;
     background:var(--bg-input);color:var(--text-primary);user-select:all;word-break:break-all; }
 .upd-commit-list { display:flex;flex-direction:column;gap:4px;background:rgba(127,127,127,0.08);border-radius:6px;padding:8px 10px; }
-.upd-commit { display:flex;gap:8px;align-items:flex-start;font-size:0.77rem; }
+/* Raster: Hash | Betreff | Datum, darunter die Beschreibung ueber Betreff UND
+   Datum hinweg - neben dem Datum blieben ihr sonst nur gut 120 px */
+.upd-commit { display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:8px;row-gap:2px;
+    align-items:start;font-size:0.77rem; }
+.upd-commit + .upd-commit { padding-top:4px;border-top:1px solid var(--border); }
 .upd-commit-hash { font-family:monospace;color:var(--accent,#6366f1);flex-shrink:0; }
 .upd-commit-msg { color:var(--text-primary,#f8fafc); }
-.upd-commit-date { color:var(--text-secondary,#94a3b8);font-size:0.71rem;flex-shrink:0; }
+/* Die Textspalte fasst Betreff und Beschreibung im Markup zusammen, loest sich
+   im Raster aber auf (contents), damit die Beschreibung die zweite Zeile nimmt */
+.upd-commit-text { display:contents; }
+.upd-commit-msg, .upd-commit-desc { overflow-wrap:anywhere;min-width:0; }
+.upd-commit-desc { grid-column:2 / -1;grid-row:2;color:var(--text-secondary);font-size:0.72rem;line-height:1.35; }
+.upd-commit-weitere { color:var(--text-secondary);font-size:0.72rem;font-style:italic;padding-top:2px; }
+.upd-commit-date { color:var(--text-secondary,#94a3b8);font-size:0.71rem;grid-column:3;grid-row:1; }
 .upd-auto-row { display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border,rgba(255,255,255,.12)); }
 .upd-auto-label { font-size:0.8rem;color:var(--text-secondary,#94a3b8); }
 .upd-schedule-select { background:var(--bg-secondary,#111827);border:1px solid var(--border,rgba(255,255,255,.15));border-radius:6px;

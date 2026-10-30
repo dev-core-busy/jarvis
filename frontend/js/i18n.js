@@ -1226,7 +1226,9 @@ const _I18N = {
         'totp.disable_failed': 'Deaktivierung fehlgeschlagen',
         'totp.show_hint':      'Auf einem weiteren Gerät einrichten: Kennwort und aktuellen Code aus deiner App eingeben. Der bisherige Eintrag bleibt gültig.',
         'totp.show':           'QR-Code für weiteres Gerät anzeigen',
-        'totp.show_scan':      'Mit der weiteren App scannen. Beide Apps zeigen danach dieselben Codes.',
+        'totp.show_scan':      'Mit der weiteren App scannen:',
+        'totp.show_done':      'Fertig – eine Bestätigung ist nicht nötig. Zum Prüfen: Beide Apps zeigen gleichzeitig denselben Code.',
+        'totp.show_done_btn':  'Fertig',
         'totp.show_need':      'Bitte Kennwort und aktuellen Code eingeben.',
         'totp.show_failed':    'Anzeige fehlgeschlagen',
 
@@ -5891,7 +5893,9 @@ const _I18N = {
         'totp.disable_failed': 'Deactivation failed',
         'totp.show_hint':      'Set up on another device: enter your password and the current code from your app. The existing entry stays valid.',
         'totp.show':           'Show QR code for another device',
-        'totp.show_scan':      'Scan with the other app. Both apps will then show the same codes.',
+        'totp.show_scan':      'Scan with the other app:',
+        'totp.show_done':      'Done – no confirmation needed. To check: both apps show the same code at the same time.',
+        'totp.show_done_btn':  'Done',
         'totp.show_need':      'Please enter your password and the current code.',
         'totp.show_failed':    'Could not show the code',
 

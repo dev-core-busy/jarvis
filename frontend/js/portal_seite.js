@@ -353,10 +353,12 @@
             }).catch(function(){ tErr.textContent=(window.t?window.t('portal.conn_error'):'Verbindungsfehler'); });
             totpModal.classList.remove('hidden');
         });
-        document.getElementById('btn-totp-close').addEventListener('click', function(){
+        function _totpSchliessen() {
             totpModal.classList.add('hidden'); _totpAnzeigeLeeren();
             document.getElementById('totp-disable-pass').value = '';
-        });
+        }
+        document.getElementById('btn-totp-close').addEventListener('click', _totpSchliessen);
+        document.getElementById('btn-totp-show-done').addEventListener('click', _totpSchliessen);
         document.getElementById('btn-totp-show').addEventListener('click', function(){
             var pw = document.getElementById('totp-disable-pass').value;
             var code = document.getElementById('totp-show-code').value.trim();

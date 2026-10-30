@@ -20,6 +20,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     /// <summary>Time given to the compositor to repaint the area the overlay covered.</summary>
     private const int OverlayRepaintDelayMs = 60;
 
+    /// <summary>Ruheplatz des unsichtbaren Besitzerfensters – ausserhalb jedes
+    /// Bildschirms. Verlassen wird er nur fuer die Dauer eines Dialogs, siehe
+    /// <see cref="AufBildschirmDerMaus{T}"/>.</summary>
+    private static readonly Point OwnerVersteck = new(-32000, -32000);
+
     private readonly Form _owner;
     private readonly NotifyIcon _trayIcon;
     private readonly SelectionOverlay _overlay;
@@ -96,7 +101,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             FormBorderStyle = FormBorderStyle.None,
             StartPosition = FormStartPosition.Manual,
-            Location = new Point(-32000, -32000),
+            Location = OwnerVersteck,
             Size = new Size(1, 1),
             ShowInTaskbar = false,
             Opacity = 0d,
@@ -444,7 +449,69 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _promptChosen = false;
 
         NativeMethods.SetForegroundWindow(_owner.Handle);
-        _promptMenu.Show(Cursor.Position);
+        _promptMenu.Show(MenuePunkt(Cursor.Position));
+    }
+
+    /// <summary>Wo das Fragen-Menue aufgeht: am Mauspunkt, und zwar auf DEM
+    /// Bildschirm, auf dem die Maus steht.
+    ///
+    /// ⚠ NICHT `Show(Cursor.Position)` ALLEIN – gemeldet 2026-10-30: „das Menue
+    /// oeffnet sich bei mehreren Bildschirmen nicht auf dem, auf dem die Maus
+    /// gerade ist". WinForms legt das Menue mit der linken oberen Ecke auf den
+    /// Punkt und waehlt den Bildschirm danach ueber `Screen.FromRectangle` –
+    /// also den, auf dem der GROESSERE Teil des Menue-Rechtecks liegt, nicht
+    /// den unter der Maus. Endet die Auswahl nahe am Rand zum Nachbarschirm,
+    /// ragt das Menue mehrheitlich hinueber und wird dort hineingeschoben.
+    /// Deshalb wird hier vorher geklappt wie bei Windows (links/oben vom
+    /// Punkt, wenn rechts/unten der Platz fehlt) und in den Arbeitsbereich
+    /// des Maus-Bildschirms geklemmt: liegt das Rechteck ganz darin, findet
+    /// `FromRectangle` keinen anderen mehr.</summary>
+    private Point MenuePunkt(Point maus)
+    {
+        _promptMenu.PerformLayout();
+        Size groesse = _promptMenu.GetPreferredSize(Size.Empty);
+        Rectangle bereich = Screen.FromPoint(maus).WorkingArea;
+
+        int x = maus.X + groesse.Width <= bereich.Right ? maus.X : maus.X - groesse.Width;
+        int y = maus.Y + groesse.Height <= bereich.Bottom ? maus.Y : maus.Y - groesse.Height;
+
+        x = Math.Clamp(x, bereich.Left, Math.Max(bereich.Left, bereich.Right - groesse.Width));
+        y = Math.Clamp(y, bereich.Top, Math.Max(bereich.Top, bereich.Bottom - groesse.Height));
+        return new Point(x, y);
+    }
+
+    /// <summary>Zeigt einen Dialog auf dem Bildschirm, auf dem die Maus steht.
+    ///
+    /// ⚠ BESITZER IST <see cref="_owner"/>, UND DER STEHT BEI (-32000, -32000).
+    /// Gemeldet 2026-10-30 (zusammen mit dem Fragen-Menue): Einstellungen,
+    /// Anmeldung, Speichern-Dialog und Update-Frage gingen auf einem anderen
+    /// Bildschirm auf. `CenterScreen` mit Besitzer zentriert auf
+    /// `Screen.FromControl(Besitzer)`, und MessageBox wie Datei-Dialog richten
+    /// sich ebenfalls nach dem Besitzer – fuer ein Fenster ausserhalb aller
+    /// Bildschirme liefert Windows den NAECHSTGELEGENEN, also meist den
+    /// linken oberen, unabhaengig davon, wo die Maus ist.
+    ///
+    /// Deshalb wird der Besitzer fuer die Dauer des Dialogs in die Mitte des
+    /// Arbeitsbereichs unter der Maus gesetzt und danach zurueck. Er bleibt
+    /// dabei unsichtbar und durchklickbar (1×1, Deckkraft 0). Ein Eingriff
+    /// an EINER Stelle statt in jedem Dialog: so trifft er auch die
+    /// System-Dialoge, deren Lage sich gar nicht setzen laesst.</summary>
+    private T AufBildschirmDerMaus<T>(Func<T> zeigen)
+    {
+        Rectangle bereich = Screen.FromPoint(Cursor.Position).WorkingArea;
+        _owner.Location = new Point(bereich.Left + bereich.Width / 2,
+                                    bereich.Top + bereich.Height / 2);
+        try
+        {
+            return zeigen();
+        }
+        finally
+        {
+            if (!_owner.IsDisposed)
+            {
+                _owner.Location = OwnerVersteck;
+            }
+        }
     }
 
     private void OnReplayFailed(string message)
@@ -675,7 +742,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             InitialDirectory = ConfigStore.BaseDirectory,
         };
 
-        if (dialog.ShowDialog(_owner) != DialogResult.OK)
+        if (AufBildschirmDerMaus(() => dialog.ShowDialog(_owner)) != DialogResult.OK)
         {
             return;
         }
@@ -721,7 +788,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         try
         {
-            if (dialog.ShowDialog(_owner) != DialogResult.OK)
+            if (AufBildschirmDerMaus(() => dialog.ShowDialog(_owner)) != DialogResult.OK)
             {
                 return;
             }
@@ -868,7 +935,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                                                     string benutzer = "")
     {
         using var dlg = new LoginWindow(settings, totpNoetig, benutzer);
-        return dlg.ShowDialog(_owner) == DialogResult.OK
+        return AufBildschirmDerMaus(() => dlg.ShowDialog(_owner)) == DialogResult.OK
             ? (dlg.Benutzer, dlg.Kennwort, dlg.Totp)
             : (string.Empty, string.Empty, string.Empty);
     }
@@ -1276,14 +1343,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 try
                 {
                     NativeMethods.SetForegroundWindow(_owner.Handle);
-                    DialogResult r = MessageBox.Show(
+                    DialogResult r = AufBildschirmDerMaus(() => MessageBox.Show(
                         _owner,
                         string.Format(Texte.UpdateFrage,
                             Aktualisierung.EigeneAnzeige, zielVersion),
                         Texte.UpdateTitel,
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Information,
-                        MessageBoxDefaultButton.Button1);
+                        MessageBoxDefaultButton.Button1));
                     antwort.TrySetResult(r == DialogResult.Yes);
                 }
                 catch (Exception)

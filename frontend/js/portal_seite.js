@@ -329,10 +329,13 @@
         var tActive = document.getElementById('totp-active');
         var tFlow = document.getElementById('totp-setup-flow');
         var tShow = document.getElementById('totp-show-result');
+        var tClose = document.getElementById('btn-totp-close');
         // Den angezeigten Schluessel nicht im DOM stehen lassen, sobald der Dialog
-        // zu ist oder neu geoeffnet wird.
+        // zu ist oder neu geoeffnet wird. Solange er angezeigt wird, schliesst
+        // "Fertig" darunter – "Schliessen" waere derselbe Knopf ein zweites Mal.
         function _totpAnzeigeLeeren() {
             tShow.classList.add('hidden');
+            tClose.classList.remove('hidden');
             document.getElementById('totp-show-qr').innerHTML = '';
             document.getElementById('totp-show-secret').textContent = '';
             document.getElementById('totp-show-code').value = '';
@@ -357,7 +360,7 @@
             totpModal.classList.add('hidden'); _totpAnzeigeLeeren();
             document.getElementById('totp-disable-pass').value = '';
         }
-        document.getElementById('btn-totp-close').addEventListener('click', _totpSchliessen);
+        tClose.addEventListener('click', _totpSchliessen);
         document.getElementById('btn-totp-show-done').addEventListener('click', _totpSchliessen);
         document.getElementById('btn-totp-show').addEventListener('click', function(){
             var pw = document.getElementById('totp-disable-pass').value;
@@ -375,6 +378,7 @@
                         document.getElementById('totp-show-code').value = '';
                         document.getElementById('totp-disable-pass').value = '';
                         tShow.classList.remove('hidden');
+                        tClose.classList.add('hidden');
                     } else {
                         _totpAnzeigeLeeren();
                         tErr.textContent = d.error || (window.t?window.t('totp.show_failed'):'Anzeige fehlgeschlagen');

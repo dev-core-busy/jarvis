@@ -123,7 +123,12 @@
         .btn-close-banner:hover { opacity:1; }
 
         /* ── Modals: 2FA + Zertifikat (portal-nativ) ── */
-        .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px); }
+        /* z-index UEBER der Avatar-Figur (#jav-root 1200, .clippy 1000): sie sitzt
+           fest unten rechts und fing bei schmalem Fenster die Klicks auf den
+           unteren Teil eines Dialogs ab (gemessen 2026-10-30: "Schliessen" im
+           2FA-Dialog bei 800 px Breite). Unter VNC-Ansicht (9000), Banner (2000)
+           und Sperrbildschirm bleibt es wie bisher. */
+        .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1300;backdrop-filter:blur(4px); }
         .modal-overlay.hidden { display:none; }
         .modal-card { background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:28px 26px;width:400px;max-width:92vw;text-align:center;max-height:88vh;overflow:auto; }
         .modal-title { font-size:18px;font-weight:600;margin-bottom:18px;color:var(--text-primary); }
@@ -761,7 +766,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/portal_tiles.js?v=2"></script>
 <script src="/static/js/alpha_sort.js?v=2"></script>
 <script src="/static/js/newsfeed.js?v=4"></script>
-<script src="/static/js/portal_seite.js?v=7"></script>
+<script src="/static/js/portal_seite.js?v=8"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

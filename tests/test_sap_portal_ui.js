@@ -14,6 +14,8 @@
  *   7. "Mein SAP-Zugang": die Aussetzer-Meldung nennt den GRUND
  *  15. Verbindungstest: Bericht fuer den SAP-Administrator (auch im Fehlerfall)
  *  16. Abfrage-Konsole: Auswahllisten fuer Service und EntitySet
+ *  17. Nicht direkt abrufbare EntitySets (Hinweis, 404-Erklaerung) und die
+ *      Service-Liste unter "Mein SAP-Zugang" -> Standard-Service
  *
  * WICHTIG (Fallstrick vom 2026-07-30): am Ende window.close() + process.exit(),
  * sonst haelt der 30-Sekunden-Timer der LLM-Anzeige den Prozess fuer immer offen.
@@ -130,8 +132,12 @@ function build(htmlFile, me, opts) {
                 }
                 if (u.startsWith('/api/sap/reporting-endpoints')) return json(ENDPOINTS);
                 if (u.startsWith('/api/sap/status')) {
-                    return json({ ok: true, configured: true, connection_type: 'odata',
-                                  product: 'S/4HANA', odata: true, hana: false, rfc: false });
+                    return json(Object.assign({ ok: true, configured: true, connection_type: 'odata',
+                                  product: 'S/4HANA', odata: true, hana: false, rfc: false }, opts.status || {}));
+                }
+                if (u.startsWith('/api/sap/odata/query') && opts.odQuery) {
+                    (opts.odCalls || []).push(u);
+                    return json(opts.odQuery(new URLSearchParams(u.split('?')[1] || '').get('entity_set') || ''));
                 }
                 if (u.startsWith('/api/sap/instructions')) {
                     if (init && init.method === 'POST') {
@@ -825,10 +831,10 @@ function loadScript(dom, rel) {
         'sap/ZA_SRV': { ok: true, service: 'sap/ZA_SRV', entity_sets: ['A1', 'A2', 'A3'], count: 3 },
         'sap/ZB_SRV': { ok: true, service: 'sap/ZB_SRV', entity_sets: ['B1'], count: 1 },
     };
-    async function konsole(odServices, odSets, vorher) {
+    async function konsole(odServices, odSets, vorher, extra) {
         const calls = [], offen = [];
         const d = build('sap.html', { username: 'anna', is_admin: true, permissions: { sap: true } },
-                        { odServices, odSets, odCalls: calls, odOffen: offen });
+                        Object.assign({ odServices, odSets, odCalls: calls, odOffen: offen }, extra || {}));
         loadScript(d, 'js/i18n.js');
         loadScript(d, 'js/sap_portal.js');
         await sleep(140);
@@ -972,6 +978,150 @@ function loadScript(dom, rel) {
               String(zaehle(r.calls, '/odata/services')));
         await schliessen(r);
     }
+    // ══ 17. Nicht direkt abrufbare EntitySets / Standard-Service-Liste ═══
+    // Gemeldet 2026-10-30: "Ressource fuer Segment 'A_SalesOrderText' nicht
+    // gefunden", obwohl das Set in der Liste stand. Die Service-Beschreibung
+    // markiert solche Sets (sap:addressable="false") – die Konsole nennt das
+    // und den Weg dorthin, aber NUR, wenn es gemessen ist.
+    section('17. Nur ueber Navigation / Standard-Service-Liste');
+    const SO = {
+        ok: true, service: 'sap/API_SALES_ORDER_SRV', count: 4,
+        entity_sets: ['A_SalesOrder', 'A_SalesOrderItem', 'A_SalesOrderItemText', 'A_SalesOrderText'],
+        details: [
+            { name: 'A_SalesOrder', addressable: true, navigation: [] },
+            { name: 'A_SalesOrderItem', addressable: true,
+              navigation: [{ von: 'A_SalesOrder', property: 'to_Item', schluessel: ['SalesOrder'] }] },
+            { name: 'A_SalesOrderItemText', addressable: false,
+              navigation: [{ von: 'A_SalesOrderItem', property: 'to_ItemText', schluessel: ['SalesOrder', 'SalesOrderItem'] }] },
+            { name: 'A_SalesOrderText', addressable: false,
+              navigation: [{ von: 'A_SalesOrder', property: 'to_Text', schluessel: ['SalesOrder'] }] },
+        ],
+    };
+    const WEG_TEXT = "A_SalesOrder('<SalesOrder>')/to_Text";
+    const WEG_ITEM = "A_SalesOrderItem(SalesOrder='<SalesOrder>',SalesOrderItem='<SalesOrderItem>')/to_ItemText";
+    const FEHLER404 = "Ressource für Segment 'A_SalesOrderText' nicht gefunden";
+    {
+        const r = await konsole({ ok: true, services: [], count: 0, genau: true, ausgelassen: 0 },
+                                () => ({ data: SO }), null,
+                                { odQuery: () => ({ ok: false, status: 404, error: FEHLER404 }) });
+        const { doc, d } = r;
+        const label = (v) => { const o = doc.querySelector('#sp-od-entity-list option[value="' + v + '"]'); return o ? o.getAttribute('label') : '(fehlt)'; };
+        check('Liste: nicht abrufbares Set mit Weg beschriftet',
+              label('A_SalesOrderText') === 'nur über Navigation: ' + WEG_TEXT, label('A_SalesOrderText'));
+        check('Liste: zusammengesetzter Schluessel im Weg', label('A_SalesOrderItemText') === 'nur über Navigation: ' + WEG_ITEM,
+              label('A_SalesOrderItemText'));
+        check('Liste: abrufbares Set ohne Beschriftung', label('A_SalesOrder') === null, String(label('A_SalesOrder')));
+        const eh = () => doc.getElementById('sp-od-entity-hint').textContent;
+        check('Zaehl-Hinweis nennt die nur ueber Navigation erreichbaren', /\(davon 2 nur über Navigation/.test(eh()), eh());
+        const feld = doc.getElementById('sp-od-entity');
+        feld.value = 'A_SalesOrderText'; feld.dispatchEvent(new d.window.Event('input'));
+        check('Auswahl: Hinweis mit Weg sofort am Feld', eh().indexOf(WEG_TEXT) >= 0 && /nicht direkt abrufbar/.test(eh()), eh());
+        feld.value = 'A_SalesOrder'; feld.dispatchEvent(new d.window.Event('input'));
+        check('anderes Set: Zaehl-Hinweis kehrt zurueck', /4 EntitySets/.test(eh()) && eh().indexOf(WEG_TEXT) < 0, eh());
+
+        const out = () => doc.getElementById('sp-console-out').textContent;
+        // "nichts geraten" = unter dem Fehler steht KEIN Zusatzhinweis. Erst
+        // wurde nach Woertern gesucht ("Navigation") – der Navigationshinweis
+        // enthaelt keines davon, zwei Gegenproben blieben deshalb stumm.
+        const zusatz = () => doc.querySelector('#sp-console-out .sp-od-hint');
+        const abfrage = async (wert) => { feld.value = wert; doc.getElementById('sp-od-run').click(); await sleep(40); };
+        await abfrage('A_SalesOrderText');
+        check('404 bei nicht abrufbarem Set: Fehler UND Weg (als Zusatzhinweis)',
+              out().indexOf(FEHLER404) >= 0 && !!zusatz() && zusatz().textContent.indexOf(WEG_TEXT) >= 0, out());
+        await abfrage('A_Salesordertext');
+        check('404 bei Set ausserhalb der Liste: Schreibweise/Service pruefen',
+              /steht nicht in der EntitySet-Liste von „sap\/API_SALES_ORDER_SRV“/.test(out()), out());
+        await abfrage('A_SalesOrder');
+        check('404 bei abrufbarem Set: nichts geraten', out().indexOf(FEHLER404) >= 0 && !zusatz(), out());
+        await abfrage("A_SalesOrder('1')/to_Text");
+        check('404 bei eingegebenem Pfad: nichts geraten', out().indexOf(FEHLER404) >= 0 && !zusatz(), out());
+
+        // Anderer Service eingetragen, fuer den keine Liste geladen ist: nichts behaupten.
+        doc.getElementById('sp-od-service').value = 'sap/ANDERER_SRV';
+        await abfrage('A_SalesOrderText');
+        check('404 ohne geladene Liste fuer diesen Service: nichts behauptet',
+              out().indexOf(FEHLER404) >= 0 && !zusatz(), out());
+        await schliessen(r);
+    }
+    {
+        // Standard-Service-Liste: nur aus dem gespeicherten EIGENEN Zugang.
+        const SVC = { ok: true, genau: true, ausgelassen: 0, count: 2, services: [
+            { service: 'sap/API_SALES_ORDER_SRV', title: 'Kundenaufträge' },
+            { service: 'sap/ZFI_AR_SRV', title: 'Debitoren' } ] };
+        const calls = [], offen = [];
+        const d = build('sap.html', { username: 'anna', is_admin: true, permissions: { sap: true } },
+                        { status: { quelle: 'persoenlich' }, odServices: SVC, odCalls: calls, odOffen: offen,
+                          odSets: (svc) => ({ data: svc ? SO : SO, delay: 120 }),
+                          account: { vorhanden: true, connection_type: 'odata', aktiv: true,
+                                     erlaubte_hosts: [], host_ok: true, cert: {} } });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(160);
+        const doc = d.window.document;
+        const acc = doc.getElementById('sp-acc-od-service');
+        check('Standard-Service haengt an seiner Liste',
+              acc.getAttribute('list') === 'sp-acc-od-service-list' && !!doc.getElementById('sp-acc-od-service-list'));
+        check('ohne Fokus kein Abruf', zaehle(calls, '/odata/services') === 0, calls.join(', '));
+        acc.dispatchEvent(new d.window.Event('focus'));
+        await sleep(40);
+        check('eigener Zugang: Liste im Standard-Service-Feld',
+              JSON.stringify(werte(doc, 'sp-acc-od-service-list')) === '["sap/API_SALES_ORDER_SRV","sap/ZFI_AR_SRV"]',
+              JSON.stringify(werte(doc, 'sp-acc-od-service-list')));
+        check('eigener Zugang: Hinweis am Feld', /2 Services im Katalog/.test(doc.getElementById('sp-acc-od-service-hint').textContent),
+              doc.getElementById('sp-acc-od-service-hint').textContent);
+        const con = doc.getElementById('sp-sect-console');
+        con.open = true;
+        await sleep(40);
+        check('Konsole nutzt dieselbe Antwort (kein zweiter Abruf)', zaehle(calls, '/odata/services') === 1,
+              String(zaehle(calls, '/odata/services')));
+
+        // Speichern verwirft gemerkte Listen – auch eine noch laufende Antwort.
+        const setsVorher = zaehle(calls, '/odata/entity-sets');
+        doc.getElementById('sp-acc-type').value = 'odata';
+        doc.getElementById('sp-acc-save').click();
+        await sleep(30);
+        check('Speichern leert die Listen',
+              werte(doc, 'sp-acc-od-service-list').length === 0 && werte(doc, 'sp-od-service-list').length === 0,
+              JSON.stringify([werte(doc, 'sp-acc-od-service-list'), werte(doc, 'sp-od-service-list')]));
+        await Promise.all(offen); await sleep(20);
+        check('...und eine danach eintreffende alte Antwort fuellt nichts',
+              werte(doc, 'sp-od-entity-list').length === 0, JSON.stringify(werte(doc, 'sp-od-entity-list')));
+        acc.dispatchEvent(new d.window.Event('focus'));
+        doc.getElementById('sp-od-entity').dispatchEvent(new d.window.Event('focus'));
+        await sleep(40);
+        check('nach dem Speichern: Service-Liste neu abgefragt', zaehle(calls, '/odata/services') === 2,
+              String(zaehle(calls, '/odata/services')));
+        check('nach dem Speichern: EntitySets neu abgefragt (nichts Altes gemerkt)',
+              zaehle(calls, '/odata/entity-sets') === setsVorher + 1, zaehle(calls, '/odata/entity-sets') + ' / ' + setsVorher);
+        await Promise.all(offen); await sleep(20);
+        d.window.close();
+    }
+    {
+        // Ohne eigenen Zugang: keine Liste aus dem Sammelzugang im Feld.
+        const calls = [];
+        const d = build('sap.html', { username: 'anna', is_admin: true, permissions: { sap: true } },
+                        { status: { quelle: 'sammel' }, odCalls: calls,
+                          odServices: { ok: true, genau: true, ausgelassen: 0, count: 1,
+                                        services: [{ service: 'sap/SAMMEL_SRV', title: 'fremd' }] },
+                          odSets: () => ({ data: SO }) });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(160);
+        const doc = d.window.document;
+        doc.getElementById('sp-acc-od-service').dispatchEvent(new d.window.Event('focus'));
+        await sleep(30);
+        check('Sammelzugang: Fokus fragt nichts ab', zaehle(calls, '/odata/services') === 0, calls.join(', '));
+        check('Sammelzugang: Hinweis "erst speichern"',
+              /gespeicherten eigenen Zugang/.test(doc.getElementById('sp-acc-od-service-hint').textContent),
+              doc.getElementById('sp-acc-od-service-hint').textContent);
+        const con = doc.getElementById('sp-sect-console');
+        con.open = true;
+        await sleep(40);
+        check('Sammelzugang: Konsole bekommt ihre Liste', werte(doc, 'sp-od-service-list').length === 1);
+        check('...aber nichts davon landet im Standard-Service-Feld', werte(doc, 'sp-acc-od-service-list').length === 0,
+              JSON.stringify(werte(doc, 'sp-acc-od-service-list')));
+        d.window.close();
+    }
     {
         // Jeder im Modul benutzte sap.ti_*-Schluessel existiert in BEIDEN
         // Sprachen – gelesen aus dem Quelltext, nicht abgetippt. t() faellt
@@ -981,7 +1131,7 @@ function loadScript(dom, rel) {
         // JEDES 'sap.ti_…'-Literal, nicht nur T('…'): die Zeilen laufen ueber
         // den Helfer add('sap.ti_…', …) – ein Muster nur auf T( war fuer sie
         // blind (von der Gegenprobe gefunden).
-        const keys = [...new Set([...quelle.matchAll(/'(sap\.(?:ti|od)_[a-z_]+)'/g)].map((m) => m[1]))];
+        const keys = [...new Set([...quelle.matchAll(/'(sap\.(?:ti|od|acc_svc)_[a-z_]+)'/g)].map((m) => m[1]))];
         const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
         const grenze = i18n.search(/\n\s*en\s*:\s*\{/);
         const bloecke = { de: grenze > 0 ? i18n.slice(0, grenze) : '', en: grenze > 0 ? i18n.slice(grenze) : '' };

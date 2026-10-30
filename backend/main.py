@@ -13522,8 +13522,10 @@ async def sap_odata_entity_sets_api(service: str = "", user: str = Depends(requi
         return JSONResponse({"ok": False, "kein_service": True,
                              "error": "Kein Service angegeben und kein Standard-Service hinterlegt."})
     try:
-        sets = await asyncio.to_thread(c.odata.entity_sets, svc)
-        return JSONResponse({"ok": True, "service": svc, "entity_sets": sets, "count": len(sets)})
+        details = await asyncio.to_thread(c.odata.entity_set_details, svc)
+        sets = [d["name"] for d in details]
+        return JSONResponse({"ok": True, "service": svc, "entity_sets": sets, "count": len(sets),
+                             "details": details})
     except SapError as e:
         return JSONResponse({"ok": False, "status": e.status, "service": svc, "error": str(e)})
 

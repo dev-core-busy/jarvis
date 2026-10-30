@@ -535,9 +535,10 @@
         });
         box.innerHTML = html + '</tbody></table>';
     }
-    function consoleError(msg) {
+    function consoleError(msg, zusatz) {
         var box = $('sp-console-out');
-        if (box) box.innerHTML = '<div class="sp-empty" style="color:var(--danger);">' + esc(msg) + '</div>';
+        if (box) box.innerHTML = '<div class="sp-empty" style="color:var(--danger);">' + esc(msg) + '</div>'
+            + (zusatz ? '<div class="sp-note sp-od-hint">' + esc(zusatz) + '</div>' : '');
     }
     function runOData() {
         var box = $('sp-console-out');
@@ -550,7 +551,11 @@
         fetch(url, { headers: authHeaders() })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                if (!d || !d.ok) { consoleError((d && d.error) || T('sap.query_failed', 'Abfrage fehlgeschlagen.')); return; }
+                if (!d || !d.ok) {
+                    consoleError((d && d.error) || T('sap.query_failed', 'Abfrage fehlgeschlagen.'),
+                                 (d && d.status === 404) ? odErklaere404(entity) : '');
+                    return;
+                }
                 renderTable(box, d.columns, d.rows);
             })
             .catch(function () { consoleError(T('sap.query_failed', 'Abfrage fehlgeschlagen.')); });
@@ -584,6 +589,8 @@
     var _odSvc = null;        // laufende/erledigte Katalog-Abfrage (Promise)
     var _odSets = {};         // Service-Eingabe -> erfolgreiche Antwort
     var _odSetsFuer = null;   // fuer welche Eingabe die EntitySet-Liste gilt
+    var _odSetsHinweis = '';  // Zaehl-Hinweis der aktuellen Liste (zum Wiederherstellen)
+    var _odGeneration = 0;    // steigt beim Verwerfen – aeltere Antworten zaehlen nicht mehr
 
     function odHint(id, msg, kind) {
         var el = $(id); if (!el) return;
@@ -608,39 +615,95 @@
         return (($('sp-od-service') || {}).value || '').trim().replace(/^\/+|\/+$/g, '');
     }
 
+    var _odSvcAntwort = null;  // letzte Antwort der Service-Liste (fuer beide Felder)
+
+    function odSvcText(d) {
+        if (!d || !d.ok) {
+            return (d && d.kein_katalog)
+                ? T('sap.od_svc_nocatalog', 'Dieser Server hat keinen Gateway-Katalog – den Service bitte von Hand eintragen.')
+                : T('sap.od_svc_failed', 'Service-Liste nicht abrufbar:') + ' ' + ((d && d.error) || '');
+        }
+        var n = Array.isArray(d.services) ? d.services.length : 0;
+        var msg = (d.genau ? T('sap.od_svc_count', '{n} Services im Katalog – zur Auswahl ins Feld klicken oder tippen.')
+                           : T('sap.od_svc_count_min', 'Mindestens {n} Services im Katalog – zur Auswahl ins Feld klicken oder tippen.'))
+            .replace('{n}', n);
+        if (d.ausgelassen) {
+            msg += ' ' + T('sap.od_svc_skipped', '({n} weitere liegen nicht unter der Basis-URL und fehlen in der Liste.)')
+                .replace('{n}', d.ausgelassen);
+        }
+        return msg;
+    }
+
+    // Die Liste kommt vom Zugang, der gerade GILT. Ins Feld "Standard-Service"
+    // von "Mein SAP-Zugang" gehoert sie nur, wenn das der gespeicherte EIGENE
+    // Zugang ist – aus dem Sammelzugang stammend waere sie eine Aussage ueber
+    // einen fremden Server bzw. fremde Berechtigungen.
+    function odEigenerZugang() {
+        return !!(_status && _status.quelle === 'persoenlich');
+    }
+
+    function odZeigeServices() {
+        var d = _odSvcAntwort;
+        if (!d) return;
+        var werte = (d.ok && Array.isArray(d.services)) ? d.services.map(function (x) {
+            return { value: x.service, label: x.title };
+        }) : [];
+        var art = d.ok ? '' : 'error';
+        odFill('sp-od-service-list', werte);
+        odHint('sp-od-svc-hint', odSvcText(d), art);
+        if (odEigenerZugang()) {
+            odFill('sp-acc-od-service-list', werte);
+            odHint('sp-acc-od-service-hint', odSvcText(d), art);
+        }
+    }
+
     function odLadeServices() {
         if (_odSvc) return _odSvc;
         odHint('sp-od-svc-hint', T('sap.od_svc_loading', 'Lade Service-Liste…'));
-        _odSvc = fetch('/api/sap/odata/services', { headers: authHeaders() })
+        if (odEigenerZugang()) odHint('sp-acc-od-service-hint', T('sap.od_svc_loading', 'Lade Service-Liste…'));
+        var dieser = fetch('/api/sap/odata/services', { headers: authHeaders() })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                if (!d || !d.ok) {
-                    // Kein Katalog ist ein Dauerzustand – sonst beim naechsten
-                    // Klick ins Feld neu versuchen (ein Klick = eine Anfrage).
-                    if (!(d && d.kein_katalog)) _odSvc = null;
-                    odHint('sp-od-svc-hint', (d && d.kein_katalog)
-                        ? T('sap.od_svc_nocatalog', 'Dieser Server hat keinen Gateway-Katalog – den Service bitte von Hand eintragen.')
-                        : T('sap.od_svc_failed', 'Service-Liste nicht abrufbar:') + ' ' + ((d && d.error) || ''), 'error');
-                    return;
-                }
-                var liste = Array.isArray(d.services) ? d.services : [];
-                odFill('sp-od-service-list', liste.map(function (x) {
-                    return { value: x.service, label: x.title };
-                }));
-                var msg = (d.genau ? T('sap.od_svc_count', '{n} Services im Katalog – zur Auswahl ins Feld klicken oder tippen.')
-                                   : T('sap.od_svc_count_min', 'Mindestens {n} Services im Katalog – zur Auswahl ins Feld klicken oder tippen.'))
-                    .replace('{n}', liste.length);
-                if (d.ausgelassen) {
-                    msg += ' ' + T('sap.od_svc_skipped', '({n} weitere liegen nicht unter der Basis-URL und fehlen in der Liste.)')
-                        .replace('{n}', d.ausgelassen);
-                }
-                odHint('sp-od-svc-hint', msg);
+                if (_odSvc !== dieser) return;      // inzwischen verworfen (Zugang gespeichert)
+                _odSvcAntwort = d || { ok: false };
+                // Kein Katalog ist ein Dauerzustand – sonst beim naechsten
+                // Klick ins Feld neu versuchen (ein Klick = eine Anfrage).
+                if (!(d && d.ok) && !(d && d.kein_katalog)) _odSvc = null;
+                odZeigeServices();
             })
             .catch(function () {
+                if (_odSvc !== dieser) return;
                 _odSvc = null;
-                odHint('sp-od-svc-hint', T('sap.od_svc_failed', 'Service-Liste nicht abrufbar:'), 'error');
+                _odSvcAntwort = { ok: false };
+                odZeigeServices();
             });
+        _odSvc = dieser;
         return _odSvc;
+    }
+
+    // Standard-Service unter "Mein SAP-Zugang": Liste nur aus dem gespeicherten
+    // eigenen Zugang. Mit ungespeicherten Formularwerten zu fragen hiesse,
+    // Anmeldedaten an eine gerade getippte Adresse zu schicken – vorbei an der
+    // Server-Freigabe der persoenlichen Zugaenge.
+    function accLadeServices() {
+        if (!odEigenerZugang()) {
+            odFill('sp-acc-od-service-list', []);
+            odHint('sp-acc-od-service-hint', T('sap.acc_svc_need_saved',
+                'Die Liste kommt aus deinem gespeicherten eigenen Zugang – Basis-URL und Anmeldung zuerst speichern, dann erscheint sie hier.'));
+            return;
+        }
+        if (_odSvcAntwort && _odSvc) { odZeigeServices(); return; }
+        odLadeServices();
+    }
+
+    // Nach Speichern/Entfernen des Zugangs gelten Server und Anmeldung nicht
+    // mehr – gemerkte Listen sind dann Aussagen ueber einen anderen Zugang.
+    function odVerwerfen() {
+        _odGeneration++;
+        _odSvc = null; _odSvcAntwort = null;
+        _odSets = {}; _odSetsFuer = null; _odSetsHinweis = '';
+        ['sp-od-service-list', 'sp-od-entity-list', 'sp-acc-od-service-list'].forEach(function (id) { odFill(id, []); });
+        ['sp-od-svc-hint', 'sp-od-entity-hint', 'sp-acc-od-service-hint'].forEach(function (id) { odHint(id, ''); });
     }
 
     function odZeigeSets(d) {
@@ -657,9 +720,81 @@
             return;
         }
         var sets = Array.isArray(d.entity_sets) ? d.entity_sets : [];
-        odFill('sp-od-entity-list', sets.map(function (n) { return { value: n }; }));
-        odHint('sp-od-entity-hint', T('sap.od_sets_count', '{n} EntitySets in „{s}“ – zur Auswahl ins Feld klicken oder tippen.')
-            .replace('{n}', sets.length).replace('{s}', d.service || ''));
+        var details = {};
+        (Array.isArray(d.details) ? d.details : []).forEach(function (x) { if (x && x.name) details[x.name] = x; });
+        var nurNav = 0;
+        odFill('sp-od-entity-list', sets.map(function (n) {
+            var x = details[n];
+            if (!x || x.addressable !== false) return { value: n };
+            nurNav++;
+            var w = (x.navigation || [])[0];
+            return { value: n, label: T('sap.od_nav_only', 'nur über Navigation') + (w ? ': ' + odWeg(w) : '') };
+        }));
+        _odSetsHinweis = T('sap.od_sets_count', '{n} EntitySets in „{s}“ – zur Auswahl ins Feld klicken oder tippen.')
+            .replace('{n}', sets.length).replace('{s}', d.service || '');
+        if (nurNav) {
+            _odSetsHinweis += ' ' + T('sap.od_sets_count_nav', '(davon {n} nur über Navigation abrufbar)').replace('{n}', nurNav);
+        }
+        odHint('sp-od-entity-hint', _odSetsHinweis);
+        odPruefeEntity();
+    }
+
+    // Weg zu einem nicht direkt abrufbaren Set: <von>(<Schluessel>)/<property>.
+    // Die Schluesselwerte kennt nur der Benutzer – sie stehen als <Name> da.
+    function odWeg(w) {
+        var k = Array.isArray(w.schluessel) ? w.schluessel : [];
+        var klammer = k.length === 1 ? "'<" + k[0] + ">'"
+            : k.length ? k.map(function (n) { return n + "='<" + n + ">'"; }).join(',') : '…';
+        return w.von + '(' + klammer + ')/' + w.property;
+    }
+
+    // Was der Service ueber das eingetragene Set sagt – nur aus einer GELADENEN
+    // Liste fuer genau den eingetragenen Service, sonst null (dann wird nichts
+    // behauptet). {liste, detail}: detail null = steht nicht in der Liste.
+    function odWissen(entity) {
+        var d = _odSets[odServiceKey()];
+        if (!d || !d.ok) return null;
+        var name = (entity || '').trim();
+        var x = null;
+        (Array.isArray(d.details) ? d.details : []).forEach(function (e) { if (e && e.name === name) x = e; });
+        if (!x && (d.entity_sets || []).indexOf(name) >= 0) x = { name: name };
+        return { liste: d, detail: x };
+    }
+
+    function odNavText(x) {
+        var w = (x.navigation || [])[0];
+        return w
+            ? T('sap.od_entity_nav', '„{e}“ ist im Service als nicht direkt abrufbar gekennzeichnet – stattdessen z. B. {weg} ins Feld eintragen und die Angaben in <…> durch echte Werte ersetzen.')
+                .replace('{e}', x.name).replace('{weg}', odWeg(w))
+            : T('sap.od_entity_nav_none', '„{e}“ ist im Service als nicht direkt abrufbar gekennzeichnet; einen Weg dorthin nennt die Service-Beschreibung nicht.')
+                .replace('{e}', x.name);
+    }
+
+    // Beim Auswaehlen/Tippen: ein nicht direkt abrufbares Set sofort am Feld
+    // nennen, sonst den Zaehl-Hinweis der Liste stehen lassen.
+    function odPruefeEntity() {
+        var feld = $('sp-od-entity'); if (!feld) return;
+        var w = odWissen(feld.value);
+        if (w && w.detail && w.detail.addressable === false) {
+            odHint('sp-od-entity-hint', odNavText(w.detail));
+        } else if (_odSetsFuer === odServiceKey() && _odSetsHinweis) {
+            odHint('sp-od-entity-hint', _odSetsHinweis);
+        }
+    }
+
+    // Zusatz zu einem 404 der Konsole – nur, was GEMESSEN ist: die Markierung
+    // aus der Service-Beschreibung oder "steht nicht in der Liste". Bei einem
+    // adressierbaren Set, das in der Liste steht, wird nichts geraten.
+    function odErklaere404(entity) {
+        var name = (entity || '').trim();
+        if (!name || /[\/(]/.test(name)) return '';     // schon ein Pfad – nichts zu deuten
+        var w = odWissen(name);
+        if (!w) return '';
+        if (!w.detail) {
+            return T('sap.od_404_unknown', '„{e}“ steht nicht in der EntitySet-Liste von „{s}“ – Schreibweise (Groß-/Kleinschreibung) und Service prüfen.')
+                .replace('{e}', name).replace('{s}', w.liste.service || '');
+        }
+        return w.detail.addressable === false ? odNavText(w.detail) : '';
     }
 
     function odLadeSets() {
@@ -669,9 +804,11 @@
         if (_odSets[key]) { odZeigeSets(_odSets[key]); return; }
         odFill('sp-od-entity-list', []);
         odHint('sp-od-entity-hint', T('sap.od_sets_loading', 'Lade EntitySets…'));
+        var gen = _odGeneration;
         fetch('/api/sap/odata/entity-sets?service=' + encodeURIComponent(key), { headers: authHeaders() })
             .then(function (r) { return r.json(); })
             .then(function (d) {
+                if (gen !== _odGeneration) return;   // Zugang inzwischen gespeichert/entfernt
                 d = d || {};
                 if (d.ok) _odSets[key] = d;          // nur Erfolge merken
                 // Inzwischen ein anderer Service eingetragen: diese Antwort
@@ -680,7 +817,7 @@
                 odZeigeSets(d);
             })
             .catch(function () {
-                if (_odSetsFuer !== key) return;
+                if (gen !== _odGeneration || _odSetsFuer !== key) return;
                 _odSetsFuer = null;
                 odHint('sp-od-entity-hint', T('sap.od_sets_failed', 'EntitySet-Liste nicht abrufbar:'), 'error');
             });
@@ -926,6 +1063,7 @@
                 }
                 accClearSecrets();
                 accResetTestInfo();
+                odVerwerfen();
                 accNote('✓ ' + T('sap.acc_saved', 'Gespeichert.'), 'ok');
                 loadAccount();
                 loadStatus();      // Pille und Verbindungsanzeige folgen sofort
@@ -1118,6 +1256,7 @@
                 if ($('sp-acc-type')) $('sp-acc-type').value = '';
                 accApplyType('');
                 accResetTestInfo();
+                odVerwerfen();
                 accNote(T('sap.acc_removed', 'Eigener Zugang entfernt.'), 'ok');
                 loadAccount();
                 loadStatus();
@@ -1193,8 +1332,12 @@
         var con = $('sp-sect-console');
         if (con) con.addEventListener('toggle', odListenLaden);
         $('sp-od-service').addEventListener('focus', odLadeServices);
+        var accSvc = $('sp-acc-od-service');
+        if (accSvc) accSvc.addEventListener('focus', accLadeServices);
         $('sp-od-service').addEventListener('change', odLadeSets);
         $('sp-od-entity').addEventListener('focus', odLadeSets);
+        $('sp-od-entity').addEventListener('input', odPruefeEntity);
+        $('sp-od-entity').addEventListener('change', odPruefeEntity);
         $('sp-sql-run').addEventListener('click', runSql);
 
         $('sp-logout-btn').addEventListener('click', function () {

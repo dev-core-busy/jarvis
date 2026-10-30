@@ -296,18 +296,109 @@ class _ODataClient:
 
     def entity_sets(self, service: str = "") -> list[str]:
         """Liste der EntitySets eines Service (aus dem $metadata-XML geparst)."""
+        return [d["name"] for d in self.entity_set_details(service)]
+
+    def entity_set_details(self, service: str = "") -> list[dict]:
+        """EntitySets eines Service samt Abrufbarkeit, aus ``$metadata``.
+
+        Je Set ``{name, addressable, navigation}``. ``addressable`` ist False,
+        wenn der Service das Set als nicht direkt abrufbar kennzeichnet
+        (V2: ``sap:addressable="false"``) – das Gateway antwortet auf einen
+        direkten GET dann mit 404 ("Ressource fuer Segment … nicht gefunden"),
+        obwohl das Set in der Beschreibung steht. ``navigation`` nennt die Wege
+        dorthin: ``[{von, property, schluessel}]`` – also
+        ``<von>(<schluessel>)/<property>``. Ermittelt fuer V2 ueber
+        AssociationSet + NavigationProperty, fuer V4 ueber
+        NavigationPropertyBinding.
+
+        EINE Quelle fuer ``entity_sets`` und die Konsole – zwei Parser fuer
+        dieselbe Beschreibung liefen auseinander."""
         xml = self.get_metadata_xml(service)
-        names: list[str] = []
         try:
             root = ET.fromstring(xml)
         except ET.ParseError as e:
             raise SapError(0, "Konnte $metadata nicht parsen: %s" % e)
+
+        def lokal(name: str) -> str:
+            return name.rsplit("}", 1)[-1]
+
+        def kurz(qualifiziert: str) -> str:
+            # "API_SALES_ORDER_SRV.A_SalesOrderType" -> "A_SalesOrderType"
+            # (der Namensraum selbst darf Punkte enthalten)
+            return (qualifiziert or "").rsplit(".", 1)[-1]
+
+        typen: dict[str, ET.Element] = {}
         for el in root.iter():
-            if el.tag.rsplit("}", 1)[-1] == "EntitySet":
-                n = el.get("Name")
-                if n:
-                    names.append(n)
-        return sorted(set(names))
+            if lokal(el.tag) == "EntityType" and el.get("Name"):
+                typen[el.get("Name")] = el
+
+        def schluessel(typname: str) -> list[str]:
+            t = typen.get(kurz(typname))
+            if t is None:
+                return []
+            return [pr.get("Name") for k in t if lokal(k.tag) == "Key"
+                    for pr in k if lokal(pr.tag) == "PropertyRef" and pr.get("Name")]
+
+        def navprops(typname: str) -> list[ET.Element]:
+            t = typen.get(kurz(typname))
+            return [] if t is None else [n for n in t if lokal(n.tag) == "NavigationProperty"]
+
+        sets: dict[str, dict] = {}
+        set_typ: dict[str, str] = {}
+        v4_wege: list[tuple[str, dict]] = []   # (Ziel-Set, Weg) – Ziel evtl. noch nicht gelesen
+        for el in root.iter():
+            if lokal(el.tag) != "EntitySet" or not el.get("Name"):
+                continue
+            name = el.get("Name")
+            adressierbar = True
+            for k, v in el.attrib.items():
+                if lokal(k) == "addressable" and str(v).strip().lower() == "false":
+                    adressierbar = False
+            if name not in sets:
+                sets[name] = {"name": name, "addressable": adressierbar, "navigation": []}
+                set_typ[name] = el.get("EntityType") or ""
+            # V4: <NavigationPropertyBinding Path="to_Text" Target="A_SalesOrderText"/>
+            for b in el:
+                if lokal(b.tag) == "NavigationPropertyBinding" and b.get("Target"):
+                    # Target ist "Set", "Container/Set" oder "Ns.Container/Set"
+                    v4_wege.append((kurz(b.get("Target").rsplit("/", 1)[-1]),
+                                    {"von": name, "property": b.get("Path") or "",
+                                     "schluessel": schluessel(el.get("EntityType") or "")}))
+
+        # V2: AssociationSet verbindet zwei Sets ueber Rollen; der Weg von P nach
+        # S ist die NavigationProperty von Typ(P) mit dieser Relationship und
+        # ToRole = Rolle von S.
+        for el in root.iter():
+            if lokal(el.tag) != "AssociationSet":
+                continue
+            enden = [(e.get("Role"), e.get("EntitySet")) for e in el if lokal(e.tag) == "End"]
+            if len(enden) != 2:
+                continue
+            assoc = kurz(el.get("Association") or "")
+            for (rolle_s, ziel), (rolle_p, von) in (enden, enden[::-1]):
+                if ziel not in sets or von not in set_typ:
+                    continue
+                for n in navprops(set_typ[von]):
+                    if (kurz(n.get("Relationship") or "") == assoc and n.get("ToRole") == rolle_s
+                            and n.get("FromRole") == rolle_p and n.get("Name")):
+                        sets[ziel]["navigation"].append(
+                            {"von": von, "property": n.get("Name"),
+                             "schluessel": schluessel(set_typ[von])})
+
+        for ziel, weg in v4_wege:
+            if ziel in sets:
+                sets[ziel]["navigation"].append(weg)
+        for d in sets.values():
+            gesehen, eindeutig = set(), []
+            for n in d["navigation"]:
+                if (n["von"], n["property"]) not in gesehen:
+                    gesehen.add((n["von"], n["property"]))
+                    eindeutig.append(n)
+            # Adressierbare Herkunft zuerst: nur ueber sie fuehrt der Weg wirklich.
+            eindeutig.sort(key=lambda n: (not sets.get(n["von"], {}).get("addressable", True),
+                                          n["von"].lower(), n["property"].lower()))
+            d["navigation"] = eindeutig
+        return [sets[k] for k in sorted(sets, key=str.lower)]
 
     @staticmethod
     def rows_from(payload: dict) -> list[dict]:

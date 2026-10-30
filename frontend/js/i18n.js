@@ -4028,6 +4028,12 @@ const _I18N = {
         'sap.od_sets_failed': 'EntitySet-Liste nicht abrufbar:',
         'sap.od_sets_count': '{n} EntitySets in „{s}“ – zur Auswahl ins Feld klicken oder tippen.',
         'sap.od_sets_loading': 'Lade EntitySets…',
+        'sap.od_nav_only': 'nur über Navigation',
+        'sap.od_sets_count_nav': '(davon {n} nur über Navigation abrufbar)',
+        'sap.od_entity_nav': '„{e}“ ist im Service als nicht direkt abrufbar gekennzeichnet – stattdessen z. B. {weg} ins Feld eintragen und die Angaben in <…> durch echte Werte ersetzen.',
+        'sap.od_entity_nav_none': '„{e}“ ist im Service als nicht direkt abrufbar gekennzeichnet; einen Weg dorthin nennt die Service-Beschreibung nicht.',
+        'sap.od_404_unknown': '„{e}“ steht nicht in der EntitySet-Liste von „{s}“ – Schreibweise (Groß-/Kleinschreibung) und Service prüfen.',
+        'sap.acc_svc_need_saved': 'Die Liste kommt aus deinem gespeicherten eigenen Zugang – Basis-URL und Anmeldung zuerst speichern, dann erscheint sie hier.',
 
         // Serverzertifikat pruefen/verankern (js/sapcert.js) – EIN Satz Texte
         // fuer beide Oberflaechen (Einstellungen → SAP und /sap).
@@ -8688,6 +8694,12 @@ const _I18N = {
         'sap.od_sets_failed': 'EntitySet list not available:',
         'sap.od_sets_count': '{n} EntitySets in “{s}” – click into the field or type to choose.',
         'sap.od_sets_loading': 'Loading EntitySets…',
+        'sap.od_nav_only': 'navigation only',
+        'sap.od_sets_count_nav': '({n} of them only reachable via navigation)',
+        'sap.od_entity_nav': '“{e}” is marked as not directly retrievable in the service – instead enter e.g. {weg} into the field and replace the parts in <…> with real values.',
+        'sap.od_entity_nav_none': '“{e}” is marked as not directly retrievable in the service; the service description names no path to it.',
+        'sap.od_404_unknown': '“{e}” is not in the EntitySet list of “{s}” – check spelling (upper/lower case) and service.',
+        'sap.acc_svc_need_saved': 'The list comes from your saved personal access – save base URL and sign-in first, then it appears here.',
 
         // Pruefung / Pinning des Serverzertifikats (js/sapcert.js)
         'sapcert.check': 'Check certificate',

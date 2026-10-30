@@ -20,6 +20,9 @@ nachbildet – keine ``requests``-Attrappe, denn genau die echte Anfrage
   7. Abfrage-Konsole: Katalog als Service-Pfade RELATIV zur Basis-URL – ein
      fremder Host aus den Katalogdaten wird nie uebernommen
   8. Endpunkte der Konsole: Service-Liste, EntitySets ohne Service (AST)
+  9. EntitySets: nicht direkt abrufbare Sets (sap:addressable="false") und der
+     Navigationsweg dorthin – V2 ueber AssociationSet, V4 ueber
+     NavigationPropertyBinding
 
 Exit 2 heisst "konnte nicht laufen", 1 "Pruefung fehlgeschlagen", 0 bestanden.
 
@@ -88,6 +91,60 @@ SETS = ["Bestellungen", "Kunden", "Kunden", "Artikel"]   # doppelt: wird einmal 
 # Katalog wie ein echter Gateway ihn liefert: absolute Adressen mit INTERNEM
 # Hostnamen, Versionen als ;v=, Gross-/Kleinschreibung, ein V4-Pfad ausserhalb
 # der Basis (Praefix-Falle: /odata4 beginnt mit /odata) und eine leere Adresse.
+# V2 nach dem Vorbild von API_SALES_ORDER_SRV: Texte nur ueber Navigation.
+# KOEDER: to_TextAlt hat dieselben Rollennamen wie to_Text, aber eine ANDERE
+# Relationship – wer nur die Rollen vergleicht, nennt einen falschen Weg.
+V2_META = '''<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx"
+  xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata"
+  xmlns:sap="http://www.sap.com/Protocols/SAPData">
+ <edmx:DataServices m:DataServiceVersion="2.0">
+  <Schema Namespace="API_SALES_ORDER_SRV" xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+   <EntityType Name="A_SalesOrderType"><Key><PropertyRef Name="SalesOrder"/></Key>
+    <Property Name="SalesOrder" Type="Edm.String"/>
+    <NavigationProperty Name="to_Text" Relationship="API_SALES_ORDER_SRV.assoc_Text" FromRole="FromRole_assoc_Text" ToRole="ToRole_assoc_Text"/>
+    <NavigationProperty Name="to_TextAlt" Relationship="API_SALES_ORDER_SRV.assoc_Anders" FromRole="FromRole_assoc_Text" ToRole="ToRole_assoc_Text"/>
+    <NavigationProperty Name="to_Item" Relationship="API_SALES_ORDER_SRV.assoc_Item" FromRole="FromRole_assoc_Item" ToRole="ToRole_assoc_Item"/>
+   </EntityType>
+   <EntityType Name="A_SalesOrderItemType"><Key><PropertyRef Name="SalesOrder"/><PropertyRef Name="SalesOrderItem"/></Key>
+    <NavigationProperty Name="to_ItemText" Relationship="API_SALES_ORDER_SRV.assoc_ItemText" FromRole="FromRole_assoc_ItemText" ToRole="ToRole_assoc_ItemText"/>
+   </EntityType>
+   <EntityType Name="A_SalesOrderTextType"><Key><PropertyRef Name="SalesOrder"/><PropertyRef Name="Language"/><PropertyRef Name="LongTextID"/></Key></EntityType>
+   <EntityType Name="A_SalesOrderItemTextType"><Key><PropertyRef Name="SalesOrder"/><PropertyRef Name="SalesOrderItem"/></Key></EntityType>
+   <EntityContainer Name="API_SALES_ORDER_SRV_Entities" m:IsDefaultEntityContainer="true">
+    <EntitySet Name="A_SalesOrder" EntityType="API_SALES_ORDER_SRV.A_SalesOrderType" sap:creatable="false"/>
+    <EntitySet Name="A_SalesOrderItem" EntityType="API_SALES_ORDER_SRV.A_SalesOrderItemType" sap:addressable="true"/>
+    <EntitySet Name="A_SalesOrderText" EntityType="API_SALES_ORDER_SRV.A_SalesOrderTextType" sap:addressable="false"/>
+    <EntitySet Name="A_SalesOrderItemText" EntityType="API_SALES_ORDER_SRV.A_SalesOrderItemTextType" sap:addressable="false"/>
+    <AssociationSet Name="assoc_Text" Association="API_SALES_ORDER_SRV.assoc_Text">
+     <End EntitySet="A_SalesOrder" Role="FromRole_assoc_Text"/><End EntitySet="A_SalesOrderText" Role="ToRole_assoc_Text"/>
+    </AssociationSet>
+    <AssociationSet Name="assoc_Item" Association="API_SALES_ORDER_SRV.assoc_Item">
+     <End EntitySet="A_SalesOrder" Role="FromRole_assoc_Item"/><End EntitySet="A_SalesOrderItem" Role="ToRole_assoc_Item"/>
+    </AssociationSet>
+    <AssociationSet Name="assoc_ItemText" Association="API_SALES_ORDER_SRV.assoc_ItemText">
+     <End EntitySet="A_SalesOrderItem" Role="FromRole_assoc_ItemText"/><End EntitySet="A_SalesOrderItemText" Role="ToRole_assoc_ItemText"/>
+    </AssociationSet>
+   </EntityContainer>
+  </Schema>
+ </edmx:DataServices>
+</edmx:Edmx>'''
+# V4 (RAP): Namensraum mit Punkten, Target mit Container-Praefix.
+V4_META = '''<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+ <edmx:DataServices>
+  <Schema Namespace="com.sap.gateway.srvd.zv4.v0001" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+   <EntityType Name="KopfType"><Key><PropertyRef Name="Id"/></Key></EntityType>
+   <EntityType Name="TextType"><Key><PropertyRef Name="Id"/><PropertyRef Name="Sprache"/></Key></EntityType>
+   <EntityContainer Name="Container">
+    <EntitySet Name="Kopf" EntityType="com.sap.gateway.srvd.zv4.v0001.KopfType">
+     <NavigationPropertyBinding Path="_Text" Target="Container/Text"/>
+    </EntitySet>
+    <EntitySet Name="Text" EntityType="com.sap.gateway.srvd.zv4.v0001.TextType"/>
+   </EntityContainer>
+  </Schema>
+ </edmx:DataServices>
+</edmx:Edmx>'''
 PFAD_ZEILEN = [
     {"ID": "ZB_SRV_0001", "Title": "B-Service", "ServiceUrl": "http://intern-gw:8000/sap/opu/odata/sap/ZB_SRV/"},
     {"ID": "ZA_SRV_0002", "Title": "A v2", "ServiceUrl": "http://intern-gw:8000/sap/opu/odata/sap/ZA_SRV;v=0002/"},
@@ -122,6 +179,10 @@ class _Gateway(http.server.BaseHTTPRequestHandler):
         if modus == "401":
             return self._antwort(401, json.dumps(
                 {"error": {"message": {"value": "Anmeldung abgelehnt"}}}))
+        if teile.path.endswith("/ZSO_SRV/$metadata"):
+            return self._antwort(200, V2_META, "application/xml")
+        if teile.path.endswith("/ZV4/$metadata"):
+            return self._antwort(200, V4_META, "application/xml")
         if teile.path.endswith("/$metadata"):
             xml = ('<?xml version="1.0"?><edmx:Edmx xmlns:edmx="x"><Schema xmlns="y">'
                    '<EntityContainer>' + "".join('<EntitySet Name="%s"/>' % n for n in SETS)
@@ -403,6 +464,62 @@ schranke = [n for n in ast.walk(f_sets) if isinstance(n, ast.If) and ast.unparse
                     for x in ast.walk(n) if isinstance(x, ast.Dict) for k in x.keys)]
 check(len(schranke) == 1 and aufrufe and schranke[0].lineno < aufrufe[0].lineno,
       "ohne Service: Antwort mit kein_service VOR dem Abruf")
+
+# ══ 9. Nicht direkt abrufbare EntitySets und der Weg dorthin ════════
+section("9. EntitySets: Abrufbarkeit und Navigationsweg")
+ZUSTAND.update({"modus": "count", "anfragen": []})
+c = client()
+try:
+    det = {d["name"]: d for d in c.odata.entity_set_details("sap/ZSO_SRV")}
+    namen_v2 = c.odata.entity_sets("sap/ZSO_SRV")
+except sc.SapError as e:
+    det, namen_v2 = {}, []
+    print("  (Fehler: %s)" % e)
+check(sorted(det) == ["A_SalesOrder", "A_SalesOrderItem", "A_SalesOrderItemText", "A_SalesOrderText"],
+      "V2: alle vier EntitySets", repr(sorted(det)))
+check(namen_v2 == sorted(det, key=str.lower), "entity_sets() liefert dieselben Namen (eine Quelle)",
+      repr(namen_v2))
+check(det.get("A_SalesOrderText", {}).get("addressable") is False
+      and det.get("A_SalesOrderItemText", {}).get("addressable") is False,
+      "V2: sap:addressable=\"false\" erkannt",
+      repr({k: v.get("addressable") for k, v in det.items()}))
+check(det.get("A_SalesOrder", {}).get("addressable") is True
+      and det.get("A_SalesOrderItem", {}).get("addressable") is True,
+      "V2: ohne bzw. mit addressable=\"true\" gilt abrufbar")
+check(det.get("A_SalesOrderText", {}).get("navigation")
+      == [{"von": "A_SalesOrder", "property": "to_Text", "schluessel": ["SalesOrder"]}],
+      "V2: Weg zu A_SalesOrderText = A_SalesOrder/to_Text (Koeder to_TextAlt NICHT)",
+      repr(det.get("A_SalesOrderText", {}).get("navigation")))
+check(det.get("A_SalesOrderItemText", {}).get("navigation")
+      == [{"von": "A_SalesOrderItem", "property": "to_ItemText",
+           "schluessel": ["SalesOrder", "SalesOrderItem"]}],
+      "V2: zusammengesetzter Schluessel des Herkunfts-Sets",
+      repr(det.get("A_SalesOrderItemText", {}).get("navigation")))
+check(det.get("A_SalesOrder", {}).get("navigation") == [], "V2: Kopf hat keinen eingehenden Weg",
+      repr(det.get("A_SalesOrder", {}).get("navigation")))
+
+try:
+    det4 = {d["name"]: d for d in c.odata.entity_set_details("sap/ZV4")}
+except sc.SapError as e:
+    det4 = {}
+    print("  (Fehler: %s)" % e)
+check(sorted(det4) == ["Kopf", "Text"] and all(d["addressable"] for d in det4.values()),
+      "V4: Sets erkannt, ohne SAP-Markierung abrufbar", repr(det4))
+check(det4.get("Text", {}).get("navigation") == [{"von": "Kopf", "property": "_Text", "schluessel": ["Id"]}],
+      "V4: Weg ueber NavigationPropertyBinding (Target mit Container-Praefix)",
+      repr(det4.get("Text", {}).get("navigation")))
+
+# Der Wert VON "ok" muss True sein – "irgendein Wert ist True" traf auch
+# kein_service: True (erster Lauf, Sonde falsch, nicht der Code).
+ok_rueckgaben = [n for n in ast.walk(f_sets) if isinstance(n, ast.Dict)
+                 and any(isinstance(k, ast.Constant) and k.value == "ok"
+                         and isinstance(v, ast.Constant) and v.value is True
+                         for k, v in zip(n.keys, n.values))]
+check(len(ok_rueckgaben) == 1 and any(isinstance(k, ast.Constant) and k.value == "details"
+                                      for k in ok_rueckgaben[0].keys),
+      "Endpunkt liefert die Details mit aus", repr([ast.unparse(d)[:80] for d in ok_rueckgaben]))
+check(len(aufrufe) == 1 and ast.unparse(aufrufe[0].args[0]) == "c.odata.entity_set_details",
+      "Endpunkt liest ueber entity_set_details", repr([ast.unparse(a) for a in aufrufe]))
 
 srv.shutdown()
 print(f"\nErgebnis: {_ok} OK, {_fail} FAIL")

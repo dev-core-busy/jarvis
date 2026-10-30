@@ -16,6 +16,7 @@
  *  16. Abfrage-Konsole: Auswahllisten fuer Service und EntitySet
  *  17. Nicht direkt abrufbare EntitySets (Hinweis, 404-Erklaerung) und die
  *      Service-Liste unter "Mein SAP-Zugang" -> Standard-Service
+ *  18. Mitladen ($expand): Vorschlaege, Uebergabe, verschachtelte Zellen
  *
  * WICHTIG (Fallstrick vom 2026-07-30): am Ende window.close() + process.exit(),
  * sonst haelt der 30-Sekunden-Timer der LLM-Anzeige den Prozess fuer immer offen.
@@ -137,7 +138,8 @@ function build(htmlFile, me, opts) {
                 }
                 if (u.startsWith('/api/sap/odata/query') && opts.odQuery) {
                     (opts.odCalls || []).push(u);
-                    return json(opts.odQuery(new URLSearchParams(u.split('?')[1] || '').get('entity_set') || ''));
+                    const qq = new URLSearchParams(u.split('?')[1] || '');
+                    return json(opts.odQuery(qq.get('entity_set') || '', qq));
                 }
                 if (u.startsWith('/api/sap/instructions')) {
                     if (init && init.method === 'POST') {
@@ -1121,6 +1123,66 @@ function loadScript(dom, rel) {
         check('...aber nichts davon landet im Standard-Service-Feld', werte(doc, 'sp-acc-od-service-list').length === 0,
               JSON.stringify(werte(doc, 'sp-acc-od-service-list')));
         d.window.close();
+    }
+    // ══ 18. Mitladen ($expand) ═══════════════════════════════════════
+    // Gewuenscht 2026-10-30: die Texte VIELER Auftraege auf einmal – also
+    // A_SalesOrder mit $expand=to_Text. Gemessen wird: welche Navigationen
+    // angeboten werden (abgehend, nicht eingehend), dass der Wert in der
+    // Abfrage ankommt, und dass mitgeladene Daten als Tabelle in der Zelle
+    // stehen statt als "[object Object]".
+    section('18. Mitladen ($expand)');
+    {
+        const abfragen = [];
+        const r = await konsole({ ok: true, services: [], count: 0, genau: true, ausgelassen: 0 },
+                                () => ({ data: SO }), null,
+                                { odQuery: (e, q) => {
+                                    abfragen.push(q.get('expand'));
+                                    return { ok: true, columns: ['SalesOrder', 'to_Text'], rows: [
+                                        { SalesOrder: '1', to_Text: [{ Language: 'DE', LongText: '<b>Hallo</b>' },
+                                                                     { Language: 'EN', LongText: 'Hello' }] },
+                                        { SalesOrder: '2', to_Text: [] },
+                                        { SalesOrder: '3', to_Text: [{ Tief: { A: { B: 1 } } }] },
+                                    ] };
+                                } });
+        const { doc, d } = r;
+        const ex = doc.getElementById('sp-od-expand');
+        check('Mitladen-Feld haengt an seiner Liste',
+              !!ex && ex.getAttribute('list') === 'sp-od-expand-list' && !!doc.getElementById('sp-od-expand-list'));
+        const feld = doc.getElementById('sp-od-entity');
+        const eh = () => doc.getElementById('sp-od-expand-hint').textContent;
+        feld.value = 'A_SalesOrder'; feld.dispatchEvent(new d.window.Event('input'));
+        check('A_SalesOrder: abgehende Navigationen angeboten',
+              JSON.stringify(werte(doc, 'sp-od-expand-list')) === '["to_Item","to_Text"]', JSON.stringify(werte(doc, 'sp-od-expand-list')));
+        const lab = doc.querySelector('#sp-od-expand-list option[value="to_Text"]');
+        check('Vorschlag nennt das Ziel', !!lab && lab.getAttribute('label') === '→ A_SalesOrderText');
+        check('Hinweis nennt die Mitladbaren', /Mitladbar für „A_SalesOrder“: to_Item, to_Text/.test(eh()), eh());
+        feld.value = 'A_SalesOrderText'; feld.dispatchEvent(new d.window.Event('input'));
+        check('Set ohne abgehende Navigation: keine Vorschlaege, Hinweis sagt es',
+              werte(doc, 'sp-od-expand-list').length === 0 && /keine Navigation zum Mitladen/.test(eh()), eh());
+        check('Navigationshinweis nennt den Weg ueber Mitladen',
+              /„A_SalesOrder“ abfragen und unter „Mitladen“ to_Text eintragen/.test(doc.getElementById('sp-od-entity-hint').textContent),
+              doc.getElementById('sp-od-entity-hint').textContent);
+        feld.value = 'Unbekannt'; feld.dispatchEvent(new d.window.Event('input'));
+        check('unbekanntes Set: nichts angeboten, nichts behauptet', werte(doc, 'sp-od-expand-list').length === 0 && eh() === '', eh());
+
+        feld.value = 'A_SalesOrder'; ex.value = ' to_Text ';
+        doc.getElementById('sp-od-run').click();
+        await sleep(40);
+        check('Abfrage traegt expand=to_Text', abfragen[abfragen.length - 1] === 'to_Text', JSON.stringify(abfragen));
+        const out = doc.getElementById('sp-console-out');
+        const innen = out.querySelectorAll('td table');
+        check('mitgeladene Texte als Tabelle in der Zelle', innen.length >= 2 && /LongText/.test(innen[0].textContent)
+              && /Hello/.test(innen[0].textContent), String(innen.length));
+        check('kein "[object Object]" in der Ausgabe', out.textContent.indexOf('[object Object]') < 0);
+        check('Inhalt wird nicht als Markup ausgewertet', !out.querySelector('b') && out.textContent.indexOf('<b>Hallo</b>') >= 0);
+        check('leere Liste als Strich', /—/.test(out.querySelectorAll('tbody > tr')[1] ? out.querySelector('tbody').children[1].textContent : ''),
+              out.querySelector('tbody') ? out.querySelector('tbody').children[1].textContent : '');
+        check('dritte Ebene als Text statt weiterer Tabelle', out.textContent.indexOf('{"B":1}') >= 0, out.textContent.slice(-120));
+        ex.value = '';
+        doc.getElementById('sp-od-run').click();
+        await sleep(40);
+        check('ohne Mitladen kein expand-Parameter', abfragen[abfragen.length - 1] === null, JSON.stringify(abfragen));
+        await schliessen(r);
     }
     {
         // Jeder im Modul benutzte sap.ti_*-Schluessel existiert in BEIDEN

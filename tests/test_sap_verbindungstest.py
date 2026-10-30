@@ -23,6 +23,8 @@ nachbildet – keine ``requests``-Attrappe, denn genau die echte Anfrage
   9. EntitySets: nicht direkt abrufbare Sets (sap:addressable="false") und der
      Navigationsweg dorthin – V2 ueber AssociationSet, V4 ueber
      NavigationPropertyBinding
+ 10. Mitladen ($expand): Zeilen fuer die Tabelle bereinigt (nicht geladene
+     Navigationen weg, mitgeladene Listen geglaettet), Spalten ueber alle Zeilen
 
 Exit 2 heisst "konnte nicht laufen", 1 "Pruefung fehlgeschlagen", 0 bestanden.
 
@@ -179,6 +181,14 @@ class _Gateway(http.server.BaseHTTPRequestHandler):
         if modus == "401":
             return self._antwort(401, json.dumps(
                 {"error": {"message": {"value": "Anmeldung abgelehnt"}}}))
+        if teile.path.endswith("/ZSO_SRV/A_SalesOrder"):
+            mit = "to_Text" in (q.get("$expand") or [""])[0]
+            text = ({"results": [{"__metadata": {"type": "T"}, "Language": "DE", "LongText": "Hallo",
+                                  "to_SalesOrder": {"__deferred": {"uri": "x"}}}]}
+                    if mit else {"__deferred": {"uri": "x"}})
+            return self._antwort(200, json.dumps({"d": {"results": [
+                {"__metadata": {"uri": "u"}, "SalesOrder": "1", "to_Item": {"__deferred": {"uri": "i"}},
+                 "to_Text": text}]}}))
         if teile.path.endswith("/ZSO_SRV/$metadata"):
             return self._antwort(200, V2_META, "application/xml")
         if teile.path.endswith("/ZV4/$metadata"):
@@ -520,6 +530,58 @@ check(len(ok_rueckgaben) == 1 and any(isinstance(k, ast.Constant) and k.value ==
       "Endpunkt liefert die Details mit aus", repr([ast.unparse(d)[:80] for d in ok_rueckgaben]))
 check(len(aufrufe) == 1 and ast.unparse(aufrufe[0].args[0]) == "c.odata.entity_set_details",
       "Endpunkt liest ueber entity_set_details", repr([ast.unparse(a) for a in aufrufe]))
+
+# ══ 10. Mitladen ($expand) ═══════════════════════════════════════════
+section("10. Mitladen: Zeilen fuer die Tabelle")
+roh = [
+    {"__metadata": {"uri": "u1"}, "SalesOrder": "1", "to_Item": {"__deferred": {"uri": "i"}},
+     "to_Text": {"results": [{"__metadata": {}, "Language": "DE", "LongText": "Hallo",
+                              "to_SalesOrder": {"__deferred": {"uri": "s"}}}]},
+     "to_Partner": {"__metadata": {}, "Name": "Contoso"}},
+    {"SalesOrder": "2", "to_Text": {"results": []}, "Extra": "x"},
+]
+spalten, zeilen = sc.tabelle_aus(roh)
+check(spalten == ["SalesOrder", "to_Text", "to_Partner", "Extra"],
+      "Spalten ueber ALLE Zeilen, ohne nicht geladene Navigation", repr(spalten))
+check(zeilen[0]["to_Text"] == [{"Language": "DE", "LongText": "Hallo"}],
+      "V2: mitgeladene Liste geglaettet, auch im Kind bereinigt", repr(zeilen[0].get("to_Text")))
+check(zeilen[0]["to_Partner"] == {"Name": "Contoso"}, "V2: mitgeladenes Einzelobjekt bleibt Objekt",
+      repr(zeilen[0].get("to_Partner")))
+check(zeilen[1]["to_Text"] == [], "V2: leere mitgeladene Liste bleibt leere Liste", repr(zeilen[1].get("to_Text")))
+check("to_Item" not in zeilen[0] and "__metadata" not in zeilen[0], "nicht Geladenes und __metadata entfernt",
+      repr(sorted(zeilen[0])))
+v4 = sc.tabelle_aus([{"@odata.etag": "e", "Id": "1", "_Text@odata.navigationLink": "x",
+                      "_Text": [{"@odata.etag": "e2", "T": "a"}]}])
+check(v4 == (["Id", "_Text"], [{"Id": "1", "_Text": [{"T": "a"}]}]), "V4: Anmerkungen entfernt", repr(v4))
+check(sc.tabelle_aus([]) == ([], []), "leere Antwort: keine Spalten, keine Zeilen")
+
+ZUSTAND.update({"modus": "count", "anfragen": []})
+c = client()
+try:
+    mit = c.odata.query("A_SalesOrder", "sap/ZSO_SRV", top=5, expand="to_Text")
+    ohne = c.odata.query("A_SalesOrder", "sap/ZSO_SRV", top=5)
+    fehler = None
+except sc.SapError as e:
+    mit, ohne, fehler = [], [], e
+q_mit = ZUSTAND["anfragen"][0]["query"] if ZUSTAND["anfragen"] else {}
+check(fehler is None and q_mit.get("$expand") == ["to_Text"], "Abruf traegt $expand=to_Text",
+      repr((fehler, q_mit)))
+check(len(ZUSTAND["anfragen"]) == 2 and "$expand" not in ZUSTAND["anfragen"][1]["query"],
+      "ohne Mitladen kein $expand", repr([a["query"] for a in ZUSTAND["anfragen"]]))
+sp_mit, z_mit = sc.tabelle_aus(mit)
+sp_ohne, _ = sc.tabelle_aus(ohne)
+check(sp_mit == ["SalesOrder", "to_Text"] and z_mit and z_mit[0]["to_Text"] == [{"Language": "DE", "LongText": "Hallo"}],
+      "echte Antwort mit $expand: Texte als Liste in der Zeile", repr((sp_mit, z_mit)))
+check(sp_ohne == ["SalesOrder"], "echte Antwort ohne $expand: keine Verweis-Spalten", repr(sp_ohne))
+
+f_q = fns.get("sap_odata_query_api")
+if f_q is None:
+    print("  ABBRUCH: sap_odata_query_api nicht gefunden – Test kann nicht laufen.")
+    sys.exit(2)
+check(any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "tabelle_aus"
+          for n in ast.walk(f_q)), "Abfrage-Endpunkt bereitet ueber tabelle_aus auf")
+check(not any(isinstance(n, ast.Constant) and n.value == "__metadata" for n in ast.walk(f_q)),
+      "...und hat keine eigene, zweite Bereinigung")
 
 srv.shutdown()
 print(f"\nErgebnis: {_ok} OK, {_fail} FAIL")

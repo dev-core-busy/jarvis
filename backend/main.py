@@ -13485,8 +13485,10 @@ async def sap_odata_query_api(entity_set: str, service: str = "", select: str = 
                               filter: str = "", top: int = 50, skip: int = 0,
                               orderby: str = "", expand: str = "",
                               user: str = Depends(require_sap_access)):
-    """Lesende OData-Abfrage fuer den Reiter (nur GET)."""
-    from backend.sap_client import SapError
+    """Lesende OData-Abfrage fuer den Reiter und die Konsole in /sap (nur GET).
+    ``expand`` laedt Navigationen mit; die Zeilen gehen durch ``tabelle_aus``
+    (nicht geladene Navigationen weg, mitgeladene Listen geglaettet)."""
+    from backend.sap_client import SapError, tabelle_aus
     c = _sap_client(user)
     if not c.odata.configured:
         return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
@@ -13499,8 +13501,7 @@ async def sap_odata_query_api(entity_set: str, service: str = "", select: str = 
             c.odata.query, entity_set.strip(), service.strip(),
             select=select.strip(), filter=filter.strip(), top=top,
             skip=int(skip or 0), orderby=orderby.strip(), expand=expand.strip())
-        clean = [{k: v for k, v in r.items() if k != "__metadata"} for r in rows]
-        cols = list(clean[0].keys()) if clean else []
+        cols, clean = tabelle_aus(rows)
         return JSONResponse({"ok": True, "columns": cols, "rows": clean, "count": len(clean)})
     except SapError as e:
         return JSONResponse({"ok": False, "status": e.status, "error": str(e)})

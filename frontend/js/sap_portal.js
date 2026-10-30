@@ -520,6 +520,30 @@
     }
 
     // ── Abfrage-Konsole ─────────────────────────────────────────────
+    // Ein Zellwert. Mitgeladene Daten ($expand) kommen als Liste bzw. Objekt –
+    // sie werden zu einer kleinen Tabelle in der Zelle statt "[object Object]".
+    // Ab der dritten Ebene als Text, damit eine tiefe Kette die Seite nicht sprengt.
+    function zelleHtml(v, tiefe) {
+        if (v === null || v === undefined) return '';
+        if (typeof v !== 'object') return esc(v);
+        if (tiefe >= 2) return esc(JSON.stringify(v));
+        var zeilen = Array.isArray(v) ? v : [v];
+        if (!zeilen.length) return '<span class="sp-sub-leer">—</span>';
+        var spalten = [];
+        zeilen.forEach(function (z) {
+            if (z && typeof z === 'object' && !Array.isArray(z)) {
+                Object.keys(z).forEach(function (k) { if (spalten.indexOf(k) < 0) spalten.push(k); });
+            }
+        });
+        if (!spalten.length) return esc(JSON.stringify(v));
+        return '<table><thead><tr>' + spalten.map(function (k) { return '<th>' + esc(k) + '</th>'; }).join('')
+            + '</tr></thead><tbody>' + zeilen.map(function (z) {
+                return '<tr>' + spalten.map(function (k) {
+                    return '<td>' + zelleHtml(z && typeof z === 'object' ? z[k] : '', tiefe + 1) + '</td>';
+                }).join('') + '</tr>';
+            }).join('') + '</tbody></table>';
+    }
+
     function renderTable(box, columns, rows) {
         if (!box) return;
         if (!rows || !rows.length) {
@@ -531,7 +555,7 @@
             return '<th>' + esc(c) + '</th>';
         }).join('') + '</tr></thead><tbody>';
         rows.forEach(function (r) {
-            html += '<tr>' + cols.map(function (c) { return '<td>' + esc(r[c]) + '</td>'; }).join('') + '</tr>';
+            html += '<tr>' + cols.map(function (c) { return '<td>' + zelleHtml(r[c], 0) + '</td>'; }).join('') + '</tr>';
         });
         box.innerHTML = html + '</tbody></table>';
     }
@@ -545,9 +569,11 @@
         var entity = ($('sp-od-entity').value || '').trim();
         if (!entity) { consoleError(T('sap.need_entityset', 'Bitte ein EntitySet angeben.')); return; }
         box.innerHTML = '<div class="sp-empty">' + esc(T('common.loading', 'Lädt…')) + '</div>';
+        var expand = (($('sp-od-expand') || {}).value || '').trim();
         var url = '/api/sap/odata/query?entity_set=' + encodeURIComponent(entity)
             + '&service=' + encodeURIComponent(($('sp-od-service').value || '').trim())
-            + '&top=' + encodeURIComponent($('sp-od-top').value || '20');
+            + '&top=' + encodeURIComponent($('sp-od-top').value || '20')
+            + (expand ? '&expand=' + encodeURIComponent(expand) : '');
         fetch(url, { headers: authHeaders() })
             .then(function (r) { return r.json(); })
             .then(function (d) {
@@ -702,8 +728,8 @@
         _odGeneration++;
         _odSvc = null; _odSvcAntwort = null;
         _odSets = {}; _odSetsFuer = null; _odSetsHinweis = '';
-        ['sp-od-service-list', 'sp-od-entity-list', 'sp-acc-od-service-list'].forEach(function (id) { odFill(id, []); });
-        ['sp-od-svc-hint', 'sp-od-entity-hint', 'sp-acc-od-service-hint'].forEach(function (id) { odHint(id, ''); });
+        ['sp-od-service-list', 'sp-od-entity-list', 'sp-acc-od-service-list', 'sp-od-expand-list'].forEach(function (id) { odFill(id, []); });
+        ['sp-od-svc-hint', 'sp-od-entity-hint', 'sp-acc-od-service-hint', 'sp-od-expand-hint'].forEach(function (id) { odHint(id, ''); });
     }
 
     function odZeigeSets(d) {
@@ -764,8 +790,8 @@
     function odNavText(x) {
         var w = (x.navigation || [])[0];
         return w
-            ? T('sap.od_entity_nav', '„{e}“ ist im Service als nicht direkt abrufbar gekennzeichnet – stattdessen z. B. {weg} ins Feld eintragen und die Angaben in <…> durch echte Werte ersetzen.')
-                .replace('{e}', x.name).replace('{weg}', odWeg(w))
+            ? T('sap.od_entity_nav', '„{e}“ ist im Service als nicht direkt abrufbar gekennzeichnet – stattdessen z. B. {weg} ins Feld eintragen und die Angaben in <…> durch echte Werte ersetzen. Für viele auf einmal: „{von}“ abfragen und unter „Mitladen“ {nav} eintragen.')
+                .replace('{e}', x.name).replace('{weg}', odWeg(w)).replace('{von}', w.von).replace('{nav}', w.property)
             : T('sap.od_entity_nav_none', '„{e}“ ist im Service als nicht direkt abrufbar gekennzeichnet; einen Weg dorthin nennt die Service-Beschreibung nicht.')
                 .replace('{e}', x.name);
     }
@@ -780,6 +806,38 @@
         } else if (_odSetsFuer === odServiceKey() && _odSetsHinweis) {
             odHint('sp-od-entity-hint', _odSetsHinweis);
         }
+        odPruefeExpand();
+    }
+
+    // Was von einem Set aus mitgeladen werden kann: die Navigationen, deren
+    // HERKUNFT dieses Set ist (die Details fuehren je Ziel die eingehenden Wege –
+    // hier wird umgekehrt gesammelt). Nur aus einer geladenen Liste fuer den
+    // eingetragenen Service; sonst wird nichts angeboten und nichts behauptet.
+    function odAbgehend(entity) {
+        var d = _odSets[odServiceKey()];
+        var name = (entity || '').trim();
+        if (!d || !d.ok || !name) return null;
+        var aus = [];
+        (Array.isArray(d.details) ? d.details : []).forEach(function (x) {
+            (x.navigation || []).forEach(function (w) {
+                if (w.von === name) aus.push({ property: w.property, nach: x.name });
+            });
+        });
+        aus.sort(function (a, b) { return a.property.toLowerCase() < b.property.toLowerCase() ? -1 : 1; });
+        return aus;
+    }
+
+    function odPruefeExpand() {
+        var name = (($('sp-od-entity') || {}).value || '').trim();
+        var aus = odAbgehend(name);
+        odFill('sp-od-expand-list', (aus || []).map(function (a) { return { value: a.property, label: '→ ' + a.nach }; }));
+        var w = odWissen(name);
+        if (!aus || !w || !w.detail) { odHint('sp-od-expand-hint', ''); return; }
+        odHint('sp-od-expand-hint', aus.length
+            ? T('sap.od_expand_hint', 'Mitladbar für „{e}“: {liste} – mehrere mit Komma trennen.')
+                .replace('{e}', name).replace('{liste}', aus.map(function (a) { return a.property; }).join(', '))
+            : T('sap.od_expand_none', 'Für „{e}“ nennt die Service-Beschreibung keine Navigation zum Mitladen.')
+                .replace('{e}', name));
     }
 
     // Zusatz zu einem 404 der Konsole – nur, was GEMESSEN ist: die Markierung

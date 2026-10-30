@@ -172,6 +172,52 @@ def _verify_odata(cfg: dict, basis: str):
         return bool(cfg.get("verify_ssl", True))
 
 
+# ── OData-Zeilen fuer die Anzeige ────────────────────────────────────
+_NICHT_GELADEN = object()
+
+
+def zeile_bereinigen(wert):
+    """Bereitet eine OData-Zeile fuer eine Tabelle auf – rekursiv, also auch
+    mitgeladene ($expand) Kinder.
+
+    * ``__metadata`` und V4-Anmerkungen (``@odata.…``, ``x@odata.…``) fallen weg.
+    * Eine NICHT geladene Navigation (V2: ``{"__deferred": {...}}``) faellt weg –
+      sie ist kein Wert, sondern ein Verweis, und stand bisher als Spalte mit
+      ``[object Object]`` in der Tabelle.
+    * Eine mitgeladene Liste (V2: ``{"results": [...]}``) wird zur Liste.
+    Einzelwerte bleiben unveraendert."""
+    if isinstance(wert, list):
+        return [zeile_bereinigen(x) for x in wert]
+    if not isinstance(wert, dict):
+        return wert
+    if set(wert) == {"__deferred"}:
+        return _NICHT_GELADEN
+    if isinstance(wert.get("results"), list) and set(wert) <= {"results", "__count", "__next"}:
+        return [zeile_bereinigen(x) for x in wert["results"]]
+    out = {}
+    for k, v in wert.items():
+        if k == "__metadata" or k.startswith("@odata.") or "@odata." in k:
+            continue
+        v2 = zeile_bereinigen(v)
+        if v2 is _NICHT_GELADEN:
+            continue
+        out[k] = v2
+    return out
+
+
+def tabelle_aus(zeilen: list) -> tuple[list[str], list[dict]]:
+    """``(spalten, zeilen)`` fuer die Konsole. Spalten in der Reihenfolge
+    ihres ersten Auftretens UEBER ALLE Zeilen – nicht nur aus der ersten: eine
+    mitgeladene Navigation, die in Zeile 1 fehlt, waere sonst unsichtbar."""
+    sauber = [z for z in (zeile_bereinigen(r) for r in (zeilen or [])) if isinstance(z, dict)]
+    spalten: list[str] = []
+    for z in sauber:
+        for k in z:
+            if k not in spalten:
+                spalten.append(k)
+    return spalten, sauber
+
+
 # ── OData (V2/V4) ────────────────────────────────────────────────────
 class _ODataClient:
     """Lesender OData-Zugriff (nur GET) fuer S/4HANA, Gateway, BW/4HANA."""

@@ -328,8 +328,18 @@
         var tErr = document.getElementById('totp-modal-error');
         var tActive = document.getElementById('totp-active');
         var tFlow = document.getElementById('totp-setup-flow');
+        var tShow = document.getElementById('totp-show-result');
+        // Den angezeigten Schluessel nicht im DOM stehen lassen, sobald der Dialog
+        // zu ist oder neu geoeffnet wird.
+        function _totpAnzeigeLeeren() {
+            tShow.classList.add('hidden');
+            document.getElementById('totp-show-qr').innerHTML = '';
+            document.getElementById('totp-show-secret').textContent = '';
+            document.getElementById('totp-show-code').value = '';
+        }
         totpBtn.addEventListener('click', function(){
             tErr.textContent=''; tActive.classList.add('hidden'); tFlow.classList.add('hidden');
+            _totpAnzeigeLeeren();
             fetch('/api/auth/totp/status', { headers: H }).then(function(r){ return r.json(); }).then(function(d){
                 if (d.enabled) { tActive.classList.remove('hidden'); }
                 else {
@@ -343,7 +353,32 @@
             }).catch(function(){ tErr.textContent=(window.t?window.t('portal.conn_error'):'Verbindungsfehler'); });
             totpModal.classList.remove('hidden');
         });
-        document.getElementById('btn-totp-close').addEventListener('click', function(){ totpModal.classList.add('hidden'); });
+        document.getElementById('btn-totp-close').addEventListener('click', function(){
+            totpModal.classList.add('hidden'); _totpAnzeigeLeeren();
+            document.getElementById('totp-disable-pass').value = '';
+        });
+        document.getElementById('btn-totp-show').addEventListener('click', function(){
+            var pw = document.getElementById('totp-disable-pass').value;
+            var code = document.getElementById('totp-show-code').value.trim();
+            tErr.textContent = '';
+            if (!pw || !code) { tErr.textContent = (window.t?window.t('totp.show_need'):'Bitte Kennwort und aktuellen Code eingeben.'); return; }
+            fetch('/api/auth/totp/show', { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, H), body: JSON.stringify({ password: pw, code: code }) })
+                .then(function(r){ return r.json(); }).then(function(d){
+                    if (d.success && d.qr_code) {
+                        var img = document.createElement('img');
+                        img.src = d.qr_code; img.alt = 'QR-Code';
+                        var qr = document.getElementById('totp-show-qr');
+                        qr.innerHTML = ''; qr.appendChild(img);
+                        document.getElementById('totp-show-secret').textContent = d.secret;
+                        document.getElementById('totp-show-code').value = '';
+                        document.getElementById('totp-disable-pass').value = '';
+                        tShow.classList.remove('hidden');
+                    } else {
+                        _totpAnzeigeLeeren();
+                        tErr.textContent = d.error || (window.t?window.t('totp.show_failed'):'Anzeige fehlgeschlagen');
+                    }
+                }).catch(function(){ tErr.textContent=(window.t?window.t('portal.conn_error'):'Verbindungsfehler'); });
+        });
         document.getElementById('btn-totp-verify').addEventListener('click', function(){
             var code = document.getElementById('totp-verify-code').value.trim(); if (!code) return; tErr.textContent='';
             fetch('/api/auth/totp/verify', { method:'POST', headers: Object.assign({'Content-Type':'application/json'}, H), body: JSON.stringify({ code }) })

@@ -281,7 +281,7 @@ exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "_admin
                  "_ist_app_anmeldung", "_ist_ai_maus_anmeldung", "_user_is_admin",
                  "_is_admin_user", "_admin_verweigert_text", "require_local_auth",
                  "_check_rate_limit", "_record_login_attempt", "_konto_sperre_antwort",
-                 "_totp_vormerken", "login", "_login_ablauf", "_anmeldung_protokollieren",
+                 "_totp_vormerken", "_totp_qr_daten", "login", "_login_ablauf", "_anmeldung_protokollieren",
                  # Seit 2026-10-20 kann das 2FA-Geheimnis im ROOT-BROKER liegen
                  # (ein Authenticator-Eintrag fuer Anmeldung UND Freigaben). Die
                  # ECHTEN Funktionen mitschneiden, nicht nachbauen: eine Attrappe

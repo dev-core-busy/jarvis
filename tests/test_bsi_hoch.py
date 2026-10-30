@@ -197,7 +197,8 @@ _ns2 = {"JSONResponse": _Antwort, "Depends": lambda x: None, "require_auth": Non
         "_sitzung": types.SimpleNamespace(
             setze_mit_2fa=lambda sig, ts: _befoerdert.append((sig, ts)))}
 _befoerdert: list = []
-exec(compile(_funktionen("totp_setup", "_totp_vormerken", "totp_verify", "totp_disable",
+exec(compile(_funktionen("totp_setup", "_totp_vormerken", "_totp_qr_daten",
+                         "totp_verify", "totp_disable",
                          "_sitzung_ist_app", "_totp_app_sperre",
                          "_totp_fehlertext", "_kennwort_schranke", "_kennwort_fehlversuch",
                          "_check_rate_limit", "_record_login_attempt",

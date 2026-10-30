@@ -182,6 +182,14 @@ AUSNAHMEN = {
     "totp_verify": "prueft nur das vorgemerkte Secret einer Einrichtung",
 }
 
+# Wege, die den Broker-Fall ERKENNEN muessen, ihn aber bewusst NICHT fragen.
+# /totp/show gibt das Secret heraus – liegt es im Broker, gibt es nichts
+# herauszugeben (409 mit dem Weg ueber die Root-Konsole). Den Broker zu fragen
+# wuerde dort nur einen Code verbrauchen.
+OHNE_BROKER_FRAGE = {
+    "totp_show": "im Broker-Fall wird nichts herausgegeben, also kein Code verbraucht",
+}
+
 
 def _ruft(knoten: ast.AST, name: str) -> bool:
     """Ruft dieser Teilbaum ``name(...)`` oder ``x.name(...)`` auf? Exakt, per AST –
@@ -227,6 +235,10 @@ for fn in pruefwege:
         continue
     p(f"{fn.name} behandelt den Broker-Fall (_totp_im_broker)",
       _ruft(fn, "_totp_im_broker"))
+    if fn.name in OHNE_BROKER_FRAGE:
+        p(f"{fn.name}: fragt den Broker bewusst nicht – Grund benannt",
+          bool(OHNE_BROKER_FRAGE[fn.name]))
+        continue
     p(f"{fn.name} fragt den Broker (_totp_broker_pruefen)",
       _ruft(fn, "_totp_broker_pruefen"))
 

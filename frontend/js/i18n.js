@@ -1224,6 +1224,11 @@ const _I18N = {
         'totp.verify':         'Bestätigen & aktivieren',
         'totp.verify_failed':  'Verifizierung fehlgeschlagen',
         'totp.disable_failed': 'Deaktivierung fehlgeschlagen',
+        'totp.show_hint':      'Auf einem weiteren Gerät einrichten: Kennwort und aktuellen Code aus deiner App eingeben. Der bisherige Eintrag bleibt gültig.',
+        'totp.show':           'QR-Code für weiteres Gerät anzeigen',
+        'totp.show_scan':      'Mit der weiteren App scannen. Beide Apps zeigen danach dieselben Codes.',
+        'totp.show_need':      'Bitte Kennwort und aktuellen Code eingeben.',
+        'totp.show_failed':    'Anzeige fehlgeschlagen',
 
         // ── Zertifikat-Modal (Portal, Kurzfassung) ─────────────
         'cert.selfsigned':      'Selbstsigniertes Zertifikat',
@@ -2815,6 +2820,8 @@ const _I18N = {
         'sprot.art.kette_bruch_anerkannt': 'Unterbrechung der Prüfkette anerkannt',
         'sprot.art.cve_pruefung': 'Sicherheitslücken geprüft',
         'sprot.art.fehleranalyse': 'Fehleranalyse abgerufen',
+        'sprot.art.totp_angezeigt': '2FA-Schlüssel für weiteres Gerät angezeigt',
+        'sprot.art.totp_pruefung': 'Falscher 2FA-Code bei Kontoänderung',
         // Weitere Protokolle (protokolle.js)
         'plog.zeitraum': 'Zeitraum',
         'plog.z_1h': 'Letzte Stunde',
@@ -5882,6 +5889,11 @@ const _I18N = {
         'totp.verify':         'Confirm & enable',
         'totp.verify_failed':  'Verification failed',
         'totp.disable_failed': 'Deactivation failed',
+        'totp.show_hint':      'Set up on another device: enter your password and the current code from your app. The existing entry stays valid.',
+        'totp.show':           'Show QR code for another device',
+        'totp.show_scan':      'Scan with the other app. Both apps will then show the same codes.',
+        'totp.show_need':      'Please enter your password and the current code.',
+        'totp.show_failed':    'Could not show the code',
 
         // ── Zertifikat-Dialog (Portal, Kurzfassung) ────────────
         'cert.selfsigned':      'Self-signed certificate',
@@ -7457,6 +7469,8 @@ const _I18N = {
         'sprot.art.kette_bruch_anerkannt': 'Verification chain gap acknowledged',
         'sprot.art.cve_pruefung': 'Vulnerabilities checked',
         'sprot.art.fehleranalyse': 'Error analysis retrieved',
+        'sprot.art.totp_angezeigt': '2FA key shown for another device',
+        'sprot.art.totp_pruefung': 'Wrong 2FA code on account change',
         // Weitere Protokolle (protokolle.js)
         'plog.zeitraum': 'Period',
         'plog.z_1h': 'Last hour',

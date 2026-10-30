@@ -659,6 +659,19 @@
         <div id="totp-active" class="hidden">
             <p class="totp-info" data-i18n-html="totp.active_html">✅ 2FA ist <strong>aktiviert</strong>.</p>
             <input type="password" id="totp-disable-pass" placeholder="Kennwort zur Bestätigung" data-i18n-placeholder="totp.pw_ph">
+            <!-- Vorhandenen Schluessel fuer eine zweite Authenticator-App zeigen
+                 (POST /api/auth/totp/show) – das Kennwortfeld darueber gilt fuer
+                 beide Knoepfe. Logik: portal_seite.js -->
+            <p class="totp-info" data-i18n="totp.show_hint">Auf einem weiteren Gerät einrichten: Kennwort und aktuellen Code aus deiner App eingeben. Der bisherige Eintrag bleibt gültig.</p>
+            <input type="text" id="totp-show-code" placeholder="000000"
+                   inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
+            <button class="btn-login" id="btn-totp-show" data-i18n="totp.show">QR-Code für weiteres Gerät anzeigen</button>
+            <div id="totp-show-result" class="hidden">
+                <p class="totp-info" style="margin-top:16px" data-i18n="totp.show_scan">Mit der weiteren App scannen. Beide Apps zeigen danach dieselben Codes.</p>
+                <div id="totp-show-qr" class="totp-qr"></div>
+                <p class="totp-secret-label" data-i18n="totp.manual">Oder manuell eingeben:</p>
+                <code id="totp-show-secret" class="totp-secret-code"></code>
+            </div>
             <button class="btn-login btn-danger" id="btn-totp-disable" data-i18n="totp.disable">2FA deaktivieren</button>
         </div>
         <div id="totp-setup-flow" class="hidden">
@@ -731,7 +744,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=15"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=393"></script>
+<script src="/static/js/i18n.js?v=394"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=29"></script>
 <script src="/static/js/security_incidents.js?v=41"></script>
@@ -744,7 +757,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/portal_tiles.js?v=2"></script>
 <script src="/static/js/alpha_sort.js?v=2"></script>
 <script src="/static/js/newsfeed.js?v=4"></script>
-<script src="/static/js/portal_seite.js?v=5"></script>
+<script src="/static/js/portal_seite.js?v=6"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

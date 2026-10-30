@@ -5664,12 +5664,25 @@ def _totp_vormerken(username: str) -> dict:
     unberuehrt) und ``{secret, qr_code, uri}`` fuer die Einrichtung liefern.
     Gemeinsam fuer /totp/setup und die Pflicht-Einrichtung beim Login (BSI M3)."""
     import pyotp
+
+    secret = pyotp.random_base32()
+    daten = _totp_qr_daten(username, secret)
+    _set_user_auth_state(username, {"totp_pending_secret": secret})
+    return daten
+
+
+def _totp_qr_daten(username: str, secret: str) -> dict:
+    """``{secret, qr_code, uri}`` zu einem Secret – schreibt NICHTS.
+
+    Eine Stelle fuer Einrichten (``_totp_vormerken``) und erneutes Anzeigen
+    (``/totp/show``): Aussteller und Kontoname muessen in beiden gleich sein,
+    sonst steht derselbe Faktor in der zweiten App unter anderem Namen."""
+    import pyotp
     import qrcode
     import qrcode.image.pil
     import io
     import base64
 
-    secret = pyotp.random_base32()
     # Provisioning-URI für Google Authenticator / Authy etc.
     totp = pyotp.TOTP(secret)
     # Benutzer-Label: Domain-Prefix entfernen für Übersichtlichkeit
@@ -5682,7 +5695,6 @@ def _totp_vormerken(username: str) -> dict:
     img.save(buf, format="PNG")
     qr_b64 = base64.b64encode(buf.getvalue()).decode()
 
-    _set_user_auth_state(username, {"totp_pending_secret": secret})
     return {
         "secret": secret,
         "qr_code": f"data:image/png;base64,{qr_b64}",
@@ -5729,6 +5741,86 @@ async def totp_verify(request: Request, username: str = Depends(require_auth)):
     # Admin-Rechte kommen mit der naechsten Anmeldung (Kennwort + Code); die
     # Pflicht-Einrichtung beim Login setzt das Merkmal weiter selbst.
     return JSONResponse({"success": True, "message": "2FA aktiviert"})
+
+
+@app.post("/api/auth/totp/show")
+async def totp_show(request: Request, username: str = Depends(require_auth)):
+    """Zeigt das AKTIVE 2FA-Geheimnis noch einmal als QR-Code – fuer eine
+    zweite Authenticator-App (zweites Telefon, Ersatzgeraet). Aendert nichts:
+    beide Apps erzeugen danach dieselben Codes.
+
+    Gebraucht vor allem von Administratoren: fuer sie ist die 2FA Pflicht, ein
+    Abschalten und Neu-Einrichten also kein Weg (und /totp/setup wuerde das
+    Secret TAUSCHEN, die erste App waere danach wertlos).
+
+    Schranken: keine App-Sitzung, das Kennwort (Anmeldeschutz wie beim Login,
+    BSI N4) UND ein aktueller Code. Der Code belegt, dass der Fragende den
+    Faktor schon BESITZT – mit Sitzung und Kennwort allein waere dieser Weg eine
+    Kopie des zweiten Faktors fuer jeden, der das Kennwort kennt. Ein falscher
+    Code zaehlt deshalb wie ein Kennwort-Fehlversuch; ohne das liessen sich die
+    Codes hier ungedrosselt durchprobieren.
+
+    Liegt das Geheimnis im Root-Broker (``totp_secret == "broker"``), kennt das
+    Backend es nicht und soll es auch nie kennen (Befund K2) – dann nennt die
+    Antwort den Weg ueber die Root-Konsole."""
+    sperre = _totp_app_sperre(username)
+    if sperre is not None:
+        return sperre
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    password = body.get("password") or ""
+    code = str(body.get("code") or "").strip()
+    if not password or not code:
+        return JSONResponse({"success": False,
+                             "error": "Kennwort und aktueller 2FA-Code erforderlich"},
+                            status_code=400)
+
+    user_state = _get_user_auth_state(username)
+    secret = user_state.get("totp_secret")
+    if not (user_state.get("totp_enabled") and secret):
+        return JSONResponse({"success": False,
+                             "error": "Die Zwei-Faktor-Anmeldung ist nicht eingeschaltet."},
+                            status_code=400)
+
+    schranke = _kennwort_schranke(request, username)
+    if schranke is not None:
+        return schranke
+    if not await asyncio.to_thread(authenticate_linux_user, username, password):
+        _kennwort_fehlversuch(request, username, "totp_show")
+        return JSONResponse({"success": False, "error": "Falsches Passwort"}, status_code=401)
+
+    if _totp_im_broker(secret):
+        # Vor der Code-Pruefung: hier wird nichts herausgegeben, also soll auch
+        # kein Code verbraucht werden.
+        return JSONResponse({"success": False, "error": (
+            "Der Schlüssel dieses Kontos liegt geschützt beim Root-Dienst des Servers "
+            "und lässt sich in der Oberfläche nicht anzeigen. Als root auf dem Server: "
+            f"jarvis-broker-admin totp-zeigen {_norm_login(username)}")},
+            status_code=409)
+    if not _totp_secret_lesbar(secret):
+        return JSONResponse({"success": False, "error": (
+            "Der 2FA-Schlüssel ist auf dem Server gerade nicht lesbar. "
+            "Bitte den Administrator verständigen.")}, status_code=503)
+
+    ip = request.client.host if request.client else ""
+    _totp_erg = _totp_schutz.pruefen(_norm_login(username), secret, code)
+    if _totp_erg != _totp_schutz.OK:
+        if _totp_erg == _totp_schutz.FALSCH:
+            # Zaehlt wie ein Kennwort-Fehlversuch, steht aber unter eigener Art im
+            # Protokoll – "falsches Kennwort" waere hier eine Falschmeldung.
+            _record_login_attempt(ip, username)
+            _sicherheits_log.ereignis("totp_pruefung", benutzer=_norm_login(username), ip=ip,
+                                      ergebnis="fehlgeschlagen", weg="totp_show")
+        return JSONResponse({"success": False, "error": _totp_fehlertext(_totp_erg)},
+                            status_code=401)
+    _anmelde_schutz.erfolg(_norm_login(username))
+    _sicherheits_log.ereignis("totp_angezeigt", benutzer=_norm_login(username), ip=ip,
+                              ergebnis="ok")
+    return JSONResponse({"success": True, **_totp_qr_daten(username, secret)})
 
 
 @app.post("/api/auth/totp/disable")

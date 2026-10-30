@@ -690,8 +690,9 @@ for fn in ast.walk(BAUM):
     if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
         for k in _aufrufe(fn, lambda s: s == "pyotp.TOTP"):
             totp_konstrukte.append(fn.name)
-check("REGEL: pyotp.TOTP(...) in main.py nur noch fuer die Einrichtung (QR)",
-      set(totp_konstrukte) == {"_totp_vormerken"}, totp_konstrukte)
+# Seit 2026-10-30 baut _totp_qr_daten den QR fuer Einrichten UND erneutes Anzeigen.
+check("REGEL: pyotp.TOTP(...) in main.py nur noch fuer den QR-Code (_totp_qr_daten)",
+      set(totp_konstrukte) == {"_totp_qr_daten"}, totp_konstrukte)
 check("REGEL: kein .verify(...) auf einem TOTP in main.py",
       not [k for k in ast.walk(BAUM) if isinstance(k, ast.Call)
            and isinstance(k.func, ast.Attribute) and k.func.attr == "verify"

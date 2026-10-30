@@ -17,7 +17,7 @@ window.sicherheitsProtokoll = (function () {
     var WARN = {
         anmeldung_fehlgeschlagen: 1, konto_gesperrt: 1, admin_verweigert: 1,
         spruehangriff: 1, kennwort_pruefung: 1, geheimnis_schluessel_fehlt: 1,
-        tls_pruefung_aus: 1, kette_bruch_anerkannt: 1
+        tls_pruefung_aus: 1, kette_bruch_anerkannt: 1, totp_pruefung: 1
     };
     var OK = { anmeldung: 1, abmeldung: 1, dienst_start: 1 };
     // Gruende aus sicherheits_log.pruefen() -> i18n-Schluessel

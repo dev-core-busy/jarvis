@@ -13,6 +13,9 @@ Oberflaeche braucht fuer dieselbe Entscheidung den Code aus ``totp-einrichten``.
                                          2FA-Geheimnis eines Kontos HIERHER holen,
                                          damit EIN App-Eintrag fuer Anmeldung und
                                          Freigaben genuegt
+    jarvis-broker-admin totp-zeigen <konto>
+                                         den HIER liegenden Schluessel eines Kontos
+                                         noch einmal zeigen (zweite Authenticator-App)
     jarvis-broker-admin totp-aus <konto> NOTWEG: 2FA eines Kontos abschalten
     jarvis-broker-admin stand            Herkunft des laufenden Broker-Codes
     jarvis-broker-admin audit [n]        letzte n Audit-Eintraege
@@ -140,7 +143,7 @@ def main(argv: list[str]) -> int:
               "- er wird nicht noch einmal angezeigt.")
         return 0
 
-    if befehl in ("totp-uebernehmen", "totp-aus"):
+    if befehl in ("totp-uebernehmen", "totp-aus", "totp-zeigen"):
         if not rest:
             print(f"Aufruf: jarvis-broker-admin {befehl} <konto>", file=sys.stderr)
             return 2
@@ -168,6 +171,51 @@ def main(argv: list[str]) -> int:
                          peer="root-konsole")
             print(f"2FA von '{schluessel}' ist AUS. Die Anmeldung geht wieder ohne Code.")
             print("Der Broker-Schluessel bleibt liegen – Freigaben funktionieren weiter.")
+            return 0
+
+        if befehl == "totp-zeigen":
+            # Gegenstueck zu POST /api/auth/totp/show: liegt das Geheimnis hier,
+            # kennt das Backend es nicht – also kann nur root es zeigen. Es wird
+            # NICHTS geschrieben; beide Apps erzeugen danach dieselben Codes.
+            roh = st.get("totp_secret")
+            if isinstance(roh, str) and roh.startswith("JGS1:"):
+                try:
+                    from backend import geheimnis_tresor as _t
+                    roh = _t.wert_entschluesseln(roh)
+                except Exception:  # noqa: BLE001
+                    pass
+            if not st.get("totp_enabled") or roh != freigabe.MARKE_IM_BROKER:
+                print(f"Der Schluessel von '{schluessel}' liegt nicht beim Broker – "
+                      "in der Oberflaeche anzeigen: Portal → 2FA-Dialog → \"QR-Code "
+                      "für weiteres Gerät anzeigen\".", file=sys.stderr)
+                return 1
+            try:
+                b32 = freigabe.SCHLUESSEL.read_text(encoding="ascii").strip().upper()
+            except OSError as e:
+                print(f"{freigabe.SCHLUESSEL} nicht lesbar: {e}", file=sys.stderr)
+                return 1
+            if not freigabe.eingerichtet():
+                print(f"{freigabe.SCHLUESSEL} ist kein gueltiger Schluessel "
+                      "(Rechte oder Inhalt) – nichts angezeigt.", file=sys.stderr)
+                return 1
+            from urllib.parse import quote
+            name = schluessel.split("\\")[-1]
+            # Aussteller und Name wie bei der Einrichtung im Backend
+            # (main._totp_qr_daten), damit beide Eintraege gleich heissen.
+            uri = (f"otpauth://totp/{quote('Jarvis')}:{quote(name)}"
+                   f"?secret={b32}&issuer={quote('Jarvis')}")
+            policy.audit(_wer(), "broker.totp_zeigen", f"login:{schluessel}", "angezeigt",
+                         peer="root-konsole")
+            print(f"2FA-Schluessel von '{schluessel}' fuer eine weitere Authenticator-App:\n")
+            print(f"  Schluessel: {b32}")
+            print(f"  URI:        {uri}\n")
+            try:
+                import shutil
+                import subprocess
+                if shutil.which("qrencode"):
+                    subprocess.run(["qrencode", "-t", "ANSIUTF8", uri], check=False)
+            except Exception:  # noqa: BLE001
+                pass
             return 0
 
         # ── totp-uebernehmen ──

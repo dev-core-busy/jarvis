@@ -623,7 +623,7 @@
             case 'nicht_im_index': return T('pkg.cve_k_nicht_im_index', 'Update noch nicht im Paketindex');
             case 'zurueckgehalten': return T('pkg.cve_k_zurueckgehalten', 'zurückgehalten');
             case 'lock': return T('pkg.cve_k_lock', 'Update nur über die Lock-Datei');
-            case 'offen': return T('pkg.cve_k_offen', 'ohne Debian-Update');
+            case 'offen': return T('pkg.cve_k_offen', 'noch keine Behebung von Debian');
             case 'ausgenommen': return T('pkg.cve_k_ausgenommen', 'bewertet');
         }
         return String(k || '');
@@ -662,7 +662,10 @@
             ? 'leise' : info.klasse;
         return '<button type="button" class="jv-pkg-cve jv-pkg-cve-' + esc(stufe)
             + '" data-cve-paket="' + esc(name) + '" title="'
-            + esc(klasseText(info.klasse) + ' – ' + T('pkg.cve_details', 'Details anzeigen'))
+            // Der Tooltip traegt die ausfuehrliche Fassung; die Kurzform passt in die Spalte.
+            + esc((info.klasse === 'offen'
+                ? T('pkg.cve_k_offen_lang', 'Debian hat für diese Version noch keine Behebung veröffentlicht')
+                : klasseText(info.klasse)) + ' – ' + T('pkg.cve_details', 'Details anzeigen'))
             + '">' + esc(klasseText(info.klasse)) + ' · ' + info.befunde.length + '</button>';
     }
 

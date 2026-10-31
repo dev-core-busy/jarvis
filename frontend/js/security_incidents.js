@@ -979,7 +979,7 @@
                     st.textContent = T('cve.letzte', 'Letzte Prüfung') + ': '
                         + new Date(erg.erzeugt_am).toLocaleString() + ' · '
                         + (z.behebbar || 0) + ' ' + T('pkg.cve_k_behebbar', 'Update verfügbar') + ' · '
-                        + (z.offen || 0) + ' ' + T('pkg.cve_k_offen', 'ohne Debian-Update');
+                        + (z.offen || 0) + ' ' + T('pkg.cve_k_offen', 'noch keine Behebung von Debian');
                 })
                 .catch(function () {});
         },

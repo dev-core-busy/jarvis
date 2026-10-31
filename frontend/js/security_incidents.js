@@ -133,6 +133,12 @@
             if (uuVerify) uuVerify.addEventListener('click', function () { Mgr.loadUnattended(true); });
             var uuDown = $('sec-unatt-teardown');
             if (uuDown) uuDown.addEventListener('click', function () { Mgr.teardownUnattended(); });
+            // Manueller Lauf (Dreieck): spielt die Sicherheitsupdates sofort ein
+            var uuJetzt = $('sec-unatt-jetzt');
+            if (uuJetzt) {
+                if (window.JarvisIcons) uuJetzt.innerHTML = JarvisIcons.play();
+                uuJetzt.addEventListener('click', function () { Mgr.jetztUnattended(); });
+            }
             // Sicherheitsluecken-Pruefung: Vorgaben speichern
             var cveSave = $('cve-speichern');
             if (cveSave) cveSave.addEventListener('click', function () { Mgr.saveCve(); });
@@ -856,7 +862,19 @@
         _runAction: function (o) {
             if (o.confirm && !window.confirm(o.confirm)) return;
             var btn = $(o.btn), out = $(o.result), orig = btn ? btn.textContent : '';
-            if (btn) { btn.disabled = true; btn.textContent = o.busy; }
+            // Symbol-Knoepfe (o.symbol) behalten ihr Symbol; der Hinweis "laeuft"
+            // steht dann im Ergebniskasten, weil ein Text das Symbol ersetzen wuerde.
+            var origHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                if (!o.symbol) btn.textContent = o.busy;
+            }
+            if (o.symbol && out) {
+                out.style.display = 'block';
+                out.style.borderColor = 'var(--border)';
+                out.style.background = 'transparent';
+                out.textContent = o.busy;
+            }
             fetch(o.url, { method: 'POST', headers: authHeaders() })
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
@@ -878,7 +896,12 @@
                     if (o.render && d.status) o.render(d.status);
                 })
                 .catch(function () { if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Ausführung.'; } })
-                .then(function () { if (btn) { btn.disabled = false; btn.textContent = orig || o.busy; } });
+                .then(function () {
+                    if (!btn) return;
+                    btn.disabled = false;
+                    if (o.symbol) btn.innerHTML = origHtml;
+                    else btn.textContent = orig || o.busy;
+                });
         },
 
         setupSandbox: function () {
@@ -1113,6 +1136,22 @@
                 okMsg: 'Automatische Sicherheitsupdates aktiv & geprüft.',
                 failMsg: 'Einrichtung unvollständig – Details:',
                 render: function (s) { Mgr.renderUnattended(s); }
+            });
+        },
+
+        // Manueller Lauf: laeuft auch bei ausgeschalteter Automatik, mit denselben
+        // Begrenzungen (das Backend lehnt ohne sie ab).
+        jetztUnattended: function () {
+            Mgr._runAction({
+                url: '/api/security/unattended/jetzt', btn: 'sec-unatt-jetzt', result: 'sec-unatt-result',
+                symbol: true,
+                busy: T('security.busy_jetzt', 'Sicherheitsupdates werden eingespielt – das kann mehrere Minuten dauern…'),
+                okMsg: T('security.jetzt_ok', 'Manueller Lauf abgeschlossen.'),
+                failMsg: T('security.jetzt_fail', 'Manueller Lauf fehlgeschlagen – Details:'),
+                render: function (s) { Mgr.renderUnattended(s); },
+                confirm: T('security.jetzt_confirm', 'Sicherheitsupdates jetzt einspielen?\n\n'
+                    + 'Nur die Debian-Sicherheitsquelle, kein Neustart, kein Aufräumen von Paketen. '
+                    + 'Dienste, deren Pakete aktualisiert werden, können kurz neu starten.')
             });
         },
 

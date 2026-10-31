@@ -566,6 +566,12 @@ def _op_apt_upgrades_teardown(args, stream):
     return {"ok": True, "rc": 0, "result": apt_upgrades.teardown(), "stdout": "", "stderr": ""}
 
 
+def _op_apt_upgrades_jetzt(args, stream):
+    from backend import apt_upgrades
+    return {"ok": True, "rc": 0, "result": apt_upgrades.jetzt_ausfuehren(),
+            "stdout": "", "stderr": ""}
+
+
 def _op_apt_upgrades_status(args, stream):
     from backend import apt_upgrades
     return {"ok": True, "rc": 0,
@@ -1552,6 +1558,12 @@ _REGISTRY = {
         _op_apt_upgrades_teardown, lambda a: "apt_upgrades_teardown",
         lambda a: "Automatische Sicherheitsupdates ausschalten (Index-Refresh bleibt)",
         False, (),   # LOCKERND (Code-Review 2026-10-18): nur nach Admin-Freigabe
+    ),
+    "apt_upgrades_jetzt": (
+        _op_apt_upgrades_jetzt, lambda a: "apt_upgrades_jetzt",
+        lambda a: "Sicherheitsupdates jetzt einspielen (manueller Lauf; nur Sicherheits-Quelle, "
+                  "kein Reboot, kein Aufraeumen)",
+        True, (),
     ),
     "apt_upgrades_status": (
         _op_apt_upgrades_status, lambda a: "apt_upgrades_status",

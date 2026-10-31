@@ -8981,6 +8981,27 @@ async def security_unattended_setup(user: str = Depends(require_local_auth)):
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
+@app.post("/api/security/unattended/jetzt")
+async def security_unattended_jetzt(user: str = Depends(require_local_auth)):
+    """Spielt die Sicherheitsupdates SOFORT ein (Admin, root) – manueller Lauf.
+
+    Laeuft auch bei ausgeschalteter Automatik, aber nur mit wirksamen
+    Begrenzungen (nur Sicherheits-Quelle, kein Neustart, kein Aufraeumen);
+    fehlen sie, lehnt der Broker ab. Vorher wird der Paketindex aufgefrischt.
+    Liefert Schritte, die neu eingespielten Pakete und den neuen Status.
+    """
+    from backend import broker_client
+    # ``timeout`` im Argument hebt den Broker-Deckel (900 s) fuer diese lange Op;
+    # der Aufruf-Deckel setzt den Socket-Timeout (wie cve_pruefung.beheben).
+    bres = await broker_client.call("apt_upgrades_jetzt", {"timeout": 1900},
+                                    user=user, timeout=2000)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")},
+                            status_code=502)
+    res = bres.get("result") or {}
+    return JSONResponse(res, status_code=200 if res.get("ok") else 500)
+
+
 @app.post("/api/security/unattended/teardown")
 async def security_unattended_teardown(user: str = Depends(require_local_auth)):
     """Schaltet automatische Sicherheitsupdates AUS (Admin, root). Idempotent.

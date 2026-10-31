@@ -53,6 +53,9 @@ UPGRADE_TIMER = "apt-daily-upgrade.timer"
 UPGRADE_DIENST = "apt-daily-upgrade.service"
 # Obergrenze fuer den Trockenlauf (siehe status(live=True)).
 DRY_RUN_TIMEOUT = 45
+# Obergrenze fuer den manuellen Lauf (jetzt_ausfuehren). Ein echter Lauf
+# laedt und installiert; bei grossem Rueckstand dauert das Minuten.
+JETZT_TIMEOUT = 1500
 
 _LIMITS = """// Von Jarvis verwaltet (Einstellungen -> Sicherheit -> Automatische
 // Sicherheitsupdates). Haendische Aenderungen werden beim naechsten
@@ -396,6 +399,59 @@ def setup() -> dict:
     # will, drueckt "Status pruefen (Trockenlauf)".
     st = status(live=False)
     return {"ok": bool(st.get("ok")), "steps": steps, "status": st}
+
+
+def jetzt_ausfuehren() -> dict:
+    """Spielt die Sicherheitsupdates SOFORT ein (manueller Lauf, Admin-Knopf).
+
+    Ruft ``unattended-upgrade`` direkt auf – das Programm selbst prueft den
+    Schalter ``APT::Periodic::Unattended-Upgrade`` NICHT (das tut nur
+    ``apt.systemd.daily``), der Lauf geht also auch bei ausgeschalteter
+    Automatik. Es liest aber dieselben Begrenzungen aus LIMITS_CONF: nur die
+    Sicherheits-Quelle, kein Neustart, kein Aufraeumen.
+
+    Fail-closed: ohne wirksame Begrenzungen (``_limits_ok()``) laeuft NICHTS –
+    sonst gaelte die Debian-Vorgabe von unattended-upgrades, und die raeumt je
+    nach Fassung Pakete auf. Vorher wird der Paketindex aufgefrischt, sonst
+    sieht der Lauf die neuesten Sicherheitsmeldungen nicht.
+    """
+    import os
+    steps = []
+
+    def step(name, ok, detail=""):
+        steps.append({"name": name, "ok": bool(ok), "detail": (detail or "")[:300]})
+
+    if not _pkg_installed():
+        step(f"{PKG} vorhanden", False, "zuerst „Einschalten / Reparieren“")
+        return {"ok": False, "error": f"{PKG} ist nicht installiert", "steps": steps,
+                "status": status()}
+    if not _limits_ok():
+        step("Begrenzungen wirksam", False, "zuerst „Einschalten / Reparieren“")
+        return {"ok": False, "error": "Begrenzungen nicht wirksam – Lauf abgelehnt",
+                "steps": steps, "status": status()}
+
+    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+    vorher = eingespielt() or []
+    r = _run([APT_GET, "update", "-qq"], timeout=300, env=env)
+    step("Paketindex aktualisiert", r.returncode == 0, (r.stderr or r.stdout or "")[-300:])
+
+    r = _run([UU, "--verbose"], timeout=JETZT_TIMEOUT, env=env)
+    aus = ((r.stdout or "") + (r.stderr or "")).strip()
+    step("Sicherheitsupdates eingespielt", r.returncode == 0,
+         aus[-300:] or f"rc={r.returncode}")
+
+    nachher = eingespielt() or []
+    # Neu ist, was vorher nicht im Verlauf stand (Vergleich ueber den ganzen Eintrag).
+    neu = [e for e in nachher if e not in vorher]
+    namen = [p.get("name", "") for e in neu for p in (e.get("pakete") or [])]
+    if namen:
+        rest = f" (+{len(namen) - 10} weitere)" if len(namen) > 10 else ""
+        step(f"{len(namen)} Paket(e) aktualisiert: " + ", ".join(namen[:10]) + rest,
+             r.returncode == 0)
+    elif r.returncode == 0:
+        step("Keine ausstehenden Sicherheitsupdates", True)
+    return {"ok": r.returncode == 0, "steps": steps, "ausgabe": aus[-1500:],
+            "neu": neu, "status": status()}
 
 
 def teardown() -> dict:

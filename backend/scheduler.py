@@ -223,6 +223,21 @@ class CronManager:
             raise ValueError(f"Job {job_id} nicht gefunden")
         return await self._execute(job_id, ausloeser="manuell", von=von)
 
+    def naechster_lauf(self, job_id: str) -> int | None:
+        """Zeitpunkt (Epoch-Sekunden) des naechsten GEPLANTEN Laufs.
+
+        Quelle ist der APScheduler selbst, nicht eine Nachrechnung des
+        Cron-Ausdrucks: nur so stimmt die Anzeige mit dem ueberein, was
+        wirklich feuert (Zeitzone, pausierter Auftrag, nicht registrierbarer
+        Ausdruck). ``None`` = es ist kein Lauf geplant – die Anzeige sagt dann
+        "nicht geplant" und nicht "nie"."""
+        try:
+            j = self._scheduler.get_job(job_id)
+            t = getattr(j, "next_run_time", None) if j else None
+            return int(t.timestamp()) if t else None
+        except Exception:  # noqa: BLE001 – eine Anzeige darf nichts kippen
+            return None
+
     def claim_job(self, job_id: str, user: str, privileged: bool) -> dict:
         """Auftraggeber-Bindung eines Jobs neu setzen (Admin-Übernahme).
 

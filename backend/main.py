@@ -8122,9 +8122,16 @@ async def system_packages(request: Request, user: str = Depends(require_local_au
 
 @app.get("/api/system/cve")
 async def system_cve(user: str = Depends(require_local_auth)):
-    """Letztes Pruefergebnis, laufender Lauf, Einstellungen, Quittungen und Plan."""
+    """Letztes Pruefergebnis, laufender Lauf, Einstellungen, Quittungen, Plan
+    und der Zeitplan der Pruefauftraege (wann zuletzt, wann als Naechstes)."""
     from backend import cve_pruefung
-    return JSONResponse(await asyncio.to_thread(cve_pruefung.zustand))
+    from backend.scheduler import cron_manager as _cm
+    d = await asyncio.to_thread(cve_pruefung.zustand)
+    try:
+        d["auftraege"] = cve_pruefung.auftraege(_cm.list_jobs(), _cm.naechster_lauf)
+    except Exception:  # noqa: BLE001 – unlesbare Auftragsliste: "unbekannt", nicht "keine"
+        d["auftraege"] = None
+    return JSONResponse(d)
 
 
 @app.post("/api/system/cve/pruefen")

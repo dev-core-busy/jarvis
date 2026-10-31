@@ -947,6 +947,7 @@
                     var e = d.einstellungen || {};
                     if ($('cve-schwelle')) $('cve-schwelle').value = e.schwelle || 'ab_niedrig';
                     if ($('cve-regulaer')) $('cve-regulaer').checked = e.regulaere_quelle === true;
+                    Mgr.renderCvePlan(d.auftraege);
                     var st = $('cve-stand');
                     if (!st) return;
                     var erg = d.ergebnis;
@@ -958,6 +959,48 @@
                         + (z.offen || 0) + ' ' + T('pkg.cve_k_offen', 'ohne Debian-Update');
                 })
                 .catch(function () {});
+        },
+
+        /* Zeitplan der Pruefauftraege (Art "Sicherheitslücken prüfen"):
+         * je Auftrag Rhythmus, ob er behebt, letzter und naechster Lauf.
+         * ``null`` = Auftragsliste nicht lesbar -> "unbekannt", NICHT "keiner
+         * eingerichtet" (eine Anzeige behauptet keinen Zustand, den sie nicht
+         * kennt). Der naechste Lauf kommt vom Scheduler selbst. */
+        renderCvePlan: function (liste) {
+            var box = $('cve-plan');
+            if (!box) return;
+            function zeit(s) {
+                return (typeof s === 'number' && s > 0) ? new Date(s * 1000).toLocaleString() : '—';
+            }
+            if (liste === null || liste === undefined) {
+                box.textContent = T('cve.plan_unbekannt', 'Geplante Prüfungen: nicht ermittelbar.');
+                return;
+            }
+            if (!liste.length) {
+                box.textContent = T('cve.plan_keiner', 'Keine regelmäßige Prüfung geplant – einrichten unter „Cron-Aufgaben“ mit der Art „Sicherheitslücken prüfen“.');
+                return;
+            }
+            var cm = window.cronManager;
+            var html = '<div style="font-weight:600;color:var(--text-primary);">'
+                + esc(T('cve.plan_titel', 'Geplante Prüfungen')) + '</div>';
+            liste.forEach(function (a) {
+                var rhythmus = '';
+                try { if (cm && cm._cronToText) rhythmus = cm._cronToText(a.cron) || ''; } catch (e) { /* Rohform bleibt */ }
+                var teile = [
+                    (a.beheben ? T('cve.plan_mit_beheben', 'prüft und spielt Updates ein')
+                               : T('cve.plan_nur_pruefen', 'prüft nur')),
+                    T('cve.plan_letzter', 'zuletzt') + ': ' + zeit(a.letzter),
+                    a.aktiv
+                        ? T('cve.plan_naechster', 'nächster Lauf') + ': '
+                          + (a.naechster ? zeit(a.naechster) : T('cve.plan_nicht_geplant', 'nicht geplant'))
+                        : T('cve.plan_pausiert', 'pausiert')
+                ];
+                html += '<div>• <b>' + esc(a.label || '') + '</b> ('
+                    + '<span title="' + esc(a.cron || '') + '">' + esc(rhythmus || a.cron || '') + '</span>'
+                    + (a.einmalig ? ', ' + esc(T('cve.plan_einmalig', 'einmalig')) : '')
+                    + ') · ' + esc(teile.join(' · ')) + '</div>';
+            });
+            box.innerHTML = html;
         },
 
         saveCve: function () {
@@ -1040,6 +1083,20 @@
                 extra += '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
                     + esc(T('security.unatt_last', 'Letzter Lauf')) + ': ' + esc(d.last_run) + '</div>';
             }
+            // Naechster Lauf des Einspiel-Timers (apt_upgrades.zeitplan, Zeit vom
+            // systemd selbst). ``null`` heisst UNBEKANNT, nicht "nie" – nur bei
+            // ausgeschalteter Automatik ist "keiner geplant" eine belegte Aussage.
+            var zp = d.zeitplan || {};
+            var naechst;
+            if (typeof zp.naechster === 'number' && zp.naechster > 0) {
+                naechst = new Date(zp.naechster * 1000).toLocaleString();
+            } else if (d.enabled === false) {
+                naechst = T('security.unatt_next_aus', 'keiner – die Automatik ist ausgeschaltet');
+            } else {
+                naechst = T('security.unatt_next_unbekannt', 'nicht ermittelbar');
+            }
+            extra += '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
+                + esc(T('security.unatt_next', 'Nächster geplanter Lauf')) + ': ' + esc(naechst) + '</div>';
             if (d.dry_run) {
                 extra += '<pre style="max-height:150px;overflow:auto;background:rgba(var(--fg-rgb),.04);'
                     + 'border-radius:8px;padding:8px;font-size:0.72rem;white-space:pre-wrap;'

@@ -1449,6 +1449,32 @@ def kurzbericht(erg: dict) -> str:
     return " · ".join(teile)
 
 
+def auftraege(jobs: list, naechster) -> list[dict]:
+    """Zeitplan der Pruefauftraege (Art ``cve_pruefung``) fuer die Einstellungen.
+
+    ``naechster`` ist eine Funktion ``job_id -> Epoch|None`` (im Dienst
+    ``cron_manager.naechster_lauf``) – als Parameter, damit die Aufbereitung
+    ohne laufenden Scheduler pruefbar ist. Ein pausierter Auftrag hat KEINEN
+    naechsten Lauf, auch wenn der Scheduler noch einen kennen sollte.
+    Sortiert nach naechstem Lauf; ungeplante Auftraege stehen am Ende."""
+    aus = []
+    for j in jobs or []:
+        if not isinstance(j, dict) or j.get("kind") != "cve_pruefung":
+            continue
+        aktiv = j.get("enabled") is True
+        pl = j.get("payload") if isinstance(j.get("payload"), dict) else {}
+        aus.append({
+            "id": j.get("id"), "label": j.get("label") or "",
+            "cron": j.get("cron") or "", "aktiv": aktiv,
+            "einmalig": j.get("once") is True,
+            "beheben": pl.get("beheben") is True,
+            "letzter": j.get("last_run"),
+            "naechster": naechster(j.get("id")) if aktiv else None,
+        })
+    aus.sort(key=lambda a: (a["naechster"] is None, a["naechster"] or 0))
+    return aus
+
+
 def zustand() -> dict:
     erg = zustand_ergebnis()
     einst = einstellungen()

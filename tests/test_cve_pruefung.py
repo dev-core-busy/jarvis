@@ -1237,4 +1237,40 @@ check("npm" not in cve_pruefung.kurzbericht(dict(_ohne, ok=True)),
       "Kurzbericht fuehrt npm nicht als nicht geprueft",
       cve_pruefung.kurzbericht(dict(_ohne, ok=True)))
 
+
+print("\n── Zeitplan der Pruefauftraege (Anzeige in den Einstellungen) ──")
+_jobs = [
+    {"id": "a", "kind": "cve_pruefung", "label": "Taeglich", "cron": "0 3 * * *",
+     "enabled": True, "payload": {"beheben": True}, "last_run": 100},
+    {"id": "b", "kind": "cve_pruefung", "label": "Pausiert", "cron": "0 4 * * *",
+     "enabled": False, "payload": {"beheben": "ja"}},
+    {"id": "c", "kind": "agent", "label": "Fremd", "cron": "* * * * *", "enabled": True},
+    {"id": "d", "kind": "cve_pruefung", "label": "Frueher", "cron": "0 1 * * *",
+     "enabled": True, "payload": {}, "once": True},
+]
+_gefragt = []
+def _naechster(jid):
+    _gefragt.append(jid)
+    return {"a": 2000, "b": 999, "d": 1500}.get(jid)
+_plan = cve_pruefung.auftraege(_jobs, _naechster)
+# Positivkontrolle: die Aufbereitung liefert ueberhaupt Eintraege.
+if not _plan:
+    print("ABBRUCH: auftraege() liefert nichts – Folgepruefungen waeren trivial")
+    sys.exit(2)
+check([a["id"] for a in _plan] == ["d", "a", "b"],
+      "nur Art cve_pruefung, sortiert nach naechstem Lauf, ungeplant zuletzt",
+      str([a["id"] for a in _plan]))
+_by = {a["id"]: a for a in _plan}
+check(_by["b"]["naechster"] is None and "b" not in _gefragt,
+      "pausierter Auftrag hat keinen naechsten Lauf (auch wenn der Scheduler einen kennt)",
+      str(_by["b"]))
+check(_by["a"]["naechster"] == 2000 and _by["a"]["letzter"] == 100,
+      "naechster Lauf kommt vom Scheduler, letzter aus last_run", str(_by["a"]))
+check(_by["a"]["beheben"] is True and _by["b"]["beheben"] is False,
+      "beheben nur bei echtem True", str((_by["a"]["beheben"], _by["b"]["beheben"])))
+check(_by["d"]["einmalig"] is True and _by["a"]["einmalig"] is False,
+      "Einmal-Auftrag gekennzeichnet", str(_by["d"]))
+check(cve_pruefung.auftraege(None, _naechster) == [],
+      "leere/fehlende Auftragsliste ergibt leere Liste")
+
 ende()

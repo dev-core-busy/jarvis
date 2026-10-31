@@ -141,7 +141,7 @@ APScheduler>=3.10,<4.0
 watchdog>=3.0
 pyotp>=2.9.0
 qrcode[pil]>=7.4.2
-# Sicherheits-Untergrenzen ohne eigenen Bedarf (CVE-Pruefung, 2026-10-29). Beide
+# Sicherheits-Untergrenzen ohne eigenen Bedarf (CVE-Pruefung, 2026-10-29). Sie
 # kommen nur MITTELBAR ins venv, stehen aber hier, weil die Lock nur so eine
 # Behebung uebernimmt (sie bevorzugt die bestehende Fassung):
 #   filelock  ueber torch/transformers/huggingface-hub/tldextract – 3.29.1 traegt
@@ -150,5 +150,12 @@ qrcode[pil]>=7.4.2
 #             behoben in 2.9.0. Ueber das Skill-Manifest ginge es nicht: die
 #             Skill-Automatik installiert nur FEHLENDE Pakete und nagelt vorhandene
 #             auf ihren Ist-Stand (abhaengigkeiten.skill_pakete_nachziehen).
+#   pyasn1    ueber ldap3 (AD-Anmeldung) und ueber pyasn1-modules/google-auth –
+#             0.6.4 traegt CVE-2026-119194/-119195/-119196/-119197 (OSV,
+#             veroeffentlicht 2026-10-29), behoben in 0.6.5. Das waren am
+#             2026-10-31 die vier Befunde der Klasse "nur ueber die Lock-Datei"
+#             im Fenster "Installierte Pakete" auf DEV: ein Server im Lock-Modus
+#             hebt Python-Pakete nie selbst, also behebt sie erst diese Zeile.
 filelock>=4.2.1
 dnspython>=2.9.0
+pyasn1>=0.6.5

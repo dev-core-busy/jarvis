@@ -77,6 +77,19 @@
     --shadow-glow: 0 0 30px var(--accent-glow);
 
     --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* Wissensgraph (/wissensgraph): sigma zeichnet per WebGL und braucht
+       konkrete Farbwerte – wissensgraph.js liest diese Variablen per
+       getComputedStyle und bei jedem Themenwechsel neu. 12 Farben fuer Typen
+       bzw. Themen-Inseln, hell auf dunklem Grund. */
+    --graph-c1: #60a5fa;  --graph-c2: #f472b6;  --graph-c3: #34d399;
+    --graph-c4: #fbbf24;  --graph-c5: #a78bfa;  --graph-c6: #f87171;
+    --graph-c7: #22d3ee;  --graph-c8: #a3e635;  --graph-c9: #fb923c;
+    --graph-c10: #e879f9; --graph-c11: #2dd4bf; --graph-c12: #94a3b8;
+    --graph-kante-stark: rgba(248, 250, 252, 0.6);
+    --graph-kante-schwach: rgba(148, 163, 184, 0.16);
+    --graph-gedimmt: rgba(100, 116, 139, 0.16);
+    --graph-widerspruch: #f97316;
 }
 
 /* ─── Sprachbloecke (lange Fliesstext-Inhalte, z.B. API-Doku) ─────────
@@ -134,6 +147,16 @@ body.light {
     --text-primary: #1a2233;
     --text-secondary: #4a5568;
     --text-muted: #7a8599;
+
+    /* Wissensgraph: dieselben 12 Toene, abgedunkelt fuer den hellen Grund. */
+    --graph-c1: #2563eb;  --graph-c2: #db2777;  --graph-c3: #059669;
+    --graph-c4: #b45309;  --graph-c5: #7c3aed;  --graph-c6: #dc2626;
+    --graph-c7: #0891b2;  --graph-c8: #4d7c0f;  --graph-c9: #c2410c;
+    --graph-c10: #a21caf; --graph-c11: #0f766e; --graph-c12: #475569;
+    --graph-kante-stark: rgba(26, 34, 51, 0.6);
+    --graph-kante-schwach: rgba(74, 85, 104, 0.16);
+    --graph-gedimmt: rgba(122, 133, 153, 0.2);
+    --graph-widerspruch: #c2410c;
 }
 
 /* ─── Native Dropdowns (option/optgroup) ────────────────────────────────────
@@ -1407,3 +1430,28 @@ html.jv-sitzung-pruefen #login-screen { visibility: hidden; }
 .frg-fehler:empty { display: none; }
 body.light .frg-fehler { color: color-mix(in srgb, var(--danger) 78%, #000); }
 .frg-knoepfe { display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; }
+
+/* ═══ Container-Kopfzeilen: Titel beim Ueberfahren in der Akzentfarbe ═══════
+   Vorgabe des Betreibers (2026-10-31): wie die Container unter /wissensgraph –
+   fuer ALLE aufklappbaren Seitenabschnitte, auch kuenftige. EINE Regel hier
+   statt einer Kopie je Seite (vorher standen drei gleiche Regeln in
+   jira_addon.css, email.html, tracks.html, und vier Bauformen hatten keine).
+   Ein NEUER Klapp-Container gehoert in diese Liste –
+   tests/test_container_akzent.py findet jeden, der fehlt.
+   Gemeint sind Seitenabschnitte (Karte, Abschnitt, Unterabschnitt), NICHT
+   Listeneintraege mit eigenem Kopf (Auftraege, Protokollzeilen).
+   ⚠ DUNKLES THEMA: die Akzentfarbe zu 65 % mit Weiss gemischt. Gemessen auf DEV
+   mit dem Haus-Rot (rgb 184,15,46): pur auf dunklem Grund nur 2,56–3,15:1.
+   ``--accent-hover`` ist KEIN Ausweg – das Branding stellt sie frei ein (auf
+   DEV ein dunkles Blau). 65 % erreichen bei Rot, Lila, Blau, Gruen und Orange
+   auf allen gemessenen dunklen Flaechen mindestens 4,68:1. Helles Thema:
+   ``--accent`` pur (6,68:1). ``body`` im Selektor hebt die Spezifitaet ueber
+   Seitenregeln, die NACH theme.css stehen. */
+body :is(.ja-card-head, .em-card-head, .st-card-head, .cs-card-head, .kb-collapse-header):hover > :is(h1, h2, h3, h4),
+body :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hover {
+    color: color-mix(in srgb, var(--accent) 65%, #fff);
+}
+body.light :is(.ja-card-head, .em-card-head, .st-card-head, .cs-card-head, .kb-collapse-header):hover > :is(h1, h2, h3, h4),
+body.light :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hover {
+    color: var(--accent);
+}

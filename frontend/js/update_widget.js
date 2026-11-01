@@ -41,6 +41,9 @@
         return f;
     }
     var _open = false, _timer = null, _inited = false;
+    // 'status' = Update-Zustand, 'verlauf' = Aenderungsverlauf. Die periodische
+    // Pruefung darf den Verlauf nicht unter dem Leser wegziehen.
+    var _ansicht = 'status', _verlaufLimit = 50;
 
     function init() {
         widget = document.getElementById('version-pill');
@@ -61,7 +64,11 @@
     }
 
     function toggle() { _open ? close() : open(); }
-    function open() { _open = true; if (dropdown) dropdown.classList.remove('hidden'); check(); }
+    function open() {
+        _open = true; _ansicht = 'status';
+        if (dropdown) dropdown.classList.remove('hidden');
+        check();
+    }
     function close() { _open = false; if (dropdown) dropdown.classList.add('hidden'); }
 
     function check() {
@@ -87,7 +94,7 @@
                 ? T('update.widget_title_avail', { n: d.commits_behind })
                 : T('update.widget_title_ok');
         }
-        if (!body) return;
+        if (!body || _ansicht === 'verlauf') return;
         if (d.image) { buildImageBody(); return; }
         fetch('/api/update/settings', { headers: auth() })
             .then(function (r) { return r.json(); })
@@ -140,6 +147,8 @@
         // lang werden; der Knopf darf davon nicht weggeschoben werden.
         var f = foot();
         if (f) f.innerHTML = btnHtml
+            + '<button id="upd-verlauf-btn" class="kb-btn-secondary" style="font-size:.78rem;">'
+            + esc(T('update.verlauf_btn')) + '</button>'
             + '<div class="upd-auto-row"><span class="upd-auto-label">' + T('update.auto_label') + '</span>'
             + '<select id="upd-schedule" class="upd-schedule-select">'
             + '<option value="never"' + (schedule === 'never' ? ' selected' : '') + '>' + T('update.sched_never') + '</option>'
@@ -153,6 +162,89 @@
         if (checkBtn) checkBtn.addEventListener('click', check);
         var sched = document.getElementById('upd-schedule');
         if (sched) sched.addEventListener('change', function (e) { saveSchedule(e.target.value); });
+        var verlaufBtn = document.getElementById('upd-verlauf-btn');
+        if (verlaufBtn) verlaufBtn.addEventListener('click', function (e) {
+            // Die Ansicht ersetzt den Knopf sofort; ohne stopPropagation saehe der
+            // Dokument-Klick ein abgehaengtes Ziel und schloesse das Popup.
+            e.stopPropagation();
+            _verlaufLimit = 50;
+            zeigeVerlauf();
+        });
+    }
+
+    /* Aenderungsverlauf: die letzten Commits, auch die schon eingespielten.
+       Die Liste "ausstehend" oben ist auf einem aktuellen Server leer – ohne
+       diese Ansicht waren die bisherigen Aenderungen nirgends einsehbar. */
+    function zeigeVerlauf() {
+        if (!body) return;
+        _ansicht = 'verlauf';
+        body.innerHTML = '<p class="kb-hint" style="margin:0;">' + esc(T('update.verlauf_laedt')) + '</p>';
+        var f = foot();
+        if (f) {
+            f.innerHTML = '<button id="upd-zurueck-btn" class="kb-btn-secondary" style="font-size:.78rem;">'
+                + esc(T('update.verlauf_zurueck')) + '</button>';
+            document.getElementById('upd-zurueck-btn').addEventListener('click', function (e) {
+                e.stopPropagation();
+                _ansicht = 'status';
+                if (body) body.innerHTML = '<p class="kb-hint" style="margin:0;">' + esc(T('update.verlauf_laedt')) + '</p>';
+                check();
+            });
+        }
+        fetch('/api/update/verlauf?limit=' + _verlaufLimit, { headers: auth() })
+            .then(function (r) { return r.ok ? r.json() : { ok: false, error: 'HTTP ' + r.status }; })
+            .then(function (d) { if (_ansicht === 'verlauf') renderVerlauf(d || {}); })
+            .catch(function () {
+                if (_ansicht === 'verlauf') renderVerlauf({ ok: false, error: T('update.unknown_error') });
+            });
+    }
+
+    function renderVerlauf(d) {
+        if (!body) return;
+        if (!d.ok) {
+            // Ein Fehler bleibt stehen und nennt den Grund.
+            body.innerHTML = '<p class="kb-hint" style="margin:0;color:var(--danger);white-space:pre-wrap;">'
+                + esc(T('update.verlauf_fehler', { msg: d.error || '?' })) + '</p>';
+            return;
+        }
+        var commits = d.commits || [];
+        var offen = commits.filter(function (c) { return !c.eingespielt; }).length;
+        var kopf = offen
+            ? T('update.verlauf_kopf_offen', { n: commits.length, m: offen })
+            : T('update.verlauf_kopf', { n: commits.length });
+        var web = d.web || '';
+        var liste = commits.map(function (c) {
+            // Hash als Link auf GitHub, wenn die Ablage dort liegt
+            var hash = web
+                ? '<a class="upd-commit-hash" href="' + esc(web + '/commit/' + c.hash_voll)
+                    + '" target="_blank" rel="noopener noreferrer" title="' + esc(T('update.verlauf_github')) + '">'
+                    + esc(c.hash) + '</a>'
+                : '<span class="upd-commit-hash">' + esc(c.hash) + '</span>';
+            var marke = c.eingespielt ? ''
+                : ' <span class="upd-commit-offen">' + esc(T('update.verlauf_ausstehend')) + '</span>';
+            var desc = c.beschreibung
+                ? '<span class="upd-commit-desc">' + esc(c.beschreibung) + '</span>' : '';
+            return '<div class="upd-commit' + (c.eingespielt ? '' : ' ist-offen') + '">' + hash
+                + '<span class="upd-commit-text"><span class="upd-commit-msg">' + esc(c.message) + marke + '</span>'
+                + desc + '</span>'
+                + '<span class="upd-commit-date">' + esc(c.date) + '</span></div>';
+        }).join('');
+        var mehr = '';
+        if (d.weitere > 0) {
+            mehr = '<div class="upd-commit-weitere">' + esc(T('update.weitere', { n: d.weitere })) + '</div>'
+                + (_verlaufLimit < 200
+                    ? '<button id="upd-mehr-btn" class="kb-btn-secondary" style="font-size:.75rem;">'
+                        + esc(T('update.verlauf_mehr')) + '</button>' : '');
+        }
+        body.innerHTML = '<div class="upd-status-row"><span style="font-size:.82rem;color:var(--text-primary);">'
+            + esc(kopf) + '</span></div>'
+            + (commits.length ? '<div class="upd-commit-list">' + liste + '</div>' : '')
+            + mehr;
+        var mehrBtn = document.getElementById('upd-mehr-btn');
+        if (mehrBtn) mehrBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            _verlaufLimit = Math.min(200, _verlaufLimit + 50);
+            zeigeVerlauf();
+        });
     }
 
     /* Docker-Container ohne git: aktualisiert wird ueber ein neues Image auf dem

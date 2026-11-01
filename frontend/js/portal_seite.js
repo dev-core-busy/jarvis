@@ -124,6 +124,12 @@
             if (amCard) amCard.classList.remove('hidden');
         }
         // Feedback: Freigabe UND aktiver Skill.
+        // Wissensgraph: jeder Wissenseditor (Inhalte seiner Gruppen) und
+        // Administratoren (Steuerung) – Rechte und Filter sitzen am Server.
+        if (d.permissions && d.permissions.wissensgraph) {
+            var wgCard = document.getElementById('pt-card-wissensgraph');
+            if (wgCard) wgCard.classList.remove('hidden');
+        }
         if (d.permissions && d.permissions.feedback) {
             var fbCard = document.getElementById('pt-card-feedback');
             if (fbCard) fbCard.classList.remove('hidden');

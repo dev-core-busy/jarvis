@@ -577,6 +577,7 @@ def _vector_index_lauf(vs, indexed, folders: list[Path], max_bytes: int,
                 # save=False: nicht bei jeder Datei den ganzen Index schreiben.
                 vs.add_chunks(path_str, chunks, mtime, save=False)
                 changed += 1
+                _graph_einreihen(path_str, mtime)
                 # Erfolg: eine etwaige Karteileiche im Negativ-Cache raeumen.
                 try:
                     _unlesbar_vergessen(path_str)
@@ -670,6 +671,10 @@ def _vector_index_lauf(vs, indexed, folders: list[Path], max_bytes: int,
                           f"ueber ihren Speicherordner zugeordnet")
         except Exception as e:  # noqa: BLE001
             _log.warning(f"Automatische Gruppenzuordnung fehlgeschlagen: {e}")
+    # ⚠ ERST NACH der Gruppenzuordnung: der Arbeiter prueft den Umfang
+    # (Wissensgruppen) – saehe er eine neue Datei vor ihrer Zuordnung, laege
+    # sie "ausserhalb" und fiele aus der Schlange.
+    _graph_einreihen_abschliessen()
     return vs.chunk_count() > 0
 
 
@@ -685,6 +690,49 @@ def _vector_index_lauf(vs, indexed, folders: list[Path], max_bytes: int,
 # Die Trennung sitzt jetzt im Dateisystem, nicht im Ranking.
 
 
+_graph_vorgemerkt: list = []
+_graph_vorgemerkt_lock = threading.Lock()
+
+
+def _graph_einreihen(path_str: str, mtime: float) -> None:
+    """Neu/geaendert indizierte Datei fuer den Wissensgraphen VORMERKEN.
+
+    ⚠ NUR VORMERKEN, NIE EXTRAHIEREN: die Extraktion kostet Modellaufrufe und
+    laeuft im eigenen Arbeiter (``wissensgraph_extraktion.dauerlauf``).
+    Gesammelt wird HIER, nicht in der Schlange: der Arbeiter saehe einen
+    Eintrag sonst noch vor der Gruppenzuordnung am Laufende (siehe
+    ``_graph_einreihen_abschliessen``). Geht das Vormerken durch einen Absturz
+    verloren, holt es der naechste Abgleich nach (der vergleicht Index und
+    Graph, nicht Ereignisse). Aus = kein Eintrag, damit nichts still waechst,
+    solange niemand den Graphen benutzt.
+    """
+    try:
+        from backend import wissensgraph_extraktion as _wgx
+        if _wgx.einstellungen().get("aktiv"):
+            with _graph_vorgemerkt_lock:
+                _graph_vorgemerkt.append((path_str, mtime))
+    except Exception as e:  # noqa: BLE001 – darf den Indexlauf nie kippen
+        _log.warning(f"Wissensgraph: Vormerken fehlgeschlagen ({e})")
+
+
+def _graph_einreihen_abschliessen() -> None:
+    """Das Vorgemerkte in die Schlange, EINMAL sichern, den Arbeiter wecken."""
+    with _graph_vorgemerkt_lock:
+        liste = list(_graph_vorgemerkt)
+        _graph_vorgemerkt.clear()
+    if not liste:
+        return
+    try:
+        from backend import wissensgraph as _wg
+        from backend import wissensgraph_extraktion as _wgx
+        for pfad, mtime in liste:
+            _wg.einreihen(pfad, mtime, sichern=False)
+        _wg.warteschlange_sichern()
+        _wgx.wecken()
+    except Exception as e:  # noqa: BLE001
+        _log.warning(f"Wissensgraph: Warteschlange nicht gesichert ({e})")
+
+
 class _TrefferListe(list):
     """Trefferliste mit einem Zusatzmerkmal am Ergebnis selbst.
 
@@ -698,6 +746,25 @@ class _TrefferListe(list):
     ``kein_anker``: kein einziges Wort der Anfrage kommt im Bestand vor.
     """
     kein_anker: bool = False
+
+
+def _graph_rangliste():
+    """Der vierte Suchkanal aus dem Wissensgraphen – ``None``, solange der
+    Schalter ``expansion`` aus ist (Vorgabe) oder der Graph leer ist. Dann ist
+    die Suche byte-gleich zum Bestand. Ein Fehler schaltet den Kanal ab, nie
+    die Suche."""
+    try:
+        from backend import wissensgraph as _wg
+        from backend import wissensgraph_extraktion as _wgx
+        st = _wgx.einstellungen()
+        if not (st.get("aktiv") and st.get("expansion")):
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+
+    def rangliste(start, erlaubt, frage):
+        return [(_wg.absolut(m), s) for m, s, _b in _wg.relevanz(frage, start, erlaubt)]
+    return rangliste
 
 
 def _vector_search(query: str, max_results: int,
@@ -721,7 +788,8 @@ def _vector_search(query: str, max_results: int,
     # denselben BM25-Durchlauf ein ZWEITES Mal gerechnet, obwohl die Hybridsuche
     # das Ergebnis Millisekunden vorher schon hatte und wegwarf.
     results, ohne_anker = vs.search_hybrid_ex(query, max_results,
-                                              allow_paths=allow_paths)
+                                              allow_paths=allow_paths,
+                                              graph_rangliste=_graph_rangliste())
     if not results:
         return None
     kein_anker = ohne_anker is True
@@ -3396,7 +3464,33 @@ class KnowledgeTool(BaseTool):
                 output += f"--- [{i}] {filename} (Relevanz: {score:.2f}) ---\n"
             output += chunk.strip()[:CHUNK_OUTPUT_LIMIT] + "\n\n"
 
+        # Zusammenhaenge aus dem Wissensgraphen (nur mit Schalter "expansion"):
+        # kurze Zeilen, die die Trefferdokumente verbinden – innerhalb der
+        # Erlaubnis des Fragenden und gedeckelt, damit sie keinen Treffer
+        # verdraengen.
+        zus = await asyncio.to_thread(_graph_zusammenhaenge, [r[1] for r in results],
+                                      allow_paths if gruppen_in_suche else None)
+        if zus:
+            block = "🔗 Zusammenhänge (Wissensgraph):\n" + "\n".join("- " + z for z in zus)
+            output += block[:GRAPH_BLOCK_LIMIT] + "\n"
+
         return output
+
+
+# Obergrenze fuer den Block "Zusammenhaenge" – ein Bruchteil eines Treffers.
+GRAPH_BLOCK_LIMIT = CHUNK_OUTPUT_LIMIT // 3
+
+
+def _graph_zusammenhaenge(pfade, erlaubt) -> list[str]:
+    """Zeilen "X ↔ Y (…, über Z)" – leer, solange der Schalter aus ist."""
+    if _graph_rangliste() is None:
+        return []
+    try:
+        from backend import wissensgraph as _wg
+        return _wg.zusammenhaenge(pfade, erlaubt)
+    except Exception as e:  # noqa: BLE001
+        _log.warning(f"Wissensgraph: Zusammenhaenge nicht ermittelt ({e})")
+        return []
 
 
 class KnowledgeManageTool(BaseTool):

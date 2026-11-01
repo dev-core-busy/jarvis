@@ -63,6 +63,7 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/confluence-addon"): ("seite", "Seitenrahmen"),
     ("GET", "/ai-mouse"): ("seite", "Seitenrahmen"),
     ("GET", "/feedback"): ("seite", "Seitenrahmen"),
+    ("GET", "/wissensgraph"): ("seite", "Seitenrahmen (Daten nur fuer Admins)"),
     ("GET", "/support"): ("seite", "Seitenrahmen"),
     ("GET", "/claude/skill.md"): ("seite", "Anleitung zum Herunterladen (statischer Text)"),
     ("GET", "/claude/claude-md-diaet.md"): ("seite", "Anleitung zum Herunterladen (statischer Text)"),

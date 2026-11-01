@@ -148,6 +148,7 @@ ADMIN: dict[str, list[tuple[str, str]]] = {
     "Sicherheits-/Systemkonfiguration": [
         ("get", "/api/auth/ad_status"), ("get", "/api/settings/ssl"),
         ("get", "/api/update/status"), ("get", "/api/update/settings"),
+        ("get", "/api/update/verlauf"),
         ("post", "/api/vnc/unlock"), ("get", "/api/mcp/servers"),
         ("get", "/api/openclaw/search"), ("get", "/api/openclaw/workflow-task"),
     ],
@@ -167,6 +168,34 @@ ADMIN: dict[str, list[tuple[str, str]]] = {
         # ENTFERNT (er wirkte auf den zuletzt geladenen, ggf. fremden Verlauf),
         # ebenso `/api/context/truncate`. Ihre Abwesenheit prueft GONE unten.
         ("post", "/api/context/threshold"),
+    ],
+    # Wissensgraph-STEUERUNG (Schalter, Aufbau, Status mit Modell und Kosten):
+    # Administratoren. Neuaufbau kostet Stunden Modelllast. Die INHALTE stehen
+    # seit 2026-10-31 nicht mehr hier, sondern in WISSENSGRAPH unten – der
+    # Betreiber: "Admin allein darf kein Wissen editieren".
+    "Wissensgraph-Steuerung (Modelllast, Schalter)": [
+        ("get", "/api/wissensgraph/status"), ("get", "/api/wissensgraph/einstellungen"),
+        ("post", "/api/wissensgraph/einstellungen"), ("post", "/api/wissensgraph/neuaufbau"),
+        ("post", "/api/wissensgraph/abbrechen"),
+    ],
+}
+
+# Wissensgraph-INHALTE (Festlegung 2026-10-31): jeder Wissenseditor liest – der
+# Endpunkt filtert auf seine Gruppen (_wissensgraph_erlaubt, gemessen in
+# tests/test_wissensgraph_rechte.py); PFLEGE und EXPORT nur globale
+# Wissenseditoren, ausdruecklich NICHT Administratoren allein.
+WISSENSGRAPH: dict[str, list[tuple[str, str]]] = {
+    "require_wissensgraph_leser": [
+        ("get", "/api/wissensgraph/graph"), ("get", "/api/wissensgraph/knoten/{kid:path}"),
+        ("get", "/api/wissensgraph/widersprueche"),
+        ("get", "/api/wissensgraph/wiki/{kid:path}"), ("post", "/api/wissensgraph/wiki/{kid:path}"),
+        ("get", "/api/wissensgraph/rueckmeldung"), ("post", "/api/wissensgraph/rueckmeldung"),
+        ("delete", "/api/wissensgraph/rueckmeldung"),
+    ],
+    "require_knowledge_editor": [
+        ("delete", "/api/wissensgraph/knoten/{kid:path}"), ("get", "/api/wissensgraph/pruefliste"),
+        ("post", "/api/wissensgraph/zusammenfuehren"), ("post", "/api/wissensgraph/trennen"),
+        ("get", "/api/wissensgraph/export"),
     ],
 }
 
@@ -204,6 +233,16 @@ for method, route in EDITOR:
 # require_auth ergaenzt, faellt hier auf – ohne dass jemand die Liste oben
 # pflegen muss.
 
+for dep, items in WISSENSGRAPH.items():
+    section(f"Wissensgraph – {dep}")
+    for method, route in items:
+        got = BY_KEY.get((method, route))
+        if not got:
+            check(f"{method.upper()} {route}", False, "Route nicht gefunden")
+            continue
+        fn, deps = got
+        check(f"{method.upper():6} {route}", dep in deps, f"{fn}: {sorted(deps) or 'KEINE'}")
+
 section("Namensraum-Waechter (auch fuer kuenftige Routen)")
 GUARDED_PREFIXES = [
     "/api/telemetry", "/api/conv_log", "/api/audit_log", "/api/logs/",
@@ -235,6 +274,10 @@ GUARDED_PREFIXES = [
     # jene vergleicht die Schranken UNTEREINANDER. Laegen ALLE vier Routen auf
     # require_auth, waeren sie gleich stark und die Regel bliebe still.
     "/api/ai-mouse/admin/",
+    # /api/wissensgraph/ (2026-10-30): jede kuenftige Route darunter (Graph,
+    # Knoten, Insights, Pruefliste) liefert Inhalte aller Quellen – der Praefix
+    # steht hier, damit sie nicht mit require_auth durchrutscht.
+    "/api/wissensgraph/",
 ]
 # Ausnahmen mit Begruendung – jede einzeln belegt, keine Sammelfreigabe.
 EXEMPT = {
@@ -320,6 +363,9 @@ EXEMPT = {
     # Matrix wird AUSGEFUEHRT gemessen, samt "kein Benutzername aus dem Rumpf"
     # und "jeder Abruf ins Audit, nie der Wert".
     ("post", "/api/secret/reveal"),
+    # Wissensgraph: die Seite fragt, was SIE dem Fragenden zeigen darf. Die
+    # Antwort traegt nur dessen eigene Rechte und Gruppennamen, keine Inhalte.
+    ("get", "/api/wissensgraph/zugang"),
 }
 # Vision-Medien (Kamerabild, Gesichts-Ausschnitte, Trainings-Vorschau,
 # Begruessungs-Audio) brauchen ``?token=``, weil <img>/<audio> keine Header
@@ -334,6 +380,11 @@ for method, route, fn, deps in ROUTES:
     if (method, route) in EXEMPT:
         continue
     if deps & ({"require_local_auth", "require_admin_or_knowledge_editor"} | QUERY_ADMIN_OK):
+        continue
+    # Unter /api/wissensgraph/ zaehlen auch die beiden Wissens-Schranken – jede
+    # Route darunter steht oben EINZELN in WISSENSGRAPH (eine neue faellt dort
+    # nicht auf, wohl aber hier, wenn sie mit require_auth kommt).
+    if route.startswith("/api/wissensgraph/") and deps & {"require_wissensgraph_leser", "require_knowledge_editor"}:
         continue
     offenders.append(f"{method.upper()} {route} ({fn}: {sorted(deps) or 'KEINE'})")
 check("kein Endpunkt in geschuetzten Namensraeumen unterhalb von Admin",
@@ -350,6 +401,9 @@ RANK = {"require_local_auth": 3, "require_admin_or_knowledge_editor": 2,
         # hinterlegten Zugangsdaten.
         "require_vemas_access": 2,
         "require_jira_assist_access": 2,
+        # Jeder Wissenseditor, Inhalte im Endpunkt auf seine Gruppen gefiltert –
+        # dieselbe Ebene wie require_knowledge_editor.
+        "require_wissensgraph_leser": 2,
         # Freigabe ODER Admin – also mindestens so eng wie die Freigabe selbst.
         "require_jira_vorlagen_access": 2,
         # Bereichs-Schranke ohne eigene Freigabeliste: prueft NUR, ob der Skill

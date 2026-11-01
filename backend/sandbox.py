@@ -351,7 +351,12 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 # gemessen: Verzeichnis 0755, Dateien 0644 – fuer jarvis_sandbox
                 # lesbar. Das geschlossene Verzeichnis ist die Schranke, die
                 # Namen kennt keine Liste.
-                "data/support_instructions")
+                "data/support_instructions",
+                # Wissensgraph: Entitaeten und Zusammenfassungen aus ALLEN
+                # Quellen, unabhaengig von Wissensgruppen – gelesen wird nur
+                # ueber die API, die je Wissenseditor auf seine Gruppen filtert
+                # (backend/wissensgraph.py legt den Ordner selbst mit 0750 an).
+                "data/graph")
 PRIVATE_MODE = 0o750
 
 # Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das

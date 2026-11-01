@@ -1,0 +1,163 @@
+/**
+ * Wissensgraph (/wissensgraph) – nur diese Seite laedt die Datei.
+ *
+ * Grundbauteile (`.ja-card`, `.ja-btn`, `.ja-main`, `.ja-note`) kommen aus
+ * `jira_addon.css`. Farben ausschliesslich als Variablen aus `theme.css` –
+ * die Grafik selbst liest `--graph-*` per Skript (sigma braucht Werte).
+ */
+
+/* ⚠ DIESE SEITE HAT SONST KEINE `.hidden`-REGEL – sie steht nur in chat.css
+   und feedback.css, die hier nicht geladen werden. Ohne sie standen Hinweis-
+   balken und Detailfeld leer, aber sichtbar da (optische Abnahme 2026-10-30;
+   jsdom sieht es nicht, die Klasse ist ja gesetzt). Dieselbe Falle wie auf
+   /feedback 2026-09-15. `!important`, weil die versteckten Elemente eigene
+   display-Werte tragen (.ja-btn inline-flex, .wg-detail im Flex-Verbund). */
+.hidden { display: none !important; }
+
+/* Die Grafik braucht Breite: 1200 px statt der 820 px fuer Fliesstext.
+   Maximieren hebt die Deckelung ganz auf (seite_breit.js). */
+.wg-main { max-width: 1200px; }
+
+/* ── Leisten ───────────────────────────────────────────────────────────── */
+.wg-leiste {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 0 0 10px;
+}
+.wg-feld {
+    padding: 7px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    /* Deckende Flaeche: Optionslisten liegen ueber Inhalt (Register). */
+    background: var(--bg-secondary); color: var(--text-primary);
+    font-size: .9rem; font-family: inherit;
+    min-width: 0; flex: 0 1 auto; max-width: 100%;
+}
+.wg-suche { flex: 1 1 220px; }
+.wg-feld:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wg-haken {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: .88rem; color: var(--text-secondary); cursor: pointer;
+}
+.wg-gruppe-knoepfe { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.wg-icon { min-width: 36px; font-weight: 600; }
+
+/* ── Buehne: Grafik + Detail ───────────────────────────────────────────── */
+.wg-buehne {
+    position: relative;
+    display: flex; gap: 12px; align-items: stretch;
+    min-width: 0;
+}
+.wg-graph {
+    flex: 1 1 auto; min-width: 0;
+    height: 62vh; min-height: 360px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    overflow: hidden;
+}
+.wg-detail {
+    position: relative;
+    flex: 0 0 300px; max-width: 100%;
+    max-height: 62vh; min-height: 360px; overflow: auto;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-secondary); color: var(--text-primary);
+    padding: 12px 14px;
+    overflow-wrap: anywhere;
+}
+/* Schmales Fenster: das Detail rutscht unter die Grafik, statt sie zu quetschen. */
+@media (max-width: 760px) {
+    .wg-buehne { flex-direction: column; }
+    .wg-detail { flex-basis: auto; min-height: 0; max-height: none; }
+}
+.wg-zu {
+    position: absolute; top: 8px; right: 8px;
+    width: 28px; height: 28px; padding: 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer;
+}
+.wg-zu:hover { color: var(--text-primary); border-color: var(--accent); }
+.wg-zu svg { width: 14px; height: 14px; }
+.wg-d-name { margin: 0 34px 2px 0; font-size: 1.05rem; }
+.wg-d-typ { font-size: .8rem; color: var(--text-secondary); margin-bottom: 8px; }
+.wg-d-text { margin: 0 0 8px; line-height: 1.5; }
+.wg-d-alias { font-size: .85rem; color: var(--text-secondary); margin: 0 0 8px; }
+.wg-d-abschnitt h4 { margin: 12px 0 4px; font-size: .88rem; color: var(--text-secondary); }
+.wg-d-liste { margin: 0; padding-left: 18px; font-size: .88rem; line-height: 1.6; }
+.wg-d-art { color: var(--text-secondary); }
+.wg-link {
+    background: none; border: 0; padding: 0; cursor: pointer;
+    color: var(--accent); font: inherit; text-align: left;
+    text-decoration: underline; text-underline-offset: 2px;
+}
+.wg-link:hover { color: var(--accent-hover); }
+.wg-loeschen { margin-top: 14px; display: inline-flex; align-items: center; gap: 4px; }
+.wg-loeschen svg { width: 14px; height: 14px; }
+
+/* ── Hinweis, Zaehler, Legende ─────────────────────────────────────────── */
+.wg-hinweis {
+    margin: 0 0 10px; padding: 8px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--bg-input);
+    color: var(--text-primary); font-size: .9rem;
+}
+.wg-hinweis.is-err { border-color: var(--danger); }
+.wg-unterzeile {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    margin: 8px 0 6px;
+}
+.wg-zaehler { font-size: .85rem; color: var(--text-secondary); }
+.wg-legende { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .85rem; }
+.wg-leg { display: inline-flex; align-items: center; gap: 6px; color: var(--text-primary); }
+.wg-leg-insel { cursor: pointer; flex: 1 1 100%; }
+.wg-leg-insel:hover { color: var(--accent); }
+.wg-fleck { width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto; }
+.wg-warn {
+    font-size: .78rem; padding: 1px 6px; border-radius: 4px;
+    border: 1px solid var(--warning); color: var(--text-primary);
+}
+
+/* ── Auffaelligkeiten ──────────────────────────────────────────────────── */
+.wg-insights {
+    display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.wg-karte {
+    position: relative;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-secondary); color: var(--text-primary);
+    padding: 10px 12px; cursor: pointer; min-width: 0;
+    overflow-wrap: anywhere;
+}
+.wg-karte:hover, .wg-karte:focus-visible { border-color: var(--accent); outline: none; }
+.wg-karte-kopf { display: flex; gap: 8px; align-items: flex-start; padding-right: 30px; }
+.wg-karte-text { font-size: .86rem; color: var(--text-secondary); margin-top: 4px; line-height: 1.45; }
+.wg-recherche { margin-top: 8px; }
+
+/* ── Pflege ────────────────────────────────────────────────────────────── */
+.wg-st {
+    display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px;
+    margin: 0 0 8px; font-size: .9rem;
+}
+.wg-st dt { color: var(--text-secondary); }
+.wg-st dd { margin: 0; overflow-wrap: anywhere; }
+.wg-fehler { margin: 0; padding-left: 18px; font-size: .85rem; overflow-wrap: anywhere; }
+.wg-meldung { font-size: .88rem; min-height: 1.2em; margin: 4px 0 8px; }
+.wg-meldung.is-err { color: var(--danger); }
+.wg-meldung.is-ok { color: var(--text-primary); }
+.wg-paar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    padding: 8px 0; border-top: 1px solid var(--border);
+}
+.wg-paar-text { flex: 1 1 300px; min-width: 0; overflow-wrap: anywhere; }
+.wg-paar-meta { color: var(--text-secondary); font-size: .85rem; }
+.wg-paar-knoepfe { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+
+/* ── Schalter ──────────────────────────────────────────────────────────── */
+.wg-schalter { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; }
+
+/* ── Wiki-Seite im Detail ──────────────────────────────────────────────── */
+.wg-wiki-inhalt { font-size: .86rem; line-height: 1.45; }
+.wg-wiki-h { margin: 10px 0 4px; font-size: .85rem; color: var(--text-secondary); }
+.wg-wiki-liste { margin: 0 0 6px; padding-left: 18px; }
+.wg-wiki-liste li { margin: 2px 0; }
+.wg-wiki-text { margin: 0 0 6px; }
+.wg-wiki-knopf { margin-top: 6px; }
+

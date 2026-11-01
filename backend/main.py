@@ -2090,6 +2090,92 @@ async def require_knowledge_editor(request: Request, user: str = Depends(require
                "(ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
+_WG_ZUGANG_TTL = 15.0
+_wg_zugang_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _wissensgraph_zugang(user: str) -> dict:
+    """Wer im Wissensgraphen was darf (Festlegung des Betreibers 2026-10-31).
+
+    Je Benutzer ``_WG_ZUGANG_TTL`` Sekunden gemerkt: ``_editable_groups_for``
+    geht den ganzen Index durch (gemessen auf dem ECHT-Bestand ~0,5 s), und
+    eine Anfrage fragt bis zu dreimal (Dependency, Ausschnitt, Gruppenfilter) –
+    ein Klick ins Detail dauerte damit 2 s. Die AD-Gruppen dahinter frischt der
+    Dienst ohnehin nur alle 10 Minuten auf.
+
+    * ``stufe``: ``global`` (globaler Wissenseditor – alle Inhalte),
+      ``gruppen`` (Editor einzelner Wissensgruppen – nur deren Inhalte) oder
+      ``keine``. Dasselbe Praedikat wie die Wissen-Kachel
+      (``_editable_groups_for``), damit beide Kacheln nicht auseinanderlaufen.
+    * ``pflegen`` (zusammenfuehren, trennen, loeschen, Export): NUR globale
+      Wissenseditoren. Ein Begriff gilt fuer den ganzen Graphen – ein
+      Gruppen-Editor veraenderte sonst fremde Gruppen mit.
+    * ``steuern`` (Schalter, Aufbau, Status): Administratoren.
+
+    ⚠ ADMIN ALLEIN IST KEIN WISSENSEDITOR (Vorgabe des Betreibers): ein
+    Administrator ohne Eintrag als Wissenseditor steuert den Graphen, sieht
+    aber KEINE Inhalte.
+    """
+    hit = _wg_zugang_cache.get(user)
+    if hit and time.monotonic() - hit[0] < _WG_ZUGANG_TTL:
+        return {**hit[1], "gruppen": list(hit[1]["gruppen"])}
+    glob = _may_edit_knowledge(user)
+    try:
+        gruppen = _editable_groups_for(user)
+    except Exception:  # noqa: BLE001 – ohne Gruppenliste kein Gruppenzugang
+        gruppen = []
+    stufe = "global" if glob else ("gruppen" if gruppen else "keine")
+    z = {"stufe": stufe,
+         "gruppen": [{"id": g["id"], "name": g.get("name", g["id"])} for g in gruppen],
+         "pflegen": glob, "steuern": bool(_is_admin_user(user))}
+    if len(_wg_zugang_cache) > 500:
+        _wg_zugang_cache.clear()
+    _wg_zugang_cache[user] = (time.monotonic(), z)
+    return z
+
+
+def _wissensgraph_kachel(user: str, ist_admin: bool) -> bool:
+    """Portal-Kachel: Administratoren immer (sie schalten den Graphen ein),
+    Wissenseditoren nur, wenn es etwas zu sehen gibt – Graph eingeschaltet ODER
+    schon ein Bestand da (etwa uebernommen, Aufbau aus). Sonst fuehrte die
+    Kachel auf eine leere Seite (Vergleichsbericht 2026-11-01). Fail-closed."""
+    if ist_admin:
+        return True
+    if _wissensgraph_zugang(user)["stufe"] == "keine":
+        return False
+    try:
+        from backend import wissensgraph as _wg
+        from backend import wissensgraph_extraktion as _wgx
+        return bool(_wgx.einstellungen().get("aktiv")) or _wg.hat_inhalt()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _wissensgraph_erlaubt(user: str) -> set | None:
+    """Dokumente (Manifest-Form), deren Graph-Inhalte der Benutzer sehen darf:
+    ``None`` = alle (globaler Wissenseditor), sonst die Dokumente seiner
+    Wissensgruppen – dieselbe Zuordnung wie die Suche."""
+    z = _wissensgraph_zugang(user)
+    if z["stufe"] == "global":
+        return None
+    if z["stufe"] == "keine":
+        return set()
+    from backend import knowledge_groups as _kg
+    from backend import wissensgraph as _wg
+    return set(_kg.filter_paths_by_groups(sorted(_wg.quellen_index()), [g["id"] for g in z["gruppen"]]))
+
+
+async def require_wissensgraph_leser(request: Request, user: str = Depends(require_auth)) -> str:
+    """Graph-INHALTE: jeder Wissenseditor (global oder fuer eine Gruppe). Was er
+    sieht, filtert der Endpunkt ueber ``_wissensgraph_erlaubt`` – die
+    Dependency allein ist keine Datenschranke."""
+    if (await asyncio.to_thread(_wissensgraph_zugang, user))["stufe"] != "keine":
+        return user
+    raise HTTPException(status_code=403,
+        detail="Den Wissensgraphen sehen nur Wissenseditoren – globale alles, "
+               "Editoren einer Wissensgruppe deren Inhalte.")
+
+
 def _user_may_use_sap(user: str) -> bool:
     """Prädikat: Darf der Benutzer den SAP-Zugriff (Reiter + Tools) nutzen?
 
@@ -6154,6 +6240,15 @@ async def update_status(user: str = Depends(require_local_auth)):
     return JSONResponse(result)
 
 
+@app.get("/api/update/verlauf")
+async def update_verlauf(limit: int = 50, user: str = Depends(require_local_auth)):
+    """Aenderungsverlauf: die letzten Commits von origin/<branch>, je Commit mit
+    Kurzbeschreibung und Kennzeichen, ob er auf diesem Server eingespielt ist.
+    Holt NICHT selbst (das tut /api/update/status beim Oeffnen des Popups)."""
+    from backend.update_manager import commit_verlauf
+    return JSONResponse(await asyncio.to_thread(commit_verlauf, limit))
+
+
 @app.post("/api/update/apply")
 async def update_apply(user: str = Depends(require_local_auth)):
     """Führt git pull aus und startet den Service neu.
@@ -6574,6 +6669,25 @@ async def startup_warm_lexical_index():
         except Exception as e:
             print(f"[Wissen] BM25-Vorbau uebersprungen: {e}", flush=True)
     asyncio.create_task(_warm())
+
+
+@app.on_event("startup")
+async def startup_wissensgraph():
+    """Den Arbeiter des Wissensgraphen starten – NACH dem BM25-Vorbau.
+
+    Reihenfolge laut Plan: Journal-Replay → Umzuege → BM25-Warmup, der Graph
+    danach und ohne zu blockieren. Der Arbeiter laedt Graph und Embeddings erst,
+    wenn wirklich etwas in der Warteschlange liegt; ist der Graph aus, schlaeft
+    er (ein Lesen der Einstellungen je Minute).
+    """
+    async def _start():
+        await asyncio.sleep(90)
+        try:
+            from backend import wissensgraph_extraktion as wgx
+            wgx.dauerlauf_starten()
+        except Exception as e:  # noqa: BLE001
+            print(f"[Wissensgraph] Arbeiter nicht gestartet: {e}", flush=True)
+    asyncio.create_task(_start())
 
 
 @app.on_event("startup")
@@ -8532,6 +8646,9 @@ async def get_me(user: str = Depends(require_auth)):
             # ist schlimmer als keine Kachel.
             "feedback": (_user_may_use_feedback(user)
                          and _skill_active("feedback")),
+            # Wissensgraph: jeder Wissenseditor (Inhalte seiner Gruppen) und
+            # Administratoren (nur Steuerung) – Rechte in _wissensgraph_zugang.
+            "wissensgraph": _wissensgraph_kachel(user, ist_admin),
             # Benutzer-Chat: haengt NUR am Skill-Zustand – eine eigene Freigabe
             # gibt es bewusst nicht (Begruendung in require_userchat_access).
             # Das Portal blendet Kachel UND Ungelesen-Badge daran ein; ohne das
@@ -20368,6 +20485,298 @@ async def get_knowledge_stats(user: str = Depends(require_auth)):
         # `path` – der Client braucht ihn fuer jede Folge-Anfrage.
         f["display"] = _rag.anzeige(f["path"])
     return JSONResponse(data)
+
+
+# ─── Wissensgraph (nur Administratoren) ─────────────────────────────────────
+# Plan "Wissensgraph fuer das Jarvis-RAG", Meilenstein 2. ALLE Routen haengen an
+# require_local_auth – der Schutz sitzt an den Daten-Endpunkten, nicht an einer
+# (spaeteren) Kachel; eine versteckte Kachel ist keine Berechtigung. Der Graph
+# enthaelt Entitaeten aus ALLEN Quellen, unabhaengig von Wissensgruppen.
+
+@app.get("/api/wissensgraph/status")
+async def wissensgraph_status(user: str = Depends(require_local_auth)):
+    """Fortschritt, Warteschlange, Token, letzte Fehler, Kennzahlen des Graphen."""
+    from backend import wissensgraph_extraktion as wgx
+    return JSONResponse(await asyncio.to_thread(wgx.status))
+
+
+@app.get("/api/wissensgraph/einstellungen")
+async def wissensgraph_einstellungen_lesen(user: str = Depends(require_local_auth)):
+    from backend import wissensgraph_extraktion as wgx
+    return JSONResponse({"einstellungen": await asyncio.to_thread(wgx.einstellungen, True),
+                         "vorgaben": wgx.VORGABEN})
+
+
+@app.post("/api/wissensgraph/einstellungen")
+async def wissensgraph_einstellungen_schreiben(request: Request,
+                                               user: str = Depends(require_local_auth)):
+    """Teilweise aendern; unbekannte Felder werden mit 400 abgewiesen."""
+    from backend import wissensgraph_extraktion as wgx
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Ungültiger Rumpf")
+    if isinstance(body, dict) and "groups" in body:
+        # Gruppen kommen wie ueberall als "groups" und laufen durch die eine Normierung.
+        body = {**{k: v for k, v in body.items() if k != "groups"},
+                "gruppen": _gruppen_normieren(body.get("groups"))}
+    try:
+        st = await asyncio.to_thread(wgx.einstellungen_pruefen, body)
+        if st["gruppen"]:
+            from backend import knowledge_groups as _kg
+            bekannt = _kg._valid_ids(_kg.load())
+            fremd = [g for g in st["gruppen"] if g not in bekannt]
+            if fremd:
+                raise ValueError(f"Unbekannte Wissensgruppe(n): {', '.join(fremd)}")
+        await asyncio.to_thread(wgx.einstellungen_speichern, st)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    wgx.wecken()
+    return JSONResponse({"ok": True, "einstellungen": st})
+
+
+@app.post("/api/wissensgraph/neuaufbau")
+async def wissensgraph_neuaufbau(request: Request, user: str = Depends(require_local_auth)):
+    """Index ↔ Graph abgleichen und Fehlendes einreihen (Teil- oder Vollaufbau).
+
+    Rumpf: ``{"umfang": "eingestellt"|"alles"|"gruppe"|"ordner", "groups": [...],
+    "ordner": "data/rag/…", "voll": false}``. ``voll`` extrahiert auch
+    unveraenderte Quellen neu. Die Extraktion selbst laeuft im Arbeiter, nie
+    in diesem Request.
+    """
+    from backend import wissensgraph as wg
+    from backend import wissensgraph_extraktion as wgx
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Ungültiger Rumpf")
+    umfang = body.get("umfang") or "eingestellt"
+    gruppen = None
+    ordner = ""
+    if umfang == "alles":
+        gruppen = []
+    elif umfang == "gruppe":
+        gruppen = _gruppen_normieren(body.get("groups"))
+        if not gruppen:
+            raise HTTPException(status_code=400, detail="Bitte mindestens eine Wissensgruppe wählen")
+    elif umfang == "ordner":
+        ordner = str(body.get("ordner") or "").strip()
+        if not wg.ist_graph_pfad(ordner.rstrip("/") + "/x"):
+            raise HTTPException(status_code=400,
+                                detail="Ordner muss unter data/rag oder /mnt/rag liegen")
+        gruppen = []
+    elif umfang != "eingestellt":
+        raise HTTPException(status_code=400, detail=f"Unbekannter Umfang: {umfang}")
+    if not (await asyncio.to_thread(wgx.einstellungen, True))["aktiv"]:
+        raise HTTPException(status_code=409, detail="Der Wissensgraph ist ausgeschaltet")
+    erg = await asyncio.to_thread(wgx.abgleich, gruppen, ordner, bool(body.get("voll")))
+    wgx.nachlauf_fortsetzen()
+    wgx.dauerlauf_starten()
+    wgx.wecken()
+    return JSONResponse(erg)
+
+
+@app.post("/api/wissensgraph/abbrechen")
+async def wissensgraph_abbrechen(user: str = Depends(require_local_auth)):
+    from backend import wissensgraph_extraktion as wgx
+    return JSONResponse(await asyncio.to_thread(wgx.abbrechen))
+
+
+@app.get("/wissensgraph")
+async def wissensgraph_seite():
+    """Die Seite. Leere Huelle wie /feedback: eine Navigation traegt keinen
+    Authorization-Header; die Seite fragt /api/wissensgraph/zugang, die DATEN
+    liegen hinter require_wissensgraph_leser (Inhalte, je Gruppe gefiltert),
+    require_knowledge_editor (Pflege, Export) und require_local_auth (Steuerung)."""
+    return FileResponse(FRONTEND_DIR / "wissensgraph.html")
+
+
+@app.get("/api/wissensgraph/zugang")
+async def wissensgraph_zugang(user: str = Depends(require_auth)):
+    """Was die Seite zeigen darf (Stufe, eigene Gruppen, Pflege, Steuerung).
+    Liefert nur die Rechte des Fragenden, keine Inhalte."""
+    return JSONResponse(await asyncio.to_thread(_wissensgraph_zugang, user))
+
+
+async def _wg_teilgraph_fuer(user: str, gruppe: str = ""):
+    """``(erlaubt, teilgraph)`` des Benutzers; eine fremde Gruppe im Filter → 403."""
+    from backend import wissensgraph as wg
+    z = await asyncio.to_thread(_wissensgraph_zugang, user)
+    if gruppe and z["stufe"] == "gruppen" and gruppe not in {g["id"] for g in z["gruppen"]}:
+        raise HTTPException(status_code=403, detail="Diese Wissensgruppe gehört nicht zu deinem Bereich.")
+    erlaubt = await asyncio.to_thread(_wissensgraph_erlaubt, user)
+    return erlaubt, await asyncio.to_thread(wg.teilgraph, erlaubt)
+
+
+@app.get("/api/wissensgraph/graph")
+async def wissensgraph_graph(q: str = "", typ: str = "", ordner: str = "", gruppe: str = "",
+                             dokumente: bool = True, limit: int = 2000, offset: int = 0,
+                             user: str = Depends(require_wissensgraph_leser)):
+    """Knoten und Kanten fuer die Grafik – gefiltert, nach Grad sortiert,
+    paginiert; fuer Gruppen-Editoren aus dem Teilgraphen ihrer Dokumente."""
+    from backend import wissensgraph as wg
+    if typ and typ not in wg.TYPEN + (wg.TYP_QUELLE,):
+        raise HTTPException(status_code=400, detail=f"Unbekannter Typ: {typ}")
+    if ordner and not wg.ist_graph_pfad(ordner.rstrip("/") + "/x"):
+        raise HTTPException(status_code=400, detail="Ordner muss unter data/rag oder /mnt/rag liegen")
+    gruppen = _gruppen_normieren([gruppe]) if gruppe else []
+    _erl, teil = await _wg_teilgraph_fuer(user, gruppen[0] if gruppen else "")
+    return JSONResponse(await asyncio.to_thread(
+        wg.ansicht, q[:200], typ, ordner, gruppen[0] if gruppen else "", dokumente, limit, offset, teil))
+
+
+@app.get("/api/wissensgraph/knoten/{kid:path}")
+async def wissensgraph_knoten(kid: str, user: str = Depends(require_wissensgraph_leser)):
+    from backend import wissensgraph as wg
+    _erl, teil = await _wg_teilgraph_fuer(user)
+    d = await asyncio.to_thread(wg.knoten_detail, kid, teil)
+    if d is None:
+        raise HTTPException(status_code=404, detail="Knoten nicht gefunden")
+    return JSONResponse(d)
+
+
+@app.delete("/api/wissensgraph/knoten/{kid:path}")
+async def wissensgraph_knoten_loeschen(kid: str, user: str = Depends(require_knowledge_editor)):
+    """Entitaet ausblenden – bleibt ueber jeden Neuaufbau geloescht."""
+    from backend import wissensgraph as wg
+    try:
+        return JSONResponse(await asyncio.to_thread(wg.knoten_loeschen, kid))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/wissensgraph/pruefliste")
+async def wissensgraph_pruefliste(limit: int = 50, user: str = Depends(require_knowledge_editor)):
+    """Unsichere Zusammenfuehrungen zur Entscheidung durch einen Menschen.
+
+    Antwortet SOFORT mit dem gemerkten Stand; gerechnet wird im Hintergrund
+    (``wissensgraph.pruefliste_stand`` – bei 7.500 Begriffen 19 s auf DEV).
+    ``laeuft``/``veraltet`` sagen der Seite, ob sie nachfragen soll."""
+    from backend import wissensgraph as wg
+    return JSONResponse(await asyncio.to_thread(wg.pruefliste_stand, limit))
+
+
+@app.post("/api/wissensgraph/zusammenfuehren")
+async def wissensgraph_zusammenfuehren(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Rumpf ``{"quelle": "e:…", "ziel": "e:…"}`` – die Quelle geht im Ziel auf."""
+    from backend import wissensgraph as wg
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Ungültiger Rumpf")
+    try:
+        return JSONResponse(await asyncio.to_thread(
+            wg.zusammenfuehren, str(body.get("quelle") or ""), str(body.get("ziel") or "")))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/wissensgraph/trennen")
+async def wissensgraph_trennen(request: Request, user: str = Depends(require_knowledge_editor)):
+    """Rumpf ``{"a": "e:…", "b": "e:…"}`` – getrennt halten (auch eine
+    Zusammenfuehrung zwischen beiden zuruecknehmen)."""
+    from backend import wissensgraph as wg
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Ungültiger Rumpf")
+    try:
+        return JSONResponse(await asyncio.to_thread(
+            wg.trennen, str(body.get("a") or ""), str(body.get("b") or "")))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/wissensgraph/widersprueche")
+async def wissensgraph_widersprueche(user: str = Depends(require_wissensgraph_leser)):
+    """Gueltige Widersprueche zwischen Quellen (beide Quellen unveraendert,
+    fuer Gruppen-Editoren beide in ihren Gruppen)."""
+    from backend import wissensgraph_widerspruch as ww
+    erlaubt = await asyncio.to_thread(_wissensgraph_erlaubt, user)
+    return JSONResponse({"befunde": await asyncio.to_thread(ww.liste, erlaubt)})
+
+
+@app.get("/api/wissensgraph/wiki/{kid:path}")
+async def wissensgraph_wiki_lesen(kid: str, user: str = Depends(require_wissensgraph_leser)):
+    from backend import wissensgraph_wiki as wiki
+    erlaubt, teil = await _wg_teilgraph_fuer(user)
+    if not any(k["id"] == kid for k in teil["knoten"]):
+        raise HTTPException(status_code=404, detail="Knoten nicht gefunden")
+    d = await asyncio.to_thread(wiki.seite_lesen, kid)
+    if d is None:
+        raise HTTPException(status_code=404, detail="Keine Wiki-Seite vorhanden")
+    if not await asyncio.to_thread(wiki.sichtbar, kid, erlaubt):
+        raise HTTPException(status_code=403, detail="Die Wiki-Seite stützt sich auch auf Dokumente "
+                                                    "außerhalb deiner Wissensgruppen.")
+    return JSONResponse(d)
+
+
+@app.post("/api/wissensgraph/wiki/{kid:path}")
+async def wissensgraph_wiki_erzeugen(kid: str, user: str = Depends(require_wissensgraph_leser)):
+    """Wiki-Seite fuer EINEN Begriff jetzt erzeugen (ein Modellaufruf, gedrosselt
+    wie der Arbeiter)."""
+    from backend import wissensgraph_extraktion as wgx
+    from backend import wissensgraph_wiki as wiki
+    st = await asyncio.to_thread(wgx.einstellungen, True)
+    if not st["aktiv"]:
+        raise HTTPException(status_code=409, detail="Der Wissensgraph ist ausgeschaltet")
+    erlaubt, teil = await _wg_teilgraph_fuer(user)
+    if not any(k["id"] == kid for k in teil["knoten"]) or await asyncio.to_thread(wiki._knoten, kid) is None:
+        raise HTTPException(status_code=404, detail="Knoten nicht gefunden")
+    if not await asyncio.to_thread(wiki.erzeugen_erlaubt, kid, erlaubt):
+        raise HTTPException(status_code=403, detail="Der Begriff kommt auch in Dokumenten außerhalb deiner "
+                                                    "Wissensgruppen vor – die Seite fasste sie mit zusammen.")
+    try:
+        provider, modell, _kennung = wgx.provider_holen(st)
+    except wgx.ExtraktionsFehler as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    erg = await wiki.seite_erzeugen(kid, provider, modell, wgx._drossel, wgx._chunks_lesen, st)
+    if not erg.get("ok"):
+        raise HTTPException(status_code=502, detail=erg.get("grund") or "Seite nicht erzeugt")
+    return JSONResponse(await asyncio.to_thread(wiki.seite_lesen, kid) or {})
+
+
+@app.get("/api/wissensgraph/export")
+async def wissensgraph_export(user: str = Depends(require_knowledge_editor)):
+    """Der ganze Graph als Obsidian-Vault (ZIP) – nur globale Wissenseditoren."""
+    from backend import wissensgraph_wiki as wiki
+    daten = await asyncio.to_thread(wiki.obsidian_export)
+    name = f"wissensgraph-{time.strftime('%Y%m%d')}.zip"
+    return Response(content=daten, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/api/wissensgraph/rueckmeldung")
+async def wissensgraph_rueckmeldung_lesen(user: str = Depends(require_wissensgraph_leser)):
+    from backend import wissensgraph as wg
+    return JSONResponse({"verworfen": await asyncio.to_thread(wg.rueckmeldungen, user)})
+
+
+@app.post("/api/wissensgraph/rueckmeldung")
+async def wissensgraph_rueckmeldung(request: Request, user: str = Depends(require_wissensgraph_leser)):
+    """Rumpf ``{"schluessel", "art", "knoten": [...], "typen": [...]}`` – eine
+    verworfene Auffaelligkeit. Senkt kuenftig das Gewicht aehnlicher."""
+    from backend import wissensgraph as wg
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    try:
+        return JSONResponse({"verworfen": await asyncio.to_thread(wg.rueckmeldung_verwerfen, user, body)})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/wissensgraph/rueckmeldung")
+async def wissensgraph_rueckmeldung_loeschen(user: str = Depends(require_wissensgraph_leser)):
+    from backend import wissensgraph as wg
+    return JSONResponse({"zurueckgesetzt": await asyncio.to_thread(wg.rueckmeldungen_zuruecksetzen, user)})
 
 
 @app.post("/api/knowledge/reindex")

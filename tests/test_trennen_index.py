@@ -88,7 +88,10 @@ class Store:
         self.gespeichert += 1
 
 
-ns = {}
+# Seit 2026-10-30 meldet die Methode dem Wissensgraphen (Modulfunktion von
+# vector_store); die geschnittene Fassung braucht sie im Namensraum, sonst
+# stirbt sie an einem NameError statt am gemessenen Verhalten.
+ns = {"_graph_melden": lambda *a: None}
 exec(compile(ast.parse("class X:\n" + "\n".join(
     "    " + z for z in schneide(VS, "remove_path_prefix").splitlines())),
     "<vs>", "exec"), ns)

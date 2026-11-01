@@ -380,17 +380,15 @@ def kurzbeschreibung(text: str) -> str:
     return _kuerzen(fliess)
 
 
-def ausstehende_commits(branch: str) -> dict:
-    """Die Commits, die ein Update bringen wuerde, neueste zuerst."""
-    bereich = f"HEAD..origin/{branch}"
-    # Feld- und Satztrenner als Steuerzeichen: Betreff und Text duerfen alles
-    # enthalten, auch "|" (die alte Zerlegung daran brach bei einem Betreff damit).
-    # NICHT \x1c-\x1f: Python zaehlt sie zum Leerraum, das strip() in _git
-    # frass damit beim aeltesten Commit ohne Text die letzten Trenner weg.
-    _, log_str, _ = _git(
-        "log", bereich, f"-{MAX_COMMIT_LISTE}", "--no-merges",
-        "--format=%H%x02%s%x02%ai%x02%an%x02%b%x03",
-    )
+# Feld- und Satztrenner als Steuerzeichen: Betreff und Text duerfen alles
+# enthalten, auch "|" (die alte Zerlegung daran brach bei einem Betreff damit).
+# NICHT \x1c-\x1f: Python zaehlt sie zum Leerraum, das strip() in _git frass
+# damit beim aeltesten Commit ohne Text die letzten Trenner weg.
+_LOG_FORMAT = "--format=%H%x02%s%x02%ai%x02%an%x02%b%x03"
+
+
+def _commits_zerlegen(log_str: str) -> list[dict]:
+    """Ausgabe von ``git log`` mit _LOG_FORMAT -> Liste von Commits."""
     commits = []
     for satz in log_str.split("\x03"):
         felder = satz.lstrip("\n").split("\x02")
@@ -399,15 +397,76 @@ def ausstehende_commits(branch: str) -> dict:
         h, msg, date, author, text = felder
         commits.append({
             "hash": h[:7],
+            "hash_voll": h.strip(),
             "message": msg.strip(),
             "beschreibung": kurzbeschreibung(text),
             "date": date.strip()[:16],
             "author": author.strip(),
         })
+    return commits
+
+
+def ausstehende_commits(branch: str) -> dict:
+    """Die Commits, die ein Update bringen wuerde, neueste zuerst."""
+    bereich = f"HEAD..origin/{branch}"
+    _, log_str, _ = _git("log", bereich, f"-{MAX_COMMIT_LISTE}", "--no-merges", _LOG_FORMAT)
+    commits = _commits_zerlegen(log_str)
     _, anzahl, _ = _git("rev-list", "--count", "--no-merges", bereich)
     gesamt = int(anzahl) if anzahl.isdigit() else len(commits)
     return {"recent_commits": commits,
             "commits_weitere": max(0, gesamt - len(commits))}
+
+
+# ─── Aenderungsverlauf (Knopf im Update-Popup) ──────────────────────────────
+#
+# Die Commit-Liste oben zeigt nur, was ein Update BRINGT – auf einem aktuellen
+# Server ist sie leer, und die bisherigen Aenderungen waren nirgends einsehbar
+# (gemeldet 2026-10-31). Der Verlauf listet die letzten Commits von
+# origin/<branch> (Stand des letzten Fetch der Statuspruefung, hier wird NICHT
+# geholt) und markiert je Commit, ob er auf diesem Server schon eingespielt ist.
+
+MAX_VERLAUF = 200
+
+
+def _web_basis() -> str:
+    """https-Adresse des GitHub-Repos aus ``origin``; leer, wenn es keines ist.
+
+    Nur github.com wird umgeschrieben – eine fremde Ablage wuerde mit einer
+    geratenen Adresse auf eine falsche Seite verlinken.
+    """
+    _, url, _ = _git("remote", "get-url", "origin")
+    m = re.match(r"^(?:git@github\.com:|ssh://git@github\.com/|https://github\.com/)"
+                 r"([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", (url or "").strip())
+    return f"https://github.com/{m.group(1)}/{m.group(2)}" if m else ""
+
+
+def commit_verlauf(limit: int = 50) -> dict:
+    """Die letzten ``limit`` Commits (neueste zuerst) mit Kennzeichen "eingespielt"."""
+    if image_betrieb():
+        return {"ok": True, "image": True, "commits": [], "weitere": 0}
+    try:
+        limit = max(1, min(int(limit), MAX_VERLAUF))
+    except (TypeError, ValueError):
+        limit = 50
+    _, branch, _ = _git("rev-parse", "--abbrev-ref", "HEAD")
+    branch = branch or "master"
+    ref = f"origin/{branch}"
+    if _git("rev-parse", "--verify", "--quiet", ref)[0] != 0:
+        ref = "HEAD"          # kein Remote-Stand bekannt: wenigstens der eigene Verlauf
+    rc, log_str, err = _git("log", ref, f"-{limit}", "--no-merges", _LOG_FORMAT)
+    if rc != 0:
+        return {"ok": False, "error": err or "git log fehlgeschlagen", "commits": []}
+    commits = _commits_zerlegen(log_str)
+    # Ausstehend = auf origin, aber nicht in HEAD. Ueber die Menge statt je Commit
+    # ein merge-base: ein git-Aufruf statt bis zu MAX_VERLAUF.
+    _, ausstehend_str, _ = _git("rev-list", "--no-merges", f"HEAD..{ref}")
+    ausstehend = set(ausstehend_str.split())
+    for c in commits:
+        c["eingespielt"] = c["hash_voll"] not in ausstehend
+    _, anzahl, _ = _git("rev-list", "--count", "--no-merges", ref)
+    gesamt = int(anzahl) if anzahl.isdigit() else len(commits)
+    return {"ok": True, "branch": branch, "ref": ref, "web": _web_basis(),
+            "commits": commits, "weitere": max(0, gesamt - len(commits))}
 
 
 def check_update() -> dict:

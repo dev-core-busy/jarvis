@@ -1078,6 +1078,9 @@ class OpenAICompatibleProvider(LLMProvider):
                  prompt_tool_calling: bool = False):
         self.api_key = api_key
         self.prompt_tool_calling = prompt_tool_calling
+        # Denken des Modells ganz abschalten (``chat_template_kwargs``) – nur auf
+        # ausdruecklichen Wunsch eines Aufrufers, siehe _apply_reasoning.
+        self.denken_aus = False
         # Automatisch /chat/completions anhängen falls noch nicht vorhanden
         url = base_url.rstrip("/")
         if not url.endswith("/chat/completions"):
@@ -1210,16 +1213,29 @@ class OpenAICompatibleProvider(LLMProvider):
         das Gegenteil des Gewuenschten.
 
         OpenRouter ueberschreibt das, weil es ein eigenes `reasoning`-Objekt nutzt.
+
+        ``denken_aus`` (Wissensgraph, 2026-10-30): vLLM mit Qwen3-Vorlage
+        UEBERGEHT ``reasoning_effort`` – gemessen auf dem Haus-Server: mit
+        "low" 7.600–8.192 Ausgabe-Token, fast alles Denken, 3 von 4 Antworten
+        am Laengenlimit abgeschnitten. Abschalten geht dort nur ueber die
+        Chat-Vorlage (``chat_template_kwargs.enable_thinking=false``; 2–7 s,
+        4 von 4 gueltig). Bewusst NUR auf Anforderung je Instanz: ein Server,
+        der das Feld nicht kennt, lehnt mit 400 ab, und der Rueckfall unten
+        ruft ohne Stufe erneut auf – deshalb haengt das Feld an ``effort``
+        und faellt mit ihm weg, statt den Aufruf zum zweiten Mal scheitern
+        zu lassen.
         """
         if not effort:
             return
+        if getattr(self, "denken_aus", False):
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         mapped = _OPENAI_EFFORT.get(effort)
         if mapped:
             payload["reasoning_effort"] = mapped
 
     def _reasoning_keys(self) -> tuple[str, ...]:
         """Payload-Felder, die beim Fallback entfernt werden muessen."""
-        return ("reasoning_effort",)
+        return ("reasoning_effort", "chat_template_kwargs")
 
     async def generate_response(self, model: str, system_prompt: str, contents: list,
                                 tools: list = None, reasoning_effort: str | None = None,

@@ -531,7 +531,7 @@ body {
        Containers, also bekommt sie eine ordentliche Flaeche. */
     min-height: 32px;
 }
-.ja-card-head:hover h2 { color: var(--accent); }
+/* Titel beim Ueberfahren: zentral in theme.css (Container-Kopfzeilen). */
 /* :focus-visible, nicht :focus – sonst bliebe nach jedem Mausklick ein
    Rahmen stehen (Projektregel). */
 .ja-card-head:focus-visible {

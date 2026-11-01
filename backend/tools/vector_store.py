@@ -66,6 +66,16 @@ BM25_B = 0.75
 
 # Reciprocal Rank Fusion: kleines k gewichtet die Spitzenplaetze staerker
 RRF_K = 20
+# Graph-Kanal (Wissensgraph, Phase 3): aus wie vielen Startdokumenten der
+# vorlaeufigen Fusion der Graph Verwandte sucht, wie viele davon in den vierten
+# Kanal gehen und wie viele Chunks je Dokument.
+GRAPH_STARTDOKUMENTE = 5
+GRAPH_DOKUMENTE = 10
+GRAPH_CHUNKS_JE_DOKUMENT = 2
+# Gewicht des Graph-Kanals in der RRF-Fusion (die drei Bestandskanaele zaehlen
+# 1,0). Gemessen (docs/wissensgraph-meilenstein5.md): mit 1,0 rutschte bei
+# Ein-Dokument-Fragen der richtige Treffer haeufiger von Platz 1, mit 0,5 nicht.
+GRAPH_GEWICHT = 0.5
 
 _TOKEN_RE = re.compile(r"[A-Za-zÄÖÜäöüß0-9_]{2,}")
 
@@ -178,6 +188,22 @@ def _encode(texts: list[str], prefix: str = "passage") -> np.ndarray:
         batch_size=16,   # 16 statt 64: reduziert Peak-RAM um ~75% bei Indexierung
     )
     return vecs.astype(np.float32)
+
+
+def _graph_melden(funktion: str, *args) -> None:
+    """Loeschen/Umbenennen an den Wissensgraphen weitergeben.
+
+    An den VectorStore-Methoden statt an den Aufrufern: es gibt ueber fuenfzehn
+    davon (Neuaufbau, Verschieben, Loeschen, Verdichten, Lernnotizen), und ein
+    vergessener Aufrufer liesse im Graphen Quellen stehen, die es nicht mehr
+    gibt. Der Graph prueft selbst, ob ein Pfad zu ihm gehoert. Ein Fehler hier
+    darf die Index-Pflege nicht kippen.
+    """
+    try:
+        from backend import wissensgraph as _wg
+        getattr(_wg, funktion)(*args)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("Wissensgraph-Pflege (%s) fehlgeschlagen: %s", funktion, e)
 
 
 class VectorStore:
@@ -505,12 +531,13 @@ class VectorStore:
         with self._lock:
             keep = [i for i, m in enumerate(self._meta) if m["file_path"] not in drop]
             removed = len(self._meta) - len(keep)
-            if not removed:
-                return 0  # nichts zu tun
-            new_meta = [self._meta[i] for i in keep]
-            new_vecs = self._vectors_at(keep)
-            self._rebuild(new_meta, new_vecs)
-            return removed
+            if removed:
+                new_meta = [self._meta[i] for i in keep]
+                new_vecs = self._vectors_at(keep)
+                self._rebuild(new_meta, new_vecs)
+        # AUSSERHALB des Locks: der Graph hat eine eigene Sperre.
+        _graph_melden("pflege_entfernt", sorted(drop))
+        return removed
 
     def rename_file_path(self, old_path: str, new_path: str) -> int:
         """Schreibt die Metadaten EINER Datei auf einen neuen Pfad um – ohne
@@ -535,7 +562,8 @@ class VectorStore:
                     changed += 1
             if changed:
                 self._save()
-            return changed
+        _graph_melden("pflege_umbenannt", old_path, new_path)
+        return changed
 
     def rename_path_prefix(self, old_prefix: str, new_prefix: str) -> int:
         """Schreibt file_path-Metadaten aller Chunks unterhalb eines Ordners auf
@@ -552,7 +580,8 @@ class VectorStore:
                     changed += 1
             if changed:
                 self._save()
-            return changed
+        _graph_melden("pflege_praefix_umbenannt", old_dir, new_dir)
+        return changed
 
     def remove_path_prefix(self, prefix: str) -> int:
         """Entfernt alle Chunks von Dateien unterhalb eines Ordner-Pfads
@@ -566,7 +595,8 @@ class VectorStore:
                 new_meta = [self._meta[i] for i in keep]
                 new_vecs = self._vectors_at(keep)
                 self._rebuild(new_meta, new_vecs)
-            return removed
+        _graph_melden("pflege_praefix_entfernt", pref)
+        return removed
 
     def clear(self):
         """Loescht den gesamten Index."""
@@ -758,7 +788,7 @@ class VectorStore:
         return self.search_hybrid_ex(query, max_results, weight_fn, allow_paths)[0]
 
     def search_hybrid_ex(self, query: str, max_results: int, weight_fn=None,
-                         allow_paths: set | None = None
+                         allow_paths: set | None = None, graph_rangliste=None
                          ) -> tuple[list[tuple[float, str, str]], bool | None]:
         """Wie ``search_hybrid``, gibt zusaetzlich den lexikalischen Anker zurueck.
 
@@ -776,15 +806,76 @@ class VectorStore:
         gelieferten Treffer beruhen, und geliefert wird nur aus der Erlaubnis.
         """
         out = self._search_hybrid_once(query, max_results, weight_fn, strict=True,
-                                       allow_paths=allow_paths)
+                                       allow_paths=allow_paths, graph_rangliste=graph_rangliste)
         if out is None:
             _log.debug("Index waehrend der Suche geaendert – ein Neuversuch")
             out = self._search_hybrid_once(query, max_results, weight_fn, strict=False,
-                                           allow_paths=allow_paths)
+                                           allow_paths=allow_paths, graph_rangliste=graph_rangliste)
         if out is None:
             return [], None
         treffer, ohne_anker = out
         return treffer, ohne_anker
+
+    def _graph_kanal(self, query, channels, graph_rangliste, allow_paths, allowed,
+                     pool) -> list[tuple[int, float]]:
+        """Rangliste des Graphen als Chunk-Kanal fuer die RRF-Fusion.
+
+        Startdokumente = die besten Dokumente einer VORLAEUFIGEN Fusion der drei
+        Bestandskanaele. ``graph_rangliste(start, allow_paths, query)`` liefert
+        verwandte Dokumente (absolute Pfade, beste zuerst) – die Startdokumente
+        selbst laesst sie aus. Deren Chunks werden
+        semantisch gegen die Frage geordnet – innerhalb der Erlaubnis und je
+        Dokument hoechstens ``GRAPH_CHUNKS_JE_DOKUMENT`` –, dann nach dem Rang
+        des Dokuments im Graphen.
+
+        ⚠ Ein Fehler des Graphen darf die Suche nicht kippen: dann gibt es
+        keinen vierten Kanal, die drei anderen bleiben.
+        """
+        vor: dict[int, float] = defaultdict(float)
+        for hits in channels:
+            for rank, (idx, _score) in enumerate(hits):
+                vor[idx] += 1.0 / (RRF_K + rank + 1)
+        start: list[str] = []
+        with self._lock:
+            meta = self._meta
+            for idx, _s in sorted(vor.items(), key=lambda x: -x[1]):
+                if idx < len(meta) and meta[idx]["file_path"] not in start:
+                    start.append(meta[idx]["file_path"])
+                if len(start) >= GRAPH_STARTDOKUMENTE:
+                    break
+        try:
+            docs = graph_rangliste(start, allow_paths, query) or []
+        except Exception as e:  # noqa: BLE001
+            _log.warning("Graph-Kanal uebersprungen: %s", e)
+            return []
+        rang = {}
+        for p, _s in docs:
+            if p not in rang and (allow_paths is None or p in allow_paths):
+                rang[p] = len(rang)
+            if len(rang) >= GRAPH_DOKUMENTE:
+                break
+        if not rang:
+            return []
+        with self._lock:
+            idxs = {i for i, m in enumerate(self._meta)
+                    if m["file_path"] in rang and (allowed is None or i in allowed)}
+        if not idxs:
+            return []
+        hits = self._search_vector_idx(query, min(pool, len(idxs)), idxs)
+        je: dict[str, int] = defaultdict(int)
+        raus = []
+        with self._lock:
+            meta = self._meta
+            for pos, (idx, sc) in enumerate(hits):
+                if idx >= len(meta):
+                    continue
+                fp = meta[idx]["file_path"]
+                if fp not in rang or je[fp] >= GRAPH_CHUNKS_JE_DOKUMENT:
+                    continue
+                je[fp] += 1
+                raus.append((rang[fp], pos, idx, sc))
+        raus.sort()
+        return [(idx, sc) for _r, _p, idx, sc in raus]
 
     def has_lexical_anchor(self, query: str) -> bool | None:
         """Kommt ueberhaupt ein Wort der Anfrage im Bestand vor?
@@ -822,7 +913,7 @@ class VectorStore:
 
     def _search_hybrid_once(self, query: str, max_results: int, weight_fn,
                             strict: bool,
-                            allow_paths: set | None = None
+                            allow_paths: set | None = None, graph_rangliste=None
                             ) -> tuple[list[tuple[float, str, str]], bool | None] | None:
         """Ein Durchgang der Hybridsuche.
 
@@ -871,6 +962,18 @@ class VectorStore:
 
         lexical = self._search_lexical_idx(query, pool, allowed)
         channels.append(lexical)
+        gewichte = [1.0] * len(channels)
+
+        # Vierter Kanal: Dokumente, die die Begriffe der Frage im Wissensgraphen
+        # tragen, ohne die vorlaeufig besten (Schalter aus = graph_rangliste None,
+        # dann ist der Durchgang byte-gleich zum Bestand). Er geht in DIESELBE
+        # Fusion – Score-Semantik, Cut und MIN_KEEP bleiben unveraendert.
+        if graph_rangliste is not None and any(channels):
+            vierter = self._graph_kanal(query, channels, graph_rangliste,
+                                        allow_paths, allowed, pool)
+            if vierter:
+                channels.append(vierter)
+                gewichte.append(GRAPH_GEWICHT)
 
         # Kein lexikalischer Anker -> nicht auf MIN_KEEP auffuellen (siehe dort).
         # Nur wenn der lexikalische Index UEBERHAUPT existiert: fehlt er, ist
@@ -894,9 +997,9 @@ class VectorStore:
             max_results = min(max_results, MIN_KEEP_OHNE_ANKER)
 
         rrf: dict[int, float] = defaultdict(float)
-        for hits in channels:
+        for hits, gewicht in zip(channels, gewichte):
             for rank, (idx, _score) in enumerate(hits):
-                rrf[idx] += 1.0 / (RRF_K + rank + 1)
+                rrf[idx] += gewicht / (RRF_K + rank + 1)
 
         output: list[tuple[float, str, str]] = []
         with self._lock:
@@ -948,6 +1051,20 @@ class VectorStore:
                 if fp not in files:
                     files[fp] = m["mtime"]
             return files
+
+    def chunks_fuer(self, file_path: str) -> tuple[list[str], float | None]:
+        """Die Chunk-Texte EINER Datei in Reihenfolge, samt ihrer mtime.
+
+        Eingabe des Wissensgraphen: der schon extrahierte Text – kein zweiter
+        OCR- oder Tika-Lauf, kein Zugriff auf die (womoeglich tote) Freigabe.
+        """
+        with self._lock:
+            teile = [(m.get("chunk_index", 0), m.get("text", ""), m.get("mtime"))
+                     for m in self._meta if m["file_path"] == file_path]
+        if not teile:
+            return [], None
+        teile.sort(key=lambda t: t[0])
+        return [t[1] for t in teile], teile[0][2]
 
     def file_count(self) -> int:
         return len(self.get_indexed_files())

@@ -37,6 +37,58 @@ Pruefen:
   sha256sum frontend/js/vendor/qrcode.min.js
 
 
+Wissensgraph: sigma.min.js, graphology.min.js, graphology-fa2.min.js,
+graphology-louvain.min.js
+-------------------------------------------------------------------
+Selbst gebaute IIFE-Bundles aus npm (2026-10-30), KEIN CDN-Abzug: die Pakete
+liefern nur ESM/CommonJS, und ein Build-System hat dieses Projekt bewusst nicht.
+Gebaut EINMAL mit esbuild 0.28.2 in einem Wegwerf-Verzeichnis; nur das Ergebnis
+liegt hier. Zweimal gebaut, byte-gleich (reproduzierbar).
+
+Einstiegsdateien (je eine Datei, gebaut mit
+  esbuild <eintrag> --bundle --minify --format=iife --global-name=<Global>
+          --target=es2019 --legal-comments=eof --outfile=<datei>):
+  sigma.min.js            JarvisSigma       export { default as Sigma } from "sigma";
+                                            export * as rendering from "sigma/rendering";
+                                            export * as utils from "sigma/utils";
+  graphology.min.js       JarvisGraphology  export { default as Graph, MultiGraph,
+                                            DirectedGraph, UndirectedGraph } from "graphology";
+  graphology-fa2.min.js   JarvisFA2         import forceAtlas2 from "graphology-layout-forceatlas2";
+                                            import FA2Layout from "graphology-layout-forceatlas2/worker";
+                                            export { forceAtlas2, FA2Layout };
+  graphology-louvain.min.js JarvisLouvain   import louvain from "graphology-communities-louvain";
+                                            export { louvain };
+
+Datei                       Paket (npm)                            Bytes   SHA-256
+sigma.min.js                sigma 4.0.4                            437442  4920b8852eb888c736385396f25d594f3f4500655dc9281f26ff974238f0736a
+graphology.min.js           graphology 0.26.0                       67965  f2032c6e35143469ab410aa636f403080436f9c65aed56b1bdc2574e7608c4a3
+graphology-fa2.min.js       graphology-layout-forceatlas2 0.10.1    19004  9c3036d137f69c70213e78f8e2dd44ba5c21f6579c0f1ad0af02d7a1dc400dbe
+graphology-louvain.min.js   graphology-communities-louvain 2.0.2    24674  29be732872a3d618411fb78c843bea3accf049c57e4cc8a24491ebf754970863
+
+Lizenz    MIT – alle gebuendelten Pakete, belegt aus deren LICENSE-Dateien.
+          MIT verlangt die Weitergabe der Copyright-Hinweise, deshalb hier:
+          sigma 4.0.4                         Copyright (C) 2012-2026, Alexis Jacomy,
+                                              Guillaume Plique, Benoît Simard
+          graphology 0.26.0                   Copyright (c) 2016-2021 Guillaume Plique (Yomguithereal)
+          graphology-layout-forceatlas2 0.10.1 Copyright (c) 2016-2021 Guillaume Plique (Yomguithereal)
+          graphology-communities-louvain 2.0.2 Copyright (c) 2017-2021 Guillaume Plique (Yomguithereal)
+          graphology-utils 2.5.2              Copyright (c) 2017-2021 Guillaume Plique (Yomguithereal)
+          graphology-indices 0.17.0           Copyright (c) 2020-2021 Guillaume Plique (Yomguithereal)
+          mnemonist 0.39.8                    Copyright (c) 2016 Guillaume Plique (Yomguithereal)
+          obliterator 2.0.5                   Copyright (c) 2017-2021 Guillaume Plique (Yomguithereal)
+          pandemonium 2.4.1                   Copyright (c) 2017-2020 Guillaume Plique (Yomguithereal)
+          events 3.3.0                        Copyright Joyent, Inc. and other Node contributors.
+          Die Vorlage llm_wiki (GPL-3.0) ist NICHT enthalten – von dort stammt
+          nur das Konzept der Ansicht.
+Geprueft  CSP-Modus `erzwingen` (script-src 'self', worker-src 'self' blob:):
+          0 Verstoesse, Gegenprobe mit eval/new Function 2 Verstoesse
+          (docs/wissensgraph-phase0-messbericht.md, Abschnitt 2).
+          ⚠ sigma 4 verweigert den Start ohne WebGL 2 – die Seite meldet das.
+Benutzt   frontend/wissensgraph.html → frontend/js/wissensgraph.js
+
+Pruefen:
+  sha256sum frontend/js/vendor/sigma.min.js frontend/js/vendor/graphology*.min.js
+
 ⚠ KEINE HERKUNFTSANGABE fuer die vier aelteren Dateien
 -------------------------------------------------------
 chart.umd.min.js, chartjs-plugin-annotation.min.js,

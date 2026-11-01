@@ -1013,6 +1013,10 @@ def einstellungen() -> dict:
 
 
 def einstellungen_setzen(neu: dict) -> dict:
+    # Kein Objekt (z.B. ein Array) ist ein Fehler, kein "nichts geaendert" –
+    # sonst meldet der Endpunkt Erfolg fuer eine Eingabe, die nichts bewirkt.
+    if not isinstance(neu, dict):
+        raise ValueError("Einstellungen muessen ein Objekt sein")
     erg = einstellungen()
     if "schwelle" in neu:
         if neu["schwelle"] not in SCHWELLEN:

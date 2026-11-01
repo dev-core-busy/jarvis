@@ -81,7 +81,26 @@ def _konto_finden(users: dict, konto: str):
     return None
 
 
+# Befehle, die auth_state.json lesen und (bis auf totp-zeigen) zurueckschreiben.
+# Sie laufen unter derselben Sperre wie der Dienst (backend/auth_state_sperre.py):
+# sonst lud der Dienst z.B. waehrend eines `totp-aus` den alten Stand und schrieb
+# ihn Sekunden spaeter zurueck – die 2FA waere still wieder AN gewesen, und das
+# im Notweg fuer eine gesperrte Anmeldung (Code-Review 2026-11-01). Die Menge
+# ist der GANZE Befehlszweig, der `_auth_state_schreiben` enthaelt – ein Waechter
+# leitet sie aus diesem Zweig ab (tests/test_auth_state_sperre.py).
+_AUTH_STATE_SCHREIBER = frozenset({"totp-aus", "totp-uebernehmen", "totp-zeigen"})
+
+
 def main(argv: list[str]) -> int:
+    """Einstieg: schreibende 2FA-Befehle unter der auth_state-Sperre."""
+    if os.geteuid() == 0 and argv and argv[0] in _AUTH_STATE_SCHREIBER:
+        from backend import auth_state_sperre
+        with auth_state_sperre.Sperre(_auth_state_datei):
+            return _main(argv)
+    return _main(argv)
+
+
+def _main(argv: list[str]) -> int:
     if os.geteuid() != 0:
         print("Nur als root.", file=sys.stderr)
         return 2

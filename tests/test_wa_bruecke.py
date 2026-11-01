@@ -14,6 +14,10 @@
 Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
 """
 from __future__ import annotations
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 
 import ast
 import asyncio
@@ -172,6 +176,7 @@ ns = {"JSONResponse": JSONResponse, "Request": Anfrage, "asyncio": asyncio, "os"
       "wa_log": lambda *a, **k: LOG.append(a), "_get_skill_manager": lambda: SM(_cfg),
       "_transcribe_audio": lambda pfad, *a: TRANSKRIBIERT.append(pfad) or "Hallo Welt",
       "_run_wa_task": _run_wa, "app": None}
+ns.setdefault("_json_objekt", _json_objekt_aus_main(ns.get("HTTPException")))
 exec(compile(ast.fix_missing_locations(ast.Module(body=[hook], type_ignores=[])), "main", "exec"), ns)
 H = ns[hook.name]
 

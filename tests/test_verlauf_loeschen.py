@@ -22,6 +22,10 @@ SANDKASTEN mit Exit 2: zeigt die Verlaufsdatei nicht ins Wegwerf-Verzeichnis,
 bricht der Lauf ab – ein Test, der den echten Verlauf der Benutzer loescht,
 waere teurer als der Fehler, den er sucht.
 """
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 import ast
 import asyncio
 import json
@@ -134,6 +138,7 @@ for k in GESCHNITTEN:
     kopie = ast.parse(ast.unparse(n)).body[0]
     kopie.decorator_list = []
     knoten.append(kopie)
+NS.setdefault("_json_objekt", _json_objekt_aus_main(NS.get("HTTPException")))
 exec(compile(ast.fix_missing_locations(ast.Module(body=knoten, type_ignores=[])),
              "<main-schnitt>", "exec"), NS)
 

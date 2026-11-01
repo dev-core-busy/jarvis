@@ -24,6 +24,10 @@ dreizehnte Fall dieser Klasse).
 
 Lauf:  timeout 120 python3 tests/test_secret_reveal.py
 """
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 import ast
 import asyncio
 import sys
@@ -380,6 +384,7 @@ _FREI = _freie_namen(kopie)
 # erfuellt und prueft nichts.
 if len(_FREI) < 5:
     abbruch("Namens-Regel findet nur %d freie Namen – sie misst nichts." % len(_FREI))
+NS.setdefault("_json_objekt", _json_objekt_aus_main(NS.get("HTTPException")))
 _fehlt = sorted(_FREI - set(NS))
 if _fehlt:
     abbruch("NS fehlen Namen, die secret_reveal braucht: %s – ohne sie bricht "

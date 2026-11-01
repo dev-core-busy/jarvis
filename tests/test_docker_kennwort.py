@@ -135,23 +135,52 @@ def _nennt(knoten, name):
     return any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(knoten))
 
 
+# Gespeichert wird seit 2026-11-01 ueber `_auth_state_aendern` (Sperre gegen
+# andere Schreiber, test_auth_state_sperre.py); `_save_auth_state` bleibt als
+# Form zulaessig – geprueft wird, DASS gespeichert wird, nicht wie.
+_SPEICHERN = ("_save_auth_state", "_auth_state_aendern")
 umschreiben = [i for i in ast.walk(anm) if isinstance(i, ast.If) and _nennt(i.test, "veraltet")
                and aufrufe_von(ast.Module(body=i.body, type_ignores=[]), "kennwort_hash")
-               and any(isinstance(c.func, ast.Name) and c.func.id == "_save_auth_state"
+               and any(isinstance(c.func, ast.Name) and c.func.id in _SPEICHERN
                        for c in ast.walk(ast.Module(body=i.body, type_ignores=[])) if isinstance(c, ast.Call))]
 check("Altwert wird nach gelungener Anmeldung neu gehasht UND gespeichert", bool(umschreiben))
 check("... nur wenn die Anmeldung gelang (Bedingung nennt local_ok)",
       any(_nennt(i.test, "local_ok") for i in umschreiben))
 
 wechsel = FUNK["change_password"]
-# Nur die Zuweisung JE BENUTZER (state["docker_password"][name] = …) – das
-# Anlegen des leeren Bereichs (state["docker_password"] = {}) ist kein Kennwort.
-zuweisung = [a for a in ast.walk(wechsel) if isinstance(a, ast.Assign)
-             and any(isinstance(t, ast.Subscript) and isinstance(t.value, ast.Subscript)
-                     and "docker_password" in ast.unparse(t.value) for t in a.targets)]
+# Seit 2026-11-01 entsteht der Hash im Thread (`neu_hash = await
+# asyncio.to_thread(_standard_zugang.kennwort_hash, …)`) und wird danach unter
+# der Auth-Sperre in docker_password[name] gesetzt. Geprueft wird die KETTE:
+# jeder Wert, der in docker_password landet, stammt aus kennwort_hash.
+hash_namen = set()
+for a in ast.walk(wechsel):
+    if isinstance(a, ast.Assign) and len(a.targets) == 1 and isinstance(a.targets[0], ast.Name):
+        wert = a.value.value if isinstance(a.value, ast.Await) else a.value
+        quelle = [wert] + (list(wert.args) if isinstance(wert, ast.Call) else [])
+        if any(aufrufe_von(q, "kennwort_hash") or
+               (isinstance(q, ast.Attribute) and q.attr == "kennwort_hash") for q in quelle):
+            hash_namen.add(a.targets[0].id)
+# Schreibende Stellen fuer docker_password[name]: Zuweisung an einen Subscript
+# darunter ODER ein __setitem__ auf dem Bereich (Lambda in _auth_state_aendern).
+# Das Anlegen des leeren Bereichs (… = {}) ist kein Kennwort.
+schreiber = []
+for n in ast.walk(wechsel):
+    if isinstance(n, ast.Assign) and any(
+            isinstance(t, ast.Subscript) and isinstance(t.value, ast.Subscript)
+            and "docker_password" in ast.unparse(t.value) for t in n.targets):
+        schreiber.append(n.value)
+    elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+            and n.func.attr == "__setitem__" and "docker_password" in ast.unparse(n.func.value):
+        schreiber.append(n.args[-1] if n.args else n)
+
+
+def _aus_hash(w):
+    return bool(aufrufe_von(w, "kennwort_hash")) or (isinstance(w, ast.Name) and w.id in hash_namen)
+
+
 check("Kennwortwechsel speichert ueber kennwort_hash",
-      bool(zuweisung) and all(aufrufe_von(a.value, "kennwort_hash") for a in zuweisung),
-      [ast.unparse(a) for a in zuweisung][:2])
+      bool(schreiber) and all(_aus_hash(w) for w in schreiber),
+      [ast.unparse(w) for w in schreiber][:2])
 check("Kennwortwechsel rechnet kein sha256", not sha256_aufrufe(wechsel))
 
 print(f"\n{_ok} OK, {_fail} FAIL")

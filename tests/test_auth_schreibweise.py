@@ -55,6 +55,8 @@ QUELLE = MAIN.read_text(encoding="utf-8")
 BAUM = ast.parse(QUELLE)
 NAMEN = ("_norm_login", "_auth_schluessel", "_auth_eintraege_zusammenfuehren",
          "_auth_state_datei_lesen", "_load_auth_state", "_save_auth_state",
+         # seit 2026-11-01: Wrapper unter _AUTH_STATE_LOCK + gesperrte Aenderung
+         "_load_auth_state_ungesperrt", "_save_auth_state_ungesperrt", "_auth_state_aendern",
          "_get_user_auth_state", "_set_user_auth_state")
 teile = [n for n in BAUM.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))
          and n.name in NAMEN + ("AuthStateUnlesbar",)]
@@ -75,7 +77,8 @@ sys.modules["backend.geheimnis_tresor"] = tresor
 SANDKASTEN = Path(tempfile.mkdtemp(prefix="auth_schreibweise_"))
 DATEI = SANDKASTEN / "auth_state.json"
 BAK = SANDKASTEN / "auth_state.json.bak"
-ns = {"json": json, "os": os, "Path": Path, "_AUTH_STATE_FILE": DATEI}
+ns = {"json": json, "os": os, "Path": Path, "_AUTH_STATE_FILE": DATEI,
+      "_AUTH_STATE_LOCK": __import__("threading").RLock()}
 modul = ast.Module(body=teile, type_ignores=[])
 ast.fix_missing_locations(modul)
 try:

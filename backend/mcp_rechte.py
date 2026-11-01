@@ -137,6 +137,56 @@ def auth_header(srv: dict | None) -> dict:
     return {name: key}
 
 
+def _ziel(srv: dict) -> tuple:
+    """Wohin die Geheimnisse eines Servers gehen: Transport, Adresse (der
+    API-Schluessel), Befehl und Argumente (die Umgebung des stdio-Prozesses).
+    Normiert wie das Formular speichert – Rand-Leerzeichen und ein
+    abschliessender Schraegstrich sind keine Zielaenderung."""
+    args = srv.get("args")
+    if not isinstance(args, (list, tuple)):
+        args = [args] if args else []
+    return (str(srv.get("transport") or "stdio").strip().lower(),
+            str(srv.get("url") or "").strip().rstrip("/"),
+            str(srv.get("command") or "").strip(),
+            tuple(str(a).strip() for a in args))
+
+
+def geheimnis_umleitung(srv: dict | None, data: dict) -> list[str]:
+    """Wuerde dieses Speichern ein GESPEICHERTES Geheimnis an ein neues Ziel
+    schicken? Rueckgabe: die Namen der Felder, die neu einzugeben sind
+    (leer = nichts zu beanstanden).
+
+    Code-Review 2026-11-01: ``config.update_mcp_server`` behaelt einen nicht
+    gesendeten ``api_key`` und eine nicht gesendete ``env`` ("leer lassen =
+    unveraendert") – auch wenn im selben Speichern ``url`` oder ``command``
+    wechseln. Der naechste Verbindungsaufbau schickte den Schluessel dann an
+    eine frei gewaehlte Adresse bzw. gab GITHUB_TOKEN & Co. einem frei
+    gewaehlten Programm, ohne dass ihn je jemand eingegeben oder per Auge
+    aufgedeckt hat (BSI M5). Dieselbe Regel wie ``main._profil_umleitung``
+    fuer LLM-Profile und das Register ("ein Ersatzwert ist ein
+    Exfiltrationsweg, sobald die Zieladresse frei waehlbar bleibt").
+
+    Bewusst ueber ALLE Zielfelder statt je Transport: ein Wechsel des
+    Transports macht ein bisher ungenutztes Geheimnis wirksam (Umgebung eines
+    HTTP-Servers -> stdio), und eine Rueckfrage zu viel kostet nur eine
+    Eingabe.
+    """
+    if not srv or not isinstance(data, dict):
+        return []
+    neu = dict(srv)
+    for k in ("transport", "url", "command", "args"):
+        if k in data:
+            neu[k] = data[k]
+    if _ziel(neu) == _ziel(srv):
+        return []
+    behalten = []
+    if "api_key" not in data and str(srv.get("api_key") or "").strip():
+        behalten.append("api_key")
+    if "env" not in data and srv.get("env"):
+        behalten.append("env")
+    return behalten
+
+
 def ohne_geheimnisse(srv: dict) -> dict:
     """Server-Eintrag fuer eine API-Antwort – der Schluessel verlaesst das
     Backend nie, nur ob einer hinterlegt ist."""

@@ -15,6 +15,10 @@ echten lokalen TLS-Server mit selbst ausgestelltem Zertifikat.
 Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
 """
 from __future__ import annotations
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 
 import ast
 import asyncio
@@ -197,6 +201,7 @@ _ns2 = {"JSONResponse": _Antwort, "Depends": lambda x: None, "require_auth": Non
         "_sitzung": types.SimpleNamespace(
             setze_mit_2fa=lambda sig, ts: _befoerdert.append((sig, ts)))}
 _befoerdert: list = []
+_ns2.setdefault("_json_objekt", _json_objekt_aus_main(_ns2.get("HTTPException")))
 exec(compile(_funktionen("totp_setup", "_totp_vormerken", "_totp_qr_daten",
                          "totp_verify", "totp_disable",
                          "_sitzung_ist_app", "_totp_app_sperre",
@@ -376,6 +381,7 @@ _ns12 = {"JSONResponse": _Antwort, "Request": object, "__name__": "waechter",
          "_feedback_self_improve": _self_improve,
          # BSI H4: der Koerper-Rueckfall laeuft ueber den ECHTEN Helfer
          "_sitzung_cookie": __import__("backend.sitzung_cookie", fromlist=["x"])}
+_ns12.setdefault("_json_objekt", _json_objekt_aus_main(_ns12.get("HTTPException")))
 exec(compile(_funktionen("_token_aufloesen", "api_feedback"), "main.py", "exec"), _ns12)
 _feedback = _ns12["api_feedback"]
 

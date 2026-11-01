@@ -635,6 +635,14 @@ def ergebnistext(zaehler: dict, luecken: list, lang: str = "de") -> str:
 
 # ── Einstieg ────────────────────────────────────────────────────────────────
 
+def _quelle_schreiben(daten: bytes, quelle: Path) -> None:
+    """Eingangsbild als RGB-PNG ablegen (blockierend – nur per to_thread)."""
+    import io  # noqa: PLC0415
+    from PIL import Image  # noqa: PLC0415
+    with Image.open(io.BytesIO(daten)) as img:
+        img.convert("RGB").save(quelle)
+
+
 async def ausfuehren(daten: bytes, lang: str = "de") -> dict:
     """Bild anonymisieren. Rueckgabe ``{text, bild, zaehler, luecken}``.
 
@@ -642,8 +650,6 @@ async def ausfuehren(daten: bytes, lang: str = "de") -> dict:
     Wirft ``AnonymFehler`` nur, wenn gar kein Bild entstehen kann – jeder
     Teilausfall laeuft weiter und steht in ``luecken``.
     """
-    from PIL import Image  # noqa: PLC0415
-
     try:
         await asyncio.to_thread(aufraeumen)
     except Exception as e:  # noqa: BLE001
@@ -653,8 +659,12 @@ async def ausfuehren(daten: bytes, lang: str = "de") -> dict:
     try:
         quelle = arbeit / "quelle.png"
         try:
-            import io  # noqa: PLC0415
-            Image.open(io.BytesIO(daten)).convert("RGB").save(quelle)
+            # Im Thread (Code-Review 2026-11-01): Dekodieren, Umwandeln und
+            # PNG-Kodieren eines 4K/8K-Bildschirmfotos dauern Hunderte
+            # Millisekunden bis Sekunden – im Event-Loop stuende in der Zeit
+            # der ganze Dienst fuer ALLE Benutzer (OCR und Zeichnen liefen
+            # schon im Thread, nur dieser Schritt nicht).
+            await asyncio.to_thread(_quelle_schreiben, daten, quelle)
         except Exception as e:  # noqa: BLE001
             raise AnonymFehler("Das Bild ließ sich nicht lesen: %s" % e) from e
 

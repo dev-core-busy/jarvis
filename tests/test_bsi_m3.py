@@ -24,6 +24,10 @@ Gemessen an der WIRKUNG:
 ``backend.config`` nur als Stub. Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
 """
 from __future__ import annotations
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 
 import ast
 import asyncio
@@ -277,6 +281,7 @@ NS = {
 EINST.update({"ad_admins": "andreas", "ad_server": "dc.firma.local", "ad_domain": "firma.local"})
 # BSI H4: Token-Antworten laufen ueber _sitzung_antwort – mit dem ECHTEN Modul
 NS["_sitzung_cookie"] = __import__("backend.sitzung_cookie", fromlist=["x"])
+NS.setdefault("_json_objekt", _json_objekt_aus_main(NS.get("HTTPException")))
 exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "_admin_2fa_pflicht", "_sitzung_ohne_admin",
                  "_ist_app_anmeldung", "_ist_ai_maus_anmeldung", "_user_is_admin",
                  "_is_admin_user", "_admin_verweigert_text", "require_local_auth",

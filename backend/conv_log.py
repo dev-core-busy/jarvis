@@ -68,6 +68,7 @@ Vollstaendig gelesen wird der Index nur noch von ``get_known_ips/users()``
 
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -282,13 +283,77 @@ def _new_id() -> str:
 # gehoert nicht doppelt in den Verlauf, er steckt im Ergebnis oder in der Datei.
 _MAX_ARG_CHARS = 2000
 
+# ─── Geheimnisse in Werkzeug-Argumenten schwaerzen ───────────────────────────
+#
+# WARUM (Code-Review 2026-11-01): seit 2026-10-26 stehen die ARGUMENTE im
+# Verlauf, und der Verlauf geht ueber die Fehleranalyse als Dossier an ein LLM.
+# Ein ``shell_execute`` mit ``curl -u admin:Geheim …`` oder ein Werkzeug mit
+# einem Kennwort-Feld landete damit im Klartext auf der Platte UND beim Modell.
+# ``llm.scrub_secrets`` hilft hier nicht – es ersetzt nur BEKANNTE Werte, und
+# ein vom Modell geschriebenes Kennwort kennt niemand vorher. Geschwaerzt wird
+# deshalb nach FORM: geheimer Feldname (dieselbe Regel wie der Tresor), und in
+# Texten die Schreibweisen, in denen ein Geheimnis in Befehlen und Kopfsaetzen
+# steht. Der Name bleibt lesbar – die Diagnose braucht, WELCHES Feld kam.
+#
+# Die Namensmuster verlangen, dass der Name AUF das Geheimniswort ENDET:
+# ``max_tokens``, ``--token-file``, ``PASSWORD_FILE`` sind Konfiguration, kein
+# Geheimnis, und ein Diagnoseprotokoll ohne sie waere wertlos.
+_GEHEIM_WORT = r"(?:passw(?:or)?d|passwort|kennwort|secret|token|api[-_]?key|apikey)"
+_GEHEIM_ERSATZ = "***"
+_GEHEIM_MUSTER = (
+    # curl/wget: -u benutzer:kennwort, --user=benutzer:kennwort
+    re.compile(r"(?P<vor>(?:^|\s)(?:-u|--user|--proxy-user)(?:\s+|=)?['\"]?[^\s:'\"]*:)"
+               r"(?P<wert>[^\s'\"]+)"),
+    # Authorization: Bearer xxx (auch Basic/Token/Digest oder ohne Schema)
+    re.compile(r"(?P<vor>\b(?:Proxy-)?Authorization['\"]?\s*:\s*['\"]?"
+               r"(?:(?:Bearer|Basic|Token|Digest)\s+)?)(?P<wert>[^\s'\"]+)", re.IGNORECASE),
+    # Kopfsatz/Schluessel mit geheimem Namen: X-API-Key: xxx, "password": "xxx"
+    re.compile(r"(?P<vor>\b[\w-]*" + _GEHEIM_WORT + r"['\"]?\s*:\s*['\"]?)(?P<wert>[^\s'\",}]+)",
+               re.IGNORECASE),
+    # Schalter mit geheimem Namen: --password xxx, --api-key=xxx, -token xxx
+    re.compile(r"(?P<vor>(?:^|\s)--?[\w-]*" + _GEHEIM_WORT + r"(?:\s+|=)['\"]?)(?P<wert>[^\s'\"]+)",
+               re.IGNORECASE),
+    # Zuweisung mit geheimem Namen: GITHUB_TOKEN=xxx, password = "xxx"
+    re.compile(r"(?P<vor>\b\w*" + _GEHEIM_WORT + r"\s*=\s*['\"]?)(?P<wert>[^\s'\"&;,)]+)",
+               re.IGNORECASE),
+    # sshpass -p xxx
+    re.compile(r"(?P<vor>\bsshpass\s+-p\s*['\"]?)(?P<wert>[^\s'\"]+)"),
+)
+
+
+def _text_schwaerzen(s: str) -> str:
+    """Schwaerzt Geheimnis-Werte in einem Text (Befehl, Code, Kopfsatz, Adresse)."""
+    from backend import url_geheimnis
+    for muster in _GEHEIM_MUSTER:
+        s = muster.sub(lambda m: m.group("vor") + _GEHEIM_ERSATZ, s)
+    # Adressen: ?token=…, schema://benutzer:kennwort@host
+    return url_geheimnis.schwaerzen(s)
+
+
+def _wert_schwaerzen(name, v):
+    """Ein Argumentwert ohne Geheimnisse – rekursiv durch Listen und Objekte."""
+    from backend.geheimnis_tresor import ist_geheimer_name
+    if name is not None and ist_geheimer_name(name) and v not in (None, ""):
+        return _GEHEIM_ERSATZ
+    if isinstance(v, str):
+        return _text_schwaerzen(v)
+    if isinstance(v, dict):
+        return {k: _wert_schwaerzen(k, w) for k, w in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_wert_schwaerzen(None, w) for w in v]
+    return v
+
 
 def args_fuer_verlauf(args) -> dict:
-    """Werkzeug-Argumente fuer den Verlauf: lange Texte gekuerzt UND beziffert.
+    """Werkzeug-Argumente fuer den Verlauf: Geheimnisse geschwaerzt, lange
+    Texte gekuerzt UND beziffert.
 
     Bis 2026-10-26 hielt der Verlauf nur Werkzeugname und Ergebnis fest. Der
     Vorfall des Tages (``filesystem write`` kam ohne ``path`` an) war darin
     unsichtbar – genau die Angabe, an der die Diagnose hing.
+
+    Geschwaerzt wird VOR dem Kuerzen: sonst koennte der Schnitt ein Muster
+    zerteilen und den Wert davor stehen lassen.
     """
     if not isinstance(args, dict):
         return {}
@@ -296,6 +361,7 @@ def args_fuer_verlauf(args) -> dict:
     for k, v in args.items():
         if str(k).startswith("_"):
             continue                  # interne Felder des Dispatch, kein Modell-Argument
+        v = _wert_schwaerzen(k, v)
         if isinstance(v, str) and len(v) > _MAX_ARG_CHARS:
             v = v[:_MAX_ARG_CHARS] + f" … [gekuerzt, {len(v)} Zeichen gesamt]"
         elif not isinstance(v, (str, int, float, bool)) and v is not None:

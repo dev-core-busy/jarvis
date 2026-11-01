@@ -112,11 +112,11 @@ def _rechte_verschieben(s: str) -> str:
              '                            status_code=403)\n'
              '    from backend import wissen_destillat as _wd\n'
              '\n'
-             '    body = await request.json()\n'
+             '    body = await _json_objekt(request)\n'
              '    markdown = str(body.get("markdown") or "").strip()\n')
     ersatz = ('    from backend import wissen_destillat as _wd\n'
               '\n'
-              '    body = await request.json()\n'
+              '    body = await _json_objekt(request)\n'
               '    if not _destillat_erlaubt(user):\n'
               '        return JSONResponse({"error": "Dir ist kein Wissensbereich zugewiesen."},\n'
               '                            status_code=403)\n'
@@ -238,11 +238,11 @@ PROBEN = [
      '                            status_code=403)\n'
      '    from backend import wissen_destillat as _wd\n'
      '\n'
-     '    body = await request.json()\n'
+     '    body = await _json_objekt(request)\n'
      '    text = str(body.get("text") or "")',
      '    from backend import wissen_destillat as _wd\n'
      '\n'
-     '    body = await request.json()\n'
+     '    body = await _json_objekt(request)\n'
      '    text = str(body.get("text") or "")', PY_W),
 
     ("⚠ Rechte-Pruefung HINTER dem Lesen des Rumpfes", MAIN, None,

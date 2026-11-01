@@ -34,14 +34,16 @@ PROBEN = [
      "                local_ok, veraltet = _standard_zugang.kennwort_pruefen(password, docker_pw)\n",
      "                local_ok = hmac.compare_digest(hashlib.sha256(password.encode()).hexdigest(), docker_pw)\n"
      "                veraltet = False\n"),
+    # Seit 2026-11-01 speichert die Umstellung gesperrt (_auth_state_aendern).
     ("Altwert wird nicht gespeichert", "main",
-     "                    _save_auth_state(state)\n                    print(f\"[AUTH] Docker-Kennwort fuer '{username}' auf scrypt",
+     "                    _auth_state_aendern(_umstellen)\n                    print(f\"[AUTH] Docker-Kennwort fuer '{username}' auf scrypt",
      "                    pass\n                    print(f\"[AUTH] Docker-Kennwort fuer '{username}' auf scrypt"),
     ("Umschreiben auch bei falschem Kennwort", "main",
      "                if local_ok and veraltet:\n", "                if veraltet:\n"),
+    # Seit 2026-11-01 entsteht der Hash im Thread und wird gesperrt gesetzt.
     ("Kennwortwechsel speichert wieder sha256", "main",
-     '        state["docker_password"][username] = _standard_zugang.kennwort_hash(new_password)\n',
-     '        state["docker_password"][username] = hashlib.sha256(new_password.encode()).hexdigest()\n'),
+     '__setitem__(username, neu_hash))',
+     '__setitem__(username, hashlib.sha256(new_password.encode()).hexdigest()))'),
 ]
 
 

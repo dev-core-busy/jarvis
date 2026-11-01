@@ -927,9 +927,12 @@ AS.write_text(json.dumps({"users": {"jarvis": {"must_change_password": False, "t
 ns_a = {"json": json, "os": os, "_AUTH_STATE_FILE": AS, "print": lambda *a, **k: None,
         "Path": Path,
         # seit 2026-10-18 fail-closed + Schreibweisen zusammengefuehrt (test_auth_schreibweise)
-        "AuthStateUnlesbar": type("AuthStateUnlesbar", (RuntimeError,), {})}
+        "AuthStateUnlesbar": type("AuthStateUnlesbar", (RuntimeError,), {}),
+        # seit 2026-11-01 laufen Laden/Speichern unter dieser Sperre (test_auth_state_sperre)
+        "_AUTH_STATE_LOCK": __import__("threading").RLock()}
 for fn in ("_norm_login", "_auth_schluessel", "_auth_eintraege_zusammenfuehren", "_auth_state_datei_lesen",
-           "_save_auth_state", "_load_auth_state", "_totp_secret_lesbar"):
+           "_save_auth_state", "_load_auth_state", "_save_auth_state_ungesperrt",
+           "_load_auth_state_ungesperrt", "_totp_secret_lesbar"):
     if fn not in FN:
         abbruch("main.py: %s fehlt" % fn)
     schneide(fn, ns_a)

@@ -365,8 +365,47 @@ def main() -> None:
     check("Frage OHNE Aktion: kein Anonymisieren", aufrufe["anon"] == 1)
 
 
+def abschnitt_7() -> None:
+    """Kein Bild-Dekodieren im Event-Loop (Code-Review 2026-11-01).
+
+    REGEL am Syntaxbaum: in ``ausfuehren`` (async) steht kein direkter Aufruf
+    einer PIL-Bildoperation – sie laufen ueber ``asyncio.to_thread``. Ein
+    4K/8K-Bildschirmfoto blockierte sonst den Dienst fuer alle Benutzer.
+    WIRKUNG: kaputte Bytes enden weiter in ``AnonymFehler`` (der Fehler aus dem
+    Thread wird uebersetzt, nicht als roher PIL-Fehler durchgereicht)."""
+    import ast
+    print("\n=== 7. Bildumwandlung nicht im Event-Loop ===")
+    baum = ast.parse((ROOT / "backend" / "anonymisieren.py").read_text(encoding="utf-8"))
+    fn = next((n for n in ast.walk(baum)
+               if isinstance(n, ast.AsyncFunctionDef) and n.name == "ausfuehren"), None)
+    if fn is None:
+        print("ABBRUCH: ausfuehren nicht gefunden")
+        sys.exit(2)
+    pil = {"open", "convert", "save", "resize", "frombytes", "load"}
+    direkt = [ast.unparse(c)[:60] for c in ast.walk(fn)
+              if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+              and c.func.attr in pil
+              and "to_thread" not in ast.unparse(c)]
+    check("ausfuehren ruft keine PIL-Operation direkt: %s" % direkt, not direkt)
+    ueber_thread = [c for c in ast.walk(fn)
+                    if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                    and c.func.attr == "to_thread" and c.args
+                    and isinstance(c.args[0], ast.Name) and c.args[0].id == "_quelle_schreiben"]
+    check("das Eingangsbild entsteht per asyncio.to_thread(_quelle_schreiben, …)",
+          bool(ueber_thread))
+    try:
+        asyncio.run(_ECHT_AUSFUEHREN(b"kein bild", "de"))
+        check("kaputte Bytes -> AnonymFehler", False)
+    except AN.AnonymFehler as e:
+        check("kaputte Bytes -> AnonymFehler mit Grund", "nicht lesen" in str(e))
+
+
+# Abschnitt 6 ersetzt AN.ausfuehren durch eine Attrappe – Abschnitt 7 braucht die ECHTE.
+_ECHT_AUSFUEHREN = AN.ausfuehren
+
 try:
     main()
+    abschnitt_7()
 finally:
     shutil.rmtree(SANDKASTEN, ignore_errors=True)
 

@@ -322,13 +322,30 @@ def beheben(pakete: list, nur_sicherheit: bool = True, index: bool = False) -> d
         erg["fehler"] = "Trockenlauf abgelehnt (apt wuerde Pakete entfernen oder scheitert)"
         erg["ausgabe"] = ((sim.stdout or "") + (sim.stderr or ""))[-2000:]
         return erg
-    geplant = re.findall(r"^Inst (\S+) (?:\[(\S+)\] )?\((\S+)", sim.stdout or "", re.M)
+    # "Inst <paket> [<alt>] (<neu> <Herkunft>/<Archiv>[, …] [<arch>])" – die
+    # Herkunft steht in der Klammer HINTER der Version.
+    geplant = re.findall(r"^Inst (\S+) (?:\[(\S+)\] )?\((\S+)([^)]*)\)", sim.stdout or "", re.M)
+    if nur_sicherheit:
+        # ⚠ Code-Review 2026-11-01: oben ist nur der Kandidat der GENANNTEN
+        # Pakete geprueft. `--only-upgrade install <ziel>` zieht aber
+        # Abhaengigkeiten mit – eine neuere libbar, die nur in der regulaeren
+        # Quelle liegt, wuerde ebenfalls gehoben (oder neu installiert), und
+        # gemeldet stuende "nur Sicherheitsquelle". Der Trockenlauf nennt die
+        # Herkunft JEDER geplanten Installation; stammt eine nicht (auch) aus
+        # einer *-security-Quelle, wird nichts installiert.
+        fremd = [n for n, _alt, _neu, herkunft in geplant if "-security" not in herkunft]
+        if fremd:
+            erg["fehler"] = ("Trockenlauf abgelehnt: die Behebung zoege Pakete aus der "
+                             "regulaeren Quelle mit (" + ", ".join(fremd[:10])
+                             + (" …" if len(fremd) > 10 else "") + ")")
+            erg["ausgabe"] = (sim.stdout or "")[-2000:]
+            return erg
     r = _run([*grund, "install", "--", *ziel], timeout=1800, env=umg)
     erg["ausgabe"] = ((r.stdout or "")[-1500:] + (r.stderr or "")[-500:])
     if r.returncode != 0:
         erg["fehler"] = f"apt-get endete mit {r.returncode}"
         return erg
-    erg["installiert"] = [{"paket": n, "von": alt or "", "auf": neu} for n, alt, neu in geplant]
+    erg["installiert"] = [{"paket": n, "von": alt or "", "auf": neu} for n, alt, neu, _h in geplant]
     erg["ok"] = True
     erg["neustart_noetig"] = neustart_noetig()
     return erg

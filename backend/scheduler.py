@@ -173,28 +173,46 @@ class CronManager:
         um den Haken "beheben" und die Schwelle eines Auftrags, der schon
         `cve_pruefung` IST; die Art selbst bleibt unveraenderlich.
         """
-        from backend import cve_pruefung
         self._schreibbar()
         job = self.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} nicht gefunden")
-        if job.get("kind") != "cve_pruefung":
-            raise ValueError("Nur CVE-Pruefauftraege haben diese Optionen")
-        job["payload"] = cve_pruefung.auftrag_payload(payload)
+        job["payload"] = self._cve_payload_pruefen(job, payload)
         self._save()
         return job
 
+    @staticmethod
+    def _cve_payload_pruefen(job: dict, payload) -> dict:
+        """Geprueftes CVE-Payload fuer ``job`` – wirft ValueError, aendert NICHTS."""
+        from backend import cve_pruefung
+        if job.get("kind") != "cve_pruefung":
+            raise ValueError("Nur CVE-Pruefauftraege haben diese Optionen")
+        return cve_pruefung.auftrag_payload(payload)
+
     def update_job(self, job_id: str, **fields) -> dict:
+        """Aendert die freigegebenen Felder eines Auftrags (``UPDATABLE_FIELDS``)
+        und – nur bei CVE-Pruefauftraegen – dessen Optionen unter ``cve``.
+
+        ⚠ ERST ALLES PRUEFEN, DANN AENDERN (Code-Review 2026-11-01): bis dahin
+        speicherte der Endpunkt die CVE-Optionen ueber ``set_cve_payload`` VOR
+        diesem Aufruf. Scheiterte danach der Cron-Ausdruck, antwortete er mit
+        400 – und ``beheben: true`` stand trotzdem auf der Platte, der Auftrag
+        behob also automatisch, waehrend die Oberflaeche "nicht gespeichert"
+        meldete.
+        """
         self._schreibbar()
         job = self.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} nicht gefunden")
+        payload = self._cve_payload_pruefen(job, fields["cve"]) if "cve" in fields else None
         fields = {k: v for k, v in fields.items() if k in self.UPDATABLE_FIELDS}
         if "aussenwirkung" in fields and not isinstance(fields["aussenwirkung"], bool):
             raise ValueError("aussenwirkung muss true/false sein")
         # Cron prüfen wenn geändert
         if "cron" in fields:
             self._validate_cron(fields["cron"])
+        if payload is not None:
+            job["payload"] = payload
         job.update(fields)
         # APScheduler-Job neu registrieren
         self._unregister(job_id)

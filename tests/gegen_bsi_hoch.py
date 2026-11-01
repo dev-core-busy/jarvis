@@ -45,17 +45,17 @@ PROBEN = [
      '    if user_state.get("totp_enabled") and user_state.get("totp_secret"):\n'),
     ("Review: verify ohne App-Sperre", MAIN,
      '        return sperre\n'
-     '    body = await request.json()\n'
+     '    body = await _json_objekt(request)\n'
      '    code = body.get("code", "").strip()\n',
      '        pass\n'
-     '    body = await request.json()\n'
+     '    body = await _json_objekt(request)\n'
      '    code = body.get("code", "").strip()\n'),
     ("Review: disable ohne App-Sperre", MAIN,
      '        return sperre\n'
-     '    body = await request.json()\n'
+     '    body = await _json_objekt(request)\n'
      '    password = body.get("password", "")\n',
      '        pass\n'
-     '    body = await request.json()\n'
+     '    body = await _json_objekt(request)\n'
      '    password = body.get("password", "")\n'),
     ("Review: App-Erkennung immer falsch", MAIN,
      '    return bool(kx is not None and kx[0] == _norm_login(user) and len(kx) > 2 and kx[2])\n',

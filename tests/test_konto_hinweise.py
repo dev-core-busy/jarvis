@@ -14,6 +14,10 @@ Schreibweise.
 Ausgefuehrt werden die ECHTEN Funktionen (per AST aus backend/main.py) gegen
 einen Zustand im Speicher. Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 """
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 import ast
 import asyncio
 import contextvars
@@ -159,6 +163,7 @@ ns = {**_abh, "JSONResponse": JSONResponse, "Request": Anfrage, "Depends": lambd
       # seit 2026-10-18 auch an der Admin-Ruecksetzung (BSI N4, test_totp_admin_reset)
       "_kennwort_schranke": lambda r, u: None, "_kennwort_fehlversuch": lambda r, u, w: None}
 try:
+    ns.setdefault("_json_objekt", _json_objekt_aus_main(ns.get("HTTPException")))
     exec(compile(modul, str(MAIN), "exec"), ns)
 except Exception as e:  # noqa: BLE001
     abbruch(f"nicht ausfuehrbar: {e}")

@@ -21,6 +21,10 @@ main.py per AST, echte Module, Attrappen in echter Signatur):
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 """
 from __future__ import annotations
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 
 import ast
 import asyncio
@@ -121,6 +125,7 @@ def schneide(ns, *namen):
             a.annotation = None
         k.returns = None
         k.args.defaults = [ast.Constant(None) for _ in k.args.defaults]
+        ns.setdefault("_json_objekt", _json_objekt_aus_main(ns.get("HTTPException")))
         exec(compile(ast.fix_missing_locations(ast.Module(body=[k], type_ignores=[])),
                      "<main:%s>" % name, "exec"), ns)
     return ns

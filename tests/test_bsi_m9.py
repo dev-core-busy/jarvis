@@ -19,6 +19,10 @@
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 """
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 import ast
 import asyncio
 import json
@@ -242,6 +246,7 @@ class _JR:
 def ausfuehren(fn_name, ns, *args, **kw):
     fn = route(fn_name)
     fn.decorator_list = []
+    ns.setdefault("_json_objekt", _json_objekt_aus_main(ns.get("HTTPException")))
     exec(compile(ast.Module(body=[fn], type_ignores=[]), fn_name, "exec"), ns)
     return asyncio.run(ns[fn_name](*args, **kw))
 

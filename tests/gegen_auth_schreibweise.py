@@ -23,8 +23,9 @@ PROBEN = [
      "    return users.get(_auth_schluessel(username), {",
      "    return users.get(username, {"),
     ("Schreiben ohne Normalisierung", MAIN,
-     "    username = _auth_schluessel(username)\n    state = _load_auth_state()",
-     "    state = _load_auth_state()"),
+     # seit 2026-11-01 folgt die gesperrte Aenderung (_auth_state_aendern)
+     "    username = _auth_schluessel(username)\n\n    def _aendern(state):",
+     "\n    def _aendern(state):"),
     ("Altbestand wird nicht zusammengefuehrt", MAIN,
      "        users, geaendert = _auth_eintraege_zusammenfuehren(state[\"users\"])",
      "        users, geaendert = state[\"users\"], False"),

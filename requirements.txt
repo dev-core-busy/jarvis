@@ -134,7 +134,15 @@ setuptools>=84.1.0
 # vom 2026-03-25 ("1.26 zieht starlette 1.0, inkompatibel mit FastAPI 0.115") und
 # ist mit FastAPI 0.141/Starlette 1.x gegenstandslos. <2: mcp 2.x ist eine neue
 # Hauptversion und zog im Probelauf ein pydantic-BETA (2.14.0b2) nach.
-mcp>=1.28.1,<2
+# Untergrenze 1.30.0 (Code-Review 2026-11-01): bis 1.29.1 baut
+# `create_mcp_http_client` den httpx-Client mit `follow_redirects=True`. httpx
+# entfernt beim Wechsel des Ursprungs nur `Authorization` – ein API-Schluessel
+# unter eigenem Header-Namen (X-API-Key) ging einer 307 auf einen fremden Host
+# hinterher. Erst 1.30.0 folgt nur innerhalb des Ursprungs
+# (`stream_within_origin`); `mcp_client._tls_haken` verlaesst sich ohne
+# eigenes Zertifikat ausdruecklich auf diese Vorgabe. Gemessen an den Raedern
+# 1.28.1/1.29.0/1.29.1/1.30.0; DEV und ECHT liefen da schon mit 1.30.0.
+mcp>=1.30.0,<2
 sse-starlette>=3.0.0,<3.1
 ldap3>=2.9
 APScheduler>=3.10,<4.0

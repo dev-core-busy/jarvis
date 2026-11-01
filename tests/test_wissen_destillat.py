@@ -663,8 +663,12 @@ for _name in _ENDPUNKTE:
     # Arbeit. Dahinter waere sie wirkungslos – gemessen an den Zeilennummern,
     # nicht am Vorkommen.
     _iR = _src.find("_destillat_erlaubt")
+    # Beide Lese-Formen: seit 2026-11-01 lesen Endpunkte ihren Rumpf ueber
+    # `_json_objekt(request)`. Fehlte diese Form hier, fiele _iA auf 10**9 –
+    # die Pruefung waere dann still trivial wahr (genau das ist passiert).
     _iA = min([x for x in (_src.find("await request.form()"),
-                           _src.find("await request.json()")) if x >= 0] or [10 ** 9])
+                           _src.find("await request.json()"),
+                           _src.find("await _json_objekt(request)")) if x >= 0] or [10 ** 9])
     check(f"{_name}: Rechte VOR dem Lesen des Rumpfes", _iR < _iA,
           f"{_iR} / {_iA}")
 
@@ -882,7 +886,9 @@ for _name, (_meth, _pfad) in _FEP.items():
           _erstes_if is not None and "_destillat_erlaubt(user)" in ast.unparse(_erstes_if.test)
           and any(isinstance(b, ast.Return) and "403" in ast.unparse(b) for b in _erstes_if.body))
     _iR = _src.find("_destillat_erlaubt")
-    _iA = min([x for x in (_src.find("await request.json()"), _src.find("_destillat_filter_pfad("))
+    _iA = min([x for x in (_src.find("await request.json()"),
+                           _src.find("await _json_objekt(request)"),
+                           _src.find("_destillat_filter_pfad("))
                if x >= 0] or [10 ** 9])
     check(f"{_name}: Rechte VOR Rumpf und Ablage", 0 <= _iR < _iA, f"{_iR} / {_iA}")
     # ⚠ DER BENUTZER KOMMT AUS DER ANMELDUNG: die Ablage wird aus `user` gebildet.

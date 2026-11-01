@@ -3937,8 +3937,17 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
                 # auf jeder Bestandsinstallation liegen, bis jemand das Kennwort aendert.
                 local_ok, veraltet = _standard_zugang.kennwort_pruefen(password, docker_pw)
                 if local_ok and veraltet:
-                    state["docker_password"][username] = _standard_zugang.kennwort_hash(password)
-                    _save_auth_state(state)
+                    # Hash VOR der Sperre (teuer), Schreiben UNTER ihr auf einem
+                    # frisch geladenen Stand – und nur, wenn dort noch derselbe
+                    # Altwert steht (ein gleichzeitiger Kennwortwechsel gewinnt).
+                    neu_hash = _standard_zugang.kennwort_hash(password)
+
+                    def _umstellen(st, _alt=docker_pw, _neu=neu_hash):
+                        dp = st.setdefault("docker_password", {})
+                        if dp.get(username) == _alt:
+                            dp[username] = _neu
+
+                    _auth_state_aendern(_umstellen)
                     print(f"[AUTH] Docker-Kennwort fuer '{username}' auf scrypt umgestellt.", flush=True)
             else:
                 local_ok = password == _JARVIS_PASSWORD
@@ -4045,6 +4054,31 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
 # ─── Auth-State (Kennwort-Änderung / 2FA-Vorbereitung) ───────────────
 _AUTH_STATE_FILE = Path(__file__).parent.parent / "data" / "auth_state.json"
 
+# ⚠ JEDE Lese-Aendern-Schreib-Folge auf auth_state.json laeuft unter dieser
+# Sperre (Code-Review 2026-11-01). Geschrieben wird immer der GANZE Zustand –
+# zwei gleichzeitige Schreiber (Anmeldung im Thread, TOTP-Vormerkung,
+# Anmeldeschutz) luden denselben Stand, und der zuletzt Speichernde loeschte
+# die Aenderung des anderen (z.B. ein frisch vorgemerktes totp_pending_secret,
+# danach scheiterte die 2FA-Einrichtung mit "falscher Code"). Dazu benutzten
+# beide dieselbe Temp-Datei (nur nach PID benannt). RLock, weil
+# ``_load_auth_state`` selbst zurueckschreiben kann und innerhalb einer
+# Aenderung laeuft. Die Sperre gilt auch gegen die Root-Konsole des Brokers
+# (``jarvis-broker-admin totp-aus``) – ``flock`` auf auth_state.json.lock,
+# siehe backend/auth_state_sperre.py.
+from backend import auth_state_sperre as _auth_state_sperre
+_AUTH_STATE_LOCK = _auth_state_sperre.Sperre(lambda: _AUTH_STATE_FILE)
+
+
+def _auth_state_aendern(aenderung) -> dict:
+    """Laedt den Zustand, wendet ``aenderung(state)`` an und speichert –
+    alles unter ``_AUTH_STATE_LOCK``. Teure Arbeit (Kennwort-Hash) gehoert
+    VOR diesen Aufruf, nicht in ``aenderung``."""
+    with _AUTH_STATE_LOCK:
+        state = _load_auth_state()
+        aenderung(state)
+        _save_auth_state(state)
+        return state
+
 class AuthStateUnlesbar(RuntimeError):
     """auth_state.json ist vorhanden, aber weder sie noch die Sicherung lesbar."""
 
@@ -4107,6 +4141,14 @@ def _auth_state_datei_lesen(pfad: Path) -> dict:
 
 
 def _load_auth_state() -> dict:
+    """Lädt den Auth-State – unter ``_AUTH_STATE_LOCK``, weil das Laden einen
+    Altbestand zurueckschreiben kann (sonst ueberschriebe dieses Zurueckschreiben
+    eine gleichzeitige Aenderung)."""
+    with _AUTH_STATE_LOCK:
+        return _load_auth_state_ungesperrt()
+
+
+def _load_auth_state_ungesperrt() -> dict:
     """Lädt den Auth-State aus der JSON-Datei.
 
     BSI M5: ``totp_secret``/``totp_pending_secret`` liegen mit dem
@@ -4153,6 +4195,13 @@ def _load_auth_state() -> dict:
     return state
 
 def _save_auth_state(state: dict):
+    """Speichert den Auth-State unter ``_AUTH_STATE_LOCK`` (die Temp-Datei ist
+    je Prozess benannt – zwei Threads teilten sie sonst)."""
+    with _AUTH_STATE_LOCK:
+        _save_auth_state_ungesperrt(state)
+
+
+def _save_auth_state_ungesperrt(state: dict):
     """Speichert den Auth-State ATOMAR (Geheimfelder verpackt, BSI M5).
 
     Temp-Datei im selben Verzeichnis (0600 ab dem Anlegen) + ``os.replace``;
@@ -4269,17 +4318,19 @@ def _get_user_auth_state(username: str) -> dict:
 def _set_user_auth_state(username: str, updates: dict):
     """Aktualisiert den Auth-State eines Benutzers (Schluessel: _auth_schluessel)."""
     username = _auth_schluessel(username)
-    state = _load_auth_state()
-    if "users" not in state:
-        state["users"] = {}
-    if username not in state["users"]:
-        state["users"][username] = {
-            "must_change_password": True,
-            "totp_enabled": False,
-            "totp_secret": None,
-        }
-    state["users"][username].update(updates)
-    _save_auth_state(state)
+
+    def _aendern(state):
+        if "users" not in state:
+            state["users"] = {}
+        if username not in state["users"]:
+            state["users"][username] = {
+                "must_change_password": True,
+                "totp_enabled": False,
+                "totp_secret": None,
+            }
+        state["users"][username].update(updates)
+
+    _auth_state_aendern(_aendern)
 
 def _user_must_change(username: str) -> bool:
     """True, wenn der LOKALE jarvis-Benutzer bei der ersten Anmeldung das Kennwort
@@ -4510,7 +4561,7 @@ async def api_local_only_update(request: Request, user: str = Depends(require_lo
     seit Dienststart von nicht-lokalen IPs aufgerufen wurde. Falls ja UND confirm
     ist nicht gesetzt, wird NICHT angewandt, sondern ``{needs_confirm, warning}``
     mit ausfuehrlicher Begruendung zurueckgegeben. Nur Admins."""
-    body = await request.json()
+    body = await _json_objekt(request)
     key = (body.get("key") or "").strip()
     local_only = bool(body.get("local_only"))
     confirm = bool(body.get("confirm"))
@@ -4644,7 +4695,7 @@ async def userchat_search(request: Request, user: str = Depends(require_userchat
     if not svc:
         return JSONResponse({"users": [], "error": "NO_SERVICE_ACCOUNT"})
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     q = (body.get("q") or "").strip()
@@ -5044,7 +5095,7 @@ async def _anmeldung_protokollieren(request: Request, resp, weg: str):
         daten = _antwort_json(resp)
         status = getattr(resp, "status_code", 0)
         try:
-            body = await request.json()
+            body = await _json_objekt(request)
         except Exception:  # noqa: BLE001
             body = {}
         name = str((body or {}).get("username") or daten.get("username") or "").strip().lower()
@@ -5096,7 +5147,7 @@ async def _login_ablauf(request: Request):
             status_code=429,
         )
 
-    body = await request.json()
+    body = await _json_objekt(request)
     username = body.get("username", "").strip().lower()
     password = body.get("password", "")
 
@@ -5804,7 +5855,7 @@ async def totp_verify(request: Request, username: str = Depends(require_auth)):
     sperre = _totp_app_sperre(username)
     if sperre is not None:
         return sperre
-    body = await request.json()
+    body = await _json_objekt(request)
     code = body.get("code", "").strip()
     if not code:
         return JSONResponse({"success": False, "error": "Code erforderlich"}, status_code=400)
@@ -5925,7 +5976,7 @@ async def totp_disable(request: Request, username: str = Depends(require_auth)):
     sperre = _totp_app_sperre(username)
     if sperre is not None:
         return sperre
-    body = await request.json()
+    body = await _json_objekt(request)
     password = body.get("password", "")
     if not password:
         return JSONResponse({"success": False, "error": "Passwort zur Bestätigung erforderlich"}, status_code=400)
@@ -6154,7 +6205,7 @@ async def konto_hinweise_gelesen(request: Request, user: str = Depends(require_a
 @app.post("/api/change-password")
 async def change_password(request: Request, username: str = Depends(require_auth_pwchange)):
     """Kennwort ändern – benötigt altes Kennwort zur Verifikation."""
-    body = await request.json()
+    body = await _json_objekt(request)
     old_password = body.get("old_password", "")
     new_password = body.get("new_password", "")
     confirm_password = body.get("confirm_password", "")
@@ -6185,13 +6236,19 @@ async def change_password(request: Request, username: str = Depends(require_auth
 
     # Kennwort setzen
     if _DOCKER_MODE:
-        # Im Docker-Modus: Kennwort als scrypt-Hash mit Salz in data/auth_state.json
-        state = _load_auth_state()
-        if "docker_password" not in state:
-            state["docker_password"] = {}
-        state["docker_password"][username] = _standard_zugang.kennwort_hash(new_password)
-        _save_auth_state(state)
-        _set_user_auth_state(username, {"must_change_password": False})
+        # Im Docker-Modus: Kennwort als scrypt-Hash mit Salz in data/auth_state.json.
+        # Der Hash (N=2^15, ~32 MB) laeuft im Thread – im Event-Loop hielte er
+        # jede andere Anfrage an (Code-Review 2026-11-01). Kennwort und
+        # must_change_password gehen in EINER gesperrten Aenderung auf die Platte.
+        neu_hash = await asyncio.to_thread(_standard_zugang.kennwort_hash, new_password)
+
+        def _setzen():
+            with _AUTH_STATE_LOCK:
+                _auth_state_aendern(
+                    lambda st: st.setdefault("docker_password", {}).__setitem__(username, neu_hash))
+                _set_user_auth_state(username, {"must_change_password": False})
+
+        await asyncio.to_thread(_setzen)
         print(f"[AUTH] Docker-Kennwort für '{username}' erfolgreich geändert.", flush=True)
         return _sitzung_antwort(request, {"success": True, "token": _sitzungen_nach_kennwortwechsel(username, request)})
 
@@ -6304,7 +6361,7 @@ async def update_settings_get(user: str = Depends(require_local_auth)):
 @app.post("/api/update/settings")
 async def update_settings_set(request: Request, user: str = Depends(require_local_auth)):
     """Speichert Auto-Update-Einstellungen und legt ggf. Cron-Job an."""
-    body    = await request.json()
+    body    = await _json_objekt(request)
     schedule = body.get("auto_update_schedule", "never")
 
     VALID = {"never", "daily", "weekly"}
@@ -6398,7 +6455,7 @@ async def license_status(user: str = Depends(require_local_auth)):
 async def license_set(request: Request, user: str = Depends(require_local_auth)):
     """Lizenzschluessel eintragen. Prueft sofort inkl. Statusabruf."""
     from backend import license as _lic
-    body = await request.json()
+    body = await _json_objekt(request)
     token = (body.get("token") or "").strip()
     if not token:
         return JSONResponse({"ok": False, "error": "Kein Schlüssel übergeben"},
@@ -7504,7 +7561,7 @@ async def get_mcp_servers(user: str = Depends(require_local_auth)):
 @app.post("/api/mcp/servers")
 async def add_mcp_server(request: Request, user: str = Depends(require_local_auth)):
     """Legt einen neuen MCP-Server an und verbindet ihn, falls aktiviert."""
-    data = await request.json()
+    data = await _json_objekt(request)
     from backend.mcp_rechte import header_name_gueltig, ohne_geheimnisse
     if not header_name_gueltig(data.get("api_key_header")):
         return JSONResponse({"detail": "Ungültiger Header-Name für den API-Schlüssel."},
@@ -7527,11 +7584,29 @@ MCP_NUR_FREIGABE = frozenset({"allowed_users", "allowed_group"})
 @app.put("/api/mcp/servers/{server_id}")
 async def update_mcp_server(server_id: str, request: Request, user: str = Depends(require_local_auth)):
     """Aktualisiert einen MCP-Server und verbindet bzw. trennt ihn je nach Aktivierungsstatus."""
-    data = await request.json()
-    from backend.mcp_rechte import header_name_gueltig, ohne_geheimnisse
+    try:
+        data = await request.json()
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        return JSONResponse({"detail": "Objekt erwartet"}, status_code=400)
+    from backend.mcp_rechte import geheimnis_umleitung, header_name_gueltig, ohne_geheimnisse
     if not header_name_gueltig(data.get("api_key_header")):
         return JSONResponse({"detail": "Ungültiger Header-Name für den API-Schlüssel."},
                             status_code=400)
+    # Ziel geaendert, Geheimnis behalten -> ablehnen, BEVOR etwas gespeichert
+    # wird (backend/mcp_rechte.py::geheimnis_umleitung, Code-Review 2026-11-01).
+    bisher = next((s for s in config.get_mcp_servers() if s.get("id") == server_id), None)
+    felder = geheimnis_umleitung(bisher, data)
+    if felder:
+        namen = {"api_key": "den API-Schlüssel", "env": "die Umgebungsvariablen"}
+        return JSONResponse(
+            {"code": "geheimnis_neu_eingeben", "felder": felder,
+             "detail": "Adresse, Befehl oder Transport wurde geändert – bitte "
+                       + " und ".join(namen[f] for f in felder)
+                       + " neu eingeben (oder ausdrücklich entfernen), sonst gingen "
+                         "die gespeicherten Werte an das neue Ziel."},
+            status_code=400)
     result = config.update_mcp_server(server_id, data)
     if not result:
         return JSONResponse({"detail": "Server nicht gefunden"}, status_code=404)
@@ -7564,7 +7639,7 @@ async def remove_mcp_server(server_id: str, user: str = Depends(require_local_au
 @app.post("/api/mcp/servers/{server_id}/toggle")
 async def toggle_mcp_server(server_id: str, request: Request, user: str = Depends(require_local_auth)):
     """Aktiviert oder deaktiviert einen MCP-Server und verbindet bzw. trennt ihn entsprechend."""
-    data = await request.json()
+    data = await _json_objekt(request)
     enabled = data.get("enabled", True)
     config.toggle_mcp_server(server_id, enabled)
     if enabled:
@@ -7830,7 +7905,7 @@ async def fehleranalyse_laeufe(benutzer: str = "", limit: int = 30,
 async def _fehleranalyse_dossier(request: Request, user: str, aktion: str) -> dict:
     from backend import fehleranalyse as fa
     try:
-        daten = await request.json()
+        daten = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         daten = {}
     conv_id = str((daten or {}).get("id") or "").strip()
@@ -8172,7 +8247,7 @@ async def api_context_threshold(request: Request, user: str = Depends(require_lo
     alle Benutzer. Vorher stand hier require_auth – damit konnte jeder angemeldete
     Benutzer per API die Einstellung aller anderen aendern, obwohl das Feld in der
     Oberflaeche nur Admins erreichen (Einstellungen -> Logs & Debug -> Kontext)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     threshold = int(body.get("threshold", 30))
     threshold = max(4, min(200, threshold))
     # Auf laufenden Agenten anwenden
@@ -8281,6 +8356,26 @@ async def system_cve_pruefen(req: Request, user: str = Depends(require_local_aut
     return JSONResponse({"ok": True, "laeuft": True, "beheben": beheben}, status_code=202)
 
 
+async def _json_objekt(req: Request) -> dict:
+    """JSON-Rumpf eines Endpunkts als Objekt – sonst 400 statt 500.
+
+    Code-Review 2026-11-01: rund 150 Endpunkte lasen ``await request.json()``
+    und griffen danach ungeprueft mit ``.get``/``[...]``/``**`` zu. Ein Array,
+    ein Skalar oder gar kein JSON endete damit als 500 (``AttributeError``,
+    ``JSONDecodeError``), und an ``/api/system/cve/einstellungen`` wurde ``[]``
+    STILL als "nichts geaendert" gespeichert. Keiner dieser Endpunkte nimmt
+    eine Liste an (am Syntaxbaum gezaehlt). Ein Waechter haelt die Regel ueber
+    ALLE Fundstellen (tests/test_json_rumpf.py): jeder Rumpf geht hier durch
+    oder wird an Ort und Stelle mit ``isinstance(…, dict)`` geprueft."""
+    try:
+        body = await req.json()
+    except ValueError:
+        raise HTTPException(400, "Ungültiger JSON-Rumpf")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "JSON-Objekt erwartet")
+    return body
+
+
 @app.post("/api/system/cve/einzeln")
 async def system_cve_einzeln(req: Request, user: str = Depends(require_local_auth)):
     """Ein einzelnes Quellpaket aktualisieren (Debian oder Node.js; Knopf in der Detailzeile).
@@ -8290,8 +8385,8 @@ async def system_cve_einzeln(req: Request, user: str = Depends(require_local_aut
     unveraendert. Laeuft im Hintergrund wie die Pruefung (202).
     """
     from backend import cve_pruefung
-    body = await req.json()
-    quelle = body.get("quelle") if isinstance(body, dict) else None
+    body = await _json_objekt(req)
+    quelle = body.get("quelle")
     if not isinstance(quelle, str) or not quelle:
         raise HTTPException(400, "quelle fehlt")
     if cve_pruefung.status()["laeuft"]:
@@ -8315,7 +8410,7 @@ async def system_cve_quittieren(req: Request, user: str = Depends(require_local_
     der Badge, bis sie erledigt sind.
     """
     from backend import cve_pruefung
-    body = await req.json()
+    body = await _json_objekt(req)
     try:
         n = await asyncio.to_thread(cve_pruefung.quittieren, body.get("ids"),
                                     body.get("alle") is True)
@@ -8328,9 +8423,9 @@ async def system_cve_quittieren(req: Request, user: str = Depends(require_local_
 async def system_cve_einstellungen(req: Request, user: str = Depends(require_local_auth)):
     """Schwelle und Quelle der automatischen Behebung (Vorgabe fuer Knopf und Auftraege)."""
     from backend import cve_pruefung
-    body = await req.json()
+    body = await _json_objekt(req)
     try:
-        erg = await asyncio.to_thread(cve_pruefung.einstellungen_setzen, body or {})
+        erg = await asyncio.to_thread(cve_pruefung.einstellungen_setzen, body)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return JSONResponse({"ok": True, "einstellungen": erg})
@@ -8782,7 +8877,7 @@ async def security_incidents_status(user: str = Depends(require_local_auth)):
 @app.post("/api/security/incidents/config")
 async def security_incidents_config(request: Request, user: str = Depends(require_local_auth)):
     """Schaltet die Sicherheitsschicht / Heuristik / LLM-Klassifikator (Admin)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     cfg = security_guard.set_config(
         enabled=body.get("enabled"),
         heuristic=body.get("heuristic"),
@@ -8807,7 +8902,7 @@ async def security_incidents_block(request: Request, user: str = Depends(require
     Verantwortung liegt bei der Rolle, nicht bei einer technischen Huerde.
     Der lokale Benutzer ``jarvis`` bleibt in jedem Fall der Rueckweg.
     """
-    body = await request.json()
+    body = await _json_objekt(request)
     target = (body.get("user") or "").strip()
     grund = (body.get("reason") or "").strip()
     if not target:
@@ -8830,7 +8925,7 @@ async def security_incidents_unblock(request: Request, user: str = Depends(requi
     beide Faelle ab (lokaler Benutzer oder AD-Administrator laut
     Sicherheitseinstellungen).
     """
-    body = await request.json()
+    body = await _json_objekt(request)
     target = (body.get("user") or "").strip()
     if not target:
         return JSONResponse({"ok": False, "error": "Kein Benutzer angegeben."}, status_code=400)
@@ -8973,7 +9068,7 @@ async def security_csp_status(user: str = Depends(require_local_auth)):
 @app.post("/api/security/csp")
 async def security_csp_setzen(request: Request, user: str = Depends(require_local_auth)):
     """Modus setzen: ``{"modus": "melden"|"erzwingen"|"aus"}`` (Admin)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     m = str((body or {}).get("modus") or "").strip().lower()
     if m not in _csp.MODI:
         return JSONResponse({"error": "Unbekannter Modus"}, status_code=400)
@@ -8999,7 +9094,7 @@ async def security_kopfzeilen_setzen(request: Request, user: str = Depends(requi
     """HSTS-Modus setzen: ``{"hsts_modus": "auto"|"an"|"aus"}`` (Admin).
     ⚠ "an" bei einem selbst signierten Zertifikat sperrt fuer ein Jahr jeden aus,
     der die Zertifikatswarnung bisher wegklickt."""
-    body = await request.json()
+    body = await _json_objekt(request)
     m = str((body or {}).get("hsts_modus") or "").strip().lower()
     if m not in _sicherheits_kopf.HSTS_MODI:
         return JSONResponse({"error": "Unbekannter Modus"}, status_code=400)
@@ -9255,7 +9350,7 @@ async def broker_ops_decide(request: Request, user: str = Depends(require_local_
     BROKER prueft (backend/broker/freigabe.py) – das Backend reicht ihn nur
     durch. Ohne ihn konnte jeder Prozess des Dienstbenutzers sich Root-Befehle
     selbst freigeben (Befund K2)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     key = (body.get("key") or "").strip()
     decision = (body.get("decision") or "").strip()
     nachweis = str(body.get("nachweis") or "").strip()[:12]
@@ -9282,7 +9377,7 @@ async def broker_ops_remove(request: Request, user: str = Depends(require_local_
     als 'allow', Root-Shell-Befehle als 'pending') – deshalb braucht das Loeschen
     denselben Freigabe-Code wie 'allow': eine geloeschte Ablehnung waere sonst
     eine Freigabe durch die Hintertuer (K2-c)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     key = (body.get("key") or "").strip()
     nachweis = str(body.get("nachweis") or "").strip()[:12]
     if not key:
@@ -9318,7 +9413,7 @@ async def _broker_ssh_aktion(request: Request, user: str, op: str, felder: tuple
     """Gemeinsamer Weg fuer SSH-Haertung und SSH-Netze: Rumpf auf bekannte
     Felder beschraenken, Freigabe-Code nur durchreichen (der BROKER prueft ihn)."""
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     aktion = str(body.get("aktion") or "").strip()
@@ -9362,7 +9457,7 @@ async def broker_ssh_schluessel(request: Request, user: str = Depends(require_lo
     konto, schluessel | fingerabdruck, nachweis}. Pruefen, Schreiben, Rechte und
     Aussperr-Schutz macht der BROKER (fernzugang.schluessel)."""
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     aktion = str(body.get("aktion") or "").strip()
@@ -9433,7 +9528,7 @@ async def _ldap_dir_search(request: Request, kind: str, admin_user: str):
     from backend import ldap_directory
     import asyncio as _asyncio
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:
         body = {}
     q = (body.get("q") or "").strip()
@@ -9478,7 +9573,7 @@ async def ldap_group_members(request: Request, user: str = Depends(require_local
     from backend import ldap_directory
     import asyncio as _asyncio
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:
         body = {}
     grp = (body.get("group") or body.get("dn") or "").strip()
@@ -9507,7 +9602,7 @@ async def ldap_user_groups(request: Request, user: str = Depends(require_local_a
     from backend import ldap_directory
     import asyncio as _asyncio
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:
         body = {}
     wer = (body.get("user") or "").strip()
@@ -9797,7 +9892,7 @@ async def secret_reveal(request: Request, user: str = Depends(require_auth)):
 
     t0 = time.time()
     try:
-        data = await request.json()
+        data = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         data = {}
     bereich = str(data.get("bereich") or "").strip().lower()
@@ -10013,7 +10108,7 @@ async def chat_history_get(user: str = Depends(require_auth)):
 async def chat_history_append(request: Request, user: str = Depends(require_auth)):
     """Hängt eine Nachricht an den geteilten Chat-Verlauf an und synchronisiert sie live an andere Fenster."""
     import backend.chat_history as ch
-    body = await request.json()
+    body = await _json_objekt(request)
     msg = body.get("message")
     result = ch.append(user, msg)
     # Live-Sync: die neue Nachricht an die anderen Fenster desselben Benutzers pushen
@@ -10030,7 +10125,7 @@ async def chat_history_append(request: Request, user: str = Depends(require_auth
 async def chat_history_replace(request: Request, user: str = Depends(require_auth)):
     """Ersetzt den kompletten geteilten Chat-Verlauf des Benutzers."""
     import backend.chat_history as ch
-    body = await request.json()
+    body = await _json_objekt(request)
     msgs = body.get("messages", [])
     return JSONResponse({"messages": ch.replace(user, msgs)})
 
@@ -10420,7 +10515,7 @@ async def get_settings(user: str = Depends(require_auth)):
 @app.post("/api/settings")
 async def save_settings(request: Request, user: str = Depends(require_local_auth)):
     """Speichert globale Einstellungen (TTS, Desktop, AD-Config etc.)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     config.save_global_settings(body)
     # AD-Konfiguration separat persistieren
     if any(k in body for k in ("ad_server", "ad_domain", "ad_bind_user", "ad_bind_password")):
@@ -10517,7 +10612,7 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
 @app.post("/api/auth/ad_test")
 async def test_ad_connection(request: Request, _username: str = Depends(require_local_auth)):
     """Prüft ob der Domain-Controller erreichbar ist (reiner Verbindungstest, kein Bind)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     ad_server = body.get("ad_server", "").strip()
     ad_domain = body.get("ad_domain", "").strip()
     if not ad_server or not ad_domain:
@@ -10822,7 +10917,7 @@ def _zertifikat_fingerabdruck(pfad) -> str:
 async def request_letsencrypt(request: Request, user: str = Depends(require_local_auth)):
     """Beantragt ein Let's Encrypt Zertifikat via certbot (standalone).
     Streamt den Fortschritt als Textzeilen zurück."""
-    body = await request.json()
+    body = await _json_objekt(request)
     domain = body.get("domain", "").strip()
     email = body.get("email", "").strip()
 
@@ -10883,7 +10978,7 @@ async def request_letsencrypt(request: Request, user: str = Depends(require_loca
 @app.post("/api/settings/ssl/custom")
 async def upload_custom_cert(request: Request, user: str = Depends(require_local_auth)):
     """Lädt ein eigenes SSL-Zertifikat hoch (PEM-Format)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     cert_pem = body.get("cert", "").strip()
     key_pem = body.get("key", "").strip()
 
@@ -11144,7 +11239,7 @@ def _lic_grenze_profile():
 async def create_agent_role(request: Request, user: str = Depends(require_local_auth)):
     """Legt eine Rolle an. Ungueltige Angaben: 400 MIT Grund im Klartext."""
     from backend import agent_roles
-    body = await request.json()
+    body = await _json_objekt(request)
     try:
         rolle = agent_roles.anlegen(body)
     except ValueError as e:
@@ -11158,7 +11253,7 @@ async def update_agent_role(role_id: str, request: Request,
                             user: str = Depends(require_local_auth)):
     """Aendert eine Rolle (nur die Felder aus agent_roles.UPDATABLE_FIELDS)."""
     from backend import agent_roles
-    body = await request.json()
+    body = await _json_objekt(request)
     try:
         rolle = agent_roles.aendern(role_id, body)
     except ValueError as e:
@@ -11259,7 +11354,7 @@ async def agent_api_aussenwirkung_setzen(request: Request, user: str = Depends(r
 async def agent_keys_create(request: Request, user: str = Depends(require_local_auth)):
     """Erzeugt einen neuen benannten API-Key."""
     import secrets, uuid
-    body = await request.json()
+    body = await _json_objekt(request)
     name = (body.get("name") or "").strip() or "Unbenannt"
     keys = _load_agent_keys()
     entry = {"id": uuid.uuid4().hex[:8], "name": name,
@@ -11273,7 +11368,7 @@ async def agent_keys_create(request: Request, user: str = Depends(require_local_
 async def agent_keys_update(kid: str, request: Request, user: str = Depends(require_local_auth)):
     """Benennt einen Key um bzw. generiert ihn neu (body: name und/oder regenerate)."""
     import secrets
-    body = await request.json()
+    body = await _json_objekt(request)
     keys = _load_agent_keys()
     found = None
     for k in keys:
@@ -11451,7 +11546,7 @@ async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
 @app.post("/api/profiles/test")
 async def test_profile_connection(request: Request, user: str = Depends(require_local_auth)):
     """Testet die Verbindung mit den aktuellen Formularwerten (nicht gespeicherten)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     try:
         zusatz = await _formular_anker(body)
     except Exception as e:  # noqa: BLE001 – AnkerFehler und Netzfehler gleich melden
@@ -11606,7 +11701,7 @@ async def profile_capabilities(request: Request, user: str = Depends(require_loc
     ein SSRF-Werkzeug (siehe Endpunkt-Durchsicht 2026-08-04).
     """
     from backend import model_caps
-    body = await request.json()
+    body = await _json_objekt(request)
     return JSONResponse(await model_caps.ermitteln(
         provider=body.get("provider", ""),
         api_url=body.get("api_url", ""),
@@ -11626,7 +11721,7 @@ async def profile_capabilities_probe(request: Request, user: str = Depends(requi
     `/capabilities` und mit `max_tokens: 1`.
     """
     from backend import model_caps
-    body = await request.json()
+    body = await _json_objekt(request)
     welche = body.get("welche") or ["vision", "tools"]
     welche = tuple(w for w in welche if w in model_caps.FRAGEN)[:4]
     return JSONResponse(await model_caps.proben(
@@ -11643,7 +11738,7 @@ async def profile_capabilities_probe(request: Request, user: str = Depends(requi
 @app.post("/api/profiles/models")
 async def list_profile_models(request: Request, user: str = Depends(require_local_auth)):
     """Liefert verfuegbare Modelle fuer die aktuellen Formularwerte (Discover-Button)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     try:
         zusatz = await _formular_anker(body)
     except Exception as e:  # noqa: BLE001
@@ -12066,7 +12161,7 @@ async def health(request: Request):
 @app.post("/api/verify-token")
 async def verify_token_endpoint(request: Request):
     """Prüft ob ein Token noch gültig ist. Gibt verbleibende Sekunden zurueck."""
-    body = await request.json()
+    body = await _json_objekt(request)
     tok = _token_aufloesen(request, body.get("token", ""))
     username = verify_token(tok)
     if username:
@@ -12336,7 +12431,7 @@ async def purge_skill(name: str, request: Request, user: str = Depends(require_l
     und loescht auf Wunsch (remove_data=true) Daten/Caches des Skills.
     Antwort: {removed_packages, kept_packages, removed_paths, errors}."""
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:
         body = {}
     remove_data = bool(body.get("remove_data", False))
@@ -12573,7 +12668,7 @@ async def avatar_ask(request: Request):
     if not _skill_active("avatar"):
         return JSONResponse({"detail": "Avatar-Assistent ist deaktiviert"}, status_code=403)
 
-    body = await request.json()
+    body = await _json_objekt(request)
     text = (body.get("text") or "").strip()
     if not text:
         return JSONResponse({"detail": "Keine Frage angegeben"}, status_code=400)
@@ -13712,7 +13807,7 @@ async def sap_sql_api(request: Request, user: str = Depends(require_sap_access))
     if not c.hana.configured:
         return JSONResponse({"ok": False, "error": "HANA nicht konfiguriert."}, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:
         body = {}
     sql = (body.get("sql") or "").strip()
@@ -14115,7 +14210,7 @@ async def sap_instructions_get(user: str = Depends(require_sap_access)):
 @app.post("/api/sap/instructions")
 async def sap_instructions_set(request: Request, user: str = Depends(require_sap_access)):
     """Speichert die persoenlichen Analyse-Anweisungen (dauerhaft, je Benutzer)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     text = (body.get("instructions") or "")[:20000]
     try:
         _sap_instr_path(user).write_text(text, encoding="utf-8")
@@ -14148,7 +14243,7 @@ async def sap_ask(request: Request, user: str = Depends(require_sap_access)):
     hart gesperrt (OData nur GET, SQL nur SELECT/WITH)."""
     from backend import sap_analyses
 
-    body = await request.json()
+    body = await _json_objekt(request)
     analysis_id = (body.get("analysis_id") or "").strip()
     question = (body.get("question") or "").strip()[:4000]
     bi_tool = (body.get("bi_tool") or "").strip()
@@ -14571,7 +14666,7 @@ async def vemas_instructions_get(user: str = Depends(require_vemas_access)):
 async def vemas_instructions_set(request: Request,
                                  user: str = Depends(require_vemas_access)):
     """Speichert die persoenlichen Anweisungen (dauerhaft, je Benutzer)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     text = (body.get("instructions") or "")[:20000]
     try:
         _vemas_instr_path(user).write_text(text, encoding="utf-8")
@@ -14604,7 +14699,7 @@ async def vemas_ask(request: Request, user: str = Depends(require_vemas_access))
     siehe wirkung.ohne_dialog)."""
     from backend import vemas_analyses
 
-    body = await request.json()
+    body = await _json_objekt(request)
     analysis_id = (body.get("analysis_id") or "").strip()
     question = (body.get("question") or "").strip()[:4000]
     tool = (body.get("tool") or "").strip()
@@ -14848,7 +14943,7 @@ async def _addin_sso_ablauf(request: Request):
         return JSONResponse({"ok": False, "error": "Zu viele Versuche. Bitte warte 5 Minuten."},
                             status_code=429)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     token_roh = str((body or {}).get("token") or "").strip()
@@ -15112,7 +15207,7 @@ async def excel_instructions_set(request: Request,
     unterzuschieben, die in JEDEN seiner Excel-Laeufe eingeht (gleiche Regel wie
     beim Empfaenger einer Erinnerung).
     """
-    body = await request.json()
+    body = await _json_objekt(request)
     text = str(body.get("instructions") or "")[:excel_ask_max_anweisungen()]
     try:
         _excel_instr_path(user).write_text(text, encoding="utf-8")
@@ -15299,7 +15394,7 @@ async def excel_ask_endpoint(request: Request,
                       "aktiviert ihn unter Einstellungen → Skills."},
             status_code=400)
 
-    body = await request.json()
+    body = await _json_objekt(request)
     frage = str(body.get("frage") or "").strip()[:excel_ask.MAX_FRAGE_LEN]
     if not frage:
         return JSONResponse({"ok": False, "error": "Keine Frage übermittelt."},
@@ -15589,7 +15684,7 @@ async def email_account_set(request: Request, user: str = Depends(require_email_
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     # KEIN Vorfiltern auf die Whitelist: der Rumpf geht unveraendert an
@@ -15646,7 +15741,7 @@ async def email_styles_add(request: Request, user: str = Depends(require_email_a
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     try:
@@ -15670,7 +15765,7 @@ async def email_styles_set(stil_id: str, request: Request,
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     erlaubt = {k: v for k, v in (body or {}).items() if k in ("name", "text", "standard")}
@@ -15739,7 +15834,7 @@ async def email_signatures_add(request: Request,
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     try:
@@ -15785,7 +15880,7 @@ async def email_signatures_import(request: Request,
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     ersetzen = bool((body or {}).get("ersetzen"))
@@ -15835,7 +15930,7 @@ async def email_signatures_set(sig_id: str, request: Request,
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     erlaubt = {k: v for k, v in (body or {}).items()
@@ -15964,7 +16059,7 @@ async def email_adressbuch(request: Request,
     """
     from backend import adressbuch
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     q = str((body or {}).get("q") or "").strip()
@@ -16008,7 +16103,7 @@ async def email_rules_create(request: Request, user: str = Depends(require_email
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     try:
@@ -16026,7 +16121,7 @@ async def email_rules_update(regel_id: str, request: Request,
     """Eigene Regel aendern. ``id``/``owner`` sind unveraenderlich (Whitelist)."""
     from backend import mail_rules
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     try:
@@ -16108,7 +16203,7 @@ async def email_rules_run_message(regel_id: str, request: Request,
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     msg_id = str((body or {}).get("msg_id") or "").strip()
@@ -16164,7 +16259,7 @@ async def email_reply_preview(request: Request,
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     msg_id = str((body or {}).get("msg_id") or "").strip()
@@ -16214,7 +16309,7 @@ async def email_reply_send(request: Request,
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     msg_id = str((body or {}).get("msg_id") or "").strip()
@@ -16416,7 +16511,7 @@ async def email_admin_explore(request: Request, user: str = Depends(require_loca
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     ziel = (body.get("benutzer") or user or "").strip()
@@ -16465,7 +16560,7 @@ async def email_admin_areas(request: Request, user: str = Depends(require_local_
     Trennung wie bei den SAP-Sichtbarkeiten)."""
     from backend import mail_rules
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     roh = body.get("bereiche")
@@ -16700,7 +16795,7 @@ async def claudesub_job_create(request: Request, user: str = Depends(require_cla
     """
     from backend import claude_subagent as _cs
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger JSON-Body"}, status_code=400)
 
@@ -16802,7 +16897,7 @@ async def tracks_dump_create(request: Request, user: str = Depends(require_track
     if hinweis:
         return JSONResponse(hinweis, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     try:
@@ -16828,7 +16923,7 @@ async def tracks_dump_update(dump_id: str, request: Request,
     """
     from backend import short_tracks as _st
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     felder = dict(body or {})
@@ -16971,7 +17066,7 @@ async def tracks_drop_url(request: Request, user: str = Depends(require_tracks_a
     if hw:
         return JSONResponse(hw, status_code=400)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     dump = _st.holen(str(body.get("dump_id") or ""))
@@ -17076,7 +17171,7 @@ async def prompt_pruefen(request: Request, user: str = Depends(require_auth)):
     """
     from backend import prompt_check as _pc
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     kontext = str(body.get("kontext") or "").strip().lower()
@@ -17191,7 +17286,7 @@ async def tracks_admin_areas(request: Request, user: str = Depends(require_local
     """
     from backend import short_tracks as _st
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     roh = body.get("bereiche")
@@ -17221,7 +17316,7 @@ async def tracks_admin_limits(request: Request, user: str = Depends(require_loca
     """
     from backend import short_tracks as _st
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     grenzen = {
@@ -17729,7 +17824,7 @@ async def jira_assist_run(request: Request,
     """
     from backend import jira_assist  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
                             status_code=400)
@@ -17795,7 +17890,7 @@ async def jira_assist_vorlage_speichern(
     """
     from backend import jira_vorlagen  # noqa: PLC0415
     try:
-        b = await request.json()
+        b = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
                             status_code=400)
@@ -17950,7 +18045,7 @@ async def jira_admin_areas(request: Request, user: str = Depends(require_local_a
     """
     from backend import jira_assist  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
                             status_code=400)
@@ -17980,7 +18075,7 @@ async def jira_assist_vorlage_standard(
     """
     from backend import jira_vorlagen  # noqa: PLC0415
     try:
-        b = await request.json()
+        b = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
                             status_code=400)
@@ -18097,7 +18192,7 @@ async def ai_mouse_analyze(request: Request,
                                    "unter Einstellungen → Skills ein."},
             status_code=403)
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
@@ -18273,7 +18368,7 @@ async def ai_mouse_fragen_speichern(request: Request,
     """
     from backend import ai_mouse_fragen as amf  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
@@ -18305,7 +18400,7 @@ async def ai_mouse_fragen_sortieren(request: Request,
     """
     from backend import ai_mouse_fragen as amf  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."},
                             status_code=400)
@@ -18362,7 +18457,7 @@ async def ai_mouse_vorgabe_speichern(request: Request,
     """
     from backend import ai_mouse_fragen as amf  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
@@ -18450,7 +18545,7 @@ async def ai_mouse_areas_speichern(request: Request,
     """
     from backend import ai_mouse  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
@@ -18510,7 +18605,7 @@ async def ai_mouse_bereitstellung(request: Request,
     """
     from backend import ai_mouse  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
@@ -18753,7 +18848,7 @@ async def feedback_abgabe_senden(request: Request,
     """
     from backend import feedback as fb  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
@@ -18789,7 +18884,7 @@ async def feedback_admin_sortieren(request: Request,
     """Die Reihenfolge der Formulare setzen. Body: ``{ids: [...]}``."""
     from backend import feedback as fb  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
@@ -18825,7 +18920,7 @@ async def feedback_admin_speichern(request: Request,
     """
     from backend import feedback as fb  # noqa: PLC0415
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungültiger JSON-Body."},
                             status_code=400)
@@ -19647,7 +19742,7 @@ async def support_instructions_get(user: str = Depends(require_auth)):
 @app.post("/api/support/instructions")
 async def support_instructions_set(request: Request, user: str = Depends(require_auth)):
     """Speichert die persoenlichen Support-Anweisungen (dauerhaft, je Benutzer)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     text = (body.get("instructions") or "")[:20000]
     try:
         _support_instr_path(user).write_text(text, encoding="utf-8")
@@ -19763,7 +19858,7 @@ async def support_query(request: Request):
         return JSONResponse({"ok": False, "error": "Nicht authentifiziert"}, status_code=401)
     if not _skill_active("support_assistant"):
         return JSONResponse({"ok": False, "error": "Support-Assistent ist nicht aktiv."}, status_code=403)
-    body = await request.json()
+    body = await _json_objekt(request)
     ok, res = await _run_cancellable(request, _support_run_query(body, user))
     if not ok:
         return JSONResponse({"ok": False, "error": "Abgebrochen"}, status_code=499)
@@ -20182,7 +20277,7 @@ async def support_summarize(request: Request):
         return JSONResponse({"ok": False, "error": "Nicht authentifiziert"}, status_code=401)
     if not _skill_active("support_assistant"):
         return JSONResponse({"ok": False, "error": "Support-Assistent ist nicht aktiv."}, status_code=403)
-    body = await request.json()
+    body = await _json_objekt(request)
     # CRM-/Ticket-Anfrage per Freitext (z.B. 'CRM-13579' oder 'Status zu CRM-13579?')
     # wird EXAKT wie unter /support beantwortet: volle Pipeline inkl. KI-Gesamt-
     # zusammenfassung ueber RAG + Jira + Confluence. Der Einzel-Ticket-Button
@@ -20308,7 +20403,7 @@ async def support_history_delete_entry(request: Request, user: str = Depends(req
     "loeschen" genau das entfernt, was eine gleichlautende Suche ersetzen wuerde.
     """
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:
         body = {}
     query = ((body or {}).get("query") or "").strip()
@@ -20397,7 +20492,7 @@ async def agent_task(request: Request):
         )
 
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:
         return JSONResponse(
             {"success": False, "error": "Ungültiger JSON-Body. Tipp für Windows CMD: Doppelte Anführungszeichen escapen, z.B. {\\\"text\\\": \\\"...\\\"}"},
@@ -20774,7 +20869,7 @@ async def wissensgraph_rueckmeldung(request: Request, user: str = Depends(requir
     verworfene Auffaelligkeit. Senkt kuenftig das Gewicht aehnlicher."""
     from backend import wissensgraph as wg
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:
         body = None
     try:
@@ -20902,7 +20997,7 @@ async def set_compact_config(request: Request, user: str = Depends(require_knowl
     """Schaltet die automatische monatliche Wissens-Verdichtung um.
     Body: {"auto": true|false} – persistiert als auto_compact in der
     Knowledge-Skill-Konfiguration."""
-    body = await request.json()
+    body = await _json_objekt(request)
     auto = bool(body.get("auto"))
     states = config.get_skill_states()
     cfg = dict(states.get("knowledge", {}).get("config", {}))
@@ -20940,7 +21035,7 @@ async def get_knowledge_files(user: str = Depends(require_auth)):
 async def delete_knowledge_file(request: Request, user: str = Depends(require_knowledge_editor)):
     """Löscht eine einzelne Datei aus einem Knowledge-Ordner."""
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
-    data = await request.json()
+    data = await _json_objekt(request)
     file_path = data.get("path", "").strip()
     if not file_path:
         return JSONResponse({"error": "Kein Dateipfad angegeben"}, status_code=400)
@@ -20995,7 +21090,7 @@ async def move_knowledge_files(request: Request, user: str = Depends(require_kno
     """
     from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
                                          relocate_file_index)
-    data = await request.json()
+    data = await _json_objekt(request)
 
     raw_paths = data.get("paths")
     if raw_paths is None:
@@ -21114,7 +21209,7 @@ async def delete_learned_file(request: Request, user: str = Depends(require_admi
     es gibt also nichts nachzuraeumen."""
     from backend.learning import LEARNED_DIR, NOTIZ_PRAEFIX, PROJECT_ROOT as LRN_ROOT
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     roh = str((body or {}).get("path") or "").strip()
@@ -21190,7 +21285,7 @@ async def gedaechtnis_eintrag_loeschen(request: Request, user: str = Depends(req
     sonst stuende der geloeschte Eintrag dort weiter."""
     from backend.tools import memory as _mem
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
     key = str((body or {}).get("key") or "")
@@ -21547,7 +21642,7 @@ async def read_knowledge_netzquelle(netz: str, user: str = Depends(require_auth_
 async def write_knowledge_file(request: Request, user: str = Depends(require_knowledge_editor)):
     """Aktualisiert den Inhalt einer gelernten Datei und re-indexiert sie in FAISS."""
     from backend.learning import LEARNED_DIR, PROJECT_ROOT as LRN_ROOT
-    data = await request.json()
+    data = await _json_objekt(request)
     path = data.get("path", "").strip()
     content = data.get("content", "")
     if not path:
@@ -21576,7 +21671,7 @@ async def open_knowledge_folder(request: Request, user: str = Depends(require_kn
     """Öffnet einen Knowledge-Ordner im Dateimanager des Server-Desktops."""
     import subprocess, os
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
-    data = await request.json()
+    data = await _json_objekt(request)
     folder_arg = data.get("folder", "").strip()
 
     target = None
@@ -22244,7 +22339,7 @@ async def create_knowledge_subfolder(request: Request, user: str = Depends(requi
     Name (kein Pfad). Der Unterordner wird NICHT als eigener Wurzelordner
     registriert: er wird von der rekursiven Indizierung der Wurzel erfasst und
     erbt deren Wissensgruppen-Berechtigung (Modell A)."""
-    data = await request.json()
+    data = await _json_objekt(request)
     parent = _kb_norm_rel(data.get("parent") or "")
     name = (data.get("name") or "").strip()
     if _kb_configured_root_for(parent) is None:
@@ -22280,7 +22375,7 @@ async def delete_knowledge_subfolder(request: Request, user: str = Depends(requi
     import shutil
     from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
                                          purge_folder_index)
-    data = await request.json()
+    data = await _json_objekt(request)
     rel = _kb_norm_rel(data.get("path") or "")
     delete_files = bool(data.get("delete_files"))
     if get_index_progress().get("running"):
@@ -22318,7 +22413,7 @@ async def rename_knowledge_subfolder(request: Request, user: str = Depends(requi
     Unterordner; die Gruppen-Berechtigung wird weiter von der Wurzel geerbt."""
     from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
                                          relocate_folder_index)
-    data = await request.json()
+    data = await _json_objekt(request)
     rel = _kb_norm_rel(data.get("path") or "")
     new_name = (data.get("new_name") or "").strip()
     if get_index_progress().get("running"):
@@ -22364,7 +22459,7 @@ async def move_knowledge_subfolder(request: Request, user: str = Depends(require
     indizierte Wissen (FAISS + TF-IDF), die Wissensgruppen-Zuordnungen und die
     Pull-Sync-Freigaben ziehen prefix-sauber mit (``_kb_move_folder``).
     """
-    data = await request.json()
+    data = await _json_objekt(request)
     res, err, code = _kb_move_folder(data.get("path") or "", data.get("target") or "",
                                      wurzel_erlaubt=True)
     if err:
@@ -22390,7 +22485,7 @@ async def create_knowledge_folder(request: Request, user: str = Depends(require_
     unvollstaendig, an dem ein neues Datenverzeichnis dazukommt."""
     from backend.tools.knowledge import PROJECT_ROOT
     from backend import knowledge_groups as kg
-    data = await request.json()
+    data = await _json_objekt(request)
     name = (data.get("name") or "").strip().replace("\\", "/").strip("/")
     # Praefixe abstreifen, egal in welcher Schreibweise sie kommen.
     if name.startswith(_rag.RAG_REL + "/"):
@@ -22453,7 +22548,7 @@ async def rename_knowledge_folder(request: Request, user: str = Depends(require_
     waehrend einer laufenden Indizierung nicht moeglich."""
     from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
                                          relocate_folder_index)
-    data = await request.json()
+    data = await _json_objekt(request)
     path_arg = (data.get("path") or "").strip()
     new_name = (data.get("new_name") or "").strip()
 
@@ -22511,7 +22606,7 @@ async def delete_knowledge_folder(request: Request, user: str = Depends(require_
     import shutil
     from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
                                          purge_folder_index)
-    data = await request.json()
+    data = await _json_objekt(request)
     path_arg = (data.get("path") or "").strip()
     delete_files = bool(data.get("delete_files"))
 
@@ -22566,7 +22661,7 @@ async def assign_knowledge_folder_groups(request: Request, user: str = Depends(r
     bekommt ihren eigenen Unterordner."""
     from backend import knowledge_groups as kg
     from backend.tools.knowledge import _bounded_call
-    data = await request.json()
+    data = await _json_objekt(request)
     path_arg = (data.get("path") or "").strip()
 
     folder, rel = _kb_find_config_folder(path_arg)
@@ -22653,7 +22748,7 @@ async def kb_create_share(request: Request, user: str = Depends(require_local_au
     Rueckgabe enthaelt das Token – es wird dem anderen Standort uebergeben.
     """
     from backend import knowledge_sync as ks
-    data = await request.json()
+    data = await _json_objekt(request)
     try:
         share = ks.create_share((data.get("folder") or "").strip(),
                                 data.get("label") or "", user)
@@ -22671,7 +22766,7 @@ async def kb_update_share(share_id: str, request: Request,
     abgewiesen – der Nehmer behaelt seine Kopie.
     """
     from backend import knowledge_sync as ks
-    data = await request.json()
+    data = await _json_objekt(request)
     share = ks.update_share(share_id, **{k: v for k, v in data.items()
                                          if k in ks.SHARE_UPDATABLE})
     if share is None:
@@ -22758,7 +22853,7 @@ async def kb_sync_site_name(request: Request, user: str = Depends(require_local_
     """Name DIESES Standorts. Er geht als Kennung an den Geber (der zeigt damit,
     wer gezogen hat) und belegt den Zielordner vor."""
     from backend import knowledge_sync as ks
-    data = await request.json()
+    data = await _json_objekt(request)
     return JSONResponse({"ok": True, "site_name": ks.set_site_name(data.get("site_name") or "")})
 
 
@@ -22774,7 +22869,7 @@ async def kb_sync_probe(request: Request, user: str = Depends(require_local_auth
     gate = _sync_gate()
     if gate is not None:
         return gate
-    data = await request.json()
+    data = await _json_objekt(request)
     url, token = (data.get("url") or "").strip(), (data.get("token") or "").strip()
     try:
         zert = await asyncio.to_thread(ks.zertifikat_abfragen, url)
@@ -22826,7 +22921,7 @@ async def kb_sync_add_peer(request: Request, user: str = Depends(require_local_a
     gate = _sync_gate()
     if gate is not None:
         return gate
-    d = await request.json()
+    d = await _json_objekt(request)
     try:
         peer = ks.create_peer(
             name=d.get("name") or "", url=d.get("url") or "", token=d.get("token") or "",
@@ -22846,7 +22941,7 @@ async def kb_sync_update_peer(peer_id: str, request: Request,
     Spiegels waere ein neuer Spiegel (und der alte bliebe verwaist liegen).
     Leeres ``token`` heisst unveraendert."""
     from backend import knowledge_sync as ks
-    d = await request.json()
+    d = await _json_objekt(request)
     try:
         peer = ks.update_peer(peer_id, **{k: v for k, v in d.items()
                                           if k in ks.PEER_UPDATABLE})
@@ -23666,7 +23761,7 @@ async def wissen_file_delete(request: Request, user: str = Depends(require_auth)
     from backend import knowledge_groups as kg
     from backend.tools.knowledge import _bounded_call
     import errno as _errno
-    body = await request.json()
+    body = await _json_objekt(request)
     rel = (body.get("path") or "").strip().lstrip("/")
     if not rel:
         return JSONResponse({"error": "Kein Pfad"}, status_code=400)
@@ -23762,7 +23857,7 @@ async def wissen_create_subfolder(request: Request, user: str = Depends(require_
     Der neue Unterordner erbt diese Gruppe (Modell A).
     """
     from backend.tools.knowledge import PROJECT_ROOT
-    data = await request.json()
+    data = await _json_objekt(request)
     parent = _kb_norm_rel(data.get("parent") or "")
     name = (data.get("name") or "").strip()
 
@@ -23798,7 +23893,7 @@ async def wissen_rename_subfolder(request: Request, user: str = Depends(require_
     """
     from backend.tools.knowledge import (PROJECT_ROOT, get_index_progress,
                                          relocate_folder_index)
-    data = await request.json()
+    data = await _json_objekt(request)
     rel = _kb_norm_rel(data.get("path") or "")
     new_name = (data.get("new_name") or "").strip()
 
@@ -23851,7 +23946,7 @@ async def wissen_move_subfolder(request: Request, user: str = Depends(require_au
     dem eigenen Bereich in einen fremden (oder umgekehrt) schieben. Wurzelordner
     bleiben der Admin-Flaeche vorbehalten.
     """
-    data = await request.json()
+    data = await _json_objekt(request)
     src = _kb_norm_rel(data.get("path") or "")
     dst = _kb_norm_rel(data.get("target") or "")
 
@@ -23878,7 +23973,7 @@ async def wissen_extract(request: Request, user: str = Depends(require_auth)):
     """URL abrufen -> Extraktions-Entwurf (Pending), dem Nutzer zugeordnet."""
     if not _editable_groups_for(user):
         return JSONResponse({"error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
-    body = await request.json()
+    body = await _json_objekt(request)
     url = (body.get("url") or "").strip()
     if not url:
         return JSONResponse({"error": "Keine URL angegeben"}, status_code=400)
@@ -24433,7 +24528,7 @@ async def wissen_extract_confluence(request: Request, user: str = Depends(requir
         return JSONResponse({"error": "Dir ist kein Wissensbereich zugewiesen."}, status_code=403)
     from backend.confluence_client import ConfluenceError, html_to_text
     from backend.web_extractor import extract_to_pending, update_pending
-    body = await request.json()
+    body = await _json_objekt(request)
     page_id = (body.get("page_id") or "").strip()
     space = (body.get("space") or "").strip()
     page_ids = [str(p).strip() for p in (body.get("page_ids") or []) if str(p).strip()]
@@ -24547,7 +24642,7 @@ async def wissen_extract_progress(job_id: str = "", user: str = Depends(require_
 @app.post("/api/wissen/extract/cancel")
 async def wissen_extract_cancel(request: Request, user: str = Depends(require_auth)):
     """Bricht einen laufenden /wissen-Bulk-Confluence-Import ab."""
-    body = await request.json()
+    body = await _json_objekt(request)
     job_id = (body.get("job_id") or "").strip()
     task = _extract_jobs.get(job_id)
     if not task:
@@ -24740,7 +24835,7 @@ async def wissen_destillat_lauf(request: Request, user: str = Depends(require_au
                             status_code=403)
     from backend import wissen_destillat as _wd
 
-    body = await request.json()
+    body = await _json_objekt(request)
     text = str(body.get("text") or "")
     prompt = str(body.get("prompt") or "")
     gruppen_prompt = str(body.get("gruppen_prompt") or "")
@@ -24778,7 +24873,7 @@ async def wissen_destillat_uebernehmen(request: Request,
                             status_code=403)
     from backend import wissen_destillat as _wd
 
-    body = await request.json()
+    body = await _json_objekt(request)
     markdown = str(body.get("markdown") or "").strip()
     # Leerraum wird getrimmt: ein String aus Leerzeichen ist nicht falsy und
     # kam sonst als "Keine Berechtigung fuer Gruppe(n):   " zurueck – es fehlt
@@ -25046,7 +25141,7 @@ async def knowledge_groups_ungrouped(user: str = Depends(require_auth)):
 async def knowledge_groups_create(request: Request, user: str = Depends(require_knowledge_editor)):
     """Legt eine neue Wissensgruppe (Name + Farbe) an."""
     from backend import knowledge_groups as kg
-    body = await request.json()
+    body = await _json_objekt(request)
     name = (body.get("name") or "").strip()
     if not name:
         return JSONResponse({"ok": False, "error": "Name fehlt"}, status_code=400)
@@ -25072,7 +25167,7 @@ async def knowledge_groups_update(gid: str, request: Request, user: str = Depend
         raise HTTPException(status_code=403,
             detail="Keine Berechtigung, diese Wissensgruppe zu bearbeiten")
     from backend import knowledge_groups as kg
-    body = await request.json()
+    body = await _json_objekt(request)
     folders = body.get("folders")
     if folders is not None:
         if not _may_edit_knowledge(user):
@@ -25143,7 +25238,7 @@ async def knowledge_assignments_set(request: Request, user: str = Depends(requir
     Editoren dürfen eine Datei nur denjenigen Gruppen zuordnen/entziehen, für die
     sie selbst als Editor hinterlegt sind."""
     from backend import knowledge_groups as kg
-    body = await request.json()
+    body = await _json_objekt(request)
     path = (body.get("path") or "").strip()
     if not path:
         return JSONResponse({"ok": False, "error": "Pfad fehlt"}, status_code=400)
@@ -25380,7 +25475,7 @@ def _mounts_migrieren(mounts: list) -> bool:
 @app.post("/api/knowledge/extract")
 async def knowledge_extract(request: Request, user: str = Depends(require_knowledge_editor)):
     """Ruft eine URL ab, extrahiert per LLM Wissen und speichert als Pending-Dokument."""
-    body = await request.json()
+    body = await _json_objekt(request)
     url = (body.get("url") or "").strip()
     job_id = (body.get("job_id") or "").strip()
     if not url:
@@ -25405,7 +25500,7 @@ async def knowledge_extract_cancel(request: Request, user: str = Depends(require
     abgebrochen; der Server gibt den Endpoint frei und speichert kein Ergebnis.
     Zuverlaessiger als sich allein auf den TCP-Disconnect zu verlassen (der hinter
     HTTPS/Reverse-Proxy nicht immer erkannt wird)."""
-    body = await request.json()
+    body = await _json_objekt(request)
     job_id = (body.get("job_id") or "").strip()
     task = _extract_jobs.get(job_id)
     if not task:
@@ -25484,7 +25579,7 @@ async def knowledge_extract_confluence(request: Request, user: str = Depends(req
     """
     from backend.confluence_client import ConfluenceError, html_to_text
     from backend.web_extractor import extract_to_pending, approve_pending
-    body = await request.json()
+    body = await _json_objekt(request)
     page_id = (body.get("page_id") or "").strip()
     space = (body.get("space") or "").strip()
     page_ids = [str(p).strip() for p in (body.get("page_ids") or []) if str(p).strip()]
@@ -25617,7 +25712,7 @@ async def knowledge_pending_get(doc_id: str, user: str = Depends(require_admin_o
 async def knowledge_pending_update(doc_id: str, request: Request, user: str = Depends(require_knowledge_editor)):
     """Aktualisiert ein ausstehendes Wissensdokument (z. B. Inhalt/Metadaten)."""
     from backend.web_extractor import update_pending
-    data = await request.json()
+    data = await _json_objekt(request)
     ok = update_pending(doc_id, data)
     return JSONResponse({"ok": ok})
 
@@ -25654,7 +25749,7 @@ async def knowledge_pending_delete(doc_id: str, user: str = Depends(require_know
 @app.delete("/api/knowledge/extract/file")
 async def knowledge_extract_file_delete(request: Request, user: str = Depends(require_knowledge_editor)):
     """Löscht eine genehmigte Extraktions-MD-Datei und startet Reindex."""
-    body = await request.json()
+    body = await _json_objekt(request)
     rel_path = (body.get("file") or "").strip().lstrip("/")
     if not rel_path:
         return JSONResponse({"ok": False, "error": "Kein Dateipfad"}, status_code=400)
@@ -25758,7 +25853,7 @@ async def list_mounts(user: str = Depends(require_knowledge_editor)):
 @app.post("/api/knowledge/mounts")
 async def add_mount(request: Request, user: str = Depends(require_knowledge_editor)):
     """Legt eine neue Netzwerk-Freigabe an und fügt deren Ordner der Wissensbasis hinzu."""
-    data = await request.json()
+    data = await _json_objekt(request)
     mount_type = data.get("type", "smb")
     # ⚠ HIER wird eine falsch geschriebene Quelle abgefangen – nicht erst beim
     # Klick auf "Verbinden". Dort faellt sie nach bis zu 10 s Netz-Timeout auf,
@@ -25846,7 +25941,7 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_k
     mounts = _get_mounts_config()
     if idx < 0 or idx >= len(mounts):
         return JSONResponse({"error": "Ungueltiger Index"}, status_code=404)
-    data = await request.json()
+    data = await _json_objekt(request)
     # Dieselbe Schranke wie beim Anlegen – sonst waere das Bearbeiten der Weg,
     # eine unmountbare Quelle doch noch in den Bestand zu bekommen.
     from backend import mount_quelle
@@ -26244,7 +26339,7 @@ async def cleanup_analyse(request: Request, user: str = Depends(require_local_au
     ``/apply`` mit dem Text, den ein Mensch bestaetigt hat.
     """
     from backend import wissen_aufraeumen as _wa
-    body = await request.json()
+    body = await _json_objekt(request)
     schluessel = [str(x) for x in (body.get("dateien") or []) if x]
     if not schluessel:
         return JSONResponse({"ok": False, "error": "Keine Datei ausgewaehlt."},
@@ -26296,7 +26391,7 @@ async def cleanup_prompt(request: Request, user: str = Depends(require_local_aut
     from backend import wissen_aufraeumen as _wa
     neu = {}
     try:
-        body = await request.json()
+        body = await _json_objekt(request)
         neu = {str(k): str(v) for k, v in (body.get("neu") or {}).items()}
     except Exception:                                         # noqa: BLE001
         pass
@@ -26320,7 +26415,7 @@ async def cleanup_regeln(request: Request, user: str = Depends(require_local_aut
     HTTP-Aufruf laeuft das in den ersten Proxy-Timeout.
     """
     from backend import wissen_aufraeumen as _wa
-    body = await request.json()
+    body = await _json_objekt(request)
     namen = [str(x) for x in (body.get("quellen") or []) if x]
     if not namen:
         return JSONResponse({"ok": False, "error": "Keine Quelle angegeben."},
@@ -26333,7 +26428,7 @@ async def cleanup_regeln(request: Request, user: str = Depends(require_local_aut
 async def cleanup_abgleich(request: Request, user: str = Depends(require_local_auth)):
     """Stufe 2: die gesammelten Regeln in EINEM Lauf auf Konflikte pruefen."""
     from backend import wissen_aufraeumen as _wa
-    body = await request.json()
+    body = await _json_objekt(request)
     erg = await _wa.abgleichen([str(z) for z in (body.get("zeilen") or [])])
     return JSONResponse(erg, status_code=200 if erg.get("ok") else 400)
 
@@ -26361,7 +26456,7 @@ async def cleanup_behebbar(request: Request, user: str = Depends(require_local_a
     statt einen Knopf anzubieten, der nichts tut.
     """
     from backend import wissen_aufraeumen as _wa
-    body = await request.json()
+    body = await _json_objekt(request)
     konflikte = [k for k in (body.get("konflikte") or []) if isinstance(k, dict)]
     return JSONResponse({"ok": True, **_wa.behebbare_dateien(konflikte)})
 
@@ -26376,7 +26471,7 @@ async def cleanup_apply(request: Request, user: str = Depends(require_local_auth
     Bestandsliste aufgeloest; einen Pfad nimmt der Endpunkt nicht entgegen.
     """
     from backend import wissen_aufraeumen as _wa
-    body = await request.json()
+    body = await _json_objekt(request)
     aend = [a for a in (body.get("aenderungen") or []) if isinstance(a, dict)]
     if not aend:
         return JSONResponse({"ok": False, "error": "Nichts zu uebernehmen."},
@@ -26488,7 +26583,7 @@ async def webdav_status(user: str = Depends(require_knowledge_editor)):
 @app.post("/api/knowledge/webdav/config")
 async def webdav_config(request: Request, user: str = Depends(require_knowledge_editor)):
     """WebDAV aktivieren/deaktivieren + Credentials setzen."""
-    data = await request.json()
+    data = await _json_objekt(request)
     states = config.get_skill_states()
     kb_state = states.get("knowledge", {})
     kb_cfg = kb_state.get("config", {})
@@ -26553,7 +26648,7 @@ async def get_instruction(name: str, user: str = Depends(require_local_auth)):
 @app.post("/api/instructions/{name}")
 async def save_instruction(name: str, request: Request, user: str = Depends(require_local_auth)):
     """Erstellt oder aktualisiert eine Instruction-Datei."""
-    data = await request.json()
+    data = await _json_objekt(request)
     content = data.get("content", "")
     if not name or not name.strip():
         return JSONResponse({"error": "Name darf nicht leer sein"}, status_code=400)
@@ -26707,7 +26802,7 @@ async def gog_status(user: str = Depends(require_local_auth)):
 async def gog_setup(request: Request, user: str = Depends(require_local_auth)):
     """Speichert OAuth-Credentials als client_secret.json + registriert bei gog."""
     import asyncio as _aio, json as _json
-    body = await request.json()
+    body = await _json_objekt(request)
     client_id     = body.get("client_id", "").strip()
     client_secret = body.get("client_secret", "").strip()
     email         = body.get("email", "").strip()
@@ -26750,7 +26845,7 @@ async def gog_setup(request: Request, user: str = Depends(require_local_auth)):
 async def gog_get_auth_url(request: Request, user: str = Depends(require_local_auth)):
     """Remote-Flow Schritt 1: Gibt die Google-Auth-URL zurück (kein Browser auf Server nötig)."""
     import asyncio as _aio
-    body  = await request.json()
+    body  = await _json_objekt(request)
     email = body.get("email", "").strip()
     if not email:
         return JSONResponse({"ok": False, "error": "email fehlt"}, status_code=400)
@@ -26786,7 +26881,7 @@ async def gog_get_auth_url(request: Request, user: str = Depends(require_local_a
 async def gog_auth_exchange(request: Request, user: str = Depends(require_local_auth)):
     """Remote-Flow Schritt 2: Tauscht Redirect-URL gegen Token."""
     import asyncio as _aio
-    body         = await request.json()
+    body         = await _json_objekt(request)
     email        = body.get("email", "").strip()
     redirect_url = body.get("redirect_url", "").strip()
     if not email or not redirect_url:
@@ -26807,7 +26902,7 @@ async def gog_auth_exchange(request: Request, user: str = Depends(require_local_
 async def gog_remove_account(request: Request, user: str = Depends(require_local_auth)):
     """Entfernt ein gog-Konto."""
     import asyncio as _aio
-    body  = await request.json()
+    body  = await _json_objekt(request)
     email = body.get("email", "").strip()
     if not email:
         return JSONResponse({"ok": False, "error": "email fehlt"}, status_code=400)
@@ -26941,7 +27036,7 @@ async def vision_control(request: Request, user: str = Depends(require_local_aut
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
 
-    body = await request.json()
+    body = await _json_objekt(request)
     action = body.get("action", "start")
     source = body.get("source", "0")
 
@@ -27081,7 +27176,7 @@ async def vision_profile_update(request: Request, user: str = Depends(require_lo
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
 
-    body = await request.json()
+    body = await _json_objekt(request)
     name = body.get("name", "")
     if not name:
         return JSONResponse({"error": "name erforderlich"}, status_code=400)
@@ -27112,7 +27207,7 @@ async def vision_profile_rename(request: Request, user: str = Depends(require_lo
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
 
-    body = await request.json()
+    body = await _json_objekt(request)
     old_name = body.get("old_name", "")
     new_name = body.get("new_name", "")
     if not old_name or not new_name:
@@ -27152,7 +27247,7 @@ async def vision_training_start(request: Request, user: str = Depends(require_lo
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
 
-    body = await request.json()
+    body = await _json_objekt(request)
     name = body.get("name", "")
     samples = body.get("samples", 30)
     if not name:
@@ -27242,7 +27337,7 @@ async def tts_synthesize(request: Request):
     if user is None:
         return JSONResponse({"detail": "Nicht autorisiert"}, status_code=status)
 
-    body = await request.json()
+    body = await _json_objekt(request)
     # Meta-Angaben zwischen zwei U+2063 (Prompt-Optimierung, Quellenliste eines
     # vorgeschalteten Proxys) werden nicht vorgelesen. HIER statt in jedem
     # Client: Web, Avatar, Windows- und Android-App mit Server-TTS laufen alle
@@ -27702,7 +27797,7 @@ async def wa_incoming(request: Request):
         wa_log("WARN", "auth", "Webhook ohne gueltiges Bridge-Geheimnis abgewiesen")
         return JSONResponse({"error": "Nicht autorisiert"}, status_code=403)
 
-    body = await request.json()
+    body = await _json_objekt(request)
 
     msg_type = body.get("type", "")
     sender = body.get("from", "unbekannt")
@@ -28841,7 +28936,7 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
     Der Auftrag wird an den anlegenden Benutzer gebunden und läuft später mit
     dessen Rechten. Nicht-Admins erhalten 403 (siehe _require_trigger_admin).
     """
-    body = await req.json()
+    body = await _json_objekt(req)
     _require_trigger_admin(user, body, "POST /api/cron")
     if body.get("kind") == "cve_pruefung":
         # Wartungsauftrag ohne Agent (backend/cve_pruefung.py): kein Auftragstext,
@@ -28887,13 +28982,19 @@ async def cron_update(job_id: str, req: Request, user: str = Depends(require_aut
     owner/owner_privileged sind nicht änderbar (siehe CronManager.UPDATABLE_FIELDS).
     """
     _cron_owned_or_404(job_id, user)
-    body = await req.json()
+    try:
+        body = await req.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Objekt erwartet")
     _require_trigger_admin(user, body, "PUT /api/cron")
     try:
-        if "cve" in body:
-            # Nur fuer CVE-Pruefauftraege; set_cve_payload lehnt jede andere Art ab.
-            cron_manager.set_cve_payload(job_id, body.get("cve"))
-        job = cron_manager.update_job(job_id, **body)
+        # `cve` (nur CVE-Pruefauftraege) prueft update_job zusammen mit allen
+        # anderen Feldern, BEVOR es etwas speichert – siehe dort. Die Namen der
+        # Methoden-Parameter selbst sind keine Felder (sonst TypeError -> 500).
+        job = cron_manager.update_job(
+            job_id, **{k: v for k, v in body.items() if k not in ("self", "job_id")})
         return JSONResponse(job)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -29092,7 +29193,7 @@ async def reminder_senders_set(req: Request, user: str = Depends(require_local_a
     steht in der Antwort, `dropped` nennt die Anzahl der verworfenen.
     """
     from backend import reminders
-    body = await req.json()
+    body = await _json_objekt(req)
     raw = body.get("senders", [])
     before = reminders.allowed_senders()
     clean = reminders.set_allowed_senders(raw)
@@ -29300,7 +29401,7 @@ async def watcher_create(req: Request, user: str = Depends(require_auth)):
     entkoppelte Auslöser wie ein Cron-Job, nur ohne Uhrzeit – deshalb dieselbe
     Sperre für Nicht-Admins (siehe _require_trigger_admin).
     """
-    body = await req.json()
+    body = await _json_objekt(req)
     _require_trigger_admin(user, body, "POST /api/watchers")
     try:
         w = watcher_manager.add_watcher(
@@ -29344,7 +29445,7 @@ async def watcher_update(watcher_id: str, req: Request, user: str = Depends(requ
     owner/owner_privileged sind nicht änderbar (WatcherManager.UPDATABLE_FIELDS).
     """
     _watcher_owned_or_404(watcher_id, user)
-    body = await req.json()
+    body = await _json_objekt(req)
     _require_trigger_admin(user, body, "PUT /api/watchers")
     try:
         vorher = (watcher_manager.get_watcher(watcher_id) or {}).get("webhook_tls_pruefen")
@@ -29470,7 +29571,7 @@ async def api_issues_get(issue_id: str, user: str = Depends(require_auth_or_agen
 async def api_issues_create(request: Request, user: str = Depends(require_auth_or_agent)):
     """Legt ein neues Issue an und benachrichtigt zugehörige Trigger-Watcher."""
     try:
-        data = await request.json()
+        data = await _json_objekt(request)
     except Exception:
         raise HTTPException(400, "Ungueltiger JSON-Body")
     issue, err = _issues_mod.create_issue(user, data or {})
@@ -29489,7 +29590,7 @@ async def api_issues_update(issue_id: str, request: Request,
                             user: str = Depends(require_auth_or_agent)):
     """Aktualisiert ein Issue (z. B. Status/Inhalt) unter Beachtung der Berechtigungen."""
     try:
-        patch = await request.json()
+        patch = await _json_objekt(request)
     except Exception:
         raise HTTPException(400, "Ungueltiger JSON-Body")
     issue, err = _issues_mod.update_issue(user, issue_id, patch or {},

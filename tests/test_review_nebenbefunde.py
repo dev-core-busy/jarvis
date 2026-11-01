@@ -18,6 +18,10 @@ Der fuenfte (Pivot-Rest in excel.js) laeuft in `test_excel_objekt_rest_ui.js`
 Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
 """
 from __future__ import annotations
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 
 import ast
 import asyncio
@@ -206,6 +210,7 @@ _ns = {"JSONResponse": _Antwort, "HTTPException": _HTTPFehler,
        # Ortspruefung (Code-Review 2026-10-07) misst test_wissen_datei_freigabe;
        # hier geht es nur um die Gruppen – jeder Pfad gilt als Wissensort.
        "_wissen_schluessel_erlaubt": lambda rel: True}
+_ns.setdefault("_json_objekt", _json_objekt_aus_main(_ns.get("HTTPException")))
 exec(compile(_mod, "main.py", "exec"), _ns)
 _endpunkt = _ns["knowledge_assignments_set"]
 

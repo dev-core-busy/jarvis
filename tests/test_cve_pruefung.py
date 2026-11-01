@@ -453,6 +453,33 @@ try:
     echt = [c for c in aufrufe if c[0] == "apt-get" and "-s" not in c]
     check(len(echt) == 1 and echt[0][echt[0].index("--") + 1:] == ["foo", "bar"],
           "mit regulaerer Quelle auch bar", str(echt))
+    # Abhaengigkeiten (Code-Review 2026-11-01): der Trockenlauf nennt die
+    # Herkunft JEDER geplanten Installation – eine mitgezogene libbar aus der
+    # regulaeren Quelle darf "nur Sicherheitsquelle" nicht unterlaufen.
+    SIM_SICHER = SIM["text"]
+    SIM["text"] = SIM_SICHER + ("Inst libbar [2.0-1] (2.1-1 Debian:13.2/stable [amd64])\n"
+                                "Inst libneu (1.0-1 Debian:13.2/stable [amd64])\n")
+    aufrufe.clear()
+    r = cve_apt.beheben(["foo"], True)
+    echt = [c for c in aufrufe if c[0] == "apt-get" and "-s" not in c]
+    check(r["ok"] is False and not echt,
+          "nur Sicherheitsquelle: Abhaengigkeit aus der regulaeren Quelle -> NICHT installiert",
+          json.dumps(r)[:200])
+    check("libbar" in r["fehler"] and "libneu" in r["fehler"] and "foo" not in r["fehler"],
+          "der Grund nennt genau die fremden Pakete", r["fehler"])
+    aufrufe.clear()
+    r = cve_apt.beheben(["foo"], nur_sicherheit=False)
+    echt = [c for c in aufrufe if c[0] == "apt-get" and "-s" not in c]
+    check(r["ok"] is True and len(echt) == 1,
+          "mit regulaerer Quelle ist dieselbe Abhaengigkeit erlaubt")
+    SIM["text"] = SIM_SICHER + ("Inst libbar [2.0-1] (2.0-1+deb13u1 Debian:13.2/stable, "
+                                "Debian-Security:13/stable-security [amd64])\n")
+    aufrufe.clear()
+    r = cve_apt.beheben(["foo"], True)
+    check(r["ok"] is True and [i["paket"] for i in r["installiert"]] == ["foo", "libbar"],
+          "Abhaengigkeit (auch) aus der Sicherheitsquelle -> erlaubt und gemeldet",
+          json.dumps(r)[:200])
+    SIM["text"] = SIM_SICHER
     aufrufe.clear()
     SIM["text"] = "Inst foo [1.0-1] (1.0-1+deb13u1)\nRemv wichtig [3.0]\n"
     r = cve_apt.beheben(["foo"], True)
@@ -503,9 +530,15 @@ for n in ast.walk(baum):
     if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "UPDATABLE_FIELDS" for t in n.targets):
         uf = {e.value for e in n.value.elts if isinstance(e, ast.Constant)}
 check(uf and not ({"kind", "payload"} & uf), "kind/payload bleiben aus UPDATABLE_FIELDS", str(uf))
-setp = ast.unparse(fn.get("set_cve_payload") or ast.Pass())
-check("!= 'cve_pruefung'" in setp and "raise ValueError" in setp,
-      "set_cve_payload lehnt jede andere Art ab")
+# Die Art-Schranke liegt seit 2026-11-01 in EINEM Helfer, den set_cve_payload
+# UND update_job (PUT mit "cve") rufen – beide Wege muessen daran haengen.
+pruef = ast.unparse(fn.get("_cve_payload_pruefen") or ast.Pass())
+check("!= 'cve_pruefung'" in pruef and "raise ValueError" in pruef,
+      "_cve_payload_pruefen lehnt jede andere Art ab")
+for _weg in ("set_cve_payload", "update_job"):
+    _rufe = {c.func.attr for c in ast.walk(fn.get(_weg) or ast.Pass())
+             if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)}
+    check("_cve_payload_pruefen" in _rufe, f"{_weg} prueft ueber _cve_payload_pruefen")
 check(cve_pruefung.auftrag_payload({"beheben": "ja"})["beheben"] is False,
       "nur ein echtes True behebt (\"ja\" nicht)")
 check(cve_pruefung.auftrag_payload({"beheben": True, "schwelle": "alle"})

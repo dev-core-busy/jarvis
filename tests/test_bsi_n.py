@@ -21,6 +21,10 @@
 ``backend.config`` nur als Stub. Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
 """
 from __future__ import annotations
+import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
+_sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+# Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
+from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 
 import ast
 import asyncio
@@ -221,6 +225,7 @@ async def _keine_verbindung(*a, **k):
 
 NS1["asyncio"] = types.SimpleNamespace(open_connection=_keine_verbindung,
                                        to_thread=asyncio.to_thread)
+NS1.setdefault("_json_objekt", _json_objekt_aus_main(NS1.get("HTTPException")))
 exec(_funktionen("health"), NS1)
 health = NS1["health"]
 
@@ -737,6 +742,9 @@ NS4 = {
     "_validate_password_strength": lambda pw, u: [],
     "_DOCKER_MODE": True,
     "_load_auth_state": lambda: {}, "_save_auth_state": lambda s: None,
+    # seit 2026-11-01: Kennwortwechsel schreibt gesperrt (echte Signatur: aenderung(state))
+    "_AUTH_STATE_LOCK": __import__("threading").RLock(),
+    "_auth_state_aendern": lambda aenderung: (lambda st: (aenderung(st), st)[1])({}),
     "_sitzungen_nach_kennwortwechsel": lambda u, r=None: "neues-token",
     "_totp_vormerken": lambda u: {"secret": "S", "qr_code": "q", "uri": "u"},
     # BSI H4: Token-Antworten laufen ueber _sitzung_antwort – mit dem ECHTEN Modul
@@ -745,6 +753,7 @@ NS4 = {
     # – das ECHTE Modul, keine Attrappe: es hat keine Abhaengigkeiten auf Modulebene
     "_standard_zugang": __import__("backend.standard_zugang", fromlist=["x"]),
 }
+NS4.setdefault("_json_objekt", _json_objekt_aus_main(NS4.get("HTTPException")))
 exec(_funktionen("_check_rate_limit", "_record_login_attempt", "_konto_sperre_antwort",
                  "_kennwort_schranke", "_kennwort_fehlversuch", "_sitzung_antwort",
                  "change_password", "totp_disable", "totp_setup",

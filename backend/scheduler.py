@@ -116,6 +116,10 @@ class CronManager:
                        (seit 2026-10-29, backend/cve_pruefung.py), `payload` =
                        {beheben: bool, schwelle: ""|alle|ab_niedrig|ab_mittel}.
                        Ebenfalls ohne LLM und ohne Werkzeuge.
+          'loesungsarchiv' – geschlossene Jira-Tickets ins Loesungsarchiv
+                       uebernehmen (seit 2026-11-01, backend/loesungsarchiv.py).
+                       KEIN Agent: je Ticket hoechstens zwei Modellaufrufe mit
+                       ``tools=[]``, der Ticketinhalt ist Fremdtext.
 
         ⚠ EINE NEUE ART GEHOERT IN DIE WHITELIST WEITER UNTEN. Steht sie nicht
         darin, wird der Job STILL zu einem Agentenlauf - er laeuft dann, tut
@@ -130,7 +134,7 @@ class CronManager:
             "enabled": enabled,
             "once": once,   # True → Job löscht sich nach einmaligem Ausführen
             "kind": kind if kind in ("agent", "reminder", "wissensabgleich",
-                                     "cve_pruefung") else "agent",
+                                     "cve_pruefung", "loesungsarchiv") else "agent",
             "payload": dict(payload or {}),
             "owner": owner or "",
             "owner_privileged": bool(owner_privileged),
@@ -362,6 +366,13 @@ class CronManager:
                     schwelle=pl.get("schwelle") or None, ausloeser="auftrag",
                     von=f"Auftrag '{label}'")
                 result = cve_pruefung.kurzbericht(erg)
+            elif job.get("kind") == "loesungsarchiv":
+                # Ohne Agent (backend/loesungsarchiv.py): Modellaufrufe nur mit
+                # tools=[], der Ticketverlauf ist Fremdtext. Laeuft im
+                # Dienst-Loop, weil der Provider-Client daran haengt.
+                from backend import loesungsarchiv
+                erg = await loesungsarchiv.lauf(ausloeser=ausloeser)
+                result = str(erg.get("grund") or "")
             elif _agent_manager:
                 agent = _agent_manager.get_or_create_main()
                 from backend import wirkung as _wirkung

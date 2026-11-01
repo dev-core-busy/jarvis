@@ -179,6 +179,11 @@ _APP_DENY_REL = (
     # Seite die Zieldatei: beschreibbar liesse er den Abgleich eine BELIEBIGE
     # Datei als "nicht mehr gewollt" loeschen.
     "data/confluence_bindung.json", "data/confluence_abgleich.json",
+    # Loesungsarchiv (backend/loesungsarchiv.py): Auswertungen geschlossener
+    # Jira-Tickets samt Ticketverweisen, auch unterhalb des Schwellwerts.
+    # Beschreibbar liesse der Stand den Lauf eine BELIEBIGE Datei als
+    # "veroeffentlicht" fuehren und beim naechsten Abgleich loeschen.
+    "data/loesungsarchiv",
     # Verankerte SAP-Serverzertifikate (backend/sap_cert.py). Der INHALT ist
     # oeffentlich – die SCHREIBBARKEIT ist das Problem: wer hier eine eigene CA
     # ablegt, laesst eine SAP-Verbindung gegen einen fremden Server laufen, ohne
@@ -356,7 +361,11 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 # Quellen, unabhaengig von Wissensgruppen – gelesen wird nur
                 # ueber die API, die je Wissenseditor auf seine Gruppen filtert
                 # (backend/wissensgraph.py legt den Ordner selbst mit 0750 an).
-                "data/graph")
+                "data/graph",
+                # Loesungsarchiv: Auswertungen geschlossener Jira-Tickets –
+                # auch die unter dem Schwellwert, die bewusst NICHT in der
+                # Wissenssuche stehen (backend/loesungsarchiv.py legt 0750 an).
+                "data/loesungsarchiv")
 PRIVATE_MODE = 0o750
 
 # Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das

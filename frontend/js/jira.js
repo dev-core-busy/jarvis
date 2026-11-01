@@ -89,6 +89,10 @@
             this.loadConfig();
             this.loadVorlagen();
             this.loadZugaenge();
+            // Die Bereiche einmal je Seite holen – danach nur noch per Knopf.
+            this.loadArchiv().then(function () {
+                if (!Manager._archivBereiche) Manager.loadArchivBereiche();
+            });
         },
 
         _bind: function () {
@@ -113,6 +117,10 @@
             if (vc) vc.addEventListener('click', function () { Manager.closeVorlage(); });
             var ts = $('jtool-save');
             if (ts) ts.addEventListener('click', this.saveAreas.bind(this));
+            var ls = $('jlarch-save'); if (ls) ls.addEventListener('click', this.saveArchiv.bind(this));
+            var lr = $('jlarch-run'); if (lr) lr.addEventListener('click', this.runArchiv.bind(this));
+            var lb = $('jlarch-bereiche-laden');
+            if (lb) lb.addEventListener('click', function () { Manager.loadArchivBereiche(); });
             /* Der Katalog ist Servertext – ein Sprachwechsel muss ihn neu
                holen. Neu GELADEN wird nur bei echtem Wechsel: zeichnen ruft
                kein applyLang(), aber ein Abruf bei jedem Ereignis waere die
@@ -868,6 +876,187 @@
                 .catch(function () {
                     if ($('jira-issue-title')) $('jira-issue-title').textContent = 'Fehler';
                 });
+        },
+
+        /* ── Lösungsarchiv (backend/loesungsarchiv.py) ─────────────────────
+           Eigener Endpunkt und eigene Datei – Speichern schickt NUR die Felder
+           dieses Containers. Das Bereichs-Pulldown traegt den gespeicherten
+           Bereich auch ohne Jira-Abruf (sonst stuende nach einem Jira-Ausfall
+           ein leeres Feld da, und Speichern wuerde den Bereich loeschen). */
+        _archivTimer: null,
+
+        loadArchiv: function () {
+            return fetch('/api/jira/admin/loesungsarchiv', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
+                    Manager._archivZeichnen(d);
+                })
+                .catch(function (e) { setStatus('jlarch-status', e.message, 'error'); });
+        },
+
+        _archivZeichnen: function (d) {
+            var st = d.einstellungen || {};
+            if ($('jlarch-aktiv')) $('jlarch-aktiv').checked = st.aktiv === true;
+            if ($('jlarch-start')) $('jlarch-start').value = st.start || '';
+            if ($('jlarch-schwelle')) $('jlarch-schwelle').value = st.schwelle != null ? st.schwelle : 10;
+            if ($('jlarch-cron')) $('jlarch-cron').value = st.cron || '';
+            this._bereichOptionen(this._archivBereiche || [], st.bereich || '');
+            var box = $('jlarch-gruppen');
+            if (box) {
+                box.innerHTML = '';
+                var gew = st.gruppen || [];
+                (d.gruppen || []).forEach(function (g) {
+                    var lab = document.createElement('label');
+                    lab.className = 'checkbox-group';
+                    var cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.setAttribute('data-gruppe', g.id);
+                    cb.checked = gew.indexOf(g.id) >= 0;
+                    var sp = document.createElement('span');
+                    sp.textContent = g.name || g.id;
+                    lab.appendChild(cb); lab.appendChild(sp);
+                    box.appendChild(lab);
+                });
+                if (!(d.gruppen || []).length) {
+                    box.textContent = t('jlarch.keine_gruppen', 'Es gibt noch keine Wissensgruppe (Einstellungen → Wissen).');
+                }
+            }
+            this._archivZustand(d);
+        },
+
+        _bereichOptionen: function (liste, aktuell) {
+            var sel = $('jlarch-bereich'); if (!sel) return;
+            sel.innerHTML = '';
+            var leer = document.createElement('option');
+            leer.value = '';
+            leer.textContent = t('jlarch.bereich_waehlen', '– Bereich wählen –');
+            sel.appendChild(leer);
+            var keys = {};
+            liste.forEach(function (b) {
+                keys[b.key] = true;
+                var o = document.createElement('option');
+                o.value = b.key;
+                o.textContent = b.key + (b.name && b.name !== b.key ? ' – ' + b.name : '');
+                sel.appendChild(o);
+            });
+            if (aktuell && !keys[aktuell]) {
+                var o2 = document.createElement('option');
+                o2.value = aktuell; o2.textContent = aktuell;
+                sel.appendChild(o2);
+            }
+            sel.value = aktuell || '';
+        },
+
+        loadArchivBereiche: function () {
+            var sel = $('jlarch-bereich');
+            var aktuell = sel ? sel.value : '';
+            setStatus('jlarch-status', t('jlarch.lade_bereiche', 'Lade Bereiche…'));
+            return fetch('/api/jira/admin/loesungsarchiv/bereiche', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
+                    Manager._archivBereiche = d.bereiche || [];
+                    Manager._bereichOptionen(Manager._archivBereiche, aktuell);
+                    setStatus('jlarch-status', t('jlarch.bereiche_da', '{n} Bereiche geladen.',
+                        { n: Manager._archivBereiche.length }), 'ok');
+                })
+                .catch(function (e) { setStatus('jlarch-status', e.message, 'error'); });
+        },
+
+        _archivZustand: function (d) {
+            var el = $('jlarch-zustand'); if (!el) return;
+            function zeit(s) {
+                if (!s) return '–';
+                var dt = new Date(s * 1000);
+                function p(n) { return (n < 10 ? '0' : '') + n; }
+                return p(dt.getDate()) + '.' + p(dt.getMonth() + 1) + '.' + dt.getFullYear()
+                    + ' ' + p(dt.getHours()) + ':' + p(dt.getMinutes());
+            }
+            var teile = [];
+            teile.push('<div>' + esc(t('jlarch.kennzahlen',
+                '{t} Tickets ausgewertet · {e} Probleme erkannt · {v} in der Wissensdatenbank',
+                { t: d.tickets_verarbeitet || 0, e: d.eintraege || 0, v: d.veroeffentlicht || 0 })) + '</div>');
+            if (d.wissensgraph_aktiv && !d.wissensgraph_deckt) {
+                teile.push('<div style="color:var(--danger);">' + esc(t('jlarch.graph_fremd',
+                    'Wissensgraph: auf andere Wissensgruppen beschränkt – die Lösungen werden dort NICHT aufgenommen (Einstellungen → Wissen → Wissensgraph).')) + '</div>');
+            } else {
+                teile.push('<div>' + esc(d.wissensgraph_aktiv
+                    ? t('jlarch.graph_an', 'Wissensgraph: eingeschaltet – veröffentlichte Lösungen werden mit aufgenommen.')
+                    : t('jlarch.graph_aus', 'Wissensgraph: ausgeschaltet – Lösungen gehen nur in die Wissenssuche.')) + '</div>');
+            }
+            if (d.laeuft) {
+                teile.push('<div><b>' + esc(t('jlarch.laeuft', 'Lauf aktiv: {f} von {g} Tickets',
+                    { f: d.laeuft.fertig || 0, g: d.laeuft.gesamt || 0 })) + '</b></div>');
+            }
+            var ll = d.letzter_lauf;
+            if (ll) {
+                teile.push('<div>' + esc(t('jlarch.letzter', 'Letzter Lauf:')) + ' ' + esc(zeit(ll.wann))
+                    + ' – ' + esc(ll.grund || '') + '</div>');
+                (ll.fehler_beispiele || []).forEach(function (f) {
+                    teile.push('<div style="color:var(--danger);">' + esc(f) + '</div>');
+                });
+            }
+            teile.push('<div>' + esc(t('jlarch.naechster', 'Nächster Lauf:')) + ' '
+                + esc(d.naechster_lauf ? zeit(d.naechster_lauf) : t('jlarch.nicht_geplant', 'nicht geplant')) + '</div>');
+            if (d.lesefehler) teile.push('<div style="color:var(--danger);">' + esc(d.lesefehler) + '</div>');
+            var top = d.haeufigste || [];
+            if (top.length) {
+                var zeilen = top.map(function (h) {
+                    return '<li>' + esc(h.titel || '–') + ' · ' + esc(String(h.zaehler))
+                        + (h.veroeffentlicht ? ' · ' + esc(t('jlarch.in_wissen', 'in der Wissensdatenbank')) : '') + '</li>';
+                }).join('');
+                teile.push('<div style="margin-top:8px;font-weight:600;">' + esc(t('jlarch.top', 'Häufigste Probleme'))
+                    + '</div><ul style="margin:4px 0 0 18px;padding:0;">' + zeilen + '</ul>');
+            }
+            el.innerHTML = teile.join('');
+            // Waehrend eines Laufs nachziehen; danach endet das Nachfragen.
+            clearTimeout(this._archivTimer);
+            if (d.laeuft) this._archivTimer = setTimeout(function () { Manager.loadArchiv(); }, 5000);
+        },
+
+        _archivFormular: function () {
+            var gruppen = [];
+            document.querySelectorAll('#jlarch-gruppen input[data-gruppe]').forEach(function (c) {
+                if (c.checked) gruppen.push(c.getAttribute('data-gruppe'));
+            });
+            var sw = parseInt(($('jlarch-schwelle') || {}).value, 10);
+            return {
+                aktiv: !!($('jlarch-aktiv') && $('jlarch-aktiv').checked),
+                bereich: ($('jlarch-bereich') || {}).value || '',
+                start: ($('jlarch-start') || {}).value || '',
+                schwelle: isNaN(sw) ? 10 : sw,
+                cron: (($('jlarch-cron') || {}).value || '').trim(),
+                gruppen: gruppen
+            };
+        },
+
+        saveArchiv: function () {
+            setStatus('jlarch-status', t('common.saving', 'Speichere…'));
+            return fetch('/api/jira/admin/loesungsarchiv', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(this._archivFormular())
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    setStatus('jlarch-status', t('jlarch.saved', '✓ Gespeichert'), 'ok');
+                    return Manager.loadArchiv();
+              })
+              .catch(function (e) { setStatus('jlarch-status', e.message, 'error'); });
+        },
+
+        runArchiv: function () {
+            setStatus('jlarch-status', t('jlarch.starte', 'Starte Auswertung…'));
+            return fetch('/api/jira/admin/loesungsarchiv/start', {
+                method: 'POST', headers: authHeaders()
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    setStatus('jlarch-status', t('jlarch.gestartet', '✓ Auswertung läuft im Hintergrund.'), 'ok');
+                    setTimeout(function () { Manager.loadArchiv(); }, 1500);
+              })
+              .catch(function (e) { setStatus('jlarch-status', e.message, 'error'); });
         }
     };
 

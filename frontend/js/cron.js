@@ -517,6 +517,9 @@ window.cronManager = new (class JarvisCronManager {
             // Agent. Ob sie automatisch BEHEBT, muss man in der Liste sehen –
             // das ist der Unterschied zwischen Bericht und Eingriff.
             const isCve = job.kind === 'cve_pruefung';
+            // Loesungsarchiv (kind='loesungsarchiv', seit 2026-11-01): ebenfalls
+            // ohne Agent – Modellaufrufe nur ohne Werkzeuge.
+            const isLarch = job.kind === 'loesungsarchiv';
             const cveBadge = isCve
                 ? `<span class="cron-owner-badge cron-badge-user" title="${this._esc(window.t('cron.kind_cve_hint'))}">`
                   + `${this._esc(window.t('cron.kind_cve'))}</span> `
@@ -529,11 +532,14 @@ window.cronManager = new (class JarvisCronManager {
                   + `${this._esc(window.t('cron.kind_reminder'))}</span> `
                 : (isWiss
                 ? `<span class="cron-owner-badge cron-badge-user" title="${this._esc(window.t('cron.kind_wissen_hint'))}">`
-                  + `${this._esc(window.t('cron.kind_wissen'))}</span> ` : '');
+                  + `${this._esc(window.t('cron.kind_wissen'))}</span> `
+                : (isLarch
+                ? `<span class="cron-owner-badge cron-badge-user" title="${this._esc(window.t('cron.kind_larch_hint'))}">`
+                  + `${this._esc(window.t('cron.kind_larch'))}</span> ` : ''));
             // Übernehmen (= Systemrechte) ist bei einer Erinnerung sinnlos: sie
             // fuehrt nichts aus. Dasselbe gilt fuer den Wissensabgleich - er
             // ruft eine Funktion im Dienst, keine Rechte im Spiel.
-            const claimBtn = (!job.owner_privileged && !isRem && !isWiss && !isCve)
+            const claimBtn = (!job.owner_privileged && !isRem && !isWiss && !isCve && !isLarch)
                 ? `<button class="kb-btn-icon cron-claim-btn" data-id="${job.id}" `
                   + `title="${this._esc(window.t('cron.claim_title'))}">🔑</button>` : '';
             return `

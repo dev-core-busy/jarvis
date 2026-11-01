@@ -18062,6 +18062,81 @@ async def jira_admin_areas(request: Request, user: str = Depends(require_local_a
     return JSONResponse({"ok": True, "bereiche": gewaehlt})
 
 
+# ── Loesungsarchiv (backend/loesungsarchiv.py, Einstellungen → Jira) ──────────
+# Admin-Sache wie der ganze Jira-Reiter: der Lauf arbeitet mit dem
+# SAMMELZUGANG und legt einen zeitgesteuerten Auftrag an.
+
+@app.get("/api/jira/admin/loesungsarchiv")
+async def jira_loesungsarchiv_lesen(user: str = Depends(require_local_auth)):
+    """Einstellungen, Kennzahlen, letzter/naechster Lauf und die Wissensgruppen
+    zur Auswahl. Rein lesend – fragt Jira NICHT (das Pulldown holt die Bereiche
+    getrennt, ein toter Jira-Server soll den Container nicht leer lassen)."""
+    from backend import loesungsarchiv as la  # noqa: PLC0415
+    from backend import knowledge_groups as kg  # noqa: PLC0415
+    try:
+        d = await asyncio.to_thread(la.zustand)
+        gruppen = [{"id": g.get("id"), "name": g.get("name") or g.get("id")}
+                   for g in sorted(kg.load().get("groups", []),
+                                   key=lambda g: g.get("order", 0))]
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, **d, "gruppen": gruppen})
+
+
+@app.get("/api/jira/admin/loesungsarchiv/bereiche")
+async def jira_loesungsarchiv_bereiche(user: str = Depends(require_local_auth)):
+    """Jira-Projekte, die der Sammelzugang sehen darf (Pulldown "Bereich")."""
+    from backend import loesungsarchiv as la  # noqa: PLC0415
+    try:
+        return JSONResponse({"ok": True, "bereiche": await asyncio.to_thread(la.bereiche)})
+    except la.ArchivFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": f"Jira nicht erreichbar: {e}"},
+                            status_code=502)
+
+
+@app.post("/api/jira/admin/loesungsarchiv")
+async def jira_loesungsarchiv_speichern(request: Request,
+                                        user: str = Depends(require_local_auth)):
+    """Einstellungen speichern und den Auftrag nachziehen. Eigener Endpunkt,
+    eigene Datei – die Jira-Skill-Config bleibt unberuehrt (Register: ein Knopf,
+    der fremde Felder mitschickt, loescht den Zugang des anderen)."""
+    from backend import loesungsarchiv as la  # noqa: PLC0415
+    try:
+        body = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        st = await asyncio.to_thread(la.einstellungen_speichern, body or {})
+    except ValueError as e:      # ArchivFehler und JobsUnlesbar
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "einstellungen": st})
+
+
+@app.post("/api/jira/admin/loesungsarchiv/start")
+async def jira_loesungsarchiv_start(user: str = Depends(require_local_auth)):
+    """Einen Lauf sofort anstossen – im Dienst-Loop als Task (der Provider-
+    Client haengt daran), die Antwort wartet NICHT auf das Ende."""
+    from backend import loesungsarchiv as la  # noqa: PLC0415
+    if la.zustand().get("laeuft"):
+        return JSONResponse({"ok": False, "error": "Ein Lauf ist bereits aktiv."},
+                            status_code=409)
+    if not la.einstellungen().get("aktiv"):
+        return JSONResponse({"ok": False, "error": "Das Lösungsarchiv ist ausgeschaltet."},
+                            status_code=400)
+    # Ueber den Auftrag, wenn es ihn gibt: dann steht der Lauf im Cron-Protokoll
+    # wie jeder andere (backend/cron_log.py).
+    from backend.scheduler import cron_manager as _cm  # noqa: PLC0415
+    if _cm.get_job(la.AUFTRAG_ID):
+        asyncio.create_task(_cm.run_now(la.AUFTRAG_ID, von=_display_name(user)))
+    else:
+        asyncio.create_task(la.lauf(ausloeser="manuell"))
+    return JSONResponse({"ok": True, "started": True})
+
+
 @app.post("/api/jira/assist/vorlagen/standard")
 async def jira_assist_vorlage_standard(
         request: Request, user: str = Depends(require_jira_vorlagen_access)):

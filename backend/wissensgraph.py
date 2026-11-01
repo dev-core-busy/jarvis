@@ -247,17 +247,6 @@ def quellen_alle() -> list[dict]:
     return raus
 
 
-def hat_inhalt() -> bool:
-    """Liegt ueberhaupt ein Graph vor? Billig (erste Quelldatei genuegt) – die
-    Portal-Kachel fragt ueber /api/me, das jede Seite ruft; ein Ableiten des
-    Graphen kostet dort Sekunden."""
-    try:
-        with os.scandir(_o() / "quellen") as it:
-            return any(e.name.endswith(".json") for e in it)
-    except OSError:
-        return False
-
-
 def quellen_index() -> dict[str, float]:
     """``{manifest: mtime}`` aller Quellen – fuer Abgleich und Bereinigen."""
     return {q["pfad"]: float(q.get("mtime") or 0) for q in quellen_alle()}

@@ -1657,6 +1657,14 @@ _ACTION_DETAILS = [
     # Fehleranalyse (Einstellungen -> Fehleranalyse)
     ("POST",   r"/api/fehleranalyse/dossier",           "Einstellungen · Fehleranalyse · Dossier erstellt"),
     ("POST",   r"/api/fehleranalyse/analyse",           "Einstellungen · Fehleranalyse · Analyse angefordert"),
+    # Wissensgraph (Steuerung in Einstellungen → Wissen, Pflege auf /wissensgraph)
+    ("POST",   r"/api/wissensgraph/einstellungen",      "Wissensgraph · Schalter geändert"),
+    ("POST",   r"/api/wissensgraph/neuaufbau",          "Wissensgraph · Aufbau gestartet"),
+    ("POST",   r"/api/wissensgraph/abbrechen",          "Wissensgraph · Aufbau abgebrochen"),
+    ("POST",   r"/api/wissensgraph/zusammenfuehren",    "Wissensgraph · Begriffe zusammengeführt"),
+    ("POST",   r"/api/wissensgraph/trennen",            "Wissensgraph · Begriffe als verschieden markiert"),
+    ("DELETE", r"/api/wissensgraph/knoten/.+",          "Wissensgraph · Begriff entfernt"),
+    ("POST",   r"/api/wissensgraph/wiki/.+",            "Wissensgraph · Wiki-Seite erzeugt"),
 ]
 _ACTION_DETAILS = [(m, re.compile(muster), label) for m, muster, label in _ACTION_DETAILS]
 
@@ -1691,6 +1699,7 @@ _ACTION_LABELS = [
     # 2026-09-30 in keiner der beiden Tabellen; Abschnitt 4 von
     # tests/test_aktion_beschriftung.py meldet sie seit ihrem Entstehen.
     ("/api/kundenverwaltung/", "Einstellungen · Kundenverwaltung"),
+    ("/api/wissensgraph/",     "Wissensgraph"),
     ("/api/llm/",              "KI-Profile"),
     ("/api/settings",          "Einstellungen"),
     ("/api/memory",            "Gedächtnis"),
@@ -1763,6 +1772,7 @@ _ACTIVITY_PAGES = {
     "claude": "Claude",
     "jira-addon": "Jira",
     "confluence-addon": "Confluence",
+    "wissensgraph": "Wissensgraph",
 }
 
 
@@ -2110,11 +2120,12 @@ def _wissensgraph_zugang(user: str) -> dict:
     * ``pflegen`` (zusammenfuehren, trennen, loeschen, Export): NUR globale
       Wissenseditoren. Ein Begriff gilt fuer den ganzen Graphen – ein
       Gruppen-Editor veraenderte sonst fremde Gruppen mit.
-    * ``steuern`` (Schalter, Aufbau, Status): Administratoren.
+    * ``steuern`` (Schalter, Aufbau, Status): Administratoren – seit 2026-11-01
+      in Einstellungen → Wissen, nicht mehr auf /wissensgraph.
 
     ⚠ ADMIN ALLEIN IST KEIN WISSENSEDITOR (Vorgabe des Betreibers): ein
-    Administrator ohne Eintrag als Wissenseditor steuert den Graphen, sieht
-    aber KEINE Inhalte.
+    Administrator ohne Eintrag als Wissenseditor steuert den Graphen (in den
+    Einstellungen), sieht aber KEINE Inhalte – und auch keine Kachel.
     """
     hit = _wg_zugang_cache.get(user)
     if hit and time.monotonic() - hit[0] < _WG_ZUGANG_TTL:
@@ -2134,21 +2145,20 @@ def _wissensgraph_zugang(user: str) -> dict:
     return z
 
 
-def _wissensgraph_kachel(user: str, ist_admin: bool) -> bool:
-    """Portal-Kachel: Administratoren immer (sie schalten den Graphen ein),
-    Wissenseditoren nur, wenn es etwas zu sehen gibt – Graph eingeschaltet ODER
-    schon ein Bestand da (etwa uebernommen, Aufbau aus). Sonst fuehrte die
-    Kachel auf eine leere Seite (Vergleichsbericht 2026-11-01). Fail-closed."""
-    if ist_admin:
-        return True
-    if _wissensgraph_zugang(user)["stufe"] == "keine":
-        return False
+def _wissensgraph_kachel(user: str) -> bool:
+    """Portal-Kachel (Vorgabe des Betreibers 2026-11-01): NUR bei eingeschaltetem
+    Graphen (Schalter "Wissensgraph an" in Einstellungen → Wissen) und NUR fuer
+    Wissenseditoren. Schalter aus → niemand sieht die Kachel, auch nicht bei
+    vorhandenem Bestand. Das Admin-Recht zaehlt bewusst NICHT – gesteuert wird
+    in den Einstellungen. Der Schalter zuerst: er ist billig (10 s gemerkt),
+    die Editor-Frage geht den Index durch. Fail-closed."""
     try:
-        from backend import wissensgraph as _wg
         from backend import wissensgraph_extraktion as _wgx
-        return bool(_wgx.einstellungen().get("aktiv")) or _wg.hat_inhalt()
+        if not _wgx.einstellungen().get("aktiv"):
+            return False
     except Exception:  # noqa: BLE001
         return False
+    return _wissensgraph_zugang(user)["stufe"] != "keine"
 
 
 def _wissensgraph_erlaubt(user: str) -> set | None:
@@ -8646,9 +8656,9 @@ async def get_me(user: str = Depends(require_auth)):
             # ist schlimmer als keine Kachel.
             "feedback": (_user_may_use_feedback(user)
                          and _skill_active("feedback")),
-            # Wissensgraph: jeder Wissenseditor (Inhalte seiner Gruppen) und
-            # Administratoren (nur Steuerung) – Rechte in _wissensgraph_zugang.
-            "wissensgraph": _wissensgraph_kachel(user, ist_admin),
+            # Wissensgraph: nur Wissenseditoren (Inhalte ihrer Gruppen); die
+            # Steuerung liegt in Einstellungen → Wissen – _wissensgraph_kachel.
+            "wissensgraph": _wissensgraph_kachel(user),
             # Benutzer-Chat: haengt NUR am Skill-Zustand – eine eigene Freigabe
             # gibt es bewusst nicht (Begruendung in require_userchat_access).
             # Das Portal blendet Kachel UND Ungelesen-Badge daran ein; ohne das

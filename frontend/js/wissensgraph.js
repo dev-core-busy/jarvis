@@ -45,10 +45,9 @@
     var _inseln = [];                // [{id, mitglieder, wichtigster, kohaesion, farbe}]
     var _offset = 0;
     var _gefiltert = 0;
-    var _statusTimer = null;
-    var _gruppen = [];
     // Rechte des Betrachters (/api/wissensgraph/zugang): stufe global|gruppen|keine,
-    // gruppen [{id,name}], pflegen (globaler Wissenseditor), steuern (Admin).
+    // gruppen [{id,name}], pflegen (globaler Wissenseditor), steuern (Admin –
+    // steuert in Einstellungen → Wissen, hier nur fuer den Leer-Hinweis).
     var _zugang = { stufe: 'keine', gruppen: [], pflegen: false, steuern: false };
     var _verworfen = [];             // Rueckmeldungen vom Server
     var _widersprueche = [];         // gueltige Befunde vom Server
@@ -547,7 +546,7 @@
             graphFuellen(d, anhaengen);
             if (!G.order) {
                 hinweis(_zugang.steuern
-                    ? t('wissensgraph.empty', 'Für diese Auswahl gibt es noch keine Begriffe. Unter „Aufbau und Pflege" lässt sich der Graph aufbauen.')
+                    ? t('wissensgraph.empty', 'Für diese Auswahl gibt es noch keine Begriffe. Aufgebaut wird der Graph unter Einstellungen → Wissen → Wissensgraph.')
                     : t('wissensgraph.empty_reader', 'Für diese Auswahl gibt es noch keine Begriffe.'));
             } else {
                 hinweis('');
@@ -687,7 +686,7 @@
                 });
             }).catch(function (e) { hinweis(e.message, 'err'); });
         } else {
-            hinweis(t('wissensgraph.search_none', 'Kein Begriff passt zu „{q}".', { q: $('wg-suche').value.trim() }));
+            hinweis(t('wissensgraph.search_none', 'Kein Begriff passt zu „{q}“.', { q: $('wg-suche').value.trim() }));
         }
     }
 
@@ -887,7 +886,7 @@
 
     function knotenLoeschen(d) {
         if (!window.confirm(t('wissensgraph.delete_confirm',
-            '„{name}" aus dem Graphen entfernen? Die Dokumente bleiben unverändert; der Begriff bleibt auch bei jedem Neuaufbau entfernt.',
+            '„{name}“ aus dem Graphen entfernen? Die Dokumente bleiben unverändert; der Begriff bleibt auch bei jedem Neuaufbau entfernt.',
             { name: d.name }))) { return; }
         sende('/api/wissensgraph/knoten/' + encodeURIComponent(d.id), 'DELETE').then(function () {
             $('wg-detail').classList.add('hidden');
@@ -1047,10 +1046,10 @@
         a.widersprueche.forEach(function (b) {
             karten.push(karte('w:' + b.id, t('wissensgraph.contra_title', 'Widerspruch: {name}', { name: b.name }),
                 (b.frage ? b.frage + ' ' : '')
-                    + t('wissensgraph.contra_text', '„{a}": {aa} – „{b}": {ab}', { a: b.name_a, aa: b.aussage_a, b: b.name_b, ab: b.aussage_b })
+                    + t('wissensgraph.contra_text', '„{a}“: {aa} – „{b}“: {ab}', { a: b.name_a, aa: b.aussage_a, b: b.name_b, ab: b.aussage_b })
                     + (b.erklaerung ? ' (' + b.erklaerung + ')' : ''),
                 [b.kid, 'q:' + b.a, 'q:' + b.b], [['q:' + b.a, 'q:' + b.b]],
-                t('wissensgraph.contra_task', 'Prüfe im Wissen, welche Aussage zu „{name}" gilt: „{a}" sagt: {aa}; „{b}" sagt: {ab}. Nenne die Quellen und welche Aussage aktueller ist.',
+                t('wissensgraph.contra_task', 'Prüfe im Wissen, welche Aussage zu „{name}“ gilt: „{a}“ sagt: {aa}; „{b}“ sagt: {ab}. Nenne die Quellen und welche Aussage aktueller ist.',
                   { name: b.name, a: b.name_a, aa: b.aussage_a, b: b.name_b, ab: b.aussage_b }),
                 { knoten: [b.kid, 'q:' + b.a, 'q:' + b.b], typen: [] }));
         });
@@ -1067,7 +1066,7 @@
                 t('wissensgraph.thin_text', '{n} Begriffe, aber kaum untereinander verbunden (Zusammenhalt {k}).',
                   { n: ins.mitglieder, k: ins.kohaesion.toFixed(2).replace('.', ',') }),
                 mitglieder, [],
-                t('wissensgraph.thin_task', 'Recherchiere im Wissen, wie die Begriffe rund um „{name}" zusammenhängen, und fasse die Zusammenhänge zusammen.', { name: wichtig }),
+                t('wissensgraph.thin_task', 'Recherchiere im Wissen, wie die Begriffe rund um „{name}“ zusammenhängen, und fasse die Zusammenhänge zusammen.', { name: wichtig }),
                 { knoten: [ins.wichtigster], typen: [] }));
         });
         if (a.isoliert.length) {
@@ -1103,118 +1102,6 @@
         window.open('/chat', '_blank');
     }
 
-    // ── Pflege: Status, Aufbau, Pruefliste ─────────────────────────────────
-
-    function statusZeichnen(st) {
-        var box = $('wg-status');
-        if (!box) { return; }
-        box.textContent = '';
-        var g = st.graph || {}, z = st.zaehler || {};
-        var arbeitet = arbeitetGerade(st);
-        // Dritter Eintrag: die Zeile bekommt den drehenden Kreis.
-        var zeilen = [
-            [t('wissensgraph.st_state', 'Zustand'), st.aktiv
-                ? (arbeitet ? t('wissensgraph.st_running', 'an – arbeitet') : t('wissensgraph.st_idle', 'an – wartet'))
-                : t('wissensgraph.st_off', 'aus'), arbeitet],
-            [t('wissensgraph.st_queue', 'Warteschlange'), String(st.warteschlange || 0)],
-            [t('wissensgraph.st_done', 'Seit Start erledigt / fehlgeschlagen'), (st.erledigt || 0) + ' / ' + (st.fehler || 0)],
-            [t('wissensgraph.st_calls', 'Modellaufrufe · Token ein/aus'),
-             (z.aufrufe || 0) + ' · ' + (z.token_ein || 0) + ' / ' + (z.token_aus || 0)],
-            [t('wissensgraph.st_calls_care', 'Widersprüche und Wiki · Modellaufrufe · Token ein/aus'),
-             (z.pflege_aufrufe || 0) + ' · ' + (z.pflege_token_ein || 0) + ' / ' + (z.pflege_token_aus || 0)],
-            [t('wissensgraph.st_graph', 'Graph'), t('wissensgraph.st_graph_v', '{q} Dokumente · {e} Begriffe · {k} Verbindungen',
-                { q: g.quellen || 0, e: g.entitaeten || 0, k: g.kanten || 0 })],
-            [t('wissensgraph.st_contra', 'Widersprüche'), t('wissensgraph.st_contra_v', '{n} gefunden · {o} Begriffe offen',
-                { n: g.widersprueche || 0, o: (st.nachlauf || {}).widersprueche_offen || 0 })],
-            [t('wissensgraph.st_wiki', 'Wiki-Seiten'), t('wissensgraph.st_wiki_v', '{n} vorhanden · {o} offen',
-                { n: (st.nachlauf || {}).wiki_seiten || 0, o: (st.nachlauf || {}).wiki_offen || 0 })],
-            [t('wissensgraph.st_model', 'Modell'), st.modell || '–']
-        ];
-        var dl = el('dl', 'wg-st');
-        zeilen.forEach(function (p) {
-            dl.appendChild(el('dt', '', p[0]));
-            var dd = el('dd', '');
-            if (p[2]) { ladeText(dd, p[1]); } else { dd.textContent = p[1]; }
-            dl.appendChild(dd);
-        });
-        box.appendChild(dl);
-        if (st.aktuell) { box.appendChild(el('p', 'ja-note', t('wissensgraph.st_current', 'Gerade: {pfad}', { pfad: aktuellText(st.aktuell) }))); }
-        if ((st.nachlauf || {}).pause) {
-            box.appendChild(el('p', 'ja-note', t('wissensgraph.st_paused',
-                'Widerspruchsprüfung und Wiki-Seiten sind angehalten – sie laufen mit dem nächsten Aufbau weiter.')));
-        }
-        einstellungenZeichnen(st.einstellungen || {});
-        var f = st.letzte_fehler || [];
-        if (f.length) {
-            box.appendChild(el('h4', '', t('wissensgraph.st_errors', 'Letzte Fehler')));
-            var ul = el('ul', 'wg-fehler');
-            f.slice(-5).reverse().forEach(function (x) { ul.appendChild(el('li', '', (x.pfad ? x.pfad + ': ' : '') + x.grund)); });
-            box.appendChild(ul);
-        }
-        var start = $('wg-start');
-        if (start) {
-            start.disabled = !st.aktiv;
-            start.title = st.aktiv ? '' : t('wissensgraph.st_off_hint', 'Der Wissensgraph ist ausgeschaltet.');
-        }
-    }
-
-    /** Arbeitet der Dienst gerade? ⚠ ``laeuft`` gilt nur fuer die Dokument-
-     *  Warteschlange – im Nachlauf (Widersprueche, Wiki-Seiten) steht es auf
-     *  false, waehrend ``aktuell`` den bearbeiteten Begriff nennt. Nur ``laeuft``
-     *  zu lesen zeigte die ganze Nacht "an – wartet" (gemeldet 2026-10-31). */
-    function arbeitetGerade(st) {
-        return !!(st && st.aktiv && (st.laeuft || st.aktuell));
-    }
-
-    function statusHolen() {
-        if (!_zugang.steuern) { return Promise.resolve(null); }
-        var sb = $('wg-status');
-        if (sb && !sb.childNodes.length) { ladeText(sb, t('wissensgraph.loading', 'Lade …')); }
-        return holeJson('/api/wissensgraph/status').then(function (st) {
-            statusZeichnen(st);
-            clearTimeout(_statusTimer);
-            var n = st.nachlauf || {};
-            var nachlauf = st.aktiv && !n.pause && ((n.widersprueche_offen || 0) + (n.wiki_offen || 0)) > 0;
-            if (arbeitetGerade(st) || st.warteschlange || nachlauf) { _statusTimer = setTimeout(statusHolen, 10000); }
-            return st;
-        }).catch(function (e) {
-            var b = $('wg-status');
-            if (b) { b.textContent = t('wissensgraph.load_failed', 'Laden fehlgeschlagen: {grund}', { grund: e.message }); }
-        });
-    }
-
-    /** "widerspruch:e:sap" → lesbarer Text; ein Dateipfad bleibt, wie er ist. */
-    function aktuellText(a) {
-        var m = /^(widerspruch|wiki):(.*)$/.exec(a || '');
-        if (!m) { return a; }
-        var kid = m[2], nm = G && G.hasNode(kid) ? G.getNodeAttribute(kid, 'label') : kid.replace(/^e:/, '');
-        return m[1] === 'wiki' ? t('wissensgraph.st_cur_wiki', 'Wiki-Seite zu „{name}"', { name: nm })
-                               : t('wissensgraph.st_cur_contra', 'Widerspruchsprüfung zu „{name}"', { name: nm });
-    }
-
-    // ── Einstellungen (Schalter) ────────────────────────────────────────────
-
-    function einstellungenZeichnen(e) {
-        document.querySelectorAll('[data-wg-einstellung]').forEach(function (h) {
-            var k = h.getAttribute('data-wg-einstellung');
-            if (typeof e[k] === 'boolean' && !h.disabled) { h.checked = e[k]; }
-        });
-    }
-
-    function einstellungSchreiben(h) {
-        var k = h.getAttribute('data-wg-einstellung'), rumpf = {};
-        rumpf[k] = h.checked;
-        h.disabled = true;
-        meldung('wg-einst-meldung', '');
-        sende('/api/wissensgraph/einstellungen', 'POST', rumpf).then(function () {
-            meldung('wg-einst-meldung', t('wissensgraph.settings_saved', 'Gespeichert.'), 'ok');
-        }).catch(function (e) {
-            meldung('wg-einst-meldung', e.message, 'err');
-        // Der Status danach setzt JEDEN Schalter auf den Stand des Servers –
-        // auch einen abgelehnten zurueck.
-        }).then(function () { h.disabled = false; statusHolen(); });
-    }
-
     // ── Export ──────────────────────────────────────────────────────────────
 
     function exportieren() {
@@ -1247,33 +1134,8 @@
     function meldung(id, text, art) {
         var m = $(id);
         if (!m) { return; }
-        if (art === 'lade') { ladeText(m, text); } else { m.textContent = text || ''; }
+        m.textContent = text || '';
         m.className = 'wg-meldung' + (art === 'err' ? ' is-err' : art === 'ok' ? ' is-ok' : '');
-    }
-
-    function aufbauStarten() {
-        var umfang = $('wg-umfang').value;
-        var rumpf = { umfang: umfang, voll: $('wg-voll').checked };
-        if (umfang === 'gruppe') { rumpf.groups = [$('wg-umfang-gruppe').value]; }
-        if (umfang === 'ordner') { rumpf.ordner = $('wg-umfang-ordner').value.trim(); }
-        $('wg-start').disabled = true;
-        meldung('wg-aufbau-meldung', t('wissensgraph.rebuild_running', 'Wird eingereiht …'), 'lade');
-        sende('/api/wissensgraph/neuaufbau', 'POST', rumpf).then(function (d) {
-            meldung('wg-aufbau-meldung', t('wissensgraph.rebuild_ok',
-                '{n} Dokumente eingereiht, {u} unverändert, {b} bereinigt. Der Aufbau läuft im Hintergrund.',
-                { n: d.eingereiht || 0, u: d.unveraendert || 0, b: d.bereinigt || 0 }), 'ok');
-            statusHolen();
-        }).catch(function (e) {
-            meldung('wg-aufbau-meldung', e.message, 'err');
-        }).then(function () { $('wg-start').disabled = false; });
-    }
-
-    function aufbauAbbrechen() {
-        sende('/api/wissensgraph/abbrechen', 'POST').then(function (d) {
-            meldung('wg-aufbau-meldung', t('wissensgraph.cancel_ok', 'Abgebrochen – {n} Einträge aus der Warteschlange genommen.',
-                { n: d.verworfen || 0 }), 'ok');
-            statusHolen();
-        }).catch(function (e) { meldung('wg-aufbau-meldung', e.message, 'err'); });
     }
 
     var _pruefTimer = null;
@@ -1323,7 +1185,7 @@
                 z.appendChild(text);
                 var ja = el('button', 'ja-btn', t('wissensgraph.merge', 'Gleich – zusammenführen'));
                 ja.type = 'button';
-                ja.title = t('wissensgraph.merge_title', '„{a}" geht in „{b}" auf', { a: p.quelle.name, b: p.ziel.name });
+                ja.title = t('wissensgraph.merge_title', '„{a}“ geht in „{b}“ auf', { a: p.quelle.name, b: p.ziel.name });
                 var nein = el('button', 'ja-btn', t('wissensgraph.split', 'Verschieden'));
                 nein.type = 'button';
                 // Der Kreis steht im geklickten Knopf – Zusammenfuehren schreibt
@@ -1372,11 +1234,7 @@
         // Der Filter ueber der Grafik bietet NUR die Gruppen an, die der
         // Betrachter sehen darf – sie kommen mit seinen Rechten vom Server.
         optionenSetzen('wg-gruppe', _zugang.gruppen || []);
-        if (!_zugang.steuern) { return Promise.resolve(); }
-        return holeJson('/api/knowledge/groups').then(function (d) {
-            _gruppen = (d.groups || []).filter(function (g) { return g && g.id && g.id !== 'ungrouped'; });
-            optionenSetzen('wg-umfang-gruppe', _gruppen);
-        }).catch(function () { /* ohne Gruppenliste bleibt "Eingestellter Umfang" */ });
+        return Promise.resolve();
     }
 
     /** Bereiche nach Recht ein-/ausblenden. Die Schranke sitzt am Server –
@@ -1387,14 +1245,13 @@
             var e = $(id);
             if (e) { e.classList.toggle('hidden', !lesen); }
         });
-        var bloecke = { 'wg-block-steuerung': _zugang.steuern, 'wg-block-pruefliste': _zugang.pflegen,
-                        'wg-block-export': _zugang.pflegen };
+        var bloecke = { 'wg-block-pruefliste': _zugang.pflegen, 'wg-block-export': _zugang.pflegen };
         Object.keys(bloecke).forEach(function (id) {
             var e = $(id);
             if (e) { e.classList.toggle('hidden', !bloecke[id]); }
         });
         var pf = $('wg-karte-pflege');
-        if (pf) { pf.classList.toggle('hidden', !_zugang.steuern && !_zugang.pflegen); }
+        if (pf) { pf.classList.toggle('hidden', !_zugang.pflegen); }
         var h = $('wg-umfang-hinweis');
         if (h) {
             var teil = _zugang.stufe === 'gruppen';
@@ -1469,16 +1326,6 @@
             }).catch(function (e) { hinweis(e.message, 'err'); });
         });
         $('wg-export').addEventListener('click', exportieren);
-        document.querySelectorAll('[data-wg-einstellung]').forEach(function (h) {
-            h.addEventListener('change', function () { einstellungSchreiben(h); });
-        });
-        $('wg-umfang').addEventListener('change', function () {
-            var u = $('wg-umfang').value;
-            $('wg-umfang-gruppe').classList.toggle('hidden', u !== 'gruppe');
-            $('wg-umfang-ordner').classList.toggle('hidden', u !== 'ordner');
-        });
-        $('wg-start').addEventListener('click', aufbauStarten);
-        $('wg-abbrechen').addEventListener('click', aufbauAbbrechen);
         $('wg-pruef-laden').addEventListener('click', function () { prueflisteLaden(false); });
         $('wg-portal-btn').addEventListener('click', function () { location.href = '/portal'; });
         $('wg-logout-btn').addEventListener('click', function () {
@@ -1577,15 +1424,15 @@
         if (!tok()) { location.replace('/'); return; }
         holeJson('/api/wissensgraph/zugang').then(function (z) {
             _zugang = z || _zugang;
-            if (_zugang.stufe === 'keine' && !_zugang.steuern) { location.replace('/portal'); return; }
+            // Nur Wissenseditoren: ein Admin ohne Editor-Eintrag steuert in
+            // Einstellungen → Wissen und hat hier nichts zu sehen (2026-11-01).
+            if (_zugang.stufe === 'keine') { location.replace('/portal'); return; }
             if (app) { app.classList.remove('hidden'); }
             farbenLesen();
             binden();
             bereicheSetzen();
             faerbungSetzen('typ');
-            statusHolen();
             try { localStorage.removeItem(WEG_SPEICHER_ALT); } catch (e) { /* privater Modus */ }
-            if (_zugang.stufe === 'keine') { gruppenFuellen(); return; }
             Promise.all([gruppenFuellen(), rueckmeldungLaden(), widerspruecheLaden()])
                 .then(function () { laden(false); });
         }).catch(function () { location.replace('/'); });
@@ -1595,7 +1442,6 @@
     window.WissensgraphIntern = {
         norm: norm, knotenGroesse: knotenGroesse, relevanzText: relevanzText,
         auffaelligkeiten: auffaelligkeiten, webgl2: webgl2, grafikMoeglich: grafikMoeglich,
-        arbeitetGerade: arbeitetGerade, statusHolen: statusHolen,
         graphSetzen: function (g) { G = g; }, graph: function () { return G; },
         renderer: function () { return R; }, hervor: function () { return _hervor; },
         hoverAuswahl: hoverAuswahl, knotenReduzierer: knotenReduzierer, freiAuswaehlen: freiAuswaehlen,

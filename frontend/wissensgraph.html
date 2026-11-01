@@ -141,53 +141,14 @@
 
         <section class="ja-card" data-klapp="pflege" id="wg-karte-pflege">
             <div class="ja-card-head" role="button" tabindex="0" aria-expanded="true">
-                <h2 data-i18n="wissensgraph.admin_h">Aufbau und Pflege</h2>
+                <h2 data-i18n="wissensgraph.care_h">Prüfliste und Export</h2>
                 <span class="ja-caret" aria-hidden="true">&#9662;</span>
             </div>
             <div class="ja-card-body">
-                <!-- Drei Bloecke, drei Rechte (2026-10-31): Steuerung = Administratoren,
-                     Pruefliste und Export = globale Wissenseditoren. Die Schranken sitzen
-                     an den Endpunkten; das Ausblenden erspart nur Knoepfe, die in ein 403
-                     fuehren. -->
-                <div id="wg-block-steuerung" class="hidden">
-                <div id="wg-status" class="wg-status" role="status" aria-live="polite"></div>
-
-                <h3 data-i18n="wissensgraph.settings_h">Schalter</h3>
-                <div class="wg-schalter">
-                    <label class="wg-haken"><input type="checkbox" data-wg-einstellung="aktiv">
-                        <span data-i18n="wissensgraph.set_active">Wissensgraph an (liest neue und geänderte Dokumente)</span></label>
-                    <label class="wg-haken"><input type="checkbox" data-wg-einstellung="expansion">
-                        <span data-i18n="wissensgraph.set_expansion">Wissenssuche nutzt den Graphen (findet zusammengehörige Dokumente)</span></label>
-                    <label class="wg-haken"><input type="checkbox" data-wg-einstellung="widersprueche">
-                        <span data-i18n="wissensgraph.set_contra">Quellen auf widersprüchliche Aussagen prüfen</span></label>
-                    <label class="wg-haken"><input type="checkbox" data-wg-einstellung="wiki_sammellauf">
-                        <span data-i18n="wissensgraph.set_wiki">Wiki-Seiten im Hintergrund erzeugen (Begriffe mit mehreren Quellen)</span></label>
-                </div>
-                <div id="wg-einst-meldung" class="wg-meldung" role="status" aria-live="polite"></div>
-
-                <h3 data-i18n="wissensgraph.rebuild_h">Neu aufbauen</h3>
-                <div class="wg-leiste">
-                    <select id="wg-umfang" class="wg-feld" data-i18n-aria="wissensgraph.scope" aria-label="Umfang">
-                        <option value="eingestellt" data-i18n="wissensgraph.scope_set">Eingestellter Umfang</option>
-                        <option value="alles" data-i18n="wissensgraph.scope_all">Alles</option>
-                        <option value="gruppe" data-i18n="wissensgraph.scope_group">Eine Wissensgruppe</option>
-                        <option value="ordner" data-i18n="wissensgraph.scope_folder">Ein Ordner</option>
-                    </select>
-                    <select id="wg-umfang-gruppe" class="wg-feld hidden" data-i18n-aria="wissensgraph.filter_group" aria-label="Wissensgruppe"></select>
-                    <input type="text" id="wg-umfang-ordner" class="wg-feld hidden" autocomplete="off"
-                           placeholder="data/rag/…" data-i18n-aria="wissensgraph.filter_folder" aria-label="Ordner">
-                    <label class="wg-haken"><input type="checkbox" id="wg-voll">
-                        <span data-i18n="wissensgraph.rebuild_full">Auch Unverändertes neu lesen</span></label>
-                </div>
-                <div class="ja-dl">
-                    <button type="button" class="ja-btn ja-btn-haupt" id="wg-start"
-                            data-i18n="wissensgraph.rebuild_start">Aufbau starten</button>
-                    <button type="button" class="ja-btn" id="wg-abbrechen"
-                            data-i18n="wissensgraph.rebuild_cancel">Abbrechen</button>
-                </div>
-                <div id="wg-aufbau-meldung" class="wg-meldung" role="status" aria-live="polite"></div>
-                </div>
-
+                <!-- Pruefliste und Export = globale Wissenseditoren. Aufbau, Schalter
+                     und Status liegen seit 2026-11-01 in Einstellungen → Wissen. Die
+                     Schranken sitzen an den Endpunkten; das Ausblenden erspart nur
+                     Knoepfe, die in ein 403 fuehren. -->
                 <div id="wg-block-pruefliste" class="hidden">
 
                 <h3 data-i18n="wissensgraph.review_h">Prüfliste: gleich oder verschieden?</h3>
@@ -222,7 +183,7 @@
 <script src="/static/js/syspackages.js?v=16"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/i18n.js?v=413"></script>
+<script src="/static/js/i18n.js?v=414"></script>
 <script src="/static/js/branding.js?v=29"></script>
 <script src="/static/js/sessions.js?v=10"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
@@ -230,10 +191,11 @@
 <script src="/static/js/activity.js?v=3"></script>
 <script src="/static/js/issues.js?v=15"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
+<script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/vendor/graphology.min.js?v=1"></script>
 <script src="/static/js/vendor/sigma.min.js?v=1"></script>
 <script src="/static/js/vendor/graphology-fa2.min.js?v=1"></script>
 <script src="/static/js/vendor/graphology-louvain.min.js?v=1"></script>
-<script src="/static/js/wissensgraph.js?v=12"></script>
+<script src="/static/js/wissensgraph.js?v=13"></script>
 </body>
 </html>

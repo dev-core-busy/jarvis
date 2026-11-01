@@ -282,21 +282,20 @@ async function main() {
         const sichtbarP = (id) => !!dp.getElementById(id) && !dp.getElementById(id).classList.contains('hidden');
         pruefe(sichtbarP('wg-karte-graph') && sichtbarP('wg-karte-pflege') && sichtbarP('wg-block-pruefliste')
                && sichtbarP('wg-block-export'), 'globaler Wissenseditor: Inhalte, Pruefliste und Export sichtbar');
-        pruefe(!sichtbarP('wg-block-steuerung'), 'globaler Wissenseditor ohne Admin: KEINE Steuerung');
+        pruefe(!dp.getElementById('wg-block-steuerung') && !dp.getElementById('wg-start') && !dp.querySelector('[data-wg-einstellung]'),
+               'keine Steuerung auf der Seite (liegt in Einstellungen → Wissen)');
         pruefe(sp.rufe.indexOf('/api/wissensgraph/status') < 0, 'globaler Wissenseditor ohne Admin: holt keinen Status',
                sp.rufe.join(','));
         sp.w.close();
 
+        // Admin ohne Editor-Eintrag: seit 2026-11-01 KEINE Seite – gesteuert wird
+        // in Einstellungen → Wissen (die Kachel haengt nur an den Wissenseditoren).
         const sa = baueSeite({ admin: true, zugang: { stufe: 'keine', gruppen: [], pflegen: false, steuern: true } });
         await warte(300);
         const da = sa.w.document;
-        const sichtbarA = (id) => !!da.getElementById(id) && !da.getElementById(id).classList.contains('hidden');
-        pruefe(sichtbarA('wg-app') && sichtbarA('wg-karte-pflege') && sichtbarA('wg-block-steuerung'),
-               'Admin allein: Steuerung sichtbar');
-        pruefe(!sichtbarA('wg-karte-graph') && !sichtbarA('wg-karte-insights'), 'Admin allein: KEINE Inhalte (Grafik, Auffaelligkeiten)');
-        pruefe(!sichtbarA('wg-block-pruefliste') && !sichtbarA('wg-block-export'), 'Admin allein: keine Pflege, kein Export');
-        pruefe(sa.rufe.indexOf('/api/wissensgraph/graph') < 0 && sa.rufe.indexOf('/api/wissensgraph/widersprueche') < 0
-               && sa.rufe.indexOf('/api/wissensgraph/status') >= 0, 'Admin allein: holt Status, aber keinen Inhalt', sa.rufe.join(','));
+        pruefe(da.getElementById('wg-app').classList.contains('hidden'), 'Admin allein: Seite bleibt verborgen');
+        pruefe(sa.rufe.indexOf('/api/wissensgraph/graph') < 0 && sa.rufe.indexOf('/api/wissensgraph/status') < 0,
+               'Admin allein: holt weder Inhalt noch Status', sa.rufe.join(','));
         sa.w.close();
     }
 
@@ -333,9 +332,9 @@ async function main() {
     pruefe(new RegExp(N + ' von ' + N).test(d.getElementById('wg-zaehler').textContent), 'Zaehler nennt beide Zahlen',
            d.getElementById('wg-zaehler').textContent);
     pruefe(d.getElementById('wg-mehr').classList.contains('hidden'), '"Weitere laden" verborgen, wenn alles da ist');
-    pruefe(s.rufe.indexOf('/api/wissensgraph/status') >= 0, 'Status wird geholt');
-    pruefe(/14 Begriffe/.test(d.getElementById('wg-status').textContent), 'Status zeigt die Kennzahlen',
-           d.getElementById('wg-status').textContent.slice(0, 200));
+    pruefe(s.rufe.indexOf('/api/wissensgraph/status') < 0 && !d.getElementById('wg-status'),
+           'kein Status auf der Seite (Steuerung in den Einstellungen)', s.rufe.join(','));
+    pruefe(/Prüfliste und Export/.test(d.querySelector('#wg-karte-pflege h2').textContent), 'Container heisst „Prüfliste und Export“');
     pruefe(d.querySelectorAll('#wg-gruppe option').length === 2, 'Wissensgruppen im Filter');
 
     abschnitt('4. Auffaelligkeiten');
@@ -498,34 +497,12 @@ async function main() {
     await warte(80);
     pruefe(/Veraltet/.test((wikiBox() || {}).textContent || ''), 'veraltete Seite ist gekennzeichnet');
 
-    abschnitt('6c. Schalter, Export, Status');
-    const hk = (k2) => d.querySelector('[data-wg-einstellung="' + k2 + '"]');
-    pruefe(hk('aktiv') && hk('aktiv').checked === true && hk('expansion').checked === false
-           && hk('widersprueche').checked === true, 'Schalter zeigen die Einstellungen');
-    hk('expansion').checked = true;
-    hk('expansion').dispatchEvent(new s.w.Event('change'));
-    await warte(60);
-    const es = s.gesendet.filter(x => x.u === '/api/wissensgraph/einstellungen' && x.m === 'POST').pop();
-    pruefe(es && JSON.stringify(es.body) === '{"expansion":true}', 'Umschalten sendet NUR dieses Feld', JSON.stringify(es && es.body));
-    pruefe(s.server.einst.expansion === true, '... und der Server hat es');
-    s.server.einstFehler = true;
-    hk('wiki_sammellauf').checked = false;
-    hk('wiki_sammellauf').dispatchEvent(new s.w.Event('change'));
-    await warte(60);
-    pruefe(hk('wiki_sammellauf').checked === true && /abgelehnt/.test(d.getElementById('wg-einst-meldung').textContent),
-           'abgelehnt: Schalter springt zurueck, Begruendung steht da', d.getElementById('wg-einst-meldung').textContent);
-    s.server.einstFehler = false;
+    abschnitt('6c. Export');
     d.getElementById('wg-export').click();
     await warte(60);
     pruefe(s.gesendet.some(x => x.u === '/api/wissensgraph/export'), 'Export holt die Datei mit Kopfzeile');
     pruefe(/wissensgraph-20261031\.zip/.test(d.getElementById('wg-export-meldung').textContent),
            'Export: Dateiname aus dem Server', d.getElementById('wg-export-meldung').textContent);
-    const stt = d.getElementById('wg-status').textContent;
-    pruefe(/1 gefunden · 3 Begriffe offen/.test(stt) && /2 vorhanden · 5 offen/.test(stt), 'Status zeigt Widersprueche und Wiki-Seiten', stt.slice(0, 400));
-    s.server.pause = true;
-    hk('aktiv').dispatchEvent(new s.w.Event('change'));
-    await warte(80);
-    pruefe(/angehalten/.test(d.getElementById('wg-status').textContent), 'angehaltener Nachlauf wird genannt');
     pruefe(s.fehler.length === 0, 'keine unerwarteten Skriptfehler', s.fehler.slice(0, 3).join(' | '));
 
     abschnitt('6d. Drehender Kreis und Pruefliste im Hintergrund');
@@ -551,44 +528,6 @@ async function main() {
     await warte(80);
     pruefe(!d.querySelector('#wg-detail-inhalt .jv-pkg-spin'), 'Detail: Kreis nach dem Laden weg');
 
-    // Zustand "an – arbeitet" mit Kreis (gemeldet 2026-10-31). ⚠ Im Nachlauf
-    // steht laeuft auf false – gearbeitet wird trotzdem (aktuell ist gesetzt).
-    pruefe(W.arbeitetGerade({ aktiv: true, laeuft: true }) === true
-           && W.arbeitetGerade({ aktiv: true, laeuft: false, aktuell: 'wiki:e:a1' }) === true
-           && W.arbeitetGerade({ aktiv: true, laeuft: false, aktuell: '' }) === false
-           && W.arbeitetGerade({ aktiv: false, laeuft: true }) === false,
-           'arbeitet = an UND (Warteschlange laeuft ODER ein Begriff/Dokument wird bearbeitet)');
-    const zustandDd = () => { const dts = Array.from(d.querySelectorAll('#wg-status dt'));
-                              const i = dts.findIndex(x => x.textContent === 'Zustand');
-                              return i >= 0 ? d.querySelectorAll('#wg-status dd')[i] : null; };
-    s.server.zustand = { laeuft: false, aktuell: 'widerspruch:e:a1' };
-    await W.statusHolen();
-    const zd1 = zustandDd();
-    pruefe(!!zd1 && /an – arbeitet/.test(zd1.textContent) && !!zd1.querySelector('.jv-pkg-spin'),
-           'Nachlauf arbeitet: "an – arbeitet" mit Kreis', zd1 && zd1.innerHTML);
-    pruefe(d.querySelectorAll('#wg-status dd .jv-pkg-spin').length === 1, 'genau eine Zeile traegt den Kreis');
-    s.server.zustand = { laeuft: true, aktuell: 'data/rag/x/d.md' };
-    await W.statusHolen();
-    pruefe(!!zustandDd() && !!zustandDd().querySelector('.jv-pkg-spin'), 'Warteschlange laeuft: Kreis');
-    s.server.zustand = { zaehler: { aufrufe: 5, token_ein: 50, token_aus: 20, pflege_aufrufe: 12, pflege_token_ein: 345, pflege_token_aus: 67 } };
-    await W.statusHolen();
-    pruefe(/Widersprüche und Wiki · Modellaufrufe/.test(d.getElementById('wg-status').textContent)
-           && /12 · 345 \/ 67/.test(d.getElementById('wg-status').textContent),
-           'Status nennt die Modellaufrufe von Widerspruechen und Wiki eigens', d.getElementById('wg-status').textContent.slice(0, 300));
-    s.server.zustand = {};
-    await W.statusHolen();
-    pruefe(!!zustandDd() && /an – wartet/.test(zustandDd().textContent) && !d.querySelector('#wg-status .jv-pkg-spin'),
-           'wartet: kein Kreis', zustandDd() && zustandDd().textContent);
-    d.getElementById('wg-status').textContent = '';
-    const sh = W.statusHolen();
-    pruefe(!!d.querySelector('#wg-status .jv-pkg-spin'), 'leerer Status: Kreis waehrend des ersten Abrufs');
-    await sh;
-    pruefe(!d.querySelector('#wg-status .jv-pkg-spin'), 'nach dem Abruf: Kreis weg');
-    d.getElementById('wg-start').click();
-    pruefe(!!d.querySelector('#wg-aufbau-meldung .jv-pkg-spin'), 'Aufbau: "Wird eingereiht" mit Kreis',
-           d.getElementById('wg-aufbau-meldung').innerHTML);
-    await warte(60);
-    pruefe(!d.querySelector('#wg-aufbau-meldung .jv-pkg-spin'), 'Aufbau: Kreis nach der Antwort weg');
     const paarKn = d.querySelector('#wg-pruefliste .wg-paar .wg-paar-knoepfe button');
     pruefe(!!paarKn, 'Positivkontrolle: Pruefpaar mit Knopf vorhanden');
     if (paarKn) {

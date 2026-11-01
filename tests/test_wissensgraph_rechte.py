@@ -187,43 +187,47 @@ if _alt_kg is not None:
 
 # ─── 1b. Portal-Kachel ───────────────────────────────────────────────────────
 
-section("1b. Portal-Kachel: nur wenn es etwas zu sehen gibt (Vergleichsbericht 2026-11-01)")
+section("1b. Portal-Kachel: nur Wissenseditoren, nur bei eingeschaltetem Graphen (2026-11-01)")
 if "_wissensgraph_kachel" not in FUNKTIONEN:
     check("_wissensgraph_kachel steht in main.py", False)
 else:
     from backend import wissensgraph_extraktion as wgx
     exec(compile(ast.Module(body=[FUNKTIONEN["_wissensgraph_kachel"]], type_ignores=[]), "main.py", "exec"), ns)
     kachel = ns["_wissensgraph_kachel"]
-    _alt_einst, _alt_inhalt, _alt_ordner = wgx.einstellungen, wg.hat_inhalt, wg.ORDNER
-    check("Positivkontrolle: der Sandkasten-Graph hat Inhalt", wg.hat_inhalt() is True)
-    wgx.einstellungen = lambda frisch=False: dict(wgx.VORGABEN, aktiv=False)
-    check("Graph aus, Bestand da: Gruppen-Editor sieht die Kachel", kachel("ga", False) is True)
-    wg.ORDNER = TMP / "gibt_es_nicht"
-    check("kein Graph-Ordner: kein Inhalt", wg.hat_inhalt() is False)
-    # Ein VORHANDENER, leerer Quellen-Ordner – sonst bricht scandir ab und die
-    # Pruefung waere unabhaengig vom Code wahr (Gegenprobe war stumm).
-    (TMP / "leer" / "quellen").mkdir(parents=True)
-    (TMP / "leer" / "quellen" / "notiz.txt").write_text("x", encoding="utf-8")
-    wg.ORDNER = TMP / "leer"
-    check("Positivkontrolle: leerer Quellen-Ordner (nur Fremddatei) hat keinen Inhalt", wg.hat_inhalt() is False)
-    check("Graph aus, kein Bestand: Gruppen-Editor sieht KEINE Kachel", kachel("ga", False) is False)
-    check("Graph aus, kein Bestand: globaler Editor sieht KEINE Kachel", kachel("glob", False) is False)
-    check("Graph aus, kein Bestand: Admin sieht sie (er schaltet ein)", kachel("admin", True) is True)
+    _alt_einst = wgx.einstellungen
     wgx.einstellungen = lambda frisch=False: dict(wgx.VORGABEN, aktiv=True)
-    check("Graph an, noch kein Bestand: Gruppen-Editor sieht die Kachel", kachel("ga", False) is True)
-    check("normaler Benutzer: nie", kachel("normal", False) is False)
+    check("Schalter an: Gruppen-Editor sieht die Kachel", kachel("ga") is True)
+    check("Schalter an: globaler Editor sieht sie", kachel("glob") is True)
+    check("Schalter an: Admin, der globaler Editor ist, sieht sie", kachel("admin_glob") is True)
+    check("Schalter an: Admin ALLEIN sieht KEINE Kachel (steuert in den Einstellungen)", kachel("admin") is False)
+    check("Schalter an: normaler Benutzer nie", kachel("normal") is False)
+    wgx.einstellungen = lambda frisch=False: dict(wgx.VORGABEN, aktiv=False)
+    check("Positivkontrolle: der Sandkasten hat einen Graphen", len(wg.quellen_index()) >= 3, len(wg.quellen_index()))
+    aus = {u: kachel(u) for u in ROLLEN}
+    check("Schalter aus: NIEMAND sieht die Kachel – auch bei vorhandenem Graphen", not any(aus.values()), aus)
+    vorher_n = AUFRUFE["n"]
+    ns["_wg_zugang_cache"].clear()
+    kachel("ga")
+    check("Schalter aus: die teure Editor-Frage entfaellt", AUFRUFE["n"] == vorher_n, AUFRUFE["n"] - vorher_n)
 
     def _wirft(*_a, **_k):
         raise RuntimeError("kaputt")
     wgx.einstellungen = _wirft
-    check("Fehler beim Nachsehen: keine Kachel (fail-closed)", kachel("ga", False) is False)
-    wgx.einstellungen, wg.hat_inhalt, wg.ORDNER = _alt_einst, _alt_inhalt, _alt_ordner
+    check("Fehler beim Lesen des Schalters: keine Kachel (fail-closed)", kachel("ga") is False)
+    wgx.einstellungen = _alt_einst
+    # Nur das Rechte-Dictionary von /api/me (erkennbar an den Nachbarrechten) –
+    # die Seitenliste des Aktivitaetslogs traegt denselben Schluessel.
     me = [n for n in ast.walk(MAIN) if isinstance(n, ast.Dict)
-          and any(isinstance(k, ast.Constant) and k.value == "wissensgraph" for k in n.keys)]
+          and {"wissensgraph", "feedback", "ai_mouse"} <= {k.value for k in n.keys if isinstance(k, ast.Constant)}]
+    check("Positivkontrolle: genau ein Rechte-Dictionary gefunden", len(me) == 1, len(me))
     werte = [ast.unparse(v) for d in me for k, v in zip(d.keys, d.values)
              if isinstance(k, ast.Constant) and k.value == "wissensgraph"]
     check("/api/me: das Recht \"wissensgraph\" kommt aus _wissensgraph_kachel",
-          bool(werte) and all(w.startswith("_wissensgraph_kachel(") for w in werte), werte)
+          bool(werte) and all(w == "_wissensgraph_kachel(user)" for w in werte), werte)
+    params = [a.arg for a in FUNKTIONEN["_wissensgraph_kachel"].args.args]
+    check("Kachelregel kennt kein Admin-Argument mehr", params == ["user"], params)
+    rumpf = ast.unparse(FUNKTIONEN["_wissensgraph_kachel"])
+    check("Kachelregel fragt kein Admin-Praedikat", "_is_admin_user" not in rumpf and "ist_admin" not in rumpf)
 
 # ─── 2. Teilgraph ────────────────────────────────────────────────────────────
 

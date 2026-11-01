@@ -9510,3 +9510,33 @@ body.light #service-restart-status.svc-err  { color: #c62828; }   /* 5,15:1 */
     font-size: 0.8em;
     color: var(--text-secondary);
 }
+
+/* ── Wissensgraph in Einstellungen → Wissen (wissensgraph_steuerung.js) ──
+   Seit 2026-11-01 hier statt auf /wissensgraph; die Bauteile dort
+   (wissensgraph.css, jira_addon.css) laedt diese Seite nicht. */
+.kbwg-status { margin: 0 0 6px; }
+.kbwg-st {
+    display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px;
+    margin: 0 0 8px; font-size: .9rem;
+}
+.kbwg-st dt { color: var(--text-secondary); }
+.kbwg-st dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+.kbwg-fehler { margin: 0; padding-left: 18px; font-size: .85rem; overflow-wrap: anywhere; }
+.kbwg-schalter { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; }
+.kbwg-haken {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: .88rem; color: var(--text-secondary); cursor: pointer;
+}
+.kbwg-leiste { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.kbwg-feld {
+    padding: 7px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-secondary); color: var(--text-primary);
+    font-size: .9rem; font-family: inherit; min-width: 0; max-width: 100%;
+}
+.kbwg-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; }
+.kbwg-meldung { font-size: .88rem; min-height: 1.2em; margin: 4px 0 8px; }
+.kbwg-meldung.is-ok { color: var(--text-primary); }
+/* --danger als Schrift haelt nur auf dunkler Flaeche (Register) – hell abdunkeln. */
+.kbwg-meldung.is-err { color: var(--danger); }
+body.light .kbwg-meldung.is-err { color: color-mix(in srgb, var(--danger) 78%, #000); }

@@ -366,21 +366,47 @@ try:
         check("[%s] Klapp: gespeichert ist danach nur noch die Pflege" % thema, bool(auf) and auf.get("zu") == ["pflege"], auf)
         bild(os.path.join(HOME, "wissensgraph_%s_aufgeklappt.png" % thema))
 
-        # Zustand mit Kreis: gegen den ECHTEN Arbeiter auf DEV – gemessen wird die
-        # Uebereinstimmung von Anzeige und Status, nicht ein bestimmter Zustand.
-        js("document.querySelector('.ja-card[data-klapp=\"pflege\"] .ja-card-head').click()")
-        time.sleep(2.5)
-        zst = js("(async function(){var st=await fetch('/api/wissensgraph/status',{credentials:'same-origin',"
-                 "headers:window.JarvisSitzung?window.JarvisSitzung.kopfsatz():{}}).then(function(r){return r.json();});"
-                 "await window.WissensgraphIntern.statusHolen();"
-                 "var dd=document.querySelector('#wg-status dl dd');var s=dd?dd.querySelector('.jv-pkg-spin'):null;"
-                 "return {arbeitet:window.WissensgraphIntern.arbeitetGerade(st),laeuft:st.laeuft,aktuell:st.aktuell||'',"
-                 "text:dd?dd.textContent:'',kreis:!!s,dreht:s?getComputedStyle(s).animationName:''};})()")
-        check("[%s] Zustand: Kreis genau dann, wenn der Dienst arbeitet (%s)" % (thema, zst and zst.get("text")),
-              bool(zst) and zst.get("kreis") == zst.get("arbeitet")
-              and (not zst.get("kreis") or zst.get("dreht") not in ("", "none")), zst)
-        bild(os.path.join(HOME, "wissensgraph_%s_zustand.png" % thema))
+        # Steuerung liegt seit 2026-11-01 in Einstellungen → Wissen: auf dieser
+        # Seite darf es sie nicht mehr geben.
+        keine = js("!document.getElementById('wg-start') && !document.querySelector('[data-wg-einstellung]')"
+                   " && !document.getElementById('wg-status')")
+        check("[%s] /wissensgraph: keine Steuerung mehr auf der Seite" % thema, keine is True, keine)
         js("localStorage.removeItem('jarvis_wissensgraph_zu')")
+
+        # Einstellungen → Wissen → Wissensgraph: der Kreis steht an der Zeile, die
+        # ARBEITET – gegen den ECHTEN Arbeiter auf DEV (Uebereinstimmung von Anzeige
+        # und Status, nicht ein bestimmter Zustand).
+        js("localStorage.removeItem('jarvis_sect_collapse_kb-sect-wg-hdr')")
+        cmd("Page.navigate", {"url": "https://127.0.0.1/settings"})
+        time.sleep(5)
+        js("(document.querySelector('[data-settings-tab=\"knowledge\"]')||{click:function(){}}).click()")
+        time.sleep(1.5)
+        js("document.getElementById('kb-sect-wg-hdr').click()")
+        time.sleep(3)
+        zst = js("(async function(){var S=window.WissensgraphSteuerung;if(!S)return {fehlt:true};"
+                 "var st=await fetch('/api/wissensgraph/status',{credentials:'same-origin',"
+                 "headers:window.JarvisSitzung?window.JarvisSitzung.kopfsatz():{}}).then(function(r){return r.json();});"
+                 "await S.statusHolen();"
+                 "var dds=[].slice.call(document.querySelectorAll('#wg-status dd'));"
+                 "var dts=[].slice.call(document.querySelectorAll('#wg-status dt'));"
+                 "var i=dds.findIndex(function(x){return x.querySelector('.jv-pkg-spin');});"
+                 "var s=i>=0?dds[i].querySelector('.jv-pkg-spin'):null;"
+                 "var b=document.getElementById('kb-sect-wg-body').getBoundingClientRect();"
+                 "return {teil:S.arbeitsteil(st),zeile:i>=0?dts[i].textContent:null,kreise:document.querySelectorAll('#wg-status .jv-pkg-spin').length,"
+                 "aktuell:st.aktuell||'',dreht:s?getComputedStyle(s).animationName:'',hoehe:Math.round(b.height),"
+                 "ue:document.documentElement.scrollWidth-window.innerWidth};})()")
+        soll = {"contra": "Widersprüche", "wiki": "Wiki-Seiten", "queue": "Warteschlange", None: None}
+        check("[%s] Einstellungen: Abschnitt Wissensgraph aufgeklappt und gezeichnet" % thema,
+              bool(zst) and not zst.get("fehlt") and zst.get("hoehe", 0) > 150, zst)
+        check("[%s] Einstellungen: Kreis an der arbeitenden Zeile (%s)" % (thema, zst and zst.get("zeile")),
+              bool(zst) and zst.get("zeile") == soll.get(zst.get("teil"), "?")
+              and zst.get("kreise", 0) <= 1 and (not zst.get("zeile") or zst.get("dreht") not in ("", "none")), zst)
+        check("[%s] Einstellungen: kein waagerechter Ueberlauf (%s px)" % (thema, zst and zst.get("ue")),
+              bool(zst) and (zst.get("ue") or 0) <= 0, zst)
+        js("document.getElementById('kb-sect-wg-hdr').scrollIntoView({block:'start'})")
+        time.sleep(0.5)
+        bild(os.path.join(HOME, "wissensgraph_%s_einstellungen.png" % thema))
+
     # Bestandsbefund, NICHT aus dieser Seite: branding.js startet auf /portal das
     # Portal-Video, die Abnahme verlaesst /portal sofort, und das abgelehnte
     # play()-Promise faengt dort kein try/catch (branding.js, Video-Zweig).

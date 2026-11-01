@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=48">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=219">
+    <link rel="stylesheet" href="/static/css/style.css?v=220">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -2630,6 +2630,56 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                     <div id="kbsync-form-err" class="kbsync-err" style="display:none;"></div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Wissensgraph: Aufbau und Pflege (2026-11-01 von /wissensgraph
+                             hierher verlegt – die Kachel haengt damit nur noch an den
+                             Wissenseditoren). Logik: wissensgraph_steuerung.js; die
+                             Endpunkte verlangen require_local_auth. -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-wg-hdr">
+                                <h3 data-i18n="wissensgraph.settings_section">Wissensgraph</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-wg-tog">▶</span>
+                            </div>
+                            <div id="kb-sect-wg-body" class="kb-collapse-body" style="display:none;">
+                                <p class="kb-hint" data-i18n-html="wissensgraph.settings_hint">Baut aus den Wissensdokumenten Begriffe und ihre Verbindungen. Ansehen, Prüfliste und Export: <a href="/wissensgraph">Wissensgraph</a> (für Wissenseditoren).</p>
+                                <div id="wg-status" class="kbwg-status" role="status" aria-live="polite"></div>
+
+                                <h4 data-i18n="wissensgraph.settings_h">Schalter</h4>
+                                <div class="kbwg-schalter">
+                                    <label class="kbwg-haken"><input type="checkbox" data-wg-einstellung="aktiv">
+                                        <span data-i18n="wissensgraph.set_active">Wissensgraph an (liest neue und geänderte Dokumente; nur dann sehen Wissenseditoren die Kachel)</span></label>
+                                    <label class="kbwg-haken"><input type="checkbox" data-wg-einstellung="expansion">
+                                        <span data-i18n="wissensgraph.set_expansion">Wissenssuche nutzt den Graphen (findet zusammengehörige Dokumente)</span></label>
+                                    <label class="kbwg-haken"><input type="checkbox" data-wg-einstellung="widersprueche">
+                                        <span data-i18n="wissensgraph.set_contra">Quellen auf widersprüchliche Aussagen prüfen</span></label>
+                                    <label class="kbwg-haken"><input type="checkbox" data-wg-einstellung="wiki_sammellauf">
+                                        <span data-i18n="wissensgraph.set_wiki">Wiki-Seiten im Hintergrund erzeugen (Begriffe mit mehreren Quellen)</span></label>
+                                </div>
+                                <div id="wg-einst-meldung" class="kbwg-meldung" role="status" aria-live="polite"></div>
+
+                                <h4 data-i18n="wissensgraph.rebuild_h">Neu aufbauen</h4>
+                                <div class="kbwg-leiste">
+                                    <select id="wg-umfang" class="kbwg-feld" data-i18n-aria="wissensgraph.scope" aria-label="Umfang">
+                                        <option value="eingestellt" data-i18n="wissensgraph.scope_set">Eingestellter Umfang</option>
+                                        <option value="alles" data-i18n="wissensgraph.scope_all">Alles</option>
+                                        <option value="gruppe" data-i18n="wissensgraph.scope_group">Eine Wissensgruppe</option>
+                                        <option value="ordner" data-i18n="wissensgraph.scope_folder">Ein Ordner</option>
+                                    </select>
+                                    <select id="wg-umfang-gruppe" class="kbwg-feld" style="display:none;" data-i18n-aria="wissensgraph.filter_group" aria-label="Wissensgruppe"></select>
+                                    <input type="text" id="wg-umfang-ordner" class="kbwg-feld" style="display:none;" autocomplete="off"
+                                           placeholder="data/rag/…" data-i18n-aria="wissensgraph.filter_folder" aria-label="Ordner">
+                                    <label class="kbwg-haken"><input type="checkbox" id="wg-voll">
+                                        <span data-i18n="wissensgraph.rebuild_full">Auch Unverändertes neu lesen</span></label>
+                                </div>
+                                <div class="kbwg-knoepfe">
+                                    <button type="button" class="sec-btn primary" id="wg-start"
+                                            data-i18n="wissensgraph.rebuild_start">Aufbau starten</button>
+                                    <button type="button" class="sec-btn" id="wg-abbrechen"
+                                            data-i18n="wissensgraph.rebuild_cancel">Abbrechen</button>
+                                </div>
+                                <div id="wg-aufbau-meldung" class="kbwg-meldung" role="status" aria-live="polite"></div>
                             </div>
                         </div>
 
@@ -6132,7 +6182,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=413"></script>
+    <script src="/static/js/i18n.js?v=414"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=33"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6184,7 +6234,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- Suchfeld im Modal-Kopf. VOR app.js: dessen openModal ruft SettingsSearch.init(). -->
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
-    <script src="/static/js/app.js?v=232"></script>
+    <script src="/static/js/wissensgraph_steuerung.js?v=1"></script>
+    <script src="/static/js/app.js?v=233"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

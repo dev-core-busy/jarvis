@@ -49,7 +49,9 @@ WW = "backend/wissensgraph_widerspruch.py"
 WIKI = "backend/wissensgraph_wiki.py"
 PORTALJS = "frontend/js/portal_seite.js"
 UEB = "deploy/wissensgraph_uebernahme.py"
-DATEIEN = [WG, WGX, VS, KN, LLM, MAIN, WGJS, WGHTML, WGCSS, THEME, PORTAL, CHATV, ZR, WW, WIKI, PORTALJS, UEB]
+WGST = "frontend/js/wissensgraph_steuerung.js"
+APPJS = "frontend/js/app.js"
+DATEIEN = [WG, WGX, VS, KN, LLM, MAIN, WGJS, WGHTML, WGCSS, THEME, PORTAL, CHATV, ZR, WW, WIKI, PORTALJS, UEB, WGST, APPJS]
 
 UMG = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 
@@ -66,6 +68,7 @@ REL = w("test_wissensgraph_relevanz")
 PH6 = w("test_wissensgraph_phase6")
 RT = w("test_wissensgraph_rechte")
 UBT = w("test_wissensgraph_uebernahme")
+STUI = ["node", str(ROOT / "tests" / "test_wissensgraph_steuerung_ui.js")]
 
 
 def sichern() -> None:
@@ -389,9 +392,9 @@ PROBEN = [
     ("Seite: Wiki-Text als HTML eingesetzt", WGJS,
      "            if (pos < text.length) { wohin.appendChild(document.createTextNode(text.slice(pos))); }",
      "            if (pos < text.length) { wohin.insertAdjacentHTML('beforeend', text.slice(pos)); }", UI),
-    ("Seite: abgelehnter Schalter bleibt umgelegt", WGJS,
+    ("Seite: abgelehnter Schalter bleibt umgelegt", WGST,
      "            if (typeof e[k] === 'boolean' && !h.disabled) { h.checked = e[k]; }",
-     "            if (typeof e[k] === 'boolean' && !h.disabled && !h.dataset.gesetzt) { h.checked = e[k]; h.dataset.gesetzt = '1'; }", UI),
+     "            if (typeof e[k] === 'boolean' && !h.disabled && !h.dataset.gesetzt) { h.checked = e[k]; h.dataset.gesetzt = '1'; }", STUI),
     ("Rechte: Export ohne Admin-Schranke", MAIN,
      "async def wissensgraph_export(user: str = Depends(require_knowledge_editor)):",
      "async def wissensgraph_export(user: str = Depends(require_auth)):", RECHTE),
@@ -457,15 +460,18 @@ PROBEN = [
     ("Seite: Kachel wieder an is_admin", PORTALJS,
      "        if (d.permissions && d.permissions.wissensgraph) {", "        if (d.is_admin) {", UI),
     ("Seite: ohne Recht keine Umleitung", WGJS,
-     "            if (_zugang.stufe === 'keine' && !_zugang.steuern) { location.replace('/portal'); return; }\n", "", UI),
-    ("Seite: Admin allein laedt Inhalte", WGJS,
-     "            if (_zugang.stufe === 'keine') { gruppenFuellen(); return; }\n", "", UI),
-    ("Seite: Steuerung fuer jeden", WGJS,
-     "        var bloecke = { 'wg-block-steuerung': _zugang.steuern,", "        var bloecke = { 'wg-block-steuerung': true,", UI),
+     "            if (_zugang.stufe === 'keine') { location.replace('/portal'); return; }\n", "", UI),
+    ("Seite: Admin allein bekommt die Seite (alte Regel)", WGJS,
+     "            if (_zugang.stufe === 'keine') { location.replace('/portal'); return; }",
+     "            if (_zugang.stufe === 'keine' && !_zugang.steuern) { location.replace('/portal'); return; }", UI),
+    ("Seite: Pruefliste und Export fuer jeden", WGJS,
+     "        if (pf) { pf.classList.toggle('hidden', !_zugang.pflegen); }",
+     "        if (pf) { pf.classList.toggle('hidden', false); }", UI),
     ("Seite: Entfernen fuer jeden Leser", WGJS,
      "            if (d.typ !== 'quelle' && _zugang.pflegen) {", "            if (d.typ !== 'quelle') {", UI),
-    ("Seite: Gruppenfilter aus ALLEN Gruppen", WGJS,
-     "        if (!_zugang.steuern) { return Promise.resolve(); }\n", "", UI),
+    ("Seite: holt die Liste ALLER Gruppen", WGJS,
+     "        optionenSetzen('wg-gruppe', _zugang.gruppen || []);\n        return Promise.resolve();",
+     "        optionenSetzen('wg-gruppe', _zugang.gruppen || []);\n        return holeJson('/api/knowledge/groups');", UI),
     ("Seite: gesperrte Wiki-Seite als Ladefehler", WGJS,
      "                if (r.status === 403) { return { gesperrt: fehlertext(j, 'HTTP 403') }; }\n", "", UI),
     ("Rechte: Status ohne Admin-Schranke", MAIN,
@@ -491,17 +497,23 @@ PROBEN = [
     ("Klapp: Aufklappen baut den Renderer nicht", WGJS,
      "            else if (G && G.order && grafikMoeglich()) { rendererBauen(); }\n", "", UI),
     # Drehender Kreis an Zustand und Wartestellen (2026-10-31)
-    ("Kreis: arbeitet liest nur laeuft (Nachlauf gilt als wartend)", WGJS,
+    ("Kreis: arbeitet liest nur laeuft (Nachlauf gilt als wartend)", WGST,
      "        return !!(st && st.aktiv && (st.laeuft || st.aktuell));",
-     "        return !!(st && st.aktiv && st.laeuft);", UI),
-    ("Kreis: Zustandszeile ohne Kreis", WGJS,
-     "            if (p[2]) { ladeText(dd, p[1]); } else { dd.textContent = p[1]; }",
-     "            dd.textContent = p[1];", UI),
-    ("Kreis: Meldung kennt 'lade' nicht", WGJS,
+     "        return !!(st && st.aktiv && st.laeuft);", STUI),
+    ("Kreis: keine Zeile traegt den Kreis", WGST,
+     "            if (teil && p[2] === teil) { ladeText(dd, p[1]); } else { dd.textContent = p[1]; }",
+     "            dd.textContent = p[1];", STUI),
+    ("Kreis: wieder pauschal bei Zustand", WGST,
+     "                : t('wissensgraph.st_off', 'aus'), 'state'],",
+     "                : t('wissensgraph.st_off', 'aus'), teil],", STUI),
+    ("Kreis: Wiki zaehlt als Widerspruch", WGST,
+     "        if (m) { return m[1] === 'wiki' ? 'wiki' : 'contra'; }",
+     "        if (m) { return 'contra'; }", STUI),
+    ("Kreis: Meldung kennt 'lade' nicht", WGST,
      "        if (art === 'lade') { ladeText(m, text); } else { m.textContent = text || ''; }",
-     "        m.textContent = text || '';", UI),
-    ("Kreis: erster Statusabruf ohne Kreis", WGJS,
-     "        if (sb && !sb.childNodes.length) { ladeText(sb, t('wissensgraph.loading', 'Lade …')); }\n", "", UI),
+     "        m.textContent = text || '';", STUI),
+    ("Kreis: erster Statusabruf ohne Kreis", WGST,
+     "        if (sb && !sb.childNodes.length) { ladeText(sb, t('wissensgraph.loading', 'Lade …')); }\n", "", STUI),
     ("Kreis: Zusammenfuehren ohne Kreis im Knopf", WGJS,
      "                    ladeText(knopf, text);\n", "", UI),
     # Befunde des Vergleichsberichts DEV/ECHT (2026-11-01)
@@ -522,20 +534,35 @@ PROBEN = [
     ("Zaehler: Bestaetigung der Widersprueche ruft direkt", WW,
      "                roh2, _u = await wgx.pflege_aufruf(provider, modell,\n",
      "                roh2, _u = await wgx.modell_aufruf(provider, modell,\n", PH6),
-    ("Zaehler: Status ohne Zeile fuer Widersprueche und Wiki", WGJS,
+    ("Zaehler: Status ohne Zeile fuer Widersprueche und Wiki", WGST,
      "            [t('wissensgraph.st_calls_care', 'Widersprüche und Wiki · Modellaufrufe · Token ein/aus'),\n"
-     "             (z.pflege_aufrufe || 0) + ' · ' + (z.pflege_token_ein || 0) + ' / ' + (z.pflege_token_aus || 0)],\n", "", UI),
-    ("Kachel: immer fuer Wissenseditoren (leere Seite)", MAIN,
-     "        return bool(_wgx.einstellungen().get(\"aktiv\")) or _wg.hat_inhalt()",
-     "        return True", RT),
-    ("Kachel: Fehler beim Nachsehen zeigt sie", MAIN,
-     "    except Exception:  # noqa: BLE001\n        return False\n\n\ndef _wissensgraph_erlaubt",
-     "    except Exception:  # noqa: BLE001\n        return True\n\n\ndef _wissensgraph_erlaubt", RT),
+     "             (z.pflege_aufrufe || 0) + ' · ' + (z.pflege_token_ein || 0) + ' / ' + (z.pflege_token_aus || 0)],\n", "", STUI),
+    ("Kachel: Schalter wird nicht beachtet", MAIN,
+     "        if not _wgx.einstellungen().get(\"aktiv\"):\n            return False\n", "", RT),
+    ("Kachel: Fehler beim Lesen des Schalters zeigt sie", MAIN,
+     "    except Exception:  # noqa: BLE001\n        return False\n    return _wissensgraph_zugang(user)",
+     "    except Exception:  # noqa: BLE001\n        pass\n    return _wissensgraph_zugang(user)", RT),
     ("Kachel: /api/me mit der alten Regel", MAIN,
-     "            \"wissensgraph\": _wissensgraph_kachel(user, ist_admin),",
-     "            \"wissensgraph\": ist_admin or _wissensgraph_zugang(user)[\"stufe\"] != \"keine\",", RT),
-    ("Kachel: hat_inhalt immer wahr", WG,
-     "            return any(e.name.endswith(\".json\") for e in it)", "            return True", RT),
+     "            \"wissensgraph\": _wissensgraph_kachel(user),",
+     "            \"wissensgraph\": ist_admin or _wissensgraph_kachel(user),", RT),
+    # Steuerung in Einstellungen → Wissen (2026-11-01)
+    ("Steuerung: fragt auch zugeklappt ab", WGST,
+     "        return !!b && b.style.display !== 'none' && !!tab && tab.style.display !== 'none';",
+     "        return true;", STUI),
+    ("Steuerung: app.js ruft onShow nicht", APPJS,
+     "                    if (window.WissensgraphSteuerung) window.WissensgraphSteuerung.onShow();\n", "", STUI),
+    ("Steuerung: Abschnitt nicht klappbar registriert", APPJS,
+     "                { hdr: 'kb-sect-wg-hdr',     body: 'kb-sect-wg-body',     tog: 'kb-sect-wg-tog'     },\n", "", STUI),
+    ("Steuerung: Aufklappen holt keinen Status", WGST,
+     "        if (kopf) { kopf.addEventListener('click', function () { setTimeout(onShow, 0); }); }\n", "", STUI),
+    ("Steuerung: Aufbau trotz ausgeschaltetem Graphen frei", WGST,
+     "            start.disabled = !st.aktiv;\n", "", STUI),
+    ("Steuerung: Gruppenliste mit 'ungrouped'", WGST,
+     "            (d.groups || []).filter(function (g) { return g && g.id && g.id !== 'ungrouped'; }).forEach(",
+     "            (d.groups || []).filter(function (g) { return g && g.id; }).forEach(", STUI),
+    ("Kachel: Admin-Bypass zurueck", MAIN,
+     "    try:\n        from backend import wissensgraph_extraktion as _wgx\n        if not _wgx",
+     "    if _is_admin_user(user):\n        return True\n    try:\n        from backend import wissensgraph_extraktion as _wgx\n        if not _wgx", RT),
     # Uebernahme eines fertigen Graphen (Option C)
     ("Uebernahme: mtime nicht verglichen", UEB, "        if mt == q[\"mtime\"]:", "        if True:", UBT),
     ("Uebernahme: laeuft als root", UEB, "    if (os.geteuid() if euid is None else euid) == 0:", "    if False:", UBT),
@@ -568,7 +595,7 @@ atexit.register(aufraeumen)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
 print("Basislauf")
-for cmd in (ISO, EXT, PFL, WS, RECHTE, API, UI, REL, PH6, RT, UBT):
+for cmd in (ISO, EXT, PFL, WS, RECHTE, API, UI, REL, PH6, RT, UBT, STUI):
     rc, aus = lauf(cmd)
     b = bilanz(aus)
     print(f"  {Path(cmd[1]).stem}: {b[-1].strip() if b else 'KEINE BILANZ'}")

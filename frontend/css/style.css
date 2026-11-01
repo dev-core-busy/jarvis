@@ -9540,3 +9540,7 @@ body.light #service-restart-status.svc-err  { color: #c62828; }   /* 5,15:1 */
 /* --danger als Schrift haelt nur auf dunkler Flaeche (Register) – hell abdunkeln. */
 .kbwg-meldung.is-err { color: var(--danger); }
 body.light .kbwg-meldung.is-err { color: color-mix(in srgb, var(--danger) 78%, #000); }
+/* Verweis auf /wissensgraph im Hinweis: sonst Browser-Blau bzw. Besucht-Lila.
+   Wie die Container-Titel: dunkel aufgehellter Akzent (lesbar), hell pur. */
+#kb-sect-wg-body .kb-hint a { color: color-mix(in srgb, var(--accent) 65%, #fff); }
+body.light #kb-sect-wg-body .kb-hint a { color: var(--accent); }

@@ -403,6 +403,14 @@ try:
               and zst.get("kreise", 0) <= 1 and (not zst.get("zeile") or zst.get("dreht") not in ("", "none")), zst)
         check("[%s] Einstellungen: kein waagerechter Ueberlauf (%s px)" % (thema, zst and zst.get("ue")),
               bool(zst) and (zst.get("ue") or 0) <= 0, zst)
+        lk = js("(function(){function rgb(s){var z=(s.match(/[\\d.]+/g)||[]).slice(0,3).map(Number);"
+                "return /^color\\(/.test(s)?z.map(function(c){return Math.round(c*255);}):z;}"
+                "var a=document.querySelector('#kb-sect-wg-body .kb-hint a');if(!a)return null;"
+                "var e=a,bg='';while(e){var c=getComputedStyle(e).backgroundColor;var m=(c.match(/[\\d.]+/g)||[]);"
+                "if(c&&c!=='transparent'&&(m.length<4||parseFloat(m[3])>=0.5)){bg=c;break;}e=e.parentElement;}"
+                "return {fg:rgb(getComputedStyle(a).color),bg:rgb(bg||getComputedStyle(document.body).backgroundColor),roh:getComputedStyle(a).color};})()")
+        kv = kontrast(lk["fg"], lk["bg"]) if lk and len(lk.get("fg") or []) == 3 and len(lk.get("bg") or []) == 3 else 0
+        check("[%s] Einstellungen: Verweis im Hinweis lesbar (Kontrast %.2f:1)" % (thema, kv), kv >= 4.5, lk)
         js("document.getElementById('kb-sect-wg-hdr').scrollIntoView({block:'start'})")
         time.sleep(0.5)
         bild(os.path.join(HOME, "wissensgraph_%s_einstellungen.png" % thema))

@@ -64,6 +64,10 @@ PROBEN = [
      "graph_deckt = graph"),
     ("Art fehlt in der Scheduler-Whitelist", SCH,
      '"cve_pruefung", "loesungsarchiv") else "agent",', '"cve_pruefung") else "agent",'),
+    ("Abbruch hinterlaesst keinen 'letzten Lauf'", LA,
+     '        _ergebnis_merken({"ok": False, "grund": grund})\n        e.args', '        e.args'),
+    ("Abbruch gibt den Fortschritt nicht weiter", LA,
+     "        e.args = (grund,)\n", ""),
     ("privater Ordner fehlt in PRIVATE_DIRS", SB,
      '                "data/graph",\n', '                "data/graph")\n_X = (\n'),
 ]

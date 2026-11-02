@@ -206,6 +206,53 @@ try:
     check("⚠ ein geworfener Lauf ist protokolliert – als Fehler, mit Grund",
           e.get("ok") is False and "Agent tot" in (e.get("ergebnis") or ""), str(e))
     check("drei Laeufe, drei Eintraege", len(cl.lesen("nacht")) == 3)
+
+    # Abbruch (Dienst-Neustart, DEV 2026-11-02): ein ECHTES task.cancel()
+    # mitten im Lauf, nicht ein geworfenes CancelledError – nur so ist belegt,
+    # dass der Weg aus dem laufenden await heraus greift.
+    class _Haengt:
+        def __init__(self): self.grund = ""; self.lief = False
+        async def run_task_headless(self, text, actor=None):
+            self.lief = True
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError as ce:
+                if self.grund:
+                    ce.args = (self.grund,)
+                raise
+            return "nie"
+
+    async def _abbrechen(grund):
+        am.a = _Haengt(); am.a.grund = grund
+        task = asyncio.ensure_future(cm._execute("nacht"))
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if am.a.lief:
+                break
+        lief = am.a.lief
+        task.cancel()
+        try:
+            await task
+            return lief, "nicht weitergeworfen"
+        except asyncio.CancelledError:
+            return lief, "weitergeworfen"
+
+    lief, wie = asyncio.run(_abbrechen(""))
+    e = (cl.lesen("nacht") or [{}])[0]
+    if not lief:
+        print("  Abbruch-Messung: Lauf kam nie in Gang – NICHT PRUEFBAR"); sys.exit(2)
+    check("⚠ abgebrochener Lauf steht im Protokoll – als Fehler",
+          len(cl.lesen("nacht")) == 4 and e.get("ok") is False
+          and "abgebrochen" in (e.get("ergebnis") or ""), str(e))
+    check("⚠ der Abbruch wird WEITERGEWORFEN (sonst haengt das Beenden)",
+          wie == "weitergeworfen", wie)
+    check("last_result nennt den Abbruch",
+          "abgebrochen" in (cm.get_job("nacht") or {}).get("last_result", ""))
+    lief, wie = asyncio.run(_abbrechen("Fehler: abgebrochen nach 26 von 300 Tickets"))
+    e = (cl.lesen("nacht") or [{}])[0]
+    check("⚠ ein mitgegebener Grund (Fortschritt) steht woertlich im Protokoll",
+          e.get("ergebnis") == "Fehler: abgebrochen nach 26 von 300 Tickets", str(e))
+    am.a = _Agent()
     am.a.antwort = "einmal erledigt"
     cm.add_job(label="Einmal", cron="0 4 * * *", task="x", job_id="einmal", once=True)
     asyncio.run(cm._execute("einmal"))

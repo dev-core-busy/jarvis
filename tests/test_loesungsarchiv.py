@@ -474,6 +474,60 @@ check("offene Zahl wird genannt (3)", erg6.get("offen") == 3 and "3 Ticket(s) fo
 
 
 # ════════════════════════════════════════════════════════════════════════════
+section("8b. Abbruch mitten im Lauf (Dienst-Neustart, DEV 2026-11-02)")
+HAENGT = f"{BEREICH}-13"
+TICKETS[HAENGT] = _ticket(HAENGT, "Haengendes Ticket Scanner", "Scanner haengt", "Neustart")
+client.keys.append(HAENGT)
+
+
+class ProviderHaengt(ProviderAttrappe):
+    """Wie die Attrappe, bleibt aber beim Ticket HAENGT stehen – dort wird
+    der Lauf per ECHTEM task.cancel() abgebrochen."""
+    def __init__(self):
+        super().__init__(); self.haengt = False
+    async def generate_response(self, **kw):
+        if f"Ticket: {HAENGT}" in kw["contents"][0].parts[0].text:
+            self.haengt = True
+            await asyncio.sleep(30)
+        return await super().generate_response(**kw)
+
+
+vor_abbr = set(json.loads((la._wurzel() / "stand.json").read_text())["verarbeitet"])
+
+
+async def _abbruch():
+    p = ProviderHaengt()
+    task = asyncio.ensure_future(la.lauf(ausloeser="test", client=client,
+                                         provider=(p, "testmodell"), laden=laden))
+    for _ in range(300):
+        await asyncio.sleep(0.01)
+        if p.haengt:
+            break
+    task.cancel()
+    try:
+        await task
+        return p.haengt, None
+    except asyncio.CancelledError as ce:
+        return p.haengt, ce
+
+
+haengt, ce = asyncio.run(_abbruch())
+if not haengt:
+    print("  Lauf erreichte das haengende Ticket nie – NICHT PRUEFBAR"); sys.exit(2)
+st7 = json.loads((la._wurzel() / "stand.json").read_text())
+fertig7 = len(set(st7["verarbeitet"]) - vor_abbr)
+grund7 = str((st7.get("letzter_lauf") or {}).get("grund") or "")
+check("(Positivkontrolle) vor dem Abbruch wurden Tickets fertig", fertig7 >= 1, fertig7)
+check("⚠ der Abbruch wird weitergeworfen", ce is not None)
+check("⚠ 'letzter Lauf' nennt den Abbruch samt Fortschritt",
+      grund7.startswith("Fehler: abgebrochen nach %d von " % fertig7), grund7)
+check("⚠ derselbe Grund reist im Abbruch mit (fuer das Cron-Protokoll)",
+      ce is not None and ce.args and ce.args[0] == grund7, ce.args if ce else None)
+check("das haengende Ticket bleibt offen", HAENGT not in st7["verarbeitet"])
+check("die Sperre ist wieder frei", la._lauf_aktiv is False)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 section("9. Scheduler (AST)")
 src = (ROOT / "backend" / "scheduler.py").read_text(encoding="utf-8")
 baum = ast.parse(src)

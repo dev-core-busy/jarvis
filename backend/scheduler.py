@@ -383,6 +383,22 @@ class CronManager:
             duration = round(time.time() - t0, 1)
             result_short = (result[:200] + "…") if len(result) > 200 else result
             print(f"[Scheduler] Job '{label}' abgeschlossen in {duration}s", flush=True)
+        except asyncio.CancelledError as e:
+            # Abbruch ist keine Exception (BaseException) und lief am Zweig
+            # darunter vorbei: der Lauf hinterliess KEINEN Protokolleintrag,
+            # das Protokoll sah aus wie "nie gelaufen" (DEV 2026-11-02, ein
+            # Dienst-Neustart mitten im Loesungsarchiv). Jetzt wird
+            # protokolliert und dann WEITERGEWORFEN – ein verschluckter Abbruch
+            # haelt den Dienst beim Beenden fest. Ein Lauf darf in den args einen
+            # genaueren Grund mitgeben (Fortschritt).
+            detail = str(e.args[0]) if e.args and e.args[0] else ""
+            result = detail or (
+                f"Fehler: abgebrochen nach {round(time.time() - t0, 1)} s "
+                "(Dienst beendet oder Auftrag gestoppt) – der Lauf ist nicht "
+                "zu Ende gekommen.")
+            print(f"[Scheduler] Job '{label}' abgebrochen", flush=True)
+            self._abbruch_protokollieren(job, t0, result, ausloeser, von)
+            raise
         except Exception as e:
             result = f"Fehler: {e}"
             duration = round(time.time() - t0, 1)
@@ -423,6 +439,25 @@ class CronManager:
             })
 
         return result
+
+    def _abbruch_protokollieren(self, job: dict, t0: float, result: str,
+                                ausloeser: str, von: str) -> None:
+        """Abgebrochenen Lauf festhalten. Wirft NIE – es laeuft mitten im
+        Beenden des Dienstes, und ein Fehler hier darf den Abbruch nicht
+        ersetzen. Kein Broadcast (es wird nicht mehr abgewartet) und kein
+        Loeschen eines Einmal-Jobs: der ist nicht gelaufen, nur angefangen."""
+        try:
+            job["last_run"] = int(time.time())
+            job["last_result"] = result[:500]
+            self._save()
+        except Exception as _se:  # noqa: BLE001
+            print(f"[Scheduler] Abbruch nicht gespeichert: {_se}", flush=True)
+        try:
+            from backend import cron_log
+            cron_log.eintragen(job, t0, time.time(), result,
+                               ausloeser=ausloeser, von=von)
+        except Exception as _le:  # noqa: BLE001
+            print(f"[Scheduler] Abbruch nicht protokolliert: {_le}", flush=True)
 
     def _actor_for(self, job: dict) -> dict:
         """Auftraggeber-Bindung eines Jobs in die Form für run_task_headless.

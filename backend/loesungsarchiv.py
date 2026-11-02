@@ -686,6 +686,20 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
     _lauf_info = {"seit": time.time(), "ausloeser": ausloeser, "fertig": 0, "gesamt": 0}
     try:
         return await _lauf(client, provider, laden, index_und_graph)
+    except asyncio.CancelledError as e:
+        # Abbruch (Dienst-Neustart, Auftrag gestoppt) ist KEINE Exception und
+        # lief frueher an jeder Merkstelle vorbei: kein "letzter Lauf", kein
+        # Protokolleintrag (DEV 2026-11-02, 26 Tickets ohne jede Spur). Der
+        # Grund nennt den Fortschritt und reist in den args mit, damit der
+        # Scheduler ihn ins Protokoll schreibt. Weitergeworfen wird immer –
+        # ein verschluckter Abbruch haelt den Dienst beim Beenden fest.
+        grund = (f"Fehler: abgebrochen nach {_lauf_info.get('fertig', 0)} von "
+                 f"{_lauf_info.get('gesamt', 0)} Tickets (Dienst beendet oder Lauf "
+                 "gestoppt). Das Ausgewertete bleibt erhalten, der nächste Lauf "
+                 "macht dort weiter.")
+        _ergebnis_merken({"ok": False, "grund": grund})
+        e.args = (grund,)
+        raise
     except Exception as e:  # noqa: BLE001
         erg = {"ok": False, "grund": f"Fehler: {e}"}
         _ergebnis_merken(erg)

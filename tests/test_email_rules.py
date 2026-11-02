@@ -218,8 +218,8 @@ _skill_states["branding"] = {"enabled": True,
                              "config": {"assistant_name": "Nexi", "company_name": "Contoso AG"}}
 check(ma.kategorie_name() == "Nexi", "Assistenten-Name gewinnt")
 _skill_states["branding"]["config"]["assistant_name"] = ""
-check(ma.kategorie_name() == "Contoso AG", "sonst der Firmenname")
-_skill_states["branding"]["config"]["company_name"] = "Contoso, AG"
+check(ma.kategorie_name() == "Jarvis", "ohne Assistenten-Name 'Jarvis', nicht der Firmenname")
+_skill_states["branding"]["config"]["assistant_name"] = "Nexi, AG"
 check("," not in ma.kategorie_name(),
       "Komma wird entfernt (Exchange-Kategorien sind komma-getrennt)")
 _skill_states["branding"] = {"enabled": False, "config": {}}

@@ -433,9 +433,12 @@
         if (mSep) mSep.classList.toggle('hidden', !(manual && (infoShown || phone || email)));
     }
 
-    // Assistenten-Name fuer die Begruessungen: eigenes Feld, sonst Firmenname.
+    // Assistenten-Name fuer die Begruessungen. Dieselbe Regel wie markeName():
+    // eingetragener Name, sonst "Jarvis" – KEIN Rueckfall auf den Firmennamen
+    // (Vorgabe des Nutzers 2026-11-02). Leer heisst hier "nichts ersetzen",
+    // denn die Begruessung traegt "Jarvis" bereits.
     function assistantNameOf(b) {
-        return ((b && b.assistant_name) || '').trim() || (b && b.company_name) || '';
+        return ((b && b.assistant_name) || '').trim();
     }
 
     // Ersetzt 'Jarvis' in den sichtbaren Begruessungszeilen durch den

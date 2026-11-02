@@ -339,12 +339,12 @@
         // Auf Seiten mit eigener Eingabezeile am unteren Rand (/chat) sass die
         // Figur GENAU ueber dem Senden-Knopf und fing dessen Klicks ab.
         if (document.getElementById('chat-screen')) root.classList.add('jav-above-input');
-        // Name: eigenes Feld > Branding (Assistenten- bzw. Firmenname) > Standard.
-        // Ohne den Branding-Rueckfall hiesse die Figur in einer White-Label-
-        // Installation "Assistent", waehrend der Rest der Seite die Marke traegt.
+        // Name: eigenes Feld > Assistenten-Name aus dem Branding > "Jarvis".
+        // KEIN Rueckfall auf den Firmennamen (Vorgabe des Nutzers 2026-11-02):
+        // ist kein Name eingetragen, heisst der Assistent ueberall "Jarvis".
         var title = cfg.title
-            || (brand && brand.active && (brand.assistant_name || brand.company_name))
-            || T('avatar.title_default', 'Assistent');
+            || (brand && brand.active && String(brand.assistant_name || '').trim())
+            || 'Jarvis';
         root.innerHTML =
             '<div id="jav-panel" class="jav-hidden">'
             + '  <div id="jav-grip" title="' + esc(T('avatar.resize', 'Größe ändern')) + '"></div>'

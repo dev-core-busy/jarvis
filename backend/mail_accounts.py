@@ -1239,16 +1239,16 @@ def kategorie_name() -> str:
     Produkt dahinter – die Markierung ist im Postfach des Benutzers sichtbar
     und geht bei einer Weiterleitung mit nach draussen.
 
-    Reihenfolge: Assistenten-Name → Firmenname → "Jarvis". Der Assistenten-Name
-    steht vorn, weil er genau dafuer gedacht ist (er traegt auch die
-    Begruessungen); der Firmenname ist der naechstbeste Bezug.
+    Reihenfolge: Assistenten-Name → "Jarvis". KEIN Rueckfall auf den
+    Firmennamen (Vorgabe des Nutzers 2026-11-02): ist kein Name eingetragen,
+    heisst der Assistent ueberall "Jarvis".
     """
     try:
         from backend.config import config  # noqa: PLC0415
         st = config.get_skill_states().get("branding", {}) or {}
         if st.get("enabled"):
             c = st.get("config", {}) or {}
-            for feld in ("assistant_name", "company_name"):
+            for feld in ("assistant_name",):
                 wert = (c.get(feld) or "").strip()
                 if wert:
                     # Exchange-Kategorien duerfen kein Komma enthalten – die

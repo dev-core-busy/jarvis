@@ -560,7 +560,8 @@ async function baueSeite(zustand) {
         ]) {
             const dom3 = new JSDOM(
                 '<body><p data-i18n-html="x">Codeaufgaben an {marke} abgeben</p>' +
-                '<button title="an {marke} senden">k</button></body>',
+                '<button title="an {marke} senden">k</button>' +
+                '<div class="log-welcome"><p id="gruss">Hallo, ich bin Jarvis</p></div></body>',
                 { url: 'https://jarvis.test/claude', runScripts: 'outside-only' });
             const w3 = dom3.window;
             w3.fetch = () => Promise.resolve({ ok: true, status: 200,
@@ -589,6 +590,13 @@ async function baueSeite(zustand) {
             check(typeof w3.jarvisMarke === 'function' && w3.jarvisMarke() === fall.erwartet,
                   `[${fall.label}] window.jarvisMarke() liefert den Namen`,
                   typeof w3.jarvisMarke === 'function' ? w3.jarvisMarke() : 'fehlt');
+            // Die Begruessung folgt DERSELBEN Regel (Vorgabe 2026-11-02): ohne
+            // Assistenten-Name bleibt "Jarvis" stehen, der Firmenname ersetzt ihn nie.
+            const g3 = w3.document.getElementById('gruss');
+            check(g3.textContent === 'Hallo, ich bin ' + fall.erwartet,
+                  `[${fall.label}] Begruessung nennt "${fall.erwartet}"`, g3.textContent);
+            check(String(w3.brandAssistantName || 'Jarvis') === fall.erwartet,
+                  `[${fall.label}] brandAssistantName (Sprachvorschau) passt`, String(w3.brandAssistantName));
             dom3.window.close();
         }
 

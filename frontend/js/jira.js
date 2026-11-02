@@ -998,16 +998,27 @@
                 teile.push('<div><span class="jv-pkg-spin" aria-hidden="true"></span><b>' + esc(t('jlarch.laeuft', 'Lauf aktiv: {f} von {g} Tickets',
                     { f: d.laeuft.fertig || 0, g: d.laeuft.gesamt || 0 })) + '</b></div>');
             }
+            // Die Zeile steht IMMER da – auch ohne Lauf und waehrend eines
+            // Laufs (dann der vorige). Fehlte sie, sahen lauter Nullen nach
+            // einem kaputten Zaehler aus statt nach "noch nie gelaufen".
             var ll = d.letzter_lauf;
-            if (ll) {
-                teile.push('<div>' + esc(t('jlarch.letzter', 'Letzter Lauf:')) + ' ' + esc(zeit(ll.wann))
+            if (!ll) {
+                teile.push('<div>' + esc(t('jlarch.letzter', 'Letzter Lauf:')) + ' '
+                    + esc(t('jlarch.noch_keiner', 'noch keiner')) + '</div>');
+            } else {
+                teile.push('<div' + (ll.ok === false ? ' style="color:var(--danger);"' : '') + '>'
+                    + esc(t('jlarch.letzter', 'Letzter Lauf:')) + ' ' + esc(zeit(ll.wann))
                     + ' – ' + esc(ll.grund || '') + '</div>');
                 (ll.fehler_beispiele || []).forEach(function (f) {
                     teile.push('<div style="color:var(--danger);">' + esc(f) + '</div>');
                 });
             }
+            // Ausgeschaltet ist ein Grund, "nicht geplant" allein keiner.
+            var aus = !((d.einstellungen || {}).aktiv === true);
             teile.push('<div>' + esc(t('jlarch.naechster', 'Nächster Lauf:')) + ' '
-                + esc(d.naechster_lauf ? zeit(d.naechster_lauf) : t('jlarch.nicht_geplant', 'nicht geplant')) + '</div>');
+                + esc(d.naechster_lauf && !aus ? zeit(d.naechster_lauf)
+                    : aus ? t('jlarch.ausgeschaltet', 'keiner – das Lösungsarchiv ist ausgeschaltet')
+                    : t('jlarch.nicht_geplant', 'nicht geplant')) + '</div>');
             if (d.lesefehler) teile.push('<div style="color:var(--danger);">' + esc(d.lesefehler) + '</div>');
             var top = d.haeufigste || [];
             if (top.length) {

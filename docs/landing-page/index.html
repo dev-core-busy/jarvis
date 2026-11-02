@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="favicon.png">
-    <title>Jarvis – Autonomer KI Desktop-Agent | Self-hosted AI Agent für Linux</title>
-    <meta name="description" content="Jarvis ist ein autonomer, selbst gehosteter KI-Agent für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, E-Mail-Regeln für Exchange samt Outlook-Add-in, RAG-Wissensdatenbank mit Wissensgraph, Sicherheitslücken-Prüfung und das OpenClaw Skill-Ökosystem. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
-    <meta name="keywords" content="AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, VNC, multi-agent, skill system, chatbot, voice assistant, Elastic License 2.0, jarvis, knowledge graph, GraphRAG, CVE check, Jira, Exchange, Outlook add-in, email automation, SAP analysis, charts">
+    <title>Jarvis – Selbst gehosteter KI-Chatbot für Linux, autonom per Skill</title>
+    <meta name="description" content="Jarvis ist ein selbst gehosteter KI-Chatbot mit enormem Funktionsumfang für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, E-Mail-Regeln für Exchange samt Outlook-Add-in, RAG-Wissensdatenbank mit Wissensgraph, Sicherheitslücken-Prüfung und das OpenClaw Skill-Ökosystem. Autonom arbeitet er erst mit dem Skill Agent Autonomy Kit. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
+    <meta name="keywords" content="AI chatbot, KI-Chatbot, AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, VNC, multi-agent, skill system, chatbot, voice assistant, Elastic License 2.0, jarvis, knowledge graph, GraphRAG, CVE check, Jira, Exchange, Outlook add-in, email automation, SAP analysis, charts">
     <meta name="author" content="Andreas Bender">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://jarvis-ai.info/">
@@ -14,8 +14,8 @@
     <!-- Open Graph / Social Media -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://jarvis-ai.info/">
-    <meta property="og:title" content="Jarvis – Autonomous AI Desktop Agent">
-    <meta property="og:description" content="Self-hosted autonomous AI agent for Linux. Controls desktop via VNC, supports Gemini/Claude/Ollama, WhatsApp integration, Exchange email rules with an Outlook add-in, RAG knowledge base, extensible via OpenClaw skills.">
+    <meta property="og:title" content="Jarvis – Self-hosted AI Chatbot for Linux, Autonomous via Skill">
+    <meta property="og:description" content="Self-hosted AI chatbot for Linux with a huge feature set, autonomous only via the Agent Autonomy Kit skill. Controls desktop via VNC, supports Gemini/Claude/Ollama, WhatsApp integration, Exchange email rules with an Outlook add-in, RAG knowledge base, extensible via OpenClaw skills.">
     <meta property="og:image" content="https://jarvis-ai.info/img/split_view.png">
     <meta property="og:image:width" content="1920">
     <meta property="og:image:height" content="1080">
@@ -25,8 +25,8 @@
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Jarvis – Autonomous AI Desktop Agent">
-    <meta name="twitter:description" content="Self-hosted autonomous AI agent for Linux. VNC desktop control, multi-LLM, WhatsApp, RAG, OpenClaw skills.">
+    <meta name="twitter:title" content="Jarvis – Self-hosted AI Chatbot for Linux, Autonomous via Skill">
+    <meta name="twitter:description" content="Self-hosted AI chatbot for Linux, autonomous via skill. VNC desktop control, multi-LLM, WhatsApp, RAG, OpenClaw skills.">
     <meta name="twitter:image" content="https://jarvis-ai.info/img/split_view.png">
 
     <!-- Structured Data -->
@@ -35,7 +35,7 @@
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "Jarvis AI Desktop Agent",
-      "description": "Autonomous self-hosted AI agent for Linux with desktop control, multi-LLM support, WhatsApp integration, RAG knowledge base with vector database, MCP tool servers and multi-agent orchestration.",
+      "description": "Self-hosted AI chatbot for Linux with a huge feature set, autonomous only via the optional Agent Autonomy Kit skill. Desktop control, multi-LLM support, WhatsApp integration, RAG knowledge base with vector database, MCP tool servers and multi-agent orchestration.",
       "url": "https://jarvis-ai.info",
       "downloadUrl": "https://github.com/dev-core-busy/jarvis",
       "operatingSystem": "Linux",
@@ -56,7 +56,8 @@
         "creator": { "@type": "Organization", "name": "Anthropic", "url": "https://anthropic.com" }
       },
       "featureList": [
-        "Autonomous desktop control via VNC",
+        "Desktop control via VNC",
+        "Autonomous operation only via the optional Agent Autonomy Kit skill (off by default)",
         "Multi-LLM support (Gemini, Claude, OpenRouter, Ollama)",
         "WhatsApp integration with voice transcription",
         "RAG knowledge base with hybrid search (FAISS vectors + BM25)",
@@ -87,7 +88,7 @@
         {
           "@type": "Question",
           "name": "What is Jarvis AI?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Jarvis is an autonomous self-hosted AI desktop agent for Linux. It controls a full desktop environment via VNC, supports multiple LLM providers (Google Gemini, Anthropic Claude, OpenRouter, Ollama), and can be extended with skills from the OpenClaw marketplace." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Jarvis is a self-hosted AI chatbot for Linux with a huge feature set. It controls a full desktop environment via VNC, supports multiple LLM providers (Google Gemini, Anthropic Claude, OpenRouter, Ollama), and can be extended with skills from the OpenClaw marketplace." }
         },
         {
           "@type": "Question",
@@ -108,6 +109,11 @@
           "@type": "Question",
           "name": "How does the RAG knowledge base work?",
           "acceptedAnswer": { "@type": "Answer", "text": "Jarvis indexes your documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) using hybrid search: semantic vectors (FAISS with sentence-transformer embeddings) plus keywords (BM25), with TF-IDF as a fallback. An optional knowledge graph can join the search as an additional channel. The index stays on your server – no cloud required." }
+        },
+        {
+          "@type": "Question",
+          "name": "Is Jarvis autonomous?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Only with a skill. Without the Agent Autonomy Kit skill, which is off by default, Jarvis is a chatbot with a huge feature set: it carries out what it is asked to do, including over many steps with tools, and then waits for the next task. The skill adds a task queue from which it picks its next task itself." }
         },
         {
           "@type": "Question",
@@ -305,7 +311,7 @@
 
         /* Screenshots */
         .screenshots-section { background: var(--bg-secondary); }
-        .screenshot-tabs { display: flex; gap: 8px; justify-content: center; margin-bottom: 32px; }
+        .screenshot-tabs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 32px; }
         .tab-btn { padding: 8px 20px; background: var(--bg-glass); border: 1px solid var(--border); border-radius: 20px; color: var(--text-secondary); font-size: 0.875rem; cursor: pointer; transition: all var(--transition); }
         .tab-btn.active, .tab-btn:hover { background: var(--accent-light); border-color: var(--accent); color: var(--text-primary); }
         .screenshot-panels > div { display: none; }
@@ -340,6 +346,7 @@
         /* Windows Desktop Agent Section */
         .windows-section { background: linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(99,102,241,0.08) 100%); border-top: 1px solid rgba(59,130,246,0.2); border-bottom: 1px solid rgba(99,102,241,0.2); }
         .windows-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+        .windows-inner > * { min-width: 0; }
         @media (max-width: 768px) { .windows-inner { grid-template-columns: 1fr; gap: 32px; } }
         .windows-badge-new { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; background: linear-gradient(135deg, rgba(59,130,246,0.3), rgba(99,102,241,0.3)); border: 1px solid rgba(59,130,246,0.5); border-radius: 20px; font-size: 0.75rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #60a5fa; margin-bottom: 18px; animation: pulse 2s infinite; }
         .windows-title { font-size: clamp(1.6rem, 3.5vw, 2.4rem); font-weight: 700; margin-bottom: 12px; line-height: 1.25; }
@@ -351,7 +358,7 @@
         .btn-windows:hover { transform: translateY(-2px); box-shadow: 0 0 44px rgba(59,130,246,0.6); }
         .btn-windows-note { display: block; margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); }
         .windows-mockup { position: relative; display: flex; justify-content: center; align-items: center; }
-        .desktop-frame { width: 340px; height: 220px; background: linear-gradient(180deg, #1a1a2e 0%, #0a0e17 100%); border-radius: 10px 10px 4px 4px; border: 2px solid rgba(59,130,246,0.4); box-shadow: 0 0 60px rgba(59,130,246,0.2), 0 24px 64px rgba(0,0,0,0.6); overflow: hidden; position: relative; }
+        .desktop-frame { width: 340px; max-width: 100%; height: 220px; background: linear-gradient(180deg, #1a1a2e 0%, #0a0e17 100%); border-radius: 10px 10px 4px 4px; border: 2px solid rgba(59,130,246,0.4); box-shadow: 0 0 60px rgba(59,130,246,0.2), 0 24px 64px rgba(0,0,0,0.6); overflow: hidden; position: relative; }
         .desktop-titlebar { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(59,130,246,0.15); border-bottom: 1px solid rgba(59,130,246,0.2); }
         .desktop-title-text { font-size: 0.65rem; font-weight: 600; color: #60a5fa; letter-spacing: 1px; }
         .desktop-controls { display: flex; gap: 5px; }
@@ -362,7 +369,13 @@
         /* Jarvis Chat Section */
         .chat-section { background: linear-gradient(135deg, rgba(155,89,182,0.06) 0%, rgba(99,102,241,0.08) 100%); border-top: 1px solid rgba(155,89,182,0.2); border-bottom: 1px solid rgba(99,102,241,0.2); }
         .chat-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
-        @media (max-width: 768px) { .chat-inner { grid-template-columns: 1fr; gap: 32px; } }
+        .chat-frames { display: flex; gap: 16px; align-items: flex-start; }
+        /* Zwei Mockups (616 px) plus Text passen erst ab rund 885 px in zwei Spalten */
+        @media (max-width: 960px) {
+            .chat-inner { grid-template-columns: 1fr; gap: 32px; }
+            .chat-inner > * { min-width: 0; }
+            .chat-frames { flex-wrap: wrap; justify-content: center; min-width: 0; }
+        }
         .chat-badge-new { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; background: linear-gradient(135deg, rgba(155,89,182,0.3), rgba(99,102,241,0.3)); border: 1px solid rgba(155,89,182,0.5); border-radius: 20px; font-size: 0.75rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #BB86FC; margin-bottom: 18px; animation: pulse 2s infinite; }
         .chat-title { font-size: clamp(1.6rem, 3.5vw, 2.4rem); font-weight: 700; margin-bottom: 12px; line-height: 1.25; }
         .chat-desc { color: var(--text-secondary); font-size: 0.975rem; line-height: 1.75; margin-bottom: 20px; }
@@ -371,7 +384,7 @@
         .chat-features li span.check { color: #BB86FC; font-size: 1rem; flex-shrink: 0; }
         /* Chat UI Mockup */
         .chat-mockup { position: relative; display: flex; justify-content: center; align-items: center; }
-        .chat-frame { width: 300px; background: #0A0A0F; border-radius: 16px; border: 1.5px solid rgba(155,89,182,0.5); box-shadow: 0 0 60px rgba(155,89,182,0.2), 0 24px 64px rgba(0,0,0,0.6); overflow: hidden; }
+        .chat-frame { width: 300px; max-width: 100%; background: #0A0A0F; border-radius: 16px; border: 1.5px solid rgba(155,89,182,0.5); box-shadow: 0 0 60px rgba(155,89,182,0.2), 0 24px 64px rgba(0,0,0,0.6); overflow: hidden; }
         .chat-topbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: #1A1A2E; border-bottom: 1px solid #333355; }
         .chat-topbar-left { display: flex; align-items: center; gap: 8px; }
         .chat-avatar-sm { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #9B59B6, #6A0DAD); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; }
@@ -441,6 +454,11 @@
             .grid-2col { grid-template-columns: 1fr; }
             .openclaw-compare { grid-template-columns: 1fr; }
         }
+        /* Kopfleiste auf schmalen Handys: GitHub nur als Symbol, sonst ragt sie ueber den Rand */
+        @media (max-width: 400px) {
+            .nav-logo { font-size: 1.1rem; letter-spacing: 2px; }
+            .btn-github { padding: 6px 10px; font-size: 0; gap: 0; }
+        }
     </style>
 </head>
 <body>
@@ -487,8 +505,8 @@
             <span>Gehärtet nach BSI-Vorgaben · Source available · ELv2</span>
         </div>
         <h1 class="hero-title">JARVIS</h1>
-        <p class="hero-tagline t-de">Dein <strong>autonomer KI-Agent</strong> für den Linux-Desktop</p>
-        <p class="hero-tagline t-en">Your <strong>autonomous AI agent</strong> for the Linux desktop</p>
+        <p class="hero-tagline t-de">Dein <strong>KI-Chatbot mit enormem Funktionsumfang</strong> für den Linux-Desktop – <a href="#autonomie" style="color:var(--cyan);">autonom erst per Skill</a></p>
+        <p class="hero-tagline t-en">Your <strong>AI chatbot with a huge feature set</strong> for the Linux desktop – <a href="#autonomie" style="color:var(--cyan);">autonomous only via skill</a></p>
         <p class="hero-sub t-de">Steuert Desktop, Browser &amp; Shell · RAG auf eigenen Dokumenten · Multi-Agenten · lokal &amp; erweiterbar</p>
         <p class="hero-sub t-en">Controls desktop, browser &amp; shell · RAG on your own documents · multi-agent · local &amp; extensible</p>
         <p class="hero-sub t-de"><a href="#wissensgraph" style="color:var(--cyan);font-weight:600;">Neu: Wissensgraph, Lösungsarchiv und Sicherheitslücken-Prüfung →</a></p>
@@ -677,11 +695,11 @@
 <section class="manifesto">
     <div class="manifesto-inner">
         <div class="manifesto-lead reveal">
-            <p class="t-de">Die meisten KI-Assistenten sind Chatboxen: Du tippst, sie antworten – und das war's. <strong>Jarvis ist anders.</strong></p>
-            <p class="t-en">Most AI assistants are chat boxes: you type, they respond – that's it. <strong>Jarvis is different.</strong></p>
+            <p class="t-de">Die meisten KI-Assistenten sind Chatboxen: Du tippst, sie antworten – und das war's. <strong>Jarvis kann mehr.</strong></p>
+            <p class="t-en">Most AI assistants are chat boxes: you type, they respond – that's it. <strong>Jarvis can do more.</strong></p>
 
-            <p class="t-de">Jarvis ist ein <em>autonomer KI-Agent</em>, der auf deinem Linux-Server läuft und dort wirklich handelt. Er sieht deinen Desktop per Screenshot, bewegt die Maus, tippt Text, öffnet Programme und führt Bash-Befehle aus – genau wie ein Mensch, der vor dem Rechner sitzt. Kein Simulieren, kein „ich kann das leider nicht" – Jarvis arbeitet direkt auf deinem System.</p>
-            <p class="t-en">Jarvis is an <em>autonomous AI agent</em> that runs on your Linux server and truly acts there. It sees your desktop via screenshot, moves the mouse, types text, opens programs and executes bash commands – just like a person sitting at the computer. No simulating, no "I'm sorry, I can't do that" – Jarvis works directly on your system.</p>
+            <p class="t-de">Jarvis ist ein <em>KI-Chatbot mit enormem Funktionsumfang</em>, der auf deinem Linux-Server läuft und dort auf deinen Auftrag wirklich handelt. Er sieht deinen Desktop per Screenshot, bewegt die Maus, tippt Text, öffnet Programme und führt Bash-Befehle aus – genau wie ein Mensch, der vor dem Rechner sitzt. Kein Simulieren, kein „ich kann das leider nicht" – Jarvis arbeitet direkt auf deinem System.</p>
+            <p class="t-en">Jarvis is an <em>AI chatbot with a huge feature set</em> that runs on your Linux server and truly acts there when you ask it to. It sees your desktop via screenshot, moves the mouse, types text, opens programs and executes bash commands – just like a person sitting at the computer. No simulating, no "I'm sorry, I can't do that" – Jarvis works directly on your system.</p>
 
             <p class="t-de">Du gibst eine Aufgabe per Browser, WhatsApp oder API – Jarvis plant die Schritte, wählt die richtigen Werkzeuge und führt sie der Reihe nach aus. Schreibt Dateien, durchsucht deine Dokumente per <strong>RAG-Wissensdatenbank</strong>, steuert den Browser bis auf DOM-Ebene, sendet WhatsApp-Nachrichten und koordiniert bei komplexen Aufgaben mehrere spezialisierte Sub-Agenten gleichzeitig.</p>
             <p class="t-en">You give a task via browser, WhatsApp or API – Jarvis plans the steps, selects the right tools and executes them in sequence. Writes files, searches your documents via <strong>RAG knowledge base</strong>, controls the browser down to DOM level, sends WhatsApp messages and coordinates multiple specialized sub-agents simultaneously for complex tasks.</p>
@@ -691,6 +709,9 @@
 
             <p class="t-de">Das Skill-System macht Jarvis erweiterbar: Neue Fähigkeiten lassen sich als Python-Module nachladen, ohne den Core anzufassen. Das OpenClaw-Ökosystem liefert fertige Skills für Gmail, Google Drive, Kalender und mehr – einfach importieren, aktivieren, nutzen.</p>
             <p class="t-en">The skill system makes Jarvis extensible: new capabilities can be loaded as Python modules without touching the core. The OpenClaw ecosystem delivers ready-made skills for Gmail, Google Drive, calendar and more – just import, enable, use.</p>
+
+            <p class="t-de"><strong>Autonom wird Jarvis erst durch einen Skill.</strong> Ohne den Skill <code>Agent Autonomy Kit</code> bleibt er ein Chatbot, wenn auch einer mit enormem Funktionsumfang: Er arbeitet ab, was du ihm aufträgst oder als Auftrag eingerichtet hast, und wartet dann auf den nächsten. Erst der Skill gibt ihm eine Aufgabenliste, aus der er sich die nächste Aufgabe selbst holt. Ab Werk ist er ausgeschaltet.</p>
+            <p class="t-en"><strong>Jarvis only becomes autonomous through a skill.</strong> Without the <code>Agent Autonomy Kit</code> skill it remains a chatbot, albeit one with a huge feature set: it carries out what you ask of it or have set up as a job, then waits for the next one. Only the skill gives it a task list from which it picks its next task itself. It is off by default.</p>
 
             <p class="t-de"><strong>Jarvis ist kein Produkt, das du abonnierst.</strong> Es ist deine Infrastruktur, auf deinem Server, unter deiner Kontrolle.</p>
             <p class="t-en"><strong>Jarvis is not a product you subscribe to.</strong> It's your infrastructure, on your server, under your control.</p>
@@ -705,10 +726,17 @@
             <span class="t-en">What Jarvis can do</span>
         </h2>
         <p class="section-sub reveal">
-            <span class="t-de">Ein vollständiger KI-Agent, der wirklich auf deinem System arbeitet – kein Cloud-Wrapper.</span>
-            <span class="t-en">A fully autonomous AI agent that actually works on your system – not a cloud wrapper.</span>
+            <span class="t-de">Ein KI-Chatbot mit enormem Funktionsumfang, der wirklich auf deinem System arbeitet – kein Cloud-Wrapper. Autonom wird er erst per Skill.</span>
+            <span class="t-en">An AI chatbot with a huge feature set that actually works on your system – not a cloud wrapper. It only becomes autonomous via a skill.</span>
         </p>
         <div class="features-grid">
+            <div class="feature-card spotlight reveal" id="autonomie" style="scroll-margin-top:90px;">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title t-de">Autonomie gibt es nur per Skill – Agent Autonomy Kit</div>
+                <div class="feature-title t-en">Autonomy Only via Skill – Agent Autonomy Kit</div>
+                <div class="feature-desc t-de"><strong>Ohne diesen Skill ist Jarvis ein Chatbot mit enormem Funktionsumfang.</strong> Er führt aus, was du ihm aufträgst, auch über viele Schritte und mit allen freigegebenen Werkzeugen. Zeitgesteuerte Aufträge, Datei-Watcher und E-Mail-Regeln laufen ohne neue Nachricht, aber nur, weil jemand sie so eingerichtet hat. Danach wartet er auf den nächsten Auftrag. <strong>Erst das Agent Autonomy Kit</strong> gibt ihm eine Aufgabenliste mit Prioritäten: Er holt sich die nächste Aufgabe selbst, trägt neu entdeckte Aufgaben ein, schließt erledigte ab und schreibt Tagesberichte. Der Skill ist <strong>ab Werk ausgeschaltet</strong>, und der Administrator entscheidet, ob er eingeschaltet wird.</div>
+                <div class="feature-desc t-en"><strong>Without this skill, Jarvis is a chatbot with a huge feature set.</strong> It carries out what you ask of it, including over many steps and with all approved tools. Scheduled jobs, file watchers and email rules run without a new message, but only because someone set them up that way. Then it waits for the next task. <strong>Only the Agent Autonomy Kit</strong> gives it a prioritised task list: it picks its next task itself, adds newly discovered tasks, closes finished ones and writes daily reports. The skill is <strong>off by default</strong>, and the administrator decides whether to switch it on.</div>
+            </div>
             <div class="feature-card spotlight reveal" id="wissensgraph" style="scroll-margin-top:90px;">
                 <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🕸️</div>
@@ -1012,8 +1040,8 @@
                 <div class="feature-icon">⏰</div>
                 <div class="feature-title t-de">Cron-Trigger &amp; Datei-Watcher</div>
                 <div class="feature-title t-en">Cron Triggers &amp; File Watchers</div>
-                <div class="feature-desc t-de">Jarvis arbeitet proaktiv: Cron-Jobs starten Agent-Tasks automatisch zu konfigurierbaren Zeiten. Datei-Watcher reagieren auf neue oder geänderte Dateien in überwachten Ordnern – mit Pattern-Matching und <code>{filename}</code>-Platzhaltern im Task-Text.</div>
-                <div class="feature-desc t-en">Jarvis works proactively: Cron jobs automatically trigger agent tasks at configured times. File watchers react to new or changed files in monitored folders – with pattern matching and <code>{filename}</code> placeholders in the task text.</div>
+                <div class="feature-desc t-de">Aufträge auf Termin oder Ereignis: Cron-Jobs starten Agent-Tasks automatisch zu konfigurierbaren Zeiten. Datei-Watcher reagieren auf neue oder geänderte Dateien in überwachten Ordnern – mit Pattern-Matching und <code>{filename}</code>-Platzhaltern im Task-Text.</div>
+                <div class="feature-desc t-en">Tasks on a schedule or an event: Cron jobs automatically trigger agent tasks at configured times. File watchers react to new or changed files in monitored folders – with pattern matching and <code>{filename}</code> placeholders in the task text.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">📱</div>
@@ -1215,8 +1243,8 @@
                     <img class="t-de" src="https://jarvis-ai.info/img/main_ui.png" alt="Jarvis Main UI" loading="lazy">
                     <img class="t-en" src="https://jarvis-ai.info/img/main_ui_en.png" alt="Jarvis Main UI" loading="lazy">
                 </div>
-                <p class="screenshot-caption t-de">Haupt-Interface: Modernes Glassmorphism-Design mit Echtzeit-Chat und autonomer Agentensteuerung</p>
-                <p class="screenshot-caption t-en">Main interface: Modern glassmorphism design with real-time chat and autonomous agent control</p>
+                <p class="screenshot-caption t-de">Haupt-Interface: Modernes Glassmorphism-Design mit Echtzeit-Chat und Agentensteuerung</p>
+                <p class="screenshot-caption t-en">Main interface: Modern glassmorphism design with real-time chat and agent control</p>
             </div>
             <div id="tab-chat">
                 <div style="display:flex;gap:24px;justify-content:center;align-items:flex-start;flex-wrap:wrap;">
@@ -1511,7 +1539,7 @@ docker compose up -d</code>
         <div class="chat-inner">
             <!-- Chat Mockup -->
             <div class="chat-mockup reveal">
-                <div style="display:flex;gap:16px;align-items:flex-start;">
+                <div class="chat-frames">
                     <div class="chat-frame">
                         <div class="chat-topbar">
                             <div class="chat-topbar-left">
@@ -1549,15 +1577,15 @@ docker compose up -d</code>
                         </div>
                         <div class="chat-messages" style="background:#F5F5F7;">
                             <div class="chat-date" style="color:rgba(0,0,0,.4);">24.04.2026</div>
-                            <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;" class="t-de">Wer hat heute Anfragen gestellt?</div>
-                            <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;" class="t-en">Who made requests today?</div>
+                            <div class="chat-bubble-user t-de" style="background:rgba(155,89,182,0.25);color:#222;">Wer hat heute Anfragen gestellt?</div>
+                            <div class="chat-bubble-user t-en" style="background:rgba(155,89,182,0.25);color:#222;">Who made requests today?</div>
                             <div class="chat-bubble-bot" style="background:rgba(0,0,0,0.06);color:#333;border-color:rgba(0,0,0,.08);">👤 mueller · 143<br>👤 schmidt · 89<br>👤 admin · 12</div>
-                            <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;" class="t-de">Danke!</div>
-                            <div class="chat-bubble-user" style="background:rgba(155,89,182,0.25);color:#222;" class="t-en">Thanks!</div>
+                            <div class="chat-bubble-user t-de" style="background:rgba(155,89,182,0.25);color:#222;">Danke!</div>
+                            <div class="chat-bubble-user t-en" style="background:rgba(155,89,182,0.25);color:#222;">Thanks!</div>
                         </div>
                         <div class="chat-input-bar" style="background:#FFFFFF;border-color:#D0D0DD;">
-                            <div class="chat-input-mock" style="border-color:#D0D0DD;color:#aaa;" class="t-de">Nachricht eingeben…</div>
-                            <div class="chat-input-mock" style="border-color:#D0D0DD;color:#aaa;" class="t-en">Type a message…</div>
+                            <div class="chat-input-mock t-de" style="border-color:#D0D0DD;color:#aaa;">Nachricht eingeben…</div>
+                            <div class="chat-input-mock t-en" style="border-color:#D0D0DD;color:#aaa;">Type a message…</div>
                             <div class="chat-send-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></div>
                         </div>
                     </div>
@@ -1758,7 +1786,7 @@ docker compose up -d</code>
 
             <!-- Desktop Mockup -->
             <div class="windows-mockup reveal visible">
-                <div style="display:flex;flex-direction:column;align-items:center;gap:0;">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:0;min-width:0;max-width:100%;">
                     <div class="desktop-frame">
                         <div class="desktop-titlebar">
                             <span class="desktop-title-text">JARVIS · Windows Desktop Agent</span>
@@ -1888,8 +1916,8 @@ docker compose up -d</code>
         document.getElementById('btn-en').classList.toggle('active', lang === 'en');
         try { localStorage.setItem('jarvis-lang', lang); } catch(e) {}
         document.title = lang === 'de'
-            ? 'Jarvis – Autonomer KI Desktop-Agent'
-            : 'Jarvis – Autonomous AI Desktop Agent';
+            ? 'Jarvis – Selbst gehosteter KI-Chatbot für Linux, autonom per Skill'
+            : 'Jarvis – Self-hosted AI Chatbot for Linux, Autonomous via Skill';
     }
     (function() {
         try { const s = localStorage.getItem('jarvis-lang'); if (s === 'en') setLang('en'); } catch(e) {}

@@ -1,6 +1,6 @@
 # Jarvis AI Desktop Agent
 
-> Autonomous self-hosted AI desktop agent for Linux with multi-LLM support, desktop control via VNC, WhatsApp and Exchange email integration, and an extensible skill system.
+> Self-hosted AI chatbot for Linux with a huge feature set, autonomous only via the optional Agent Autonomy Kit skill, with multi-LLM support, desktop control via VNC, WhatsApp and Exchange email integration, and an extensible skill system.
 
 ## Overview
 
@@ -8,11 +8,12 @@ Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a fu
 
 ## Key Features
 
+- **Autonomy Only via Skill**: Without the Agent Autonomy Kit skill (off by default), Jarvis is a chatbot with a huge feature set: it carries out what it is asked to do or what has been set up as a job, including over many steps with tools, then waits for the next task. The skill adds a prioritised task list from which it picks its next task itself
 - **AI Mouse for Windows**: Hold the right mouse button, drag a frame around anything on the Windows screen, pick a question – the self-hosted model answers in a small window next to it. Portable single EXE built and branded by the own Jarvis server (German/English), no installation or admin rights; network-share distribution, optional Authenticode signing, automatic updates; access only for approved users or AD groups; questions managed centrally in the portal; optional read-only lookups in the knowledge base, Jira, Confluence and SAP; can replace text inside an image. Only an encrypted session token is stored, never a password. Requires a vision-capable model
 - **Security Hardened to BSI Requirements**: Systematically checked against requirements of Germany's Federal Office for Information Security (IT-Grundschutz APP.3.1, TR-02102); 34 measures implemented, each with an automated test. Not a BSI certification
 - **Desktop Control**: Full Linux desktop via Xvfb/VNC, controlled by the AI agent in real-time
 - **Multi-LLM Support**: Google Gemini, Anthropic Claude, OpenRouter (300+ models), any OpenAI-compatible API, local models via Ollama/LM Studio
-- **Multi-Agent Orchestration**: Main agent can spawn autonomous sub-agents for parallel task execution
+- **Multi-Agent Orchestration**: Main agent can spawn sub-agents for parallel task execution
 - **RAG Knowledge Base**: Document search (PDF, DOCX, TXT, Excel, PPTX, OneNote sections, images via OCR) with hybrid search from semantic vectors (FAISS with sentence-transformer embeddings) and keywords (BM25), TF-IDF as a fallback
 - **Knowledge Graph (Graph RAG)**: Optional and off by default. Builds a graph of terms and connections from the knowledge documents in the background, with an interactive view, a review list for similar terms, wiki pages per term, a contradiction check with verbatim quotes and Obsidian export. Can join the hybrid search as an additional channel; editors of a knowledge group only see its part of the graph
 - **Solution Archive**: Goes through the closed and resolved tickets of selected Jira projects on a schedule, extracts problem and solution without an agent or tools, counts similar cases and publishes a solution to the knowledge base only once the problem has occurred repeatedly (threshold configurable, default 10)

@@ -168,14 +168,41 @@ if [ "$NUR_WIEDERHER" = "0" ] && [ "$ANZ" -gt 0 ]; then
     # zerstoert, ist keine. Deshalb zusaetzlich die PID und keine Ueberschreibung.
     ZIEL="/root/dev-abweichungen-$(date +%Y%m%d-%H%M%S)-$$.tgz"
     [ -e "$ZIEL" ] && fehler "Sicherungsziel $ZIEL existiert bereits – es wird NICHTS zurueckgesetzt."
-    # Nur verfolgte Aenderungen UND unverfolgte Dateien, Pfade NUL-getrennt,
-    # damit Leerzeichen im Namen nicht zerfallen.
-    if printf '%s\n' "$ABW" | sed 's/^...//' | tr '\n' '\0' \
-         | tar czf "$ZIEL" -C "$DIR" --null -T - 2>/dev/null; then
+    # Verfolgte Aenderungen UND unverfolgte Dateien - aber nur, was es im Baum
+    # GIBT.
+    # ⚠ BIS 2026-11-02 KAM DIE LISTE AUS "$ABW" (Anzeigeform, `sed 's/^...//'`).
+    # Eine auf DEV GELOESCHTE verfolgte Datei steht dort als " D pfad"; tar
+    # findet sie nicht, die Sicherung scheitert, und der Reset bricht ab -
+    # fail-closed richtig, aber jeder Reset nach einem per scp ausgerollten
+    # Loeschen blieb haengen (gesehen beim c+p ce4e6cc7). Dieselbe Anzeigeform
+    # brach auch an Umbenennungen ("R alt -> neu") und an Pfaden, die git in
+    # Anfuehrungszeichen setzt. Deshalb kommt die Liste jetzt direkt aus git:
+    # -z (NUL-getrennt, nie gequotet), --no-renames (eine Umbenennung ist
+    # Loeschen + Neu). Eine geloeschte Datei hat nichts zu sichern - ihr Inhalt
+    # liegt in git, der Reset legt sie wieder hin -, sie wird aber BENANNT.
+    LISTE="$(mktemp)"
+    GELOESCHT=""
+    while IFS= read -r -d '' e; do
+        p="${e:3}"
+        if [ -e "$DIR/$p" ] || [ -L "$DIR/$p" ]; then
+            printf '%s\0' "$p" >> "$LISTE"
+        else
+            GELOESCHT="$GELOESCHT      $p"$'\n'
+        fi
+    done < <(g status --porcelain -z --no-renames)
+    if [ -n "$GELOESCHT" ]; then
+        meldung "  auf DEV geloescht (nichts zu sichern, der Inhalt liegt in git – der Reset legt sie wieder hin):"
+        printf '%s' "$GELOESCHT"
+    fi
+    if tar czf "$ZIEL" -C "$DIR" --null -T "$LISTE" 2>/dev/null; then
+        rm -f "$LISTE"
         chmod 0600 "$ZIEL"
         meldung "gesichert: $ZIEL ($(stat -c %s "$ZIEL") Bytes, $(tar tzf "$ZIEL" | wc -l) Eintraege)"
         SICHERUNG="$ZIEL"
     else
+        # Ein angefangenes Archiv sieht wie eine Sicherung aus und wuerde von
+        # --wiederherstellen als "neueste" genommen - weg damit.
+        rm -f "$LISTE" "$ZIEL"
         fehler "Sicherung nach $ZIEL fehlgeschlagen – es wird NICHTS zurueckgesetzt."
     fi
 

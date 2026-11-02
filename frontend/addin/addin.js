@@ -556,7 +556,7 @@
                     $('ad-login').classList.add('hidden');
                     $('ad-app').classList.remove('hidden');
                     $('ad-global').innerHTML = '<div class="ad-warn">' + esc(T('addin.no_access',
-                        'Dein Konto ist für den E-Mail-Bereich nicht freigeschaltet. Ein Administrator gibt ihn unter Einstellungen → Sicherheit → Berechtigungen → E-Mail-Zugriff frei.')) + '</div>';
+                        'Dein Konto ist für den E-Mail-Bereich nicht freigeschaltet. Ein Administrator gibt ihn unter Einstellungen → Sicherheit → Berechtigungen (Spalte „E-Mail“) frei.')) + '</div>';
                     document.querySelector('.ad-tabs').classList.add('hidden');
                     return;
                 }

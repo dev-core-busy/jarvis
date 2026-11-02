@@ -134,6 +134,6 @@
             "Zeig mir die offenen Hotline-Vorgaenge aelter als sieben Tage",
             "Welche erbrachten Leistungen sind noch nicht fakturiert?"
         ],
-        "notes": "Der Bereich /vemas und die vemas_*-Werkzeuge sind ausdruecklich freizuschalten (Einstellungen → Sicherheit → Berechtigungen → VEMAS-Zugriff). Leer = niemand, auch keine lokalen Administratoren."
+        "notes": "Der Bereich /vemas und die vemas_*-Werkzeuge sind ausdruecklich freizuschalten (Einstellungen → Sicherheit → Berechtigungen, Spalte 'VEMAS'). Leer = niemand, auch keine lokalen Administratoren."
     }
 }

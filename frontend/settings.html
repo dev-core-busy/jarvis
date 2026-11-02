@@ -973,8 +973,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li>Lokale Administratoren werden nie automatisch gesperrt (<code>exempt</code>).</li>
                     <li>Gesperrte Konten können sich noch anmelden, sehen aber nur den Sperr-Bildschirm samt Protokoll. Freischalten ausschließlich durch einen lokalen Benutzer (<i>Gesperrte Konten → Freischalten</i>).</li>
                     <li>Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
-                    <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Harte Egress-Sperre</i>.</li>
-                    <li>OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Einrichten/Reparieren via <code>POST /api/security/sandbox/setup</code>, Grenzen und Admin-Schalter via <code>POST /api/security/sandbox/config</code> (<code>auch_admins</code>, <code>speicher_mb</code>, <code>prozesse</code>, <code>cpu_prozent</code>). Ein Abschalten gibt es nicht. Bedienung unter <i>Sicherheit → Berechtigungen → Systemschutz / Sandbox</i>.</li>
+                    <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Internet-Sperre (Firewall)</i>.</li>
+                    <li>OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Einrichten/Reparieren via <code>POST /api/security/sandbox/setup</code>, Grenzen und Admin-Schalter via <code>POST /api/security/sandbox/config</code> (<code>auch_admins</code>, <code>speicher_mb</code>, <code>prozesse</code>, <code>cpu_prozent</code>). Ein Abschalten gibt es nicht. Bedienung unter <i>Sicherheit → Angriffsprävention und Sicherheitsvorfälle → Systemschutz / Sandbox</i>.</li>
                     <li>Automatische Sicherheitsupdates (System): Status via <code>GET /api/security/unattended</code> (mit <code>?live=1</code> Trockenlauf), Ein-/Ausschalten via <code>POST /api/security/unattended/setup</code> bzw. <code>/teardown</code>. Richtet <code>unattended-upgrades</code> bewusst eng ein: nur die Debian-Sicherheits-Quelle, kein automatischer Neustart, kein automatisches Aufräumen von Paketen. Beim Ausschalten bleibt die tägliche Aktualisierung des Paketindex aktiv. Bedienung unter <i>KI &amp; System → System-Einstellungen → Automatische Sicherheitsupdates</i>.</li>
                     <li>Root-Broker (Trennung UI-/Ausführungsebene): Betriebsmodus via <code>GET /api/broker/status</code>, Ein-Klick-Umschaltung via <code>POST /api/broker/setup</code> (getrennter Betrieb) bzw. <code>POST /api/broker/teardown</code> (Alt-Betrieb), Freigabeliste via <code>GET /api/broker/ops</code>, Admin-Entscheidung via <code>POST /api/broker/ops/decide</code> (Body <code>{key, decision: allow|deny|pending}</code>), Eintrag löschen via <code>POST /api/broker/ops/remove</code>, Audit-Log via <code>GET /api/broker/audit?n=100</code>. Bedienung unter <i>Sicherheit → Root-Freigaben (Root-Broker)</i>.</li>
                     <li>Zeitversetzte Auslöser (seit 2026-07-29): Zeitgesteuerte Aufträge (<code>POST/PUT /api/cron</code>, <code>POST /api/cron/{id}/run</code>) und Trigger-Watcher (<code>POST/PUT /api/watchers</code>) darf <b>nur ein Administrator</b> anlegen bzw. ändern; das Werkzeug <code>cron_create</code> ist für Netzwerk-Benutzer gesperrt. Grund: ein solcher Eintrag startet später selbständig einen Agenten mit vollem Werkzeugkasten – außerhalb jeder Sitzung, ohne Freigabe. Sehen und Löschen <em>eigener</em> Einträge bleibt erlaubt (Altbestand aufräumbar). Ausnahme: unter <i>Sicherheit → Erinnerungen per Messenger</i> freigegebene Absender (<code>GET/POST /api/reminders/senders</code>) dürfen sich <b>einmalige Erinnerungen</b> an sich selbst setzen – reiner Nachrichtenversand ohne Agent, gedeckelt auf 20 offene je Absender.</li>
@@ -1044,7 +1044,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <p class="kb-hint">Die Tabelle ist eigenständig und beeinflusst bestehende Regeln (Docker/NAT) nicht. Ein <code>systemd</code>-Dienst (<code>jarvis-egress.service</code>) lädt sie nach jedem Reboot. UID und Resolver werden bei der Einrichtung <b>automatisch erkannt</b> – die Sperre funktioniert dadurch ohne manuelle Anpassung auf jedem Server.</p>
 
                 <h3>4. Wer ist betroffen?</h3>
-                <p class="kb-hint">Nur Benutzer <b>ohne</b> Internet-Freigabe (Steuerung unter <i>Sicherheit → Berechtigungen → Internet-Zugang</i> via <code>ad_internet_users</code>/<code>ad_internet_group</code>). Lokale Administratoren und freigeschaltete Benutzer laufen über den normalen Sandbox-Benutzer <b>mit</b> Internet. Die beiden Ebenen (OS-Sandbox und Egress-Sperre) sind unabhängig schaltbar.</p>
+                <p class="kb-hint">Nur Benutzer <b>ohne</b> Internet-Freigabe (Steuerung unter <i>Sicherheit → Berechtigungen, Spalte „Internet“</i> via <code>ad_internet_users</code>/<code>ad_internet_group</code>). Lokale Administratoren und freigeschaltete Benutzer laufen über den normalen Sandbox-Benutzer <b>mit</b> Internet. Die beiden Ebenen (OS-Sandbox und Egress-Sperre) sind unabhängig schaltbar.</p>
 
                 <h3>5. Einrichtung &amp; Verifikation (in dieser Oberfläche)</h3>
                 <ul>
@@ -4134,7 +4134,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      Exchange nicht. -->
                 <div id="settings-tab-excel" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <p class="kb-hint">Der <b>Excel-Assistent</b> bringt {marke} als Aufgabenfenster nach Excel: der Benutzer fragt etwas zu der Arbeitsmappe, die er gerade geöffnet hat, und bekommt eine Antwort – oder einen Änderungsvorschlag, den er <b>vor dem Schreiben</b> Zelle für Zelle sieht. Wer den Assistenten benutzen darf, legen Sie unter <b>Sicherheit → Berechtigungen → Excel-Zugriff</b> fest; ohne Eintrag darf niemand.</p>
+                        <p class="kb-hint">Der <b>Excel-Assistent</b> bringt {marke} als Aufgabenfenster nach Excel: der Benutzer fragt etwas zu der Arbeitsmappe, die er gerade geöffnet hat, und bekommt eine Antwort – oder einen Änderungsvorschlag, den er <b>vor dem Schreiben</b> Zelle für Zelle sieht. Wer den Assistenten benutzen darf, legen Sie unter <b>Sicherheit → Berechtigungen, Spalte „Excel“</b> fest; ohne Eintrag darf niemand.</p>
 
                         <div class="kb-section" id="xa-sect-install">
                             <div class="kb-section-header kb-collapse-header" id="xa-sect-install-hdr">
@@ -4461,7 +4461,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
                         <div class="kb-collapse-body" id="am-sect-info-body">
                             <div id="amtool-state"></div>
-                            <p class="kb-hint" data-i18n-html="amtool.state_hint">Wer AI-Maus benutzen darf, steht getrennt davon unter <b>Sicherheit → Berechtigungen → AI-Maus</b> („leer = niemand"). Die Anwendung selbst holen die Benutzer unter <b>Portal → AI-Maus</b>.</p>
+                            <p class="kb-hint" data-i18n-html="amtool.state_hint">Wer AI-Maus benutzen darf, steht getrennt davon unter <b>Sicherheit → Berechtigungen, Spalte „AI-Maus“</b> („leer = niemand"). Die Anwendung selbst holen die Benutzer unter <b>Portal → AI-Maus</b>.</p>
                         </div>
                     </div>
                 </div>
@@ -4768,7 +4768,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      handgebautes Panel: die drei Werte sind reine Zahlen. -->
                 <div id="settings-tab-claude_subagent" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <p class="kb-hint">Claude Code gibt eng umrissene Codeaufgaben an {marke} ab; {marke} arbeitet in einem Wegwerf-Klon unter <code>/tmp</code> und liefert einen <b>maschinell geprüften</b> Patch zurück. Wer den Bereich betreten darf, steht unter <b>Sicherheit → Berechtigungen → Claude-Subagent-Zugriff</b> (leer = niemand). Die Anleitung für die Benutzer samt Token-Rechnung steht im Bereich <code>/claude</code>.</p>
+                        <p class="kb-hint">Claude Code gibt eng umrissene Codeaufgaben an {marke} ab; {marke} arbeitet in einem Wegwerf-Klon unter <code>/tmp</code> und liefert einen <b>maschinell geprüften</b> Patch zurück. Wer den Bereich betreten darf, steht unter <b>Sicherheit → Berechtigungen, Spalte „Claude“</b> (leer = niemand). Die Anleitung für die Benutzer samt Token-Rechnung steht im Bereich <code>/claude</code>.</p>
                         <p class="kb-hint"><b>Zu den Werten:</b> Jeder Auftrag rechnet auf demselben Sprachmodell wie der Chat – eine hohe Zahl gleichzeitiger Läufe geht unmittelbar zu Lasten der Antwortzeiten aller anderen.</p>
                         <div id="skcfg-claude_subagent"></div>
                     </div>
@@ -5427,12 +5427,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </div>
 
-                                <!-- ⚠ EIGENER SPEICHERN-KNOPF, WEIL DER ANDERE ZUGEKLAPPT IST.
-                                     Der Knopf am Ende von "alte Benutzerberechtigungen" schreibt
-                                     diese Verbindungsfelder mit; ohne diesen hier muesste man den
-                                     Berechtigungs-Container aufklappen, um eine geaenderte
-                                     DC-Adresse zu speichern. Gleiche Klick-Marke, gleicher
-                                     Vorgang - es gibt nur EINEN Speichervorgang. -->
+                                <!-- Speichert die Verbindungsfelder. Die Freigaben schickt
+                                     settings_ad.js nur mit, wenn ihr Bestand geladen ist (sonst
+                                     gingen leere Listen an den Server). -->
                                 <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
                                     <button class="kb-btn-action" data-klick="ad-speichern" data-i18n="common.save">Speichern</button>
                                     <button class="kb-btn-secondary" data-klick="ad-testen" data-i18n="profile.test">Verbindung testen</button>
@@ -5461,360 +5458,34 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                      sie (sie liest <h3>/<h4>/<summary> aus dem lebenden DOM).
                                      Die Tabelle samt Leiste und Fuss baut rechte_matrix.js in
                                      #rmx-host.
-                                     FETT, weil das hier der Regelweg ist – die Kopfzeile von
-                                     "alte Benutzerberechtigungen" tritt dagegen zurueck. Die
-                                     Staerke steht INLINE und nicht als Regel: eine
-                                     Kaskaden-Zusage waere in jsdom nicht verlaesslich messbar
-                                     (dort gewinnt bei zwei passenden Regeln die spaetere, nicht
-                                     die spezifischere). -->
+                                     Seit 2026-11-02 der EINZIGE Weg: die Einzellisten je Bereich
+                                     ("alte Benutzerberechtigungen") sind entfallen, den Bestand
+                                     haelt settings_ad.js (window.AdRechte). -->
                                 <h4 id="rmx-titel" style="font-weight:600;margin:14px 0 4px;" data-i18n="rmx.title">Berechtigungen zuweisen</h4>
-                                <p class="kb-hint" data-i18n="rmx.intro">Jede Zeile ist ein Benutzer oder eine Gruppe, jede Spalte ein Bereich. Ein Häkchen gibt den Bereich frei – das wirkt genau wie ein Eintrag im jeweiligen Abschnitt darunter. Bereiche, deren Funktion ausgeschaltet ist, fehlen hier. Gespeichert wird erst mit „Übernehmen".</p>
+                                <p class="kb-hint" data-i18n="rmx.intro">Jede Zeile ist ein Benutzer oder eine Gruppe, jede Spalte ein Bereich. Ein Häkchen gibt den Bereich frei; ohne Häkchen hat niemand Zugriff – auch Administratoren nicht. Bereiche, deren Funktion ausgeschaltet ist, fehlen hier. Gespeichert wird erst mit „Übernehmen".</p>
                                 <div class="rmx-inline" id="rmx-host"></div>
 
-                                <!-- ── Unter-Container: alte Benutzerberechtigungen ──
-                                     Fasst die einzelnen Bereichs-Listen (Anmeldung bis
-                                     Administratoren) samt ihrem Speichern-Knopf zusammen. Der
-                                     Regelweg ist der Knopf "Berechtigungen zuweisen…" darueber;
-                                     die Einzelfelder bleiben erreichbar, treten aber zurueck.
-                                     ⚠ Verschachtelte <details>: die CSS-Regeln von .sec-sub
-                                     zielen mit > auf das DIREKTE Kind, die inneren Bloecke
-                                     behalten damit ihr Aussehen.
-                                     Die Kopfzeile steht bewusst NORMAL statt fett (die Regel
-                                     `details.sec-sub > summary` setzt 600): sie soll gegenueber
-                                     "Berechtigungen zuweisen…" zuruecktreten. Inline und nicht
-                                     als Regel – siehe Begruendung am Knopf oben. -->
-                                <details class="sec-sub" data-sub="altrechte">
-                                    <summary style="font-weight:400;"><span data-i18n="security.sub_altrechte">alte Benutzerberechtigungen</span><span class="sec-sub-hint" data-i18n="security.sub_altrechte_hint">– Einzellisten je Bereich, von Hand gepflegt</span></summary>
+                                <!-- Anmelde-Hinweis (settings_ad.js): warnt sichtbar, wenn sich
+                                     niemand anmelden darf. Stand bis 2026-11-02 im Unter-Container
+                                     "Anmeldung" der Einzellisten; die sind entfallen (Vorgabe des
+                                     Betreibers), die Tabelle ist seitdem der EINZIGE Weg. -->
+                                <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin:10px 0 12px;border:1px solid;"></div>
+
+                                <!-- ── Unter-Container: Internet-Sperre (Firewall) ──
+                                     Lag bis 2026-11-02 im Unter-Container "Internet-Zugang" der
+                                     Einzellisten. Er ist keine Freigabeliste, sondern eine
+                                     Server-Einrichtung, und blieb deshalb beim Entfernen der
+                                     Einzellisten erhalten. -->
+                                <details class="sec-sub" data-sub="egress">
+                                    <summary><span data-i18n="security.sub_egress">Internet-Sperre (Firewall)</span><span class="sec-sub-hint" data-i18n="security.sub_egress_hint">– Harte Grenze für Benutzer ohne Internet-Freigabe</span></summary>
                                     <div class="sec-sub-body">
-
-                                <!-- ── Unter-Container: Anmeldung (Login-Zugriff) ── -->
-                                <details class="sec-sub" data-sub="login">
-                                    <summary><span data-i18n="security.sub_login">Anmeldung (Login-Zugriff)</span><span class="sec-sub-hint" data-i18n="security.sub_login_hint">– Wer darf sich überhaupt anmelden?</span></summary>
-                                    <div class="sec-sub-body">
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span data-i18n="security.ad_users_label">Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n-html="security.ad_users_hint">– kommagetrennt, z.B. <code>mueller,schmidt</code> (leer = niemand)</span>
-                                    </label>
-                                    <input type="text" id="ad-allowed-users" data-i18n-placeholder="security.ad_users_ph" placeholder="Leer = niemand darf sich anmelden" style="width:50%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span data-i18n="security.ad_group_label">Erlaubte Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="ad-allowed-group" rows="1" placeholder="z.B. CN=Jarvis-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;" data-i18n="security.ad_group_warning">
-                                        Anmelden darf, wer in der Benutzerliste steht ODER Mitglied einer dieser Gruppen ist – beide Felder sind Freigabewege, jeder genügt allein. Beide leer = niemand (nur das lokale Konto jarvis bleibt möglich).
-                                    </div>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;" data-i18n="security.ad_reval_hint">
-                                        Mit hinterlegtem Service-Konto (Verzeichnis-Suche) wird die Gruppen-Mitgliedschaft aktiver Benutzer automatisch nachgeprüft (Standard: alle 10 Min.) – ein Entzug meldet die Sitzung ohne Neuanmeldung ab.
-                                    </div>
-                                </div>
-
-                                <!-- Modus-Anzeige (Login-Zugriff) -->
-                                <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:12px;border:1px solid;"></div>
-                                    </div>
-                                </details>
-
-                                <!-- ── Unter-Container: Wissens-Editoren ── -->
-                                <details class="sec-sub" data-sub="knowledge">
-                                    <summary><span data-i18n="security.sub_knowledge">Wissens-Editoren</span><span class="sec-sub-hint" data-i18n="security.sub_knowledge_hint">– Wer darf Wissen hinzufügen, bearbeiten und löschen?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" data-i18n="security.knowledge_editors_intro" style="margin-bottom:10px;">Diese Liste steuert den GLOBALEN Zugriff auf die gesamte Wissens-Verwaltung (diese Seite, Ordner, Extraktor, Import/Export, Gruppen anlegen/löschen). Globale Editoren müssen EXPLIZIT eingetragen werden: leer = niemand ist globaler Editor – ausdrücklich auch keine lokalen Admins. Soll jemand bearbeiten dürfen, muss er hier stehen; für „alle" trägst du die AD-Gruppe „Jeder"/Domänen-Benutzer als Editor-Gruppe ein. Gezielten Schreibzugriff auf einzelne Gruppen (für Domänennutzer) vergibst du separat unter „Wissen → jeweilige Gruppe → 🔐".</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Editoren</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="ad-knowledge-editors" placeholder="Leer = niemand (auch keine Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Editor-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="ad-knowledge-editors-group" rows="1" placeholder="z.B. CN=Knowledge-Editors,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-
-                                <!-- Wissens-Editor Status -->
-                                <div id="ad-knowledge-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
-                                    </div>
-                                </details>
-
-                                <!-- ── Unter-Container: SAP-Zugriff (nur bei aktivem SAP-Skill sichtbar) ── -->
-                                <details class="sec-sub" data-sub="sap" id="sec-sub-sap" style="display:none;">
-                                    <summary><span>SAP-Zugriff</span><span class="sec-sub-hint">– Wer darf SAP-Daten lesen (Reiter, SQL, Tools)?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den <b>SAP-Reiter</b> und die SAP-Tools des Agenten (OData/HANA-SQL/RFC, nur lesend). Weil SAP mit einem hinterlegten Dienstkonto auf sensible Daten zugreift, ist der Zugriff <b>ausdrücklich freizuschalten</b>: leer = <b>niemand</b> darf SAP nutzen – ausdrücklich <b>auch keine lokalen Administratoren</b>. Jeder Nutzer (auch Admins) muss hier explizit eingetragen sein; für „alle" die AD-Gruppe „Jeder"/Domänen-Benutzer eintragen.</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="sap-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>SAP-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="sap-allowed-group" rows="1" placeholder="z.B. CN=SAP-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-
-                                <!-- SAP-Zugang Status -->
-                                <div id="ad-sap-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
-                                    </div>
-                                </details>
-
-                                <!-- ── Unter-Container: VEMAS-Zugriff (nur bei aktivem VEMAS-Skill sichtbar) ── -->
-                                <details class="sec-sub" data-sub="vemas" id="sec-sub-vemas" style="display:none;">
-                                    <summary><span>VEMAS-Zugriff</span><span class="sec-sub-hint">– Wer darf VEMAS.NET-Daten lesen (Bereich + Tools)?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den <b>VEMAS-Bereich</b> (Kachel im Portal) und die <code>vemas_*</code>-Tools des Agenten. Wie bei SAP ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Wichtig:</b> Freigegebene hinterlegen im Bereich VEMAS ihre <b>eigenen</b> Zugangsdaten und sehen dann genau die Daten, für die sie in VEMAS berechtigt sind; ohne eigenen Zugang gilt der gemeinsame Zugang aus dem Reiter <b>Vemas</b>. Ein Administrator <b>ohne</b> Eintrag hier kann keinen eigenen Zugang hinterlegen – er pflegt den gemeinsamen.</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="vemas-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>VEMAS-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="vemas-allowed-group" rows="1" placeholder="z.B. CN=VEMAS-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-                                    </div>
-                                </details>
-
-                                <!-- ── Unter-Container: E-Mail-Zugriff (nur bei aktivem E-Mail-Skill sichtbar) ── -->
-                                <details class="sec-sub" data-sub="email" id="sec-sub-email" style="display:none;">
-                                    <summary><span>E-Mail-Zugriff</span><span class="sec-sub-hint">– Wer darf sein Postfach anbinden und Regeln anlegen?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den <b>E-Mail-Bereich</b> (Kachel im Portal) und damit auf das Anbinden des eigenen Exchange-Postfachs samt Verarbeitungsregeln. Wie bei SAP ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Wichtig:</b> Freigegebene Benutzer legen ihre Regeln <b>selbst</b> an; eine Regel startet später ohne anwesenden Benutzer einen Agentenlauf – immer <b>unprivilegiert</b> und immer im <b>eigenen</b> Postfach des Regel-Besitzers. Welche Werkzeuge ein Regel-Lauf benutzen darf, legen Sie im Reiter <b>E-Mail</b> fest.</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="email-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>E-Mail-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="email-allowed-group" rows="1" placeholder="z.B. CN=Mail-Automation,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-
-                                <!-- E-Mail-Zugang Status -->
-                                <div id="ad-email-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:4px;border:1px solid;"></div>
-                                    </div>
-                                </details>
-                                <details class="sec-sub" data-sub="tracks" id="sec-sub-tracks" style="display:none;">
-                                    <summary><span>Short-Tracks-Zugriff</span><span class="sec-sub-hint">– Wer darf Ablagen anlegen und benutzen?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den Bereich <b>Short Tracks</b> (Kachel im Portal): Ablagen anlegen und Dateien darauf ablegen. Wie bei E-Mail und SAP ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Wichtig:</b> Freigegebene Benutzer legen ihre Ablagen <b>selbst</b> an; der Lauf ist immer <b>unprivilegiert</b> und kann nichts, was derselbe Benutzer nicht auch im Chat könnte. Welche Werkzeuge eine Ablage benutzen darf, legen Sie im Reiter <b>Short Tracks</b> fest – ohne Freigabe gilt dort allein „Lesen + Dokumente erzeugen".</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="tracks-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Short-Tracks-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="tracks-allowed-group" rows="1" placeholder="z.B. CN=Short-Tracks,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-                                    </div>
-                                </details>
-                                <!-- ── Unter-Container: Jira-Assistent (Browser-Erweiterung) ──
-                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
-                                     "jira" eingeblendet – gleiches Muster wie
-                                     sec-sub-email/-tracks/-excel. -->
-                                <details class="sec-sub" data-sub="jiraassist" id="sec-sub-jiraassist" style="display:none;">
-                                    <summary><span>Jira-Assistent</span><span class="sec-sub-hint">– Wer darf Tickets über die Browser-Erweiterung auswerten?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert die <b>Browser-Erweiterung „{marke} für Jira"</b>: Zusammenfassung eines Tickets und Antwortvorschlag an den Melder. Leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Warum das hier eine eigene Freigabe braucht:</b> das Ticket wird mit dem <b>Server-Token</b> aus dem Jira-Reiter geholt, nicht mit den Rechten des Benutzers in Jira. Wer eine Ticketnummer errät, die er dort selbst nicht sehen dürfte, bekäme den Inhalt über diesen Weg trotzdem. Tragen Sie deshalb nur ein, wer die betreffenden Tickets ohnehin einsehen darf. <b>Es läuft kein Agent</b> – der Vorschlag entsteht in einem einzelnen Modellaufruf ohne Werkzeuge und wird von Hand in Jira eingefügt und abgeschickt.</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="jiraassist-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Jira-Assistent-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="jiraassist-allowed-group" rows="1" placeholder="z.B. CN=Jira-Assistent,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-                                    </div>
-                                </details>
-                                <!-- ── Unter-Container: AI-Maus ──
-                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
-                                     "ai_mouse" eingeblendet – gleiches Muster wie
-                                     sec-sub-jiraassist/-email/-tracks. -->
-                                <details class="sec-sub" data-sub="aimouse" id="sec-sub-aimouse" style="display:none;">
-                                    <summary><span>AI-Maus</span><span class="sec-sub-hint">– Wer darf Bildschirmausschnitte auswerten lassen?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert die Windows-Anwendung <b>AI-Maus</b> (Kachel im Portal): rechte Maustaste halten, einen Rahmen aufziehen, dazu eine Frage stellen. Leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Warum das eine eigene Freigabe braucht:</b> jede Anfrage ist ein echter Modellaufruf <b>mit einem Bild</b> – das kostet spürbar mehr als eine Textfrage. Und der Bildinhalt ist <b>Fremdtext, der sich nicht entschärfen lässt</b>: was gerade auf dem Bildschirm steht, sieht das Modell direkt. <b>Es läuft kein Agent</b>, solange unter <b>Einstellungen → AI-Maus</b> kein Werkzeug-Bereich freigeschaltet ist – die Auswertung ist dann genau ein Aufruf ohne Werkzeuge. <b>Der Ausschnitt wird nicht gespeichert.</b></p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="aimouse-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>AI-Maus-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="aimouse-allowed-group" rows="1" placeholder="z.B. CN=AI-Maus,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-                                    </div>
-                                </details>
-<!-- ── Unter-Container: Feedback ──
-                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
-                                     "feedback" eingeblendet – gleiches Muster wie
-                                     sec-sub-aimouse/-email/-tracks. -->
-                                <!-- ⚠ HIER STAND DER UNTER-CONTAINER "Feedback".
-                                     Entfallen am 2026-09-14 auf Vorgabe des Betreibers: der
-                                     Feedback-Bereich haengt jetzt an den WISSENS-EDITOREN
-                                     (Unter-Container "Wissen bearbeiten" weiter oben) – wer
-                                     Wissen pflegen darf, darf dazu auch Rueckmeldung geben.
-                                     Eine zweite Liste daneben waere ein zweiter Ort fuer
-                                     dieselbe Personengruppe, und zwei Listen laufen
-                                     auseinander. Die Verwaltung (Formulare, ALLE Abgaben,
-                                     CSV-Export) bleibt unveraendert Administratoren
-                                     vorbehalten (Reiter "Feedback"). -->
-                                <!-- ── Unter-Container: Claude Subagent ──
-                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
-                                     "claude_subagent" eingeblendet – gleiches Muster wie
-                                     sec-sub-email/-tracks/-excel. -->
-                                <details class="sec-sub" data-sub="claudesub" id="sec-sub-claudesub" style="display:none;">
-                                    <summary><span>Claude-Subagent-Zugriff</span><span class="sec-sub-hint">– Wer darf Codeaufgaben an {marke} abgeben?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf den Bereich <b>Claude Subagent</b> (Kachel im Portal): dort erzeugt ein Benutzer den persönlichen Schlüssel, mit dem sein Claude-Code-Werkzeug Codeaufgaben an {marke} abgeben darf. Wie bei E-Mail, SAP und Short Tracks ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Was ein Auftrag darf:</b> {marke} klont das Projekt frisch nach <code>/tmp</code> und arbeitet nur dort; der Lauf ist immer <b>unprivilegiert</b>, hat kein Internet und nur <code>filesystem</code> + <code>shell_execute</code>. An die laufende Installation, an <code>settings.json</code> oder <code>.env</code> kommt er nicht heran. Das Ergebnis wird <b>maschinell</b> geprüft (Patch + benannte Testdatei), nicht vom Sprachmodell behauptet. <b>Was es kostet:</b> jeder Auftrag rechnet auf demselben LLM wie der Chat – die Zahl gleichzeitiger Läufe stellen Sie im Reiter <b>Claude Subagent</b> ein.</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="claudesub-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Claude-Subagent-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="claudesub-allowed-group" rows="1" placeholder="z.B. CN=Entwicklung,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-                                    </div>
-                                </details>
-                                <!-- ── Unter-Container: Excel-Add-in ──
-                                     Startet VERSTECKT und wird von app.js am Zustand des Skills
-                                     "excel-addin" eingeblendet – gleiches Muster wie
-                                     sec-sub-email und sec-sub-tracks. Ohne aktiven Skill waere
-                                     die Freigabe eine Freigabe fuer nichts. -->
-                                <details class="sec-sub" data-sub="excel" id="sec-sub-excel" style="display:none;">
-                                    <summary><span>Excel-Zugriff</span><span class="sec-sub-hint">– Wer darf den Tabellen-Assistenten in Excel benutzen?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Steuert den Zugriff auf das <b>Excel-Add-in</b> (Chatfenster auf die geöffnete Arbeitsmappe). Wie bei E-Mail, SAP und Short Tracks ausdrücklich freizuschalten: leer = <b>niemand</b> – ausdrücklich <b>auch keine lokalen Administratoren</b>. <b>Warum es die Freigabe gibt:</b> beim Fragen geht der Aufbau der geöffneten Mappe an den Server (Blattnamen, Spaltenüberschriften, Beispielzeilen und die markierte Auswahl). Das ist derselbe Vorgang wie im Chat – die Tabellen, die in Excel offen sind, enthalten aber typischerweise mehr Geschäftsdaten als ein getippter Beitrag. Geschrieben wird nie ohne Bestätigung: jede Zelle wird mit altem und neuem Inhalt angezeigt. Das Manifest zum Verteilen liegt unter <code>/excel-addin/manifest.xml</code>.</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="excel-allowed-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Excel-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="excel-allowed-group" rows="1" placeholder="z.B. CN=Excel-Assistent,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-                                    </div>
-                                </details>
-
-                                <!-- ── Unter-Container: Internet-Zugang ── -->
-                                <details class="sec-sub" data-sub="internet">
-                                    <summary><span data-i18n="security.sub_internet">Internet-Zugang</span><span class="sec-sub-hint" data-i18n="security.sub_internet_hint">– Wer darf Abfragen mit Internet-Ergebnissen machen?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Explizites Opt-in: leer = <b>niemand</b> darf das Internet nutzen – ausdrücklich <b>auch keine lokalen Administratoren</b>. Jeder Nutzer (auch Admins) muss hier explizit eingetragen sein; für „alle" die AD-Gruppe „Jeder"/Domänen-Benutzer als Internet-Gruppe eintragen. Nicht freigeschaltete Benutzer können Web-Suche, Browser und Bildersuche nicht nutzen.</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Erlaubte Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>mueller,schmidt</code></span>
-                                    </label>
-                                    <input type="text" id="ad-internet-users" placeholder="Leer = niemand (auch keine lokalen Admins)" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Internet-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="ad-internet-group" rows="1" placeholder="z.B. CN=Internet-Users,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-
-                                <!-- Internet-Zugang Status -->
-                                <div id="ad-internet-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:10px;border:1px solid;"></div>
-
                                 <!-- ── Internet-Egress-Sperre (harte OS-Grenze) ── -->
                                 <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(var(--fg-rgb),0.09);border-radius:10px;background:rgba(var(--fg-rgb),0.02);">
                                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                                         <span style="font-size:1rem;">🧱</span>
                                         <span style="font-weight:600;font-size:0.9rem;">Harte Egress-Sperre (Firewall)</span>
                                     </div>
-                                    <p class="kb-hint" style="margin:0 0 10px;">Ergänzt die Berechtigung oben um eine <b>Betriebssystem-Firewall</b>: Shell-Befehle von Benutzern <b>ohne</b> Internet-Freigabe laufen als gesperrter OS-Benutzer, der nur internes Netz (LAN, Jira/Confluence), Loopback und DNS erreicht – öffentliches Internet wird verworfen. Das ist die harte Grenze und fängt auch ab, was die Muster-Erkennung verpasst (z.&nbsp;B. rohe Sockets). Einmalige Einrichtung pro Server.</p>
+                                    <p class="kb-hint" style="margin:0 0 10px;">Ergänzt die Internet-Freigabe in der Tabelle oben um eine <b>Betriebssystem-Firewall</b>: Shell-Befehle von Benutzern <b>ohne</b> Internet-Freigabe laufen als gesperrter OS-Benutzer, der nur internes Netz (LAN, Jira/Confluence), Loopback und DNS erreicht – öffentliches Internet wird verworfen. Das ist die harte Grenze und fängt auch ab, was die Muster-Erkennung verpasst (z.&nbsp;B. rohe Sockets). Einmalige Einrichtung pro Server.</p>
                                     <button type="button" id="sec-fwdoc-btn" class="sec-btn"
                                             style="margin:0 0 10px;">❓ <span>Funktionsweise &amp; Sicherheitsfeatures</span></button>
                                     <div id="sec-egress-status" style="font-size:0.82rem;line-height:1.75;margin-bottom:10px;color:var(--text-secondary,#cbd5e1);">Status wird geladen…</div>
@@ -5825,47 +5496,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                     <div id="sec-egress-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
                                 </div>
-
-                                    </div>
-                                </details>
-
-                                <!-- ── Unter-Container: Administratoren ── -->
-                                <details class="sec-sub" data-sub="admins">
-                                    <summary><span data-i18n="security.sub_admins">Administratoren</span><span class="sec-sub-hint" data-i18n="security.sub_admins_hint">– Wer darf Admin-Aktionen (Update, Profile, Skills, MCP) ausführen?</span></summary>
-                                    <div class="sec-sub-body">
-                                <p class="kb-hint" style="margin-bottom:10px;">Leer lassen = nur der lokale Benutzer <code>jarvis</code> ist Administrator. Hier eingetragene AD-Benutzer/Gruppen dürfen zusätzlich Updates auslösen und Einstellungen ändern.</p>
-
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Admin-Benutzer</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– Benutzernamen kommagetrennt, z.B. <code>m.mustermann,mueller</code></span>
-                                    </label>
-                                    <input type="text" id="ad-admins" placeholder="Leer = nur lokaler jarvis ist Admin" style="width:60%;box-sizing:border-box;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:8px;">
-                                    <label>
-                                        <span>Admin-Gruppe (AD-Gruppe)</span>
-                                        <span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n="security.ad_group_hint">– zusätzlich zur Benutzerliste (ODER: Liste oder Gruppe genügt)</span>
-                                    </label>
-                                    <textarea id="ad-admins-group" rows="1" placeholder="z.B. CN=Jarvis-Admins,OU=Groups,DC=firma,DC=local" style="width:100%;box-sizing:border-box;"></textarea>
-                                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">
-                                        <span data-i18n="security.ad_group_cache_hint">⚠ Gruppen-Mitgliedschaft wird beim Login ermittelt. Mit Service-Konto (Verzeichnis-Suche) wird sie automatisch nachgeprüft (Standard: alle 10 Min.) – Änderungen wirken dann ohne Neuanmeldung.</span>
-                                    </div>
-                                </div>
-
-                                <!-- Administratoren Status -->
-                                <div id="ad-admins-status" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin-bottom:10px;border:1px solid;"></div>
-                                    </div>
-                                </details>
-
-                                <!-- Speichern der Einzellisten. Derselbe Vorgang wie der Knopf
-                                     im Container "Verbindung" (beide schreiben den GANZEN
-                                     Koerper), deshalb dieselbe Klick-Marke. -->
-                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                                    <button class="kb-btn-action" id="ad-save-btn" data-klick="ad-speichern" data-i18n="common.save">Speichern</button>
-                                    <span id="ad-save-status" class="ad-save-status" style="font-size:0.82rem;"></span>
-                                </div>
-
                                     </div>
                                 </details>
 
@@ -5880,7 +5510,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_ad.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
-                                <script src="/static/js/settings_ad.js?v=5"></script>
+                                <script src="/static/js/settings_ad.js?v=6"></script>
                             </div>
                         </div>
 
@@ -6256,7 +5886,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=420"></script>
+    <script src="/static/js/i18n.js?v=421"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=34"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6281,8 +5911,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=3"></script>
     <script src="/static/js/sap.js?v=7"></script>
-    <script src="/static/js/vemas.js?v=4"></script>
-    <script src="/static/js/email.js?v=7"></script>
+    <script src="/static/js/vemas.js?v=5"></script>
+    <script src="/static/js/email.js?v=8"></script>
     <script src="/static/js/short_tracks_admin.js?v=3"></script>
     <script src="/static/js/ai_mouse_admin.js?v=12"></script>
     <script src="/static/js/feedback_admin.js?v=7"></script>
@@ -6296,9 +5926,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=45"></script>
     <script src="/static/js/fernzugang.js?v=3"></script>
     <script src="/static/js/totp_admin.js?v=3"></script>
-    <script src="/static/js/ldap_picker.js?v=16"></script>
+    <script src="/static/js/ldap_picker.js?v=17"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
-    <script src="/static/js/rechte_matrix.js?v=6"></script>
+    <script src="/static/js/rechte_matrix.js?v=7"></script>
     <script src="/static/js/excel_admin.js?v=9"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=10"></script>
@@ -6309,7 +5939,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=235"></script>
+    <script src="/static/js/app.js?v=236"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

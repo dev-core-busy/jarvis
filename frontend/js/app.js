@@ -866,12 +866,16 @@
         const tabExcel   = document.getElementById('settings-tab-excel');
         const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabNewsfeed, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabFehleranalyse, tabSecurity, tabCron].concat(tabsSkillCfg);
 
+        // Zuletzt benutzter Reiter, je Browser. openModal stellt ihn wieder her;
+        // bis 2026-11-02 oeffneten die Einstellungen IMMER auf "KI & System".
+        const LETZTER_REITER_KEY = 'jarvis_settings_letzter_reiter';
         settingsTabs.forEach(tab => {
             tab.addEventListener('click', () => {
                 settingsTabs.forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
 
                 const target = tab.dataset.settingsTab;
+                try { localStorage.setItem(LETZTER_REITER_KEY, target); } catch (e) { /* Speicher gesperrt */ }
                 allSettingsTabs.forEach(t => {
                     if (t) { t.style.display = 'none'; t.classList.remove('active'); }
                 });
@@ -1183,6 +1187,19 @@
             }
         }
 
+        // ── Bereiche der Berechtigungs-Tabelle (rechte_matrix.js) ──
+        // Ein Skill-gebundener Bereich ist nur bei eingeschaltetem Skill eine
+        // Spalte: eine Freigabe fuer einen abgeschalteten Bereich waere eine
+        // Freigabe fuer nichts. Bis 2026-11-02 blendete app.js dafuer je Bereich
+        // einen Unter-Container (sec-sub-*) ein und aus; die sind mit den
+        // Einzellisten entfallen. Faellt der Skill-Abruf aus, wird NICHTS
+        // gemeldet – die Spalte fehlt dann (fail-closed).
+        function _rechteBereich(sub, an) {
+            window._rechteBereiche = window._rechteBereiche || {};
+            window._rechteBereiche[sub] = !!an;
+            document.dispatchEvent(new CustomEvent('jarvis-rechte-bereiche', { detail: { sub: sub, an: !!an } }));
+        }
+
         // ── SAP-Tab: nur sichtbar wenn 'sap'-Skill aktiviert ──
         const sapTabBtn = document.getElementById('settings-tab-btn-sap');
         window.updateSapTabVisibility = async function updateSapTabVisibility() {
@@ -1194,9 +1211,8 @@
                     : null;
                 const isEnabled = sp && sp.enabled;
                 sapTabBtn.style.display = isEnabled ? '' : 'none';
-                // SAP-Berechtigungsblock in Sicherheit → Berechtigungen nur bei aktivem Skill zeigen
-                const sapSecSub = document.getElementById('sec-sub-sap');
-                if (sapSecSub) sapSecSub.style.display = isEnabled ? '' : 'none';
+                // SAP-Spalte in Sicherheit → Berechtigungen nur bei aktivem Skill
+                _rechteBereich('sap', isEnabled);
                 if (!isEnabled && tabSap && tabSap.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
                     if (btnProfiles) btnProfiles.classList.add('active');
@@ -1210,9 +1226,8 @@
 
         // ── VEMAS-Tab: nur sichtbar wenn 'vemas'-Skill aktiviert ──
         // Gleiche Bauart wie beim SAP-Reiter: der Reiter selbst UND der
-        // Berechtigungsblock in Sicherheit haengen am Skill-Zustand – eine
-        // Freigabe fuer einen abgeschalteten Bereich waere eine Freigabe fuer
-        // nichts (gleiche Begruendung wie bei sec-sub-email/-sap).
+        // Berechtigungs-Spalte in Sicherheit haengen am Skill-Zustand
+        // (Begruendung bei _rechteBereich).
         const vemasTabBtn = document.getElementById('settings-tab-btn-vemas');
         window.updateVemasTabVisibility = async function updateVemasTabVisibility() {
             if (!vemasTabBtn) return;
@@ -1223,8 +1238,7 @@
                     : null;
                 const isEnabled = vm && vm.enabled;
                 vemasTabBtn.style.display = isEnabled ? '' : 'none';
-                const vemasSecSub = document.getElementById('sec-sub-vemas');
-                if (vemasSecSub) vemasSecSub.style.display = isEnabled ? '' : 'none';
+                _rechteBereich('vemas', isEnabled);
                 if (!isEnabled && tabVemas && tabVemas.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
                     if (btnProfiles) btnProfiles.classList.add('active');
@@ -1236,58 +1250,49 @@
             }
         }
 
-        // ── Short Tracks: Berechtigungsblock nur bei aktivem Skill ──
+        // ── Short Tracks: Berechtigungs-Spalte nur bei aktivem Skill ──
         // Der REITER wird von skillcfg.js::updateTabs() geschaltet (er steht dort
-        // in TAB_BUTTONS). Hier geht es nur um den Block in Sicherheit →
-        // Berechtigungen: ohne aktiven Skill waere die Freigabe eine Freigabe fuer
-        // nichts – dieselbe Begruendung wie bei sec-sub-email und sec-sub-sap.
+        // in TAB_BUTTONS). Hier geht es nur um die Spalte in Sicherheit →
+        // Berechtigungen (Begruendung bei _rechteBereich).
         window.updateTracksSecVisibility = async function updateTracksSecVisibility() {
-            const box = document.getElementById('sec-sub-tracks');
-            if (!box) return;
             try {
                 const skills = await _skillsOnce();
                 const sp = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'short-tracks')
                     : null;
-                box.style.display = (sp && sp.enabled) ? '' : 'none';
+                _rechteBereich('tracks', !!(sp && sp.enabled));
             } catch (e) {
-                // Fehler ignorieren – der Block bleibt versteckt
+                // Fehler ignorieren – die Spalte bleibt weg
             }
         };
 
-        // ── Jira-Assistent: Berechtigungsblock nur bei aktivem Skill ──
-        // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
+        // ── Jira-Assistent: Berechtigungs-Spalte nur bei aktivem Skill ──
+        // Begruendung bei _rechteBereich; ohne aktiven
         // Jira-Skill gibt es weder Adresse noch Token, die Freigabe waere eine
         // Freigabe fuer nichts.
         window.updateJiraAssistSecVisibility = async function updateJiraAssistSecVisibility() {
-            const box = document.getElementById('sec-sub-jiraassist');
-            if (!box) return;
             try {
                 const skills = await _skillsOnce();
                 const sp = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'jira')
                     : null;
-                box.style.display = (sp && sp.enabled) ? '' : 'none';
+                _rechteBereich('jiraassist', !!(sp && sp.enabled));
             } catch (e) {
-                // Fehler ignorieren – der Block bleibt versteckt
+                // Fehler ignorieren – die Spalte bleibt weg
             }
         };
 
-        // ── AI-Maus: Berechtigungsblock nur bei aktivem Skill ──
-        // Gleiche Begruendung wie bei sec-sub-jiraassist/-email/-tracks: ohne
-        // aktiven Skill gibt es den Bereich gar nicht, die Freigabe waere eine
-        // Freigabe fuer nichts.
+        // ── AI-Maus: Berechtigungs-Spalte nur bei aktivem Skill ──
+        // Begruendung bei _rechteBereich.
         window.updateAimouseSecVisibility = async function updateAimouseSecVisibility() {
-            const box = document.getElementById('sec-sub-aimouse');
-            if (!box) return;
             try {
                 const skills = await _skillsOnce();
                 const sp = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'ai_mouse')
                     : null;
-                box.style.display = (sp && sp.enabled) ? '' : 'none';
+                _rechteBereich('aimouse', !!(sp && sp.enabled));
             } catch (e) {
-                // Fehler ignorieren – der Block bleibt versteckt
+                // Fehler ignorieren – die Spalte bleibt weg
             }
         };
 
@@ -1296,51 +1301,43 @@
         // keinen eigenen Berechtigungsblock mehr, der ein- oder auszublenden
         // waere. Eine Funktion ohne Bedienelement ist toter Code.
 
-        // ── Claude Subagent: Berechtigungsblock nur bei aktivem Skill ──
-        // Gleiche Begruendung wie bei sec-sub-email/-sap/-tracks: ohne aktiven
-        // Skill waere die Freigabe eine Freigabe fuer nichts.
+        // ── Claude Subagent: Berechtigungs-Spalte nur bei aktivem Skill ──
+        // Begruendung bei _rechteBereich.
         window.updateClaudesubSecVisibility = async function updateClaudesubSecVisibility() {
-            const box = document.getElementById('sec-sub-claudesub');
-            if (!box) return;
             try {
                 const skills = await _skillsOnce();
                 const sp = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'claude_subagent')
                     : null;
-                box.style.display = (sp && sp.enabled) ? '' : 'none';
+                _rechteBereich('claudesub', !!(sp && sp.enabled));
             } catch (e) {
-                // Fehler ignorieren – der Block bleibt versteckt
+                // Fehler ignorieren – die Spalte bleibt weg
             }
         };
 
-        // ── Excel-Assistent: Berechtigungsblock nur bei aktivem Skill ──
+        // ── Excel-Assistent: Berechtigungs-Spalte nur bei aktivem Skill ──
         // Der REITER wird von skillcfg.js::updateTabs() geschaltet (er steht dort
-        // in TAB_BUTTONS). Hier geht es nur um den Block in Sicherheit →
-        // Berechtigungen – dieselbe Begruendung wie bei sec-sub-email,
-        // sec-sub-sap und sec-sub-tracks.
+        // in TAB_BUTTONS). Hier geht es nur um die Spalte in Sicherheit →
+        // Berechtigungen – Begruendung bei _rechteBereich.
         window.updateExcelSecVisibility = async function updateExcelSecVisibility() {
-            const box = document.getElementById('sec-sub-excel');
-            if (!box) return;
             try {
                 const skills = await _skillsOnce();
                 const sp = Array.isArray(skills)
                     ? skills.find(s => s.dir_name === 'excel-addin')
                     : null;
-                box.style.display = (sp && sp.enabled) ? '' : 'none';
+                _rechteBereich('excel', !!(sp && sp.enabled));
             } catch (e) {
-                // Fehler ignorieren – der Block bleibt versteckt
+                // Fehler ignorieren – die Spalte bleibt weg
             }
         };
 
         // ── E-Mail-Tab: nur sichtbar wenn 'email'-Skill aktiviert ──
-        // Gleiches Muster wie beim SAP-Reiter, inklusive des Berechtigungsblocks
+        // Gleiches Muster wie beim SAP-Reiter, inklusive der Berechtigungs-Spalte
         // in Sicherheit → Berechtigungen: ohne aktiven Skill waere die Freigabe
-        // eine Freigabe fuer nichts (dieselbe Begruendung wie bei sec-sub-sap
-        // und dem Erinnerungs-Abschnitt).
+        // eine Freigabe fuer nichts (Begruendung bei _rechteBereich).
         const emailTabBtn = document.getElementById('settings-tab-btn-email');
         window.updateEmailTabVisibility = async function updateEmailTabVisibility() {
-            const emailSecSub = document.getElementById('sec-sub-email');
-            if (!emailTabBtn && !emailSecSub) return;
+
             try {
                 const skills = await _skillsOnce();
                 const sp = Array.isArray(skills)
@@ -1348,7 +1345,7 @@
                     : null;
                 const isEnabled = !!(sp && sp.enabled);
                 if (emailTabBtn) emailTabBtn.style.display = isEnabled ? '' : 'none';
-                if (emailSecSub) emailSecSub.style.display = isEnabled ? '' : 'none';
+                _rechteBereich('email', isEnabled);
                 if (!isEnabled && tabEmail && tabEmail.classList.contains('active')) {
                     settingsTabs.forEach(t => t.classList.remove('active'));
                     if (btnProfiles) btnProfiles.classList.add('active');
@@ -1831,6 +1828,21 @@
             if (tabGoogle) { tabGoogle.style.display = 'none'; tabGoogle.classList.remove('active'); }
             if (tabVision) { tabVision.style.display = 'none'; tabVision.classList.remove('active'); }
             if (tabTelemetry) { tabTelemetry.style.display = 'none'; tabTelemetry.classList.remove('active'); }
+            // Zuletzt benutzten Reiter wiederherstellen. "KI & System" ist oben
+            // trotzdem zuerst aktiviert worden (seine Haken muessen laufen) und
+            // bleibt der Rueckfall: kein gemerkter Reiter, Speicher gesperrt oder
+            // Reiter ausgeblendet (Skill aus) – ein Klick auf einen ausgeblendeten
+            // Reiter zeigte ein leeres Panel. Ein ausdruecklich angeforderter
+            // Reiter (sessionStorage 'jarvis_settings_tab') wird danach geklickt
+            // und hat damit Vorrang.
+            try {
+                const _letzter = localStorage.getItem(LETZTER_REITER_KEY) || '';
+                if (_letzter && _letzter !== 'profiles') {
+                    const _lb = document.querySelector(
+                        '.settings-tab-btn[data-settings-tab="' + _letzter + '"]');
+                    if (_lb && _lb.style.display !== 'none') _lb.click();
+                }
+            } catch (e) { /* Speicher gesperrt: Vorgabe-Reiter */ }
             // Suchfeld im Kopf. Idempotent; hier und nicht beim Laden der Seite,
             // weil der Kopf erst mit dem Modal wirklich benutzbar ist.
             if (window.SettingsSearch) window.SettingsSearch.init();

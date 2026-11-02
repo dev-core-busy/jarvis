@@ -234,7 +234,7 @@
                     if (r.status === 403) {
                         status(T('vemas.test_no_access',
                             'Der Verbindungstest läuft über den VEMAS-Bereich – dafür musst du dich '
-                            + 'unter Sicherheit → Berechtigungen → VEMAS-Zugriff selbst freischalten.'), 'error');
+                            + 'unter Sicherheit → Berechtigungen (Spalte „VEMAS“) selbst freischalten.'), 'error');
                         return null;
                     }
                     return r.json();

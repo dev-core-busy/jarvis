@@ -1,8 +1,13 @@
 /* Jarvis – mausbedienbarer AD-User-/Gruppen-Picker + Token-Listen.
  *
- * - Hängt an alle AD-Felder einen "Durchsuchen"-Button mit Live-Verzeichnis-Suche
- *   (POST /api/ldap/users|groups). Service-Konto oder On-Demand-Passwort (nur Sitzung).
- * - Felder mit list:true (Erlaubte Benutzer / Erlaubte Gruppe) werden als
+ * - Haengt an Felder, die ein Modul ueber attachField anmeldet, einen
+ *   "Durchsuchen"-Button mit Live-Verzeichnis-Suche (POST /api/ldap/users|groups);
+ *   open() bedient die Berechtigungs-Tabelle (rechte_matrix.js). Service-Konto
+ *   oder On-Demand-Passwort (nur Sitzung).
+ *   ⚠ Bis 2026-11-02 hing er sich zusaetzlich selbst an 24 feste Freigabefelder
+ *   in settings.html (Liste FIELDS); die Felder sind mit den Einzellisten
+ *   entfallen, die Liste und attachButtons damit auch.
+ * - Felder mit list:true werden als
  *   Chip-Liste dargestellt: Einträge untereinander, je × zum Herausnehmen, plus
  *   manuelles Hinzufügen. Das zugrunde liegende (versteckte) Feld bleibt die
  *   Quelle der Wahrheit (Benutzer: kommagetrennt; Gruppen: zeilengetrennt, da
@@ -10,33 +15,6 @@
  */
 (function () {
     'use strict';
-
-    var FIELDS = {
-        'ad-allowed-users':           { kind: 'users',  multi: true, sep: ',',  list: true },
-        'ad-allowed-group':           { kind: 'groups', multi: true, sep: '\n', list: true },
-        'ad-internet-users':          { kind: 'users',  multi: true, sep: ',',  list: true },
-        'ad-internet-group':          { kind: 'groups', multi: true, sep: '\n', list: true },
-        'ad-admins':                  { kind: 'users',  multi: true, sep: ',',  list: true },
-        'ad-admins-group':            { kind: 'groups', multi: true, sep: '\n', list: true },
-        'ad-knowledge-editors':       { kind: 'users',  multi: true, sep: ',',  list: true },
-        'ad-knowledge-editors-group': { kind: 'groups', multi: true, sep: '\n', list: true },
-        'sap-allowed-users':          { kind: 'users',  multi: true, sep: ',',  list: true },
-        'sap-allowed-group':          { kind: 'groups', multi: true, sep: '\n', list: true },
-        'vemas-allowed-users':        { kind: 'users',  multi: true, sep: ',',  list: true },
-        'vemas-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
-        'email-allowed-users':        { kind: 'users',  multi: true, sep: ',',  list: true },
-        'email-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
-        'tracks-allowed-users':       { kind: 'users',  multi: true, sep: ',',  list: true },
-        'tracks-allowed-group':       { kind: 'groups', multi: true, sep: '\n', list: true },
-        'jiraassist-allowed-users':   { kind: 'users',  multi: true, sep: ',',  list: true },
-        'jiraassist-allowed-group':   { kind: 'groups', multi: true, sep: '\n', list: true },
-        'excel-allowed-users':        { kind: 'users',  multi: true, sep: ',',  list: true },
-        'excel-allowed-group':        { kind: 'groups', multi: true, sep: '\n', list: true },
-        'aimouse-allowed-users':      { kind: 'users',  multi: true, sep: ',',  list: true },
-        'aimouse-allowed-group':      { kind: 'groups', multi: true, sep: '\n', list: true },
-        'claudesub-allowed-users':    { kind: 'users',  multi: true, sep: ',',  list: true },
-        'claudesub-allowed-group':    { kind: 'groups', multi: true, sep: '\n', list: true }
-    };
 
     var _cred = { user: '', password: '' };
 
@@ -573,13 +551,6 @@
         if (cfg.list) initTokenList(inp, cfg);
     }
 
-    // ── Buttons + Token-Listen an die statischen Felder hängen ────────────
-    function attachButtons() {
-        Object.keys(FIELDS).forEach(function (id) {
-            attachOne(el(id), FIELDS[id]);
-        });
-    }
-
     // attachField: für dynamisch erzeugte Felder (z.B. Wissensgruppen-Editoren).
     // cfg optional – Default = mehrfach-Token-Liste, kind ableitbar oder 'users'.
     function attachField(inp, cfg) {
@@ -598,12 +569,6 @@
         return _cred.password ? { password: _cred.password, bind_user: _cred.user } : {};
     }
 
-    window.LdapPicker = { open: open, attachButtons: attachButtons, attachField: attachField, zugang: zugang,
+    window.LdapPicker = { open: open, attachField: attachField, zugang: zugang,
                          gruppenVon: openGroups };
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', attachButtons);
-    } else {
-        attachButtons();
-    }
 })();

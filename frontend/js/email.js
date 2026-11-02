@@ -275,7 +275,7 @@
             box.innerHTML = '<p class="kb-hint">' + T('mailadm.acc_empty',
                 'Noch kein Postfach angebunden. Freigegebene Benutzer hinterlegen ihr '
                 + 'Postfach selbst im Bereich <b>E-Mail</b> (Kachel im Portal). '
-                + 'Freigabe: Sicherheit → Berechtigungen → E-Mail-Zugriff.') + '</p>';
+                + 'Freigabe: Sicherheit → Berechtigungen, Spalte „E-Mail“.') + '</p>';
             return;
         }
         var h = '<table class="audit-table" style="width:100%;"><thead><tr>'

@@ -754,8 +754,10 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     pruefe('ein Skill-Reiter steht nicht zusaetzlich als Reiter im Index',
            alsReiter === 0, String(alsReiter));
 
-    // Beschriftung und Erlaeuterung sind getrennt.
-    await tippe(w, 'admin-benutzer');
+    // Beschriftung und Erlaeuterung sind getrennt. (Bis 2026-11-02 hier
+    // „Admin-Benutzer" – das Feld ist mit den Einzellisten entfallen;
+    // „Bind-Benutzer" traegt denselben angehaengten Hilfetext.)
+    await tippe(w, 'bind-benutzer');
     const tAdm = titelTexte(w);
     pruefe('Beschriftung ohne angehaengten Hilfetext',
            tAdm.length > 0 && (tAdm[0] || '').length < 40, tAdm[0] || '(nichts)');
@@ -919,8 +921,10 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
            inHdr.length === 0, inHdr.slice(0, 3).join(' | '));
 
     // ⚠ DIE REGEL, DIE EINE KUENFTIGE UEBERSCHRIFT MITNIMMT: jeder sichtbare
-    // Berechtigungs-Block des Sicherheits-Reiters ist auffindbar. Gepflegt wird
+    // Unter-Container des Sicherheits-Reiters ist auffindbar. Gepflegt wird
     // dafuer nichts - gelesen wird das Markup.
+    // Seit 2026-11-02 sind die Bereichs-Bloecke ("alte Benutzerberechtigungen")
+    // entfallen; uebrig sind u. a. "Verbindung" und "Internet-Sperre (Firewall)".
     const sichtbareSubs = [].slice.call(doc.querySelectorAll('details.sec-sub'))
         .filter(x => x.style.display !== 'none');
     const titelImIndex = new Set(unter.map(e => e.titel));
@@ -929,29 +933,51 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
         const sp = sm && sm.querySelector('span');
         return sp ? (sp.textContent || '').trim() : '';
     }).filter(t2 => t2 && !titelImIndex.has(t2));
-    pruefe('Positivkontrolle: es gibt sichtbare sec-sub-Bloecke',
-           sichtbareSubs.length >= 5, String(sichtbareSubs.length));
+    pruefe('Positivkontrolle: der Firewall-Block ist ein sichtbarer sec-sub-Block',
+           sichtbareSubs.some(x => x.getAttribute('data-sub') === 'egress'),
+           sichtbareSubs.map(x => x.getAttribute('data-sub')).join(','));
     pruefe('JEDER sichtbare sec-sub-Block ist auffindbar', fehlend.length === 0,
            fehlend.slice(0, 5).join(' | '));
+    pruefe('„Berechtigungen zuweisen" (die Tabelle) ist auffindbar',
+           titelImIndex.has('Berechtigungen zuweisen'), '(fehlt)');
 
-    // ⚠ EIN VERSTECKTER BLOCK IST KEIN ZIEL. `#sec-sub-sap` traegt
-    // `display:none`, solange der SAP-Skill aus ist - ein Treffer dorthin
-    // fuehrte auf eine Zeile, die es auf diesem System nicht gibt.
-    const sap = doc.getElementById('sec-sub-sap');
-    pruefe('Positivkontrolle: der SAP-Block ist im Testaufbau versteckt',
-           !!sap && sap.style.display === 'none', sap ? sap.style.display : '(fehlt)');
+    // ⚠ EIN VERSTECKTER BLOCK IST KEIN ZIEL. Ein per Skill-Schalter
+    // ausgeblendeter Block (`display:none`) fuehrte auf eine Zeile, die es
+    // auf diesem System nicht gibt. Im echten Markup gibt es seit 2026-11-02
+    // keinen solchen Block mehr - die Eigenschaft der Suche gilt weiter und
+    // wird an einem SONDEN-Block gemessen, der einmal versteckt und einmal
+    // sichtbar eingehaengt wird (sonst waere „nicht im Index" trivial wahr).
+    const sondeHost = doc.getElementById('sec-sect-ad-body');
+    if (!sondeHost) { console.log('ABBRUCH: #sec-sect-ad-body fehlt'); process.exit(2); }
+    const sondeV = doc.createElement('details');
+    sondeV.className = 'sec-sub';
+    sondeV.setAttribute('data-sub', 'sonde-versteckt');
+    sondeV.innerHTML = '<summary><span>Sondenblock Verborgen</span></summary><div class="sec-sub-body"></div>';
+    sondeV.style.display = 'none';
+    sondeHost.appendChild(sondeV);
+    w.SettingsSearch._verwerfen();
+    await tippe(w, 'sondenblock');
+    const mitV = new Set((w.SettingsSearch._index() || []).map(e => e.titel));
     pruefe('ein versteckter Block steht NICHT im Index',
-           !titelImIndex.has('SAP-Zugriff'), 'SAP-Zugriff gefunden');
+           !mitV.has('Sondenblock Verborgen'), 'Sondenblock gefunden');
+    sondeV.style.display = '';
+    w.SettingsSearch._verwerfen();
+    await tippe(w, 'sondenblock');
+    const ohneV = new Set((w.SettingsSearch._index() || []).map(e => e.titel));
+    pruefe('Positivkontrolle: derselbe Block SICHTBAR steht im Index',
+           ohneV.has('Sondenblock Verborgen'), '(fehlt)');
+    sondeV.remove();
 
     // ⚠ TITEL UND ERLAEUTERUNG TRENNEN - sonst steht als Titel
-    // „SAP-Zugriff– Wer darf SAP-Daten lesen (Reiter, SQL, Tools)?" da.
-    await tippe(w, 'internet-zugang');
+    // „Internet-Sperre (Firewall)– Harte Grenze …" da.
+    w.SettingsSearch._verwerfen();
+    await tippe(w, 'internet-sperre');
     const tIz = titelTexte(w);
     pruefe('ein <summary> wird in Titel und Erlaeuterung getrennt',
-           (tIz[0] || '') === 'Internet-Zugang', tIz[0] || '(nichts)');
+           (tIz[0] || '') === 'Internet-Sperre (Firewall)', tIz[0] || '(nichts)');
     pruefe('… und die Erlaeuterung bleibt DURCHSUCHBAR',
-           (await (async () => { await tippe(w, 'internet ergebnissen');
-                                 return titelTexte(w).length > 0; })()),
+           (await (async () => { await tippe(w, 'harte grenze');
+                                 return titelTexte(w).indexOf('Internet-Sperre (Firewall)') >= 0; })()),
            'nichts gefunden');
 
     // ⚠ DER SPRUNG MUSS DAS <details> OEFFNEN - sonst landet der Treffer auf
@@ -962,9 +988,11 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     // <summary>-Treffer ist das bereits sein eigenes <details> – der Fall
     // oeffnet sich also auch dann, wenn die Kette gar nicht greift, und eine
     // Sabotage daran bliebe stumm. Eine Feldbeschriftung INNERHALB des Blocks
-    // kann nur die Kette erreichen.
-    const det = doc.querySelector('details.sec-sub[data-sub="internet"]');
-    await tippe(w, 'internet-zugang');
+    // kann nur die Kette erreichen. (Bis 2026-11-02 am Block „Internet-Zugang";
+    // der ist entfallen, „Verbindung" traegt Feldbeschriftungen.)
+    const det = doc.querySelector('details.sec-sub[data-sub="connection"]');
+    if (det) det.open = false;
+    await tippe(w, 'verbindung (domain');
     pruefe('Positivkontrolle: der Block ist VOR dem Klick zu',
            !!det && det.open === false, det ? String(det.open) : '(fehlt)');
     klick(zeile(w, 0), w);
@@ -973,7 +1001,7 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
            !!det && det.open === true, det ? String(det.open) : '(fehlt)');
 
     if (det) det.open = false;
-    await tippe(w, 'internet-gruppe');
+    await tippe(w, 'bind-benutzer');
     pruefe('Positivkontrolle: ein Treffer TIEF im Block existiert',
            zeilen(w).length > 0, String(zeilen(w).length));
     pruefe('… und der Block ist davor wieder zu',
@@ -984,31 +1012,39 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
            !!det && det.open === true, det ? String(det.open) : '(fehlt)');
 
     // ⚠ EIN AUFGEKLAPPTER BLOCK IN EINEM ZUGEKLAPPTEN IST WEITER UNSICHTBAR.
-    // Seit die Bereichs-Bloecke in "alte Benutzerberechtigungen" liegen, hat
-    // der Treffer ZWEI <details> ueber sich – ein Sprung, der nur das innerste
-    // oeffnet, landet wieder auf einer geschlossenen Zeile. Geprueft wird die
-    // EIGENSCHAFT (kein Vorfahre ist zu), nicht ein benannter Container: eine
-    // dritte Ebene waere damit von selbst mitgemessen.
+    // Bis 2026-11-02 lagen die Bereichs-Bloecke in "alte Benutzerberechtigungen",
+    // ein Treffer hatte ZWEI <details> ueber sich. Das echte Markup verschachtelt
+    // seitdem nicht mehr - die Eigenschaft der Suche gilt weiter und wird an
+    // einer SONDE gemessen (zwei Ebenen, Feld tief innen). Geprueft wird die
+    // EIGENSCHAFT (kein Vorfahre ist zu), nicht ein benannter Container.
+    const sondeA = doc.createElement('details');
+    sondeA.className = 'sec-sub';
+    sondeA.setAttribute('data-sub', 'sonde-aussen');
+    sondeA.innerHTML = '<summary><span>Sondenhuelle Aussen</span></summary><div class="sec-sub-body">' +
+        '<details class="sec-sub" data-sub="sonde-innen"><summary><span>Sondenhuelle Innen</span></summary>' +
+        '<div class="sec-sub-body"><div class="form-group"><label><span>Sondenfeld Tiefliegend</span></label>' +
+        '<input type="text"></div></div></details></div>';
+    sondeHost.appendChild(sondeA);
+    w.SettingsSearch._verwerfen();
+    const innen = sondeA.querySelector('details[data-sub="sonde-innen"]');
     const aussen = [];
-    for (let p = det && det.parentNode; p && p !== doc.body; p = p.parentNode) {
+    for (let p = innen && innen.parentNode; p && p !== doc.body; p = p.parentNode) {
         if (p.tagName === 'DETAILS') aussen.push(p);
     }
     pruefe('Positivkontrolle: der Block liegt in mindestens einem weiteren <details>',
            aussen.length >= 1, String(aussen.length));
-    pruefe('… und KEIN uebergeordnetes <details> ist nach dem Sprung zu',
-           aussen.every(x => x.open === true),
-           aussen.map(x => (x.getAttribute('data-sub') || '?') + '=' + x.open).join(' | '));
     aussen.forEach(x => { x.open = false; });
-    if (det) det.open = false;
-    await tippe(w, 'internet-gruppe');
-    pruefe('… auch wenn ALLE Ebenen davor zu waren',
-           (await (async () => {
-               klick(zeile(w, 0), w);
-               await tickCount(8);
-               return det && det.open === true && aussen.every(x => x.open === true);
-           })()),
+    if (innen) innen.open = false;
+    await tippe(w, 'sondenfeld tiefliegend');
+    pruefe('Positivkontrolle: das tiefe Sondenfeld ist ein Treffer',
+           zeilen(w).length > 0, String(zeilen(w).length));
+    klick(zeile(w, 0), w);
+    await tickCount(8);
+    pruefe('… und KEIN uebergeordnetes <details> ist nach dem Sprung zu',
+           !!innen && innen.open === true && aussen.every(x => x.open === true),
            aussen.map(x => (x.getAttribute('data-sub') || '?') + '=' + x.open).join(' | ')
-           + ' / innen=' + (det ? det.open : '(fehlt)'));
+           + ' / innen=' + (innen ? innen.open : '(fehlt)'));
+    sondeA.remove();
 }
 
 // ── Abschnitt 10: die Regel steht im Code, nicht als Liste ─────────────────

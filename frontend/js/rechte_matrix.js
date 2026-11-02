@@ -1,32 +1,37 @@
 /* Jarvis – Berechtigungen kompakt zuweisen (Sicherheit -> Berechtigungen).
  *
- * Ein Fenster statt zwoelf Unter-Container: Benutzer und Gruppen werden ueber
+ * Eine Tabelle fuer alle Bereiche: Benutzer und Gruppen werden ueber
  * die vorhandene Verzeichnis-Suche (LdapPicker) gewaehlt, je Bereich gibt es
  * ein Kaestchen. Zeilen sind alle Benutzer/Gruppen, die in einem der SICHTBAREN
  * Bereiche schon stehen, plus die neu gewaehlten.
  *
- * Quelle der Wahrheit bleiben die Felder der Unter-Container (ad-allowed-users
- * usw.): "Uebernehmen" schreibt dort hinein und speichert ueber window._adSave –
- * derselbe Weg wie der Speichern-Knopf darunter, also kein zweites Format.
+ * Quelle der Wahrheit ist der Bestand in settings_ad.js (window.AdRechte):
+ * "Uebernehmen" schreibt dort hinein und speichert ueber window._adSave.
+ * ⚠ BIS 2026-11-02 WAREN DAS EINGABEFELDER in den Unter-Containern von "alte
+ * Benutzerberechtigungen"; die sind auf Vorgabe des Betreibers entfallen, die
+ * Tabelle ist seitdem der einzige Weg.
  *
- * Bereiche, deren Unter-Container ausgeblendet ist (Skill aus), erscheinen
- * nicht als Spalte und werden nicht angefasst.
+ * Bereiche mit `skill` erscheinen nur, wenn app.js den Skill als eingeschaltet
+ * gemeldet hat (window._rechteBereiche + Ereignis 'jarvis-rechte-bereiche');
+ * sonst sind sie keine Spalte und werden nicht angefasst.
  */
 (function () {
     'use strict';
 
-    // sub = data-sub des Unter-Containers; users/group = IDs der Felder
+    // sub = Kennung des Bereichs (Sortierung, Skill-Meldung aus app.js);
+    // users/group = Kennungen im Bestand von settings_ad.js; skill = nur bei
+    // eingeschaltetem Skill eine Spalte
     var BEREICHE = [
         { sub: 'login',      users: 'ad-allowed-users',         group: 'ad-allowed-group',           key: 'rmx.col_login' },
         { sub: 'knowledge',  users: 'ad-knowledge-editors',     group: 'ad-knowledge-editors-group', key: 'rmx.col_knowledge' },
-        { sub: 'sap',        users: 'sap-allowed-users',        group: 'sap-allowed-group',          key: 'rmx.col_sap' },
-        { sub: 'vemas',      users: 'vemas-allowed-users',      group: 'vemas-allowed-group',        key: 'rmx.col_vemas' },
-        { sub: 'email',      users: 'email-allowed-users',      group: 'email-allowed-group',        key: 'rmx.col_email' },
-        { sub: 'tracks',     users: 'tracks-allowed-users',     group: 'tracks-allowed-group',       key: 'rmx.col_tracks' },
-        { sub: 'jiraassist', users: 'jiraassist-allowed-users', group: 'jiraassist-allowed-group',   key: 'rmx.col_jiraassist' },
-        { sub: 'aimouse',    users: 'aimouse-allowed-users',    group: 'aimouse-allowed-group',      key: 'rmx.col_aimouse' },
-        { sub: 'claudesub',  users: 'claudesub-allowed-users',  group: 'claudesub-allowed-group',    key: 'rmx.col_claudesub' },
-        { sub: 'excel',      users: 'excel-allowed-users',      group: 'excel-allowed-group',        key: 'rmx.col_excel' },
+        { sub: 'sap',        users: 'sap-allowed-users',        group: 'sap-allowed-group',          key: 'rmx.col_sap',        skill: true },
+        { sub: 'vemas',      users: 'vemas-allowed-users',      group: 'vemas-allowed-group',        key: 'rmx.col_vemas',      skill: true },
+        { sub: 'email',      users: 'email-allowed-users',      group: 'email-allowed-group',        key: 'rmx.col_email',      skill: true },
+        { sub: 'tracks',     users: 'tracks-allowed-users',     group: 'tracks-allowed-group',       key: 'rmx.col_tracks',     skill: true },
+        { sub: 'jiraassist', users: 'jiraassist-allowed-users', group: 'jiraassist-allowed-group',   key: 'rmx.col_jiraassist', skill: true },
+        { sub: 'aimouse',    users: 'aimouse-allowed-users',    group: 'aimouse-allowed-group',      key: 'rmx.col_aimouse',    skill: true },
+        { sub: 'claudesub',  users: 'claudesub-allowed-users',  group: 'claudesub-allowed-group',    key: 'rmx.col_claudesub',  skill: true },
+        { sub: 'excel',      users: 'excel-allowed-users',      group: 'excel-allowed-group',        key: 'rmx.col_excel',      skill: true },
         { sub: 'internet',   users: 'ad-internet-users',        group: 'ad-internet-group',          key: 'rmx.col_internet' },
         { sub: 'admins',     users: 'ad-admins',                group: 'ad-admins-group',            key: 'rmx.col_admins' }
     ];
@@ -65,15 +70,14 @@
         return m ? m[1].replace(/\\(.)/g, '$1') : dn;
     }
     function feldId(b, kind) { return kind === 'users' ? b.users : b.group; }
+    function wert(b, kind) { return window.AdRechte ? window.AdRechte.lesen(feldId(b, kind)) : ''; }
 
-    // Sichtbar = Unter-Container existiert und ist nicht per Skill-Schalter
-    // ausgeblendet. Zugeklappt zaehlt als sichtbar (Register: "Zugeklappt ist
-    // nicht versteckt").
+    // Sichtbar = kein Skill noetig, oder app.js hat den Skill als eingeschaltet
+    // gemeldet. Fail-closed: solange keine Meldung da ist, fehlt die Spalte –
+    // eine Freigabe fuer einen abgeschalteten Bereich waere eine fuer nichts.
     function sichtbareBereiche() {
-        return BEREICHE.filter(function (b) {
-            var d = document.querySelector('details.sec-sub[data-sub="' + b.sub + '"]');
-            return !!(d && d.style.display !== 'none' && el(b.users) && el(b.group));
-        });
+        var an = window._rechteBereiche || {};
+        return BEREICHE.filter(function (b) { return !b.skill || an[b.sub] === true; });
     }
 
     // Identitaet eines Eintrags. Benutzer wie im Backend (_norm_login): ohne
@@ -103,7 +107,7 @@
         if (z) return z;
         z = { kind: kind, wert: wert, an: [], vorher: [], neu: true, nurGruppe: false, anzeige: '' };
         _spalten.forEach(function (b) {
-            var drin = enthaelt(teile(el(feldId(b, kind)).value, kind), wert, kind);
+            var drin = enthaelt(teile(window.AdRechte ? window.AdRechte.lesen(feldId(b, kind)) : '', kind), wert, kind);
             z.an.push(drin);
             z.vorher.push(drin);
             if (drin) z.neu = false;
@@ -117,7 +121,7 @@
         _zeilen = [];
         ['users', 'groups'].forEach(function (kind) {
             _spalten.forEach(function (b) {
-                teile(el(feldId(b, kind)).value, kind).forEach(function (w) { zeileAnlegen(kind, w); });
+                teile(wert(b, kind), kind).forEach(function (w) { zeileAnlegen(kind, w); });
             });
         });
         sortieren();
@@ -423,8 +427,7 @@
         };
         var kopf = '<thead><tr>' + kopfZelle('name', T('rmx.col_principal'), T('rmx.sort_hint_name'), 'rmx-name-th');
         _spalten.forEach(function (b) {
-            var d = document.querySelector('details.sec-sub[data-sub="' + b.sub + '"] summary span');
-            var titel = (d ? d.textContent : T(b.key)) + ' – ' + T('rmx.sort_hint_area');
+            var titel = T(b.key) + ' – ' + T('rmx.sort_hint_area');
             kopf += kopfZelle(b.sub, T(b.key), titel, '');
         });
         kopf += '<th></th></tr></thead>';
@@ -506,8 +509,8 @@
     }
 
     // ⚠ EIN NACHLADEN DARF OFFENE HAKEN NICHT STILL WEGWERFEN. `_adLoad` laeuft
-    // auch, wenn jemand den Speichern-Knopf unter den Abschnitten drueckt –
-    // frueher lag darueber ein Fenster, jetzt ist beides gleichzeitig bedienbar.
+    // auch, wenn jemand an der Verbindung (Domain-Controller) speichert –
+    // beides ist gleichzeitig bedienbar.
     // Steht etwas Unuebernommenes an, bleibt es stehen und wird BENANNT; nur der
     // eigene Speicherlauf baut durch (danach ist der neue Stand der richtige).
     var _eigenerSpeicherlauf = false;
@@ -526,23 +529,17 @@
         aufbauen();
     }
 
-    // Welche Bereiche es gibt, entscheiden die Skill-Schalter – und app.js setzt
-    // sie unabhaengig vom AD-Abruf. ⚠ EINE REIHENFOLGE ZWISCHEN BEIDEN GIBT ES
-    // NICHT; wer eine annimmt, misst den Glueckfall. Deshalb wird die
-    // Sichtbarkeit BEOBACHTET statt erwartet (MutationObserver auf das
-    // style-Attribut – anders als ResizeObserver arbeitet der auch headless).
+    // Welche Bereiche es gibt, entscheiden die Skill-Schalter – und app.js
+    // meldet sie unabhaengig vom AD-Abruf. ⚠ EINE REIHENFOLGE ZWISCHEN BEIDEN
+    // GIBT ES NICHT; wer eine annimmt, misst den Glueckfall. Deshalb wird jede
+    // Meldung abgewartet statt eine erwartet.
     function sichtbarkeitBeobachten() {
-        if (typeof MutationObserver !== 'function') return;
         var stand = sichtbareBereiche().map(function (b) { return b.sub; }).join(',');
-        var mo = new MutationObserver(function () {
+        document.addEventListener('jarvis-rechte-bereiche', function () {
             var neu = sichtbareBereiche().map(function (b) { return b.sub; }).join(',');
             if (neu === stand) return;
             stand = neu;
             nachladen();
-        });
-        BEREICHE.forEach(function (b) {
-            var d = document.querySelector('details.sec-sub[data-sub="' + b.sub + '"]');
-            if (d) mo.observe(d, { attributes: true, attributeFilter: ['style'] });
         });
     }
 
@@ -556,8 +553,7 @@
         // Schreibweise vorhandener Eintraege bleiben, nur Zu- und Abgaenge aendern sich.
         _spalten.forEach(function (b, si) {
             ['users', 'groups'].forEach(function (kind) {
-                var inp = el(feldId(b, kind));
-                var liste = teile(inp.value, kind);
+                var liste = teile(wert(b, kind), kind);
                 var vorher = liste.join('\u0000');
                 _zeilen.forEach(function (z) {
                     if (z.kind !== kind || z.an[si] === z.vorher[si]) return;
@@ -569,8 +565,7 @@
                     }
                 });
                 if (liste.join('\u0000') === vorher) return;
-                inp.value = liste.join(JOIN[kind]);
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                window.AdRechte.setzen(feldId(b, kind), liste.join(JOIN[kind]));
             });
         });
         var btn = el('rmx-apply');

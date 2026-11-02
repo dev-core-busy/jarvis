@@ -2410,7 +2410,7 @@
                 if (!erlaubt) {
                     zeigeLogin('');
                     melde('xl-login-status', T('xl.no_access',
-                        'Dein Konto ist für den Tabellen-Assistenten nicht freigeschaltet. Ein Administrator trägt dich unter Einstellungen → Sicherheit → Berechtigungen → Excel-Zugriff ein.'),
+                        'Dein Konto ist für den Tabellen-Assistenten nicht freigeschaltet. Ein Administrator trägt dich unter Einstellungen → Sicherheit → Berechtigungen (Spalte „Excel“) ein.'),
                         'fehler');
                     return;
                 }

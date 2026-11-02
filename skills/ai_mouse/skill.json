@@ -38,7 +38,7 @@
   "knowledge_docs": [],
   "permissions": [],
   "help": {
-    "details": "Server-Haelfte der Windows-Anwendung AI-Maus (Quellcode unter ai-mouse/). Der Skill stellt selbst KEINE Agent-Werkzeuge bereit – er schaltet den Bereich /ai-mouse frei, gattert die Endpunkte /api/ai-mouse/* und haelt die Freigabe der Werkzeug-Bereiche.\n\nWer den Bereich benutzen darf, steht getrennt davon unter Einstellungen → Sicherheit → Berechtigungen → AI-Maus ('leer = niemand'). Beides muss stimmen: ohne aktiven Skill gibt es die Kachel nicht, ohne Freigabe keinen Zugriff.",
+    "details": "Server-Haelfte der Windows-Anwendung AI-Maus (Quellcode unter ai-mouse/). Der Skill stellt selbst KEINE Agent-Werkzeuge bereit – er schaltet den Bereich /ai-mouse frei, gattert die Endpunkte /api/ai-mouse/* und haelt die Freigabe der Werkzeug-Bereiche.\n\nWer den Bereich benutzen darf, steht getrennt davon unter Einstellungen → Sicherheit → Berechtigungen, Spalte 'AI-Maus' ('leer = niemand'). Beides muss stimmen: ohne aktiven Skill gibt es die Kachel nicht, ohne Freigabe keinen Zugriff.",
     "tools": [],
     "use_cases": [
       "Fehlermeldung auf dem Bildschirm einrahmen und fragen, was sie bedeutet",

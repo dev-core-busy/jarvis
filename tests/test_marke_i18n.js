@@ -62,9 +62,8 @@ const AUSNAHMEN = {
     // Kennungen, die auf dem Server wirklich so heissen (2026-10-25 eingeordnet):
     'amtool.st_nosdk':                  'Umgebungsvariable JARVIS_AIMOUSE_EXE',
     'security.ssh_nicht_erreichbar':    'Dienstname jarvis-broker.service',
-    'security.ad_adm_none':             'das lokale Linux-Konto heisst jarvis',
-    'security.ad_adm_users':            'das lokale Linux-Konto heisst jarvis',
-    'security.ad_adm_group':            'das lokale Linux-Konto heisst jarvis',
+    // security.ad_adm_* standen hier bis 2026-11-02; die Schluessel sind mit dem
+    // Container "alte Benutzerberechtigungen" entfallen.
     'knowledge.autoindex_notaus':       'Umgebungsvariable JARVIS_RAG_AUTOINDEX (Notschalter)',
 };
 

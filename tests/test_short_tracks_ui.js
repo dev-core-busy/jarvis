@@ -37,9 +37,6 @@ const TR_HTML = fs.readFileSync(path.join(ROOT, 'frontend/tracks.html'), 'utf8')
 const TR_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/tracks.js'), 'utf8');
 const ADMIN_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/short_tracks_admin.js'), 'utf8');
 const SET_HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
-// BSI H4 (CSP ohne Inline-Skript, 2026-10-04): die AD-/Berechtigungs-Logik stand als
-// Inline-<script> in settings.html und liegt jetzt in js/settings_ad.js.
-const SET_AD = fs.readFileSync(path.join(ROOT, 'frontend/js/settings_ad.js'), 'utf8');
 const I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
 const SEITE_BREIT = fs.readFileSync(path.join(ROOT, 'frontend/js/seite_breit.js'), 'utf8');
 // icons.js MUSS mitgeladen werden – die echte Seite bindet es als erstes
@@ -1115,26 +1112,82 @@ abschnitt('7b. Der gemeldete Fehler: im Reiter liess sich kein Haken setzen');
 abschnitt('8. Verdrahtung, Portal, i18n, CSS');
 /* ═══════════════════════════════════════════════════════════════════════ */
 {
-    // Berechtigungsblock in Sicherheit → Berechtigungen (analog E-Mail)
-    pruefe(/id="sec-sub-tracks"[^>]*style="display:none;"/.test(SET_HTML),
-        'der Berechtigungsblock startet versteckt (nur bei aktivem Skill)');
-    pruefe(/id="tracks-allowed-users"/.test(SET_HTML) &&
-           /id="tracks-allowed-group"/.test(SET_HTML),
-        'beide Freigabefelder sind im Markup');
-    pruefe(/tracks_allowed_users:/.test(SET_AD) && /tracks_allowed_group:/.test(SET_AD),
-        'sie werden mit den uebrigen Berechtigungen gespeichert');
-    pruefe(/d\.tracks_users/.test(SET_AD) && /d\.tracks_group/.test(SET_AD),
-        'und beim Oeffnen vorbelegt');
-    pruefe(/updateTracksSecVisibility/.test(APP),
-        'app.js blendet den Block am Skill-Zustand ein');
-    // Der Block muss in DERSELBEN Liste stehen wie die uebrigen Picker-Felder –
-    // sonst zeigt er nach dem Laden keine Marken (Lehre vom AD-Picker).
-    // MITGLIEDSCHAFT pruefen, nicht die Position: die alte Fassung verlangte
-    // ein `]` direkt hinter den Tracks-Feldern, war also nur richtig, solange
-    // Tracks der LETZTE Eintrag der Liste blieb. Jedes spaeter ergaenzte Feld
-    // (excel, claudesub) liess sie fehlschlagen, ohne dass etwas kaputt war.
-    pruefe(/'tracks-allowed-users','tracks-allowed-group'/.test(SET_AD),
-        'die Felder stehen in der Picker-Auffrisch-Liste');
+    // Freigabe in Sicherheit → Berechtigungen (analog E-Mail)
+    // ⚠ SEIT 2026-11-02 GIBT ES KEINEN EIGENEN BERECHTIGUNGSBLOCK MEHR: die
+    // Freigabe ist eine Spalte der Berechtigungs-Tabelle (rechte_matrix.js),
+    // den Bestand haelt settings_ad.js (window.AdRechte), app.js meldet den
+    // Skill-Zustand ueber _rechteBereich. Gemessen wird die KETTE: settings_ad.js
+    // laeuft echt in jsdom, laedt ueber eine fetch-Attrappe und speichert – der
+    // gesendete Koerper muss die Werte des Bereichs tragen.
+    async function freigabeKette(sub, dirName, fnName, feldU, feldG, lesenU, lesenG, schreibenU, schreibenG) {
+        const AD_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/settings_ad.js'), 'utf8');
+        const RMX_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/rechte_matrix.js'), 'utf8');
+        const APP_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
+        const HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+        const markup = '<input id="ad-server"><input id="ad-domain"><input id="ad-bind-user">'
+            + '<input id="ad-bind-password"><div id="ad-bind-pw-hint"></div>'
+            + '<span id="ad-status-dot"></span><span id="ad-status-text"></span>'
+            + '<div id="ad-mode-hint"></div><button data-klick="ad-speichern"></button>'
+            + '<span class="ad-save-status"></span>';
+        const dom = new JSDOM('<!doctype html><body>' + markup + '</body>',
+            { url: 'https://x/settings', runScripts: 'outside-only' });
+        const w = dom.window;
+        w.t = (k) => k;
+        const antwort = { configured: false };
+        antwort[lesenU] = 'probe.u';
+        antwort[lesenG] = 'CN=Probe,DC=firma,DC=local';
+        let gesendet = null;
+        const ok = (j) => ({ ok: true, status: 200, json: async () => j });
+        w.fetch = async (url, opt) => {
+            const p = String(url).split('?')[0];
+            if (p === '/api/auth/ad_status') return ok(antwort);
+            if (p === '/api/settings') { gesendet = JSON.parse(opt.body); return ok({}); }
+            return { ok: false, status: 404, json: async () => ({}) };
+        };
+        const geladen = new Promise((r) => w.document.addEventListener('jarvis-ad-geladen', r));
+        w.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/sitzung.js'), 'utf8'));
+        w.eval(AD_JS);
+        await Promise.race([geladen, new Promise((r) => setTimeout(r, 2000))]);
+        // Positivkontrolle: ohne geladenen Bestand waere jede Pruefung unten
+        // ein Fehler des Messaufbaus, kein Befund.
+        if (!w.AdRechte || !w._adGeladen) {
+            console.log('ABBRUCH (Exit 2): settings_ad.js hat den Bestand in jsdom nicht geladen');
+            process.exit(2);
+        }
+        let gelesenU = null, gelesenG = null;
+        try { gelesenU = w.AdRechte.lesen(feldU); gelesenG = w.AdRechte.lesen(feldG); } catch (e) { gelesenU = 'WURF: ' + e.message; }
+        pruefe(gelesenU === 'probe.u' && gelesenG === 'CN=Probe,DC=firma,DC=local',
+            'Bestand ' + sub + ': ' + lesenU + '/' + lesenG + ' werden beim Laden uebernommen',
+            String(gelesenU) + ' | ' + String(gelesenG));
+        try { w.AdRechte.setzen(feldU, 'probe.neu'); } catch (e) { /* faellt unten auf */ }
+        const okSave = await w._adSave();
+        pruefe(okSave === true && gesendet && gesendet[schreibenU] === 'probe.neu'
+            && gesendet[schreibenG] === 'CN=Probe,DC=firma,DC=local',
+            'beim Speichern gehen ' + schreibenU + '/' + schreibenG + ' mit',
+            JSON.stringify(gesendet && [gesendet[schreibenU], gesendet[schreibenG]]));
+        w.close();
+
+        // Spalte der Tabelle: am Skill, mit beiden Kennungen
+        const re = new RegExp("\\{\\s*sub:\\s*'" + sub + "',\\s*users:\\s*'([^']+)',\\s*group:\\s*'([^']+)',"
+            + "\\s*key:\\s*'[^']+'(\\s*,\\s*skill:\\s*true)?\\s*\\}");
+        const m = re.exec(RMX_JS);
+        pruefe(!!(m && m[1] === feldU && m[2] === feldG && m[3]),
+            "die Tabellen-Spalte '" + sub + "' haengt am Skill und an beiden Kennungen",
+            m ? m[0] : 'keine Spalte');
+        // app.js meldet die Spalte im Rumpf der Sichtbarkeitsfunktion
+        const fm = new RegExp('window\\.' + fnName + '\\s*=\\s*async function[^{]*\\{([\\s\\S]*?)\\n        \\};?\\n').exec(APP_JS);
+        const rumpf = fm ? fm[1] : '';
+        pruefe(rumpf.indexOf("dir_name === '" + dirName + "'") > -1
+            && rumpf.indexOf("_rechteBereich('" + sub + "'") > -1,
+            'app.js/' + fnName + " meldet die Spalte am Skill '" + dirName + "'",
+            fm ? '' : 'Funktion nicht gefunden');
+        pruefe(HTML.indexOf('sec-sub-' + sub) === -1 && APP_JS.indexOf("getElementById('sec-sub-" + sub + "')") === -1
+            && HTML.indexOf('id="' + feldU + '"') === -1 && HTML.indexOf('id="' + feldG + '"') === -1,
+            'kein Rest des alten Blocks sec-sub-' + sub + ' und seiner Felder');
+    }
+    await freigabeKette('tracks', 'short-tracks', 'updateTracksSecVisibility',
+        'tracks-allowed-users', 'tracks-allowed-group',
+        'tracks_users', 'tracks_group', 'tracks_allowed_users', 'tracks_allowed_group');
 
     // Reiter
     pruefe(/data-settings-tab="tracks"/.test(SET_HTML), 'der Reiter-Knopf existiert');

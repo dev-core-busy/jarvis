@@ -587,37 +587,63 @@ abschnitt("10. Die Freigabe muss BEDIENBAR sein")
 # keine Einstellung; das prueft dieser Abschnitt.
 
 SET = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
-# BSI H4 (CSP ohne Inline-Skript, 2026-10-04): die AD-/Berechtigungs-Logik stand als
-# Inline-<script> in settings.html und liegt jetzt in js/settings_ad.js.
-SET_AD = (ROOT / "frontend" / "js" / "settings_ad.js").read_text(encoding="utf-8")
 
-pruefe('id="sec-sub-excel"' in SET,
-       "Unter-Container 'Excel-Zugriff' im Berechtigungs-Panel")
-pruefe('id="excel-allowed-users"' in SET, "Feld fuer die Benutzerliste")
-pruefe('id="excel-allowed-group"' in SET, "Feld fuer die AD-Gruppe")
+# ⚠ SEIT 2026-11-02 KEIN EIGENER UNTER-CONTAINER MEHR: die Freigabe ist eine
+# Spalte der Berechtigungs-Tabelle (rechte_matrix.js), den Bestand haelt
+# settings_ad.js. Geprueft wird dieselbe Kette wie vorher – Laden, Speichern,
+# Bedienweg, Sichtbarkeit am Skill – an ihren neuen Stellen.
+def _freigabe_bereich(root, sub, dir_name, fn_name, felder):
+    """Zusagen eines Skill-gebundenen Bereichs der Berechtigungs-Tabelle.
 
-# HINWEIS: Ob der Block sichtbar STARTET, wird in Abschnitt 11 geprueft. Bis
-# zum 2026-08-20 stand hier das Gegenteil ("startet sichtbar, haengt an keinem
-# Skill") – mit dem Umbau zum Skill ist das ueberholt. Ein Test, der ein
-# ueberholtes Verhalten festschreibt, meldet spaeter einen Fehler, den es nicht
-# gibt; deshalb wurde die Aussage verschoben statt verdoppelt.
+    Seit 2026-11-02 gibt es keine Unter-Container und Eingabefelder je Bereich
+    mehr: den Bestand haelt settings_ad.js (Tabelle FREIGABEN), die Spalte
+    rechte_matrix.js (BEREICHE, skill:true), und app.js meldet den
+    Skill-Zustand ueber _rechteBereich('<sub>', an).
+    felder: geordnet {kennung: (lese_schluessel, schreib_schluessel)} –
+    zuerst Benutzer, dann Gruppe. Liefert [(ok, titel, detail)].
+    """
+    import re as _re
+    ad = (root / "frontend" / "js" / "settings_ad.js").read_text(encoding="utf-8")
+    rm = (root / "frontend" / "js" / "rechte_matrix.js").read_text(encoding="utf-8")
+    app = (root / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
+    html = (root / "frontend" / "settings.html").read_text(encoding="utf-8")
+    fr = {m.group(1): (m.group(2), m.group(3)) for m in _re.finditer(
+        r"\{\s*feld:\s*'([^']+)',\s*lesen:\s*'([^']+)',\s*schreiben:\s*'([^']+)'\s*\}", ad)}
+    be = {m.group(1): (m.group(2), m.group(3), bool(m.group(4))) for m in _re.finditer(
+        r"\{\s*sub:\s*'([^']+)',\s*users:\s*'([^']+)',\s*group:\s*'([^']+)',"
+        r"\s*key:\s*'[^']+'(\s*,\s*skill:\s*true)?\s*\}", rm)}
+    # Positivkontrolle: ohne gelesene Tabellen waere jede Pruefung unten
+    # ein Fehlschlag aus dem Messwerkzeug, kein Befund.
+    if len(fr) < 10 or len(be) < 5:
+        print("ABBRUCH (Exit 2): FREIGABEN/BEREICHE nicht lesbar (%d/%d)" % (len(fr), len(be)))
+        sys.exit(2)
+    out = []
+    kennungen = list(felder)
+    for feld, (lesen, schreiben) in felder.items():
+        out.append((fr.get(feld) == (lesen, schreiben),
+                    "Bestand %s: wird aus %s geladen und als %s gespeichert" % (feld, lesen, schreiben),
+                    str(fr.get(feld))))
+    out.append((len(kennungen) == 2 and be.get(sub) == (kennungen[0], kennungen[1], True),
+                "Tabellen-Spalte '%s' haengt am Skill und an beiden Kennungen" % sub,
+                str(be.get(sub))))
+    m = _re.search(r"window\.%s\s*=\s*async function[^{]*\{(.*?)\n        \};?\n"
+                   % _re.escape(fn_name), app, _re.S)
+    rumpf = m.group(1) if m else ""
+    out.append((bool(rumpf) and ("dir_name === '%s'" % dir_name) in rumpf
+                and ("_rechteBereich('%s'" % sub) in rumpf,
+                "app.js/%s meldet die Spalte '%s' am Skill '%s'" % (fn_name, sub, dir_name),
+                "Rumpf gefunden" if rumpf else "Funktion nicht gefunden"))
+    out.append(("sec-sub-%s" % sub not in html and "getElementById('sec-sub-%s')" % sub not in app,
+                "kein Rest des alten Unter-Containers sec-sub-%s" % sub, ""))
+    out.append((all(('id="%s"' % k) not in html for k in kennungen),
+                "keine alten Eingabefelder mehr im Markup", ""))
+    return out
 
-# Laden, Speichern, Picker – fehlt eines, ist das Feld tot.
-pruefe("d.excel_users" in SET_AD and "d.excel_group" in SET_AD,
-       "die Werte werden beim Oeffnen geladen")
-pruefe("excel_allowed_users:" in SET_AD and "excel_allowed_group:" in SET_AD,
-       "die Werte werden mitgespeichert")
-pruefe("'excel-allowed-users','excel-allowed-group'" in SET_AD
-       or "'excel-allowed-users'," in SET_AD,
-       "die Felder stehen in der Chip-Auffrischung nach dem Laden")
-
-PICK = (ROOT / "frontend" / "js" / "ldap_picker.js").read_text(encoding="utf-8")
-pruefe("'excel-allowed-users'" in PICK and "'excel-allowed-group'" in PICK,
-       "beide Felder sind am AD-Picker angemeldet")
-pruefe(re.search(r"'excel-allowed-users':\s*\{\s*kind:\s*'users'", PICK) is not None,
-       "Benutzerfeld sucht Benutzer")
-pruefe(re.search(r"'excel-allowed-group':\s*\{\s*kind:\s*'groups'", PICK) is not None,
-       "Gruppenfeld sucht Gruppen")
+for _ok_f, _titel_f, _det_f in _freigabe_bereich(
+        ROOT, "excel", "excel-addin", "updateExcelSecVisibility",
+        {"excel-allowed-users": ("excel_users", "excel_allowed_users"),
+         "excel-allowed-group": ("excel_group", "excel_allowed_group")}):
+    pruefe(_ok_f, _titel_f, _det_f)
 
 # Backend-Gegenstueck: ohne diese beiden Haelften bleibt das Formular wirkungslos.
 pruefe('"excel_users": config.get_setting("excel_allowed_users"' in MAIN,
@@ -754,7 +780,7 @@ pruefe("settings-tab-excel" in APP, "app.js kennt das Panel")
 pruefe("window.ExcelAdmin.onShow()" in APP,
        "app.js ruft onShow beim Reiter-Wechsel")
 pruefe("updateExcelSecVisibility" in APP,
-       "der Berechtigungsblock wird am Skill-Zustand geschaltet")
+       "die Berechtigungs-Spalte wird am Skill-Zustand geschaltet")
 # AUF DEN AUFRUF pruefen, nicht auf die Anzahl der Nennungen: die Zeile
 # `window.X = async function X()` enthaelt den Namen schon ZWEIMAL – eine
 # Zaehlung `>= 2` ist damit allein durch die Definition erfuellt und prueft
@@ -762,11 +788,8 @@ pruefe("updateExcelSecVisibility" in APP,
 # Fehlschlag ergab).
 pruefe("await updateExcelSecVisibility();" in APP,
        "die Funktion wird auch AUFGERUFEN, nicht nur definiert")
-# Jetzt haengt der Block am Skill – also MUSS er versteckt starten.
-_m2 = re.search(r'id="sec-sub-excel"[^>]*>', SET)
-pruefe(_m2 is not None and "display:none" in _m2.group(0),
-       "der Berechtigungsblock startet versteckt (app.js blendet ihn ein)",
-       _m2.group(0) if _m2 else "?")
+# Dass die Spalte ohne Meldung des Skills FEHLT (fail-closed), prueft
+# _freigabe_bereich oben ueber skill:true in BEREICHE.
 
 pruefe('excel_admin.js' in SET, "excel_admin.js ist in settings.html eingebunden")
 

@@ -1157,8 +1157,10 @@ check("return False" in _pred[_i_grp:], "und beides zusammen entscheidet, nicht 
 
 _dep = abschnitt(MAIN, "async def require_tracks_access", "def _is_kb_group_editor")
 check("status_code=403" in _dep, "die Dependency antwortet 403")
-check("Short-Tracks-Zugriff" in _dep,
-      "und nennt den WEG zur Abhilfe (Einstellungen → Sicherheit → …)")
+# Seit 2026-11-02 gibt es keinen Block "Short-Tracks-Zugriff" mehr, sondern
+# die Spalte "Short Tracks" der Berechtigungs-Tabelle - der Weg nennt sie.
+check("Spalte „Short Tracks“" in _dep,
+      "und nennt den WEG zur Abhilfe (Sicherheit → Berechtigungen, Spalte)")
 
 # Jeder Benutzer-Endpunkt haengt an der Freigabe, die Admin-Endpunkte an
 # require_local_auth. `require_auth` allein darf NIRGENDS mehr stehen.
@@ -1183,28 +1185,65 @@ check('"tracks_users": config.get_setting("tracks_allowed_users"' in MAIN and
       '"tracks_group": config.get_setting("tracks_allowed_group"' in MAIN,
       "und wieder ausgelesen")
 
-# Oberflaeche: Block, Felder, Picker, Sichtbarkeit am Skill
+# Oberflaeche: Bestand, Tabellen-Spalte, Sichtbarkeit am Skill
 SET = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
-# BSI H4 (CSP ohne Inline-Skript, 2026-10-04): die AD-/Berechtigungs-Logik stand als
-# Inline-<script> in settings.html und liegt jetzt in js/settings_ad.js.
-SET_AD = (ROOT / "frontend" / "js" / "settings_ad.js").read_text(encoding="utf-8")
-check('data-sub="tracks"' in SET, "der Unter-Container existiert")
-check('id="sec-sub-tracks"' in SET and 'id="sec-sub-tracks" style="display:none;"' in SET,
-      "er startet versteckt (Muster sec-sub-email/sec-sub-sap)")
-check('id="tracks-allowed-users"' in SET and 'id="tracks-allowed-group"' in SET,
-      "beide Felder sind im Markup")
-_inp = SET.split('id="tracks-allowed-users"')[1][:200]
-check("Leer = niemand" in _inp, "der Platzhalter sagt 'leer = niemand'", _inp[:80])
-check("tracks_allowed_users:" in SET_AD and "tracks_allowed_group:" in SET_AD,
-      "das Speichern sendet beide Felder")
-check("d.tracks_users" in SET_AD and "d.tracks_group" in SET_AD,
-      "und beim Laden werden sie vorbelegt")
-PICKER = (ROOT / "frontend" / "js" / "ldap_picker.js").read_text(encoding="utf-8")
-check("'tracks-allowed-users'" in PICKER and "'tracks-allowed-group'" in PICKER,
-      "der AD-Picker kennt beide Felder")
+# Seit 2026-11-02 eine Spalte der Berechtigungs-Tabelle statt eines eigenen
+# Unter-Containers mit Eingabefeldern (Bestand in settings_ad.js).
+def _freigabe_bereich(root, sub, dir_name, fn_name, felder):
+    """Zusagen eines Skill-gebundenen Bereichs der Berechtigungs-Tabelle.
+
+    Seit 2026-11-02 gibt es keine Unter-Container und Eingabefelder je Bereich
+    mehr: den Bestand haelt settings_ad.js (Tabelle FREIGABEN), die Spalte
+    rechte_matrix.js (BEREICHE, skill:true), und app.js meldet den
+    Skill-Zustand ueber _rechteBereich('<sub>', an).
+    felder: geordnet {kennung: (lese_schluessel, schreib_schluessel)} –
+    zuerst Benutzer, dann Gruppe. Liefert [(ok, titel, detail)].
+    """
+    import re as _re
+    ad = (root / "frontend" / "js" / "settings_ad.js").read_text(encoding="utf-8")
+    rm = (root / "frontend" / "js" / "rechte_matrix.js").read_text(encoding="utf-8")
+    app = (root / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
+    html = (root / "frontend" / "settings.html").read_text(encoding="utf-8")
+    fr = {m.group(1): (m.group(2), m.group(3)) for m in _re.finditer(
+        r"\{\s*feld:\s*'([^']+)',\s*lesen:\s*'([^']+)',\s*schreiben:\s*'([^']+)'\s*\}", ad)}
+    be = {m.group(1): (m.group(2), m.group(3), bool(m.group(4))) for m in _re.finditer(
+        r"\{\s*sub:\s*'([^']+)',\s*users:\s*'([^']+)',\s*group:\s*'([^']+)',"
+        r"\s*key:\s*'[^']+'(\s*,\s*skill:\s*true)?\s*\}", rm)}
+    # Positivkontrolle: ohne gelesene Tabellen waere jede Pruefung unten
+    # ein Fehlschlag aus dem Messwerkzeug, kein Befund.
+    if len(fr) < 10 or len(be) < 5:
+        print("ABBRUCH (Exit 2): FREIGABEN/BEREICHE nicht lesbar (%d/%d)" % (len(fr), len(be)))
+        sys.exit(2)
+    out = []
+    kennungen = list(felder)
+    for feld, (lesen, schreiben) in felder.items():
+        out.append((fr.get(feld) == (lesen, schreiben),
+                    "Bestand %s: wird aus %s geladen und als %s gespeichert" % (feld, lesen, schreiben),
+                    str(fr.get(feld))))
+    out.append((len(kennungen) == 2 and be.get(sub) == (kennungen[0], kennungen[1], True),
+                "Tabellen-Spalte '%s' haengt am Skill und an beiden Kennungen" % sub,
+                str(be.get(sub))))
+    m = _re.search(r"window\.%s\s*=\s*async function[^{]*\{(.*?)\n        \};?\n"
+                   % _re.escape(fn_name), app, _re.S)
+    rumpf = m.group(1) if m else ""
+    out.append((bool(rumpf) and ("dir_name === '%s'" % dir_name) in rumpf
+                and ("_rechteBereich('%s'" % sub) in rumpf,
+                "app.js/%s meldet die Spalte '%s' am Skill '%s'" % (fn_name, sub, dir_name),
+                "Rumpf gefunden" if rumpf else "Funktion nicht gefunden"))
+    out.append(("sec-sub-%s" % sub not in html and "getElementById('sec-sub-%s')" % sub not in app,
+                "kein Rest des alten Unter-Containers sec-sub-%s" % sub, ""))
+    out.append((all(('id="%s"' % k) not in html for k in kennungen),
+                "keine alten Eingabefelder mehr im Markup", ""))
+    return out
+
+for _ok_f, _titel_f, _det_f in _freigabe_bereich(
+        ROOT, "tracks", "short-tracks", "updateTracksSecVisibility",
+        {"tracks-allowed-users": ("tracks_users", "tracks_allowed_users"),
+         "tracks-allowed-group": ("tracks_group", "tracks_allowed_group")}):
+    check(_ok_f, _titel_f, _det_f)
 APP = (ROOT / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
 check("updateTracksSecVisibility" in APP,
-      "app.js blendet den Block am Skill-Zustand ein")
+      "app.js schaltet die Spalte am Skill-Zustand")
 check(APP.count("updateTracksSecVisibility") >= 3,
       "definiert UND beim Oeffnen der Einstellungen gerufen")
 SKILLS_JS = (ROOT / "frontend" / "js" / "skills.js").read_text(encoding="utf-8")

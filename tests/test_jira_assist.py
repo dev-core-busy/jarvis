@@ -595,16 +595,66 @@ SETTINGS = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
 SETTINGS_AD = (ROOT / "frontend" / "js" / "settings_ad.js").read_text(encoding="utf-8")
 APPJS = (ROOT / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
 
-check('id="sec-sub-jiraassist"' in SETTINGS, "der Block existiert in settings.html")
-for feld in ("jiraassist-allowed-users", "jiraassist-allowed-group"):
-    check(SETTINGS.count('id="%s"' % feld) == 1, "Feld %s genau einmal" % feld)
+# ⚠ SEIT 2026-11-02 IST DER ORT EINE SPALTE der Berechtigungs-Tabelle
+# (rechte_matrix.js), kein eigener Block mit Eingabefeldern mehr. Den Bestand
+# haelt settings_ad.js; ein Eintrag, der sich laden, aber nicht speichern
+# laesst (oder umgekehrt), ist schlimmer als keiner.
+def _freigabe_bereich(root, sub, dir_name, fn_name, felder):
+    """Zusagen eines Skill-gebundenen Bereichs der Berechtigungs-Tabelle.
 
-# Ein Feld, das man befuellen, aber nicht speichern kann, ist schlimmer als
-# keines: der Admin traegt etwas ein und glaubt, es wirke.
-check("jira_assist_allowed_users:" in SETTINGS_AD and "jira_assist_allowed_group:" in SETTINGS_AD,
-      "beide Felder werden beim Speichern GESENDET")
-check("d.jira_assist_users" in SETTINGS_AD and "d.jira_assist_group" in SETTINGS_AD,
-      "beide Felder werden beim Laden BELEGT")
+    Seit 2026-11-02 gibt es keine Unter-Container und Eingabefelder je Bereich
+    mehr: den Bestand haelt settings_ad.js (Tabelle FREIGABEN), die Spalte
+    rechte_matrix.js (BEREICHE, skill:true), und app.js meldet den
+    Skill-Zustand ueber _rechteBereich('<sub>', an).
+    felder: geordnet {kennung: (lese_schluessel, schreib_schluessel)} –
+    zuerst Benutzer, dann Gruppe. Liefert [(ok, titel, detail)].
+    """
+    import re as _re
+    ad = (root / "frontend" / "js" / "settings_ad.js").read_text(encoding="utf-8")
+    rm = (root / "frontend" / "js" / "rechte_matrix.js").read_text(encoding="utf-8")
+    app = (root / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
+    html = (root / "frontend" / "settings.html").read_text(encoding="utf-8")
+    fr = {m.group(1): (m.group(2), m.group(3)) for m in _re.finditer(
+        r"\{\s*feld:\s*'([^']+)',\s*lesen:\s*'([^']+)',\s*schreiben:\s*'([^']+)'\s*\}", ad)}
+    be = {m.group(1): (m.group(2), m.group(3), bool(m.group(4))) for m in _re.finditer(
+        r"\{\s*sub:\s*'([^']+)',\s*users:\s*'([^']+)',\s*group:\s*'([^']+)',"
+        r"\s*key:\s*'[^']+'(\s*,\s*skill:\s*true)?\s*\}", rm)}
+    # Positivkontrolle: ohne gelesene Tabellen waere jede Pruefung unten
+    # ein Fehlschlag aus dem Messwerkzeug, kein Befund.
+    if len(fr) < 10 or len(be) < 5:
+        print("ABBRUCH (Exit 2): FREIGABEN/BEREICHE nicht lesbar (%d/%d)" % (len(fr), len(be)))
+        sys.exit(2)
+    out = []
+    kennungen = list(felder)
+    for feld, (lesen, schreiben) in felder.items():
+        out.append((fr.get(feld) == (lesen, schreiben),
+                    "Bestand %s: wird aus %s geladen und als %s gespeichert" % (feld, lesen, schreiben),
+                    str(fr.get(feld))))
+    out.append((len(kennungen) == 2 and be.get(sub) == (kennungen[0], kennungen[1], True),
+                "Tabellen-Spalte '%s' haengt am Skill und an beiden Kennungen" % sub,
+                str(be.get(sub))))
+    m = _re.search(r"window\.%s\s*=\s*async function[^{]*\{(.*?)\n        \};?\n"
+                   % _re.escape(fn_name), app, _re.S)
+    rumpf = m.group(1) if m else ""
+    out.append((bool(rumpf) and ("dir_name === '%s'" % dir_name) in rumpf
+                and ("_rechteBereich('%s'" % sub) in rumpf,
+                "app.js/%s meldet die Spalte '%s' am Skill '%s'" % (fn_name, sub, dir_name),
+                "Rumpf gefunden" if rumpf else "Funktion nicht gefunden"))
+    out.append(("sec-sub-%s" % sub not in html and "getElementById('sec-sub-%s')" % sub not in app,
+                "kein Rest des alten Unter-Containers sec-sub-%s" % sub, ""))
+    out.append((all(('id="%s"' % k) not in html for k in kennungen),
+                "keine alten Eingabefelder mehr im Markup", ""))
+    return out
+
+for _ok_f, _titel_f, _det_f in _freigabe_bereich(
+        ROOT, "jiraassist", "jira", "updateJiraAssistSecVisibility",
+        {"jiraassist-allowed-users": ("jira_assist_users", "jira_assist_allowed_users"),
+         "jiraassist-allowed-group": ("jira_assist_group", "jira_assist_allowed_group")}):
+    check(_ok_f, _titel_f, _det_f)
+I18N_RMX = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+check("'rmx.col_jiraassist':" in I18N_RMX,
+      "die Spalte hat eine Beschriftung (Ziel des Verweises in der 403-Meldung)")
+
 # ⚠ LESEN UND SCHREIBEN LAUFEN UEBER VERSCHIEDENE ENDPUNKTE – wie bei allen
 # Nachbarblöcken: die Werte kommen aus GET /api/auth/ad_status, gespeichert wird
 # ueber POST /api/settings. Wer nur einen der beiden ergaenzt, bekommt ein Feld,
@@ -619,61 +669,35 @@ check('config.save_setting("jira_assist_allowed_users"' in _save
       and 'config.save_setting("jira_assist_allowed_group"' in _save,
       "POST /api/settings speichert beide Werte")
 
-# Der Block startet versteckt und wird am Skill-Zustand eingeblendet – ohne
-# Jira-Skill gibt es weder Adresse noch Token.
-i_block = SETTINGS.find('id="sec-sub-jiraassist"')
-check("display:none" in SETTINGS[i_block:i_block + 200],
-      "der Block startet versteckt")
-check("updateJiraAssistSecVisibility" in APPJS,
-      "app.js kennt die Sichtbarkeitsfunktion")
+# Die Spalte haengt am Skill-Zustand – ohne Jira-Skill gibt es weder Adresse
+# noch Token. Dass app.js sie am Skill 'jira' meldet, prueft _freigabe_bereich.
 check(APPJS.count("await updateJiraAssistSecVisibility()") >= 1,
-      "und ruft sie beim Oeffnen der Einstellungen auf")
-check("'jira'" in APPJS[APPJS.find("updateJiraAssistSecVisibility"):
-                        APPJS.find("updateJiraAssistSecVisibility") + 900],
-      "sie prueft den Skill 'jira'")
+      "app.js ruft die Sichtbarkeitsfunktion beim Oeffnen der Einstellungen auf")
 
-# Der Hinweistext muss die Server-PAT-Frage benennen – das ist der Grund, warum
-# es diese Freigabe ueberhaupt gibt.
-block = SETTINGS[i_block:i_block + 2600]
-check("Server-Token" in block or "Server-PAT" in block,
-      "der Hinweistext nennt, dass mit Server-Zugangsdaten gelesen wird")
-check("niemand" in block, "und dass leer = niemand gilt")
-
-# ── AD-Picker: geprueft wird die REGEL, nicht mein eines Feld ──────────────
-# Die "Durchsuchen"-Knoepfe haengt ldap_picker.js an alle Felder aus seiner
-# FIELDS-Liste. Ein Freigabefeld, das dort fehlt, sieht voellig normal aus –
-# man kann Namen eintippen, nur eben nicht auswaehlen. Genau das war hier der
-# Fall (gemeldet). Deshalb prueft der Waechter JEDES Freigabefeld der
-# Einstellungsseite, nicht nur das neue.
-PICKER = (ROOT / "frontend" / "js" / "ldap_picker.js").read_text(encoding="utf-8")
-_i_fields = PICKER.find("var FIELDS")
-_fields_block = PICKER[_i_fields:PICKER.find("};", _i_fields)]
-registriert = set(re.findall(r"'([a-z0-9-]+)':\s*\{", _fields_block))
-
-# Alle Felder der Seite, die nach einer AD-Freigabe aussehen.
-im_markup = set(re.findall(r'id="([a-z0-9-]*allowed-(?:users|group))"', SETTINGS))
-check("jiraassist-allowed-users" in im_markup,
-      "die Regel erfasst das neue Feld ueberhaupt")
-ohne_picker = sorted(im_markup - registriert)
-check(not ohne_picker,
-      "jedes Freigabefeld der Seite hat einen AD-Picker",
-      "ohne Picker: " + ", ".join(ohne_picker))
-
-# Gegenrichtung: ein Eintrag in FIELDS ohne Feld auf der Seite waere ein
-# Karteileichen-Kandidat – der Picker sucht dann bei jedem Aufbau ins Leere.
-verwaist = sorted(n for n in registriert
-                  if n.endswith(("allowed-users", "allowed-group"))
-                  and n not in im_markup)
-check(not verwaist, "kein Picker-Eintrag ohne Feld",
-      "verwaist: " + ", ".join(verwaist))
+# ── Bestand und Tabelle: geprueft wird die REGEL, nicht mein eines Feld ────
+# Frueher: jedes Freigabefeld der Seite braucht einen AD-Picker. Seit 2026-11-02
+# gibt es diese Felder nicht mehr; der Bedienweg ist die Tabelle. Die Regel
+# heisst jetzt: jeder Eintrag im Bestand (FREIGABEN) ist ueber eine Spalte
+# (BEREICHE) erreichbar, und jede Spalte zeigt auf einen Bestandseintrag. Ein
+# Eintrag ohne Spalte waere ein Recht, das niemand setzen kann; eine Spalte
+# ohne Eintrag wuerfe beim Lesen (AdRechte prueft die Kennung).
+RMX = (ROOT / "frontend" / "js" / "rechte_matrix.js").read_text(encoding="utf-8")
+im_bestand = set(re.findall(r"\{\s*feld:\s*'([a-z0-9-]+)'", SETTINGS_AD))
+in_spalten = set()
+for _m in re.finditer(r"\{\s*sub:\s*'[^']+',\s*users:\s*'([a-z0-9-]+)',\s*group:\s*'([a-z0-9-]+)'", RMX):
+    in_spalten |= {_m.group(1), _m.group(2)}
+check("jiraassist-allowed-users" in im_bestand and len(in_spalten) >= 10,
+      "die Regel erfasst Bestand und Spalten ueberhaupt",
+      "%d Bestand / %d Spalten" % (len(im_bestand), len(in_spalten)))
+check(not sorted(im_bestand - in_spalten), "jeder Bestandseintrag hat eine Spalte",
+      "ohne Spalte: " + ", ".join(sorted(im_bestand - in_spalten)))
+check(not sorted(in_spalten - im_bestand), "jede Spalte zeigt auf einen Bestandseintrag",
+      "verwaist: " + ", ".join(sorted(in_spalten - im_bestand)))
 
 # Benutzer kommagetrennt, Gruppen zeilengetrennt: ein Gruppen-DN ENTHAELT
-# Kommas, mit sep=',' zerlegte der Picker jeden DN in Bruchstuecke.
-for feld, sep in (("jiraassist-allowed-users", "','"),
-                  ("jiraassist-allowed-group", r"'\\n'")):
-    m = re.search(r"'%s':\s*\{[^}]*sep:\s*(%s)" % (re.escape(feld), sep), PICKER)
-    check(m is not None, "%s hat das richtige Trennzeichen" % feld)
-
+# Kommas, mit ',' zerlegte die Tabelle jeden DN in Bruchstuecke.
+check(re.search(r"var SEP\s*=\s*\{\s*users:\s*',',\s*groups:\s*'\\n'\s*\}", RMX) is not None,
+      "die Tabelle trennt Benutzer per Komma und Gruppen per Zeile")
 
 # ═══════════════════════════════════════════════════════════════════════════
 section("11) Kachel, Anleitungsseite und Paket-Auslieferung")

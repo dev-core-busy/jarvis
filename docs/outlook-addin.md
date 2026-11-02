@@ -47,7 +47,7 @@ Outlook im Web sowie Outlook auf Windows (Microsoft 365).
 
 1. **Der E-Mail-Skill ist aktiv** (*Einstellungen → Skills*), Serverdaten sind
    unter *Einstellungen → E-Mail* hinterlegt, und die Benutzer sind unter
-   *Sicherheit → Berechtigungen → E-Mail-Zugriff* freigeschaltet. Ohne das sagt
+   *Sicherheit → Berechtigungen*, Spalte „E-Mail“, freigeschaltet. Ohne das sagt
    das Aufgabenfenster im Klartext, was fehlt – es funktioniert dann nur nicht.
 2. **Der Jarvis-Server ist per HTTPS unter einem Namen erreichbar, dem der
    Arbeitsplatz vertraut.** Das ist die häufigste Hürde: Office lädt
@@ -438,7 +438,7 @@ als ein neues und muss einmal neu installiert werden (das alte vorher entfernen)
 | Aufgabenfenster bleibt **leer/weiß** | Zertifikat. Die Serveradresse einmal im Browser des Arbeitsplatzes aufrufen – erscheint eine Zertifikatswarnung, fehlt `jarvis.cer` im Zertifikatsspeicher (siehe Abschnitt 2). |
 | Exchange lehnt das Manifest ab | Manifest **erneut herunterladen** statt eine alte Kopie zu nehmen; bei Aktualisierungen muss die Version gestiegen sein. |
 | Knopf erscheint **nicht** im Menüband | Add-in am Postfach installiert? Outlook einmal neu starten. Im klassischen Outlook: *Datei → Add-Ins verwalten*. |
-| „Dein Konto ist für den E-Mail-Bereich nicht freigeschaltet" | *Einstellungen → Sicherheit → Berechtigungen → E-Mail-Zugriff*. **Leer heißt niemand** – auch Administratoren müssen eingetragen sein. |
+| „Dein Konto ist für den E-Mail-Bereich nicht freigeschaltet" | *Einstellungen → Sicherheit → Berechtigungen*, Spalte „E-Mail“. **Leer heißt niemand** – auch Administratoren müssen eingetragen sein. |
 | „Der E-Mail-Skill ist abgeschaltet" | *Einstellungen → Skills* → E-Mail einschalten (installiert `exchangelib` nach). |
 | Kein Knopf „Jetzt verarbeiten" | Entweder kein Postfach hinterlegt, keine aktive Regel, oder das Postfach läuft über IMAP (Hinweis steht im Fenster). |
 | Es kommt weiterhin jedes Mal die Anmeldemaske | Steht im Fenster ein Grund? Meist fehlt die **EWS-Adresse** (*Einstellungen → E-Mail*), oder das Konto hat **2FA** eingeschaltet (dann ist das so gewollt). Bei „Token stammt von einem anderen Exchange-Server" stimmt die hinterlegte Adresse nicht mit der überein, die Outlook benutzt. |

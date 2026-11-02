@@ -499,7 +499,7 @@ _UC_SKILL = "userchat"
 # laesst sich abschalten, aber nicht deinstallieren.
 #
 # Dass er von Haus aus an ist, oeffnet fuer sich genommen NICHTS: ohne Eintrag
-# unter Sicherheit → Berechtigungen → Excel-Zugriff darf niemand den Assistenten
+# unter Sicherheit → Berechtigungen (Spalte Excel) darf niemand den Assistenten
 # benutzen ("leer = niemand", `_user_may_use_excel`). Die Freigabe ist damit die
 # einzige verbleibende Schranke vor dem Bereich – wer sie je auf "leer = alle"
 # umstellt, gibt ihn nach dem naechsten Update jedem angemeldeten Benutzer frei.
@@ -2219,7 +2219,7 @@ async def require_sap_access(request: Request, user: str = Depends(require_auth)
         return user
     raise HTTPException(status_code=403,
         detail="Kein SAP-Zugriff – nicht in der SAP-Benutzerliste/-Gruppe freigeschaltet "
-               "(Einstellungen → Sicherheit → Berechtigungen → SAP-Zugriff; "
+               "(Einstellungen → Sicherheit → Berechtigungen, Spalte „SAP“; "
                "ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
@@ -2261,8 +2261,8 @@ async def require_vemas_access(request: Request, user: str = Depends(require_aut
         return user
     raise HTTPException(status_code=403,
         detail="Kein VEMAS-Zugriff – nicht in der VEMAS-Benutzerliste/-Gruppe "
-               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
-               "VEMAS-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
+               "Spalte „VEMAS“; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 def _user_may_use_email(user: str) -> bool:
@@ -2302,8 +2302,8 @@ async def require_email_access(request: Request, user: str = Depends(require_aut
         return user
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf den E-Mail-Bereich – nicht in der Benutzerliste/-Gruppe "
-               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
-               "E-Mail-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
+               "Spalte „E-Mail“; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 def _user_may_use_tracks(user: str) -> bool:
@@ -2346,8 +2346,8 @@ async def require_tracks_access(request: Request, user: str = Depends(require_au
         return user
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf Short Tracks – nicht in der Benutzerliste/-Gruppe "
-               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
-               "Short-Tracks-Zugriff; ggf. neu einloggen für Gruppen-Aktualisierung)")
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
+               "Spalte „Short Tracks“; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 def _user_may_use_jira_assist(user: str) -> bool:
@@ -2390,8 +2390,8 @@ async def require_jira_assist_access(request: Request,
         return user
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf den Jira-Assistenten – nicht in der Benutzerliste/-Gruppe "
-               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
-               "Jira-Assistent; ggf. neu einloggen für Gruppen-Aktualisierung)")
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
+               "Spalte „Jira“; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 async def require_jira_vorlagen_access(request: Request,
@@ -2413,7 +2413,7 @@ async def require_jira_vorlagen_access(request: Request,
         return user
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf die Vorlagen des Jira-Assistenten – weder freigeschaltet "
-               "(Einstellungen → Sicherheit → Berechtigungen → Jira-Assistent) noch "
+               "(Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“) noch "
                "Administrator")
 
 
@@ -2453,8 +2453,8 @@ async def require_aimouse_access(request: Request,
         return user
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf AI Mouse – nicht in der Benutzerliste/-Gruppe "
-               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
-               "AI Mouse; ggf. neu einloggen für Gruppen-Aktualisierung)")
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
+               "Spalte „AI-Maus“; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 def _user_may_use_feedback(user: str) -> bool:
@@ -2518,7 +2518,7 @@ async def require_feedback_access(request: Request,
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf Feedback – der Bereich steht offen, wer Wissen "
                "bearbeiten darf: entweder als globaler Wissens-Editor "
-               "(Einstellungen → Sicherheit → Berechtigungen → Wissen bearbeiten) "
+               "(Einstellungen → Sicherheit → Berechtigungen, Spalte „Wissen“) "
                "oder als Editor einer einzelnen Wissensgruppe (Einstellungen → "
                "Wissen → Wissensgruppen). Ohne angelegte Wissensgruppe gibt es "
                "den Bereich nicht. Ggf. neu einloggen für Gruppen-Aktualisierung.")
@@ -2564,7 +2564,7 @@ async def require_claudesub_access(request: Request, user: str = Depends(require
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf den Bereich Claude Subagent – nicht in der "
                "Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → "
-               "Berechtigungen → Claude-Subagent-Zugriff; ggf. neu einloggen für "
+               "Berechtigungen, Spalte „Claude“; ggf. neu einloggen für "
                "Gruppen-Aktualisierung)")
 
 
@@ -2645,7 +2645,7 @@ async def require_excel_access(request: Request, user: str = Depends(require_aut
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf den Tabellen-Assistenten – nicht in der "
                "Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit "
-               "→ Berechtigungen → Excel-Zugriff; ggf. neu einloggen für "
+               "→ Berechtigungen, Spalte „Excel“; ggf. neu einloggen für "
                "Gruppen-Aktualisierung)")
 
 
@@ -3053,7 +3053,7 @@ def _ad_user_allowed(conn, username: str, base_dn: str) -> bool:
     if not allowed_users_raw and not allowed_group_raw:
         print(f"[AUTH] AD-Freigabe: '{plain}' abgelehnt – es ist WEDER ein Benutzer NOCH "
               f"eine Gruppe zur Anmeldung freigegeben (Einstellungen → Sicherheit → "
-              f"Berechtigungen → Anmeldung)", flush=True)
+              f"Berechtigungen, Spalte „Anmeldung“)", flush=True)
         return False
 
     # ── Benutzerliste prüfen ──────────────────────────────────────────
@@ -17077,7 +17077,7 @@ async def tracks_drop_url(request: Request, user: str = Depends(require_tracks_a
         return JSONResponse({"ok": False, "error":
                              "Adressen aus dem Internet sind fuer deinen Benutzer "
                              "nicht freigeschaltet (Einstellungen → Sicherheit → "
-                             "Berechtigungen → Internet-Zugriff)."}, status_code=403)
+                             "Berechtigungen, Spalte „Internet“)."}, status_code=403)
     url = str(body.get("url") or "").strip()
     if not url:
         return JSONResponse({"ok": False, "error": "Keine Adresse angegeben."},
@@ -18369,8 +18369,8 @@ async def require_aimouse_paket(request: Request,
         return user
     raise HTTPException(status_code=403,
         detail="Kein Zugriff auf AI Mouse – nicht in der Benutzerliste/-Gruppe "
-               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen → "
-               "AI Mouse; ggf. neu einloggen für Gruppen-Aktualisierung)")
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
+               "Spalte „AI-Maus“; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 @app.get("/api/ai-mouse/paket")

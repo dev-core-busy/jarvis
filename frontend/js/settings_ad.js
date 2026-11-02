@@ -8,43 +8,71 @@
    defer/async): Zeitpunkt und Reihenfolge bleiben gleich, inklusive dessen,
    was das Skript zu diesem Zeitpunkt vom Dokument schon sieht. */
 (function() {
+    // ── Bereichs-Freigaben ────────────────────────────────────────────────
+    // ⚠ SEIT 2026-11-02 GIBT ES DAFUER KEINE EINGABEFELDER MEHR. Bis dahin
+    // standen je Bereich zwei Felder im Container "alte Benutzerberechtigungen",
+    // und die Tabelle (rechte_matrix.js) schrieb dort hinein. Der Container ist
+    // auf Vorgabe des Betreibers entfallen; der Bestand liegt jetzt HIER, die
+    // Tabelle liest und schreibt ihn ueber window.AdRechte.
+    // feld = Kennung (wie die frueheren Feld-Ids, rechte_matrix.js benutzt sie),
+    // lesen = Schluessel in /api/auth/ad_status, schreiben = Schluessel fuer
+    // POST /api/settings.
+    var FREIGABEN = [
+        { feld: 'ad-allowed-users',           lesen: 'allowed_users',           schreiben: 'ad_allowed_users' },
+        { feld: 'ad-allowed-group',           lesen: 'allowed_group',           schreiben: 'ad_allowed_group' },
+        { feld: 'ad-knowledge-editors',       lesen: 'knowledge_editors',       schreiben: 'ad_knowledge_editors' },
+        { feld: 'ad-knowledge-editors-group', lesen: 'knowledge_editors_group', schreiben: 'ad_knowledge_editors_group' },
+        { feld: 'ad-internet-users',          lesen: 'internet_users',          schreiben: 'ad_internet_users' },
+        { feld: 'ad-internet-group',          lesen: 'internet_group',          schreiben: 'ad_internet_group' },
+        { feld: 'ad-admins',                  lesen: 'admins',                  schreiben: 'ad_admins' },
+        { feld: 'ad-admins-group',            lesen: 'admins_group',            schreiben: 'ad_admins_group' },
+        { feld: 'sap-allowed-users',          lesen: 'sap_users',               schreiben: 'sap_allowed_users' },
+        { feld: 'sap-allowed-group',          lesen: 'sap_group',               schreiben: 'sap_allowed_group' },
+        { feld: 'vemas-allowed-users',        lesen: 'vemas_users',             schreiben: 'vemas_allowed_users' },
+        { feld: 'vemas-allowed-group',        lesen: 'vemas_group',             schreiben: 'vemas_allowed_group' },
+        { feld: 'email-allowed-users',        lesen: 'email_users',             schreiben: 'email_allowed_users' },
+        { feld: 'email-allowed-group',        lesen: 'email_group',             schreiben: 'email_allowed_group' },
+        { feld: 'tracks-allowed-users',       lesen: 'tracks_users',            schreiben: 'tracks_allowed_users' },
+        { feld: 'tracks-allowed-group',       lesen: 'tracks_group',            schreiben: 'tracks_allowed_group' },
+        { feld: 'jiraassist-allowed-users',   lesen: 'jira_assist_users',       schreiben: 'jira_assist_allowed_users' },
+        { feld: 'jiraassist-allowed-group',   lesen: 'jira_assist_group',       schreiben: 'jira_assist_allowed_group' },
+        { feld: 'aimouse-allowed-users',      lesen: 'aimouse_users',           schreiben: 'aimouse_allowed_users' },
+        { feld: 'aimouse-allowed-group',      lesen: 'aimouse_group',           schreiben: 'aimouse_allowed_group' },
+        { feld: 'excel-allowed-users',        lesen: 'excel_users',             schreiben: 'excel_allowed_users' },
+        { feld: 'excel-allowed-group',        lesen: 'excel_group',             schreiben: 'excel_allowed_group' },
+        { feld: 'claudesub-allowed-users',    lesen: 'claudesub_users',         schreiben: 'claudesub_allowed_users' },
+        { feld: 'claudesub-allowed-group',    lesen: 'claudesub_group',         schreiben: 'claudesub_allowed_group' }
+    ];
+    var _bestand = {};
+    function _kennt(feld) {
+        return FREIGABEN.some(function (f) { return f.feld === feld; });
+    }
+    // Unbekannte Kennungen WERFEN: ein Tippfehler in rechte_matrix.js waere
+    // sonst eine Spalte, die still nichts speichert.
+    function _pruefe(feld) {
+        if (!_kennt(feld)) throw new Error('unbekannte Freigabe: ' + feld);
+    }
+    window.AdRechte = {
+        kennt: _kennt,
+        lesen: function (feld) { _pruefe(feld); return _bestand[feld] || ''; },
+        setzen: function (feld, wert) { _pruefe(feld); _bestand[feld] = String(wert == null ? '' : wert); }
+    };
+
     async function _adLoad() {
         try {
             const r = await fetch('/api/auth/ad_status', {
                 headers: { 'Authorization': 'Bearer ' + (window.JarvisSitzung.token()) }
             });
+            // Ohne diese Zeile gaelte eine Fehlerantwort als geladener, LEERER
+            // Bestand – und das naechste Speichern loeschte jede Freigabe.
+            if (!r.ok) throw new Error('HTTP ' + r.status);
             const d = await r.json();
             document.getElementById('ad-server').value        = d.server        || '';
             document.getElementById('ad-domain').value        = d.domain        || '';
-            document.getElementById('ad-allowed-users').value = d.allowed_users || '';
-            document.getElementById('ad-allowed-group').value = d.allowed_group || '';
-            document.getElementById('ad-knowledge-editors').value = d.knowledge_editors || '';
-            document.getElementById('ad-knowledge-editors-group').value = d.knowledge_editors_group || '';
-            document.getElementById('ad-internet-users').value = d.internet_users || '';
-            document.getElementById('ad-internet-group').value = d.internet_group || '';
             document.getElementById('ad-bind-user').value = d.bind_user || '';
             document.getElementById('ad-bind-password').value = '';
             document.getElementById('ad-bind-pw-hint').textContent = window.t(d.bind_password_set ? 'security.ad_pw_saved' : 'security.ad_pw_none');
-            document.getElementById('ad-admins').value = d.admins || '';
-            document.getElementById('ad-admins-group').value = d.admins_group || '';
-            var _sapU = document.getElementById('sap-allowed-users'); if (_sapU) _sapU.value = d.sap_users || '';
-            var _sapG = document.getElementById('sap-allowed-group'); if (_sapG) _sapG.value = d.sap_group || '';
-            var _vemU = document.getElementById('vemas-allowed-users'); if (_vemU) _vemU.value = d.vemas_users || '';
-            var _vemG = document.getElementById('vemas-allowed-group'); if (_vemG) _vemG.value = d.vemas_group || '';
-            var _mailU = document.getElementById('email-allowed-users'); if (_mailU) _mailU.value = d.email_users || '';
-            var _mailG = document.getElementById('email-allowed-group'); if (_mailG) _mailG.value = d.email_group || '';
-            var _trU = document.getElementById('tracks-allowed-users'); if (_trU) _trU.value = d.tracks_users || '';
-            var _trG = document.getElementById('tracks-allowed-group'); if (_trG) _trG.value = d.tracks_group || '';
-            var _jaU = document.getElementById('jiraassist-allowed-users'); if (_jaU) _jaU.value = d.jira_assist_users || '';
-            var _amU = document.getElementById('aimouse-allowed-users'); if (_amU) _amU.value = d.aimouse_users || '';
-            var _amG = document.getElementById('aimouse-allowed-group'); if (_amG) _amG.value = d.aimouse_group || '';
-            var _jaG = document.getElementById('jiraassist-allowed-group'); if (_jaG) _jaG.value = d.jira_assist_group || '';
-            var _xlU = document.getElementById('excel-allowed-users'); if (_xlU) _xlU.value = d.excel_users || '';
-            var _xlG = document.getElementById('excel-allowed-group'); if (_xlG) _xlG.value = d.excel_group || '';
-            var _csU = document.getElementById('claudesub-allowed-users'); if (_csU) _csU.value = d.claudesub_users || '';
-            var _csG = document.getElementById('claudesub-allowed-group'); if (_csG) _csG.value = d.claudesub_group || '';
-            // Token-Listen (Chips) aller AD-Felder neu aufbauen (nach dem Setzen aller Werte)
-            ['ad-allowed-users','ad-allowed-group','ad-knowledge-editors','ad-knowledge-editors-group','ad-internet-users','ad-internet-group','ad-admins','ad-admins-group','sap-allowed-users','sap-allowed-group','vemas-allowed-users','vemas-allowed-group','email-allowed-users','email-allowed-group','tracks-allowed-users','tracks-allowed-group','jiraassist-allowed-users','jiraassist-allowed-group','aimouse-allowed-users','aimouse-allowed-group','excel-allowed-users','excel-allowed-group','claudesub-allowed-users','claudesub-allowed-group'].forEach(function(_id){ var _e=document.getElementById(_id); if(_e) _e.dispatchEvent(new Event('change')); });
+            FREIGABEN.forEach(function (f) { _bestand[f.feld] = d[f.lesen] || ''; });
             _adUpdateStatus(d);
             _adCertMount(d);
             // Fuer die Berechtigungs-Tabelle (rechte_matrix.js): erst mit
@@ -107,16 +135,6 @@
         el.classList.add('jv-hinweis-' + art);
         el.textContent = text;
     }
-    function _tl(key, liste) { return window.t(key).replace('{liste}', liste || ''); }
-
-    // Ein Freigabe-Block: keiner eingetragen -> Warnung, Liste -> ok, Gruppe -> info
-    function _freigabe(el, users, group, mode, pre) {
-        if (!users && !group) _hinweis(el, 'warn', window.t(pre + '_none'));
-        else if (mode === 'users') _hinweis(el, 'ok', _tl(pre + '_users', users));
-        else if (mode === 'group') _hinweis(el, 'info', _tl(pre + '_group', group));
-        else _hinweis(el, null);
-    }
-
     function _adUpdateStatus(d) {
         const dot  = document.getElementById('ad-status-dot');
         const txt  = document.getElementById('ad-status-text');
@@ -157,24 +175,11 @@
         } else {
             _hinweis(hint, null);
         }
-        _freigabe(document.getElementById('ad-knowledge-status'), d.knowledge_editors,
-                  d.knowledge_editors_group, d.knowledge_edit_mode, 'security.ad_ke');
-        _freigabe(document.getElementById('ad-sap-status'), d.sap_users, d.sap_group,
-                  d.sap_mode, 'security.ad_sap');
-        _freigabe(document.getElementById('ad-internet-status'), d.internet_users,
-                  d.internet_group, d.internet_mode, 'security.ad_inet');
-        _freigabe(document.getElementById('ad-admins-status'), d.admins, d.admins_group,
-                  d.admin_mode, 'security.ad_adm');
     }
 
-    // ⚠ DEN SPEICHERN-KNOPF GIBT ES ZWEIMAL: einmal im Container "Verbindung
-    // (Domain-Controller)", einmal am Ende von "alte Benutzerberechtigungen".
-    // Beide loesen DENSELBEN Vorgang aus (der Koerper unten enthaelt beides),
-    // deshalb werden beide gesperrt und BEIDE Statuszeilen beschrieben - sonst
-    // meldet nur der eine das Ergebnis, und wer den anderen geklickt hat, sieht
-    // nichts und haelt den Knopf fuer kaputt. Gesammelt wird ueber die
-    // Klick-Marke bzw. die Klasse, nicht ueber eine Liste von Ids: ein dritter
-    // Knopf waere damit von selbst mit versorgt.
+    // Speichern-Knoepfe und Statuszeilen werden ueber Klick-Marke bzw. Klasse
+    // gesammelt, nicht ueber Ids: bis 2026-11-02 gab es den Knopf zweimal, und
+    // ein weiterer waere damit von selbst mit versorgt.
     function _saveKnoepfe() {
         return Array.prototype.slice.call(document.querySelectorAll('[data-klick="ad-speichern"]'));
     }
@@ -186,6 +191,22 @@
         }
     }
 
+    // ⚠ FREIGABEN NUR MIT GELADENEM BESTAND. Das Backend uebernimmt nur
+    // Schluessel, die im Koerper STEHEN. Ist der Abruf gescheitert, fehlen sie
+    // deshalb ganz – sonst loeschte "Speichern" an der Verbindung jede Freigabe.
+    function _koerper() {
+        var k = {
+            ad_server:        document.getElementById('ad-server').value.trim(),
+            ad_domain:        document.getElementById('ad-domain').value.trim(),
+            ad_bind_user:     document.getElementById('ad-bind-user').value.trim(),
+            ad_bind_password: document.getElementById('ad-bind-password').value
+        };
+        if (window._adGeladen) {
+            FREIGABEN.forEach(function (f) { k[f.schreiben] = (_bestand[f.feld] || '').trim(); });
+        }
+        return k;
+    }
+
     window._adSave = async function() {
         const btns = _saveKnoepfe();
         btns.forEach(function (b) { b.disabled = true; });
@@ -194,36 +215,7 @@
             const r = await fetch('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (window.JarvisSitzung.token()) },
-                body: JSON.stringify({
-                    ad_server:        document.getElementById('ad-server').value.trim(),
-                    ad_domain:        document.getElementById('ad-domain').value.trim(),
-                    ad_allowed_users:          document.getElementById('ad-allowed-users').value.trim(),
-                    ad_allowed_group:          document.getElementById('ad-allowed-group').value.trim(),
-                    ad_knowledge_editors:      document.getElementById('ad-knowledge-editors').value.trim(),
-                    ad_knowledge_editors_group: document.getElementById('ad-knowledge-editors-group').value.trim(),
-                    ad_internet_users:         document.getElementById('ad-internet-users').value.trim(),
-                    ad_internet_group:         document.getElementById('ad-internet-group').value.trim(),
-                    ad_bind_user:              document.getElementById('ad-bind-user').value.trim(),
-                    ad_bind_password:          document.getElementById('ad-bind-password').value,
-                    ad_admins:                 document.getElementById('ad-admins').value.trim(),
-                    ad_admins_group:           document.getElementById('ad-admins-group').value.trim(),
-                    sap_allowed_users:         (document.getElementById('sap-allowed-users')||{}).value ? document.getElementById('sap-allowed-users').value.trim() : '',
-                    sap_allowed_group:         (document.getElementById('sap-allowed-group')||{}).value ? document.getElementById('sap-allowed-group').value.trim() : '',
-                    vemas_allowed_users:       (document.getElementById('vemas-allowed-users')||{}).value ? document.getElementById('vemas-allowed-users').value.trim() : '',
-                    vemas_allowed_group:       (document.getElementById('vemas-allowed-group')||{}).value ? document.getElementById('vemas-allowed-group').value.trim() : '',
-                    email_allowed_users:       (document.getElementById('email-allowed-users')||{}).value ? document.getElementById('email-allowed-users').value.trim() : '',
-                    email_allowed_group:       (document.getElementById('email-allowed-group')||{}).value ? document.getElementById('email-allowed-group').value.trim() : '',
-                    tracks_allowed_users:      (document.getElementById('tracks-allowed-users')||{}).value ? document.getElementById('tracks-allowed-users').value.trim() : '',
-                    tracks_allowed_group:      (document.getElementById('tracks-allowed-group')||{}).value ? document.getElementById('tracks-allowed-group').value.trim() : '',
-                    jira_assist_allowed_users: (document.getElementById('jiraassist-allowed-users')||{}).value ? document.getElementById('jiraassist-allowed-users').value.trim() : '',
-                    jira_assist_allowed_group: (document.getElementById('jiraassist-allowed-group')||{}).value ? document.getElementById('jiraassist-allowed-group').value.trim() : '',
-                    aimouse_allowed_users: (document.getElementById('aimouse-allowed-users')||{}).value ? document.getElementById('aimouse-allowed-users').value.trim() : '',
-                    aimouse_allowed_group: (document.getElementById('aimouse-allowed-group')||{}).value ? document.getElementById('aimouse-allowed-group').value.trim() : '',
-                    excel_allowed_users:       (document.getElementById('excel-allowed-users')||{}).value ? document.getElementById('excel-allowed-users').value.trim() : '',
-                    excel_allowed_group:       (document.getElementById('excel-allowed-group')||{}).value ? document.getElementById('excel-allowed-group').value.trim() : '',
-                    claudesub_allowed_users:   (document.getElementById('claudesub-allowed-users')||{}).value ? document.getElementById('claudesub-allowed-users').value.trim() : '',
-                    claudesub_allowed_group:   (document.getElementById('claudesub-allowed-group')||{}).value ? document.getElementById('claudesub-allowed-group').value.trim() : '',
-                })
+                body: JSON.stringify(_koerper())
             });
             if (!r.ok) throw new Error('HTTP ' + r.status);
             _saveStatus(window.t('security.ad_saved'), 'var(--success)');

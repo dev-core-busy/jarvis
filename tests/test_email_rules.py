@@ -1116,15 +1116,65 @@ check("email:             'email'" in skills_js or "email:" in skills_js,
 
 settings_html = (ROOT / "frontend/settings.html").read_text()
 check('id="settings-tab-email"' in settings_html, "das Reiter-Panel existiert")
-check('id="sec-sub-email"' in settings_html, "der Berechtigungsblock existiert")
 check("js/email.js" in settings_html, "email.js ist eingebunden")
 check(settings_html.count('class="role-grid-2"') == 0
       or 'class="role-grid role-grid-2"' in settings_html,
       "role-grid-2 wird nur mit der Basisklasse benutzt (sonst kein display:grid)")
 
-picker = (ROOT / "frontend/js/ldap_picker.js").read_text()
-check("'email-allowed-users'" in picker and "'email-allowed-group'" in picker,
-      "die Freigabefelder sind an den AD-Picker angeschlossen")
+# Freigabe: seit 2026-11-02 eine Spalte der Berechtigungs-Tabelle statt eines
+# eigenen Berechtigungsblocks mit Eingabefeldern.
+def _freigabe_bereich(root, sub, dir_name, fn_name, felder):
+    """Zusagen eines Skill-gebundenen Bereichs der Berechtigungs-Tabelle.
+
+    Seit 2026-11-02 gibt es keine Unter-Container und Eingabefelder je Bereich
+    mehr: den Bestand haelt settings_ad.js (Tabelle FREIGABEN), die Spalte
+    rechte_matrix.js (BEREICHE, skill:true), und app.js meldet den
+    Skill-Zustand ueber _rechteBereich('<sub>', an).
+    felder: geordnet {kennung: (lese_schluessel, schreib_schluessel)} –
+    zuerst Benutzer, dann Gruppe. Liefert [(ok, titel, detail)].
+    """
+    import re as _re
+    ad = (root / "frontend" / "js" / "settings_ad.js").read_text(encoding="utf-8")
+    rm = (root / "frontend" / "js" / "rechte_matrix.js").read_text(encoding="utf-8")
+    app = (root / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
+    html = (root / "frontend" / "settings.html").read_text(encoding="utf-8")
+    fr = {m.group(1): (m.group(2), m.group(3)) for m in _re.finditer(
+        r"\{\s*feld:\s*'([^']+)',\s*lesen:\s*'([^']+)',\s*schreiben:\s*'([^']+)'\s*\}", ad)}
+    be = {m.group(1): (m.group(2), m.group(3), bool(m.group(4))) for m in _re.finditer(
+        r"\{\s*sub:\s*'([^']+)',\s*users:\s*'([^']+)',\s*group:\s*'([^']+)',"
+        r"\s*key:\s*'[^']+'(\s*,\s*skill:\s*true)?\s*\}", rm)}
+    # Positivkontrolle: ohne gelesene Tabellen waere jede Pruefung unten
+    # ein Fehlschlag aus dem Messwerkzeug, kein Befund.
+    if len(fr) < 10 or len(be) < 5:
+        print("ABBRUCH (Exit 2): FREIGABEN/BEREICHE nicht lesbar (%d/%d)" % (len(fr), len(be)))
+        sys.exit(2)
+    out = []
+    kennungen = list(felder)
+    for feld, (lesen, schreiben) in felder.items():
+        out.append((fr.get(feld) == (lesen, schreiben),
+                    "Bestand %s: wird aus %s geladen und als %s gespeichert" % (feld, lesen, schreiben),
+                    str(fr.get(feld))))
+    out.append((len(kennungen) == 2 and be.get(sub) == (kennungen[0], kennungen[1], True),
+                "Tabellen-Spalte '%s' haengt am Skill und an beiden Kennungen" % sub,
+                str(be.get(sub))))
+    m = _re.search(r"window\.%s\s*=\s*async function[^{]*\{(.*?)\n        \};?\n"
+                   % _re.escape(fn_name), app, _re.S)
+    rumpf = m.group(1) if m else ""
+    out.append((bool(rumpf) and ("dir_name === '%s'" % dir_name) in rumpf
+                and ("_rechteBereich('%s'" % sub) in rumpf,
+                "app.js/%s meldet die Spalte '%s' am Skill '%s'" % (fn_name, sub, dir_name),
+                "Rumpf gefunden" if rumpf else "Funktion nicht gefunden"))
+    out.append(("sec-sub-%s" % sub not in html and "getElementById('sec-sub-%s')" % sub not in app,
+                "kein Rest des alten Unter-Containers sec-sub-%s" % sub, ""))
+    out.append((all(('id="%s"' % k) not in html for k in kennungen),
+                "keine alten Eingabefelder mehr im Markup", ""))
+    return out
+
+for _ok_f, _titel_f, _det_f in _freigabe_bereich(
+        ROOT, "email", "email", "updateEmailTabVisibility",
+        {"email-allowed-users": ("email_users", "email_allowed_users"),
+         "email-allowed-group": ("email_group", "email_allowed_group")}):
+    check(_ok_f, _titel_f, _det_f)
 
 portal = (ROOT / "frontend/portal.html").read_text()
 check('id="pt-card-email"' in portal and "permissions.email" in portal,

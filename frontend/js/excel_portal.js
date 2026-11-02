@@ -50,7 +50,7 @@
         if (w) {
             w.innerHTML = '<b>' + T('xp.no_access_head', 'Kein Zugriff') + '</b><br>' +
                 (grund || T('xp.no_access',
-                    'Dein Konto ist für den Excel-Assistenten nicht freigeschaltet. Wende dich an deine Administration – sie trägt dich unter Einstellungen → Sicherheit → Berechtigungen → Excel-Zugriff ein.'));
+                    'Dein Konto ist für den Excel-Assistenten nicht freigeschaltet. Wende dich an deine Administration – sie trägt dich unter Einstellungen → Sicherheit → Berechtigungen (Spalte „Excel“) ein.'));
             w.classList.remove('hidden');
         }
         // Den Download-Block ganz entfernen, nicht nur ausgrauen: ein Knopf,

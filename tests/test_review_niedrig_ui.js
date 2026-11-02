@@ -92,32 +92,36 @@ const SETTINGS = lies('frontend/settings.html');
 
 // ── 1. settings_ad.js ───────────────────────────────────────────────────────
 section('1. Firmenverzeichnis-Status: Theme-Klassen und i18n (echte settings.html)');
-const AD = { configured: true, reachable: true, server: 'dc.firma.local', domain: 'firma.local',
-             access_mode: 'none', bind_password_set: true,
-             knowledge_editors: '', knowledge_editors_group: '',
-             sap_users: 'anna', sap_group: '', sap_mode: 'users',
-             internet_users: '', internet_group: 'Internet', internet_mode: 'group',
-             admins: '', admins_group: '' };
-for (const lang of ['de', 'en']) {
+// Seit 2026-11-02 gibt es nur noch EINEN Status-Kasten: den Anmelde-Hinweis
+// #ad-mode-hint unter der Berechtigungs-Tabelle. Die Kaesten je Bereich
+// (ad-knowledge-/sap-/internet-/admins-status) sind mit den Einzellisten
+// ("alte Benutzerberechtigungen") entfallen. Damit alle drei Hinweisarten
+// (warn/ok/info) weiter gemessen werden, laeuft der Kasten in drei Modi.
+const AD_BASIS = { configured: true, reachable: true, server: 'dc.firma.local', domain: 'firma.local',
+                   bind_password_set: true };
+const MODI = [
+    ['none',  { access_mode: 'none',  allowed_users: '',     allowed_group: '' },         'jv-hinweis-warn',
+     (t) => t('security.ad_warn_none')],
+    ['users', { access_mode: 'users', allowed_users: 'anna', allowed_group: '' },         'jv-hinweis-ok',
+     (t) => t('security.ad_users_active') + ' anna'],
+    ['group', { access_mode: 'group', allowed_users: '',     allowed_group: 'CN=Login' }, 'jv-hinweis-info',
+     (t) => t('security.ad_group_active') + ' CN=Login'],
+];
+for (const lang of ['de', 'en']) for (const [modus, extra, klasse, textVon] of MODI) {
+    const AD = Object.assign({}, AD_BASIS, extra);
     const s = await seite(SETTINGS, {
         lang, module: ['frontend/js/i18n.js', 'frontend/js/settings_ad.js'],
         fetch: (u) => String(u).split('?')[0] === '/api/auth/ad_status' ? json(AD) : json({})
     });
     const t = (k) => s.w.t(k);
     const $ = (id) => s.d.getElementById(id);
-    if (!$('ad-mode-hint') || !$('ad-sap-status')) abbruch('settings.html ohne die Status-Kaesten');
-    check(`[${lang}] Positivkontrolle: Status geladen (Server im Text)`,
+    if (!$('ad-mode-hint')) abbruch('settings.html ohne den Anmelde-Hinweis #ad-mode-hint');
+    check(`[${lang}/${modus}] Positivkontrolle: Status geladen (Server im Text)`,
           ($('ad-status-text').textContent || '').includes('dc.firma.local'), $('ad-status-text').textContent);
-    const faelle = [
-        ['ad-mode-hint', 'jv-hinweis-warn', t('security.ad_warn_none')],
-        ['ad-knowledge-status', 'jv-hinweis-warn', t('security.ad_ke_none')],
-        ['ad-sap-status', 'jv-hinweis-ok', t('security.ad_sap_users').replace('{liste}', 'anna')],
-        ['ad-internet-status', 'jv-hinweis-info', t('security.ad_inet_group').replace('{liste}', 'Internet')],
-        ['ad-admins-status', 'jv-hinweis-warn', t('security.ad_adm_none')],
-    ];
+    const faelle = [['ad-mode-hint', klasse, textVon(t)]];
     for (const [id, klasse, text] of faelle) {
         const el = $(id);
-        check(`[${lang}] ⚠ ${id}: Klasse ${klasse}, Text aus i18n`,
+        check(`[${lang}/${modus}] ⚠ ${id}: Klasse ${klasse}, Text aus i18n`,
               el.classList.contains(klasse) && el.textContent === text, `${el.className} | ${el.textContent}`);
         /* ⚠ `currentcolor` IST KEINE INLINE-FARBE, sondern "erbe die Textfarbe"
          * - also genau das, was diese Zusage sehen will. Das Markup traegt
@@ -134,16 +138,16 @@ for (const lang of ['de', 'en']) {
          * Laeufe lang 10 FAIL, waehrend der Waechter lokal gruen war. Das
          * Produkt war die ganze Zeit in Ordnung. */
         const ohneFarbe = (v) => !v || v === 'currentcolor';
-        check(`[${lang}] ⚠ ${id}: keine Inline-Farbe`,
+        check(`[${lang}/${modus}] ⚠ ${id}: keine Inline-Farbe`,
               [el.style.color, el.style.borderColor, el.style.background].every(ohneFarbe),
               el.getAttribute('style'));
-        check(`[${lang}] ${id}: kein Emoji`, emojiIn(el.textContent).length === 0 && !el.textContent.includes('\uFE0F'),
+        check(`[${lang}/${modus}] ${id}: kein Emoji`, emojiIn(el.textContent).length === 0 && !el.textContent.includes('\uFE0F'),
               el.textContent);
     }
-    check(`[${lang}] ⚠ Kennwort-Hinweis aus i18n`, $('ad-bind-pw-hint').textContent === t('security.ad_pw_saved'),
+    check(`[${lang}/${modus}] ⚠ Kennwort-Hinweis aus i18n`, $('ad-bind-pw-hint').textContent === t('security.ad_pw_saved'),
           $('ad-bind-pw-hint').textContent);
-    if (lang === 'en') check('[en] ⚠ englischer Text (nicht der deutsche Festtext)',
-                             /SAP users: anna/.test($('ad-sap-status').textContent), $('ad-sap-status').textContent);
+    if (lang === 'en' && modus === 'users') check('[en] ⚠ englischer Text (nicht der deutsche Festtext)',
+                             /^\S*\s*User list: anna$/.test($('ad-mode-hint').textContent), $('ad-mode-hint').textContent);
     s.w.close();
 }
 const css = lies('frontend/css/theme.css');

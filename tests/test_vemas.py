@@ -742,11 +742,60 @@ check("... und wird nur bei permissions.vemas eingeblendet",
 SET = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
 check("Reiter-Knopf startet versteckt (Skill-abhaengig)",
       'id="settings-tab-btn-vemas" style="display:none;"' in SET)
-check("Berechtigungsblock startet versteckt",
-      'id="sec-sub-vemas" style="display:none;"' in SET)
-check("beide Freigabefelder sagen 'leer = niemand'",
-      SET.count("Leer = niemand") >= 2
-      and 'id="vemas-allowed-users"' in SET and 'id="vemas-allowed-group"' in SET)
+# Freigabe: seit 2026-11-02 eine Spalte der Berechtigungs-Tabelle statt eines
+# eigenen Unter-Containers mit Eingabefeldern (Bestand in settings_ad.js).
+def _freigabe_bereich(root, sub, dir_name, fn_name, felder):
+    """Zusagen eines Skill-gebundenen Bereichs der Berechtigungs-Tabelle.
+
+    Seit 2026-11-02 gibt es keine Unter-Container und Eingabefelder je Bereich
+    mehr: den Bestand haelt settings_ad.js (Tabelle FREIGABEN), die Spalte
+    rechte_matrix.js (BEREICHE, skill:true), und app.js meldet den
+    Skill-Zustand ueber _rechteBereich('<sub>', an).
+    felder: geordnet {kennung: (lese_schluessel, schreib_schluessel)} –
+    zuerst Benutzer, dann Gruppe. Liefert [(ok, titel, detail)].
+    """
+    import re as _re
+    ad = (root / "frontend" / "js" / "settings_ad.js").read_text(encoding="utf-8")
+    rm = (root / "frontend" / "js" / "rechte_matrix.js").read_text(encoding="utf-8")
+    app = (root / "frontend" / "js" / "app.js").read_text(encoding="utf-8")
+    html = (root / "frontend" / "settings.html").read_text(encoding="utf-8")
+    fr = {m.group(1): (m.group(2), m.group(3)) for m in _re.finditer(
+        r"\{\s*feld:\s*'([^']+)',\s*lesen:\s*'([^']+)',\s*schreiben:\s*'([^']+)'\s*\}", ad)}
+    be = {m.group(1): (m.group(2), m.group(3), bool(m.group(4))) for m in _re.finditer(
+        r"\{\s*sub:\s*'([^']+)',\s*users:\s*'([^']+)',\s*group:\s*'([^']+)',"
+        r"\s*key:\s*'[^']+'(\s*,\s*skill:\s*true)?\s*\}", rm)}
+    # Positivkontrolle: ohne gelesene Tabellen waere jede Pruefung unten
+    # ein Fehlschlag aus dem Messwerkzeug, kein Befund.
+    if len(fr) < 10 or len(be) < 5:
+        print("ABBRUCH (Exit 2): FREIGABEN/BEREICHE nicht lesbar (%d/%d)" % (len(fr), len(be)))
+        sys.exit(2)
+    out = []
+    kennungen = list(felder)
+    for feld, (lesen, schreiben) in felder.items():
+        out.append((fr.get(feld) == (lesen, schreiben),
+                    "Bestand %s: wird aus %s geladen und als %s gespeichert" % (feld, lesen, schreiben),
+                    str(fr.get(feld))))
+    out.append((len(kennungen) == 2 and be.get(sub) == (kennungen[0], kennungen[1], True),
+                "Tabellen-Spalte '%s' haengt am Skill und an beiden Kennungen" % sub,
+                str(be.get(sub))))
+    m = _re.search(r"window\.%s\s*=\s*async function[^{]*\{(.*?)\n        \};?\n"
+                   % _re.escape(fn_name), app, _re.S)
+    rumpf = m.group(1) if m else ""
+    out.append((bool(rumpf) and ("dir_name === '%s'" % dir_name) in rumpf
+                and ("_rechteBereich('%s'" % sub) in rumpf,
+                "app.js/%s meldet die Spalte '%s' am Skill '%s'" % (fn_name, sub, dir_name),
+                "Rumpf gefunden" if rumpf else "Funktion nicht gefunden"))
+    out.append(("sec-sub-%s" % sub not in html and "getElementById('sec-sub-%s')" % sub not in app,
+                "kein Rest des alten Unter-Containers sec-sub-%s" % sub, ""))
+    out.append((all(('id="%s"' % k) not in html for k in kennungen),
+                "keine alten Eingabefelder mehr im Markup", ""))
+    return out
+
+for _ok_f, _titel_f, _det_f in _freigabe_bereich(
+        ROOT, "vemas", "vemas", "updateVemasTabVisibility",
+        {"vemas-allowed-users": ("vemas_users", "vemas_allowed_users"),
+         "vemas-allowed-group": ("vemas_group", "vemas_allowed_group")}):
+    check(_titel_f, _ok_f, _det_f)
 check("Reiter-Panel vorhanden", 'id="settings-tab-vemas"' in SET)
 check("vemas.js wird eingebunden", "/static/js/vemas.js?v=" in SET)
 
@@ -763,9 +812,6 @@ check("Zahnrad des Skills springt in den Reiter", "vemas:             'vemas'," 
 check("Skill-Toggle zieht die Reiter-Sichtbarkeit nach",
       SKJS.count("window.updateVemasTabVisibility()") >= 3)
 
-LP = (ROOT / "frontend" / "js" / "ldap_picker.js").read_text(encoding="utf-8")
-check("AD-Picker kennt beide Freigabefelder",
-      "'vemas-allowed-users'" in LP and "'vemas-allowed-group'" in LP)
 
 # i18n: beide Sprachen, keine Luecke.
 I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")

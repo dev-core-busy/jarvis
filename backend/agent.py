@@ -4847,7 +4847,7 @@ KRITISCH – Ausfuehrungs-Regeln:
                     _ldap_blocked = True
 
             # SAP-Zugriff: SAP-Tools nur fuer freigeschaltete Benutzer (Einstellungen
-            # -> Sicherheit -> Berechtigungen -> SAP-Zugriff). Sensible Faehigkeit
+            # -> Sicherheit -> Berechtigungen, Spalte SAP). Sensible Faehigkeit
             # (Roh-SQL/Datenabruf mit Dienstkonto); Default fuer Netzwerk-Nutzer = gesperrt.
             if (not _ldap_blocked and name.startswith("sap_")
                     and not getattr(self, '_current_user_sap', True)):

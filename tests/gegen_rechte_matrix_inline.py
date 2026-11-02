@@ -1,5 +1,5 @@
-"""Gegenprobe zu test_rechte_matrix_ui, Abschnitt 11 (Tabelle auf der Seite statt
-im Popup, 2026-10-21).
+"""Gegenprobe zu test_rechte_matrix_ui, Abschnitte 11 und 12 (Tabelle auf der
+Seite statt im Popup, 2026-10-21; Einzellisten entfallen, 2026-11-02).
 
 Dreht je EINE Zusage des Umbaus in einer Plattenkopie zurueck und erwartet FAILs
 MIT Bilanzzeile; stellt danach byte-gleich wieder her (md5).
@@ -13,6 +13,14 @@ im Popup gab es sie nicht, weil der Bestand "beim Oeffnen" gelesen wurde:
   5. Der eigene Speicherlauf baut NICHT durch (der gespeicherte Stand kommt nie).
   6. "Verwerfen" nimmt nichts zurueck.
   7. Das Popup ist zurueck (Markup ohne #rmx-host).
+Seit 2026-11-02 (Container "alte Benutzerberechtigungen" entfallen, Bestand in
+window.AdRechte, Skill-Spalten ueber die Meldung aus app.js):
+  8. Skill-Bereiche erscheinen ohne Meldung (nicht mehr fail-closed).
+  9. Speichern schickt Freigaben auch ohne geladenen Bestand (leere Listen).
+ 10. Eine Fehlerantwort von ad_status gilt als geladener, leerer Bestand.
+ 11. Uebernehmen schreibt nicht in den Bestand.
+ 12. AdRechte nimmt unbekannte Kennungen still hin.
+ 13. Die Firewall-Sperre ist mit den Einzellisten verschwunden.
 
 Exit 0 = alle beissen, 1 = mindestens eine zahnlos, 2 = Basis nicht gruen.
 """
@@ -79,6 +87,27 @@ PROBEN = [
     ("das Popup ist zurueck (kein #rmx-host im Markup)", [
         (HTML, '<div class="rmx-inline" id="rmx-host"></div>',
                '<div class="rmx-inline"></div>'),
+    ]),
+    ("Skill-Bereiche ohne Meldung sichtbar", [
+        (RMX, "return !b.skill || an[b.sub] === true;", "return true;"),
+    ]),
+    ("Freigaben auch ohne geladenen Bestand im Koerper", [
+        (AD, "        if (window._adGeladen) {\n            FREIGABEN.forEach(",
+             "        if (true) {\n            FREIGABEN.forEach("),
+    ]),
+    ("Fehlerantwort von ad_status gilt als geladen", [
+        (AD, "            // Bestand – und das naechste Speichern loeschte jede Freigabe.\n"
+             "            if (!r.ok) throw new Error('HTTP ' + r.status);\n",
+             "            // Bestand – und das naechste Speichern loeschte jede Freigabe.\n"),
+    ]),
+    ("Uebernehmen schreibt nicht in den Bestand", [
+        (RMX, "window.AdRechte.setzen(feldId(b, kind), liste.join(JOIN[kind]));", "void 0;"),
+    ]),
+    ("AdRechte nimmt unbekannte Kennungen still hin", [
+        (AD, "lesen: function (feld) { _pruefe(feld); return", "lesen: function (feld) { return"),
+    ]),
+    ("Firewall-Sperre ist verschwunden", [
+        (HTML, '<details class="sec-sub" data-sub="egress">', '<details class="sec-sub">'),
     ]),
 ]
 

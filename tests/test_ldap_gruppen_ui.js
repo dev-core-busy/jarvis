@@ -1,7 +1,11 @@
 /* Waechter: "Gruppenmitgliedschaften anzeigen" (frontend/js/ldap_picker.js).
  *
  * Gemessen an der ECHTEN settings.html mit den ECHTEN Modulen (i18n, icons,
- * ldap_picker), fetch ueber den Pfad geroutet:
+ * ldap_picker), fetch ueber den Pfad geroutet. Die Chip-Listen haengt der
+ * Waechter selbst ueber LdapPicker.attachField an zwei Felder – so wie es die
+ * Wissensgruppen und der Freigabe-Dialog tun. ⚠ Bis 2026-11-02 benutzte er
+ * die Freigabefelder aus settings.html; die sind mit dem Container "alte
+ * Benutzerberechtigungen" entfallen.
  *   1. Benutzer-Chip in einer Freigabeliste ist ein Knopf und oeffnet das
  *      Popup mit OU-Pfad, direkten, indirekten Gruppen und Primaergruppe.
  *   2. Klick auf eine Gruppe dort oeffnet ihre Mitglieder OBEN drauf; Escape
@@ -69,6 +73,14 @@ async function seite(opt) {
     sitzungLaden(w, { token: 'TOK' });
     for (const m of MODULE) w.eval(lies(m));
     w.document.dispatchEvent(new w.Event('DOMContentLoaded', { bubbles: true }));
+    // Zwei Freigabefelder wie in einem Modul, das attachField benutzt
+    const box = w.document.createElement('div');
+    box.innerHTML = '<div><input type="text" id="probe-users"></div><div><textarea id="probe-group"></textarea></div>';
+    w.document.body.appendChild(box);
+    if (w.LdapPicker && w.LdapPicker.attachField) {
+        w.LdapPicker.attachField(w.document.getElementById('probe-users'), { kind: 'users' });
+        w.LdapPicker.attachField(w.document.getElementById('probe-group'), { kind: 'groups' });
+    }
     await schlaf(50);
     return { w, d: w.document, fehler, ug, gm, $: (id) => w.document.getElementById(id) };
 }
@@ -90,15 +102,17 @@ if (!s.w.LdapPicker || !s.w.LdapPicker.gruppenVon) {
     // fehlt die Schnittstelle, ist das ein Befund, kein Messaufbau-Problem
     check('LdapPicker.gruppenVon vorhanden', false, 'fehlt');
 }
-if (!s.$('ad-allowed-users') || !s.$('ad-allowed-users').parentNode.querySelector('.token-list')) {
-    abbruch('settings.html hat kein #ad-allowed-users mit Chip-Liste – Messaufbau stimmt nicht');
+if (!s.w.LdapPicker || !s.w.LdapPicker.attachField) abbruch('LdapPicker.attachField fehlt – Messaufbau');
+if (!s.$('probe-users').parentNode.querySelector('.token-list')
+    || !s.$('probe-group').parentNode.querySelector('.token-list')) {
+    abbruch('attachField hat keine Chip-Liste angelegt – Messaufbau stimmt nicht');
 }
 
 section('1. Chip -> Popup mit Ort und Gruppen');
-const k = chipKnopf(s, 'ad-allowed-users', 'erika.muster');
+const k = chipKnopf(s, 'probe-users', 'erika.muster');
 check('Benutzer-Chip ist ein Knopf', !!k && k.tagName === 'BUTTON', k && k.tagName);
 check('Knopf nennt die Wirkung im Tooltip', !!k && /Gruppenmitgliedschaften/.test(k.title || ''), k && k.title);
-const grpChip = chipKnopf(s, 'ad-allowed-group', G_A);
+const grpChip = chipKnopf(s, 'probe-group', G_A);
 check('Gruppen-Chip bekommt KEINEN Benutzer-Knopf', grpChip === null);
 if (k) k.click();
 await schlaf(30);
@@ -147,7 +161,7 @@ check('... und wieder ganz oben',
 esc(s); esc(s);
 
 section('3. Verzeichnis-Picker: Name oeffnet, Auswahl bleibt');
-s.w.LdapPicker.open({ kind: 'users', multi: true, sep: ',', list: true }, s.$('ad-allowed-users'));
+s.w.LdapPicker.open({ kind: 'users', multi: true, sep: ',', list: true }, s.$('probe-users'));
 await schlaf(30);
 const zeile = s.d.querySelector('#ldap-picker-list .ldap-row');
 const cb = zeile ? zeile.querySelector('input[type="checkbox"]') : null;

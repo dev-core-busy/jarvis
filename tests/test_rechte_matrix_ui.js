@@ -5,7 +5,11 @@
  * ldap_picker, settings_ad, rechte_matrix) – der Speicherweg ist der von
  * window._adSave, geprueft wird der Koerper von POST /api/settings:
  *   1. Bestand: Zeilen = alle Eintraege der SICHTBAREN Bereiche, Spalten =
- *      sichtbare Unter-Container; ausgeblendete Bereiche bleiben unberuehrt.
+ *      Bereiche ohne Skill plus die, deren Skill app.js als eingeschaltet
+ *      gemeldet hat (window._rechteBereiche); ohne Meldung fehlt die Spalte
+ *      (fail-closed), ausgeblendete Bereiche bleiben unberuehrt.
+ *      ⚠ Bis 2026-11-02 waren das Unter-Container mit Eingabefeldern ("alte
+ *      Benutzerberechtigungen"); der Bestand liegt jetzt in window.AdRechte.
  *   2. Kaestchen spiegeln den Bestand; Umschalten zaehlt Aenderungen.
  *   3. Uebernehmen schreibt nur Zu-/Abgaenge, Reihenfolge und Schreibweise
  *      vorhandener Eintraege bleiben, Gruppen-DNs mit Komma bleiben ganz.
@@ -23,6 +27,9 @@
  *      Gruppe den Bereich gibt.
  *  9f. REGEL: der graue Haken ist per CSS gezeichnet.
  *  10. Sortieren: Name und jeder Bereich, Gruppen bleiben oben, gemerkt.
+ *  12. Container "alte Benutzerberechtigungen" ist weg, Speichern an der
+ *      Verbindung schickt ohne geladenen Bestand KEINE Freigaben, und eine
+ *      Fehlerantwort von ad_status gilt nicht als geladener Bestand.
  *  11. INLINE statt Popup (2026-10-21): die Tabelle steht ohne Klick da,
  *      ein nachgelieferter Bestand und ein nachtraeglich eingeblendeter
  *      Bereich kommen an, ein fremdes Speichern wirft offene Haken nicht
@@ -100,8 +107,9 @@ async function seite(opt) {
     w.alert = () => {}; w.confirm = () => true;
     sitzungLaden(w, { token: 'TOK' });
     if (opt.vorab) opt.vorab(w);
-    // SAP sichtbar schalten (wie app.js bei aktivem Skill), VEMAS bleibt aus
-    w.document.getElementById('sec-sub-sap').style.display = '';
+    // SAP als eingeschaltet melden (wie app.js::_rechteBereich bei aktivem
+    // Skill), VEMAS bleibt aus. opt.bereiche ersetzt die Meldung ganz.
+    w._rechteBereiche = opt.bereiche !== undefined ? opt.bereiche : { sap: true, vemas: false };
     for (const m of MODULE) w.eval(lies(m));
     w.document.dispatchEvent(new w.Event('DOMContentLoaded', { bubbles: true }));
     await schlaf(80);
@@ -141,8 +149,9 @@ section('1. Bestand einlesen: Zeilen, Spalten, ausgeblendete Bereiche');
 let s = await seite({});
 const t = (k) => s.w.t(k);
 if (!s.w.RechteMatrix) abbruch('rechte_matrix.js nicht geladen');
-check('Positivkontrolle: Bestand geladen (_adGeladen, Feld gefuellt)',
-      s.w._adGeladen === true && s.$('ad-allowed-users').value === 'Bob, carla', s.$('ad-allowed-users').value);
+if (!s.w.AdRechte) abbruch('settings_ad.js ohne window.AdRechte – Messaufbau');
+check('Positivkontrolle: Bestand geladen (_adGeladen, Bestand gefuellt)',
+      s.w._adGeladen === true && s.w.AdRechte.lesen('ad-allowed-users') === 'Bob, carla', s.w.AdRechte.lesen('ad-allowed-users'));
 // Die Tabelle steht im Markup-Platzhalter – das ist eine Zusage, kein Messaufbau.
 check('settings.html hat den Platzhalter #rmx-host', !!s.$('rmx-host'));
 if (!s.$('rmx-host')) fruehesEnde('kein #rmx-host');
@@ -150,13 +159,14 @@ if (!s.$('rmx-host')) fruehesEnde('kein #rmx-host');
 check('die Tabelle steht auf der Seite, ohne Klick', !!s.$('rmx-tabwrap')
       && s.$('rmx-host').contains(s.$('rmx-tabwrap')));
 check('kein Popup mehr (#rmx-modal existiert nicht)', s.$('rmx-modal') === null);
-// Erwartung aus dem DOM gerechnet, nicht abgetippt: sichtbare Unter-Container
-const sichtbar = [...s.d.querySelectorAll('details.sec-sub[data-sub]')]
-    .filter(d => d.style.display !== 'none').map(d => d.getAttribute('data-sub'))
-    .filter(k => ['login','knowledge','sap','vemas','email','tracks','jiraassist','aimouse','claudesub','excel','internet','admins'].includes(k));
+// Erwartung: die vier Bereiche ohne Skill plus SAP (gemeldet). Die Spalten-
+// Namen kommen aus i18n, also aus derselben Quelle wie im Modul.
+const sichtbar = ['login', 'knowledge', 'sap', 'internet', 'admins'].map(k => t('rmx.col_' + k));
 const kopf = [...s.d.querySelectorAll('#rmx-tabwrap thead th')].slice(1, -1).map(th => th.textContent.replace(/[\u25B2\u25BC]/g, ''));
-check('Spalten = sichtbare Bereiche', kopf.length === sichtbar.length && sichtbar.length >= 5,
+check('Spalten = Bereiche ohne Skill + gemeldete Skill-Bereiche', kopf.join('|') === sichtbar.join('|'),
       kopf.join('|') + ' gegen ' + sichtbar.join('|'));
+for (const k of ['email', 'tracks', 'jiraassist', 'aimouse', 'claudesub', 'excel'])
+    check('ohne Skill-Meldung keine Spalte: ' + k, !kopf.includes(t('rmx.col_' + k)));
 check('VEMAS (ausgeblendet) ist keine Spalte', !kopf.includes(t('rmx.col_vemas')));
 check('SAP (eingeblendet) ist Spalte', kopf.includes(t('rmx.col_sap')));
 const namen = zeilen(s).map(tr => tr.querySelector('.rmx-wert').textContent);
@@ -193,8 +203,8 @@ check('Zaehler zeigt 5 Aenderungen', s.$('rmx-apply').textContent === t('rmx.app
 check('geaenderte Zelle markiert', kaestchen(s, 'carla', A).closest('td').classList.contains('rmx-geaendert'));
 s.$('rmx-apply').click();
 // vor dem Neuladen messen: die Attrappe liefert danach wieder den Altbestand
-check('Chip-Liste im Abschnitt nachgezogen (carla bei Admins)',
-      [...s.$('ad-admins').parentNode.querySelectorAll('.token-label')].some(x => x.textContent === 'carla'));
+check('Bestand in settings_ad.js nachgezogen (carla bei Admins)',
+      s.w.AdRechte.lesen('ad-admins') === 'admin1, carla', s.w.AdRechte.lesen('ad-admins'));
 await schlaf(80);
 check('genau ein POST /api/settings', s.posts.length === 1, s.posts.length);
 const b = s.posts[0] || {};
@@ -507,7 +517,9 @@ section('11. Inline: Bestand kommt nach, Bereiche kommen nach, Haken bleiben');
     //     garantierte Reihenfolge).
     check('Positivkontrolle: VEMAS ist noch keine Spalte',
           !spaltenNamen(s).includes(t('rmx.col_vemas')), spaltenNamen(s).join('|'));
-    s.$('sec-sub-vemas').style.display = '';
+    // wie app.js::_rechteBereich: Zustand setzen, dann melden
+    s.w._rechteBereiche.vemas = true;
+    s.d.dispatchEvent(new s.w.CustomEvent('jarvis-rechte-bereiche', { detail: { sub: 'vemas', an: true } }));
     await schlaf(140);
     check('nachtraeglich eingeblendeter Bereich wird zur Spalte',
           spaltenNamen(s).includes(t('rmx.col_vemas')), spaltenNamen(s).join('|'));
@@ -522,7 +534,7 @@ section('11. Inline: Bestand kommt nach, Bereiche kommen nach, Haken bleiben');
     check('Positivkontrolle: eine Aenderung steht offen',
           s.$('rmx-apply').textContent === t('rmx.apply_n').replace('{n}', '1'),
           s.$('rmx-apply').textContent);
-    await s.w._adSave();            // der Speichern-Knopf unter den Abschnitten
+    await s.w._adSave();            // der Speichern-Knopf an der Verbindung
     await schlaf(140);
     check('fremdes Speichern wirft die offenen Haken NICHT weg',
           kz(s, 'carla', t('rmx.col_admins')).checked === true
@@ -542,6 +554,56 @@ section('11. Inline: Bestand kommt nach, Bereiche kommen nach, Haken bleiben');
           kz(s, 'carla', t('rmx.col_admins')).checked === false);
     check('… und ist danach selbst gesperrt', s.$('rmx-cancel').disabled === true);
     check('keine JS-Fehler im ganzen Abschnitt', s.fehler.length === 0, s.fehler.join(' | '));
+}
+
+// ── 12. Einzellisten entfallen ─────────────────────────────────────────────
+section('12. Container "alte Benutzerberechtigungen" weg, Speichern fail-closed');
+{
+    s = await seite({});
+    check('kein Container altrechte mehr', !s.d.querySelector('[data-sub="altrechte"]'));
+    const reste = ['ad-allowed-users', 'ad-allowed-group', 'ad-knowledge-editors', 'ad-admins', 'ad-admins-group',
+                   'ad-internet-users', 'sap-allowed-users', 'vemas-allowed-group', 'excel-allowed-users']
+        .filter(id => s.$(id));
+    check('keine Freigabe-Eingabefelder mehr im Markup', reste.length === 0, reste.join(','));
+    check('genau EIN Speichern-Knopf (an der Verbindung)',
+          s.d.querySelectorAll('[data-klick="ad-speichern"]').length === 1,
+          String(s.d.querySelectorAll('[data-klick="ad-speichern"]').length));
+    check('Anmelde-Hinweis steht weiter auf der Seite und ist befuellt',
+          !!s.$('ad-mode-hint') && s.$('ad-mode-hint').style.display === 'block'
+          && s.$('ad-mode-hint').textContent.includes('Bob, carla'),
+          s.$('ad-mode-hint') ? s.$('ad-mode-hint').textContent : 'fehlt');
+    check('Firewall-Sperre bleibt erhalten (eigener Unter-Container)',
+          !!s.d.querySelector('details.sec-sub[data-sub="egress"] #sec-egress-setup'));
+    // Speichern mit geladenem Bestand: alle 24 Freigaben im Koerper
+    await s.w._adSave(); await schlaf(40);
+    const k1 = s.posts[s.posts.length - 1] || {};
+    const fk = Object.keys(k1).filter(k => /_allowed_|_admins|_knowledge_editors|_internet_/.test(k));
+    check('mit Bestand: alle 24 Freigaben im Koerper', fk.length === 24, fk.length + ': ' + fk.join(','));
+    check('… mit dem geladenen Wert', k1.ad_allowed_users === 'Bob, carla' && k1.vemas_allowed_users === 'vera',
+          k1.ad_allowed_users + ' / ' + k1.vemas_allowed_users);
+    // Abruf scheitert: Speichern an der Verbindung darf KEINE Freigabe schicken
+    s = await seite({ adStatus: () => Promise.reject(new Error('netz')) });
+    s.$('ad-server').value = 'dc2.firma.local';
+    await s.w._adSave(); await schlaf(40);
+    const k2 = s.posts[0] || {};
+    check('Positivkontrolle: POST ging raus, mit Verbindungsfeld', s.posts.length === 1 && k2.ad_server === 'dc2.firma.local',
+          JSON.stringify(k2).slice(0, 80));
+    const fk2 = Object.keys(k2).filter(k => /_allowed_|_admins|_knowledge_editors|_internet_/.test(k));
+    check('ohne Bestand: KEINE Freigabe im Koerper (sonst leere Listen)', fk2.length === 0, fk2.join(','));
+    // Fehlerantwort (HTTP 500 mit JSON-Koerper) gilt nicht als geladen
+    s = await seite({ adStatus: () => json({ error: 'kaputt' }, 500) });
+    check('HTTP-Fehler von ad_status: _adGeladen bleibt aus', !s.w._adGeladen);
+    check('… und die Tabelle meldet "nicht geladen"', s.$('rmx-status').textContent === t('rmx.not_loaded'),
+          s.$('rmx-status').textContent);
+    check('keine JS-Fehler in Abschnitt 12', s.fehler.length === 0, s.fehler.join(' | '));
+    // fail-closed: gar keine Skill-Meldung -> nur die vier Bereiche ohne Skill
+    s = await seite({ bereiche: null });
+    const k3 = spaltenNamen(s);
+    check('ohne jede Skill-Meldung: nur Bereiche ohne Skill',
+          k3.join('|') === ['login', 'knowledge', 'internet', 'admins'].map(k => t('rmx.col_' + k)).join('|'), k3.join('|'));
+    // AdRechte wirft bei unbekannter Kennung (Tippfehler waere sonst stille Spalte)
+    let warf = false; try { s.w.AdRechte.lesen('gibt-es-nicht'); } catch (e) { warf = true; }
+    check('AdRechte.lesen wirft bei unbekannter Kennung', warf);
 }
 
 clearTimeout(WACH);

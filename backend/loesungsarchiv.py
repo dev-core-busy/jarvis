@@ -102,6 +102,23 @@ _ID_RE = re.compile(r"^[a-f0-9]{12}$")
 _STAND_SPERRE = threading.Lock()
 _lauf_aktiv = False              # EIN Lauf zugleich (Zeitplan und Knopf)
 _lauf_info: dict = {}
+_stopp_angefordert = False       # "Lauf beenden" – wirkt nach dem laufenden Ticket
+
+
+def anhalten() -> bool:
+    """Den laufenden Lauf nach dem aktuellen Ticket beenden (Knopf "Lauf
+    beenden", seit 2026-11-02). Rueckgabe: ob ein Lauf aktiv war.
+
+    ⚠ KOOPERATIV, NICHT ``task.cancel()``: ein Abbruch liefe an der Schranke am
+    Ende vorbei (nichts kaeme in die Wissensdatenbank) und wuerfe den gerade
+    bezahlten Modellaufruf weg. So endet der Lauf regulaer – Schranke, Index,
+    "letzter Lauf" und Cron-Protokoll wie bei einem vollstaendigen Lauf."""
+    global _stopp_angefordert
+    if not _lauf_aktiv:
+        return False
+    _stopp_angefordert = True
+    _lauf_info["stopp"] = True
+    return True
 
 
 class ArchivFehler(ValueError):
@@ -304,6 +321,20 @@ def _stand_laden() -> dict:
 
 def _stand_speichern(d: dict) -> None:
     _json_schreiben(_wurzel() / "stand.json", d)
+
+
+def _stand_gesperrt_speichern(d: dict) -> None:
+    """Speichern MIT Sperre, und zwar im ausfuehrenden Thread selbst.
+
+    ⚠ NICHT ``with _STAND_SPERRE: await asyncio.to_thread(_stand_speichern)``:
+    wird der Lauf dabei abgebrochen (Dienst-Neustart), verlaesst der Loop den
+    ``with``-Block sofort und gibt die Sperre frei, waehrend der Thread noch
+    schreibt. Die Abbruchmeldung (``_ergebnis_merken``) landete dann VOR dem
+    alten Stand auf der Platte und wurde ueberschrieben – ECHT 2026-11-02:
+    Lauf nach 405 Tickets abgebrochen, die Statuszeile zeigte weiter den Lauf
+    von 11:16."""
+    with _STAND_SPERRE:
+        _stand_speichern(d)
 
 
 # ── Markdown ────────────────────────────────────────────────────────────────
@@ -851,7 +882,7 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
 
     Laeuft im Dienst-Loop (asyncio): der geteilte httpx-Client der Provider
     haengt daran. Jira, Platte und Embedding gehen ueber ``to_thread``."""
-    global _lauf_aktiv, _lauf_info
+    global _lauf_aktiv, _lauf_info, _stopp_angefordert
     if _lauf_aktiv:
         return {"ok": False, "grund": "Ein Lauf ist bereits aktiv."}
     _lauf_aktiv = True
@@ -879,6 +910,9 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
     finally:
         _lauf_aktiv = False
         _lauf_info = {}
+        # EINE Stelle setzt zurueck: ``anhalten`` setzt nur bei aktivem Lauf,
+        # eine Marke kann also nicht in den naechsten Lauf hinueberreichen.
+        _stopp_angefordert = False
 
 
 async def _lauf(client, provider, laden, index_und_graph) -> dict:
@@ -898,6 +932,18 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     stand.pop("bereich", None)
     stand["bereiche"] = list(st["bereiche"])
 
+    # ⚠ SCHRANKE AUCH VORAB (ECHT 2026-11-02). Bis dahin lief sie nur am ENDE
+    # eines Laufs – ein gesenkter Schwellwert wirkte erst, wenn ein ganzer Lauf
+    # (bis zu ``JE_LAUF_MAX`` Tickets, Stunden) durchkam. Der Lauf, der nach
+    # "5 → 3" gestartet wurde, brach beim Update nach 405 Tickets ab; rund 40
+    # Entwuerfe mit Zaehler >= 3 blieben draussen. Vorab kostet die Schranke
+    # keinen Modellaufruf, und geaenderte Schwelle/Gruppen wirken beim Start.
+    sch0 = await asyncio.to_thread(schranke, stand, st)
+    idx0 = ""
+    if sch0["veroeffentlicht"] or sch0["aktualisiert"] or sch0["entfernt"]:
+        await asyncio.to_thread(_stand_gesperrt_speichern, stand)
+        idx0 = await asyncio.to_thread(index_und_graph or _index_und_graph)
+
     neu, offen = await asyncio.to_thread(
         offene_tickets, client, st["bereiche"], st["start"],
         dict(stand["verarbeitet"]), _je_lauf(st))
@@ -906,12 +952,16 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     zahl = {"neu": 0, "gleich": 0, "irrelevant": 0, "fehler": 0, "erneut": 0}
     fehler: list[str] = []
     weg: list[str] = []             # beim Loesen entfernte, veroeffentlichte Dateien
-    if neu:
+    ausgewertet = 0                 # angefasste Tickets (bei "beenden" < len(neu))
+    if neu and not _stopp_angefordert:
         if provider is None:
             provider = await asyncio.to_thread(_provider)
         prov, modell = provider
         vektoren = _VektorCache()
         for t in neu:
+            if _stopp_angefordert:
+                break
+            ausgewertet += 1
             try:
                 art = await ticket_verarbeiten(t["key"], t["geloest"], stand, st,
                                                prov, modell, vektoren, laden,
@@ -926,21 +976,34 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
             _lauf_info["fertig"] = _lauf_info.get("fertig", 0) + 1
             # Nach JEDEM Ticket sichern: ein Neustart mitten im Lauf soll nicht
             # Hunderte bereits bezahlte Modellaufrufe wegwerfen.
-            with _STAND_SPERRE:
-                await asyncio.to_thread(_stand_speichern, stand)
+            await asyncio.to_thread(_stand_gesperrt_speichern, stand)
 
-    sch = await asyncio.to_thread(schranke, stand, st)
+    # Schwelle und Gruppen NEU lesen: ein Lauf dauert Stunden, und wer sie
+    # waehrenddessen aendert (ECHT 2026-11-02: 16:00 gestartet, 16:02 auf 3
+    # gesenkt), erwartet die Wirkung an diesem Lauf – nicht am naechsten.
+    try:
+        jetzt = einstellungen()
+        st_ende = {**st, "schwelle": jetzt["schwelle"], "gruppen": jetzt["gruppen"]}
+    except ArchivFehler:
+        st_ende = st
+    sch = await asyncio.to_thread(schranke, stand, st_ende)
     sch["entfernt"] += len(weg)
-    with _STAND_SPERRE:
-        await asyncio.to_thread(_stand_speichern, stand)
+    await asyncio.to_thread(_stand_gesperrt_speichern, stand)
     idx = ""
     if sch["veroeffentlicht"] or sch["aktualisiert"] or sch["entfernt"]:
         idx = await asyncio.to_thread(index_und_graph or _index_und_graph)
+    for k in sch:
+        sch[k] += sch0.get(k, 0)
+    idx = idx or idx0
 
-    rest = max(0, offen - len(neu))
+    # Offen bleibt alles, was dieser Lauf nicht angefasst hat – bei "beenden"
+    # also auch der Rest seiner eigenen Liste.
+    rest = max(0, offen - ausgewertet)
     erneut = (f" (davon {zahl['erneut']} geändert und erneut ausgewertet)"
               if zahl["erneut"] else "")
-    grund = (f"{len(neu)} Ticket(s) ausgewertet{erneut}: {zahl['neu']} neu, {zahl['gleich']} "
+    beendet = (f"Von Hand beendet nach {ausgewertet} von {len(neu)} Tickets. "
+               if _stopp_angefordert else "")
+    grund = (f"{beendet}{ausgewertet} Ticket(s) ausgewertet{erneut}: {zahl['neu']} neu, {zahl['gleich']} "
              f"zugeordnet, {zahl['irrelevant']} ohne Lösung, {zahl['fehler']} Fehler · "
              f"Wissensdatenbank: {sch['veroeffentlicht']} neu, {sch['aktualisiert']} "
              f"aktualisiert, {sch['entfernt']} entfernt")
@@ -949,7 +1012,8 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     if idx:
         grund += " · " + idx
     erg = {"ok": zahl["fehler"] == 0, "grund": grund, **zahl, **sch,
-           "offen": rest, "fehler_beispiele": fehler}
+           "offen": rest, "fehler_beispiele": fehler,
+           "beendet": bool(_stopp_angefordert)}
     _ergebnis_merken(erg)
     return erg
 

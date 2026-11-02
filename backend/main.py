@@ -18142,6 +18142,18 @@ async def jira_loesungsarchiv_start(user: str = Depends(require_local_auth)):
     return JSONResponse({"ok": True, "started": True})
 
 
+@app.post("/api/jira/admin/loesungsarchiv/stopp")
+async def jira_loesungsarchiv_stopp(user: str = Depends(require_local_auth)):
+    """Den laufenden Lauf nach dem aktuellen Ticket beenden. Kooperativ
+    (``loesungsarchiv.anhalten``): Schranke, Index und Protokoll laufen wie
+    bei einem vollstaendigen Lauf – kein harter Abbruch."""
+    from backend import loesungsarchiv as la  # noqa: PLC0415
+    if not la.anhalten():
+        return JSONResponse({"ok": False, "error": "Es läuft gerade keine Auswertung."},
+                            status_code=409)
+    return JSONResponse({"ok": True, "stopp": True})
+
+
 @app.post("/api/jira/assist/vorlagen/standard")
 async def jira_assist_vorlage_standard(
         request: Request, user: str = Depends(require_jira_vorlagen_access)):

@@ -119,6 +119,7 @@
             if (ts) ts.addEventListener('click', this.saveAreas.bind(this));
             var ls = $('jlarch-save'); if (ls) ls.addEventListener('click', this.saveArchiv.bind(this));
             var lr = $('jlarch-run'); if (lr) lr.addEventListener('click', this.runArchiv.bind(this));
+            var lx = $('jlarch-stop'); if (lx) lx.addEventListener('click', this.stopArchiv.bind(this));
             var lb = $('jlarch-bereiche-laden');
             if (lb) lb.addEventListener('click', function () { Manager.loadArchivBereiche(); });
             // Auswahllisten wie "Erlaubte Netze fuer SSH": EIN Zuhoerer je Container
@@ -1111,7 +1112,17 @@
                 // Drehender Kreis wie im uebrigen Haus (.jv-pkg-spin, theme.css):
                 // ohne ihn sieht eine minutenlang gleiche Zahl wie ein Haenger aus.
                 teile.push('<div><span class="jv-pkg-spin" aria-hidden="true"></span><b>' + esc(t('jlarch.laeuft', 'Lauf aktiv: {f} von {g} Tickets',
-                    { f: d.laeuft.fertig || 0, g: d.laeuft.gesamt || 0 })) + '</b></div>');
+                    { f: d.laeuft.fertig || 0, g: d.laeuft.gesamt || 0 })) + '</b>'
+                    + (d.laeuft.stopp ? ' – ' + esc(t('jlarch.laeuft_stopp', 'wird nach dem aktuellen Ticket beendet')) : '')
+                    + '</div>');
+            }
+            // "Jetzt auswerten" und "Lauf beenden" folgen dem Zustand: waehrend
+            // eines Laufs gibt es nichts zu starten, ohne Lauf nichts zu beenden.
+            var kr = $('jlarch-run'), ks = $('jlarch-stop');
+            if (kr) kr.disabled = !!d.laeuft;
+            if (ks) {
+                ks.style.display = d.laeuft ? '' : 'none';
+                ks.disabled = !!(d.laeuft && d.laeuft.stopp);
             }
             // Die Zeile steht IMMER da – auch ohne Lauf und waehrend eines
             // Laufs (dann der vorige). Fehlte sie, sahen lauter Nullen nach
@@ -1211,6 +1222,26 @@
                     setTimeout(function () { Manager.loadArchiv(); }, 1500);
               })
               .catch(function (e) { setStatus('jlarch-status', e.message, 'error'); });
+        },
+
+        stopArchiv: function () {
+            // Kooperativ: das laufende Ticket wird fertig ausgewertet, danach
+            // endet der Lauf regulaer (Uebernahme in die Wissensdatenbank inklusive).
+            var knopf = $('jlarch-stop');
+            if (knopf) knopf.disabled = true;
+            setStatus('jlarch-status', t('jlarch.stoppe', 'Beende den Lauf…'));
+            return fetch('/api/jira/admin/loesungsarchiv/stopp', {
+                method: 'POST', headers: authHeaders()
+            }).then(function (r) { return r.json(); })
+              .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
+                    setStatus('jlarch-status', t('jlarch.gestoppt', '✓ Der Lauf endet nach dem aktuellen Ticket.'), 'ok');
+                    return Manager.loadArchiv();
+              })
+              .catch(function (e) {
+                    if (knopf) knopf.disabled = false;
+                    setStatus('jlarch-status', e.message, 'error');
+              });
         }
     };
 

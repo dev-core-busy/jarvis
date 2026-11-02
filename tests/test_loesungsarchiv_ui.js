@@ -46,8 +46,14 @@ function mkFetch(state) {
         if (u === '/api/jira/admin/loesungsarchiv' && method === 'GET') {
             return j({ ok: true, einstellungen: state.einst, gruppen: state.gruppen,
                        tickets_verarbeitet: 0, eintraege: 0, veroeffentlicht: 0,
-                       letzter_lauf: null, naechster_lauf: null, laeuft: null,
+                       letzter_lauf: null, naechster_lauf: null, laeuft: state.laeuft || null,
                        ablage: state.ablage });
+        }
+        if (u === '/api/jira/admin/loesungsarchiv/stopp' && method === 'POST') {
+            // Antwortform wie main.jira_loesungsarchiv_stopp
+            if (!state.laeuft) return j({ ok: false, error: 'Es läuft gerade keine Auswertung.' });
+            state.laeuft = Object.assign({}, state.laeuft, { stopp: true });
+            return j({ ok: true, stopp: true });
         }
         if (u === '/api/jira/admin/loesungsarchiv' && method === 'POST') {
             state.gespeichert = body;
@@ -188,6 +194,38 @@ function klick(w, el, was) {
     await sleep(150);
     check('⚠ ungespeicherte Auswahl ueberlebt das Nachladen',
           chips(d, 'jlarch-bereiche-liste').join(',') === 'PRJA,PRJB', chips(d, 'jlarch-bereiche-liste'));
+
+    section('6. Lauf beenden (2026-11-02)');
+    const run = d.getElementById('jlarch-run'), stop = d.getElementById('jlarch-stop');
+    if (!run || !stop) { console.log('Knoepfe fehlen im Markup – NICHT PRUEFBAR'); process.exit(2); }
+    const sichtbar = (el) => el.style.display !== 'none';
+    check('ohne Lauf: "Lauf beenden" ist ausgeblendet, "Jetzt auswerten" bedienbar',
+          !sichtbar(stop) && !run.disabled, stop.style.display + '/' + run.disabled);
+    check('der Knopf traegt einen DE/EN-Schluessel', stop.getAttribute('data-i18n') === 'jlarch.stop'
+          && /'jlarch\.stop': 'Stop run'/.test(read('frontend/js/i18n.js')));
+    state.laeuft = { seit: 1, ausloeser: 'manuell', fertig: 12, gesamt: 300 };
+    w.JiraManager.loadArchiv();
+    await sleep(150);
+    check('⚠ waehrend eines Laufs: "Lauf beenden" sichtbar und bedienbar',
+          sichtbar(stop) && !stop.disabled, stop.style.display + '/' + stop.disabled);
+    check('und "Jetzt auswerten" gesperrt', run.disabled === true);
+    const vorher = state.calls.length;
+    klick(w, stop, 'Lauf beenden');
+    await sleep(200);
+    const stoppRufe = state.calls.slice(vorher).filter((c) => c.url === '/api/jira/admin/loesungsarchiv/stopp');
+    check('⚠ der Klick schickt POST an /stopp', stoppRufe.length === 1 && stoppRufe[0].method === 'POST',
+          JSON.stringify(stoppRufe));
+    const zt3 = d.getElementById('jlarch-zustand').textContent;
+    check('die Uebersicht sagt, dass nach dem aktuellen Ticket beendet wird',
+          /wird nach dem aktuellen Ticket beendet/.test(zt3), zt3);
+    check('der Knopf bleibt gesperrt, bis der Lauf zu Ende ist', sichtbar(stop) && stop.disabled === true);
+    check('die Rueckmeldung steht am Knopf',
+          /endet nach dem aktuellen Ticket/.test(d.getElementById('jlarch-status').textContent));
+    state.laeuft = null;
+    w.JiraManager.loadArchiv();
+    await sleep(150);
+    check('Lauf zu Ende: "Lauf beenden" verschwindet, "Jetzt auswerten" wieder bedienbar',
+          !sichtbar(stop) && !run.disabled);
 
     console.log('\n\x1b[1mErgebnis: ' + ok + '/' + (ok + fail) + '\x1b[0m');
     w.close();

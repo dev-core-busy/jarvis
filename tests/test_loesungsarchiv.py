@@ -760,6 +760,156 @@ la.einstellungen_speichern({**la.einstellungen(), "schwelle": 3}, cron_manager=C
 
 
 # ════════════════════════════════════════════════════════════════════════════
+section("8e. Gesenkte Schwelle wirkt sofort – auch bei Abbruch (ECHT 2026-11-02)")
+# Vorfall: Schwelle 5 -> 3, Lauf gestartet, nach 405 Tickets per Update
+# abgebrochen. Die Schranke lief nur am ENDE – kein Entwurf kam in die
+# Wissensdatenbank. Und die Aenderung 2 Minuten NACH dem Start haette selbst
+# am Ende nicht gegolten (Schwelle vom Laufbeginn).
+def _dateien():
+    return sorted((ORDNER / "loesungsarchiv").rglob("*.md")) if (ORDNER / "loesungsarchiv").is_dir() else []
+
+
+_vor_8e = la.einstellungen()
+_cm8e = CronAttrappe()
+la.einstellungen_speichern({**_vor_8e, "schwelle": la.SCHWELLE_MAX}, cron_manager=_cm8e)
+lauf(client, ProviderAttrappe())
+n_eintraege = len(_stand()["eintraege"])
+check("(Positivkontrolle) Ausgangslage: Schwelle maximal, nichts veroeffentlicht, Eintraege da",
+      not _dateien() and n_eintraege >= 2, (len(_dateien()), n_eintraege))
+
+# a) Abbruch mitten im Lauf: Vorab-Schranke hat trotzdem veroeffentlicht
+HAENGT2 = f"{BEREICH}-40"
+TICKETS[HAENGT2] = _ticket(HAENGT2, "Haengendes Ticket Plotter", "Plotter haengt", "Neustart")
+client.keys.append(HAENGT2)
+
+
+class ProviderHaengt2(ProviderAttrappe):
+    def __init__(self):
+        super().__init__(); self.haengt = False
+    async def generate_response(self, **kw):
+        if f"Ticket: {HAENGT2}" in kw["contents"][0].parts[0].text:
+            self.haengt = True
+            await asyncio.sleep(30)
+        return await super().generate_response(**kw)
+
+
+async def _abbruch2():
+    p = ProviderHaengt2()
+    task = asyncio.ensure_future(la.lauf(ausloeser="test", client=client,
+                                         provider=(p, "testmodell"), laden=laden))
+    for _ in range(300):
+        await asyncio.sleep(0.01)
+        if p.haengt:
+            break
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    return p.haengt
+
+
+la.einstellungen_speichern({**_vor_8e, "schwelle": 1}, cron_manager=_cm8e)
+if not asyncio.run(_abbruch2()):
+    print("  Lauf erreichte das haengende Ticket nie – NICHT PRUEFBAR"); sys.exit(2)
+s8e = _stand()
+check("(Positivkontrolle) das haengende Ticket blieb offen", HAENGT2 not in s8e["verarbeitet"])
+check("⚠ abgebrochener Lauf: Entwuerfe ueber der GESENKTEN Schwelle sind veroeffentlicht",
+      len(_dateien()) == len(s8e["eintraege"]) >= 2, (len(_dateien()), len(s8e["eintraege"])))
+check("und im Stand vermerkt",
+      all(e.get("rag_datei") for e in s8e["eintraege"].values()))
+TICKETS.pop(HAENGT2, None)
+client.keys.remove(HAENGT2)
+
+# b) Schwelle WAEHREND des Laufs gesenkt: das Ende des Laufs nimmt sie
+la.einstellungen_speichern({**_vor_8e, "schwelle": la.SCHWELLE_MAX}, cron_manager=_cm8e)
+lauf(client, ProviderAttrappe())
+check("(Positivkontrolle) wieder nichts veroeffentlicht", not _dateien(), len(_dateien()))
+NEU8E = f"{BEREICH}-41"
+TICKETS[NEU8E] = _ticket(NEU8E, "Monitor flackert", "Monitor flackert staendig", "Kabel getauscht")
+client.keys.append(NEU8E)
+
+
+class ProviderSenkt(ProviderAttrappe):
+    """Senkt die Schwelle beim ersten Modellaufruf – also NACH der
+    Vorab-Schranke und VOR der am Ende, wie der Betreiber auf ECHT."""
+    async def generate_response(self, **kw):
+        if la.einstellungen()["schwelle"] != 1:
+            la.einstellungen_speichern({**_vor_8e, "schwelle": 1}, cron_manager=_cm8e)
+        return await super().generate_response(**kw)
+
+
+erg8e = lauf(client, ProviderSenkt())
+s8e_b = _stand()
+check("(Positivkontrolle) das neue Ticket wurde im Lauf ausgewertet", NEU8E in s8e_b["verarbeitet"],
+      erg8e.get("grund"))
+check("⚠ waehrend des Laufs gesenkte Schwelle gilt am Ende DIESES Laufs",
+      len(_dateien()) == len(s8e_b["eintraege"]) >= 2, (len(_dateien()), len(s8e_b["eintraege"])))
+check("das Ergebnis zaehlt die Veroeffentlichung", erg8e.get("veroeffentlicht", 0) >= 2, erg8e.get("grund"))
+TICKETS.pop(NEU8E, None)
+client.keys.remove(NEU8E)
+la.einstellungen_speichern({**_vor_8e, "schwelle": 3}, cron_manager=CronAttrappe())
+
+# c) Regel: im Lauf haelt kein ``with _STAND_SPERRE`` ein ``await`` – sonst
+#    gibt ein Abbruch die Sperre frei, waehrend der Thread noch schreibt, und
+#    ueberschreibt die Abbruchmeldung.
+_la_baum = ast.parse((ROOT / "backend" / "loesungsarchiv.py").read_text(encoding="utf-8"))
+_withs = [w for w in ast.walk(_la_baum) if isinstance(w, (ast.With, ast.AsyncWith))
+          and any("_STAND_SPERRE" in ast.unparse(i.context_expr) for i in w.items)]
+check("(Positivkontrolle) Sperr-Bloecke gefunden", len(_withs) >= 2, len(_withs))
+_mit_await = [w.lineno for w in _withs if any(isinstance(n, ast.Await) for n in ast.walk(w))]
+check("⚠ kein Sperr-Block enthaelt ein await", not _mit_await, _mit_await)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+section("8f. Lauf von Hand beenden (2026-11-02)")
+check("ohne Lauf: anhalten() meldet 'nichts aktiv'", la.anhalten() is False)
+_vor_8f = la.einstellungen()
+la.einstellungen_speichern({**_vor_8f, "schwelle": 1}, cron_manager=CronAttrappe())
+NEU8F = [f"{BEREICH}-{i}" for i in (50, 51, 52)]
+for i, k in enumerate(NEU8F):
+    TICKETS[k] = _ticket(k, f"Beamer Problem {i} Projektor", f"Beamer zeigt nichts {i}", f"Lampe {i} getauscht")
+    client.keys.append(k)
+
+
+class ProviderBeendet(ProviderAttrappe):
+    """Drueckt beim ERSTEN Ticket auf "Lauf beenden" – das laufende Ticket
+    muss trotzdem fertig werden, die anderen beiden nicht mehr anfangen."""
+    def __init__(self):
+        super().__init__(); self.gedrueckt = None
+    async def generate_response(self, **kw):
+        if self.gedrueckt is None:
+            self.gedrueckt = la.anhalten()
+        return await super().generate_response(**kw)
+
+
+p8f = ProviderBeendet()
+erg8f = lauf(client, p8f)
+s8f = _stand()
+fertig8f = [k for k in NEU8F if k in s8f["verarbeitet"]]
+check("(Positivkontrolle) 'beenden' traf einen aktiven Lauf", p8f.gedrueckt is True, p8f.gedrueckt)
+check("⚠ das laufende Ticket wird noch fertig ausgewertet", len(fertig8f) == 1, fertig8f)
+check("⚠ die uebrigen fangen nicht mehr an (bleiben offen)",
+      _analysiert(p8f) == fertig8f, (_analysiert(p8f), fertig8f))
+check("der Grund sagt 'von Hand beendet' mit Fortschritt",
+      erg8f.get("grund", "").startswith("Von Hand beendet nach 1 von 3 Tickets"), erg8f.get("grund"))
+check("die offene Zahl zaehlt die nicht angefangenen mit",
+      erg8f.get("offen") == 2 and "2 Ticket(s) folgen" in erg8f.get("grund", ""), erg8f.get("offen"))
+check("⚠ regulaeres Ende: die Schranke lief (Datei des neuen Eintrags ist da)",
+      bool(fertig8f) and bool((s8f["eintraege"].get(s8f["verarbeitet"][fertig8f[0]]["eintrag"]) or {}).get("rag_datei")),
+      s8f["verarbeitet"].get(fertig8f[0]) if fertig8f else None)
+check("'letzter Lauf' traegt das Ende", str((s8f.get("letzter_lauf") or {}).get("grund", "")).startswith("Von Hand beendet"))
+check("die Marke ist danach zurueckgesetzt", la._stopp_angefordert is False and la._lauf_aktiv is False)
+p8f2 = ProviderAttrappe()
+lauf(client, p8f2)
+check("der naechste Lauf macht mit den uebrigen weiter (Marke wirkt nicht nach)",
+      sorted(_analysiert(p8f2)) == sorted(set(NEU8F) - set(fertig8f)), _analysiert(p8f2))
+for k in NEU8F:
+    TICKETS.pop(k, None); client.keys.remove(k)
+la.einstellungen_speichern({**_vor_8f, "schwelle": 3}, cron_manager=CronAttrappe())
+
+
+# ════════════════════════════════════════════════════════════════════════════
 section("9. Scheduler (AST)")
 src = (ROOT / "backend" / "scheduler.py").read_text(encoding="utf-8")
 baum = ast.parse(src)

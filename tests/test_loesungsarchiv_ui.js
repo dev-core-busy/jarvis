@@ -46,7 +46,8 @@ function mkFetch(state) {
         if (u === '/api/jira/admin/loesungsarchiv' && method === 'GET') {
             return j({ ok: true, einstellungen: state.einst, gruppen: state.gruppen,
                        tickets_verarbeitet: 0, eintraege: 0, veroeffentlicht: 0,
-                       letzter_lauf: null, naechster_lauf: null, laeuft: null });
+                       letzter_lauf: null, naechster_lauf: null, laeuft: null,
+                       ablage: state.ablage });
         }
         if (u === '/api/jira/admin/loesungsarchiv' && method === 'POST') {
             state.gespeichert = body;
@@ -87,7 +88,9 @@ function klick(w, el, was) {
                     einst: { aktiv: true, bereiche: ['PRJA'], start: '2026-09-01', schwelle: 5,
                              cron: '30 2 * * *', gruppen: ['g1'] },
                     gruppen: [{ id: 'g1', name: 'Technik' }, { id: 'g2', name: 'Vertrieb' },
-                              { id: 'g3', name: 'Leitung' }] };
+                              { id: 'g3', name: 'Leitung' }],
+                    ablage: { privat: 'data/loesungsarchiv', entwuerfe: 150, ziel: 'data/rag/technik/loesungsarchiv',
+                              veroeffentlicht: [{ ordner: 'data/rag/technik/loesungsarchiv/PRJA', dateien: 3 }] } };
     const dom = makeDom(state);
     const w = dom.window, d = w.document;
 
@@ -99,6 +102,12 @@ function klick(w, el, was) {
     check('(Positivkontrolle) Einstellungen und Jira-Bereiche wurden geholt', geladen
           && state.calls.some((c) => c.url === '/api/jira/admin/loesungsarchiv' && c.method === 'GET'));
     if (!d.getElementById('jlarch-bereiche-liste')) { console.log('Markup fehlt – NICHT PRUEFBAR'); process.exit(2); }
+
+    section('0b. Ablageorte in der Uebersicht');
+    const zt = (d.getElementById('jlarch-zustand') || {}).textContent || '';
+    check('Zwischenablage mit Pfad und Zahl', /data\/loesungsarchiv\/entwuerfe/.test(zt) && /150 Entwürfe/.test(zt), zt);
+    check('veroeffentlichter Ordner mit Pfad und Zahl',
+          /data\/rag\/technik\/loesungsarchiv\/PRJA/.test(zt) && /3 Dateien/.test(zt), zt);
 
     section('1. Gespeicherter Stand wird als Liste gezeigt');
     check('gewaehlter Bereich steht als Eintrag mit Muelleimer',
@@ -164,6 +173,14 @@ function klick(w, el, was) {
     check('kein Einzelfeld "bereich" mehr im Rumpf', !('bereich' in g));
     check('nach dem Speichern verschwindet der Hinweis',
           d.getElementById('jlarch-ungespeichert').style.display === 'none');
+
+    section('4b. Noch nichts veroeffentlicht: der Zielordner wird genannt');
+    state.ablage = Object.assign({}, state.ablage, { veroeffentlicht: [] });
+    w.JiraManager.loadArchiv();
+    await sleep(150);
+    const zt2 = d.getElementById('jlarch-zustand').textContent;
+    check('Zielordner und "noch keine Lösung" stehen da',
+          /data\/rag\/technik\/loesungsarchiv/.test(zt2) && /noch keine Lösung/.test(zt2), zt2);
 
     section('5. Nachladen waehrend eines Laufs verwirft keine offene Auswahl');
     klick(w, weg(d, 'jlarch-bereiche-liste', 'PRJC'), 'Muelleimer PRJC');

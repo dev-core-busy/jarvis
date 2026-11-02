@@ -873,4 +873,40 @@ def zustand() -> dict:
         "haeufigste": [{"titel": _zeile(e.get("titel"), MAX_TITEL),
                         "zaehler": int(e.get("zaehler") or 0),
                         "veroeffentlicht": bool(e.get("rag_datei"))} for _, e in top],
+        "ablage": _ablage(stand, st),
     }
+
+
+def _ablage(stand: dict, st: dict) -> dict:
+    """Wo die Dateien liegen – fuer die Anzeige. Gezaehlt wird, was WIRKLICH
+    auf der Platte steht (nicht der Stand), sonst saehe eine geloeschte oder
+    nie geschriebene Datei wie vorhanden aus. Wirft nie: ein fehlender
+    Wissensordner ist eine Aussage, kein Fehler der Uebersicht."""
+    ent = _wurzel() / "entwuerfe"
+    try:
+        n_ent = sum(1 for f in ent.glob("*.md") if f.is_file()) if ent.is_dir() else 0
+    except OSError:
+        n_ent = 0
+    # Veroeffentlicht: je Ordner, in dem tatsaechlich Dateien liegen ...
+    ordner: dict[str, int] = {}
+    for e in stand.get("eintraege", {}).values():
+        rel = str(e.get("rag_datei") or "")
+        if not rel:
+            continue
+        try:
+            if _abs(rel).is_file():
+                o = str(Path(rel).parent)
+                ordner[o] = ordner.get(o, 0) + 1
+        except Exception:  # noqa: BLE001
+            continue
+    # ... und das Ziel, solange noch nichts veroeffentlicht ist.
+    ziel = ""
+    if st.get("gruppen"):
+        try:
+            from backend.web_extractor import _target_dir_for_groups
+            ziel = _rel(_target_dir_for_groups(st["gruppen"]) / "loesungsarchiv")
+        except Exception:  # noqa: BLE001
+            ziel = ""
+    return {"privat": _rel(_wurzel()), "entwuerfe": n_ent,
+            "veroeffentlicht": [{"ordner": o, "dateien": n} for o, n in sorted(ordner.items())],
+            "ziel": ziel}

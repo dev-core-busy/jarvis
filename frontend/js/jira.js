@@ -1134,6 +1134,26 @@
                     : aus ? t('jlarch.ausgeschaltet', 'keiner – das Lösungsarchiv ist ausgeschaltet')
                     : t('jlarch.nicht_geplant', 'nicht geplant')) + '</div>');
             if (d.lesefehler) teile.push('<div style="color:var(--danger);">' + esc(d.lesefehler) + '</div>');
+            // Wo die Dateien liegen: Zwischenablage (privat, nicht durchsuchbar)
+            // und veroeffentlicht (Wissensordner). Gezaehlt im Backend auf der Platte.
+            var ab = d.ablage;
+            if (ab) {
+                teile.push('<div style="margin-top:8px;">' + esc(t('jlarch.ablage_privat', 'Zwischenablage (nicht in der Wissenssuche):'))
+                    + ' <code>' + esc(ab.privat + '/entwuerfe') + '</code> · '
+                    + esc(t('jlarch.ablage_entwuerfe', '{n} Entwürfe', { n: ab.entwuerfe || 0 })) + '</div>');
+                var vo = ab.veroeffentlicht || [];
+                if (vo.length) {
+                    vo.forEach(function (v) {
+                        teile.push('<div>' + esc(t('jlarch.ablage_wissen', 'In der Wissensdatenbank:'))
+                            + ' <code>' + esc(v.ordner) + '</code> · '
+                            + esc(t('jlarch.ablage_dateien', '{n} Dateien', { n: v.dateien })) + '</div>');
+                    });
+                } else {
+                    teile.push('<div>' + esc(t('jlarch.ablage_wissen', 'In der Wissensdatenbank:')) + ' '
+                        + (ab.ziel ? '<code>' + esc(ab.ziel) + '</code> · ' + esc(t('jlarch.ablage_noch_nichts', 'noch keine Lösung über der Schwelle'))
+                            : esc(t('jlarch.ablage_kein_ziel', 'kein Zielordner – Wissensgruppe wählen'))) + '</div>');
+                }
+            }
             var top = d.haeufigste || [];
             if (top.length) {
                 var zeilen = top.map(function (h) {

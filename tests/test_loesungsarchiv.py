@@ -406,6 +406,21 @@ check("Ergebnis nennt den Wissensgraphen", "Wissensgraph: eingereiht" in erg.get
 check("Lauf ohne Fehler", erg.get("ok") is True and erg.get("fehler") == 0, erg)
 z = la.zustand()
 check("Anzeige: 1 in der Wissensdatenbank", z["veroeffentlicht"] == 1 and z["eintraege"] == 2, z)
+ab = z.get("ablage") or {}
+check("Ablage: Zwischenablage ist die private Wurzel", ab.get("privat") == la._rel(la._wurzel()), ab)
+check("Ablage: Entwuerfe auf der Platte gezaehlt", ab.get("entwuerfe") == 2, ab)
+vo = ab.get("veroeffentlicht") or []
+check("Ablage: veroeffentlichter Ordner mit Dateizahl",
+      len(vo) == 1 and vo[0]["dateien"] == 1 and vo[0]["ordner"].endswith("loesungsarchiv/" + BEREICH), vo)
+_f = ORDNER / "loesungsarchiv" / BEREICH
+_weg = sorted(_f.glob("*.md"))
+_inhalt = {f: f.read_bytes() for f in _weg}
+for f in _weg:
+    f.unlink()
+check("⚠ Ablage zaehlt die PLATTE, nicht den Stand (Datei weg -> nicht gezeigt)",
+      la.zustand()["ablage"]["veroeffentlicht"] == [], la.zustand()["ablage"])
+for f, b in _inhalt.items():
+    f.write_bytes(b)
 check("Anzeige: Graph ohne Gruppenbeschraenkung deckt das Archiv ab", z["wissensgraph_deckt"] is True, z)
 _wst_echt = wgx.einstellungen
 wgx.einstellungen = lambda frisch=False: {"aktiv": True, "gruppen": ["vertrieb"]}

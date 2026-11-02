@@ -951,17 +951,24 @@
         loadArchivBereiche: function () {
             var sel = $('jlarch-bereich');
             var aktuell = sel ? sel.value : '';
-            setStatus('jlarch-status', t('jlarch.lade_bereiche', 'Lade Bereiche…'));
+            // Die Rueckmeldung gehoert an den Knopf, nicht an "Speichern" ganz
+            // unten (Register: eine Meldung, die niemand sieht, ist keine).
+            // Der Knopf ist waehrend des Abrufs gesperrt, sonst wirkt ein
+            // Klick bei schon gefuellter Liste wie ohne Funktion.
+            var knopf = $('jlarch-bereiche-laden');
+            if (knopf) knopf.disabled = true;
+            setStatus('jlarch-bereiche-status', t('jlarch.lade_bereiche', 'Lade Bereiche…'));
             return fetch('/api/jira/admin/loesungsarchiv/bereiche', { headers: authHeaders() })
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
                     if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
                     Manager._archivBereiche = d.bereiche || [];
                     Manager._bereichOptionen(Manager._archivBereiche, aktuell);
-                    setStatus('jlarch-status', t('jlarch.bereiche_da', '{n} Bereiche geladen.',
+                    setStatus('jlarch-bereiche-status', t('jlarch.bereiche_da', '{n} Bereiche geladen.',
                         { n: Manager._archivBereiche.length }), 'ok');
                 })
-                .catch(function (e) { setStatus('jlarch-status', e.message, 'error'); });
+                .catch(function (e) { setStatus('jlarch-bereiche-status', e.message, 'error'); })
+                .then(function () { if (knopf) knopf.disabled = false; });
         },
 
         _archivZustand: function (d) {
@@ -986,7 +993,9 @@
                     : t('jlarch.graph_aus', 'Wissensgraph: ausgeschaltet – Lösungen gehen nur in die Wissenssuche.')) + '</div>');
             }
             if (d.laeuft) {
-                teile.push('<div><b>' + esc(t('jlarch.laeuft', 'Lauf aktiv: {f} von {g} Tickets',
+                // Drehender Kreis wie im uebrigen Haus (.jv-pkg-spin, theme.css):
+                // ohne ihn sieht eine minutenlang gleiche Zahl wie ein Haenger aus.
+                teile.push('<div><span class="jv-pkg-spin" aria-hidden="true"></span><b>' + esc(t('jlarch.laeuft', 'Lauf aktiv: {f} von {g} Tickets',
                     { f: d.laeuft.fertig || 0, g: d.laeuft.gesamt || 0 })) + '</b></div>');
             }
             var ll = d.letzter_lauf;

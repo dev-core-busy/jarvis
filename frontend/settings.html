@@ -3832,12 +3832,20 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <label class="checkbox-group"><input type="checkbox" id="jlarch-aktiv"><span data-i18n="jlarch.aktiv">Lösungsarchiv einschalten</span></label>
                                 </div>
                                 <div class="form-group">
-                                    <label for="jlarch-bereich" data-i18n="jlarch.bereich">Jira-Bereich</label>
-                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                                        <select id="jlarch-bereich" class="config-input" style="flex:1;min-width:200px;box-sizing:border-box;"></select>
-                                        <button class="btn-secondary" id="jlarch-bereiche-laden" type="button" data-i18n="jlarch.bereiche_laden" style="flex:0 0 auto;">Bereiche laden</button>
+                                    <label for="jlarch-bereich-neu" data-i18n="jlarch.bereiche">Jira-Bereiche</label>
+                                    <p class="kb-hint" style="margin:0 0 4px;" data-i18n="jlarch.bereiche_desc">Aus welchen Bereichen die gelösten Tickets kommen. Klicke unten auf einen Bereich oder suche ihn über das Feld; mit dem Mülleimer entfernst du einen. Gleiche Probleme aus verschiedenen Bereichen werden zusammen gezählt.</p>
+                                    <!-- Bauform wie "Erlaubte Netze fuer SSH" (fernzugang.js): Liste + Vorschlaege + Eingabezeile. -->
+                                    <div id="jlarch-bereiche-liste" class="sec-ssh-chips"></div>
+                                    <div class="sec-ssh-vorschlag-kopf" data-i18n="jlarch.bereiche_vs_h">Bereiche aus Jira – zum Hinzufügen anklicken</div>
+                                    <div id="jlarch-bereiche-vorschlaege" class="sec-ssh-vorschlaege"></div>
+                                    <div class="sec-ssh-neu">
+                                        <input type="text" id="jlarch-bereich-neu" class="sec-ssh-feld" spellcheck="false" autocomplete="off"
+                                               placeholder="Bereich suchen oder Schlüssel eingeben" data-i18n-placeholder="jlarch.bereich_neu_ph">
+                                        <button type="button" id="jlarch-bereich-add" class="sec-btn" data-i18n="jlarch.hinzufuegen">Hinzufügen</button>
+                                        <button type="button" id="jlarch-bereiche-laden" class="sec-btn" data-i18n="jlarch.bereiche_laden">Bereiche laden</button>
                                         <span id="jlarch-bereiche-status" style="font-size:0.9em;"></span>
                                     </div>
+                                    <div id="jlarch-bereich-fehler" class="sec-ssh-hinweis" style="display:none;"></div>
                                 </div>
                                 <div class="form-group">
                                     <label for="jlarch-start" data-i18n="jlarch.start">Startzeitpunkt</label>
@@ -3856,8 +3864,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                 <div class="form-group">
                                     <label data-i18n="jlarch.gruppen">Sichtbar für Wissensgruppen</label>
-                                    <div id="jlarch-gruppen" style="display:flex;flex-direction:column;gap:4px;"></div>
+                                    <div id="jlarch-gruppen-liste" class="sec-ssh-chips"></div>
+                                    <div class="sec-ssh-vorschlag-kopf" data-i18n="jlarch.gruppen_vs_h">Wissensgruppen – zum Hinzufügen anklicken</div>
+                                    <div id="jlarch-gruppen-vorschlaege" class="sec-ssh-vorschlaege"></div>
                                 </div>
+                                <div id="jlarch-ungespeichert" class="sec-ssh-hinweis" style="display:none;" data-i18n="jlarch.ungespeichert">Noch nicht gespeichert – zum Übernehmen „Speichern“ klicken.</div>
                                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                                     <button class="btn-primary" id="jlarch-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
                                     <button class="btn-secondary" id="jlarch-run" type="button" data-i18n="jlarch.run" style="flex:0 0 auto;">Jetzt auswerten</button>
@@ -6245,7 +6256,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=418"></script>
+    <script src="/static/js/i18n.js?v=419"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=34"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6266,7 +6277,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/mcp.js?v=12"></script>
     <script src="/static/js/vision.js?v=38"></script>
     <script src="/static/js/confluence.js?v=11"></script>
-    <script src="/static/js/jira.js?v=25"></script>
+    <script src="/static/js/jira.js?v=26"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=3"></script>
     <script src="/static/js/sap.js?v=7"></script>

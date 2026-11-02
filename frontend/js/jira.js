@@ -121,6 +121,22 @@
             var lr = $('jlarch-run'); if (lr) lr.addEventListener('click', this.runArchiv.bind(this));
             var lb = $('jlarch-bereiche-laden');
             if (lb) lb.addEventListener('click', function () { Manager.loadArchivBereiche(); });
+            // Auswahllisten wie "Erlaubte Netze fuer SSH": EIN Zuhoerer je Container
+            // (die Knoepfe entstehen beim Zeichnen neu).
+            ['jlarch-bereiche-liste', 'jlarch-bereiche-vorschlaege',
+             'jlarch-gruppen-liste', 'jlarch-gruppen-vorschlaege'].forEach(function (id) {
+                var box = $(id);
+                if (box) box.addEventListener('click', function (ev) { Manager._archivAuswahlKlick(ev); });
+            });
+            var bn = $('jlarch-bereich-neu');
+            if (bn) {
+                bn.addEventListener('input', function () { Manager._archivAuswahlZeigen(); });
+                bn.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') { e.preventDefault(); Manager._archivBereichEingabe(); }
+                });
+            }
+            var ba = $('jlarch-bereich-add');
+            if (ba) ba.addEventListener('click', function () { Manager._archivBereichEingabe(); });
             /* Der Katalog ist Servertext – ein Sprachwechsel muss ihn neu
                holen. Neu GELADEN wird nur bei echtem Wechsel: zeichnen ruft
                kein applyLang(), aber ein Abruf bei jedem Ereignis waere die
@@ -901,56 +917,154 @@
             if ($('jlarch-start')) $('jlarch-start').value = st.start || '';
             if ($('jlarch-schwelle')) $('jlarch-schwelle').value = st.schwelle != null ? st.schwelle : 10;
             if ($('jlarch-cron')) $('jlarch-cron').value = st.cron || '';
-            this._bereichOptionen(this._archivBereiche || [], st.bereich || '');
-            var box = $('jlarch-gruppen');
-            if (box) {
-                box.innerHTML = '';
-                var gew = st.gruppen || [];
-                (d.gruppen || []).forEach(function (g) {
-                    var lab = document.createElement('label');
-                    lab.className = 'checkbox-group';
-                    var cb = document.createElement('input');
-                    cb.type = 'checkbox';
-                    cb.setAttribute('data-gruppe', g.id);
-                    cb.checked = gew.indexOf(g.id) >= 0;
-                    var sp = document.createElement('span');
-                    sp.textContent = g.name || g.id;
-                    lab.appendChild(cb); lab.appendChild(sp);
-                    box.appendChild(lab);
-                });
-                if (!(d.gruppen || []).length) {
-                    box.textContent = t('jlarch.keine_gruppen', 'Es gibt noch keine Wissensgruppe (Einstellungen → Wissen).');
-                }
+            // Gewaehlt wird in Arbeitskopien; gespeichert erst mit "Speichern".
+            // Ein Nachladen waehrend eines Laufs (alle 5 s) darf eine noch nicht
+            // gespeicherte Auswahl NICHT ueberschreiben.
+            var gespeichert = { b: (st.bereiche || []).slice(), g: (st.gruppen || []).slice() };
+            if (!this._larchGespeichert || !this._archivGeaendert()) {
+                this._larchBereiche = gespeichert.b.slice();
+                this._larchGruppen = gespeichert.g.slice();
             }
+            this._larchGespeichert = gespeichert;
+            this._larchGruppenListe = d.gruppen || [];
+            this._archivAuswahlZeigen();
             this._archivZustand(d);
         },
 
-        _bereichOptionen: function (liste, aktuell) {
-            var sel = $('jlarch-bereich'); if (!sel) return;
-            sel.innerHTML = '';
-            var leer = document.createElement('option');
-            leer.value = '';
-            leer.textContent = t('jlarch.bereich_waehlen', '– Bereich wählen –');
-            sel.appendChild(leer);
-            var keys = {};
-            liste.forEach(function (b) {
-                keys[b.key] = true;
-                var o = document.createElement('option');
-                o.value = b.key;
-                o.textContent = b.key + (b.name && b.name !== b.key ? ' – ' + b.name : '');
-                sel.appendChild(o);
-            });
-            if (aktuell && !keys[aktuell]) {
-                var o2 = document.createElement('option');
-                o2.value = aktuell; o2.textContent = aktuell;
-                sel.appendChild(o2);
+        _larchBereiche: [],
+        _larchGruppen: [],
+        _larchGespeichert: null,
+        _larchGruppenListe: [],
+        LARCH_VS_MAX: 40,
+
+        _archivGeaendert: function () {
+            var g = this._larchGespeichert;
+            if (!g) return false;
+            return this._larchBereiche.join(' ') !== g.b.join(' ')
+                || this._larchGruppen.slice().sort().join(' ') !== g.g.slice().sort().join(' ');
+        },
+
+        _chip: function (text, art, wert, titel) {
+            var weg = t('jlarch.entfernen', 'Entfernen');
+            return '<span class="sec-ssh-chip"' + (titel ? ' title="' + esc(titel) + '"' : '') + '><code>' + esc(text) + '</code>'
+                + '<button type="button" class="sec-ssh-chip-weg" data-larch-weg="' + esc(art) + '" data-wert="' + esc(wert)
+                + '" title="' + esc(weg) + '" aria-label="' + esc(weg + ' ' + text) + '">'
+                + (window.JarvisIcons ? window.JarvisIcons.trash() : '') + '</button></span>';
+        },
+
+        _vorschlag: function (art, wert, label, hinweis) {
+            return '<button type="button" class="sec-ssh-vorschlag" data-larch-dazu="' + esc(art) + '" data-wert="' + esc(wert) + '">'
+                + '<span class="sec-ssh-vs-netz">+ ' + esc(label) + '</span>'
+                + (hinweis ? '<span class="sec-ssh-vs-hinweis">' + esc(hinweis) + '</span>' : '') + '</button>';
+        },
+
+        _archivAuswahlZeigen: function () {
+            var self = this;
+            var namen = {};
+            (this._archivBereiche || []).forEach(function (b) { namen[b.key] = b.name || ''; });
+            var bl = $('jlarch-bereiche-liste');
+            if (bl) {
+                bl.innerHTML = this._larchBereiche.length
+                    ? this._larchBereiche.map(function (k) {
+                        return self._chip(k, 'bereich', k, namen[k] && namen[k] !== k ? namen[k] : '');
+                    }).join('')
+                    : '<span class="sec-ssh-leer">' + esc(t('jlarch.bereiche_leer', 'Noch kein Bereich gewählt.')) + '</span>';
             }
-            sel.value = aktuell || '';
+            // Vorschlaege: die Bereiche aus Jira, gefiltert ueber das Eingabefeld.
+            // Gewaehlte stehen oben in der Liste und fallen hier heraus.
+            var vb = $('jlarch-bereiche-vorschlaege');
+            if (vb) {
+                var such = (($('jlarch-bereich-neu') || {}).value || '').trim().toLowerCase();
+                var frei = (this._archivBereiche || []).filter(function (b) {
+                    return self._larchBereiche.indexOf(b.key) < 0
+                        && (!such || b.key.toLowerCase().indexOf(such) >= 0
+                            || String(b.name || '').toLowerCase().indexOf(such) >= 0);
+                });
+                var zeigen = frei.slice(0, this.LARCH_VS_MAX);
+                var html = zeigen.map(function (b) {
+                    return self._vorschlag('bereich', b.key, b.key, b.name && b.name !== b.key ? b.name : '');
+                }).join('');
+                if (frei.length > zeigen.length) {
+                    html += '<span class="sec-ssh-leer">' + esc(t('jlarch.vs_mehr', '… und {n} weitere – zum Eingrenzen oben suchen.',
+                        { n: frei.length - zeigen.length })) + '</span>';
+                }
+                if (!frei.length) {
+                    html = '<span class="sec-ssh-leer">' + esc(!(this._archivBereiche || []).length
+                        ? t('jlarch.vs_nicht_geladen', 'Bereiche noch nicht geladen – „Bereiche laden“ klicken oder den Schlüssel eintippen.')
+                        : t('jlarch.vs_keine', 'Kein weiterer Bereich passt.')) + '</span>';
+                }
+                vb.innerHTML = html;
+            }
+            var gn = {};
+            this._larchGruppenListe.forEach(function (g) { gn[g.id] = g.name || g.id; });
+            var gl = $('jlarch-gruppen-liste');
+            if (gl) {
+                gl.innerHTML = this._larchGruppen.length
+                    ? this._larchGruppen.map(function (id) { return self._chip(gn[id] || id, 'gruppe', id, ''); }).join('')
+                    : '<span class="sec-ssh-leer">' + esc(t('jlarch.gruppen_leer', 'Noch keine Wissensgruppe gewählt – ohne sie bleibt jede Lösung draußen.')) + '</span>';
+            }
+            var gv = $('jlarch-gruppen-vorschlaege');
+            if (gv) {
+                var gfrei = this._larchGruppenListe.filter(function (g) { return self._larchGruppen.indexOf(g.id) < 0; });
+                gv.innerHTML = gfrei.length
+                    ? gfrei.map(function (g) { return self._vorschlag('gruppe', g.id, g.name || g.id, ''); }).join('')
+                    : '<span class="sec-ssh-leer">' + esc(this._larchGruppenListe.length
+                        ? t('jlarch.gruppen_alle', 'Alle Wissensgruppen sind gewählt.')
+                        : t('jlarch.keine_gruppen', 'Es gibt noch keine Wissensgruppe (Einstellungen → Wissen).')) + '</span>';
+            }
+            var u = $('jlarch-ungespeichert');
+            if (u) u.style.display = this._archivGeaendert() ? '' : 'none';
+        },
+
+        _archivAuswahlKlick: function (ev) {
+            var b = ev.target && ev.target.closest ? ev.target.closest('[data-larch-weg],[data-larch-dazu]') : null;
+            if (!b) return;
+            var wert = b.getAttribute('data-wert') || '';
+            var art = b.getAttribute('data-larch-weg') || b.getAttribute('data-larch-dazu');
+            var liste = art === 'bereich' ? this._larchBereiche : this._larchGruppen;
+            var i = liste.indexOf(wert);
+            if (b.hasAttribute('data-larch-weg')) { if (i >= 0) liste.splice(i, 1); }
+            else if (i < 0) liste.push(wert);
+            this._archivFehler('');
+            this._archivAuswahlZeigen();
+        },
+
+        _archivFehler: function (text) {
+            var f = $('jlarch-bereich-fehler'); if (!f) return;
+            f.textContent = text || '';
+            f.style.display = text ? '' : 'none';
+        },
+
+        /* Eingabefeld: ein exakt passender Schluessel gewinnt; sonst der EINE
+           Vorschlag, auf den die Suche passt; sonst ein formal gueltiger
+           Schluessel (Jira noch nicht geladen). Mehrdeutig -> Hinweis statt raten. */
+        _archivBereichEingabe: function () {
+            var feld = $('jlarch-bereich-neu'); if (!feld) return;
+            var roh = (feld.value || '').trim();
+            if (!roh) return;
+            var gross = roh.toUpperCase(), self = this;
+            var alle = this._archivBereiche || [];
+            var genau = alle.filter(function (b) { return b.key === gross; });
+            var such = roh.toLowerCase();
+            var passend = alle.filter(function (b) {
+                return self._larchBereiche.indexOf(b.key) < 0
+                    && (b.key.toLowerCase().indexOf(such) >= 0 || String(b.name || '').toLowerCase().indexOf(such) >= 0);
+            });
+            var key = genau.length ? gross : passend.length === 1 ? passend[0].key
+                : (!alle.length && /^[A-Z][A-Z0-9_]{0,30}$/.test(gross)) ? gross : '';
+            if (!key) {
+                this._archivFehler(passend.length > 1
+                    ? t('jlarch.mehrdeutig', '„{s}“ passt auf {n} Bereiche – bitte unten anklicken oder genauer suchen.', { s: roh, n: passend.length })
+                    : t('jlarch.unbekannt', '„{s}“ ist kein bekannter Jira-Bereich.', { s: roh }));
+                return;
+            }
+            if (this._larchBereiche.indexOf(key) < 0) this._larchBereiche.push(key);
+            feld.value = '';
+            this._archivFehler('');
+            this._archivAuswahlZeigen();
         },
 
         loadArchivBereiche: function () {
-            var sel = $('jlarch-bereich');
-            var aktuell = sel ? sel.value : '';
             // Die Rueckmeldung gehoert an den Knopf, nicht an "Speichern" ganz
             // unten (Register: eine Meldung, die niemand sieht, ist keine).
             // Der Knopf ist waehrend des Abrufs gesperrt, sonst wirkt ein
@@ -963,7 +1077,7 @@
                 .then(function (d) {
                     if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
                     Manager._archivBereiche = d.bereiche || [];
-                    Manager._bereichOptionen(Manager._archivBereiche, aktuell);
+                    Manager._archivAuswahlZeigen();
                     setStatus('jlarch-bereiche-status', t('jlarch.bereiche_da', '{n} Bereiche geladen.',
                         { n: Manager._archivBereiche.length }), 'ok');
                 })
@@ -1036,18 +1150,14 @@
         },
 
         _archivFormular: function () {
-            var gruppen = [];
-            document.querySelectorAll('#jlarch-gruppen input[data-gruppe]').forEach(function (c) {
-                if (c.checked) gruppen.push(c.getAttribute('data-gruppe'));
-            });
             var sw = parseInt(($('jlarch-schwelle') || {}).value, 10);
             return {
                 aktiv: !!($('jlarch-aktiv') && $('jlarch-aktiv').checked),
-                bereich: ($('jlarch-bereich') || {}).value || '',
+                bereiche: this._larchBereiche.slice(),
                 start: ($('jlarch-start') || {}).value || '',
                 schwelle: isNaN(sw) ? 10 : sw,
                 cron: (($('jlarch-cron') || {}).value || '').trim(),
-                gruppen: gruppen
+                gruppen: this._larchGruppen.slice()
             };
         },
 
@@ -1061,6 +1171,7 @@
               .then(function (d) {
                     if (!d || d.ok === false) throw new Error((d && (d.error || d.detail)) || 'Fehler');
                     setStatus('jlarch-status', t('jlarch.saved', '✓ Gespeichert'), 'ok');
+                    Manager._larchGespeichert = null;   // gespeicherter Stand ist jetzt massgeblich
                     return Manager.loadArchiv();
               })
               .catch(function (e) { setStatus('jlarch-status', e.message, 'error'); });

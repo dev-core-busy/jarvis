@@ -269,12 +269,23 @@ def lauf(client, prov):
 # ════════════════════════════════════════════════════════════════════════════
 section("1. Einstellungen und Auftrag")
 pr = la.einstellungen_pruefen
-gut = {"aktiv": True, "bereich": "prja", "start": START, "schwelle": 3,
+gut = {"aktiv": True, "bereiche": ["prja"], "start": START, "schwelle": 3,
        "cron": "30 2 * * *", "gruppen": ["technik", "unbekannt"]}
 st = pr(gut)
-check("Bereich wird grossgeschrieben", st["bereich"] == "PRJA", st["bereich"])
+check("Bereich wird grossgeschrieben", st["bereiche"] == ["PRJA"], st["bereiche"])
+st2 = pr({**gut, "bereiche": ["prjb", "PRJA", "prjb"]})
+check("mehrere Bereiche: Reihenfolge bleibt, Doppelte fallen weg", st2["bereiche"] == ["PRJB", "PRJA"], st2["bereiche"])
+check("ein ungueltiger unter mehreren wird abgewiesen (nicht still verworfen)",
+      isinstance(wirft(pr, {**gut, "bereiche": ["PRJA", 'X" OR 1=1']}), la.ArchivFehler))
+check("Bereiche als Text statt Liste abgewiesen", isinstance(wirft(pr, {**gut, "bereiche": "PRJA"}), la.ArchivFehler))
+check("Obergrenze fuer Bereiche",
+      isinstance(wirft(pr, {**gut, "bereiche": [f"B{i}" for i in range(la.MAX_BEREICHE + 1)]}), la.ArchivFehler))
+e0 = wirft(pr, {**gut, "bereiche": []})
+check("Einschalten ohne Bereich abgewiesen (mit Grund)", isinstance(e0, la.ArchivFehler) and "Jira-Bereich" in str(e0), e0)
+check("Client einer aelteren Fassung (einzelnes 'bereich') wird verstanden",
+      pr({"aktiv": False, "bereich": "prja"})["bereiche"] == ["PRJA"])
 check("unbekannte Wissensgruppe wird verworfen", st["gruppen"] == ["technik"], st["gruppen"])
-check("ungueltiger Bereich abgewiesen", isinstance(wirft(pr, {**gut, "bereich": 'X" OR 1=1'}), la.ArchivFehler))
+check("ungueltiger Bereich abgewiesen", isinstance(wirft(pr, {**gut, "bereiche": ['X" OR 1=1']}), la.ArchivFehler))
 check("Startzeitpunkt in der Zukunft abgewiesen",
       isinstance(wirft(pr, {**gut, "start": (date.today() + timedelta(days=2)).isoformat()}), la.ArchivFehler))
 check("kaputtes Datum abgewiesen", isinstance(wirft(pr, {**gut, "start": "31.12.2026"}), la.ArchivFehler))
@@ -302,21 +313,30 @@ la.einstellungen_speichern({"aktiv": False}, cron_manager=cm2)
 check("Ausgeschaltet ohne Auftrag legt KEINEN an", cm2.get_job(la.AUFTRAG_ID) is None)
 la.einstellungen_speichern({**gut, "schwelle": 3}, cron_manager=cm)
 check("Wieder einschalten aktiviert ihn", cm.get_job(la.AUFTRAG_ID)["enabled"] is True)
+_e = la._wurzel() / "einstellungen.json"
+_vor = _e.read_text()
+_e.write_text(json.dumps({**json.loads(_vor), "bereich": "ALT", "bereiche": []}))
+check("Altbestand mit EINEM Bereich wird beim Lesen uebernommen", la.einstellungen()["bereiche"] == ["ALT"],
+      la.einstellungen())
+_e.write_text(_vor)
 priv = la._wurzel()
 check("private Ablage ist 0750", (priv.stat().st_mode & 0o777) == 0o750, oct(priv.stat().st_mode & 0o777))
 
 
 # ════════════════════════════════════════════════════════════════════════════
 section("2. JQL")
-q = la.jql("PRJA", START)
+q = la.jql(["PRJA"], START)
 check("nur abgeschlossene Tickets", "statusCategory = Done" in q, q)
 check("nur geloeste Tickets", "resolution IS NOT EMPTY" in q, q)
 check("ab dem Startdatum nach Loesungsdatum", f'resolved >= "{START}"' in q, q)
-check("Bereich steht in Anfuehrungszeichen", 'project = "PRJA"' in q, q)
+check("Bereich steht in Anfuehrungszeichen", 'project in ("PRJA")' in q, q)
+q2 = la.jql(["PRJA", "PRJB"], START)
+check("mehrere Bereiche in EINER Abfrage", 'project in ("PRJA", "PRJB")' in q2, q2)
+check("leere Bereichsliste abgewiesen", isinstance(wirft(la.jql, [], START), la.ArchivFehler))
 check("aelteste zuerst", "ORDER BY resolved ASC" in q, q)
 check("Bereich mit Anfuehrungszeichen wird abgewiesen",
-      isinstance(wirft(la.jql, 'PRJA" OR project = "X', START), la.ArchivFehler))
-check("Datum wird geprueft", wirft(la.jql, "PRJA", '2026-01-01" OR 1=1') is not None)
+      isinstance(wirft(la.jql, ["PRJA", 'PRJA" OR project = "X'], START), la.ArchivFehler))
+check("Datum wird geprueft", wirft(la.jql, ["PRJA"], '2026-01-01" OR 1=1') is not None)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -331,7 +351,7 @@ check("erfundene Kennung zaehlt nicht",
 check("angebotene Kennung (auch in Klammern) zaehlt",
       la.pruefe_vergleich({"gleich": "[aaaaaaaaaaaa]"}, ["aaaaaaaaaaaa"]) == "aaaaaaaaaaaa")
 md = la.markdown({"titel": "T", "problem": "# Gekapert\nx", "loesung": "y", "zaehler": 2,
-                  "tickets": [{"key": "PRJA-1", "link": "https://j/browse/PRJA-1"}]}, "PRJA")
+                  "tickets": [{"key": "PRJA-1", "link": "https://j/browse/PRJA-1"}]})
 check("Ueberschrift im Modelltext wird entschaerft", "\n# Gekapert" not in md and "\\# Gekapert" in md)
 check("Zaehler steht in der Datei", "> Vorkommen: 2" in md)
 
@@ -409,9 +429,9 @@ class _Spaeter(_dt):
 _echt_dt = la.datetime
 la.datetime = _Spaeter
 try:
-    md_spaet = la.markdown(drucker, BEREICH)
+    md_spaet = la.markdown(drucker)
     la.datetime = _echt_dt
-    md_jetzt = la.markdown(drucker, BEREICH)
+    md_jetzt = la.markdown(drucker)
     la.datetime = _Spaeter
     check("Positivkontrolle: Stand-Zeile unterscheidet sich zwischen den Laeufen", md_spaet != md_jetzt)
     erg2 = lauf(client, prov2)
@@ -525,6 +545,38 @@ check("⚠ derselbe Grund reist im Abbruch mit (fuer das Cron-Protokoll)",
       ce is not None and ce.args and ce.args[0] == grund7, ce.args if ce else None)
 check("das haengende Ticket bleibt offen", HAENGT not in st7["verarbeitet"])
 check("die Sperre ist wieder frei", la._lauf_aktiv is False)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+section("8c. Zweiter Bereich kommt dazu (Mehrfachauswahl, 2026-11-02)")
+la.einstellungen_speichern({**gut, "bereiche": ["PRJA", "PRJB"], "schwelle": 3}, cron_manager=cm)
+vor8c = json.loads((la._wurzel() / "stand.json").read_text())
+for i in (1, 2):
+    k = f"PRJB-{i}"
+    # Derselbe Text wie die PRJA-Tickets: gemessen wird das Zusammenfuehren
+    # ueber Bereichsgrenzen, nicht die Aehnlichkeitsschwelle.
+    TICKETS[k] = _ticket(k, "Drucker druckt nicht", "Druckerwarteschlange haengt nach Update",
+                         "Druckerspooler neu gestartet, Warteschlange geleert – geloest")
+    client.keys.append(k)
+TICKETS.pop(HAENGT, None)
+client.keys.remove(HAENGT)
+erg8 = lauf(client, ProviderAttrappe())
+st8 = json.loads((la._wurzel() / "stand.json").read_text())
+check("(Positivkontrolle) beide neuen Tickets verarbeitet",
+      all(f"PRJB-{i}" in st8["verarbeitet"] for i in (1, 2)), erg8)
+check("⚠ der Stand wird beim Dazunehmen NICHT verworfen",
+      set(vor8c["verarbeitet"]) <= set(st8["verarbeitet"]), len(st8["verarbeitet"]))
+check("die Abfrage nennt beide Bereiche", 'project in ("PRJA", "PRJB")' in client.jqls[-1], client.jqls[-1])
+dr8 = [e for e in st8["eintraege"].values() if e["titel"] == "Drucker druckt nicht"]
+check("⚠ gleiches Problem aus zwei Bereichen landet in EINEM Eintrag",
+      len(dr8) == 1 and dr8[0]["zaehler"] == 6, [(e["titel"], e["zaehler"]) for e in dr8])
+pfad8 = SAND / (dr8[0].get("rag_datei") or "-") if dr8 else SAND / "-"
+check("die Datei bleibt unter dem Bereich des ERSTEN Tickets",
+      pfad8.is_file() and pfad8.parent.name == BEREICH, str(pfad8))
+check("der Kopf der Datei nennt beide Bereiche",
+      pfad8.is_file() and f"Jira-Bereiche {BEREICH}, PRJB" in pfad8.read_text(), pfad8)
+check("der Stand fuehrt die Bereiche, nicht mehr den einzelnen", st8.get("bereiche") == ["PRJA", "PRJB"]
+      and "bereich" not in st8, {k: st8.get(k) for k in ("bereich", "bereiche")})
 
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -100,7 +100,8 @@ else:
 
 print("4. Ungueltige Eingaben")
 basis = dict(vor["einstellungen"])
-for name, aenderung in [("Bereich mit Anfuehrungszeichen", {"bereich": 'X" OR 1=1'}),
+for name, aenderung in [("Bereich mit Anfuehrungszeichen", {"bereiche": ["PRJA", 'X" OR 1=1']}),
+                        ("Bereiche als Text statt Liste", {"bereiche": "PRJA"}),
                         ("Schwelle 0", {"schwelle": 0}),
                         ("Cron-Ausdruck kaputt", {"cron": "jede Nacht"}),
                         ("Startdatum kaputt", {"start": "morgen"}),

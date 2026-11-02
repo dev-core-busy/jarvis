@@ -68,6 +68,12 @@ PROBEN = [
      '        _ergebnis_merken({"ok": False, "grund": grund})\n        e.args', '        e.args'),
     ("Abbruch gibt den Fortschritt nicht weiter", LA,
      "        e.args = (grund,)\n", ""),
+    ("JQL fragt nur den ersten Bereich", LA,
+     "for b in bereiche_)\n", "for b in bereiche_[:1])\n"),
+    ("Altbestand mit einem Bereich geht verloren", LA,
+     '        st["bereiche"] = [str(d["bereich"]).strip().upper()]\n', "        pass\n"),
+    ("Dateikopf nennt nur den ersten Bereich", LA,
+     "{', '.join(bb) or '-'}", "{bb[0] if bb else '-'}"),
     ("privater Ordner fehlt in PRIVATE_DIRS", SB,
      '                "data/graph",\n', '                "data/graph")\n_X = (\n'),
 ]

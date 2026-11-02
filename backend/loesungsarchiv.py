@@ -136,7 +136,7 @@ def _json_schreiben(p: Path, d: dict) -> None:
 
 VORGABEN = {
     "aktiv": False,
-    "bereich": "",
+    "bereiche": [],              # Jira-Projektschluessel, einer oder mehrere
     "start": "",                 # JJJJ-MM-TT; ab diesem Loesungsdatum
     "schwelle": SCHWELLE_VORGABE,
     "cron": CRON_VORGABE,
@@ -144,10 +144,18 @@ VORGABEN = {
 }
 
 
+MAX_BEREICHE = 50
+
+
 def einstellungen() -> dict:
     d = _json_lesen(_wurzel() / "einstellungen.json", {})
     st = dict(VORGABEN)
     st.update({k: d[k] for k in VORGABEN if k in d})
+    # Altbestand (bis 2026-11-02 genau EIN Bereich unter "bereich"): beim
+    # LESEN uebernehmen, die Datei bleibt bis zum naechsten Speichern stehen.
+    if not d.get("bereiche") and str(d.get("bereich") or "").strip():
+        st["bereiche"] = [str(d["bereich"]).strip().upper()]
+    st["bereiche"] = [str(b) for b in (st.get("bereiche") or []) if _BEREICH_RE.match(str(b))]
     return st
 
 
@@ -158,10 +166,23 @@ def einstellungen_pruefen(neu: dict) -> dict:
     st = dict(VORGABEN)
     st["aktiv"] = neu.get("aktiv") is True
 
-    bereich = str(neu.get("bereich") or "").strip().upper()
-    if bereich and not _BEREICH_RE.match(bereich):
-        raise ArchivFehler("Ungültiger Jira-Bereich (Projektschlüssel).")
-    st["bereich"] = bereich
+    roh = neu.get("bereiche")
+    if roh is None and "bereich" in neu:          # Client einer aelteren Fassung
+        roh = [neu.get("bereich")] if str(neu.get("bereich") or "").strip() else []
+    if roh is None:
+        roh = []
+    if not isinstance(roh, list):
+        raise ArchivFehler("Ungültige Jira-Bereiche.")
+    bereiche_ = []
+    for b in roh:
+        b = str(b or "").strip().upper()
+        if not _BEREICH_RE.match(b):
+            raise ArchivFehler(f"Ungültiger Jira-Bereich (Projektschlüssel): {b[:40]!r}")
+        if b not in bereiche_:
+            bereiche_.append(b)
+    if len(bereiche_) > MAX_BEREICHE:
+        raise ArchivFehler(f"Höchstens {MAX_BEREICHE} Jira-Bereiche.")
+    st["bereiche"] = bereiche_
 
     start = str(neu.get("start") or "").strip()
     if start:
@@ -199,7 +220,7 @@ def einstellungen_pruefen(neu: dict) -> dict:
     st["gruppen"] = gruppen
 
     if st["aktiv"]:
-        fehlt = [n for n, w in (("Jira-Bereich", bereich), ("Startzeitpunkt", start),
+        fehlt = [n for n, w in (("Jira-Bereich", bereiche_), ("Startzeitpunkt", start),
                                 ("Wissensgruppe", gruppen)) if not w]
         if fehlt:
             raise ArchivFehler("Zum Einschalten fehlt: " + ", ".join(fehlt) + ".")
@@ -262,12 +283,27 @@ def _absatz(s, n: int) -> str:
     return re.sub(r"(?m)^(#+)", lambda m: "\\" + m.group(1), t)
 
 
-def markdown(e: dict, bereich: str) -> str:
+def bereiche_von(e: dict) -> list[str]:
+    """Die Jira-Bereiche, aus denen die Tickets eines Eintrags stammen – in der
+    Reihenfolge ihres ersten Auftretens. Seit mehrere Bereiche ausgewertet
+    werden, kann ein Problem in mehreren vorkommen; der Bereich gehoert damit
+    zum EINTRAG, nicht zur Einstellung."""
+    out: list[str] = []
+    for t in e.get("tickets") or []:
+        b = str(t.get("key") or "").split("-")[0]
+        if _BEREICH_RE.match(b) and b not in out:
+            out.append(b)
+    return out
+
+
+def markdown(e: dict) -> str:
     """Die Datei eines Eintrags. Der Zaehler steht im Kopf UND im Stand – die
     Datei soll fuer sich lesbar sein, massgeblich ist der Stand."""
     tickets = e.get("tickets") or []
+    bb = bereiche_von(e)
     zeilen = [f"# {_zeile(e.get('titel'), MAX_TITEL) or 'Ohne Titel'}", "",
-              f"> Quelle: Lösungsarchiv · Jira-Bereich {bereich}",
+              f"> Quelle: Lösungsarchiv · Jira-Bereich{'e' if len(bb) > 1 else ''} "
+              f"{', '.join(bb) or '-'}",
               f"> Vorkommen: {int(e.get('zaehler') or 0)} gleichartige Tickets",
               f"> Stand: {datetime.now().strftime('%d.%m.%Y %H:%M')}", "",
               "## Problem", "", _absatz(e.get("problem"), MAX_PROBLEM) or "-", "",
@@ -291,9 +327,9 @@ def _entwurf_pfad(eid: str) -> Path:
     return _wurzel() / "entwuerfe" / f"{eid}.md"
 
 
-def _entwurf_schreiben(eid: str, e: dict, bereich: str) -> None:
+def _entwurf_schreiben(eid: str, e: dict) -> None:
     _ordner_anlegen()
-    _entwurf_pfad(eid).write_text(markdown(e, bereich), encoding="utf-8")
+    _entwurf_pfad(eid).write_text(markdown(e), encoding="utf-8")
 
 
 # ── Modell ──────────────────────────────────────────────────────────────────
@@ -454,16 +490,17 @@ class _VektorCache:
 
 # ── Jira ────────────────────────────────────────────────────────────────────
 
-def jql(bereich: str, start: str) -> str:
+def jql(bereiche_: list, start: str) -> str:
     """Geschlossen UND geloest, ab ``start`` nach Loesungsdatum, aelteste zuerst.
 
     ``statusCategory = Done`` faengt jeden Abschluss-Status (Geschlossen,
     Erledigt, Done) unabhaengig von der Workflow-Benennung;
     ``resolution IS NOT EMPTY`` schliesst Tickets ohne Loesung aus."""
-    if not _BEREICH_RE.match(bereich or ""):
+    if not bereiche_ or not all(_BEREICH_RE.match(str(b) or "") for b in bereiche_):
         raise ArchivFehler("Ungültiger Jira-Bereich")
     date.fromisoformat(start)
-    return (f'project = "{bereich}" AND statusCategory = Done AND resolution IS NOT EMPTY '
+    liste = ", ".join(f'"{b}"' for b in bereiche_)
+    return (f'project in ({liste}) AND statusCategory = Done AND resolution IS NOT EMPTY '
             f'AND resolved >= "{start}" ORDER BY resolved ASC, key ASC')
 
 
@@ -486,13 +523,13 @@ def bereiche() -> list[dict]:
     return sorted(out, key=lambda p: p["key"])
 
 
-def offene_tickets(client, bereich: str, start: str, erledigt: set,
+def offene_tickets(client, bereiche_: list, start: str, erledigt: set,
                    maximal: int) -> tuple[list[dict], int]:
     """(bis zu ``maximal`` noch nicht verarbeitete Tickets, Gesamtzahl offen).
 
     Seitenweise ueber die GANZE Trefferliste – nur so stimmt die offene Zahl,
     und die Liste ist nach Loesungsdatum sortiert, die aeltesten kommen zuerst."""
-    q = jql(bereich, start)
+    q = jql(bereiche_, start)
     neu, offen, start_at = [], 0, 0
     while True:
         d = client.search(q, limit=SEITE, start=start_at, fields="key,resolutiondate")
@@ -513,13 +550,16 @@ def offene_tickets(client, bereich: str, start: str, erledigt: set,
 
 # ── Veroeffentlichen (Schranke) ─────────────────────────────────────────────
 
-def _zielpfad(gruppen: list, bereich: str, eid: str, titel: str) -> Path:
+def _zielpfad(gruppen: list, e: dict, eid: str) -> Path:
+    """Ablage unter dem Bereich des ERSTEN Tickets – der aendert sich fuer einen
+    Eintrag nie, die Datei wandert also nicht, wenn weitere Bereiche dazukommen."""
     from backend.web_extractor import _target_dir_for_groups
     from backend.tools.knowledge import _get_folders
     if not _get_folders():
         raise ArchivFehler("Es ist kein Wissensordner eingerichtet (Einstellungen → Wissen).")
     basis = _target_dir_for_groups(gruppen)
-    sicher = re.sub(r"[^\w\-äöüÄÖÜß]+", "_", titel).strip("_")[:60] or "loesung"
+    bereich = (bereiche_von(e) or ["GEMISCHT"])[0]
+    sicher = re.sub(r"[^\w\-äöüÄÖÜß]+", "_", str(e.get("titel") or "")).strip("_")[:60] or "loesung"
     return basis / "loesungsarchiv" / bereich / f"{eid}_{sicher}.md"
 
 
@@ -574,9 +614,9 @@ def schranke(stand: dict, st: dict) -> dict:
                 e["rag_datei"] = ""
                 erg["entfernt"] += 1
             continue
-        ziel = _zielpfad(st["gruppen"], st["bereich"], eid, str(e.get("titel") or ""))
+        ziel = _zielpfad(st["gruppen"], e, eid)
         rel = _rel(ziel)
-        inhalt = markdown(e, st["bereich"])
+        inhalt = markdown(e)
         if alt and alt != rel:
             _datei_weg(alt)
         vorher = ziel.read_text(encoding="utf-8") if ziel.is_file() else None
@@ -667,7 +707,7 @@ async def ticket_verarbeiten(key: str, geloest: str, stand: dict, st: dict,
              "rag_datei": ""}
         eintraege[eid] = e
         art = "neu"
-    _entwurf_schreiben(eid, e, st["bereich"])
+    _entwurf_schreiben(eid, e)
     stand["verarbeitet"][key] = {"eintrag": eid, "wann": jetzt}
     return art
 
@@ -713,26 +753,21 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     st = einstellungen()
     if not st["aktiv"]:
         return {"ok": True, "grund": "Lösungsarchiv ist ausgeschaltet."}
-    if not (st["bereich"] and st["start"] and st["gruppen"]):
+    if not (st["bereiche"] and st["start"] and st["gruppen"]):
         return {"ok": False, "grund": "Lösungsarchiv ist unvollständig eingerichtet."}
     client = client or await asyncio.to_thread(_client)
     with _STAND_SPERRE:
         stand = _stand_laden()
-    # Der Bereich ist Teil des Stands: wechselt er, gehoeren die bisherigen
-    # Eintraege zu einem anderen Bereich – verarbeitet wird dann neu, die alten
-    # Entwuerfe bleiben (fuer den Rueckwechsel), nur nicht mehr veroeffentlicht.
-    if stand.get("bereich") not in ("", None, st["bereich"]):
-        stand = {"version": 1, "verarbeitet": {}, "eintraege": {},
-                 "frueher": {"bereich": stand.get("bereich"),
-                             "eintraege": len(stand.get("eintraege") or {})}}
-        alt = _stand_laden()
-        for e in alt["eintraege"].values():
-            if e.get("rag_datei"):
-                _datei_weg(e["rag_datei"])
-    stand["bereich"] = st["bereich"]
+    # Mehrere Bereiche (seit 2026-11-02): der Stand wird bei einer Aenderung
+    # der Auswahl NICHT verworfen. Verarbeitet ist je Ticketschluessel, und der
+    # traegt seinen Bereich selbst – ein dazugenommener Bereich liefert nur
+    # neue Tickets, ein gleiches Problem aus zwei Bereichen landet in EINEM
+    # Eintrag. Bereits Gezaehltes aus einem abgewaehlten Bereich bleibt stehen.
+    stand.pop("bereich", None)
+    stand["bereiche"] = list(st["bereiche"])
 
     neu, offen = await asyncio.to_thread(
-        offene_tickets, client, st["bereich"], st["start"],
+        offene_tickets, client, st["bereiche"], st["start"],
         set(stand["verarbeitet"]), MAX_TICKETS_JE_LAUF)
     _lauf_info["gesamt"] = len(neu)
 

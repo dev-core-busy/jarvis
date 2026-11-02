@@ -42,3 +42,16 @@ tests/test_totp_setup_knopf_ui.js:generic-api-key:73
 # lesbarer Platzhalter ohne Entropie – dieser Eintrag deckt nur den Fund in
 # Commit c5d69120 ab, den die Historien-Pruefung weiterhin sieht.
 tests/test_broker_totp.py:generic-api-key:302
+# 2026-11-02 einzeln angesehen: erfundene Sondenwerte der Waechter fuer das
+# Schwaerzen von Geheimnissen (Sonde1Kw, sonde-geheim-123456, Tok-geheim-0815 …)
+# und zwei Kommentare in conv_log.py, die das Muster beschreiben.
+backend/conv_log.py:curl-auth-user:290
+backend/conv_log.py:curl-auth-user:304
+tests/live_review_fixes_dev.py:generic-api-key:106
+tests/test_conv_log_geheimnisse.py:curl-auth-header:79
+tests/test_conv_log_geheimnisse.py:curl-auth-header:87
+tests/test_conv_log_geheimnisse.py:curl-auth-user:135
+tests/test_conv_log_geheimnisse.py:curl-auth-user:79
+tests/test_conv_log_geheimnisse.py:curl-auth-user:81
+tests/test_mcp_umleitung.py:generic-api-key:80
+tests/test_sap_verbindungstest.py:generic-api-key:83

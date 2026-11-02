@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="favicon.png">
     <title>Jarvis – Autonomer KI Desktop-Agent | Self-hosted AI Agent für Linux</title>
-    <meta name="description" content="Jarvis ist ein autonomer, selbst gehosteter KI-Agent für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, E-Mail-Regeln für Exchange samt Outlook-Add-in, RAG-Wissensdatenbank und das OpenClaw Skill-Ökosystem. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
-    <meta name="keywords" content="AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, VNC, multi-agent, skill system, chatbot, voice assistant, Apache-2.0, jarvis, Exchange, Outlook add-in, email automation, SAP analysis, charts">
+    <meta name="description" content="Jarvis ist ein autonomer, selbst gehosteter KI-Agent für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, E-Mail-Regeln für Exchange samt Outlook-Add-in, RAG-Wissensdatenbank mit Wissensgraph, Sicherheitslücken-Prüfung und das OpenClaw Skill-Ökosystem. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
+    <meta name="keywords" content="AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, VNC, multi-agent, skill system, chatbot, voice assistant, Elastic License 2.0, jarvis, knowledge graph, GraphRAG, CVE check, Jira, Exchange, Outlook add-in, email automation, SAP analysis, charts">
     <meta name="author" content="Andreas Bender">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://jarvis-ai.info/">
@@ -59,7 +59,10 @@
         "Autonomous desktop control via VNC",
         "Multi-LLM support (Gemini, Claude, OpenRouter, Ollama)",
         "WhatsApp integration with voice transcription",
-        "RAG knowledge base with ChromaDB vector database",
+        "RAG knowledge base with hybrid search (FAISS vectors + BM25)",
+        "Optional knowledge graph (Graph RAG) with review list, wiki pages, contradiction check and Obsidian export",
+        "Solution archive: recurring solutions from closed Jira tickets enter the knowledge base",
+        "Vulnerability checks of installed packages (Debian Security Tracker, OSV, Node.js) with optional remediation",
         "MCP (Model Context Protocol) tool server integration",
         "Multi-agent orchestration with sub-agents",
         "OpenClaw skill marketplace",
@@ -104,7 +107,12 @@
         {
           "@type": "Question",
           "name": "How does the RAG knowledge base work?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Jarvis indexes your documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) using TF-IDF for small collections. As your data grows, it automatically switches to ChromaDB vector database with sentence-transformer embeddings for semantic search. All data stays local – no cloud required." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Jarvis indexes your documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) using hybrid search: semantic vectors (FAISS with sentence-transformer embeddings) plus keywords (BM25), with TF-IDF as a fallback. An optional knowledge graph can join the search as an additional channel. The index stays on your server – no cloud required." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does Jarvis support Graph RAG?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes, as an option that is off by default. Jarvis can build a knowledge graph of terms and connections from your documents, with a review list, wiki pages, a contradiction check and Obsidian export. When switched on, the graph joins the hybrid knowledge search as an additional channel; knowledge-group permissions stay in force." }
         }
       ]
     }
@@ -483,8 +491,10 @@
         <p class="hero-tagline t-en">Your <strong>autonomous AI agent</strong> for the Linux desktop</p>
         <p class="hero-sub t-de">Steuert Desktop, Browser &amp; Shell · RAG auf eigenen Dokumenten · Multi-Agenten · lokal &amp; erweiterbar</p>
         <p class="hero-sub t-en">Controls desktop, browser &amp; shell · RAG on your own documents · multi-agent · local &amp; extensible</p>
-        <p class="hero-sub t-de"><a href="#ai-maus" style="color:var(--cyan);font-weight:600;">Neu: die AI-Maus – Rahmen um etwas auf dem Bildschirm ziehen, Frage wählen, Antwort bekommen →</a></p>
-        <p class="hero-sub t-en"><a href="#ai-maus" style="color:var(--cyan);font-weight:600;">New: the AI Mouse – drag a frame around anything on screen, pick a question, get the answer →</a></p>
+        <p class="hero-sub t-de"><a href="#wissensgraph" style="color:var(--cyan);font-weight:600;">Neu: Wissensgraph, Lösungsarchiv und Sicherheitslücken-Prüfung →</a></p>
+        <p class="hero-sub t-en"><a href="#wissensgraph" style="color:var(--cyan);font-weight:600;">New: knowledge graph, solution archive and vulnerability checks →</a></p>
+        <p class="hero-sub t-de"><a href="#ai-maus" style="color:var(--cyan);font-weight:600;">Die AI-Maus – Rahmen um etwas auf dem Bildschirm ziehen, Frage wählen, Antwort bekommen →</a></p>
+        <p class="hero-sub t-en"><a href="#ai-maus" style="color:var(--cyan);font-weight:600;">The AI Mouse – drag a frame around anything on screen, pick a question, get the answer →</a></p>
         <div class="hero-actions">
             <a href="#install" class="btn-primary">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -556,8 +566,8 @@
                 <div class="feature-icon">🏢</div>
                 <div class="feature-title t-de">Für das Unternehmen gemacht</div>
                 <div class="feature-title t-en">Built for the company</div>
-                <div class="feature-desc t-de">Verteilung über eine Netzwerkfreigabe, optionale Code-Signatur, automatische Aktualisierung. Zugang nur für ausdrücklich freigegebene Benutzer oder AD-Gruppen.</div>
-                <div class="feature-desc t-en">Distribution via a network share, optional code signing, automatic updates. Access only for explicitly approved users or AD groups.</div>
+                <div class="feature-desc t-de">Verteilung über eine Netzwerkfreigabe, optionale Code-Signatur (auch über Azure Key Vault), automatische Aktualisierung. Zugang nur für ausdrücklich freigegebene Benutzer oder AD-Gruppen.</div>
+                <div class="feature-desc t-en">Distribution via a network share, optional code signing (also via Azure Key Vault), automatic updates. Access only for explicitly approved users or AD groups.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">💬</div>
@@ -575,17 +585,17 @@
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🖼️</div>
-                <div class="feature-title t-de">Text im Bild ersetzen</div>
-                <div class="feature-title t-en">Replace text in images</div>
-                <div class="feature-desc t-de">Zum Beispiel englische Beschriftungen eines Screenshots durch deutsche ersetzen – das bearbeitete Bild erscheint direkt im Antwortfenster.</div>
-                <div class="feature-desc t-en">For example, replace the English labels of a screenshot with German ones – the edited image appears right in the answer window.</div>
+                <div class="feature-title t-de">Bilder bearbeiten und anonymisieren</div>
+                <div class="feature-title t-en">Edit and anonymise images</div>
+                <div class="feature-desc t-de">Zum Beispiel englische Beschriftungen eines Screenshots durch deutsche ersetzen – das bearbeitete Bild erscheint direkt im Antwortfenster. Die vom Administrator eingerichtete Aktion <strong>Anonymisieren</strong> schwärzt Namen im Text und verpixelt Gesichter; das Sprachmodell sieht dabei nur den erkannten Text, nie das Bild.</div>
+                <div class="feature-desc t-en">For example, replace the English labels of a screenshot with German ones – the edited image appears right in the answer window. The <strong>Anonymise</strong> action, set up by the administrator, blacks out names in text and pixelates faces; the language model only sees the recognised text, never the image.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🔐</div>
                 <div class="feature-title t-de">Sicher angebunden</div>
                 <div class="feature-title t-en">Securely connected</div>
-                <div class="feature-desc t-de">Anmeldung an Ihrem Jarvis; gespeichert wird nur ein verschlüsseltes Sitzungs-Token, nie ein Kennwort. Bildschirminhalt gilt als nicht vertrauenswürdig: nur lesende Werkzeuge, ohne Sonderrechte.</div>
-                <div class="feature-desc t-en">Sign-in to your Jarvis; only an encrypted session token is stored, never a password. Screen content is treated as untrusted: read-only tools, no special privileges.</div>
+                <div class="feature-desc t-de">Anmeldung an Ihrem Jarvis, auf Wunsch still mit der Windows-Domänenanmeldung (Kerberos); gespeichert wird nur ein verschlüsseltes Sitzungs-Token, nie ein Kennwort. Bildschirminhalt gilt als nicht vertrauenswürdig: nur lesende Werkzeuge, ohne Sonderrechte.</div>
+                <div class="feature-desc t-en">Sign-in to your Jarvis, optionally silent with the Windows domain login (Kerberos); only an encrypted session token is stored, never a password. Screen content is treated as untrusted: read-only tools, no special privileges.</div>
             </div>
         </div>
         <p class="maus-fuss">
@@ -653,8 +663,8 @@
                 <div class="feature-icon">📦</div>
                 <div class="feature-title t-de">Sichere Lieferkette</div>
                 <div class="feature-title t-en">Secure supply chain</div>
-                <div class="feature-desc t-de">Updates werden nur mit gültiger Signatur angenommen. Automatische Prüfung jeder Änderung: Abhängigkeits-Audit, SBOM, statische Analyse und Secret-Scan.</div>
-                <div class="feature-desc t-en">Updates are only accepted with a valid signature. Every change is checked automatically: dependency audit, SBOM, static analysis and secret scanning.</div>
+                <div class="feature-desc t-de">Updates werden nur mit gültiger Signatur angenommen. Automatische Prüfung jeder Änderung: Abhängigkeits-Audit, SBOM, statische Analyse und Secret-Scan. Das Docker-Image installiert seine Abhängigkeiten aus einer Lock-Datei mit Prüfsummen, und im Betrieb prüft die <a href="#cve" style="color:var(--cyan);">Sicherheitslücken-Prüfung</a> die installierten Pakete.</div>
+                <div class="feature-desc t-en">Updates are only accepted with a valid signature. Every change is checked automatically: dependency audit, SBOM, static analysis and secret scanning. The Docker image installs its dependencies from a lock file with checksums, and in operation the <a href="#cve" style="color:var(--cyan);">vulnerability check</a> examines the installed packages.</div>
             </div>
         </div>
         <p class="bsi-fuss">
@@ -699,6 +709,46 @@
             <span class="t-en">A fully autonomous AI agent that actually works on your system – not a cloud wrapper.</span>
         </p>
         <div class="features-grid">
+            <div class="feature-card spotlight reveal" id="wissensgraph" style="scroll-margin-top:90px;">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">🕸️</div>
+                <div class="feature-title t-de">Wissensgraph (Graph-RAG) – Zusammenhänge statt nur Textstellen</div>
+                <div class="feature-title t-en">Knowledge Graph (Graph RAG) – Connections, Not Just Passages</div>
+                <div class="feature-desc t-de">Aus den eigenen Wissensdokumenten baut Jarvis im Hintergrund einen <strong>Graphen aus Begriffen und ihren Verbindungen</strong> – als interaktive Grafik auf einer eigenen Seite. Ähnliche Begriffe landen auf einer <strong>Prüfliste</strong>: Wissenseditoren führen sie zusammen, trennen oder entfernen sie; automatisch zusammengeführt wird nur bei gleichem Namen. Je Begriff entstehen <strong>Wiki-Seiten</strong>, und der Graph lässt sich als <strong>Obsidian-Vault</strong> exportieren. Die <strong>Widerspruchsprüfung</strong> zeigt mit wörtlichen Zitaten, wo zwei Quellen dieselbe Frage verschieden beantworten – als Hinweis für einen Menschen, nicht als Urteil. Zugeschaltet ergänzt der Graph die Wissenssuche als <strong>zusätzlichen Suchkanal</strong>. Gemessen an 236 Dokumenten und 90 Fragen, deren Antwort in zwei Dokumenten steckt: beide lagen in <strong>67 statt 58 %</strong> der Fälle unter den ersten acht Treffern; Fragen zu einem einzelnen Dokument blieben praktisch unverändert, eine Suche dauerte rund 20 ms länger. Die Rechte bleiben gewahrt: Editoren einer Wissensgruppe sehen nur deren Teilgraphen. <strong>Ab Werk ist alles ausgeschaltet</strong>, und der Administrator legt fest, wie stark der Aufbau das Sprachmodell belasten darf.</div>
+                <div class="feature-desc t-en">From your own knowledge documents, Jarvis builds a <strong>graph of terms and their connections</strong> in the background – shown as an interactive visual on its own page. Similar terms go onto a <strong>review list</strong>: knowledge editors merge, split or remove them; automatic merging only happens for identical names. <strong>Wiki pages</strong> are generated per term, and the graph can be exported as an <strong>Obsidian vault</strong>. The <strong>contradiction check</strong> shows, with verbatim quotes, where two sources answer the same question differently – as a pointer for a human, not a verdict. When switched on, the graph joins the knowledge search as an <strong>additional search channel</strong>. Measured on 236 documents and 90 questions whose answer spans two documents: both landed in the top eight results in <strong>67 instead of 58 %</strong> of cases; single-document questions stayed practically unchanged, and a search took about 20 ms longer. Permissions stay intact: editors of a knowledge group only see its part of the graph. <strong>Everything is off by default</strong>, and the administrator sets how much load the build may put on the language model.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">🗃️</div>
+                <div class="feature-title t-de">Lösungsarchiv – aus gelösten Tickets wird Wissen</div>
+                <div class="feature-title t-en">Solution Archive – Solved Tickets Become Knowledge</div>
+                <div class="feature-desc t-de">Geht nach Zeitplan die <strong>geschlossenen und gelösten Tickets</strong> ausgewählter Jira-Bereiche durch, zieht Problem und Lösungsweg heraus und zählt gleichartige Fälle zusammen, auch über Bereiche hinweg. In die Wissenssuche kommt eine Lösung erst, wenn das Problem <strong>mehrfach aufgetreten</strong> ist (Schwellwert einstellbar, Vorgabe 10) – Einzelfälle fluten sie also nicht. Ob zwei Fälle dasselbe Problem sind, entscheiden Vektor-Ähnlichkeit und eine Bestätigung durch das Modell. Das Modell ist angewiesen, Personen-, Kunden- und Kontaktdaten wegzulassen; Tickets stehen nur als Verweis im Eintrag. Weil Ticketverläufe Fremdtext sind, läuft hier <strong>kein Agent und kein Werkzeug</strong>. Wer das Ergebnis sieht, regeln die Wissensgruppen; ist der Wissensgraph eingeschaltet, fließt es auch dorthin.</div>
+                <div class="feature-desc t-en">On a schedule, it goes through the <strong>closed and resolved tickets</strong> of selected Jira projects, extracts problem and solution, and counts similar cases together, across projects too. A solution only enters the knowledge search once the problem has <strong>occurred repeatedly</strong> (threshold configurable, default 10) – so one-off cases do not flood it. Whether two cases are the same problem is decided by vector similarity plus a confirmation from the model. The model is instructed to leave out personal, customer and contact data; tickets appear in the entry only as a reference. Because ticket histories are third-party text, <strong>no agent and no tools</strong> run here. Knowledge groups control who sees the result; if the knowledge graph is on, it flows in there as well.</div>
+            </div>
+            <div class="feature-card reveal" id="cve" style="scroll-margin-top:90px;">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">🩹</div>
+                <div class="feature-title t-de">Sicherheitslücken-Prüfung und Sicherheitsupdates</div>
+                <div class="feature-title t-en">Vulnerability Checks and Security Updates</div>
+                <div class="feature-desc t-de">Prüft, was <strong>auf diesem Server wirklich installiert ist</strong>: Debian-Pakete gegen den Debian Security Tracker, Python-Pakete und die WhatsApp-Bridge über OSV, eine Node.js-Laufzeit aus Fremdquelle gegen die Datenbank der Node.js Security WG samt Ende der Unterstützung. Was sich nicht prüfen lässt, wird mit Grund genannt, statt wie „keine Lücken“ auszusehen. Die Paketliste zeigt je Lücke Einstufung, Veröffentlichungsdatum und Abhilfe – bei offenen Lücken auch, ob ein Zwischenrelease geplant ist oder eine andere Debian-Version sie schon behebt. Behoben wird <strong>einzeln per Knopf</strong>, gesammelt oder auf Wunsch per Zeitplan mit einstellbarer Schwelle – nur als Aktualisierung vorhandener Pakete, ohne Entfernen und ohne Neustart. Node.js wird nie automatisch gehoben. Debians automatische Sicherheitsupdates stehen mit letztem und nächstem Lauf in der Auftragsliste und lassen sich <strong>per Knopf sofort einspielen</strong>.</div>
+                <div class="feature-desc t-en">Checks what is <strong>actually installed on this server</strong>: Debian packages against the Debian Security Tracker, Python packages and the WhatsApp bridge via OSV, a third-party Node.js runtime against the Node.js Security WG database including end of support. Whatever cannot be checked is named with a reason instead of looking like “no vulnerabilities”. For each vulnerability, the package list shows severity, publication date and remedy – for open ones also whether a point release is planned or another Debian version already fixes it. Fixes are applied <strong>individually at the push of a button</strong>, in bulk or, if you wish, on a schedule with a configurable threshold – only as upgrades of existing packages, with no removals and no reboot. Node.js is never upgraded automatically. Debian's automatic security updates appear in the job list with their last and next run, and can be <strong>applied immediately with one click</strong>.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">🔬</div>
+                <div class="feature-title t-de">Fehleranalyse – vom Lauf zum Befund</div>
+                <div class="feature-title t-en">Error Analysis – From Run to Diagnosis</div>
+                <div class="feature-desc t-de">Administratoren stellen zu einem Agentenlauf ein <strong>Dossier</strong> zusammen: Aufgabe, Werkzeugaufrufe mit Argumenten und Abbruchgrund, Dienst-Journal im passenden Zeitfenster, Sicherheitsereignisse und die Fundstellen der Fehlermeldungen im Quelltext – zum Kopieren und ganz ohne Modell. Auf Wunsch deutet das Modell das Dossier, <strong>ohne Werkzeuge</strong>. Jeder Abruf steht im Sicherheitsprotokoll.</div>
+                <div class="feature-desc t-en">Administrators compile a <strong>dossier</strong> for an agent run: task, tool calls with arguments and abort reason, service journal in the matching time window, security events and where the error messages occur in the source code – ready to copy and with no model involved. On request, the model interprets the dossier, <strong>without tools</strong>. Every retrieval is recorded in the security log.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
+                <div class="feature-icon">📰</div>
+                <div class="feature-title t-de">Neuigkeiten-Laufband im Portal</div>
+                <div class="feature-title t-en">News Ticker in the Portal</div>
+                <div class="feature-desc t-de">Kurzmeldungen aus Überschrift und ein bis drei Sätzen laufen als animierte Kachel über den Bereichen des Portals. Verweilzeit, Scrolldauer und Anzahl der Meldungen sind einstellbar, Zurück, Pause und Vor liegen direkt am Laufband, und jeder Benutzer kann es für sich ausblenden. Administratoren pflegen die Meldungen in den Einstellungen; der Skill ist ab Werk ausgeschaltet.</div>
+                <div class="feature-desc t-en">Short messages with a headline and one to three sentences run as an animated tile above the portal's areas. Dwell time, scroll duration and number of messages are configurable, back, pause and forward sit right on the ticker, and every user can hide it for themselves. Administrators maintain the messages in the settings; the skill is off by default.</div>
+            </div>
             <div class="feature-card spotlight reveal">
                 <div class="feature-icon">🛡️</div>
                 <div class="feature-title t-de">Sicherheitsschicht – Sandbox &amp; Angriffsschutz</div>
@@ -707,7 +757,6 @@
                 <div class="feature-desc t-en">Multi-layered protection for the AI agent: <strong>sandbox isolation</strong> runs network users' actions unprivileged and separated from the system – with no access to protected system and configuration areas. <strong>Role-based rights and file-system separation</strong> between administrators and network users. Real-time detection of <strong>jailbreak, prompt-injection and obfuscated (Base64) attacks</strong> across chat, support and WhatsApp (heuristics + LLM classifier). Repeated attack attempts <strong>lock the account automatically</strong>; all security-relevant access is <strong>logged</strong>. All network users share one system account – so <strong>each of them gets their own working directory</strong>, mounted as <code>/tmp</code> for the duration of a run: another user's intermediate files are not merely unreadable, they are <strong>not there</strong>, and foreign processes are invisible. Unlocking and configuration under Settings → Security.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🎫</div>
                 <div class="feature-title t-de">Jira im Browser – Zusammenfassung und Antwortentwurf am Ticket</div>
                 <div class="feature-title t-en">Jira in the Browser – Summary and Draft Reply at the Ticket</div>
@@ -715,7 +764,6 @@
                 <div class="feature-desc t-en">A browser extension for Chrome, Edge and Firefox that sits as a <strong>side panel next to the open issue</strong>: it summarises the ticket or drafts a <strong>reply to the reporter</strong> – driven by named <strong>templates</strong> that every user creates for themselves, each carrying a kind (summary or reply). It also works the other way round: the text <strong>you</strong> wrote into the comment box is checked against the issue history and handed back corrected – contradictions appear as a note beside it and are not included. <strong>Everyone works with their own Jira token</strong>, so they see exactly the issues they are entitled to. <strong>Nothing is written</strong>: the draft goes into the comment box, sending happens in Jira, by hand. Looking things up in the knowledge base and internal business systems is possible – <strong>read-only</strong>, only if an administrator has released the area, and only where a template ticks it.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🗂️</div>
                 <div class="feature-title t-de">VEMAS.NET-Auswertungen</div>
                 <div class="feature-title t-en">VEMAS.NET Analyses</div>
@@ -723,7 +771,6 @@
                 <div class="feature-desc t-en">Connects to <strong>VEMAS.NET</strong>, the platform for project and professional-services businesses: <strong>21 prepared queries</strong> across seven categories – management cockpit, CRM, projects, time tracking, service desk, billing and capacity planning – plus free-form questions and an AI-free query console. <strong>Read-only is the default.</strong> Writing can be enabled, but then runs exclusively through the user's <strong>personal account</strong>: the remote system's audit trail should carry the right name, not a shared one. <strong>Nothing is ever deleted</strong>, not even once writing is enabled. As with SAP, everyone stores their own credentials; the shared account is only the fallback – and the UI says when it steps in.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🎯</div>
                 <div class="feature-title t-de">Kurzwege – Ablagen mit gespeichertem Auftrag</div>
                 <div class="feature-title t-en">Short Tracks – Drop Zones with a Stored Task</div>
@@ -731,7 +778,6 @@
                 <div class="feature-desc t-en">A board of named <strong>drop zones</strong>, each carrying a task you formulate once. Drag a file or a link onto it – the task runs, the result appears on the card, generated files are ready to download. Made for recurring document work you would otherwise re-explain every time: “check this invoice”, “summarise this quote”, “clean up this table”. An administrator creates zones for everyone, <strong>every user creates their own</strong> on top. A run always carries the identity of whoever dropped something, is <strong>always unprivileged</strong>, and only gets the tool areas an administrator has approved. Multiple jobs run through a queue; the administrator decides how many at once.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">📊</div>
                 <div class="feature-title t-de">Excel-Add-in – Chatfenster auf der offenen Mappe</div>
                 <div class="feature-title t-en">Excel Add-in – A Chat Window on the Open Workbook</div>
@@ -739,7 +785,6 @@
                 <div class="feature-desc t-en">A task pane <strong>inside Excel</strong> that looks at the workbook you currently have open. Ask about the figures in front of you, describe a change and have it applied – without uploading the file anywhere and without switching applications. The administrator caps how many rounds and how many changes a single run may make, and chooses whether the user tile offers the download or points at an in-house catalogue path.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">📗</div>
                 <div class="feature-title t-de">Tabellen und Formulare – bearbeiten statt abtippen</div>
                 <div class="feature-title t-en">Spreadsheets and Forms – Edited, Not Retyped</div>
@@ -747,7 +792,6 @@
                 <div class="feature-desc t-en">An existing workbook is <strong>edited, not rebuilt</strong>: formulas, column widths and merged cells survive. The agent receives the workbook's <strong>structure</strong> – a few kilobytes even for a 360,000-cell file, instead of a truncated excerpt – and describes the transformation; it is carried out in the background on the real file. <strong>The data never passes through the language model.</strong> The same goes for stacks of filled-in <strong>form PDFs</strong>: values are matched to labels by the <strong>geometry of the page</strong>, not by reading order – and when the text layer is damaged (01.07.2026 silently becomes OL.O7.2026) that is measured rather than guessed, and the page is re-read with OCR if that actually wins. The result is a finished table with a tally, not an estimate.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🤝</div>
                 <div class="feature-title t-de">Codeaufgaben abgeben – Claude Code arbeitet mit Jarvis</div>
                 <div class="feature-title t-en">Hand Over Coding Tasks – Claude Code Works with Jarvis</div>
@@ -755,15 +799,13 @@
                 <div class="feature-desc t-en">A developer tool such as Claude Code can hand scoped coding tasks to Jarvis and gets a <strong>machine-verified patch</strong> back – breadth work that needs a lot of file reading and little description runs on your own server instead of on someone else's tokens. The scope comes from a measurement, not an assumption: what gets handed over is what an existing test file can prove. LLM profile and reasoning depth are configurable per skill.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">✉️</div>
                 <div class="feature-title t-de">E-Mail-Regeln (Exchange)</div>
                 <div class="feature-title t-en">Email Rules (Exchange)</div>
-                <div class="feature-desc t-de">Jeder Benutzer hinterlegt <strong>sein eigenes Postfach</strong> (Exchange per EWS, IMAP/SMTP als Rückfall) und legt <strong>selbst</strong> beliebig viele Regeln an – als Anweisung in eigenen Worten. Trifft eine Nachricht ein, <strong>entscheidet das Modell die Aktion</strong>: antworten, Entwurf speichern, verschieben, weiterleiten oder löschen. Je Regel wird der Werkzeug-Umfang zugeschnitten, und ein Regel-Lauf ist <strong>immer unprivilegiert</strong> – Systemrechte gibt es über diesen Weg nicht. Der Text einer eingehenden Mail gilt ausdrücklich als Sachverhalt, nicht als Anweisung (Injektionsschutz mit Echtheitskennung je Lauf). Kennwörter werden verschlüsselt gespeichert und von keiner Schnittstelle herausgegeben; nach mehreren Anmeldefehlern hält die Automatik von selbst an, damit kein Domänenkonto gesperrt wird.</div>
-                <div class="feature-desc t-en">Every user connects <strong>their own mailbox</strong> (Exchange via EWS, IMAP/SMTP as fallback) and creates <strong>their own</strong> rules – written as an instruction in plain words. When a message arrives, <strong>the model chooses the action</strong>: reply, save a draft, move, forward or delete. Each rule gets its own tool scope, and a rule run is <strong>always unprivileged</strong> – it grants no system rights. The text of an incoming mail is explicitly treated as information, never as an instruction (injection protection with a per-run authenticity marker). Passwords are stored encrypted and never handed out by any endpoint; after repeated sign-in failures the automation pauses itself so no domain account gets locked out.</div>
+                <div class="feature-desc t-de">Jeder Benutzer hinterlegt <strong>sein eigenes Postfach</strong> (Exchange per EWS, IMAP/SMTP als Rückfall) und legt <strong>selbst</strong> beliebig viele Regeln an – als Anweisung in eigenen Worten. Trifft eine Nachricht ein, <strong>entscheidet das Modell die Aktion</strong>: antworten, Entwurf speichern, verschieben, weiterleiten oder löschen. Je Regel wird der Werkzeug-Umfang zugeschnitten, und ein Regel-Lauf ist <strong>immer unprivilegiert</strong> – Systemrechte gibt es über diesen Weg nicht. Der Text einer eingehenden Mail gilt ausdrücklich als Sachverhalt, nicht als Anweisung (Injektionsschutz mit Echtheitskennung je Lauf). Kennwörter werden verschlüsselt gespeichert und von keiner Schnittstelle herausgegeben; nach mehreren Anmeldefehlern hält die Automatik von selbst an, damit kein Domänenkonto gesperrt wird. Beim Senden aus dem Chat findet das <strong>Adressbuch</strong> zum Namen die Adresse, der Empfänger lässt sich in der Bestätigung noch korrigieren, und Dateien aus dem Chat gehen als Anhang mit.</div>
+                <div class="feature-desc t-en">Every user connects <strong>their own mailbox</strong> (Exchange via EWS, IMAP/SMTP as fallback) and creates <strong>their own</strong> rules – written as an instruction in plain words. When a message arrives, <strong>the model chooses the action</strong>: reply, save a draft, move, forward or delete. Each rule gets its own tool scope, and a rule run is <strong>always unprivileged</strong> – it grants no system rights. The text of an incoming mail is explicitly treated as information, never as an instruction (injection protection with a per-run authenticity marker). Passwords are stored encrypted and never handed out by any endpoint; after repeated sign-in failures the automation pauses itself so no domain account gets locked out. When sending from the chat, the <strong>address book</strong> finds the address for a name, the recipient can still be corrected in the confirmation, and files from the chat can go along as attachments.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🧩</div>
                 <div class="feature-title t-de">Outlook-Add-in</div>
                 <div class="feature-title t-en">Outlook Add-in</div>
@@ -774,11 +816,10 @@
                 <div class="feature-icon">🧾</div>
                 <div class="feature-title t-de">SAP-Analysen (nur lesend)</div>
                 <div class="feature-title t-en">SAP Analyses (read-only)</div>
-                <div class="feature-desc t-de">Ein eigener Bereich für die Geschäftsleitung: Vorlage wählen, der Agent wertet aus. <strong>24 Auswertungen in sechs Kategorien</strong> – von GuV, Bilanz, Working Capital, Debitoren-Aging, Auftragsbestand und Beständen bis zu Segmentberichterstattung (IFRS 8), erwarteten Kreditverlusten (IFRS 9), Konzernkonsolidierung, Funktionstrennung, Umsatzsteuer/Intrastat und ESG. <strong>Nur-Lesen ist erzwungen</strong>, nicht versprochen: OData ausschließlich GET, SQL ausschließlich SELECT, RFC über eine Whitelist. Dazu fertige Verbindungsangaben für BI-Werkzeuge und eine <strong>Abfrage-Konsole ohne KI</strong>. Jeder Benutzer hinterlegt <strong>seinen eigenen SAP-Zugang</strong> und arbeitet mit den eigenen Berechtigungen – der im Reiter gepflegte Zugang ist nur noch der lesende Sammelbenutzer als Rückfall. Bei selbst ausgestellten Serverzertifikaten wird <strong>genau eines verankert</strong>, statt die Prüfung abzuschalten. Der Verlauf speichert die Frage – nie das Ergebnis.</div>
-                <div class="feature-desc t-en">A dedicated area for management: pick a template, the agent does the analysis. <strong>24 analyses across six categories</strong> – from P&amp;L, balance sheet, working capital, receivables aging, order backlog and inventory to segment reporting (IFRS 8), expected credit losses (IFRS 9), group consolidation, segregation of duties, VAT/Intrastat and ESG. <strong>Read-only is enforced</strong>, not merely promised: OData GET only, SQL SELECT only, RFC via a whitelist. Plus ready-made connection details for BI tools and a <strong>query console without AI</strong>. Every user stores <strong>their own SAP account</strong> and works with their own permissions – the account configured in the settings tab is now only the read-only shared fallback. For self-signed server certificates, <strong>exactly one is pinned</strong> instead of switching validation off. The history stores the question – never the result.</div>
+                <div class="feature-desc t-de">Ein eigener Bereich für die Geschäftsleitung: Vorlage wählen, der Agent wertet aus. <strong>24 Auswertungen in sechs Kategorien</strong> – von GuV, Bilanz, Working Capital, Debitoren-Aging, Auftragsbestand und Beständen bis zu Segmentberichterstattung (IFRS 8), erwarteten Kreditverlusten (IFRS 9), Konzernkonsolidierung, Funktionstrennung, Umsatzsteuer/Intrastat und ESG. <strong>Nur-Lesen ist erzwungen</strong>, nicht versprochen: OData ausschließlich GET, SQL ausschließlich SELECT, RFC über eine Whitelist. Dazu fertige Verbindungsangaben für BI-Werkzeuge und eine <strong>Abfrage-Konsole ohne KI</strong>. Jeder Benutzer hinterlegt <strong>seinen eigenen SAP-Zugang</strong> und arbeitet mit den eigenen Berechtigungen – der im Reiter gepflegte Zugang ist nur noch der lesende Sammelbenutzer als Rückfall. Bei selbst ausgestellten Serverzertifikaten wird <strong>genau eines verankert</strong>, statt die Prüfung abzuschalten. Der Verlauf speichert die Frage – nie das Ergebnis. Die Konsole bietet Services und EntitySets zur Auswahl an und lädt verschachtelte Daten mit ($expand); der Verbindungstest liefert einen Bericht für den SAP-Administrator.</div>
+                <div class="feature-desc t-en">A dedicated area for management: pick a template, the agent does the analysis. <strong>24 analyses across six categories</strong> – from P&amp;L, balance sheet, working capital, receivables aging, order backlog and inventory to segment reporting (IFRS 8), expected credit losses (IFRS 9), group consolidation, segregation of duties, VAT/Intrastat and ESG. <strong>Read-only is enforced</strong>, not merely promised: OData GET only, SQL SELECT only, RFC via a whitelist. Plus ready-made connection details for BI tools and a <strong>query console without AI</strong>. Every user stores <strong>their own SAP account</strong> and works with their own permissions – the account configured in the settings tab is now only the read-only shared fallback. For self-signed server certificates, <strong>exactly one is pinned</strong> instead of switching validation off. The history stores the question – never the result. The console offers services and entity sets to choose from and loads nested data ($expand); the connection test produces a report for the SAP administrator.</div>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-badge"><span class="dot"></span><span class="t-de">Neu</span><span class="t-en">New</span></div>
                 <div class="feature-icon">🗺️</div>
                 <div class="feature-title t-de">Wissen zwischen Standorten spiegeln</div>
                 <div class="feature-title t-en">Mirror Knowledge Across Sites</div>
@@ -845,8 +886,8 @@
                 <div class="feature-icon">🤖</div>
                 <div class="feature-title t-de">Multi-LLM Unterstützung</div>
                 <div class="feature-title t-en">Multi-LLM Support</div>
-                <div class="feature-desc t-de">Gemini, Claude, OpenRouter, Ollama, LM Studio – und jedes weitere Modell mit OpenAI-kompatibler API. Kein Vendor-Lock-in.</div>
-                <div class="feature-desc t-en">Gemini, Claude, OpenRouter, Ollama, LM Studio – and any model with an OpenAI-compatible API. No vendor lock-in.</div>
+                <div class="feature-desc t-de">Gemini, Claude, OpenRouter, Ollama, LM Studio – und jedes weitere Modell mit OpenAI-kompatibler API. Kein Vendor-Lock-in. Für eigene Modellserver lässt sich das Zertifikat per Fingerabdruck verankern, statt die Prüfung abzuschalten.</div>
+                <div class="feature-desc t-en">Gemini, Claude, OpenRouter, Ollama, LM Studio – and any model with an OpenAI-compatible API. No vendor lock-in. For your own model servers, the certificate can be pinned by fingerprint instead of switching validation off.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🔌</div>
@@ -887,15 +928,15 @@
                 <div class="feature-icon">📚</div>
                 <div class="feature-title t-de">Wissensdatenbank (RAG)</div>
                 <div class="feature-title t-en">Knowledge Base (RAG)</div>
-                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT, Excel, PPTX, Bilder per OCR) durchsuchen – TF-IDF für kleine Bestände, automatischer Wechsel auf ChromaDB-Vektordatenbank bei wachsenden Datenmengen. Bilder werden per Tesseract-OCR gelesen und vom LLM aufbereitet. Bei PDFs mit <strong>beschädigter Textebene</strong> – typisch bei nachträglich verkleinerten Scans, wo aus <code>01.07.</code> ein <code>OL.O7.</code> wird – erkennt Jarvis das und liest die betroffenen Seiten per Texterkennung neu; entschieden wird über eine Stichprobe, nicht geraten. Auch <strong>OneNote-Abschnitte</strong> (<code>*.one</code>) werden gelesen – ohne Cloud und ohne Microsoft-Konto: eingebunden wird die <strong>Windows-Freigabe</strong>, auf der die Notizbücher liegen, der Text kommt aus der Datei selbst. Genauso lassen sich ganze Netzlaufwerke (SMB/NFS/WebDAV) als Wissensquelle einhängen. RAG direkt auf deinen Daten, keine Cloud, kein Datenleck.</div>
-                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) – TF-IDF for small collections, automatic switch to ChromaDB vector database as data grows. Images are read via Tesseract OCR and refined by the LLM. For PDFs with a <strong>damaged text layer</strong> – typical for downsized scans, where <code>01/07</code> turns into <code>OL/O7</code> – Jarvis detects it and re-reads the affected pages via OCR; the decision is made from a sample comparison, not guessed. <strong>OneNote sections</strong> (<code>*.one</code>) are read as well – no cloud, no Microsoft account: you mount the <strong>Windows share</strong> the notebooks live on, and the text comes out of the file itself. Whole network drives (SMB/NFS/WebDAV) can be mounted as a knowledge source the same way. RAG directly on your data, no cloud, no data leak.</div>
+                <div class="feature-desc t-de">Eigene Dokumente (PDF, DOCX, TXT, Excel, PPTX, Bilder per OCR) durchsuchen – <strong>hybride Suche</strong> aus semantischen Vektoren (FAISS) und Stichworten (BM25), TF-IDF als Rückfall; zuschaltbar kommt der <a href="#wissensgraph" style="color:var(--cyan);">Wissensgraph</a> als weiterer Kanal dazu. Bilder werden per Tesseract-OCR gelesen und vom LLM aufbereitet. Bei PDFs mit <strong>beschädigter Textebene</strong> – typisch bei nachträglich verkleinerten Scans, wo aus <code>01.07.</code> ein <code>OL.O7.</code> wird – erkennt Jarvis das und liest die betroffenen Seiten per Texterkennung neu; entschieden wird über eine Stichprobe, nicht geraten. Auch <strong>OneNote-Abschnitte</strong> (<code>*.one</code>) werden gelesen – ohne Cloud und ohne Microsoft-Konto: eingebunden wird die <strong>Windows-Freigabe</strong>, auf der die Notizbücher liegen, der Text kommt aus der Datei selbst. Genauso lassen sich ganze Netzlaufwerke (SMB/NFS/WebDAV) als Wissensquelle einhängen. RAG direkt auf deinen Daten, keine Cloud, kein Datenleck.</div>
+                <div class="feature-desc t-en">Search your own documents (PDF, DOCX, TXT, Excel, PPTX, images via OCR) – <strong>hybrid search</strong> from semantic vectors (FAISS) and keywords (BM25), with TF-IDF as a fallback; the <a href="#wissensgraph" style="color:var(--cyan);">knowledge graph</a> can be switched on as a further channel. Images are read via Tesseract OCR and refined by the LLM. For PDFs with a <strong>damaged text layer</strong> – typical for downsized scans, where <code>01/07</code> turns into <code>OL/O7</code> – Jarvis detects it and re-reads the affected pages via OCR; the decision is made from a sample comparison, not guessed. <strong>OneNote sections</strong> (<code>*.one</code>) are read as well – no cloud, no Microsoft account: you mount the <strong>Windows share</strong> the notebooks live on, and the text comes out of the file itself. Whole network drives (SMB/NFS/WebDAV) can be mounted as a knowledge source the same way. RAG directly on your data, no cloud, no data leak.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">📄</div>
                 <div class="feature-title t-de">Office-Dokumente erstellen</div>
                 <div class="feature-title t-en">Office Document Generation</div>
-                <div class="feature-desc t-de">Jarvis erstellt Word-, Excel- und PowerPoint-Dateien direkt im Chat – inklusive PDF-Export. Auch komplexe Inhalte wie Diagramme werden generiert; die fertige Datei kommt als Ein-Klick-Download zurück, nicht als bloßer Pfad. Präsentationen entstehen im <strong>Hausdesign</strong>: Farben, Schriften, Satzspiegel und Layouts kann Jarvis aus einer <strong>hochgeladenen Firmenvorlage</strong> übernehmen, statt im Office-Standard auszuliefern.</div>
-                <div class="feature-desc t-en">Jarvis creates Word, Excel and PowerPoint files directly in the chat – including PDF export. Even complex content like diagrams is generated; the finished file comes back as a one-click download, not just a path. Presentations are produced in your <strong>corporate design</strong>: Jarvis can take colours, fonts, margins and layouts from an <strong>uploaded company template</strong> instead of shipping the Office default.</div>
+                <div class="feature-desc t-de">Jarvis erstellt Word-, Excel- und PowerPoint-Dateien direkt im Chat – inklusive PDF-Export. Auch komplexe Inhalte wie Diagramme werden generiert; die fertige Datei kommt als Ein-Klick-Download zurück, nicht als bloßer Pfad. Präsentationen entstehen im <strong>Hausdesign</strong>: Farben, Schriften, Satzspiegel und Layouts kann Jarvis aus einer <strong>hochgeladenen Firmenvorlage</strong> übernehmen, statt im Office-Standard auszuliefern. Für Word gibt es das Gegenstück: eine <strong>Hausvorlage</strong> aus dem Branding mit Hausschrift, Logo und Seitenzahlen, oder eine hochgeladene Vorlage. Eigene Schriften lassen sich hochladen, damit auch der PDF-Export sie verwendet.</div>
+                <div class="feature-desc t-en">Jarvis creates Word, Excel and PowerPoint files directly in the chat – including PDF export. Even complex content like diagrams is generated; the finished file comes back as a one-click download, not just a path. Presentations are produced in your <strong>corporate design</strong>: Jarvis can take colours, fonts, margins and layouts from an <strong>uploaded company template</strong> instead of shipping the Office default. Word gets the counterpart: a <strong>house template</strong> from your branding with corporate font, logo and page numbers, or an uploaded template. Your own fonts can be uploaded so the PDF export uses them too.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🔗</div>
@@ -936,22 +977,22 @@
                 <div class="feature-icon">🔄</div>
                 <div class="feature-title t-de">Einfaches Update</div>
                 <div class="feature-title t-en">Easy Updates</div>
-                <div class="feature-desc t-de">Install-Skript erneut ausführen – fertig. Erkennt automatisch eine bestehende Installation und aktualisiert nur Code und Abhängigkeiten. Einstellungen und .env bleiben erhalten.</div>
-                <div class="feature-desc t-en">Just re-run the install script – done. Automatically detects an existing installation and only updates code and dependencies. Settings and .env are preserved.</div>
+                <div class="feature-desc t-de">Install-Skript erneut ausführen – fertig. Erkennt automatisch eine bestehende Installation und aktualisiert nur Code und Abhängigkeiten. Einstellungen und .env bleiben erhalten. Im Portal zeigt das Update-Fenster Administratoren genau die Änderungen, die ein Update bringt, je mit einem Satz Beschreibung, dazu den Verlauf bisheriger Aktualisierungen.</div>
+                <div class="feature-desc t-en">Just re-run the install script – done. Automatically detects an existing installation and only updates code and dependencies. Settings and .env are preserved. In the portal, the update window shows administrators exactly what an update brings, each change with a one-sentence description, plus a history of past updates.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🔌</div>
                 <div class="feature-title t-de">MCP-Anbindung</div>
                 <div class="feature-title t-en">MCP Integration</div>
-                <div class="feature-desc t-de">Externe Tool-Server per Model Context Protocol (MCP) anbinden – stdio, <strong>Streamable HTTP</strong> oder SSE. Hunderte verfügbare MCP-Server für Dateisysteme, Datenbanken und APIs, direkt als Agent-Tools nutzbar. Weil ein MCP-Server <strong>fremder Code</strong> ist, läuft er auf Wunsch in einer <strong>Namespace-Sandbox</strong> und sieht das Verzeichnis des Dienstes nicht – weder Konfiguration noch Zugangsdaten; die Zugangsdaten des Systems werden ihm ohnehin nicht übergeben. Ob Netzwerk-Benutzer seine Werkzeuge benutzen dürfen, entscheidet ein Administrator <strong>je Server</strong>.</div>
-                <div class="feature-desc t-en">Connect external tool servers via Model Context Protocol (MCP) – stdio, <strong>Streamable HTTP</strong> or SSE. Hundreds of available MCP servers for filesystems, databases and APIs, usable directly as agent tools. Because an MCP server is <strong>third-party code</strong>, it can run in a <strong>namespace sandbox</strong> where it cannot see the service directory – neither configuration nor credentials; the system's own secrets are never passed to it anyway. Whether network users may use its tools is decided by an administrator <strong>per server</strong>.</div>
+                <div class="feature-desc t-de">Externe Tool-Server per Model Context Protocol (MCP) anbinden – stdio, <strong>Streamable HTTP</strong> oder SSE. Hunderte verfügbare MCP-Server für Dateisysteme, Datenbanken und APIs, direkt als Agent-Tools nutzbar. Weil ein MCP-Server <strong>fremder Code</strong> ist, läuft er auf Wunsch in einer <strong>Namespace-Sandbox</strong> und sieht das Verzeichnis des Dienstes nicht – weder Konfiguration noch Zugangsdaten; die Zugangsdaten des Systems werden ihm ohnehin nicht übergeben. Freigegeben wird <strong>je Server</strong> in drei Stufen: nur Administratoren, ausgewählte Benutzer und Gruppen oder alle Netzwerk-Benutzer. API-Schlüssel je Server verlassen das Backend nie, und das Serverzertifikat lässt sich ansehen, prüfen und ausdrücklich erlauben.</div>
+                <div class="feature-desc t-en">Connect external tool servers via Model Context Protocol (MCP) – stdio, <strong>Streamable HTTP</strong> or SSE. Hundreds of available MCP servers for filesystems, databases and APIs, usable directly as agent tools. Because an MCP server is <strong>third-party code</strong>, it can run in a <strong>namespace sandbox</strong> where it cannot see the service directory – neither configuration nor credentials; the system's own secrets are never passed to it anyway. Access is granted <strong>per server</strong> at three levels: administrators only, selected users and groups, or all network users. Per-server API keys never leave the backend, and the server certificate can be viewed, checked and explicitly allowed.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">📊</div>
                 <div class="feature-title t-de">Telemetry &amp; Tracing</div>
                 <div class="feature-title t-en">Telemetry &amp; Tracing</div>
-                <div class="feature-desc t-de">Integriertes Tracing für Agent-Runs, Tool-Aufrufe und LLM-Calls. Performance-Statistiken in Echtzeit – Antwortzeiten, Fehlerquoten, Tool-Nutzung auf einen Blick.</div>
-                <div class="feature-desc t-en">Built-in tracing for agent runs, tool calls and LLM calls. Real-time performance stats – response times, error rates, tool usage at a glance.</div>
+                <div class="feature-desc t-de">Integriertes Tracing für Agent-Runs, Tool-Aufrufe und LLM-Calls. Performance-Statistiken in Echtzeit – Antwortzeiten, Fehlerquoten, Tool-Nutzung auf einen Blick. Der Reiter <strong>Protokolle</strong> zeigt zusätzlich nur lesend Dienst-Journal, CSP-Verstöße, Update-Verlauf, SSH-Anmeldungen, Selbstkorrekturen des Agenten und den Zustand der Abhängigkeitsprüfung.</div>
+                <div class="feature-desc t-en">Built-in tracing for agent runs, tool calls and LLM calls. Real-time performance stats – response times, error rates, tool usage at a glance. The <strong>Logs</strong> tab additionally shows, read-only, the service journal, CSP violations, update history, SSH logins, the agent's self-corrections and the state of the dependency check.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">💬</div>
@@ -964,8 +1005,8 @@
                 <div class="feature-icon">🔐</div>
                 <div class="feature-title t-de">Multi-User &amp; LDAP-Sicherheit</div>
                 <div class="feature-title t-en">Multi-User &amp; LDAP Security</div>
-                <div class="feature-desc t-de">LDAP-Domain-Anmeldung mit granularer Berechtigungskontrolle. LDAP-Nutzer können chatten und Wissen abrufen, aber keine Shell-Befehle ausführen oder Dateien schreiben – volle Isolation ohne Konfigurationsaufwand.</div>
-                <div class="feature-desc t-en">LDAP domain login with granular permission control. LDAP users can chat and query knowledge, but cannot execute shell commands or write files – full isolation with zero configuration.</div>
+                <div class="feature-desc t-de">LDAP-Domain-Anmeldung mit granularer Berechtigungskontrolle. LDAP-Nutzer können chatten und Wissen abrufen, aber keine Shell-Befehle ausführen oder Dateien schreiben – volle Isolation ohne Konfigurationsaufwand. Ein Klick auf einen Benutzer zeigt OU und Gruppenmitgliedschaften.</div>
+                <div class="feature-desc t-en">LDAP domain login with granular permission control. LDAP users can chat and query knowledge, but cannot execute shell commands or write files – full isolation with zero configuration. A click on a user shows their OU and group memberships.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">⏰</div>
@@ -978,8 +1019,8 @@
                 <div class="feature-icon">📱</div>
                 <div class="feature-title t-de">PWA + Telegram Bot</div>
                 <div class="feature-title t-en">PWA + Telegram Bot</div>
-                <div class="feature-desc t-de">Jarvis Chat als installierbare App (PWA) auf iOS &amp; Android – inkl. Offline-Cache und Push-Notifications. Dazu installierbarer Telegram-Bot-Skill: Nachrichten an den Bot werden als Jarvis-Tasks ausgeführt, Antworten kommen direkt zurück.</div>
-                <div class="feature-desc t-en">Jarvis Chat as an installable app (PWA) on iOS &amp; Android – including offline cache and push notifications. Plus an installable Telegram Bot skill: messages to the bot are executed as Jarvis tasks, replies come straight back.</div>
+                <div class="feature-desc t-de">Jarvis Chat als installierbare App (PWA) auf iOS &amp; Android. Dazu installierbarer Telegram-Bot-Skill: Nachrichten an den Bot werden als Jarvis-Tasks ausgeführt, Antworten kommen direkt zurück.</div>
+                <div class="feature-desc t-en">Jarvis Chat as an installable app (PWA) on iOS &amp; Android. Plus an installable Telegram Bot skill: messages to the bot are executed as Jarvis tasks, replies come straight back.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🔒</div>
@@ -1028,8 +1069,8 @@
                 <div class="feature-icon">🔒</div>
                 <div class="feature-title t-de">Lokale Verarbeitung</div>
                 <div class="feature-title t-en">Local Processing</div>
-                <div class="feature-desc t-de">Volltextsuche &amp; Embeddings (RAG/ChromaDB), Bild-OCR (Tesseract), Sprachtranskription (Whisper) und Gesichtserkennung laufen <strong>vollständig auf deiner Maschine</strong> – ganz ohne externe Dienste.</div>
-                <div class="feature-desc t-en">Full-text search &amp; embeddings (RAG/ChromaDB), image OCR (Tesseract), speech transcription (Whisper) and face recognition run <strong>entirely on your machine</strong> – with no external services.</div>
+                <div class="feature-desc t-de">Volltextsuche &amp; Embeddings (RAG/FAISS), Bild-OCR (Tesseract), Sprachtranskription (Whisper) und Gesichtserkennung laufen <strong>vollständig auf deiner Maschine</strong> – ganz ohne externe Dienste.</div>
+                <div class="feature-desc t-en">Full-text search &amp; embeddings (RAG/FAISS), image OCR (Tesseract), speech transcription (Whisper) and face recognition run <strong>entirely on your machine</strong> – with no external services.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🧠</div>
@@ -1632,7 +1673,6 @@ docker compose up -d</code>
                     <li><span class="check">✅</span> <span class="t-de">Kein App Store – keine Abhängigkeiten</span><span class="t-en">No App Store – fully self-hosted</span></li>
                     <li><span class="check">✅</span> <span class="t-de">Vollbild-Modus, eigenes Icon, eigener Splash-Screen</span><span class="t-en">Full-screen mode, custom icon, custom splash screen</span></li>
                     <li><span class="check">✅</span> <span class="t-de">Dark &amp; Light Mode – passt sich automatisch an</span><span class="t-en">Dark &amp; light mode – adapts automatically</span></li>
-                    <li><span class="check">✅</span> <span class="t-de">Offline-Cache (statische Assets via Service Worker)</span><span class="t-en">Offline cache (static assets via service worker)</span></li>
                     <li><span class="check">✅</span> <span class="t-de">Funktioniert auf iPhone &amp; iPad (Safari 16.4+)</span><span class="t-en">Works on iPhone &amp; iPad (Safari 16.4+)</span></li>
                 </ul>
 

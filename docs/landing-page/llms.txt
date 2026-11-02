@@ -13,7 +13,11 @@ Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a fu
 - **Desktop Control**: Full Linux desktop via Xvfb/VNC, controlled by the AI agent in real-time
 - **Multi-LLM Support**: Google Gemini, Anthropic Claude, OpenRouter (300+ models), any OpenAI-compatible API, local models via Ollama/LM Studio
 - **Multi-Agent Orchestration**: Main agent can spawn autonomous sub-agents for parallel task execution
-- **RAG Knowledge Base**: Document search (PDF, DOCX, TXT, Excel, PPTX, OneNote sections, images via OCR) with TF-IDF and ChromaDB vector database (automatic scaling with sentence-transformer embeddings)
+- **RAG Knowledge Base**: Document search (PDF, DOCX, TXT, Excel, PPTX, OneNote sections, images via OCR) with hybrid search from semantic vectors (FAISS with sentence-transformer embeddings) and keywords (BM25), TF-IDF as a fallback
+- **Knowledge Graph (Graph RAG)**: Optional and off by default. Builds a graph of terms and connections from the knowledge documents in the background, with an interactive view, a review list for similar terms, wiki pages per term, a contradiction check with verbatim quotes and Obsidian export. Can join the hybrid search as an additional channel; editors of a knowledge group only see its part of the graph
+- **Solution Archive**: Goes through the closed and resolved tickets of selected Jira projects on a schedule, extracts problem and solution without an agent or tools, counts similar cases and publishes a solution to the knowledge base only once the problem has occurred repeatedly (threshold configurable, default 10)
+- **Vulnerability Checks and Security Updates**: Checks installed packages against the Debian Security Tracker, OSV (Python, WhatsApp bridge) and the Node.js Security WG database; anything that cannot be checked is named with a reason. Remediation individually, in bulk or on a schedule, as upgrades only; Debian's automatic security updates can be applied immediately with one click
+- **Error Analysis**: A dossier for an agent run (task, tool calls with arguments, service journal, security events, source locations), optionally interpreted by the model without tools
 - **MCP Integration**: Model Context Protocol support for external tool servers via stdio, Streamable HTTP or SSE. Third-party servers can run in a namespace sandbox with no access to the service directory or its credentials; access for network users is released per server
 - **Exchange Email Rules**: Each user connects their own mailbox (EWS, IMAP/SMTP fallback) and writes their own rules in plain words; the model chooses the action (reply, draft, move, forward, delete). Per-rule tool scopes, always unprivileged, incoming mail text treated as information rather than instruction
 - **Outlook Add-in**: The email area as an Outlook task pane – process the selected message with a rule, or generate a reply preview that is only sent on demand (the suggestion run has no tools). Passwordless sign-in via the Exchange identity token after first use
@@ -39,7 +43,7 @@ Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a fu
 - Backend: Python 3.13, FastAPI, uvicorn, HTTPS
 - Frontend: Vanilla JavaScript, Dark Glassmorphism Theme, WebSocket
 - Desktop: Xvfb, Cinnamon/Openbox, x11vnc, noVNC
-- Database: ChromaDB (vector), JSON (memory/settings)
+- Knowledge search: FAISS (vector), BM25 (keywords), optional knowledge graph; JSON (memory/settings)
 - WhatsApp: Node.js, Baileys v7, faster-whisper
 
 ## Installation

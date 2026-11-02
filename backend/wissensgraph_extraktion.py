@@ -65,6 +65,13 @@ VORGABEN = {
     "widersprueche": True,
     "wiki_sammellauf": True,
 }
+# Grenzen der Drossel. Der Arbeiter wartet mit den Werten, die beim Start seines
+# Schritts galten (Drossel.warten) – ein Tippfehler wie 999999 s liesse ihn also
+# auch nach der Korrektur weiter warten. Deshalb eine harte Obergrenze.
+RATE_ABSTAND_MAX_S = 600
+RATE_STUNDE_MAX = 100000
+# json.loads nimmt NaN und Infinity an; beide fallen durch "v < 0" hindurch.
+ZAHL_MAX = 1e9
 MAX_VERSUCHE = 3
 CHUNK_UEBERLAPPUNG = 40           # wie knowledge._chunk_text
 MAX_ENTITAETEN = 25
@@ -122,6 +129,10 @@ def einstellungen_pruefen(neu: dict) -> dict:
                 raise ValueError(f"{k}: Zahl erwartet")
             if v < 0:
                 raise ValueError(f"{k}: darf nicht negativ sein")
+            if not v <= ZAHL_MAX:
+                raise ValueError(f"{k}: Zahl außerhalb des erlaubten Bereichs")
+            if isinstance(vorgabe, int) and v != int(v):
+                raise ValueError(f"{k}: ganze Zahl erwartet")
             v = type(vorgabe)(v)
         elif isinstance(vorgabe, list):
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
@@ -134,6 +145,10 @@ def einstellungen_pruefen(neu: dict) -> dict:
         raise ValueError("kandidaten_schwelle: zwischen 0,5 und 1,0")
     if int(st["block_woerter"]) < 100:
         raise ValueError("block_woerter: mindestens 100")
+    if float(st["rate_min_abstand_s"]) > RATE_ABSTAND_MAX_S:
+        raise ValueError(f"Mindestabstand: höchstens {RATE_ABSTAND_MAX_S} Sekunden")
+    if int(st["rate_max_pro_stunde"]) > RATE_STUNDE_MAX:
+        raise ValueError(f"Modellaufrufe je Stunde: höchstens {RATE_STUNDE_MAX}")
     return st
 
 

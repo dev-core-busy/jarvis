@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -413,6 +414,51 @@ check("nur die geaenderten Felder stehen in der Ablage",
       isinstance(roh8, dict) and set(roh8) == {"aktiv", "gruppen"}, str(roh8))
 check("wirksam sind trotzdem alle Werte (Vorgaben ergaenzt)",
       wgx.einstellungen(frisch=True) == {**wgx.VORGABEN, "aktiv": True, "gruppen": ["g1"]})
+
+section("8b. Modell-Last: Grenzen der beiden Drosselwerte")
+def _abgelehnt(rumpf):
+    try:
+        wgx.einstellungen_pruefen(rumpf)
+    except ValueError:
+        return True
+    except Exception:  # noqa: BLE001 – alles andere waere im Dienst ein 500, keine Ablehnung
+        return False
+    return False
+st8b = wgx.einstellungen_pruefen({"rate_min_abstand_s": 2.5, "rate_max_pro_stunde": 800})
+check("Positivkontrolle: gueltige Werte kommen an",
+      st8b["rate_min_abstand_s"] == 2.5 and st8b["rate_max_pro_stunde"] == 800, str(st8b))
+check("Sekunden bleiben Kommazahl, Aufrufe ganze Zahl",
+      isinstance(wgx.einstellungen_pruefen({"rate_min_abstand_s": 3})["rate_min_abstand_s"], float)
+      and isinstance(wgx.einstellungen_pruefen({"rate_max_pro_stunde": 800.0})["rate_max_pro_stunde"], int))
+st8g = wgx.einstellungen_pruefen({"rate_min_abstand_s": wgx.RATE_ABSTAND_MAX_S, "rate_max_pro_stunde": wgx.RATE_STUNDE_MAX})
+check("die Grenzwerte selbst sind erlaubt",
+      st8g["rate_min_abstand_s"] == wgx.RATE_ABSTAND_MAX_S and st8g["rate_max_pro_stunde"] == wgx.RATE_STUNDE_MAX)
+st8n = wgx.einstellungen_pruefen({"rate_min_abstand_s": 0, "rate_max_pro_stunde": 0})
+check("0 ist erlaubt (ohne Abstand, ohne Obergrenze)",
+      st8n["rate_min_abstand_s"] == 0 and st8n["rate_max_pro_stunde"] == 0)
+for _name, _rumpf in (
+        ("Abstand ueber der Grenze", {"rate_min_abstand_s": wgx.RATE_ABSTAND_MAX_S + 1}),
+        ("Aufrufe ueber der Grenze", {"rate_max_pro_stunde": wgx.RATE_STUNDE_MAX + 1}),
+        ("Abstand negativ", {"rate_min_abstand_s": -1}),
+        ("Aufrufe negativ", {"rate_max_pro_stunde": -1}),
+        ("Abstand NaN", {"rate_min_abstand_s": float("nan")}),
+        ("Abstand Unendlich", {"rate_min_abstand_s": float("inf")}),
+        ("Aufrufe Unendlich", {"rate_max_pro_stunde": float("inf")}),
+        ("Abstand riesige ganze Zahl", {"rate_min_abstand_s": 10 ** 400}),
+        ("Aufrufe Kommazahl", {"rate_max_pro_stunde": 10.5}),
+        ("Abstand ja/nein", {"rate_min_abstand_s": True}),
+        ("Abstand Text", {"rate_min_abstand_s": "2"})):
+    check(f"abgelehnt: {_name}", _abgelehnt(_rumpf))
+_html = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
+def _attr(feld, name):
+    m = re.search(r'<input[^>]*data-wg-zahl="%s"[^>]*>' % feld, _html)
+    a = re.search(r'\b%s="([^"]+)"' % name, m.group(0)) if m else None
+    return a.group(1) if a else None
+check("Oberflaeche und Server nennen dieselben Grenzen",
+      _attr("rate_min_abstand_s", "max") == str(wgx.RATE_ABSTAND_MAX_S)
+      and _attr("rate_max_pro_stunde", "max") == str(wgx.RATE_STUNDE_MAX)
+      and _attr("rate_min_abstand_s", "min") == "0" and _attr("rate_max_pro_stunde", "min") == "0",
+      f"{_attr('rate_min_abstand_s', 'max')} {_attr('rate_max_pro_stunde', 'max')}")
 
 print(f"\nErgebnis: {_ok} ok, {_fail} fehlgeschlagen")
 sys.exit(1 if _fail else 0)

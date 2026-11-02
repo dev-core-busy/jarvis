@@ -12,6 +12,7 @@
  *  3. Status: Kennzahlen, Kreis genau bei „arbeitet“ (auch im Nachlauf), eigene
  *     Zeile fuer Widersprueche/Wiki, Pause-Hinweis, Kreis beim ersten Abruf
  *  4. Schalter: sendet nur das Feld, abgelehnt springt zurueck
+ *  4b. Modell-Last: Felder zeigen den Stand, Tippen bleibt stehen, Grenzen greifen
  *  5. Aufbau: Umfang/Gruppe, Kreis beim Einreihen, gesperrt wenn aus
  *  6. i18n DE/EN, Stilregeln vorhanden, keine Farbliterale
  *
@@ -47,7 +48,8 @@ function baue() {
     const w = dom.window;
     sitzungLaden(w);
     w.localStorage.setItem('jarvis_token', 'jarvis:1:deadbeef');
-    const server = { aufrufe: [], einst: { aktiv: true, expansion: false, widersprueche: true, wiki_sammellauf: true },
+    const server = { aufrufe: [], einst: { aktiv: true, expansion: false, widersprueche: true, wiki_sammellauf: true,
+                             rate_min_abstand_s: 2, rate_max_pro_stunde: 800 },
                      zustand: {}, einstFehler: false, pause: false };
     const antwort = (status, body) => Promise.resolve({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) });
     w.fetch = function (url, o) {
@@ -179,6 +181,54 @@ async function main() {
     pruefe(hk('wiki_sammellauf').checked === true && /abgelehnt/.test(em.textContent) && em.classList.contains('is-err'),
            'abgelehnt: Schalter springt zurueck, Begruendung als Fehler', em.className + ' ' + em.textContent);
     server.einstFehler = false;
+
+    abschnitt('4b. Modell-Last');
+    const zf = (k) => d.querySelector('[data-wg-zahl="' + k + '"]');
+    const tippen = (h, v) => { h.value = v; h.dispatchEvent(new w.Event('input')); };
+    const fertig = async (h) => { h.dispatchEvent(new w.Event('change')); await warte(40); };
+    const posts = () => server.aufrufe.filter(x => x.u === '/api/wissensgraph/einstellungen').length;
+    await W.statusHolen();
+    const ab = zf('rate_min_abstand_s'), mx = zf('rate_max_pro_stunde');
+    pruefe(!!ab && !!mx && ab.value === '2' && mx.value === '800', 'Felder zeigen den Stand des Servers', ab && ab.value);
+    tippen(ab, '7');
+    await W.statusHolen();
+    pruefe(ab.value === '7', 'Statusabfrage ueberschreibt NICHT, was gerade getippt wird', ab.value);
+    pruefe(mx.value === '800', 'Positivkontrolle: das andere Feld folgt weiter dem Server', mx.value);
+    await fertig(ab);
+    const za = server.aufrufe.filter(x => x.u === '/api/wissensgraph/einstellungen').pop();
+    pruefe(za && JSON.stringify(za.body) === '{"rate_min_abstand_s":7}', 'Aendern sendet NUR dieses Feld, als Zahl', JSON.stringify(za && za.body));
+    pruefe(server.einst.rate_min_abstand_s === 7 && /Gespeichert/.test(d.getElementById('wg-einst-meldung').textContent), '… der Server hat es, Meldung steht da');
+    pruefe(!ab.hasAttribute('data-wg-tippt') && !ab.disabled, 'Feld ist danach wieder frei');
+    server.einst.rate_min_abstand_s = 3;
+    await W.statusHolen();
+    pruefe(ab.value === '3', 'nach dem Speichern folgt das Feld wieder dem Server', ab.value);
+    let vor = posts();
+    await fertig(ab);
+    pruefe(posts() === vor, 'unveraenderter Wert: kein Speichern');
+    for (const [h, v, was] of [[ab, '601', 'ueber dem Hoechstwert'], [ab, '-1', 'negativ'], [ab, '', 'leer'], [mx, '10.5', 'Kommazahl bei ganzer Zahl']]) {
+        const soll = h.value;
+        vor = posts();
+        tippen(h, v);
+        await fertig(h);
+        const m = d.getElementById('wg-einst-meldung');
+        pruefe(posts() === vor && h.value === soll && m.classList.contains('is-err') && /Bitte eine Zahl von 0 bis/.test(m.textContent),
+               'ungueltig (' + was + '): nichts gesendet, Feld springt zurueck, Fehler steht da', [posts() - vor, h.value, m.textContent].join(' | '));
+    }
+    vor = posts();
+    tippen(ab, '600');
+    await fertig(ab);
+    pruefe(posts() === vor + 1 && server.einst.rate_min_abstand_s === 600, 'Grenzwert selbst ist erlaubt', server.einst.rate_min_abstand_s);
+    vor = posts();
+    tippen(mx, '0');
+    await fertig(mx);
+    pruefe(posts() === vor + 1 && server.einst.rate_max_pro_stunde === 0 && mx.value === '0', '0 = keine Obergrenze wird gesendet und angezeigt', mx.value);
+    server.einstFehler = true;
+    tippen(ab, '5');
+    await fertig(ab);
+    pruefe(ab.value === '600' && /abgelehnt/.test(d.getElementById('wg-einst-meldung').textContent),
+           'vom Server abgelehnt: Feld springt zurueck, Begruendung steht da', ab.value);
+    server.einstFehler = false;
+    pruefe(/\.kbwg-zahl input\s*\{/.test(STYLE), 'Feldbreite in style.css');
 
     abschnitt('5. Aufbau');
     const umf = d.getElementById('wg-umfang'), gr = d.getElementById('wg-umfang-gruppe'), ord = d.getElementById('wg-umfang-ordner');

@@ -9527,6 +9527,11 @@ body.light #service-restart-status.svc-err  { color: #c62828; }   /* 5,15:1 */
     display: inline-flex; align-items: center; gap: 6px;
     font-size: .88rem; color: var(--text-secondary); cursor: pointer;
 }
+.kbwg-zahl {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    font-size: .88rem; color: var(--text-secondary);
+}
+.kbwg-zahl input { width: 7.5em; }
 .kbwg-leiste { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
 .kbwg-feld {
     padding: 7px 10px; border-radius: var(--radius-sm);

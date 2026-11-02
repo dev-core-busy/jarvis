@@ -18,6 +18,7 @@
     var _timer = null;
     var _gebunden = false;
     var _gruppenGeladen = false;
+    var _zahlStand = {};    // letzter Stand des Servers je Zahlenfeld
 
     function $(id) { return document.getElementById(id); }
 
@@ -196,11 +197,40 @@
             var k = h.getAttribute('data-wg-einstellung');
             if (typeof e[k] === 'boolean' && !h.disabled) { h.checked = e[k]; }
         });
+        // Die Abfrage laeuft waehrend der Arbeit alle 10 s: ein Feld, in dem gerade
+        // getippt wird, bleibt deshalb unangetastet (data-wg-tippt).
+        document.querySelectorAll('[data-wg-zahl]').forEach(function (h) {
+            var k = h.getAttribute('data-wg-zahl');
+            if (typeof e[k] !== 'number') { return; }
+            _zahlStand[k] = e[k];
+            if (!h.disabled && !h.hasAttribute('data-wg-tippt')) { h.value = String(e[k]); }
+        });
     }
 
     function einstellungSchreiben(h) {
-        var k = h.getAttribute('data-wg-einstellung'), rumpf = {};
-        rumpf[k] = h.checked;
+        var rumpf = {};
+        rumpf[h.getAttribute('data-wg-einstellung')] = h.checked;
+        einstellungSenden(h, rumpf);
+    }
+
+    /** Zahlenfeld: Grenzen stehen im Markup (min/max), der Server prueft sie
+     *  noch einmal. Ungueltiges springt sofort auf den Stand des Servers zurueck. */
+    function zahlSchreiben(h) {
+        var k = h.getAttribute('data-wg-zahl'), roh = h.value.trim(), v = Number(roh), rumpf = {};
+        h.removeAttribute('data-wg-tippt');
+        if (roh === '' || !isFinite(v) || v < Number(h.min) || v > Number(h.max)
+                || (h.step === '1' && v % 1 !== 0)) {
+            if (k in _zahlStand) { h.value = String(_zahlStand[k]); }
+            meldung('wg-einst-meldung', t('wissensgraph.rate_invalid', 'Bitte eine Zahl von {min} bis {max} eingeben.',
+                { min: h.min, max: h.max }), 'err');
+            return;
+        }
+        if (v === _zahlStand[k]) { return; }
+        rumpf[k] = v;
+        einstellungSenden(h, rumpf);
+    }
+
+    function einstellungSenden(h, rumpf) {
         h.disabled = true;
         meldung('wg-einst-meldung', '');
         sende('/api/wissensgraph/einstellungen', 'POST', rumpf).then(function () {
@@ -263,6 +293,11 @@
         _gebunden = true;
         document.querySelectorAll('[data-wg-einstellung]').forEach(function (h) {
             h.addEventListener('change', function () { einstellungSchreiben(h); });
+        });
+        document.querySelectorAll('[data-wg-zahl]').forEach(function (h) {
+            h.addEventListener('input', function () { h.setAttribute('data-wg-tippt', '1'); });
+            h.addEventListener('change', function () { zahlSchreiben(h); });
+            h.addEventListener('blur', function () { h.removeAttribute('data-wg-tippt'); });
         });
         $('wg-umfang').addEventListener('change', umfangZeigen);
         umfangZeigen();

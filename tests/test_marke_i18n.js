@@ -298,6 +298,101 @@ pruefe(hakenDa.length >= 2, '.login-title behaelt "Jarvis" (Branding-Haken)',
        String(hakenDa.length));
 
 // ══════════════════════════════════════════════════════════════════════════
+abschnitt('9) Auch Zeichenketten, die JS SELBST rendert, nennen den Vorgabenamen nicht');
+// ══════════════════════════════════════════════════════════════════════════
+// ⚠ WARUM (2026-11-02): auf DEV stand im Formular "Task bearbeiten" woertlich
+// "Aufgabe fuer Jarvis". Der Text kam weder aus i18n (Abschnitt 2) noch aus
+// einer HTML-Datei (Abschnitte 7/8), sondern aus einem Template-Literal in
+// cron.js – fuer diesen Waechter unsichtbar. Dieselbe Luecke traf zugleich
+// google.js, issues.js und skills.js (14 sichtbare Stellen).
+//
+// Gemessen am TOKEN (acorn): nur String- und Template-Teile zaehlen, also
+// weder Kommentare noch Bezeichner wie JarvisIcons. Der blosse Rueckfallwert
+// 'Jarvis' (window.jarvisMarke ? ... : 'Jarvis') ist erlaubt.
+const JS_AUSNAHMEN = [
+    // Begruessungs-Vorschau: der Aufrufer ersetzt /Jarvis/g direkt danach
+    // durch window.brandAssistantName (applyAssistantName-Weg).
+    { datei: 'frontend/js/app.js',  text: 'ich bin Jarvis, dein KI-Assistent', grund: 'Vorschau, danach replace(/Jarvis/g)' },
+    { datei: 'frontend/js/app.js',  text: 'I am Jarvis, your AI assistant',    grund: 'Vorschau, danach replace(/Jarvis/g)' },
+    { datei: 'frontend/js/chat.js', text: 'ich bin Jarvis, dein KI-Assistent', grund: 'Vorschau, danach replace(/Jarvis/g)' },
+    { datei: 'frontend/js/chat.js', text: 'I am Jarvis, your AI assistant',    grund: 'Vorschau, danach replace(/Jarvis/g)' },
+    { datei: 'frontend/js/chat.js', text: 'Hallo! Ich bin Jarvis.',            grund: 'chat.greeting, applyAssistantName' },
+    // Kopfzeilennamen des Drahtformats – kein Anzeigename.
+    { datei: 'frontend/js/email.js',       text: 'X-Jarvis-Cert-Warn', grund: 'HTTP-Kopfzeile' },
+    { datei: 'frontend/js/excel_admin.js', text: 'X-Jarvis-Cert-Warn', grund: 'HTTP-Kopfzeile' },
+    { datei: 'frontend/js/sitzung.js',     text: 'X-Jarvis-Sitzung',   grund: 'HTTP-Kopfzeile' },
+    // /support-api ist die oeffentliche Doku-Seite OHNE branding.js – dort
+    // gibt es keine Marke, die eingesetzt werden koennte.
+    { datei: 'frontend/js/support_api_sprache.js', text: 'Jarvis Support API',  grund: 'Seite ohne Branding' },
+    { datei: 'frontend/js/support_api_sprache.js', text: 'Jarvis Support-API',  grund: 'Seite ohne Branding' },
+];
+const acornJs = require('./lib/acorn_laden')();
+function markenStrings(quelle) {
+    const aus = [];
+    for (const t of acornJs.tokenizer(quelle, { ecmaVersion: 'latest', locations: true })) {
+        if (t.type.label !== 'string' && t.type.label !== 'template') continue;
+        const s = String(t.value == null ? '' : t.value);
+        if (!/\bJarvis\b/.test(s) || s.trim() === 'Jarvis') continue;
+        // Zeile und Ausschnitt der FUNDSTELLE, nicht des Template-Anfangs –
+        // ein Template ueber 200 Zeilen nennt sonst nur seine erste Zeile.
+        const i = s.search(/\bJarvis\b/);
+        const zeile = t.loc.start.line + (s.slice(0, i).match(/\n/g) || []).length;
+        const stelle = s.slice(Math.max(0, i - 30), i + 30).replace(/\s+/g, ' ').trim();
+        aus.push({ zeile, s, stelle });
+    }
+    return aus;
+}
+// Positivkontrolle ZUERST: die Sonde sieht genau die Form des Vorfalls
+// (Template mit Interpolation) und auch einen einfachen String – und NICHT
+// Kommentar, Bezeichner oder den erlaubten Rueckfallwert.
+const SONDE = [
+    'const a = `<label>${x}</label><label for="t">Aufgabe für Jarvis</label>`;',
+    "fail('Bitte eine Aufgabe für Jarvis angeben.');",
+    '// Jarvis im Kommentar',
+    "const n = window.jarvisMarke ? window.jarvisMarke() : 'Jarvis';",
+    'JarvisIcons.pencil();',
+].join('\n');
+const sondeTreffer = markenStrings(SONDE).map((h) => h.zeile);
+if (JSON.stringify(sondeTreffer) !== '[1,2]') {
+    console.log('ABBRUCH: die Zeichenketten-Sonde misst falsch – Treffer in Zeilen '
+                + JSON.stringify(sondeTreffer) + ', erwartet [1,2]');
+    process.exit(2);
+}
+pruefe(true, 'Positivkontrolle: die Sonde trifft Template und String, nicht Kommentar/Bezeichner/Rueckfall');
+
+const JS_WURZELN = ['frontend/js', 'frontend/addin', 'frontend/excel-addin'];
+const jsHits = [];
+const benutzteAusnahmen = new Set();
+let jsGelesen = 0;
+for (const d of JS_WURZELN) {
+    const voll = path.join(ROOT, d);
+    if (!fs.existsSync(voll)) {
+        if (d === 'frontend/js') { console.log('ABBRUCH: ' + d + ' fehlt'); process.exit(2); }
+        continue;   // Add-in-Verzeichnisse sind optional
+    }
+    for (const f of fs.readdirSync(voll).filter((x) => x.endsWith('.js'))) {
+        const pfad = d + '/' + f;
+        if (pfad === 'frontend/js/i18n.js') continue;   // Abschnitt 2 prueft die Werte
+        jsGelesen++;
+        let treffer;
+        try { treffer = markenStrings(lies(pfad)); }
+        catch (e) { jsHits.push(pfad + ': nicht lesbar (' + e.message + ')'); continue; }
+        for (const h of treffer) {
+            const a = JS_AUSNAHMEN.find((x) => x.datei === pfad && h.s.includes(x.text));
+            if (a) { benutzteAusnahmen.add(a); continue; }
+            jsHits.push(pfad + ':' + h.zeile + ' ' + JSON.stringify(h.stelle));
+        }
+    }
+}
+pruefe(jsGelesen > 50, 'die JS-Module werden ueberhaupt gelesen', String(jsGelesen));
+pruefe(jsHits.length === 0,
+       'keine von JS gerenderte Zeichenkette nennt "Jarvis" (dort {marke} per i18n)',
+       jsHits.join(' | '));
+const jsUnnoetig = JS_AUSNAHMEN.filter((a) => !benutzteAusnahmen.has(a))
+    .map((a) => a.datei + ' "' + a.text + '"');
+pruefe(jsUnnoetig.length === 0, 'keine JS-Ausnahme ohne Anlass', jsUnnoetig.join(', '));
+
+// ══════════════════════════════════════════════════════════════════════════
 abschnitt('6) GEMESSEN: der Beobachter setzt spaeter eingefuegten Text nach');
 // ══════════════════════════════════════════════════════════════════════════
 // Teil 5 liest nur den Quelltext. Ob der Beobachter WIRKT - und ob er nach

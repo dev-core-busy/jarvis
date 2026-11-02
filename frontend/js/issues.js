@@ -486,7 +486,7 @@
             </div>
             ${issue.jarvis_comment ? `
             <div class="jv-iss-detail-section">
-                <div class="jv-iss-detail-label">Antwort von Jarvis</div>
+                <div class="jv-iss-detail-label">${window.t('issues.answer_from')}</div>
                 <div class="jv-iss-jarvis-comment jv-iss-detail-value">${_escape(issue.jarvis_comment)}</div>
             </div>` : ''}
             <div class="jv-iss-detail-section">

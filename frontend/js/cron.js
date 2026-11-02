@@ -117,9 +117,9 @@ window.cronManager = new (class JarvisCronManager {
                         </div>
 
                         <div class="kb-form-row" id="cron-task-row">
-                            <label class="kb-label" for="cron-task">Aufgabe für Jarvis</label>
+                            <label class="kb-label" for="cron-task">${window.t('cron.task_label')}</label>
                             <textarea id="cron-task" rows="3" class="kb-input"
-                                placeholder="Was soll Jarvis tun? z.B.: Prüfe Server-Auslastung und sende Zusammenfassung per WhatsApp."></textarea>
+                                placeholder="${window.t('cron.task_ph')}"></textarea>
                             <label class="kb-form-checkbox-label" style="margin-top:6px;">
                                 <input id="cron-aussenwirkung" type="checkbox"> ${window.t('cron.aussenwirkung')}
                             </label>
@@ -213,7 +213,7 @@ window.cronManager = new (class JarvisCronManager {
                         <div class="kb-form-field">
                             <label class="kb-label" for="watcher-action-type">Aktion bei Auslösung</label>
                             <select id="watcher-action-type" class="kb-input">
-                                <option value="agent_task">Jarvis-Aufgabe ausführen</option>
+                                <option value="agent_task">${window.t('cron.action_agent')}</option>
                                 <option value="whatsapp">WhatsApp senden</option>
                                 <option value="email">E-Mail senden</option>
                                 <option value="webhook">Webhook (HTTP POST)</option>
@@ -221,9 +221,9 @@ window.cronManager = new (class JarvisCronManager {
                             <p class="kb-hint" style="margin-top:4px;">Platzhalter: <code>{filename}</code> <code>{filepath}</code> <code>{event}</code> · Issue: <code>{issue_title}</code> <code>{issue_author}</code> <code>{issue_type}</code></p>
                         </div>
 
-                        <!-- Aktion: Jarvis-Aufgabe -->
+                        <!-- Aktion: Agenten-Aufgabe -->
                         <div id="watcher-action-agent" class="kb-form-row">
-                            <label class="kb-label" for="watcher-task">Aufgabe für Jarvis</label>
+                            <label class="kb-label" for="watcher-task">${window.t('cron.task_label')}</label>
                             <textarea id="watcher-task" rows="3" class="kb-input"
                                 placeholder="Fasse die neu eingetroffene Datei {filename} zusammen."></textarea>
                             <label class="kb-form-checkbox-label" style="margin-top:6px;">
@@ -241,7 +241,7 @@ window.cronManager = new (class JarvisCronManager {
                             <div class="kb-form-row">
                                 <label class="kb-label" for="watcher-wa-message">Nachricht</label>
                                 <textarea id="watcher-wa-message" rows="2" class="kb-input"
-                                    placeholder="⚠️ Jarvis: Das aktive LLM ist nicht erreichbar!"></textarea>
+                                    placeholder="${window.t('cron.wa_message_ph')}"></textarea>
                             </div>
                         </div>
 
@@ -271,7 +271,7 @@ window.cronManager = new (class JarvisCronManager {
                                 </div>
                                 <div class="kb-form-field">
                                     <label class="kb-label" for="watcher-email-subject">Betreff</label>
-                                    <input id="watcher-email-subject" type="text" placeholder="Jarvis: LLM nicht erreichbar" class="kb-input">
+                                    <input id="watcher-email-subject" type="text" placeholder="${window.t('cron.email_subject_ph')}" class="kb-input">
                                 </div>
                             </div>
                             <div class="kb-form-row">
@@ -1040,7 +1040,7 @@ window.cronManager = new (class JarvisCronManager {
             const trig      = w.trigger_type || 'file';
             const act       = w.action_type || 'agent_task';
             const trigLabel = trig === 'llm_down' ? '⚡ LLM nicht erreichbar' : (trig === 'issue_created' ? '🐞 Neuer Issue' : '📂 Datei');
-            const actLabel  = act === 'whatsapp' ? '📱 WhatsApp' : (act === 'webhook' ? '🔗 Webhook' : (act === 'email' ? '✉️ E-Mail' : '🤖 Jarvis-Aufgabe'));
+            const actLabel  = act === 'whatsapp' ? '📱 WhatsApp' : (act === 'webhook' ? '🔗 Webhook' : (act === 'email' ? '✉️ E-Mail' : '🤖 ' + window.t('cron.action_agent_kurz')));
             const evBadges  = (trig === 'file') ? (w.events || []).map(ev => `<span class="cron-event-badge">${ev}</span>`).join('') : '';
             const trigDetail = (trig === 'file')
                 ? `<div class="cron-item-path">📂 ${this._esc(w.path || '')} <code class="cron-item-code">${this._esc(w.pattern || '*')}</code></div>` : '';
@@ -1155,7 +1155,7 @@ window.cronManager = new (class JarvisCronManager {
             if (!path) return fail('Bitte den zu überwachenden Pfad angeben.');
             if (!events.length) return fail(window.t('cron.watcher_error_events'));
         }
-        if (action_type === 'agent_task' && !task) return fail('Bitte eine Aufgabe für Jarvis angeben.');
+        if (action_type === 'agent_task' && !task) return fail(window.t('cron.err_task'));
         if (action_type === 'whatsapp' && (!wa_to || !wa_message)) return fail('Bitte WhatsApp-Empfänger und Nachricht angeben.');
         if (action_type === 'webhook' && !webhook_url) return fail('Bitte eine Webhook-URL angeben.');
         if (action_type === 'email' && !email_to) return fail('Bitte einen E-Mail-Empfänger angeben.');

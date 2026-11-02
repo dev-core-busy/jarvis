@@ -47,7 +47,7 @@ class JarvisGoogleManager {
     // ─── Sektion 1: Jarvis Google Apps ────────────────────────────
 
     _renderJarvisSection(status) {
-        if (!status) return this._errorCard('Jarvis Google', window.t('google.conn_error'));
+        if (!status) return this._errorCard(window.t('google.jarvis_title'), window.t('google.conn_error'));
 
         let card = '';
 
@@ -71,7 +71,7 @@ class JarvisGoogleManager {
                 <div class="google-card google-card-ok">
                     <div class="google-card-icon">✅</div>
                     <div class="google-card-body">
-                        <div class="google-card-title">Jarvis Google Apps</div>
+                        <div class="google-card-title">${window.t('google.jarvis_title')}</div>
                         <div class="google-card-email">${status.email || ''}</div>
                         <div class="google-card-services">
                             <span class="google-service-badge">Gmail</span>
@@ -87,7 +87,7 @@ class JarvisGoogleManager {
                 <div class="google-card google-card-idle" id="jarvis-google-card">
                     <div class="google-card-icon">🔗</div>
                     <div class="google-card-body">
-                        <div class="google-card-title">Jarvis Google Apps</div>
+                        <div class="google-card-title">${window.t('google.jarvis_title')}</div>
                         <div class="google-card-desc">${window.t('google.jarvis_desc')}</div>
                     </div>
                     <button class="kb-btn-action google-btn-connect"
@@ -96,7 +96,7 @@ class JarvisGoogleManager {
         }
 
         return `<div class="google-section">
-            <div class="google-section-label">Jarvis Google Apps</div>
+            <div class="google-section-label">${window.t('google.jarvis_title')}</div>
             ${card}
         </div>`;
     }

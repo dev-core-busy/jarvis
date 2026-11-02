@@ -610,7 +610,7 @@
                     </div>
                     <div class="sk-import-log" id="sk-import-log">
                         <div class="sk-import-msg sk-import-msg-info">
-                            🤖 Jarvis startet den OpenClaw Skill-Import…
+                            🤖 ${window.t('skills.import_start')}
                         </div>
                     </div>
                     <div class="sk-import-input-row">

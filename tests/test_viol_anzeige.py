@@ -80,7 +80,7 @@ def harness():
     # Helfer, sonst stirbt der Pruefstand an einem AttributeError (Register:
     # wer eine geteilte Funktion erweitert, zieht die Prologe mit).
     gefunden = {"const": False, "reminder": False, "prop": False, "gesperrt": False,
-                "mcp_tool": False, "mcp_frei": False, "prefix": False}
+                "mcp_tool": False, "mcp_frei": False, "prefix": False, "hana": False}
     methoden = []
     for knoten in baum.body:
         if isinstance(knoten, ast.Assign) and any(
@@ -94,6 +94,11 @@ def harness():
                 isinstance(t, ast.Name) and t.id == "_MCP_TOOL_PREFIX" for t in knoten.targets):
             teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
             gefunden["prefix"] = True
+        # Seit 2026-11-02 liest `_gesperrte_weg` auch die HANA-Werkzeugnamen.
+        if isinstance(knoten, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "_SAP_HANA_TOOLS" for t in knoten.targets):
+            teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+            gefunden["hana"] = True
         for fname, schl in (("_ist_mcp_tool", "mcp_tool"), ("_mcp_freigegeben", "mcp_frei")):
             if isinstance(knoten, ast.FunctionDef) and knoten.name == fname:
                 teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))

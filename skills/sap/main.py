@@ -127,7 +127,9 @@ class _Base(BaseTool):
         tok = _AKTUELL.set(akt)
         try:
             res = await self._run(**kwargs)
-            if isinstance(res, str) and not res.startswith("❌") \
+            # "ℹ️" = Absage ohne Anmeldung (HANA nicht freigegeben) – kein Erfolg
+            # des Zugangs, darf also auch keinen Fehlerzaehler aufheben.
+            if isinstance(res, str) and not res.startswith(("❌", "ℹ️")) \
                     and akt.get("quelle") == sa.QUELLE_PERSOENLICH:
                 # Erfolg hebt einen laufenden Fehlerzaehler auf – das ist der
                 # Rueckweg aus dem Aussetzer ohne jeden Handgriff.
@@ -147,6 +149,24 @@ class _Base(BaseTool):
         akt = _AKTUELL.get() or {}
         c = akt.get("client") or _client()
         return c if c.configured else None
+
+    def _hana_absage(self, c: SapClient) -> str:
+        """Absage fuer die HANA-Werkzeuge, wenn HANA-SQL fuer diesen Zugang
+        nicht geht ("" = nutzbar).
+
+        ⚠ WARUM (ECHT 2026-11-02): ``_guard`` prueft nur den AKTIVEN Kanal. Bei
+        einem OData-Zugang liefen die HANA-Werkzeuge trotzdem los – gegen einen
+        leeren oder nie freigegebenen Host – und das Modell bekam einen
+        Verbindungs-/Zertifikatsfehler, den es als "HANA gesperrt" deutete und
+        sich merkte. Die Absage sagt deshalb, dass es KEIN Stoerfall ist und
+        welcher Weg bleibt."""
+        grund = c.hana.nicht_nutzbar_grund()
+        if not grund:
+            return ""
+        return ("ℹ️ %s Das ist eine feste Einstellung, kein Verbindungsfehler – "
+                "bitte nicht erneut versuchen und nicht als Stoerung melden. "
+                "Lesen ist ueber OData moeglich (sap_odata_services, "
+                "sap_odata_entity_sets, sap_odata_query)." % grund)
 
     def _not_configured(self) -> str:
         return ("SAP ist nicht konfiguriert. Entweder hinterlegt ein Administrator "
@@ -317,6 +337,9 @@ class SapSqlQueryTool(_Base):
         c = self._guard()
         if not c:
             return self._not_configured()
+        absage = self._hana_absage(c)
+        if absage:
+            return absage
         sql = (kwargs.get("sql") or "").strip()
         if not sql:
             return "sql ist erforderlich."
@@ -353,6 +376,9 @@ class SapListTablesTool(_Base):
         c = self._guard()
         if not c:
             return self._not_configured()
+        absage = self._hana_absage(c)
+        if absage:
+            return absage
         try:
             limit = max(1, min(int(kwargs.get("limit") or 200), 5000))
         except (TypeError, ValueError):
@@ -385,6 +411,9 @@ class SapDescribeTableTool(_Base):
         c = self._guard()
         if not c:
             return self._not_configured()
+        absage = self._hana_absage(c)
+        if absage:
+            return absage
         table = (kwargs.get("table") or "").strip()
         if not table:
             return "table ist erforderlich."

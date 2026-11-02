@@ -307,7 +307,15 @@ for meth, client in (("_connect_streamable_http", "streamablehttp_client"),
 # ── 8. Angebot an das Modell = was der Dispatch zulaesst (DEV 2026-10-25) ──
 print("\n8. _gesperrte_weg / _mcp_prompt_block (agent.py)")
 AGENT_SRC = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
+# `_SAP_HANA_TOOLS` aus dem ECHTEN Modul (seit 2026-11-02 liest `_gesperrte_weg`
+# es) – abgetippt waere es eine zweite Quelle.
+_hana_knoten = [k for k in ast.parse(AGENT_SRC).body if isinstance(k, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "_SAP_HANA_TOOLS" for t in k.targets)]
+if len(_hana_knoten) != 1:
+    print("ABBRUCH: _SAP_HANA_TOOLS nicht genau einmal in agent.py")
+    sys.exit(2)
 _ans = {"_MCP_TOOL_PREFIX": "mcp_"}
+exec(compile(ast.Module(body=_hana_knoten, type_ignores=[]), "agent", "exec"), _ans)
 _teile = [_funktion(AGENT_SRC, "_ist_mcp_tool"), _funktion(AGENT_SRC, "_mcp_freigegeben")]
 exec(compile(ast.Module(body=_teile, type_ignores=[]), "agent", "exec"), _ans)
 _klasse = ast.ClassDef(name="_A", bases=[], keywords=[], decorator_list=[], type_params=[],

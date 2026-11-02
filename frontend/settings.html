@@ -3174,6 +3174,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span>Nur-Lesen erzwingen (immer aktiv, nicht abschaltbar)</span>
                             </label>
                         </div>
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="checkbox" id="sap-hana-allowed">
+                                <span data-i18n="sap.hana_allowed">Direkten SQL-Zugriff auf die HANA-Datenbank zulassen</span>
+                            </label>
+                            <span class="kb-hint" data-i18n="sap.hana_allowed_hint">Aus: Abfragen laufen nur über OData bzw. RFC. Die KI bekommt die SQL-Werkzeuge gar nicht angeboten, und auch ein eigener SAP-Zugang kann HANA-SQL nicht benutzen.</span>
+                        </div>
 
                         <!-- OData-Felder -->
                         <div id="sap-group-odata" class="sap-conn-group">
@@ -5956,7 +5963,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=423"></script>
+    <script src="/static/js/i18n.js?v=424"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=34"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -5980,7 +5987,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/jira.js?v=28"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=3"></script>
-    <script src="/static/js/sap.js?v=7"></script>
+    <script src="/static/js/sap.js?v=8"></script>
     <script src="/static/js/vemas.js?v=5"></script>
     <script src="/static/js/email.js?v=8"></script>
     <script src="/static/js/short_tracks_admin.js?v=3"></script>

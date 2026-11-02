@@ -143,6 +143,14 @@
                     if ($('sap-hana-schema')) $('sap-hana-schema').value = c.hana_schema || '';
                     if ($('sap-hana-encrypt')) $('sap-hana-encrypt').checked = c.hana_encrypt !== false;
                     if ($('sap-hana-validate')) $('sap-hana-validate').checked = c.hana_ssl_validate !== false;
+                    // Freigabe HANA-SQL. Nie gesetzt = an, wenn HANA hier
+                    // eingerichtet ist – dieselbe Regel wie
+                    // backend/sap_client.hana_erlaubt (Waechter vergleicht beide).
+                    if ($('sap-hana-allowed')) {
+                        $('sap-hana-allowed').checked = (c.hana_allowed === undefined || c.hana_allowed === null || c.hana_allowed === '')
+                            ? (c.connection_type === 'hana' || !!String(c.hana_host || '').trim())
+                            : !!c.hana_allowed;
+                    }
                     // RFC
                     if ($('sap-rfc-ashost')) $('sap-rfc-ashost').value = c.rfc_ashost || '';
                     if ($('sap-rfc-sysnr')) $('sap-rfc-sysnr').value = c.rfc_sysnr || '';
@@ -218,6 +226,7 @@
                 hana_schema: val('sap-hana-schema'),
                 hana_encrypt: checked('sap-hana-encrypt'),
                 hana_ssl_validate: checked('sap-hana-validate'),
+                hana_allowed: checked('sap-hana-allowed'),
                 // RFC
                 rfc_ashost: val('sap-rfc-ashost'),
                 rfc_sysnr: val('sap-rfc-sysnr'),
@@ -234,6 +243,13 @@
         },
 
         save: function () {
+            // Ein Sammelzugang ueber HANA-SQL bei gesperrtem SQL-Zugriff waere
+            // gespeichert und danach "nicht konfiguriert" – lieber gleich sagen.
+            if (val('sap-conn-type') === 'hana' && !checked('sap-hana-allowed')) {
+                status('✗ ' + (window.t ? window.t('sap.hana_allowed_conflict')
+                    : 'Der Verbindungstyp HANA-SQL passt nicht zu „SQL-Zugriff nicht zulassen“.'), 'error');
+                return;
+            }
             status(window.t ? window.t('confluence.saving') : 'Speichere…');
             fetch('/api/skills/sap/config', {
                 method: 'POST',

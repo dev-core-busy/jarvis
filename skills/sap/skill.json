@@ -115,6 +115,11 @@
             "label": "HANA-Serverzertifikat pruefen",
             "default": true
         },
+        "hana_allowed": {
+            "type": "boolean",
+            "label": "Direkten SQL-Zugriff auf HANA zulassen",
+            "description": "Aus = HANA-SQL ist gesperrt: die SQL-Werkzeuge werden der KI nicht angeboten und auch persoenliche Zugaenge koennen HANA nicht benutzen. Nicht gesetzt = an, sofern hier ein HANA-Host oder der Kanal hana eingetragen ist."
+        },
         "rfc_ashost": {
             "type": "string",
             "label": "RFC Application Server (ashost)",

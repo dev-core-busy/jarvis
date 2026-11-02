@@ -13805,7 +13805,8 @@ async def sap_sql_api(request: Request, user: str = Depends(require_sap_access))
     from backend.sap_client import SapError
     c = _sap_client(user)
     if not c.hana.configured:
-        return JSONResponse({"ok": False, "error": "HANA nicht konfiguriert."}, status_code=400)
+        return JSONResponse({"ok": False, "error": c.hana.nicht_nutzbar_grund()
+                             or "HANA nicht konfiguriert."}, status_code=400)
     try:
         body = await _json_objekt(request)
     except Exception:
@@ -13834,7 +13835,8 @@ async def sap_tables_api(schema: str = "", limit: int = 200,
     from backend.sap_client import SapError
     c = _sap_client(user)
     if not c.hana.configured:
-        return JSONResponse({"ok": False, "error": "HANA nicht konfiguriert."}, status_code=400)
+        return JSONResponse({"ok": False, "error": c.hana.nicht_nutzbar_grund()
+                             or "HANA nicht konfiguriert."}, status_code=400)
     try:
         limit = max(1, min(int(limit), 5000))
     except (TypeError, ValueError):
@@ -13908,6 +13910,9 @@ async def sap_portal_status(user: str = Depends(require_sap_access)):
         "product": c.product,
         "odata": bool(c.odata.configured),
         "hana": bool(c.hana.configured),
+        # Darf ein eigener Zugang HANA-SQL waehlen? (Administrator-Freigabe;
+        # die Oberflaeche blendet die Zugangsart sonst aus.)
+        "hana_erlaubt": bool(c.hana.erlaubt),
         "rfc": bool(c.rfc.configured),
         "quelle": z.get("quelle") or "sammel",
         "hinweis": z.get("hinweis") or "",

@@ -93,6 +93,39 @@ def get_sap_config() -> dict:
         return {}
 
 
+# ── Freigabe des HANA-SQL-Kanals (Administrator) ─────────────────────────────
+#
+# ⚠ WARUM (ECHT 2026-11-02): eine SAP-Analyse meldete "HANA-SQL gesperrt
+# (SSL-Fehler)". Der Administrator hatte HANA nie eingerichtet – der Host stand
+# in einem PERSOENLICHEN Zugang (Kanal OData, HANA-Felder zusaetzlich gefuellt).
+# Die HANA-Werkzeuge pruefen nur "irgendein Kanal ist eingerichtet", griffen
+# also auf diesen Host zu, liefen in die Zertifikatspruefung, und das Modell
+# legte den Fehler als "gelernte Tatsache" ins Gedaechtnis. Direktes SQL auf
+# die Datenbank ist dort nicht gestattet – also gehoert der Kanal abschaltbar,
+# und zwar an EINER Stelle, die jeder Zugang (Sammel- wie persoenlicher) liest.
+#
+# Vorgabe, wenn der Administrator den Schalter nie gesetzt hat: AN nur dann,
+# wenn er selbst HANA eingerichtet hat (Kanal "hana" oder ein HANA-Host). Ein
+# bestehender HANA-Betrieb laeuft so ohne Handgriff weiter, und wo der
+# Administrator HANA nie vorgesehen hat, kann ein persoenlicher Zugang es nicht
+# still einfuehren (fail-closed, "leer = niemand").
+HANA_GESPERRT_TEXT = ("HANA-SQL (direkter SQL-Zugriff auf die Datenbank) ist "
+                      "vom Administrator nicht freigegeben.")
+
+
+def hana_erlaubt(admin_cfg: dict | None = None) -> bool:
+    """Darf der HANA-SQL-Kanal ueberhaupt benutzt werden? Entscheidet allein
+    die Administrator-Konfiguration – nie ein persoenlicher Zugang."""
+    c = get_sap_config() if admin_cfg is None else (admin_cfg or {})
+    wert = c.get("hana_allowed")
+    if wert is None or wert == "":
+        return ((c.get("connection_type") or "").strip().lower() == "hana"
+                or bool((c.get("hana_host") or "").strip()))
+    if isinstance(wert, str):
+        return wert.strip().lower() in ("1", "true", "ja", "yes", "on")
+    return bool(wert)
+
+
 class SapError(Exception):
     """Fehler bei einer SAP-Anfrage (mit optionalem HTTP-/DB-Status)."""
 
@@ -562,6 +595,11 @@ class _HanaClient:
 
     def __init__(self, cfg: dict):
         self.host = (cfg.get("hana_host") or "").strip()
+        # Freigabe durch den Administrator. Ein persoenlicher Zugang bekommt
+        # das Feld in ``sap_accounts._cfg_aus_zugang`` aus der Admin-
+        # Konfiguration gesetzt; fehlt es (Sammelzugang), gilt die Vorgabe
+        # aus ``hana_erlaubt`` fuer genau diese Konfiguration.
+        self.erlaubt = hana_erlaubt(cfg)
         try:
             self.port = int(cfg.get("hana_port") or 443)
         except (TypeError, ValueError):
@@ -599,10 +637,32 @@ class _HanaClient:
                 self.validate_cert = True
 
     @property
-    def configured(self) -> bool:
+    def eingerichtet(self) -> bool:
+        """Host und Benutzer stehen da – ohne Aussage ueber die Freigabe."""
         return bool(self.host and self.user)
 
+    @property
+    def configured(self) -> bool:
+        return bool(self.erlaubt and self.eingerichtet)
+
+    def nicht_nutzbar_grund(self) -> str:
+        """Klartext, warum HANA hier nicht geht ("" = nutzbar).
+
+        Fuer das Modell UND den Benutzer geschrieben: es soll nicht weiter
+        probieren, sondern OData benutzen bzw. den Grund nennen."""
+        if not self.erlaubt:
+            return HANA_GESPERRT_TEXT
+        if not self.eingerichtet:
+            return ("HANA-SQL ist fuer diesen SAP-Zugang nicht eingerichtet "
+                    "(kein HANA-Host/-Benutzer hinterlegt).")
+        return ""
+
     def _connect(self):
+        # Harte Schranke unabhaengig vom Werkzeugangebot: auch ein Aufrufer,
+        # der ``configured`` nicht prueft, erreicht die Datenbank nicht.
+        grund = self.nicht_nutzbar_grund()
+        if grund:
+            raise SapError(0, grund)
         try:
             from hdbcli import dbapi
         except ImportError:
@@ -628,7 +688,16 @@ class _HanaClient:
                 **extra,
             )
         except Exception as e:  # dbapi.Error u.a.
-            raise SapError(0, "HANA-Verbindung fehlgeschlagen: %s" % e)
+            text = "HANA-Verbindung fehlgeschlagen: %s" % e
+            if "certificate" in str(e).lower():
+                # Kein "gesperrt": der Server ist erreichbar, nur seinem
+                # Zertifikat wird (noch) nicht vertraut. Der Weg dazu steht
+                # im SAP-Bereich bzw. in den Einstellungen.
+                text += ("\nHinweis: Das Serverzertifikat der HANA-Datenbank wird "
+                         "nicht anerkannt. Es laesst sich unter 'Mein SAP-Zugang' "
+                         "(bzw. vom Administrator unter Einstellungen → SAP) "
+                         "pruefen und bestaetigen.")
+            raise SapError(0, text)
         return conn
 
     def run_select(self, sql: str, max_rows: int = 500) -> dict:

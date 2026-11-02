@@ -561,6 +561,11 @@ def _ist_mcp_tool(tool, name: str) -> bool:
     return bool(getattr(tool, "ist_mcp", False)) or name.startswith(_MCP_TOOL_PREFIX)
 
 
+# Die Werkzeuge des HANA-SQL-Kanals (skills/sap/main.py) – fallen aus dem
+# Angebot, wenn der Administrator HANA-SQL nicht freigegeben hat.
+_SAP_HANA_TOOLS = frozenset({"sap_sql_query", "sap_list_tables", "sap_describe_table"})
+
+
 def _mcp_freigegeben(tool, benutzer: str) -> bool:
     """Ist dieses MCP-Werkzeug fuer diesen Benutzer freigegeben? (kein Admin-Bypass)
 
@@ -1988,6 +1993,20 @@ KRITISCH – Ausfuehrungs-Regeln:
         sap_ok = getattr(self, '_current_user_sap', True)
         vemas_ok = getattr(self, '_current_user_vemas', True)
         uname = self.actor_name()
+        # HANA-SQL: hat der Administrator den Kanal nicht freigegeben, sind die
+        # drei SQL-Werkzeuge nur ein Irrweg (ECHT 2026-11-02: "HANA-SQL gesperrt
+        # (SSL-Fehler)" in einer Analyse, als Fakt ins Gedaechtnis gelernt).
+        # Harte Schranke bleibt ``_HanaClient._connect``. Fail-open nur fuer
+        # das ANGEBOT: ist die Freigabe nicht lesbar, bleibt es beim alten
+        # Angebot, und die Schranke im Client entscheidet.
+        hana_ok = True
+        if sap_ok and any(getattr(t, "name", "") in _SAP_HANA_TOOLS for t in tools or []):
+            try:
+                from backend.sap_client import hana_erlaubt
+                hana_ok = hana_erlaubt()
+            except Exception as e:  # noqa: BLE001
+                print(f"[AGENT] HANA-Freigabe nicht lesbar ({e}) – Angebot unveraendert",
+                      flush=True)
         # Die Freigabe haengt am SERVER, nicht am Werkzeug: ein Urteil je
         # server_id genuegt (Code-Review 2026-10-25 – bei vielen Werkzeugen sonst
         # dieselbe Pruefung hundertfach je Schritt). Dasselbe Praedikat wie im
@@ -1997,6 +2016,8 @@ KRITISCH – Ausfuehrungs-Regeln:
         for t in tools or []:
             name = getattr(t, "name", "")
             if name.startswith("sap_") and not sap_ok:
+                continue
+            if name in _SAP_HANA_TOOLS and not hana_ok:
                 continue
             if name.startswith("vemas_") and not vemas_ok:
                 continue

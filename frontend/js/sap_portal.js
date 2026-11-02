@@ -116,6 +116,7 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 _status = d;
+                accHanaFreigabe();
                 var el = $('sp-conn'); if (!el) return;
                 if (!d) { el.textContent = ''; return; }
                 accRenderState();
@@ -913,6 +914,25 @@
         el.className = 'sp-note' + (kind === 'error' ? ' is-error' : kind === 'ok' ? ' is-ok' : '');
     }
 
+    // HANA-SQL nur anbieten, wenn der Administrator es freigegeben hat. Der
+    // Server lehnt einen eigenen HANA-Zugang ohnehin ab (sap_accounts.speichern)
+    // – hier sieht der Benutzer es, BEVOR er die Felder ausfuellt. Ein schon
+    // gespeicherter HANA-Zugang bleibt waehlbar sichtbar, sonst stuende das
+    // Feld still auf "kein eigener Zugang"; er bekommt dann den Hinweis.
+    function accHanaFreigabe() {
+        var sel = $('sp-acc-type'); if (!sel) return;
+        var gesperrt = !!(_status && _status.hana_erlaubt === false);
+        for (var i = 0; i < sel.options.length; i++) {
+            var o = sel.options[i];
+            if (o.value !== 'hana') continue;
+            o.disabled = gesperrt && sel.value !== 'hana';
+            o.hidden = gesperrt && sel.value !== 'hana';
+        }
+        if (gesperrt && sel.value === 'hana') {
+            accNote(T('sap.acc_hana_gesperrt', 'HANA-SQL ist vom Administrator nicht freigegeben.'), 'error');
+        }
+    }
+
     function accApplyType(t) {
         ['odata', 'hana', 'rfc'].forEach(function (k) {
             var g = $('sp-acc-g-' + k);
@@ -1017,6 +1037,7 @@
                 if (!d || !d.ok || !d.account) return;
                 var a = _account = d.account;
                 if ($('sp-acc-type')) $('sp-acc-type').value = a.connection_type || '';
+                accHanaFreigabe();
                 if ($('sp-acc-aktiv')) $('sp-acc-aktiv').checked = a.aktiv !== false;
                 // OData
                 if ($('sp-acc-od-url')) $('sp-acc-od-url').value = a.odata_base_url || '';

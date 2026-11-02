@@ -57,7 +57,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from backend.sap_client import SapClient, SapError, get_sap_config
+from backend.sap_client import (HANA_GESPERRT_TEXT, SapClient, SapError,
+                                 get_sap_config, hana_erlaubt)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -657,6 +658,8 @@ def speichern(user: str, felder: dict) -> dict:
         if ct and ct not in KANAELE:
             raise SapKontoFehler("Zugangsart muss %s sein."
                                  % " / ".join(KANAELE))
+        if ct == "hana" and not hana_erlaubt(skill_config()):
+            raise SapKontoFehler(HANA_GESPERRT_TEXT + " Bitte OData oder RFC waehlen.")
         k["connection_type"] = ct
     if "auth_kind" in felder:
         ak = str(felder.get("auth_kind") or "").strip().lower()
@@ -813,6 +816,11 @@ def _cfg_aus_zugang(k: dict) -> dict:
         "verify_ssl": c.get("verify_ssl", True),
         "hana_encrypt": c.get("hana_encrypt", True),
         "hana_ssl_validate": c.get("hana_ssl_validate", True),
+        # Freigabe des HANA-SQL-Kanals: AUSDRUECKLICH aus der Admin-Konfiguration
+        # gesetzt. Fehlte das Feld, entschiede ``hana_erlaubt`` ueber DIESE
+        # Konfiguration – und die traegt den HANA-Host des Benutzers, haette
+        # die Vorgabe also selbst eingeschaltet.
+        "hana_allowed": hana_erlaubt(c),
         # Verankertes Serverzertifikat: EIGENER Anker vor dem des Administrators.
         # Der Rueckfall auf dessen Anker ist Absicht – wer denselben Server
         # benutzt, soll ihn nicht ein zweites Mal bestaetigen muessen. Ob ein
@@ -873,6 +881,10 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
                     "wird) – es gilt der gemeinsame Lesezugang. Kennwort unter "
                     "'Mein SAP-Zugang' pruefen und 'Verbindung testen' druecken."
                     % int(k.get("anmeldefehler", 0) or 0))
+            elif ((k.get("connection_type") or "").strip().lower() == "hana"
+                  and not hana_erlaubt(skill_config())):
+                hinweis = ("Dein persoenlicher SAP-Zugang benutzt HANA-SQL. %s "
+                           "Es gilt der gemeinsame Lesezugang." % HANA_GESPERRT_TEXT)
             elif not all(host_ok(h) for h in _hosts_im_zugang(k)):
                 # Die Freigabeliste kann sich NACH dem Speichern geaendert haben.
                 hinweis = ("Der Server deines persoenlichen SAP-Zugangs ist nicht "

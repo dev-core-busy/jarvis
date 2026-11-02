@@ -948,7 +948,7 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     // wird an einem SONDEN-Block gemessen, der einmal versteckt und einmal
     // sichtbar eingehaengt wird (sonst waere „nicht im Index" trivial wahr).
     const sondeHost = doc.getElementById('sec-sect-ad-body');
-    if (!sondeHost) { console.log('ABBRUCH: #sec-sect-ad-body fehlt'); process.exit(2); }
+    if (!sondeHost) { console.log('ABBRUCH: #sec-sect-ad-body fehlt'); bilanz = true; process.exit(2); }
     const sondeV = doc.createElement('details');
     sondeV.className = 'sec-sub';
     sondeV.setAttribute('data-sub', 'sonde-versteckt');

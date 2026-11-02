@@ -916,6 +916,7 @@
             if ($('jlarch-aktiv')) $('jlarch-aktiv').checked = st.aktiv === true;
             if ($('jlarch-start')) $('jlarch-start').value = st.start || '';
             if ($('jlarch-schwelle')) $('jlarch-schwelle').value = st.schwelle != null ? st.schwelle : 10;
+            if ($('jlarch-je-lauf')) $('jlarch-je-lauf').value = st.je_lauf != null ? st.je_lauf : 300;
             if ($('jlarch-cron')) $('jlarch-cron').value = st.cron || '';
             // Gewaehlt wird in Arbeitskopien; gespeichert erst mit "Speichern".
             // Ein Nachladen waehrend eines Laufs (alle 5 s) darf eine noch nicht
@@ -1171,11 +1172,13 @@
 
         _archivFormular: function () {
             var sw = parseInt(($('jlarch-schwelle') || {}).value, 10);
+            var jl = parseInt(($('jlarch-je-lauf') || {}).value, 10);
             return {
                 aktiv: !!($('jlarch-aktiv') && $('jlarch-aktiv').checked),
                 bereiche: this._larchBereiche.slice(),
                 start: ($('jlarch-start') || {}).value || '',
                 schwelle: isNaN(sw) ? 10 : sw,
+                je_lauf: isNaN(jl) ? 300 : jl,
                 cron: (($('jlarch-cron') || {}).value || '').trim(),
                 gruppen: this._larchGruppen.slice()
             };

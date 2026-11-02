@@ -39,7 +39,7 @@ def check(text, bedingung, info=""):
         print("  OK   %s" % text)
     else:
         _fail += 1
-        print("  FAIL %s%s" % (text, ("  [%s]" % info) if info else ""))
+        print("  FAIL %s%s" % (text, ("  [%s]" % (info,)) if info else ""))
 
 
 from backend import main as M                                      # noqa: E402
@@ -103,6 +103,7 @@ basis = dict(vor["einstellungen"])
 for name, aenderung in [("Bereich mit Anfuehrungszeichen", {"bereiche": ["PRJA", 'X" OR 1=1']}),
                         ("Bereiche als Text statt Liste", {"bereiche": "PRJA"}),
                         ("Schwelle 0", {"schwelle": 0}),
+                        ("Tickets je Lauf 0", {"je_lauf": 0}),
                         ("Cron-Ausdruck kaputt", {"cron": "jede Nacht"}),
                         ("Startdatum kaputt", {"start": "morgen"}),
                         ("Einschalten ohne Gruppe", {"aktiv": True, "gruppen": []})]:

@@ -74,6 +74,10 @@ PROBEN = [
      '        st["bereiche"] = [str(d["bereich"]).strip().upper()]\n', "        pass\n"),
     ("Dateikopf nennt nur den ersten Bereich", LA,
      "{', '.join(bb) or '-'}", "{bb[0] if bb else '-'}"),
+    ("Deckel je Lauf ignoriert die Einstellung", LA,
+     'set(stand["verarbeitet"]), _je_lauf(st))', 'set(stand["verarbeitet"]), JE_LAUF_VORGABE)'),
+    ("Tickets je Lauf ohne Obergrenze", LA,
+     "    if not 1 <= je_lauf <= JE_LAUF_MAX:\n", "    if not 1 <= je_lauf:\n"),
     ("privater Ordner fehlt in PRIVATE_DIRS", SB,
      '                "data/graph",\n', '                "data/graph")\n_X = (\n'),
 ]

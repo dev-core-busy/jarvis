@@ -747,9 +747,16 @@ check("die tote Sichtbarkeits-Funktion ist weg",
       (FRONT / "js" / "app.js").read_text(encoding="utf-8"),
       "eine Funktion ohne Bedienelement ist toter Code")
 # Der Block, auf den jetzt verwiesen wird, MUSS es geben – sonst nennt die
-# Oberflaeche ein Bedienelement, das niemand findet.
-check("der Editoren-Block, an dem es jetzt haengt, existiert",
-      'id="ad-knowledge-editors"' in st)
+# Oberflaeche ein Bedienelement, das niemand findet. Seit 2026-11-02 sind die
+# Einzellisten (``id="ad-knowledge-editors"``) entfallen; die Wissens-Editoren
+# sind eine Spalte der Tabelle "Berechtigungen zuweisen" und liegen im
+# Freigabe-Bestand von settings_ad.js.
+_rmx = (FRONT / "js" / "rechte_matrix.js").read_text(encoding="utf-8")
+_sad = (FRONT / "js" / "settings_ad.js").read_text(encoding="utf-8")
+check("die Wissens-Editoren, an denen es jetzt haengt, sind eine Spalte der Rechte-Tabelle",
+      re.search(r"sub:\s*'knowledge'.*key:\s*'rmx\.col_knowledge'", _rmx) is not None)
+check("und stehen im Freigabe-Bestand",
+      re.search(r"lesen:\s*'knowledge_editors'", _sad) is not None)
 
 app_js = (FRONT / "js" / "app.js").read_text(encoding="utf-8")
 # ⚠ DIESE PRUEFUNG STEHT HIER, WEIL DIE EINBINDUNG GEFEHLT HAT (2026-09-14):

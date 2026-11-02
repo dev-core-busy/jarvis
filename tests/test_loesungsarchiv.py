@@ -298,6 +298,15 @@ check("Einschalten ohne Wissensgruppe abgewiesen (mit Grund)",
 check("Ausgeschaltet darf unvollstaendig gespeichert werden",
       wirft(pr, {"aktiv": False}) is None)
 check("Vorgabe-Schwelle ist 10", pr({"aktiv": False})["schwelle"] == 10)
+check("Vorgabe Tickets je Lauf ist 300", pr({"aktiv": False})["je_lauf"] == 300)
+check("Tickets je Lauf wird uebernommen", pr({**gut, "je_lauf": 1200})["je_lauf"] == 1200)
+check("Tickets je Lauf 0 abgewiesen", isinstance(wirft(pr, {**gut, "je_lauf": 0}), la.ArchivFehler))
+check("Tickets je Lauf ueber Obergrenze abgewiesen",
+      isinstance(wirft(pr, {**gut, "je_lauf": la.JE_LAUF_MAX + 1}), la.ArchivFehler))
+check("Tickets je Lauf als Text abgewiesen", isinstance(wirft(pr, {**gut, "je_lauf": "viele"}), la.ArchivFehler))
+check("verbogene Datei: Deckel faellt auf die Vorgabe zurueck",
+      la._je_lauf({"je_lauf": "x"}) == la.JE_LAUF_VORGABE and la._je_lauf({"je_lauf": -5}) == la.JE_LAUF_VORGABE
+      and la._je_lauf({}) == la.JE_LAUF_VORGABE)
 
 cm = CronAttrappe()
 la.einstellungen_speichern({**gut, "schwelle": 3}, cron_manager=cm)
@@ -498,12 +507,13 @@ for i in range(8, 13):
     TICKETS[f"{BEREICH}-{i}"] = _ticket(f"{BEREICH}-{i}", f"Problem Nummer {i} Kalender",
                                         f"Kalender Fehler {i}", f"Loesung {i}")
     client.keys.append(f"{BEREICH}-{i}")
-alt_deckel = la.MAX_TICKETS_JE_LAUF
-la.MAX_TICKETS_JE_LAUF = 2
+# Der Deckel kommt aus der EINSTELLUNG (bis 2026-11-02 fest 300 im Code).
+_vor_deckel = la.einstellungen()
+la.einstellungen_speichern({**_vor_deckel, "je_lauf": 2}, cron_manager=CronAttrappe())
 try:
     erg6 = lauf(client, ProviderAttrappe())
 finally:
-    la.MAX_TICKETS_JE_LAUF = alt_deckel
+    la.einstellungen_speichern(_vor_deckel, cron_manager=CronAttrappe())
 check("nur 2 Tickets in diesem Lauf", erg6.get("neu", 0) + erg6.get("gleich", 0) == 2, erg6)
 check("offene Zahl wird genannt (3)", erg6.get("offen") == 3 and "3 Ticket(s) folgen" in erg6["grund"], erg6)
 

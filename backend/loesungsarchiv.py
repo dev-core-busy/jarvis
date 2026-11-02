@@ -47,9 +47,11 @@ und Graph erledigt der Index-Abgleich (verwaiste Eintraege).
 der Modellaufruf, bleibt es offen und kommt im naechsten Lauf wieder – sonst
 fehlte es fuer immer, und der Zaehler waere still zu klein.
 
-⚠ DECKEL JE LAUF (``MAX_TICKETS_JE_LAUF``). Der erste Lauf ueber einen grossen
-Zeitraum holt tausende Tickets; der Rest folgt in den naechsten Laeufen, die
-Oberflaeche nennt die offene Zahl.
+⚠ DECKEL JE LAUF (Einstellung ``je_lauf``, Vorgabe ``JE_LAUF_VORGABE``). Der
+erste Lauf ueber einen grossen Zeitraum holt tausende Tickets; der Rest folgt
+in den naechsten Laeufen, die Oberflaeche nennt die offene Zahl. Bis
+2026-11-02 war der Deckel fest 300 – einstellbar auf Wunsch des Betreibers,
+nach oben begrenzt durch ``JE_LAUF_MAX`` (je Ticket bis zu zwei Modellaufrufe).
 """
 from __future__ import annotations
 
@@ -68,7 +70,8 @@ AUFTRAG_LABEL = "Lösungsarchiv (Jira)"
 CRON_VORGABE = "30 2 * * *"
 SCHWELLE_VORGABE = 10
 SCHWELLE_MAX = 100000
-MAX_TICKETS_JE_LAUF = 300
+JE_LAUF_VORGABE = 300
+JE_LAUF_MAX = 100000
 SEITE = 50                       # Tickets je Suchabruf
 KANDIDATEN_SCHWELLE = 0.80       # e5-Kosinus, ab dem ein Eintrag Kandidat ist
 KANDIDATEN_MAX = 3
@@ -139,6 +142,7 @@ VORGABEN = {
     "bereiche": [],              # Jira-Projektschluessel, einer oder mehrere
     "start": "",                 # JJJJ-MM-TT; ab diesem Loesungsdatum
     "schwelle": SCHWELLE_VORGABE,
+    "je_lauf": JE_LAUF_VORGABE,  # Tickets je Lauf, der Rest folgt im naechsten
     "cron": CRON_VORGABE,
     "gruppen": [],
 }
@@ -157,6 +161,16 @@ def einstellungen() -> dict:
         st["bereiche"] = [str(d["bereich"]).strip().upper()]
     st["bereiche"] = [str(b) for b in (st.get("bereiche") or []) if _BEREICH_RE.match(str(b))]
     return st
+
+
+def _je_lauf(st: dict) -> int:
+    """Deckel je Lauf aus dem gespeicherten Stand – eine von Hand verbogene
+    Datei faellt auf die Vorgabe zurueck statt den Lauf zu kippen."""
+    try:
+        n = int(st.get("je_lauf"))
+    except (TypeError, ValueError):
+        return JE_LAUF_VORGABE
+    return n if 1 <= n <= JE_LAUF_MAX else JE_LAUF_VORGABE
 
 
 def einstellungen_pruefen(neu: dict) -> dict:
@@ -202,6 +216,14 @@ def einstellungen_pruefen(neu: dict) -> dict:
     if not 1 <= schwelle <= SCHWELLE_MAX:
         raise ArchivFehler(f"Der Schwellwert muss zwischen 1 und {SCHWELLE_MAX} liegen.")
     st["schwelle"] = schwelle
+
+    try:
+        je_lauf = int(neu.get("je_lauf", JE_LAUF_VORGABE))
+    except (TypeError, ValueError) as e:
+        raise ArchivFehler("Die Tickets je Lauf müssen eine ganze Zahl sein.") from e
+    if not 1 <= je_lauf <= JE_LAUF_MAX:
+        raise ArchivFehler(f"Die Tickets je Lauf müssen zwischen 1 und {JE_LAUF_MAX} liegen.")
+    st["je_lauf"] = je_lauf
 
     cron = " ".join(str(neu.get("cron") or CRON_VORGABE).split())
     try:
@@ -768,7 +790,7 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
 
     neu, offen = await asyncio.to_thread(
         offene_tickets, client, st["bereiche"], st["start"],
-        set(stand["verarbeitet"]), MAX_TICKETS_JE_LAUF)
+        set(stand["verarbeitet"]), _je_lauf(st))
     _lauf_info["gesamt"] = len(neu)
 
     zahl = {"neu": 0, "gleich": 0, "irrelevant": 0, "fehler": 0}

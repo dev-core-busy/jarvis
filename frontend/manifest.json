@@ -1,7 +1,7 @@
 {
   "name": "Jarvis AI Agent",
   "short_name": "Jarvis",
-  "description": "Autonomer KI-Agent mit Desktop-Steuerung und WhatsApp-Integration",
+  "description": "KI-Chatbot mit Desktop-Steuerung und WhatsApp-Integration",
   "start_url": "/chat",
   "display": "standalone",
   "background_color": "#0d1117",

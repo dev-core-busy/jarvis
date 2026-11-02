@@ -1,6 +1,6 @@
 # Jarvis Projektinfo
 
-Jarvis ist ein autonomer KI-Agent fuer Linux-Systeme mit modularem Skill-System und WhatsApp-Integration.
+Jarvis ist ein KI-Chatbot mit enormem Funktionsumfang fuer Linux-Systeme, mit modularem Skill-System und WhatsApp-Integration. Autonom arbeitet er erst mit dem Skill Agent Autonomy Kit.
 
 ## Server
 - Server-IP: 10.0.0.1

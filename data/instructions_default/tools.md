@@ -47,5 +47,5 @@
 
 ## spawn_agent (nur privilegierte lokale Benutzer – für Netzwerk-Benutzer gesperrt)
 - Für parallelisierbare Teilaufgaben: Sub-Agents spawnen
-- Sub-Agents sind vollständig autonom – kein Micromanagement
+- Sub-Agents arbeiten ihre Teilaufgabe ohne Rückfragen ab – kein Micromanagement
 - Label beschreibend wählen (z.B. "deploy-backend", "test-api")

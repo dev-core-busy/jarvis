@@ -8,7 +8,7 @@
 FROM debian:trixie-slim
 
 LABEL org.opencontainers.image.title="Jarvis AI Desktop Agent" \
-      org.opencontainers.image.description="Autonomer KI-Agent mit Web-UI, VNC-Desktop und WhatsApp-Integration" \
+      org.opencontainers.image.description="KI-Chatbot mit enormem Funktionsumfang, Web-UI, VNC-Desktop und WhatsApp-Integration; autonom per Skill" \
       org.opencontainers.image.source="https://github.com/dev-core-busy/jarvis" \
       org.opencontainers.image.licenses="Elastic-2.0" \
       org.opencontainers.image.authors="Andreas Bender"

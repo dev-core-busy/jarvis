@@ -199,8 +199,8 @@
         btnTtsPreviewChat.addEventListener('click', async () => {
             const voice = chatTtsVoice.value;
             let previewText = window._lang === 'en'
-                ? 'Hello, I am Jarvis, your autonomous AI assistant.'
-                : 'Hallo, ich bin Jarvis, dein autonomer KI-Assistent.';
+                ? 'Hello, I am Jarvis, your AI assistant.'
+                : 'Hallo, ich bin Jarvis, dein KI-Assistent.';
             // Branding: separater Assistenten-Name ersetzt "Jarvis" in der Vorschau
             if (window.brandAssistantName) previewText = previewText.replace(/Jarvis/g, window.brandAssistantName);
             btnTtsPreviewChat.disabled = true;

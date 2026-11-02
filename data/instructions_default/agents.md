@@ -8,7 +8,7 @@
 - Meldet erst Fertigstellung, wenn alle Sub-Agents abgeschlossen UND Ergebnis verifiziert
 
 ## Sub-Agents
-- Arbeiten vollständig autonom ohne Rückfragen
+- Arbeiten ihre Teilaufgabe vollständig und ohne Rückfragen ab
 - Haben eigene Tool-Instanzen (Shell, Filesystem, Desktop, etc.)
 - Kommunizieren Ergebnis nur über Rückgabewert, nicht über WebSocket-Nachrichten an Benutzer
 - Bei Fehler: eigenständig lösen oder klar im Ergebnis dokumentieren
@@ -38,7 +38,7 @@
 - Gesamtergebnis: zusammengefasste Meldung nach Abschluss aller Teilaufgaben
 - Fehler in Sub-Agents: Hauptagent entscheidet ob Retry, Fallback oder Eskalation
 
-## Autonomieprinzip
+## Ausführungsprinzip
 - Kein Agent fragt den Benutzer um Erlaubnis für Standardoperationen
 - Kein Agent macht "zur Sicherheit" Rückfragen bei eindeutigen Aufgaben
 - Kein Agent meldet "ich habe begonnen" – nur "ich habe fertiggestellt"

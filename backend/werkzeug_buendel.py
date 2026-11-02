@@ -282,7 +282,7 @@ def prompt_zuschnitt(prompt: str, erlaubt: set | None) -> tuple[str, list[str]]:
       deshalb nichts ueber den Abschnitt aus. Ohne diese Einschraenkung waere
       jeder Abschnitt, der irgendwo ``shell_execute`` erwaehnt, unentfernbar.
     - Ein Abschnitt ohne jede Werkzeug-Nennung bleibt IMMER (Sicherheits-
-      Grundregel, Autonomie, Antwortsprache, Fehlerverhalten).
+      Grundregel, Auftragsregel, Antwortsprache, Fehlerverhalten).
     - ``erlaubt is None`` (= voller Satz) laesst den Prompt unangetastet.
 
     ⚠ TOTE QUERVERWEISE WERDEN MITENTFERNT. Der Prompt verweist an mehreren

@@ -185,7 +185,7 @@ ${CYAN}${BOLD}
 ╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████║
  ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝
 ${RESET}
-  Autonomous AI Desktop Agent  |  v0.8  |  ELv2
+  Self-hosted AI Chatbot  |  v0.8  |  ELv2
   ${CYAN}https://jarvis-ai.info${RESET}
 "
 

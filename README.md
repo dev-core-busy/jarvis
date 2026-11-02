@@ -2,7 +2,7 @@
 
 # 🤖 Jarvis AI Desktop Agent
 
-**A self-hosted, autonomous AI agent for Linux — it plans, executes, and gets real work done.**
+**A self-hosted AI chatbot for Linux with a huge feature set — it plans, executes, and gets real work done when you ask it to. It only becomes autonomous through the `agent_autonomy_kit` skill.**
 
 [![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![AI Mouse](https://img.shields.io/badge/NEW-AI_Mouse_for_Windows-06b6d4)](#ai-mouse)
@@ -136,7 +136,7 @@ filter) are applied by the operator when setting up the server — see `deploy/s
 
 ## Overview
 
-Jarvis is a **self-hosted, autonomous AI agent** that runs on a Linux server. Give it a goal in plain language — through the web chat, the built-in **Support portal**, a **task pane inside Outlook or Excel**, or even **WhatsApp** — and it plans and executes: browsing the web, reading and writing files, running code, editing existing spreadsheets, generating Office documents & diagrams, answering email by rule, evaluating SAP data read-only, managing your calendar. Whenever you want, you can watch it work live on the desktop via an **optional VNC view**.
+Jarvis is a **self-hosted AI chatbot with a huge feature set** that runs on a Linux server. Give it a goal in plain language — through the web chat, the built-in **Support portal**, a **task pane inside Outlook or Excel**, or even **WhatsApp** — and it plans and executes: browsing the web, reading and writing files, running code, editing existing spreadsheets, generating Office documents & diagrams, answering email by rule, evaluating SAP data read-only, managing your calendar. Whenever you want, you can watch it work live on the desktop via an **optional VNC view**.
 
 ```
 "Find all emails from last week about Project Alpha, summarize them,
@@ -179,7 +179,7 @@ Switch between AI providers without restarting anything:
 Both native tool/function calling **and** prompt-based tool calling are supported — so even models without native tool support can use all of Jarvis's capabilities.
 
 ### 🤖 Multi-Agent System & Role Delegation
-The **main agent can spawn autonomous sub-agents** for parallel or background tasks. Each sub-agent runs independently, reports back in real-time, and appears in the sidebar. Complex multi-step workflows run in parallel without blocking the main conversation.
+The **main agent can spawn sub-agents** for parallel or background tasks. Each sub-agent runs independently, reports back in real-time, and appears in the sidebar. Complex multi-step workflows run in parallel without blocking the main conversation.
 
 On top of that, an admin can define **named role agents** — each with its own system prompt, tool subset, LLM profile, reasoning depth and step limit. The main agent gets a single `delegate(role, task)` tool, hands off a sub-task, **waits**, and continues with the result. A role can only ever *narrow* the caller's permissions, never widen them.
 
@@ -523,7 +523,7 @@ Attachments are transferred peer-to-peer through the server — Jarvis does **no
 
 ## Multi-Agent System
 
-Jarvis can spawn **autonomous sub-agents** that work in parallel with the main agent.
+Jarvis can spawn **sub-agents** that work in parallel with the main agent.
 
 ```python
 # In a task, the main agent can spawn sub-agents:
@@ -533,7 +533,7 @@ Jarvis can spawn **autonomous sub-agents** that work in parallel with the main a
 - Each sub-agent has access to all tools and skills
 - Sub-agents appear as cards in the sidebar (purple = sub-agent, green = main)
 - Real-time streaming output for every agent
-- Sub-agents are fully autonomous — no interruptions or confirmations
+- Sub-agents work through their sub-task without asking back — no interruptions
 
 This enables patterns like: *"Simultaneously research topic A and B, then merge the results."*
 

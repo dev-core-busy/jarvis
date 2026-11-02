@@ -238,7 +238,7 @@ check("Positivkontrolle: der SYSTEM_PROMPT wurde gefunden",
 # Werkzeug-Nennung bzw. in 16b - waeren sie in einem werkzeuggebundenen Block,
 # verschwaende mit dem Zuschnitt eine Sicherheitszusage.
 TRAGEND = ["SICHERHEITS-GRUNDREGEL", "UNTRUSTED_CONTEXT", "ANTWORTSPRACHE",
-           "JARVIS_DELIVER", "/tmp", "AUTONOMIE"]
+           "JARVIS_DELIVER", "/tmp", "AUFTRAEGE AUSFUEHREN"]
 for auftrag in ("generiere ein Bild einer Kuh", "erstelle eine PowerPoint",
                 "lies das Jira-Ticket NX-1", "schicke eine Mail",
                 "zeig die Umsaetze als Balkendiagramm"):

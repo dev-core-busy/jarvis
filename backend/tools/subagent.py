@@ -18,7 +18,7 @@ class SpawnAgentTool(BaseTool):
     def description(self) -> str:
         return (
             "Startet einen neuen Sub-Agent, der eine Teilaufgabe parallel bearbeitet. "
-            "Jeder Sub-Agent arbeitet VOLLSTAENDIG AUTONOM und fuehrt Code direkt aus. "
+            "Jeder Sub-Agent arbeitet seine Teilaufgabe OHNE RUECKFRAGEN ab und fuehrt Code direkt aus. "
             "WICHTIG: Gib die komplette Aufgabe im 'task'-Feld als klare Anweisung an. "
             "Wenn Code ausgefuehrt werden soll, schreibe den Code DIREKT ins 'task'-Feld, "
             "z.B.: 'Fuehre folgendes Python-Skript mit shell_execute aus: python3 -c \"print(42)\"'"

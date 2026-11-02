@@ -20,6 +20,8 @@ Geprueft:
   6. Schwelle erhoeht: veroeffentlichte Datei und Zuordnung verschwinden.
   7. Fehlerhafte Modellantwort: Ticket bleibt offen und kommt wieder.
   8. Deckel je Lauf: offene Zahl wird genannt.
+ 8d. Geaenderte Tickets: erneut ausgewertet, alte Zuordnung geloest, Eintrag
+     nur aus diesem Ticket ueberschrieben bzw. entfernt; unveraenderte nicht.
   9. Scheduler: Art in der Whitelist, Zweig VOR dem Agentenzweig (AST).
  10. Sandbox: privater Ordner in beiden Sperrlisten (AST).
 
@@ -38,8 +40,9 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import types
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -213,12 +216,19 @@ class JiraAttrappe:
     def __init__(self, keys):
         self.keys = list(keys)
         self.jqls = []
+        self.felder = []
+        self.updated: dict = {}       # Key -> Jira-"updated"; fehlt -> Feld fehlt
     def search(self, jql, limit=25, start=0, fields=None):
         self.jqls.append(jql)
+        self.felder.append(fields)
         seite = self.keys[start:start + limit]
+        def f(k):
+            d = {"resolutiondate": "2026-10-15T10:00:00.000+0200"}
+            if k in self.updated:
+                d["updated"] = self.updated[k]
+            return d
         return {"total": len(self.keys), "startAt": start,
-                "issues": [{"key": k, "fields": {"resolutiondate": "2026-10-15T10:00:00.000+0200"}}
-                           for k in seite]}
+                "issues": [{"key": k, "fields": f(k)} for k in seite]}
 
 
 GELADEN: list = []
@@ -602,6 +612,151 @@ check("der Kopf der Datei nennt beide Bereiche",
       pfad8.is_file() and f"Jira-Bereiche {BEREICH}, PRJB" in pfad8.read_text(), pfad8)
 check("der Stand fuehrt die Bereiche, nicht mehr den einzelnen", st8.get("bereiche") == ["PRJA", "PRJB"]
       and "bereich" not in st8, {k: st8.get(k) for k in ("bereich", "bereiche")})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+section("8d. Geaenderte Tickets werden erneut ausgewertet (2026-11-02)")
+def _stand():
+    return json.loads((la._wurzel() / "stand.json").read_text())
+def _iso(sek):
+    """Jira-Form: 2026-10-15T10:00:00.000+0000"""
+    return (datetime.fromtimestamp(sek, tz=timezone.utc)
+            .isoformat(timespec="milliseconds").replace("+00:00", "+0000"))
+def _analysiert(p):
+    out = []
+    for a in p.aufrufe:
+        if "AUFGABE: Ziehe" in a["text"]:
+            m = re.search(r"Ticket: (\S+)", a["text"])
+            out.append(m.group(1) if m else "?")
+    return out
+def _nach_titel(st, titel):
+    return [(i, e) for i, e in st["eintraege"].items() if e.get("titel") == titel]
+def _zaehler(st, titel):
+    """Zaehler des EINEN Eintrags mit diesem Titel; -1 bei keinem/mehreren –
+    eine Pruefung soll fehlschlagen, nicht werfen."""
+    t = _nach_titel(st, titel)
+    return int(t[0][1].get("zaehler") or 0) if len(t) == 1 else -1
+def _verarb(st, key):
+    return st.get("verarbeitet", {}).get(key) or {}
+DRUCKER = ("Drucker druckt nicht", "Druckerwarteschlange haengt nach Update",
+           "Druckerspooler neu gestartet, Warteschlange geleert – geloest")
+
+# a) Jira liefert "updated", aelter als die Auswertung -> nichts zu tun
+for k in client.keys:
+    client.updated[k] = _iso(time.time() - 86400)
+p_a = ProviderAttrappe()
+erg_a = lauf(client, p_a)
+check("die Suche holt 'updated' mit", "updated" in str(client.felder[-1]), client.felder[-1])
+check("(Positivkontrolle) Altbestand, in Jira aelter als die Auswertung: kein Modellaufruf",
+      p_a.aufrufe == [] and erg_a.get("erneut") == 0, (len(p_a.aufrufe), erg_a.get("grund")))
+
+# b) ein Ticket aus einem GETEILTEN Eintrag (VPN: PRJA-5 + PRJA-7) aendert sich
+#    so, dass es jetzt zum Drucker-Problem gehoert
+s0 = _stand()
+dr_vor = _zaehler(s0, "Drucker druckt nicht")
+n_vor = len(s0["eintraege"])
+TICKETS[f"{BEREICH}-5"] = _ticket(f"{BEREICH}-5", *DRUCKER)
+NEU1 = _iso(time.time() + 60)
+client.updated[f"{BEREICH}-5"] = NEU1
+p_b = ProviderAttrappe()
+erg_b = lauf(client, p_b)
+s1 = _stand()
+check("⚠ geaendertes Ticket wird erneut ausgewertet (nur dieses)",
+      _analysiert(p_b) == [f"{BEREICH}-5"], _analysiert(p_b))
+check("das Ergebnis nennt die erneute Auswertung",
+      erg_b.get("erneut") == 1 and "1 geändert und erneut ausgewertet" in erg_b.get("grund", ""),
+      erg_b.get("grund"))
+vpn_b = _nach_titel(s1, "VPN trennt Verbindung")
+check("⚠ aus der alten Zuordnung geloest: VPN zaehlt nur noch PRJA-7",
+      len(vpn_b) == 1 and vpn_b[0][1]["zaehler"] == 1
+      and [t["key"] for t in vpn_b[0][1]["tickets"]] == [f"{BEREICH}-7"],
+      [(e["zaehler"], [t["key"] for t in e["tickets"]]) for _, e in vpn_b])
+dr_b = _nach_titel(s1, "Drucker druckt nicht")
+check("neu zugeordnet: das Drucker-Problem zaehlt eins mehr",
+      len(dr_b) == 1 and dr_b[0][1]["zaehler"] == dr_vor + 1
+      and f"{BEREICH}-5" in [t["key"] for t in dr_b[0][1]["tickets"]], [e["zaehler"] for _, e in dr_b])
+check("kein zusaetzlicher Eintrag", len(s1["eintraege"]) == n_vor, (n_vor, len(s1["eintraege"])))
+check("gemerkt wird Jiras 'updated'", _verarb(s1, f"{BEREICH}-5").get("updated") == NEU1,
+      _verarb(s1, f"{BEREICH}-5"))
+
+# c) seitdem unveraendert -> nicht noch einmal
+p_c = ProviderAttrappe()
+lauf(client, p_c)
+check("⚠ seit der erneuten Auswertung unveraendert: kein Modellaufruf", p_c.aufrufe == [],
+      _analysiert(p_c))
+
+# d) Eintrag nur aus diesem Ticket (VPN, PRJA-7) – veroeffentlicht – neue Loesung
+la.einstellungen_speichern({**la.einstellungen(), "schwelle": 1}, cron_manager=CronAttrappe())
+lauf(client, ProviderAttrappe())
+s2 = _stand()
+_vpn2 = _nach_titel(s2, "VPN trennt Verbindung")
+if len(_vpn2) != 1:
+    print(f"  \033[31m✗\033[0m VPN-Eintrag nicht eindeutig ({len(_vpn2)}) – Folgepruefungen nicht deutbar")
+    print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL + 1}\033[0m"); sys.exit(1)
+vpn_id, vpn_e = _vpn2[0]
+vpn_datei = SAND / (vpn_e.get("rag_datei") or "-")
+check("(Positivkontrolle) der VPN-Eintrag ist veroeffentlicht", vpn_datei.is_file(), vpn_e.get("rag_datei"))
+TICKETS[f"{BEREICH}-7"] = _ticket(f"{BEREICH}-7", "VPN trennt Verbindung",
+                                  "VPN Verbindung bricht nach Minuten ab",
+                                  "Treiber des VPN Clients aktualisiert")
+client.updated[f"{BEREICH}-7"] = _iso(time.time() + 120)
+p_d = ProviderAttrappe()
+lauf(client, p_d)
+s3 = _stand()
+vpn_d = _nach_titel(s3, "VPN trennt Verbindung")
+check("(Positivkontrolle) PRJA-7 wurde erneut ausgewertet", _analysiert(p_d) == [f"{BEREICH}-7"],
+      _analysiert(p_d))
+check("⚠ Eintrag nur aus diesem Ticket wird ueberschrieben, nicht verdoppelt",
+      [i for i, _ in vpn_d] == [vpn_id] and vpn_d[0][1]["zaehler"] == 1, [(i, e["zaehler"]) for i, e in vpn_d])
+check("die alte Fassung wird nicht als Kandidat angeboten (findet sich nicht selbst)",
+      not any(f"[{vpn_id}]" in a["text"] for a in p_d.aufrufe))
+check("die neue Loesung steht im Stand und im Entwurf",
+      bool(vpn_d) and "Treiber" in vpn_d[0][1]["loesung"]
+      and "Treiber" in (la._wurzel() / "entwuerfe" / f"{vpn_id}.md").read_text())
+check("die veroeffentlichte Datei ist nachgezogen", vpn_datei.is_file() and "Treiber" in vpn_datei.read_text())
+
+# e) dasselbe Ticket traegt jetzt keine Loesung mehr -> Eintrag verschwindet
+TICKETS[f"{BEREICH}-7"] = _ticket(f"{BEREICH}-7", "Doppelt", "Duplikat", "nichts")
+client.updated[f"{BEREICH}-7"] = _iso(time.time() + 180)
+idx_vor = INDEX["laeufe"]
+erg_e = lauf(client, ProviderAttrappe())
+s4 = _stand()
+check("(Positivkontrolle) jetzt als ohne Loesung eingestuft",
+      erg_e.get("irrelevant") == 1 and _verarb(s4, f"{BEREICH}-7").get("eintrag") == "", erg_e.get("grund"))
+check("⚠ der Eintrag nur aus diesem Ticket verschwindet", vpn_id not in s4["eintraege"])
+check("seine veroeffentlichte Datei ist entfernt", not vpn_datei.exists())
+check("sein Entwurf ist entfernt", not (la._wurzel() / "entwuerfe" / f"{vpn_id}.md").exists())
+check("⚠ der Index wird fuer das Aufraeumen angestossen",
+      INDEX["laeufe"] > idx_vor and erg_e.get("entfernt", 0) >= 1, (INDEX, erg_e.get("entfernt")))
+
+# f) Ticket aus einem GETEILTEN Eintrag traegt keine Loesung mehr
+dr_f0 = _zaehler(s4, "Drucker druckt nicht")
+TICKETS[f"{BEREICH}-1"] = _ticket(f"{BEREICH}-1", "Doppelt", "Duplikat", "nichts")
+client.updated[f"{BEREICH}-1"] = _iso(time.time() + 240)
+lauf(client, ProviderAttrappe())
+dr_f = _nach_titel(_stand(), "Drucker druckt nicht")
+check("⚠ geteilter Eintrag bleibt, zaehlt aber eins weniger",
+      len(dr_f) == 1 and dr_f0 > 0 and dr_f[0][1]["zaehler"] == dr_f0 - 1
+      and f"{BEREICH}-1" not in [t["key"] for t in dr_f[0][1]["tickets"]], [e["zaehler"] for _, e in dr_f])
+
+# g) erneute Auswertung scheitert -> alte Zuordnung bleibt, naechster Lauf holt nach
+s5 = _stand()
+v5 = dict(_verarb(s5, f"{BEREICH}-2"))
+dr_g0 = _zaehler(s5, "Drucker druckt nicht")
+client.updated[f"{BEREICH}-2"] = _iso(time.time() + 300)
+p_g = ProviderAttrappe(); p_g.kaputt.add(f"{BEREICH}-2")
+erg_g = lauf(client, p_g)
+s6 = _stand()
+check("(Positivkontrolle) die Auswertung ist gescheitert", erg_g.get("fehler") == 1, erg_g.get("grund"))
+check("⚠ gescheitert: das Ticket bleibt in seiner alten Zuordnung",
+      dr_g0 > 0 and _zaehler(s6, "Drucker druckt nicht") == dr_g0
+      and bool(v5) and _verarb(s6, f"{BEREICH}-2") == v5, _verarb(s6, f"{BEREICH}-2"))
+p_g2 = ProviderAttrappe()
+lauf(client, p_g2)
+check("und der naechste Lauf holt es nach", _analysiert(p_g2) == [f"{BEREICH}-2"], _analysiert(p_g2))
+check("ohne doppelt zu zaehlen",
+      dr_g0 > 0 and _zaehler(_stand(), "Drucker druckt nicht") == dr_g0)
+la.einstellungen_speichern({**la.einstellungen(), "schwelle": 3}, cron_manager=CronAttrappe())
 
 
 # ════════════════════════════════════════════════════════════════════════════

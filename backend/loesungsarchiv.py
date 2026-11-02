@@ -52,6 +52,21 @@ erste Lauf ueber einen grossen Zeitraum holt tausende Tickets; der Rest folgt
 in den naechsten Laeufen, die Oberflaeche nennt die offene Zahl. Bis
 2026-11-02 war der Deckel fest 300 – einstellbar auf Wunsch des Betreibers,
 nach oben begrenzt durch ``JE_LAUF_MAX`` (je Ticket bis zu zwei Modellaufrufe).
+
+⚠ GEAENDERTE TICKETS KOMMEN WIEDER (seit 2026-11-02). Bis dahin galt ein
+Ticket nach der ersten Auswertung fuer immer als erledigt – ein spaeter
+nachgetragener Loesungsweg oder ein wieder geoeffnetes und neu geloestes
+Ticket kam nie im Archiv an, ein als "ohne Loesung" eingestuftes blieb es.
+Jetzt merkt sich der Stand je Ticket Jiras ``updated``; ist es in Jira neuer,
+wird das Ticket erneut ausgewertet (``geaendert``). Unveraenderte Tickets
+kosten weiterhin keinen Modellaufruf. Die alte Zuordnung wird dabei LOSGELOEST,
+bevor das Ticket neu einsortiert wird – sonst zaehlte es doppelt. Ein Eintrag,
+der nur aus diesem Ticket besteht, ist dessen alte Fassung: er wird
+ueberschrieben (oder verschwindet, wenn das Ticket jetzt einem anderen
+Problem zugeordnet wird oder keine Loesung mehr traegt).
+Altbestand ohne gemerktes ``updated``: verglichen wird mit dem Zeitpunkt der
+Auswertung (``wann``) – sonst liefe beim ersten Lauf nach dem Update der
+GANZE Bestand noch einmal durchs Modell.
 """
 from __future__ import annotations
 
@@ -545,25 +560,58 @@ def bereiche() -> list[dict]:
     return sorted(out, key=lambda p: p["key"])
 
 
-def offene_tickets(client, bereiche_: list, start: str, erledigt: set,
-                   maximal: int) -> tuple[list[dict], int]:
-    """(bis zu ``maximal`` noch nicht verarbeitete Tickets, Gesamtzahl offen).
+def _zeitpunkt(s) -> float | None:
+    """Jira-Zeitstempel (``2026-10-15T10:00:00.000+0200``) als Epoche, sonst None."""
+    try:
+        return datetime.fromisoformat(str(s or "").strip()).timestamp()
+    except (TypeError, ValueError):
+        return None
 
+
+def geaendert(v: dict, updated: str) -> bool:
+    """Ist ein verarbeitetes Ticket seit seiner Auswertung in Jira geaendert?
+
+    Ohne Jira-Zeitstempel oder bei unlesbarem Wert: NEIN – ein Formatwechsel
+    in Jira darf nicht den ganzen Bestand erneut durchs Modell schicken."""
+    neu = _zeitpunkt(updated)
+    if neu is None:
+        return False
+    alt = _zeitpunkt((v or {}).get("updated"))
+    if alt is None:
+        # Altbestand: gemerkt ist nur der Zeitpunkt der Auswertung.
+        try:
+            alt = float((v or {}).get("wann"))
+        except (TypeError, ValueError):
+            return False
+    return neu > alt + 1
+
+
+def offene_tickets(client, bereiche_: list, start: str, verarbeitet: dict,
+                   maximal: int) -> tuple[list[dict], int]:
+    """(bis zu ``maximal`` auszuwertende Tickets, Gesamtzahl offen).
+
+    Auszuwerten ist ein Ticket, das noch nie verarbeitet wurde ODER seit seiner
+    Auswertung in Jira geaendert wurde (``geaendert`` im Eintrag).
     Seitenweise ueber die GANZE Trefferliste – nur so stimmt die offene Zahl,
     und die Liste ist nach Loesungsdatum sortiert, die aeltesten kommen zuerst."""
     q = jql(bereiche_, start)
     neu, offen, start_at = [], 0, 0
     while True:
-        d = client.search(q, limit=SEITE, start=start_at, fields="key,resolutiondate")
+        d = client.search(q, limit=SEITE, start=start_at, fields="key,resolutiondate,updated")
         issues = d.get("issues") or []
         for it in issues:
             k = str(it.get("key") or "")
-            if not _KEY_RE.match(k) or k in erledigt:
+            if not _KEY_RE.match(k):
+                continue
+            f = it.get("fields") or {}
+            upd = str(f.get("updated") or "")
+            wieder = k in verarbeitet
+            if wieder and not geaendert(verarbeitet[k], upd):
                 continue
             offen += 1
             if len(neu) < maximal:
-                neu.append({"key": k, "geloest": str(((it.get("fields") or {})
-                                                      .get("resolutiondate")) or "")})
+                neu.append({"key": k, "geloest": str(f.get("resolutiondate") or ""),
+                            "updated": upd, "geaendert": wieder})
         start_at += len(issues)
         if not issues or start_at >= int(d.get("total") or 0):
             break
@@ -683,10 +731,45 @@ def _neue_id(eintraege: dict) -> str:
             return eid
 
 
+def _ticket_loesen(stand: dict, eid: str, key: str, weg: list | None) -> None:
+    """Ein Ticket aus einem Eintrag herausnehmen (erneute Auswertung). Bleibt
+    der Eintrag leer, verschwindet er samt Entwurf und veroeffentlichter Datei;
+    deren Pfad landet in ``weg``, damit der Lauf den Index aufraeumen laesst."""
+    e = stand["eintraege"].get(eid)
+    if e is None:
+        return
+    vorher = e.get("tickets") or []
+    rest = [t for t in vorher if t.get("key") != key]
+    if len(rest) == len(vorher):
+        return
+    if not rest:
+        datei = str(e.get("rag_datei") or "")
+        if datei:
+            _datei_weg(datei)
+            if weg is not None:
+                weg.append(datei)
+        try:
+            _entwurf_pfad(eid).unlink()
+        except FileNotFoundError:
+            pass
+        del stand["eintraege"][eid]
+        return
+    e["tickets"] = rest
+    e["zaehler"] = max(0, int(e.get("zaehler") or 0) - (len(vorher) - len(rest)))
+    e["aktualisiert"] = time.time()
+    _entwurf_schreiben(eid, e)
+
+
 async def ticket_verarbeiten(key: str, geloest: str, stand: dict, st: dict,
-                             provider, modell: str, vektoren, laden=None) -> str:
+                             provider, modell: str, vektoren, laden=None,
+                             updated: str = "", weg: list | None = None) -> str:
     """Ein Ticket: laden → analysieren → zuordnen. Rueckgabe: "neu" | "gleich" |
-    "irrelevant". Wirft bei Fehlern – dann bleibt das Ticket offen."""
+    "irrelevant". Wirft bei Fehlern – dann bleibt das Ticket offen (bzw. bei
+    einer erneuten Auswertung in seiner alten Zuordnung).
+
+    ⚠ Der Stand wird erst NACH allen Modellaufrufen veraendert: scheitert ein
+    Aufruf, darf ein geaendertes Ticket nicht schon aus seinem Eintrag
+    geloest sein."""
     from backend import jira_assist
     laden = laden or jira_assist.ticket_laden
     t = await laden(key, "")
@@ -701,27 +784,54 @@ async def ticket_verarbeiten(key: str, geloest: str, stand: dict, st: dict,
     if analyse is None:
         raise ArchivFehler(f"{key}: keine gültige Auswertung vom Modell")
 
+    eintraege = stand["eintraege"]
+    # Erneute Auswertung: wo stand das Ticket bisher? Besteht der Eintrag NUR
+    # aus ihm, ist er seine alte Fassung – als Kandidat faende er sich selbst.
+    alt_id = str((stand["verarbeitet"].get(key) or {}).get("eintrag") or "")
+    if alt_id not in eintraege:
+        alt_id = ""
+    alt_allein = bool(alt_id) and {x.get("key") for x in
+                                   eintraege[alt_id].get("tickets") or []} <= {key}
+
     jetzt = time.time()
+    merken = {"wann": jetzt, "updated": str(updated or "")}
     if not analyse["relevant"]:
-        stand["verarbeitet"][key] = {"eintrag": "", "wann": jetzt}
+        if alt_id:
+            _ticket_loesen(stand, alt_id, key, weg)
+        stand["verarbeitet"][key] = {"eintrag": "", **merken}
         return "irrelevant"
 
     ref = {"key": key, "link": str(t.get("link") or ""), "geloest": geloest[:10]}
-    eintraege = stand["eintraege"]
-    kand = kandidaten(analyse, eintraege, kodieren=vektoren)
+    pool = {i: e for i, e in eintraege.items() if not (alt_allein and i == alt_id)}
+    kand = kandidaten(analyse, pool, kodieren=vektoren)
     treffer = None
     if kand:
         roh = await _modell(provider, modell,
-                            auftrag_vergleich(analyse, [(i, eintraege[i]) for i in kand]))
+                            auftrag_vergleich(analyse, [(i, pool[i]) for i in kand]))
         treffer = pruefe_vergleich(json_aus(roh), kand)
+
+    # Ab hier keine Modellaufrufe mehr – jetzt darf der Stand sich aendern.
+    if alt_id and alt_id != treffer and not (alt_allein and not treffer):
+        _ticket_loesen(stand, alt_id, key, weg)
 
     if treffer:
         e = eintraege[treffer]
-        if key not in {x.get("key") for x in e.get("tickets", [])}:
-            e.setdefault("tickets", []).append(ref)
+        tickets = e.setdefault("tickets", [])
+        bisher = next((x for x in tickets if x.get("key") == key), None)
+        if bisher is None:
+            tickets.append(ref)
             e["zaehler"] = int(e.get("zaehler") or 0) + 1
+        else:
+            bisher.update(ref)
         e["aktualisiert"] = jetzt
         eid, art = treffer, "gleich"
+    elif alt_allein:
+        # Die alte Fassung wird ueberschrieben – Kennung und Ablage bleiben.
+        eid = alt_id
+        e = eintraege[eid]
+        e.update({k: analyse[k] for k in ("titel", "problem", "loesung", "schlagworte")})
+        e.update({"zaehler": 1, "tickets": [ref], "aktualisiert": jetzt})
+        art = "neu"
     else:
         eid = _neue_id(eintraege)
         e = {**{k: analyse[k] for k in ("titel", "problem", "loesung", "schlagworte")},
@@ -730,7 +840,7 @@ async def ticket_verarbeiten(key: str, geloest: str, stand: dict, st: dict,
         eintraege[eid] = e
         art = "neu"
     _entwurf_schreiben(eid, e)
-    stand["verarbeitet"][key] = {"eintrag": eid, "wann": jetzt}
+    stand["verarbeitet"][key] = {"eintrag": eid, **merken}
     return art
 
 
@@ -790,11 +900,12 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
 
     neu, offen = await asyncio.to_thread(
         offene_tickets, client, st["bereiche"], st["start"],
-        set(stand["verarbeitet"]), _je_lauf(st))
+        dict(stand["verarbeitet"]), _je_lauf(st))
     _lauf_info["gesamt"] = len(neu)
 
-    zahl = {"neu": 0, "gleich": 0, "irrelevant": 0, "fehler": 0}
+    zahl = {"neu": 0, "gleich": 0, "irrelevant": 0, "fehler": 0, "erneut": 0}
     fehler: list[str] = []
+    weg: list[str] = []             # beim Loesen entfernte, veroeffentlichte Dateien
     if neu:
         if provider is None:
             provider = await asyncio.to_thread(_provider)
@@ -803,8 +914,11 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
         for t in neu:
             try:
                 art = await ticket_verarbeiten(t["key"], t["geloest"], stand, st,
-                                               prov, modell, vektoren, laden)
+                                               prov, modell, vektoren, laden,
+                                               updated=t.get("updated", ""), weg=weg)
                 zahl[art] += 1
+                if t.get("geaendert"):
+                    zahl["erneut"] += 1
             except Exception as e:  # noqa: BLE001 – ein Ticket kippt nicht den Lauf
                 zahl["fehler"] += 1
                 if len(fehler) < 5:
@@ -816,6 +930,7 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
                 await asyncio.to_thread(_stand_speichern, stand)
 
     sch = await asyncio.to_thread(schranke, stand, st)
+    sch["entfernt"] += len(weg)
     with _STAND_SPERRE:
         await asyncio.to_thread(_stand_speichern, stand)
     idx = ""
@@ -823,7 +938,9 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
         idx = await asyncio.to_thread(index_und_graph or _index_und_graph)
 
     rest = max(0, offen - len(neu))
-    grund = (f"{len(neu)} Ticket(s) ausgewertet: {zahl['neu']} neu, {zahl['gleich']} "
+    erneut = (f" (davon {zahl['erneut']} geändert und erneut ausgewertet)"
+              if zahl["erneut"] else "")
+    grund = (f"{len(neu)} Ticket(s) ausgewertet{erneut}: {zahl['neu']} neu, {zahl['gleich']} "
              f"zugeordnet, {zahl['irrelevant']} ohne Lösung, {zahl['fehler']} Fehler · "
              f"Wissensdatenbank: {sch['veroeffentlicht']} neu, {sch['aktualisiert']} "
              f"aktualisiert, {sch['entfernt']} entfernt")

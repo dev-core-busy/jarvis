@@ -3847,25 +3847,90 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                     <div id="jlarch-bereich-fehler" class="sec-ssh-hinweis" style="display:none;"></div>
                                 </div>
+                                <!-- Werte als Tabelle wie KI & System -> System-Einstellungen (.systab,
+                                     2026-11-02). Anders als dort OHNE Speichern-Spalte: das Archiv
+                                     speichert alle Felder zusammen ueber den Knopf unten – ein Knopf
+                                     je Zeile haette die uebrigen Felder still mitgespeichert.
+                                     Die IDs jlarch-* sind unveraendert (jira.js verdrahtet sie);
+                                     "Details" klappt die Erlaeuterung auf (settings_bedienung.js). -->
                                 <div class="form-group">
-                                    <label for="jlarch-start" data-i18n="jlarch.start">Startzeitpunkt</label>
-                                    <input type="date" id="jlarch-start" class="config-input" style="width:200px;box-sizing:border-box;">
-                                    <p class="kb-hint" style="margin:4px 0 0;" data-i18n="jlarch.start_hint">Ausgewertet werden alle Tickets, die ab diesem Tag gelöst wurden – beim ersten Lauf rückwirkend, danach kommen die neu gelösten dazu.</p>
-                                </div>
-                                <div class="form-group">
-                                    <label for="jlarch-schwelle" data-i18n="jlarch.schwelle">Schwellwert (Vorkommen)</label>
-                                    <input type="number" id="jlarch-schwelle" class="config-input" min="1" max="100000" step="1" placeholder="10" style="width:140px;box-sizing:border-box;">
-                                    <p class="kb-hint" style="margin:4px 0 0;" data-i18n="jlarch.schwelle_hint">Ab wie vielen gleichartigen Tickets eine Lösung in die Wissensdatenbank wandert. Wird der Wert erhöht, verschwinden Lösungen darunter wieder aus der Wissenssuche.</p>
-                                </div>
-                                <div class="form-group">
-                                    <label for="jlarch-je-lauf" data-i18n="jlarch.je_lauf">Tickets je Lauf</label>
-                                    <input type="number" id="jlarch-je-lauf" class="config-input" min="1" max="100000" step="1" placeholder="300" style="width:140px;box-sizing:border-box;">
-                                    <p class="kb-hint" style="margin:4px 0 0;" data-i18n="jlarch.je_lauf_hint">Höchstens so viele Tickets werden in einem Lauf ausgewertet; der Rest folgt im nächsten Lauf. Ein höherer Wert verlängert den Lauf und erzeugt entsprechend mehr Modellaufrufe.</p>
-                                </div>
-                                <div class="form-group">
-                                    <label for="jlarch-cron" data-i18n="jlarch.cron">Zeitplan (Cron-Ausdruck)</label>
-                                    <input type="text" id="jlarch-cron" class="config-input" maxlength="100" placeholder="30 2 * * *" style="width:200px;box-sizing:border-box;font-family:var(--font-mono);">
-                                    <p class="kb-hint" style="margin:4px 0 0;" data-i18n="jlarch.cron_hint">Vorgabe: jede Nacht um 02:30. Der Auftrag erscheint auch unter Cron-Aufgaben.</p>
+                                    <div class="systab-wrap">
+                                    <table class="systab">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="profile.systab_col_name">Einstellung</th>
+                                                <th data-i18n="profile.systab_col_wert">Wert</th>
+                                                <th data-i18n="profile.systab_col_wirkung">Wirkung</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td>
+                                                    <h4 id="jlarch-start-titel" class="tuning-group-title" data-i18n="jlarch.start">Startzeitpunkt</h4>
+                                                </td>
+                                                <td>
+                                                    <input type="date" id="jlarch-start" aria-labelledby="jlarch-start-titel" class="systab-feld">
+                                                    <small class="systab-bereich" data-i18n="jlarch.start_bereich">Datum, nicht in der Zukunft</small>
+                                                </td>
+                                                <td>
+                                                    <span data-i18n="jlarch.start_wirkung">Ausgewertet werden die Tickets, die ab diesem Tag gelöst wurden.</span>
+                                                    <button type="button" class="systab-mehr" data-klick="systab-details" aria-expanded="false" data-i18n="profile.systab_details">Details</button>
+                                                </td>
+                                            </tr>
+                                            <tr class="systab-hint" hidden>
+                                                <td colspan="3"><small class="tab-note" data-i18n="jlarch.start_hint">Ausgewertet werden alle Tickets, die ab diesem Tag gelöst wurden – beim ersten Lauf rückwirkend, danach kommen die neu gelösten dazu. Wird ein schon ausgewertetes Ticket in Jira später geändert, wird es beim nächsten Lauf erneut ausgewertet und neu zugeordnet; unveränderte Tickets werden nicht noch einmal geprüft.</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    <h4 id="jlarch-schwelle-titel" class="tuning-group-title" data-i18n="jlarch.schwelle">Schwellwert (Vorkommen)</h4>
+                                                </td>
+                                                <td>
+                                                    <input type="number" id="jlarch-schwelle" aria-labelledby="jlarch-schwelle-titel" class="systab-feld systab-zahl" min="1" max="100000" step="1" placeholder="10">
+                                                    <small class="systab-bereich" data-i18n="jlarch.schwelle_bereich">1–100000 Tickets · Vorgabe 10</small>
+                                                </td>
+                                                <td>
+                                                    <span data-i18n="jlarch.schwelle_wirkung">Ab so vielen gleichartigen Tickets wandert eine Lösung in die Wissensdatenbank.</span>
+                                                    <button type="button" class="systab-mehr" data-klick="systab-details" aria-expanded="false" data-i18n="profile.systab_details">Details</button>
+                                                </td>
+                                            </tr>
+                                            <tr class="systab-hint" hidden>
+                                                <td colspan="3"><small class="tab-note" data-i18n="jlarch.schwelle_hint">Ab wie vielen gleichartigen Tickets eine Lösung in die Wissensdatenbank wandert. Wird der Wert erhöht, verschwinden Lösungen darunter wieder aus der Wissenssuche.</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    <h4 id="jlarch-je-lauf-titel" class="tuning-group-title" data-i18n="jlarch.je_lauf">Tickets je Lauf</h4>
+                                                </td>
+                                                <td>
+                                                    <input type="number" id="jlarch-je-lauf" aria-labelledby="jlarch-je-lauf-titel" class="systab-feld systab-zahl" min="1" max="100000" step="1" placeholder="300">
+                                                    <small class="systab-bereich" data-i18n="jlarch.je_lauf_bereich">1–100000 Tickets · Vorgabe 300</small>
+                                                </td>
+                                                <td>
+                                                    <span data-i18n="jlarch.je_lauf_wirkung">Höchstens so viele Tickets werden in einem Lauf ausgewertet, der Rest folgt im nächsten.</span>
+                                                    <button type="button" class="systab-mehr" data-klick="systab-details" aria-expanded="false" data-i18n="profile.systab_details">Details</button>
+                                                </td>
+                                            </tr>
+                                            <tr class="systab-hint" hidden>
+                                                <td colspan="3"><small class="tab-note" data-i18n="jlarch.je_lauf_hint">Höchstens so viele Tickets werden in einem Lauf ausgewertet; der Rest folgt im nächsten Lauf. Geänderte Tickets, die erneut ausgewertet werden, zählen mit. Ein höherer Wert verlängert den Lauf und erzeugt entsprechend mehr Modellaufrufe.</small></td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    <h4 id="jlarch-cron-titel" class="tuning-group-title" data-i18n="jlarch.cron">Zeitplan (Cron-Ausdruck)</h4>
+                                                </td>
+                                                <td>
+                                                    <input type="text" id="jlarch-cron" aria-labelledby="jlarch-cron-titel" class="systab-feld" maxlength="100" placeholder="30 2 * * *" style="font-family:var(--font-mono);width:160px;">
+                                                    <small class="systab-bereich" data-i18n="jlarch.cron_bereich">Vorgabe 30 2 * * * (02:30)</small>
+                                                </td>
+                                                <td>
+                                                    <span data-i18n="jlarch.cron_wirkung">Wann der Lauf startet.</span>
+                                                    <button type="button" class="systab-mehr" data-klick="systab-details" aria-expanded="false" data-i18n="profile.systab_details">Details</button>
+                                                </td>
+                                            </tr>
+                                            <tr class="systab-hint" hidden>
+                                                <td colspan="3"><small class="tab-note" data-i18n="jlarch.cron_hint">Vorgabe: jede Nacht um 02:30. Der Auftrag erscheint auch unter Cron-Aufgaben.</small></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                    </div>
                                 </div>
                                 <div class="form-group">
                                     <label data-i18n="jlarch.gruppen">Sichtbar für Wissensgruppen</label>
@@ -5891,7 +5956,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=422"></script>
+    <script src="/static/js/i18n.js?v=423"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=34"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->

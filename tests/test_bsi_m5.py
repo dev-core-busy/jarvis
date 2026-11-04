@@ -41,6 +41,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests" / "lib"))
+from aktivitaet_attrappe import aktivitaet_attrappe  # noqa: E402
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 sys.dont_write_bytecode = True
 
@@ -646,7 +648,7 @@ class _SM:
 
 ns = {"JSONResponse": Antwort, "Request": Anfrage, "Depends": lambda x: None,
       "require_local_auth": None, "_get_skill_manager": lambda: _SM(), "os": os,
-      "_update_env_google": lambda a, b: None}
+      "_update_env_google": lambda a, b: None, "_aktivitaet": aktivitaet_attrappe()}
 gsc = schneide("get_skill_config", ns)
 usc = schneide("update_skill_config", ns)
 r = LOOP.run_until_complete(gsc("jira", user="chef"))
@@ -778,6 +780,17 @@ ns = {"config": CF, "JSONResponse": Antwort, "Request": Anfrage, "Depends": lamb
 for _hilfe in ("_mask_key", "_profil_oeffentlich", "_profil_anker"):
     schneide(_hilfe, ns)
 schneide("_profil_umleitung", ns)
+# Seit dem Aktivitaetsprotokoll (2026-11-04) protokolliert update_profile ueber
+# _aktivitaet mit _profil_details – Helfer und Konstante ECHT aus main.py.
+schneide("_profil_details", ns)
+_rf = next((st for st in MB.body if isinstance(st, ast.Assign)
+            and any(isinstance(z, ast.Name) and z.id == "_PROFIL_RECHTE_FELDER" for z in st.targets)),
+           None)
+if _rf is None:
+    print("ABBRUCH: _PROFIL_RECHTE_FELDER fehlt in main.py")
+    sys.exit(2)
+exec(compile(ast.Module(body=[_rf], type_ignores=[]), "<main:_PROFIL_RECHTE_FELDER>", "exec"), ns)
+ns["_aktivitaet"] = aktivitaet_attrappe()
 upd = schneide("update_profile", ns)
 for rumpf, was in (({"api_url": "https://angreifer.example/v1", "api_key": ""}, "Schluessel leer"),
                    ({"api_url": "https://angreifer.example/v1", "api_key": "***echt"}, "maskiert"),

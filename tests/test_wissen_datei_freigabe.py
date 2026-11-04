@@ -35,6 +35,7 @@ import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
 _sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
 # Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
 from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
+from aktivitaet_attrappe import aktivitaet_attrappe  # noqa: E402
 
 import ast
 import asyncio
@@ -201,10 +202,12 @@ for name in ("_wissen_absolut", "_wissen_wurzeln", "_wissen_unter_wurzel",
     k.decorator_list = []
     knoten.append(k)
 NS.setdefault("_json_objekt", _json_objekt_aus_main(NS.get("HTTPException")))
+NS.setdefault("_aktivitaet", aktivitaet_attrappe())
 exec(compile(ast.fix_missing_locations(ast.Module(body=knoten, type_ignores=[])), "<main>", "exec"), NS)
 # Der ECHTE _bounded_call – die Begrenzung ist Teil der Zusage.
 kns = {"threading": threading}
 kns.setdefault("_json_objekt", _json_objekt_aus_main(kns.get("HTTPException")))
+kns.setdefault("_aktivitaet", aktivitaet_attrappe())
 exec(compile(ast.fix_missing_locations(ast.Module(body=[KFN["_bounded_call"]], type_ignores=[])),
              "<knowledge>", "exec"), kns)
 kn._bounded_call = kns["_bounded_call"]

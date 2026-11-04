@@ -48,12 +48,31 @@ function c(name, bed, info) {
     else { fail++; console.log('  ✗ ' + name + (info ? '  [' + info + ']' : '')); }
 }
 
+// jsdom (nwsapi) kann einen gueltigen relativen `:has(+ …)`-Selektor nicht
+// auswerten und WIRFT dann in getComputedStyle – der Lauf brach seit
+// style.css:`.systab tr:has(+ .systab-hint…)` mit SyntaxError ab, ohne eine
+// einzige Seite zu messen. Der Fehler liegt im Pruefstand, nicht im CSS
+// (Browser koennen das). Entfernt werden NUR Regeln mit `:has(`; jede davon
+// wird gezaehlt, und eine Regel mit `max-width` darunter waere ein Abbruch,
+// weil genau die hier gemessen wird.
+let HAS_ENTFERNT = 0;
+function ohneHas(css) {
+    return css.replace(/[^{}]*:has\([^{]*\{[^}]*\}/g, (regel) => {
+        if (/max-width/.test(regel)) {
+            console.log('ABBRUCH: eine :has-Regel setzt max-width – nicht entfernbar: ' + regel.trim().slice(0, 120));
+            process.exit(2);
+        }
+        HAS_ENTFERNT++;
+        return '';
+    });
+}
+
 async function baue(datei, speicher) {
     const html = lies('frontend/' + datei + '.html');
     // Eingebundene Stylesheets inline einsetzen – jsdom laedt keine <link>s,
     // und die Deckelung von `.ja-main` steht in jira_addon.css.
     const mitCss = html.replace(/<link rel="stylesheet" href="\/static\/css\/([\w.-]+\.css)\?v=\d+">/g,
-        (m, f) => '<style>' + lies('frontend/css/' + f) + '</style>');
+        (m, f) => '<style>' + ohneHas(lies('frontend/css/' + f)) + '</style>');
     const d = new JSDOM(mitCss, { url: 'https://x/' + datei, runScripts: 'outside-only' });
     const w = d.window;
     if (speicher === 'gesperrt') {

@@ -87,7 +87,7 @@
         'audit-klappen': function () {
             klappe(this, function () { if (window.auditManager) window.auditManager.init(); });
         },
-        // Weitere Protokolle (journal, csp, updates, ssh, fixes, abh): EIN Eintrag,
+        // Weitere Protokolle (akt, journal, csp, updates, ssh, fixes, abh): EIN Eintrag,
         // der Abschnitt steht im data-plog-Attribut des Kopfes.
         'plog-klappen': function () {
             var name = this.getAttribute('data-plog');

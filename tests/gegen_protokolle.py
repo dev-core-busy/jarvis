@@ -52,7 +52,7 @@ PROBEN = [
      "        await asyncio.to_thread(update_protokoll.knopf, user, _vorher, result)\n",
      "        pass\n", PY),
     ("Update-Verlauf ohne Aufbewahrungsfrist", LR,
-     '                     ("update_verlauf", _prune_update_verlauf)):', '                     ):', PY),
+     '                     ("update_verlauf", _prune_update_verlauf),\n', '', PY),
     ("Traceback-Zeilen werden eigene Eintraege", PQ,
      '        elif aus:\n            aus[-1]["text"] += "\\n" + z\n',
      '        elif False:\n            aus[-1]["text"] += "\\n" + z\n', PY),

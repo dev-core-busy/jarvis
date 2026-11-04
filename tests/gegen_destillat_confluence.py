@@ -189,8 +189,11 @@ PROBEN = [
                      "    if False:"), W),
 
     ("Confluence-Zustand wird nicht mehr geprueft", MAIN, None,
-     _endpunkt_zeile("    aktiv, konfiguriert = _cfb_aktiv()",
-                     "    aktiv, konfiguriert = True, True"), W),
+     # Der Endpunkt fragt seit dem Umbau `_skill_active("confluence")` statt
+     # `_cfb_aktiv()` – die alte Zeile gab es nicht mehr, die Probe war still
+     # unbrauchbar ("SABOTAGE TRIFFT NICHT"), gefunden 2026-11-04.
+     _endpunkt_zeile('    if not _skill_active("confluence"):',
+                     "    if False:"), W),
 
     ("⚠ Bereichs-Sichtbarkeit wird nicht mehr geprueft", MAIN, None,
      _endpunkt_zeile(

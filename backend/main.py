@@ -1255,7 +1255,8 @@ class _AnfragePfadMiddleware:
 async def _sicherheits_protokoll_mw(request: Request, call_next):
     if request.method not in _AENDERNDE_METHODEN or not _routing_pfad(request).startswith("/api/"):
         return await call_next(request)
-    halter: dict = {}
+    # "ip" liest _aktivitaet() – der Endpunkt kennt die Anfrage oft nicht
+    halter: dict = {"ip": request.client.host if request.client else ""}
     marke = _admin_anfrage.set(halter)
     try:
         response = await call_next(request)
@@ -1284,6 +1285,39 @@ async def _sicherheits_protokoll_mw(request: Request, call_next):
 
 
 app.add_middleware(_AnfragePfadMiddleware)
+
+
+def _aktivitaet(user: str, bereich: str, aktion: str, objekt: str = "", *,
+                rechte: bool = False, **details) -> None:
+    """Aenderung an einem gemeinsamen Bestand festhalten (``backend/aktivitaet.py``).
+
+    Aufruf AM ENDPUNKT, NACH dem Erfolg, mit dem benannten Gegenstand – nur dort
+    ist bekannt, WELCHER Ordner/Auftrag/Skill gemeint ist. ``details`` traegt nie
+    Geheimnisse oder Inhalte (Kennwoerter, Tokens, Prompts, Dokumenttexte).
+
+    ``rechte=True``: die Aenderung verschiebt, WER WAS DARF (Editoren, Freigabe-
+    Links, Sync-Partner, WebDAV-Zugang …) – dann zusaetzlich als
+    ``rechte_aenderung`` ins Sicherheitsprotokoll. Was sich nur am BESTAND aendert,
+    gehoert nicht dorthin (Rauschen in der BSI-Kette).
+
+    Wirft nie: die Aenderung ist zu diesem Zeitpunkt schon geschehen, ein
+    Schreibfehler im Protokoll darf ihr Ergebnis nicht in einen 500er kippen.
+    """
+    halter = _admin_anfrage.get()
+    ip = (halter or {}).get("ip", "") if isinstance(halter, dict) else ""
+    try:
+        from backend import aktivitaet
+        aktivitaet.eintragen(user, bereich, aktion, objekt, ip=ip,
+                             rechte=True if rechte else None, **details)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Aktivitaet] {bereich}/{aktion} nicht protokollierbar: {e}", flush=True)
+    if rechte:
+        try:
+            _sicherheits_log.ereignis("rechte_aenderung", benutzer=str(user or ""), ip=ip,
+                                      ergebnis="ok", bereich=bereich, aktion=aktion,
+                                      objekt=str(objekt or "")[:300])
+        except Exception as e:  # noqa: BLE001
+            print(f"[Sicherheit] Rechteaenderung nicht protokollierbar: {e}", flush=True)
 
 
 def generate_token(username: str, ts: int | None = None, mit_2fa: bool = False,
@@ -11092,7 +11126,24 @@ async def create_profile(request: Request, user: str = Depends(require_local_aut
         print("[LLM] Zertifikat verankert von %s fuer Profil %s: %s:%s %s"
               % (user, profile["id"], eintrag["host"], eintrag["port"],
                  eintrag["fingerprint"]), flush=True)
+    _aktivitaet(user, "profile", "profil_angelegt", str(profile.get("name") or profile["id"]),
+                **_profil_details(profile["id"], body))
     return JSONResponse({"success": True, "profile": _profil_oeffentlich(profile)})
+
+
+# Felder eines Profils, die bestimmen, WER es benutzen darf (_may_use_profile)
+_PROFIL_RECHTE_FELDER = ("allowed_users", "allowed_group")
+
+
+def _profil_details(profile_id: str, body: dict) -> dict:
+    """Details fuers Aktivitaetsprotokoll: Feldnamen, Ziel und die Rechte-Felder
+    im Wortlaut (Konten/Gruppen sind keine Geheimnisse) – nie Schluessel."""
+    aus = {"profil": profile_id, "felder": sorted(body),
+           "anbieter": body.get("provider"), "modell": body.get("model")}
+    for f in _PROFIL_RECHTE_FELDER:
+        if f in body:
+            aus[f] = body.get(f)
+    return aus
 
 
 def _profil_umleitung(profile_id: str, body: dict) -> bool:
@@ -11154,6 +11205,11 @@ async def update_profile(profile_id: str, request: Request, user: str = Depends(
             config.set_profile_cert(profile_id, None)
             print("[LLM] Zertifikatsanker entfernt von %s fuer Profil %s"
                   % (user, profile_id), flush=True)
+        # Rechte: wer das Profil benutzen darf
+        _aktivitaet(user, "profile", "profil_geaendert",
+                    str(profile.get("name") or profile_id),
+                    rechte=any(f in body for f in _PROFIL_RECHTE_FELDER),
+                    **_profil_details(profile_id, body))
         return JSONResponse({"success": True, "profile": _profil_oeffentlich(profile)})
     return JSONResponse({"success": False, "error": "Profil nicht gefunden"}, status_code=404)
 
@@ -11161,7 +11217,10 @@ async def update_profile(profile_id: str, request: Request, user: str = Depends(
 @app.delete("/api/profiles/{profile_id}")
 async def delete_profile(profile_id: str, user: str = Depends(require_local_auth)):
     """Löscht ein Profil (mindestens eines muss bestehen bleiben)."""
+    vorher = next((p for p in config.profiles if p.get("id") == profile_id), {}) or {}
     if config.delete_profile(profile_id):
+        _aktivitaet(user, "profile", "profil_geloescht", str(vorher.get("name") or profile_id),
+                    profil=profile_id)
         return JSONResponse({"success": True})
     return JSONResponse({"success": False, "error": "Letztes Profil kann nicht gelöscht werden"}, status_code=400)
 
@@ -11245,6 +11304,7 @@ async def create_agent_role(request: Request, user: str = Depends(require_local_
     except ValueError as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
     _role_audit(user, "anlegen", rolle["id"])
+    _aktivitaet(user, "rollen", "rolle_angelegt", rolle["id"], name=rolle.get("name"))
     return JSONResponse({"success": True, "role": rolle})
 
 
@@ -11261,6 +11321,7 @@ async def update_agent_role(role_id: str, request: Request,
         code = 404 if "nicht gefunden" in str(e) else 400
         return JSONResponse({"success": False, "error": str(e)}, status_code=code)
     _role_audit(user, "aendern", rolle["id"])
+    _aktivitaet(user, "rollen", "rolle_geaendert", rolle["id"], felder=sorted(body))
     return JSONResponse({"success": True, "role": rolle})
 
 
@@ -11271,6 +11332,7 @@ async def delete_agent_role(role_id: str, user: str = Depends(require_local_auth
     if not agent_roles.loeschen(role_id):
         return JSONResponse({"success": False, "error": "Rolle nicht gefunden"}, status_code=404)
     _role_audit(user, "loeschen", role_id)
+    _aktivitaet(user, "rollen", "rolle_geloescht", role_id)
     return JSONResponse({"success": True})
 
 
@@ -11829,6 +11891,9 @@ async def llm_active_status(user: str = Depends(require_auth)):
 async def activate_profile(profile_id: str, user: str = Depends(require_local_auth)):
     """Setzt ein Profil als aktiv (Admin-Weg unter Einstellungen)."""
     if config.activate_profile(profile_id):
+        prof = next((p for p in config.profiles if p.get("id") == profile_id), {}) or {}
+        _aktivitaet(user, "profile", "profil_aktiviert", str(prof.get("name") or profile_id),
+                    profil=profile_id)
         return JSONResponse({"success": True})
     return JSONResponse({"success": False, "error": "Profil nicht gefunden"}, status_code=404)
 
@@ -12303,6 +12368,9 @@ async def enable_skill(name: str, user: str = Depends(require_local_auth)):
     sm = _get_skill_manager()
     result = await asyncio.to_thread(sm.enable_skill, name)
     _reload_agent_tools()
+    if isinstance(result, dict) and result.get("success") is not False:
+        _aktivitaet(user, "skills", "skill_eingeschaltet", name,
+                    installiert_nach=bool(result.get("installing")) or None)
     return JSONResponse(result)
 
 
@@ -12312,6 +12380,8 @@ async def disable_skill(name: str, user: str = Depends(require_local_auth)):
     sm = _get_skill_manager()
     success = sm.disable_skill(name)
     _reload_agent_tools()
+    if success:
+        _aktivitaet(user, "skills", "skill_ausgeschaltet", name)
     return JSONResponse({"success": success})
 
 
@@ -12322,6 +12392,8 @@ async def remove_skill(name: str, user: str = Depends(require_local_auth)):
     sm = _get_skill_manager()
     success = sm.remove_skill(name)
     _reload_agent_tools()
+    if success:
+        _aktivitaet(user, "skills", "skill_entfernt", name)
     return JSONResponse({"success": success})
 
 
@@ -12394,6 +12466,9 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
         if cid or csecret:
             _update_env_google(cid, csecret)
 
+    if success:
+        # Nur die FELDNAMEN – die Werte koennen Kennwoerter und Tokens sein
+        _aktivitaet(user, "skills", "skill_konfiguriert", name, felder=sorted(body))
     return JSONResponse({"success": success})
 
 
@@ -12413,7 +12488,10 @@ async def install_skill_deps(name: str, user: str = Depends(require_local_auth))
     ohne apt – und hätte genau diesen Fall nicht gelöst.
     """
     sm = _get_skill_manager()
-    return JSONResponse(sm.install_missing(name))
+    erg = sm.install_missing(name)
+    _aktivitaet(user, "skills", "abhaengigkeiten_nachinstalliert", name,
+                laeuft=bool((erg or {}).get("installing")) if isinstance(erg, dict) else None)
+    return JSONResponse(erg)
 
 
 @app.get("/api/skills/{name}/install-status")
@@ -12438,6 +12516,7 @@ async def purge_skill(name: str, request: Request, user: str = Depends(require_l
     sm = _get_skill_manager()
     report = await asyncio.to_thread(sm.purge_skill, name, remove_data)
     _reload_agent_tools()
+    _aktivitaet(user, "skills", "skill_deinstalliert", name, daten_geloescht=remove_data)
     return JSONResponse(report)
 
 
@@ -12449,6 +12528,7 @@ async def uninstall_skill(name: str, user: str = Depends(require_local_auth)):
     if success:
         _reload_agent_tools()
     if success:
+        _aktivitaet(user, "skills", "skill_geloescht", name)
         return JSONResponse({"success": True})
     return JSONResponse({"success": False, "error": "System-Skill oder nicht gefunden"}, status_code=400)
 
@@ -17920,6 +18000,11 @@ async def jira_assist_vorlage_speichern(
         )
     except jira_vorlagen.VorlagenFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    # Nur GEMEINSAME Vorlagen: eine persoenliche betrifft niemanden sonst
+    if bool((b or {}).get("global")):
+        _aktivitaet(user, "jira", "gemeinsame_vorlage_gespeichert",
+                    str((v or {}).get("name") or ""), vorlage=(v or {}).get("id"),
+                    art=(v or {}).get("art"), bereiche=(v or {}).get("bereiche") or None)
     return JSONResponse({"ok": True, "vorlage": v})
 
 
@@ -18189,7 +18274,13 @@ async def jira_assist_vorlage_loeschen(
     existiert, ist selbst eine Information.
     """
     from backend import jira_vorlagen  # noqa: PLC0415
-    if jira_vorlagen.loeschen(user, vid, _is_admin_user(user)):
+    admin = _is_admin_user(user)
+    gemeinsam = next((x for x in (jira_vorlagen.liste(user, admin).get("global") or [])
+                      if x.get("id") == vid), None)
+    if jira_vorlagen.loeschen(user, vid, admin):
+        if gemeinsam is not None:
+            _aktivitaet(user, "jira", "gemeinsame_vorlage_geloescht",
+                        str(gemeinsam.get("name") or vid), vorlage=vid)
         return JSONResponse({"ok": True})
     return JSONResponse({"ok": False, "error": "Vorlage nicht gefunden."},
                         status_code=404)
@@ -20729,6 +20820,8 @@ async def wissensgraph_einstellungen_schreiben(request: Request,
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     wgx.wecken()
+    _aktivitaet(user, "wissensgraph", "einstellungen_geaendert", "Wissensgraph",
+                felder=sorted(body) if isinstance(body, dict) else None)
     return JSONResponse({"ok": True, "einstellungen": st})
 
 
@@ -20769,6 +20862,8 @@ async def wissensgraph_neuaufbau(request: Request, user: str = Depends(require_l
     if not (await asyncio.to_thread(wgx.einstellungen, True))["aktiv"]:
         raise HTTPException(status_code=409, detail="Der Wissensgraph ist ausgeschaltet")
     erg = await asyncio.to_thread(wgx.abgleich, gruppen, ordner, bool(body.get("voll")))
+    _aktivitaet(user, "wissensgraph", "neuaufbau_gestartet", ordner or umfang,
+                gruppen=gruppen or None, voll=bool(body.get("voll")))
     wgx.nachlauf_fortsetzen()
     wgx.dauerlauf_starten()
     wgx.wecken()
@@ -20778,7 +20873,9 @@ async def wissensgraph_neuaufbau(request: Request, user: str = Depends(require_l
 @app.post("/api/wissensgraph/abbrechen")
 async def wissensgraph_abbrechen(user: str = Depends(require_local_auth)):
     from backend import wissensgraph_extraktion as wgx
-    return JSONResponse(await asyncio.to_thread(wgx.abbrechen))
+    erg = await asyncio.to_thread(wgx.abbrechen)
+    _aktivitaet(user, "wissensgraph", "lauf_abgebrochen", "Wissensgraph")
+    return JSONResponse(erg)
 
 
 @app.get("/wissensgraph")
@@ -20839,9 +20936,11 @@ async def wissensgraph_knoten_loeschen(kid: str, user: str = Depends(require_kno
     """Entitaet ausblenden – bleibt ueber jeden Neuaufbau geloescht."""
     from backend import wissensgraph as wg
     try:
-        return JSONResponse(await asyncio.to_thread(wg.knoten_loeschen, kid))
+        erg = await asyncio.to_thread(wg.knoten_loeschen, kid)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _aktivitaet(user, "wissensgraph", "begriff_ausgeblendet", kid)
+    return JSONResponse(erg)
 
 
 @app.get("/api/wissensgraph/pruefliste")
@@ -20865,11 +20964,13 @@ async def wissensgraph_zusammenfuehren(request: Request, user: str = Depends(req
         body = None
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Ungültiger Rumpf")
+    quelle, ziel = str(body.get("quelle") or ""), str(body.get("ziel") or "")
     try:
-        return JSONResponse(await asyncio.to_thread(
-            wg.zusammenfuehren, str(body.get("quelle") or ""), str(body.get("ziel") or "")))
+        erg = await asyncio.to_thread(wg.zusammenfuehren, quelle, ziel)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _aktivitaet(user, "wissensgraph", "begriffe_zusammengefuehrt", ziel, quelle=quelle)
+    return JSONResponse(erg)
 
 
 @app.post("/api/wissensgraph/trennen")
@@ -20883,11 +20984,13 @@ async def wissensgraph_trennen(request: Request, user: str = Depends(require_kno
         body = None
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Ungültiger Rumpf")
+    a, b = str(body.get("a") or ""), str(body.get("b") or "")
     try:
-        return JSONResponse(await asyncio.to_thread(
-            wg.trennen, str(body.get("a") or ""), str(body.get("b") or "")))
+        erg = await asyncio.to_thread(wg.trennen, a, b)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _aktivitaet(user, "wissensgraph", "begriffe_getrennt", a, getrennt_von=b)
+    return JSONResponse(erg)
 
 
 @app.get("/api/wissensgraph/widersprueche")
@@ -20936,6 +21039,7 @@ async def wissensgraph_wiki_erzeugen(kid: str, user: str = Depends(require_wisse
     erg = await wiki.seite_erzeugen(kid, provider, modell, wgx._drossel, wgx._chunks_lesen, st)
     if not erg.get("ok"):
         raise HTTPException(status_code=502, detail=erg.get("grund") or "Seite nicht erzeugt")
+    _aktivitaet(user, "wissensgraph", "wiki_erzeugt", kid)
     return JSONResponse(await asyncio.to_thread(wiki.seite_lesen, kid) or {})
 
 
@@ -21005,6 +21109,7 @@ async def reindex_knowledge(user: str = Depends(require_knowledge_editor)):
         except Exception:
             pass
     asyncio.create_task(_run_reindex())
+    _aktivitaet(user, "wissen", "neuindizierung_gestartet", "Wissensindex")
     return JSONResponse({"started": True})
 
 
@@ -21025,6 +21130,7 @@ async def restore_autoindex_job(user: str = Depends(require_local_auth)):
     from backend import rag_autoindex as _ai
     try:
         erg = await asyncio.to_thread(_ai.auftrag_wiederherstellen)
+        _aktivitaet(user, "cron", "auftrag_wiederhergestellt", "Wissensabgleich")
         return JSONResponse({"ok": True, "job": erg.get("job")})
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -21038,7 +21144,10 @@ async def cancel_reindex_knowledge(user: str = Depends(require_knowledge_editor)
     wenn gerade keine Indizierung läuft. Der Index bleibt nach einem Abbruch
     unvollständig – erst ein neuer Lauf stellt ihn wieder her."""
     from backend.tools.knowledge import cancel_reindex
-    return JSONResponse(cancel_reindex())
+    erg = cancel_reindex()
+    if erg.get("cancelled"):
+        _aktivitaet(user, "wissen", "neuindizierung_abgebrochen", "Wissensindex")
+    return JSONResponse(erg)
 
 
 @app.get("/api/knowledge/index_progress")
@@ -21072,6 +21181,9 @@ async def compact_learned_knowledge(user: str = Depends(require_knowledge_editor
     from backend.knowledge_compactor import compact_learned
     result = await compact_learned(trigger=f"manuell ({user})")
     status = 409 if result.get("error") == "Verdichtung läuft bereits" else (500 if result.get("error") else 200)
+    if status == 200:
+        _aktivitaet(user, "wissen", "gelerntes_verdichtet", "Gelerntes Wissen",
+                    dateien=result.get("files_in"), archiviert=result.get("archived"))
     return JSONResponse(result, status_code=status)
 
 
@@ -21095,6 +21207,7 @@ async def set_compact_config(request: Request, user: str = Depends(require_knowl
     cfg = dict(states.get("knowledge", {}).get("config", {}))
     cfg["auto_compact"] = auto
     config.save_skill_state("knowledge", {"config": cfg})
+    _aktivitaet(user, "wissen", "einstellung_geaendert", "Automatische Verdichtung", an=auto)
     return JSONResponse({"ok": True, "auto": auto})
 
 
@@ -21161,6 +21274,7 @@ async def delete_knowledge_file(request: Request, user: str = Depends(require_kn
         invalidate_files_cache()
     except Exception:
         pass
+    _aktivitaet(user, "wissen", "datei_geloescht", file_path)
     return JSONResponse({"ok": True, "deleted": file_path})
 
 
@@ -21250,6 +21364,9 @@ async def move_knowledge_files(request: Request, user: str = Depends(require_kno
             # z.B. Verschieben ueber Dateisystemgrenzen bei fehlenden Rechten
             errors.append({"path": src_rel, "error": f"Verschieben fehlgeschlagen: {e}"})
 
+    if moved:
+        _aktivitaet(user, "wissen", "dateien_verschoben", target_rel,
+                    dateien=[m["from"] for m in moved])
     return JSONResponse({"ok": not errors, "moved": moved, "errors": errors})
 
 
@@ -21319,6 +21436,7 @@ async def delete_learned_file(request: Request, user: str = Depends(require_admi
         return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
     ziel.unlink()
     _sicherheits_log.ereignis("lernnotiz_geloescht", benutzer=user, datei=ziel.name)
+    _aktivitaet(user, "wissen", "lernnotiz_geloescht", roh)
     return JSONResponse({"ok": True, "deleted": roh})
 
 
@@ -21753,6 +21871,7 @@ async def write_knowledge_file(request: Request, user: str = Depends(require_kno
             _index_immediately(resolved, content)
         except Exception:
             pass
+        _aktivitaet(user, "wissen", "lernnotiz_bearbeitet", path)
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -22455,6 +22574,7 @@ async def create_knowledge_subfolder(request: Request, user: str = Depends(requi
         target.mkdir(parents=True)
     except OSError as e:
         return JSONResponse({"error": f"Anlegen fehlgeschlagen: {e}"}, status_code=500)
+    _aktivitaet(user, "wissen", "unterordner_angelegt", new_rel)
     return JSONResponse({"ok": True, "path": new_rel})
 
 
@@ -22494,6 +22614,7 @@ async def delete_knowledge_subfolder(request: Request, user: str = Depends(requi
                 deleted_dir = True
             except OSError as e:
                 return JSONResponse({"error": f"Löschen fehlgeschlagen: {e}"}, status_code=500)
+    _aktivitaet(user, "wissen", "unterordner_entfernt", rel, dateien_geloescht=deleted_dir)
     return JSONResponse({"ok": True, "removed": removed, "deleted_dir": deleted_dir})
 
 
@@ -22538,6 +22659,7 @@ async def rename_knowledge_subfolder(request: Request, user: str = Depends(requi
         except OSError as e:
             return JSONResponse({"error": f"Umbenennen fehlgeschlagen: {e}"}, status_code=500)
     moved = relocate_folder_index(old_abs, new_abs)
+    _aktivitaet(user, "wissen", "unterordner_umbenannt", new_rel, vorher=rel)
     return JSONResponse({"ok": True, "path": new_rel, "moved": moved})
 
 
@@ -22556,6 +22678,8 @@ async def move_knowledge_subfolder(request: Request, user: str = Depends(require
                                      wurzel_erlaubt=True)
     if err:
         return JSONResponse({"error": err}, status_code=code)
+    _aktivitaet(user, "wissen", "ordner_verschoben", str(data.get("path") or ""),
+                ziel=str(data.get("target") or ""))
     return JSONResponse(res)
 
 
@@ -22625,8 +22749,10 @@ async def create_knowledge_folder(request: Request, user: str = Depends(require_
         try:
             assigned = kg.add_folder_to_groups(rel, group_ids)
         except Exception as e:
+            _aktivitaet(user, "wissen", "ordner_angelegt", rel)
             return JSONResponse({"ok": True, "path": rel, "groups_assigned": 0,
                                  "warning": f"Gruppen-Zuordnung fehlgeschlagen: {e}"})
+    _aktivitaet(user, "wissen", "ordner_angelegt", rel, gruppen=group_ids or None)
     return JSONResponse({"ok": True, "path": rel, "groups_assigned": assigned})
 
 
@@ -22684,6 +22810,7 @@ async def rename_knowledge_folder(request: Request, user: str = Depends(require_
 
     # 3) Indiziertes Wissen relokalisieren (TF-IDF + FAISS + Gruppen)
     moved = relocate_folder_index(folder, new_folder)
+    _aktivitaet(user, "wissen", "ordner_umbenannt", new_rel, vorher=rel)
     return JSONResponse({"ok": True, "path": new_rel, "moved": moved})
 
 
@@ -22736,6 +22863,7 @@ async def delete_knowledge_folder(request: Request, user: str = Depends(require_
     # 3) Ordner-Liste aktualisieren
     folders = [f for f in _kb_current_folder_list() if f != rel]
     _kb_save_folder_list(folders)
+    _aktivitaet(user, "wissen", "ordner_entfernt", rel, dateien_geloescht=deleted_dir)
     return JSONResponse({"ok": True, "removed": removed, "deleted_dir": deleted_dir})
 
 
@@ -22789,6 +22917,7 @@ async def assign_knowledge_folder_groups(request: Request, user: str = Depends(r
                                                  list(vs.get_indexed_files()))
     except Exception as e:  # noqa: BLE001
         print(f"[knowledge] automatische Gruppenzuordnung fehlgeschlagen: {e}", flush=True)
+    _aktivitaet(user, "wissen", "ordner_gruppen_gesetzt", rel, gruppen=group_ids)
     return JSONResponse({"ok": True, "path": rel, "zugeordnet": zugeordnet, **result})
 
 
@@ -22846,6 +22975,9 @@ async def kb_create_share(request: Request, user: str = Depends(require_local_au
                                 data.get("label") or "", user)
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    # Rechte: ein anderer Standort darf diesen Ordner ab jetzt abholen
+    _aktivitaet(user, "wissen", "freigabe_angelegt", share.get("folder", ""), rechte=True,
+                beschriftung=share.get("label"))
     return JSONResponse({"ok": True, "share": share})
 
 
@@ -22863,6 +22995,9 @@ async def kb_update_share(share_id: str, request: Request,
                                          if k in ks.SHARE_UPDATABLE})
     if share is None:
         return JSONResponse({"ok": False, "error": "Freigabe nicht gefunden"}, status_code=404)
+    _aktivitaet(user, "wissen", "freigabe_geaendert", share.get("folder", ""),
+                rechte="enabled" in data, aktiv=share.get("enabled"),
+                felder=sorted(k for k in data if k in ks.SHARE_UPDATABLE))
     return JSONResponse({"ok": True, "share": share})
 
 
@@ -22874,6 +23009,8 @@ async def kb_rotate_share(share_id: str, user: str = Depends(require_local_auth)
     share = ks.rotate_token(share_id)
     if share is None:
         return JSONResponse({"ok": False, "error": "Freigabe nicht gefunden"}, status_code=404)
+    # Rechte: das alte Token gilt ab jetzt nicht mehr
+    _aktivitaet(user, "wissen", "freigabe_token_erneuert", share.get("folder", ""), rechte=True)
     return JSONResponse({"ok": True, "share": share})
 
 
@@ -22882,8 +23019,11 @@ async def kb_delete_share(share_id: str, user: str = Depends(require_local_auth)
     """Widerruft eine Freigabe. Die Kopie beim Nehmer bleibt liegen – ein
     Widerruf hier kann dort nichts loeschen (und soll es nicht)."""
     from backend import knowledge_sync as ks
+    vorher = next((s for s in ks.list_shares() if s.get("id") == share_id), {})
     if not ks.delete_share(share_id):
         return JSONResponse({"ok": False, "error": "Freigabe nicht gefunden"}, status_code=404)
+    _aktivitaet(user, "wissen", "freigabe_widerrufen", vorher.get("folder") or share_id,
+                rechte=True)
     return JSONResponse({"ok": True})
 
 
@@ -22946,7 +23086,9 @@ async def kb_sync_site_name(request: Request, user: str = Depends(require_local_
     wer gezogen hat) und belegt den Zielordner vor."""
     from backend import knowledge_sync as ks
     data = await _json_objekt(request)
-    return JSONResponse({"ok": True, "site_name": ks.set_site_name(data.get("site_name") or "")})
+    name = ks.set_site_name(data.get("site_name") or "")
+    _aktivitaet(user, "wissen", "standortname_gesetzt", name)
+    return JSONResponse({"ok": True, "site_name": name})
 
 
 @app.post("/api/knowledge/sync/probe")
@@ -23023,6 +23165,8 @@ async def kb_sync_add_peer(request: Request, user: str = Depends(require_local_a
             remote={"site": d.get("remote_site"), "label": d.get("remote_label")})
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    _aktivitaet(user, "wissen", "standort_angelegt", peer.get("name", ""),
+                zielordner=peer.get("target_folder"), gruppe=d.get("group_id") or None)
     return JSONResponse({"ok": True, "peer": peer})
 
 
@@ -23041,6 +23185,9 @@ async def kb_sync_update_peer(peer_id: str, request: Request,
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     if peer is None:
         return JSONResponse({"ok": False, "error": "Standort nicht gefunden"}, status_code=404)
+    _aktivitaet(user, "wissen", "standort_geaendert", peer.get("name", ""),
+                felder=sorted(k for k in d if k in ks.PEER_UPDATABLE and k != "token")
+                + (["token"] if d.get("token") else []))
     return JSONResponse({"ok": True, "peer": peer})
 
 
@@ -23050,9 +23197,12 @@ async def kb_sync_delete_peer(peer_id: str, remove_data: int = 0,
     """Standort entfernen. ``?remove_data=1`` entfernt zusaetzlich die lokale
     Kopie samt Index; ohne das bleibt das Wissen nutzbar."""
     from backend import knowledge_sync as ks
+    vorher = ks.get_peer(peer_id) or {}
     res = await asyncio.to_thread(ks.delete_peer, peer_id, bool(remove_data))
     if not res.get("ok"):
         return JSONResponse(res, status_code=404)
+    _aktivitaet(user, "wissen", "standort_entfernt", vorher.get("name") or peer_id,
+                kopie_geloescht=bool(remove_data))
     return JSONResponse(res)
 
 
@@ -23071,6 +23221,8 @@ async def kb_sync_run(peer_id: str, user: str = Depends(require_local_auth)):
     if ks.get_peer(peer_id) is None:
         return JSONResponse({"ok": False, "error": "Standort nicht gefunden"}, status_code=404)
     bericht = await asyncio.to_thread(ks.sync_peer, peer_id, "manuell")
+    _aktivitaet(user, "wissen", "standort_synchronisiert",
+                (ks.get_peer(peer_id) or {}).get("name") or peer_id, ok=bool(bericht.get("ok")))
     return JSONResponse(bericht, status_code=200 if bericht.get("ok") else 400)
 
 
@@ -23159,6 +23311,10 @@ async def upload_knowledge_files(
             except Exception:
                 pass
 
+    if saved:
+        _aktivitaet(user, "wissen", "dateien_hochgeladen", _kb_norm_rel(folder) or folder,
+                    dateien=[s["name"] for s in saved],
+                    gruppen=[g.strip() for g in (groups or "").split(",") if g.strip()] or None)
     return JSONResponse({
         "saved": saved,
         "rejected": rejected,
@@ -23602,6 +23758,9 @@ async def wissen_upload(
             invalidate_files_cache()
         except Exception:  # noqa: BLE001
             pass
+        _aktivitaet(user, "wissen", "dateien_hochgeladen", target_rel,
+                    dateien=[s.get("name") for s in saved if isinstance(s, dict)],
+                    gruppen=req_groups or None)
     return JSONResponse({"saved": saved, "rejected": rejected,
                          "total_saved": len(saved), "total_rejected": len(rejected),
                          "created_dirs": created_dirs,
@@ -23913,6 +24072,7 @@ async def wissen_file_delete(request: Request, user: str = Depends(require_auth)
             vs.remove_file(str(target))
     except Exception:  # noqa: BLE001
         pass
+    _aktivitaet(user, "wissen", "datei_geloescht", rel)
     return JSONResponse({"ok": True, "deleted": rel})
 
 
@@ -23970,6 +24130,7 @@ async def wissen_create_subfolder(request: Request, user: str = Depends(require_
         target.mkdir(parents=True)
     except OSError as e:
         return JSONResponse({"error": f"Anlegen fehlgeschlagen: {e}"}, status_code=500)
+    _aktivitaet(user, "wissen", "unterordner_angelegt", new_rel)
     return JSONResponse({"ok": True, "path": new_rel,
                          "name": name, "parent": parent})
 
@@ -24025,6 +24186,7 @@ async def wissen_rename_subfolder(request: Request, user: str = Depends(require_
     except OSError as e:
         return JSONResponse({"error": f"Umbenennen fehlgeschlagen: {e}"}, status_code=500)
     moved = relocate_folder_index(old_abs, new_abs)
+    _aktivitaet(user, "wissen", "unterordner_umbenannt", new_rel, vorher=rel)
     return JSONResponse({"ok": True, "path": new_rel, "moved": moved})
 
 
@@ -24057,6 +24219,7 @@ async def wissen_move_subfolder(request: Request, user: str = Depends(require_au
     res, err, code = _kb_move_folder(src, dst)
     if err:
         return JSONResponse({"error": err}, status_code=code)
+    _aktivitaet(user, "wissen", "ordner_verschoben", src, ziel=dst)
     return JSONResponse(res)
 
 
@@ -24185,6 +24348,9 @@ async def wissen_pending_approve(doc_id: str, request: Request, user: str = Depe
         # Im Thread (Code-Review 2026-10-18): schreibt Dateien und indiziert –
         # im Event-Loop stand derweil der ganze Dienst.
         result = await asyncio.to_thread(approve_pending, doc_id, groups=req_groups)
+        _aktivitaet(user, "wissen", "entwurf_uebernommen",
+                    str(doc.get("title") or doc.get("source_name") or doc_id),
+                    gruppen=req_groups or None, entwurf=doc_id)
         return JSONResponse({"ok": True, **result})
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -24535,6 +24701,8 @@ async def wissen_cf_bindung_anlegen(request: Request, user: str = Depends(requir
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": f"Konnte nicht gespeichert werden: {e}"},
                             status_code=500)
+    _aktivitaet(user, "wissen", "confluence_eingebunden", str(eintrag.get("name") or ""),
+                gruppen=req_groups or None)
     return JSONResponse({"ok": True, "bereich": eintrag,
                          "bereiche": _cfb_mit_gruppen(_cfb.liste(), user)})
 
@@ -24581,6 +24749,8 @@ async def wissen_cf_bindung_aendern(bid: str, request: Request,
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": f"Konnte nicht gespeichert werden: {e}"},
                             status_code=500)
+    _aktivitaet(user, "wissen", "confluence_einbindung_geaendert",
+                str(eintrag.get("name") or alt.get("name") or bid), gruppen=gruppen or None)
     return JSONResponse({"ok": True, "bereich": eintrag,
                          "bereiche": _cfb_mit_gruppen(_cfb.liste(), user)})
 
@@ -24601,6 +24771,8 @@ async def wissen_cf_bindung_loeschen(bid: str, user: str = Depends(require_auth)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     if not weg:
         return JSONResponse({"ok": False, "error": "Einbindung nicht gefunden."}, status_code=404)
+    _aktivitaet(user, "wissen", "confluence_einbindung_geloest",
+                str((alt or {}).get("name") or bid))
     return JSONResponse({"ok": True, "bereiche": _cfb_mit_gruppen(_cfb.liste(), user)})
 
 
@@ -25156,6 +25328,8 @@ async def wissen_destillat_confluence(request: Request,
         from backend.llm import scrub_secrets
         return JSONResponse({"ok": False, "error": scrub_secrets(str(e))}, status_code=500)
 
+    _aktivitaet(user, "wissen", "confluence_seite_angelegt", seite.get("title") or titel,
+                bereich_confluence=space, seite=seiten_id)
     return JSONResponse({"ok": True, "id": seiten_id,
                          "title": seite.get("title") or titel,
                          "link": c.link_for(seite, seite),
@@ -25238,7 +25412,9 @@ async def knowledge_groups_create(request: Request, user: str = Depends(require_
     if not name:
         return JSONResponse({"ok": False, "error": "Name fehlt"}, status_code=400)
     color = (body.get("color") or "#64748b").strip()
-    return JSONResponse({"ok": True, "group": kg.create_group(name, color)})
+    g = kg.create_group(name, color)
+    _aktivitaet(user, "wissen", "gruppe_angelegt", str((g or {}).get("id") or name), name=name)
+    return JSONResponse({"ok": True, "group": g})
 
 
 @app.patch("/api/knowledge/groups/{gid}")
@@ -25297,9 +25473,16 @@ async def knowledge_groups_update(gid: str, request: Request, user: str = Depend
             editors_group=body.get("editors_group"),
             folders=folders,
         )
-        return JSONResponse({"ok": True, "group": g})
     except KeyError:
         return JSONResponse({"ok": False, "error": "Gruppe nicht gefunden"}, status_code=404)
+    # Rechte: die Editoren einer Gruppe bestimmen, wer ihr Wissen pflegen darf
+    editoren = {k: body.get(k) for k in ("editors_users", "editors_group")
+                if body.get(k) is not None}
+    _aktivitaet(user, "wissen", "gruppe_geaendert", gid, rechte=bool(editoren),
+                felder=sorted(k for k in ("name", "color", "order", "editors_users",
+                                          "editors_group", "folders") if body.get(k) is not None),
+                name=body.get("name"), ordner=folders, **editoren)
+    return JSONResponse({"ok": True, "group": g})
 
 
 @app.delete("/api/knowledge/groups/{gid}")
@@ -25309,7 +25492,12 @@ async def knowledge_groups_delete(gid: str, user: str = Depends(require_auth)):
         raise HTTPException(status_code=403,
             detail="Keine Berechtigung, diese Wissensgruppe zu löschen")
     from backend import knowledge_groups as kg
+    vorher = kg.get_group(gid) or {}
     ok = kg.delete_group(gid)
+    if ok:
+        # Rechte: mit der Gruppe verschwinden auch ihre Editoren
+        _aktivitaet(user, "wissen", "gruppe_geloescht", gid, rechte=True,
+                    name=vorher.get("name"))
     return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
 
 
@@ -25369,6 +25557,7 @@ async def knowledge_assignments_set(request: Request, user: str = Depends(requir
                     detail=f"Keine Berechtigung für die Wissensgruppe '{gid}'")
 
     saved = kg.set_assignment(path, groups)
+    _aktivitaet(user, "wissen", "datei_gruppen_gesetzt", path, gruppen=saved)
     return JSONResponse({"ok": True, "path": path, "groups": saved})
 
 
@@ -25806,6 +25995,8 @@ async def knowledge_pending_update(doc_id: str, request: Request, user: str = De
     from backend.web_extractor import update_pending
     data = await _json_objekt(request)
     ok = update_pending(doc_id, data)
+    if ok:
+        _aktivitaet(user, "wissen", "entwurf_bearbeitet", doc_id, felder=sorted(data))
     return JSONResponse({"ok": ok})
 
 
@@ -25823,6 +26014,9 @@ async def knowledge_pending_approve(doc_id: str, request: Request, user: str = D
         pass
     try:
         result = await asyncio.to_thread(approve_pending, doc_id, groups=groups)   # Thread: s. o.
+        _aktivitaet(user, "wissen", "entwurf_uebernommen",
+                    str(result.get("path") or result.get("file") or doc_id),
+                    gruppen=groups or None, entwurf=doc_id)
         return JSONResponse({"ok": True, **result})
     except FileNotFoundError:
         return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
@@ -25835,6 +26029,8 @@ async def knowledge_pending_delete(doc_id: str, user: str = Depends(require_know
     """Löscht ein zur Freigabe ausstehendes Wissensdokument."""
     from backend.web_extractor import delete_pending
     ok = delete_pending(doc_id)
+    if ok:
+        _aktivitaet(user, "wissen", "entwurf_verworfen", doc_id)
     return JSONResponse({"ok": ok})
 
 
@@ -25872,6 +26068,7 @@ async def knowledge_extract_file_delete(request: Request, user: str = Depends(re
         invalidate_files_cache()
     except Exception as e:  # noqa: BLE001
         print(f"[knowledge] Index-Bereinigung nach Loeschen fehlgeschlagen: {e}", flush=True)
+    _aktivitaet(user, "wissen", "datei_geloescht", rel_path)
     return JSONResponse({"ok": True})
 
 
@@ -25996,6 +26193,8 @@ async def add_mount(request: Request, user: str = Depends(require_knowledge_edit
     # beim Verbinden – zwei Fassungen liefen auseinander).
     _kb_ordner_sicherstellen(mp)
 
+    _aktivitaet(user, "wissen", "netzfreigabe_angelegt", source, typ=mount_type,
+                konto=mount_entry.get("username"), einhaengepunkt=str(mp))
     return JSONResponse({"ok": True, "index": idx})
 
 
@@ -26020,10 +26219,12 @@ async def remove_mount(idx: int, user: str = Depends(require_knowledge_editor)):
     kb_cfg["folders"] = ",".join(folder_list)
     kb_state["config"] = kb_cfg
 
-    mounts.pop(idx)
+    weg = mounts.pop(idx)
     kb_cfg["mounts"] = mounts
     config.save_skill_state("knowledge", kb_state)
 
+    _aktivitaet(user, "wissen", "netzfreigabe_entfernt", str(weg.get("source") or mp),
+                einhaengepunkt=str(mp))
     return JSONResponse({"ok": True})
 
 
@@ -26073,6 +26274,10 @@ async def update_mount(idx: int, request: Request, user: str = Depends(require_k
         _mc.uebernehme_kennwort(_neu, _alt)
     mounts[idx] = _neu
     _save_mounts_config(mounts)
+    _aktivitaet(user, "wissen", "netzfreigabe_geaendert", str(_neu.get("source") or idx),
+                vorher=_alt.get("source") if _alt.get("source") != _neu.get("source") else None,
+                konto=_neu.get("username"),
+                kennwort_neu=bool(str(data.get("password") or "")))
     return JSONResponse({"ok": True})
 
 
@@ -26332,6 +26537,8 @@ async def mount_share(idx: int, user: str = Depends(require_knowledge_editor)):
             print(f"[knowledge] Reindex nach Mount fehlgeschlagen: {e}", flush=True)
     asyncio.create_task(_reindex_nach_mount())
 
+    _aktivitaet(user, "wissen", "netzfreigabe_verbunden", str(m.get("source") or mp),
+                einhaengepunkt=str(mp))
     return JSONResponse({"ok": True, "mountpoint": str(mp),
                          "hinweis": "Der Index wird im Hintergrund aktualisiert."})
 
@@ -26384,6 +26591,7 @@ async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor))
         # Auch hier aufraeumen: wer "Trennen" drueckt, will die Treffer los –
         # unabhaengig davon, ob der Mount gerade noch stand.
         entfernt = await asyncio.to_thread(_mount_index_raeumen, mp)
+        _aktivitaet(user, "wissen", "netzfreigabe_getrennt", str(mp), war_verbunden=False)
         return JSONResponse({"ok": True, "hint": "War nicht gemountet",
                              "index_bereinigt": entfernt})
 
@@ -26407,6 +26615,7 @@ async def unmount_share(idx: int, user: str = Depends(require_knowledge_editor))
     # ERST nach erfolgreichem Trennen bereinigen: scheitert das Aushaengen,
     # sind die Dateien noch da und der Index bleibt richtig.
     entfernt = await asyncio.to_thread(_mount_index_raeumen, mp)
+    _aktivitaet(user, "wissen", "netzfreigabe_getrennt", str(mp), war_verbunden=True)
     return JSONResponse({"ok": True, "index_bereinigt": entfernt})
 
 
@@ -26579,6 +26788,9 @@ async def cleanup_apply(request: Request, user: str = Depends(require_local_auth
                      len(erg.get("erledigt") or []), 0)
     except Exception as e:                                    # noqa: BLE001
         print(f"[Aufraeumen] Audit fehlgeschlagen: {e}", flush=True)
+    if erg.get("erledigt"):
+        _aktivitaet(user, "wissen", "anweisungen_aufgeraeumt", "Anweisungsdateien",
+                    dateien=[e.get("schluessel") for e in (erg.get("erledigt") or [])])
     return JSONResponse(erg)
 
 
@@ -26705,6 +26917,10 @@ async def webdav_config(request: Request, user: str = Depends(require_knowledge_
     except Exception:
         pass
 
+    # Rechte: wer mit welchem Konto per WebDAV an den Wissensordner kommt
+    _aktivitaet(user, "wissen", "webdav_geaendert", "WebDAV", rechte=True,
+                an=bool(webdav.get("enabled")), konto=webdav.get("username"),
+                kennwort_neu=bool("password" in data and data["password"]))
     return JSONResponse({"ok": True, "enabled": webdav.get("enabled", False)})
 
 
@@ -26750,7 +26966,12 @@ async def save_instruction(name: str, request: Request, user: str = Depends(requ
         return JSONResponse({"error": "Ungueltiger Name"}, status_code=400)
     INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
     filepath = INSTRUCTIONS_DIR / f"{safe_name}.md"
+    neu = not filepath.exists()
     filepath.write_text(content, encoding="utf-8")
+    if neu:
+        _aktivitaet(user, "anweisungen", "anweisung_angelegt", filepath.name)
+    else:
+        _aktivitaet(user, "anweisungen", "anweisung_geaendert", filepath.name)
     return JSONResponse({"ok": True, "filename": filepath.name})
 
 
@@ -26763,6 +26984,7 @@ async def delete_instruction(name: str, user: str = Depends(require_local_auth))
     filepath = INSTRUCTIONS_DIR / f"{safe_name}.md"
     if filepath.exists():
         filepath.unlink()
+        _aktivitaet(user, "anweisungen", "anweisung_geloescht", filepath.name)
         return JSONResponse({"ok": True})
     return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
 
@@ -29042,6 +29264,8 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
                 owner=user, owner_privileged=True, created_via="api",
                 kind="cve_pruefung",
                 payload=cve_pruefung.auftrag_payload(body.get("cve") or {}))
+            _aktivitaet(user, "cron", "auftrag_angelegt", str(job.get("label") or ""),
+                        auftrag=job.get("id"), zeitplan=job.get("cron"), art="cve_pruefung")
             return JSONResponse(job, status_code=201)
         except (ValueError, KeyError) as e:
             raise HTTPException(400, str(e))
@@ -29059,6 +29283,9 @@ async def cron_create_api(req: Request, user: str = Depends(require_auth)):
             # BSI H8/H9-Rest: nur ein echtes true gibt frei (Vorgabe nein).
             aussenwirkung=body.get("aussenwirkung") is True,
         )
+        _aktivitaet(user, "cron", "auftrag_angelegt", str(job.get("label") or ""),
+                    auftrag=job.get("id"), zeitplan=job.get("cron"),
+                    aussenwirkung=body.get("aussenwirkung") is True)
         return JSONResponse(job, status_code=201)
     except (ValueError, KeyError) as e:
         raise HTTPException(400, str(e))
@@ -29087,6 +29314,9 @@ async def cron_update(job_id: str, req: Request, user: str = Depends(require_aut
         # Methoden-Parameter selbst sind keine Felder (sonst TypeError -> 500).
         job = cron_manager.update_job(
             job_id, **{k: v for k, v in body.items() if k not in ("self", "job_id")})
+        _aktivitaet(user, "cron", "auftrag_geaendert", str(job.get("label") or job_id),
+                    auftrag=job_id, felder=sorted(k for k in body if k not in ("self", "job_id")),
+                    an=body.get("enabled") if "enabled" in body else None)
         return JSONResponse(job)
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -29096,8 +29326,11 @@ async def cron_update(job_id: str, req: Request, user: str = Depends(require_aut
 async def cron_delete_api(job_id: str, user: str = Depends(require_auth)):
     """Löscht einen zeitgesteuerten Auftrag (nur eigene; Admins alle)."""
     _cron_owned_or_404(job_id, user)
+    vorher = cron_manager.get_job(job_id) or {}
     try:
         cron_manager.delete_job(job_id)
+        _aktivitaet(user, "cron", "auftrag_geloescht", str(vorher.get("label") or job_id),
+                    auftrag=job_id)
         return JSONResponse({"ok": True})
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -29114,6 +29347,8 @@ async def cron_run_now(job_id: str, user: str = Depends(require_auth)):
     """
     _cron_owned_or_404(job_id, user)
     _require_trigger_admin(user, {}, "POST /api/cron/run")
+    _aktivitaet(user, "cron", "auftrag_von_hand_gestartet",
+                str((cron_manager.get_job(job_id) or {}).get("label") or job_id), auftrag=job_id)
     try:
         result = await cron_manager.run_now(job_id, von=user)
         return JSONResponse({"ok": True, "result": result[:500] if result else ""})
@@ -29155,6 +29390,9 @@ async def cron_claim(job_id: str, user: str = Depends(require_local_auth)):
         job = cron_manager.claim_job(job_id, user, privileged=True)
         print(f"[CRON] '{job['label']}' von Admin '{user}' übernommen "
               f"(läuft künftig mit Systemrechten)", flush=True)
+        # Rechte: der Auftrag laeuft ab jetzt mit Systemrechten
+        _aktivitaet(user, "cron", "auftrag_uebernommen", str(job.get("label") or job_id),
+                    rechte=True, auftrag=job_id)
         return JSONResponse(job)
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -29210,6 +29448,8 @@ async def info_files_upload(file: UploadFile = File(...), ersetzen: str = Form("
         print(f"[InfoFiles] Hochladen von {name!r} fehlgeschlagen: {e}", flush=True)
         return JSONResponse({"error": "Datei konnte nicht gespeichert werden."}, status_code=500)
     print(f"[InfoFiles] {eintrag['name']} ({eintrag['size']} Bytes) hochgeladen von {user}", flush=True)
+    _aktivitaet(user, "portal", "infodokument_hochgeladen", eintrag["name"],
+                ersetzt=ersetzen in ("1", "true", "ja"))
     return JSONResponse({"ok": True, "file": eintrag})
 
 
@@ -29230,6 +29470,7 @@ async def info_files_delete(name: str, user: str = Depends(require_local_auth)):
     if not weg:
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
     print(f"[InfoFiles] {name} geloescht von {user}", flush=True)
+    _aktivitaet(user, "portal", "infodokument_geloescht", name)
     return JSONResponse({"ok": True})
 
 
@@ -29420,6 +29661,23 @@ async def protokoll_updates(limit: int = 200, _u: str = Depends(require_local_au
     stand, eintraege = await asyncio.to_thread(lambda: (up.stand(), up.lesen(limit)))
     return JSONResponse({"ok": True, "stand": stand,
                          "eintraege": _mit_anzeigenamen_feld(eintraege, "benutzer")})
+
+
+@app.get("/api/logs/aktivitaet")
+async def protokoll_aktivitaet(limit: int = 200, bereich: str = "", benutzer: str = "",
+                               suche: str = "", _u: str = Depends(require_local_auth)):
+    """Aktivitaetsprotokoll (backend/aktivitaet.py): wer hat wann was an den
+    gemeinsamen Bestaenden geaendert. Gefiltert VOR dem Deckel, damit die Suche
+    nach einem alten Ordnernamen nicht an den juengsten 200 Zeilen endet.
+
+    Nur Administratoren: die Eintraege nennen Benutzer, Ordner und Dokumente
+    aller Bereiche – dasselbe Material wie das Audit-Log daneben."""
+    from backend import aktivitaet
+    limit = max(1, min(int(limit or 200), 1000))
+    erg = await asyncio.to_thread(aktivitaet.lesen, limit, bereich[:40], benutzer[:120],
+                                  suche[:200])
+    return JSONResponse({"ok": True, "gesamt": erg["gesamt"], "bereiche": erg["bereiche"],
+                         "eintraege": _mit_anzeigenamen_feld(erg["eintraege"], "benutzer")})
 
 
 @app.get("/api/logs/code_fixes")

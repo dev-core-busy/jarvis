@@ -1,6 +1,8 @@
 /**
  * Weitere Protokolle unter Einstellungen -> Protokolle (nur lesen).
  *
+ *   akt      – Aktivitaeten: wer hat was an gemeinsamen Bestaenden geaendert
+ *              (GET /api/logs/aktivitaet, backend/aktivitaet.py)
  *   journal  – Dienst-Journal (GET /api/logs/journal, ueber den Root-Broker)
  *   csp      – CSP-Verstoesse (GET /api/security/csp, Feld "berichte")
  *   updates  – Update-Verlauf (GET /api/logs/updates)
@@ -110,8 +112,90 @@ window.Protokolle = (function () {
 
     function wert(id) { return (($(id) || {}).value || '').trim(); }
 
+    // ── Aktivitaeten: Hilfen ────────────────────────────────────────────────
+    // Loeschende/entziehende Aktionen sind die, nach denen man spaeter sucht
+    // ("wer hat das weggenommen?") – sie bekommen die Warnfarbe, Text bleibt
+    // die Hauptaussage (Farbe allein ist keine Information).
+    var AKT_WEG = /(geloescht|entfernt|widerrufen|verworfen|geloest|ausgeschaltet|deinstalliert|getrennt|abgebrochen)$/;
+
+    function aktWert(v) {
+        if (v === true) return T('plog.akt.ja', 'ja');
+        if (v === false) return T('plog.akt.nein', 'nein');
+        if (Array.isArray(v)) return v.map(aktWert).join(', ');
+        if (v && typeof v === 'object') return JSON.stringify(v);
+        return String(v);
+    }
+
+    function aktDetails(e) {
+        var d = e.details || {};
+        var teile = Object.keys(d).filter(function (k) {
+            return k !== 'ip' && k !== 'rechte';
+        }).map(function (k) { return k + ': ' + aktWert(d[k]); });
+        return teile.join(' · ');
+    }
+
+    // Auswahl der Bereiche aus der Antwort fuellen – die GEWAEHLTE Option bleibt
+    // erhalten, auch wenn der Bereich (noch) nicht in der Liste steht: ein
+    // `sel.value = x` auf eine fehlende Option verpufft still (Register).
+    function aktBereicheFuellen(bereiche) {
+        var sel = $('plog-akt-bereich');
+        if (!sel) return;
+        var gewaehlt = sel.value;
+        var liste = (bereiche || []).slice();
+        if (gewaehlt && liste.indexOf(gewaehlt) < 0) liste.push(gewaehlt);
+        while (sel.options.length > 1) sel.remove(1);
+        liste.forEach(function (b) {
+            var o = document.createElement('option');
+            o.value = b;
+            o.textContent = T('plog.akt.b_' + b, b);
+            sel.appendChild(o);
+        });
+        sel.value = gewaehlt;
+    }
+
     // ── Quellen ────────────────────────────────────────────────────────────
     var QUELLEN = {
+        akt: {
+            url: function () {
+                var p = new URLSearchParams({ limit: '300' });
+                var b = wert('plog-akt-bereich'), u = wert('plog-akt-benutzer'), s = wert('plog-akt-suche');
+                if (b) p.set('bereich', b);
+                if (u) p.set('benutzer', u);
+                if (s) p.set('suche', s);
+                return '/api/logs/aktivitaet?' + p.toString();
+            },
+            zeichnen: function (d) {
+                var liste = d.eintraege || [];
+                aktBereicheFuellen(d.bereiche);
+                zaehler('akt', liste.length, d.gesamt);
+                status('akt', []);
+                fuellen('akt', liste.map(function (e) {
+                    var det = e.details || {};
+                    var rechte = det.rechte === true;
+                    var weg = AKT_WEG.test(String(e.aktion || ''));
+                    // gap statt margin: bricht die Rechte-Marke um, steht sie
+                    // buendig unter der Aktion (margin-left rueckte sie ein)
+                    var aktion = document.createElement('span');
+                    aktion.style.display = 'inline-flex';
+                    aktion.style.flexWrap = 'wrap';
+                    aktion.style.gap = '4px';
+                    aktion.appendChild(badge(T('plog.akt.a_' + e.aktion, e.aktion),
+                                             (weg || rechte) ? 'warn' : 'neutral'));
+                    if (rechte) {
+                        var r = badge(T('plog.akt.rechte', 'Berechtigung'), 'warn');
+                        r.title = T('plog.akt.rechte_title', 'Ändert, wer was darf – steht auch im Sicherheitsprotokoll');
+                        aktion.appendChild(r);
+                    }
+                    return zeile([{ inhalt: zeit(e.ts), klasse: 'audit-ts' },
+                                  T('plog.akt.b_' + e.bereich, e.bereich),
+                                  aktion,
+                                  { inhalt: e.objekt, klasse: 'audit-args' },
+                                  e.benutzer_anzeige || e.benutzer || '',
+                                  { inhalt: aktDetails(e), klasse: 'plog-text' },
+                                  { inhalt: det.ip || '', klasse: 'audit-ts' }], rechte);
+                }), T('plog.akt.leer', 'Keine Einträge.'));
+            }
+        },
         journal: {
             url: function () {
                 var p = new URLSearchParams({

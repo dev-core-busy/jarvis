@@ -119,7 +119,8 @@ def run_all() -> dict:
                      ("short_tracks_log", _prune_short_tracks_log),
                      ("cron_log", _prune_cron_log),
                      ("csp_berichte", _prune_csp_berichte),
-                     ("update_verlauf", _prune_update_verlauf)):
+                     ("update_verlauf", _prune_update_verlauf),
+                     ("aktivitaet", _prune_aktivitaet)):
         try:
             removed[name] = int(fn(cut) or 0)
         except Exception as e:  # noqa: BLE001
@@ -214,3 +215,11 @@ def _prune_update_verlauf(cut: float) -> int:
     dieselbe Frist, keine Stueckzahlgrenze."""
     from backend import update_protokoll
     return update_protokoll.prune_older_than(cut)
+
+
+def _prune_aktivitaet(cut: float) -> int:
+    """Aktivitaetsprotokoll (data/logs/aktivitaet.jsonl) – derselbe Protokolltyp,
+    dieselbe Frist, keine Stueckzahlgrenze (gesucht wird gerade nach dem alten
+    Eintrag: "wer hat diesen Ordner angelegt?")."""
+    from backend import aktivitaet
+    return aktivitaet.prune_older_than(cut)

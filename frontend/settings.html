@@ -5183,6 +5183,57 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <!-- ── Weitere Protokolle (2026-10-20). NUR LESEN, nur Administratoren.
                              Logik: frontend/js/protokolle.js, Endpunkte /api/logs/* und
                              /api/security/csp. Kein Symbol im Kopf (Emojis verboten). ── -->
+                        <!-- Aktivitaeten (2026-11-04): wer hat was an gemeinsamen Bestaenden
+                             geaendert – backend/aktivitaet.py, GET /api/logs/aktivitaet. -->
+                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                            <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="akt">
+                                <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.akt.titel">Aktivitäten</span>
+                                <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
+                                    <button id="plog-akt-refresh" class="kb-hdr-btn" data-i18n-title="telemetry.refresh_title" title="Aktualisieren"><svg class="jv-ico jv-ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+                                </span>
+                                <span class="kb-folder-arrow">▶</span>
+                            </div>
+                            <div id="plog-akt-body" style="display:none;padding:10px 0 4px;">
+                                <p class="kb-hint" style="margin:0 0 8px;" data-i18n="plog.akt.hint">Wer hat wann was an gemeinsamen Beständen geändert: Wissensordner, Wissensgruppen, Dokumente, zeitgesteuerte Aufträge, Skills, Profile, Rollen, Anweisungen und gemeinsame Vorlagen. Änderungen an Berechtigungen stehen zusätzlich im Sicherheitsprotokoll. Erfasst wird ab der Einführung dieses Protokolls.</p>
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:flex-end;">
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:140px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-akt-bereich" data-i18n="plog.akt.bereich">Bereich</label>
+                                        <select id="plog-akt-bereich" class="kb-input log-feld"><option value="" selected data-i18n="plog.akt.alle">Alle Bereiche</option></select>
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:120px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-akt-benutzer" data-i18n="plog.akt.benutzer">Benutzer</label>
+                                        <input id="plog-akt-benutzer" type="text" name="protokoll-akt-benutzer" autocomplete="off" maxlength="120" class="kb-input log-feld">
+                                    </div>
+                                    <div class="kb-form-field" style="margin:0;flex:1;min-width:140px;">
+                                        <label class="kb-label" style="margin-bottom:2px;" for="plog-akt-suche" data-i18n="plog.akt.suche">Gegenstand enthält</label>
+                                        <input id="plog-akt-suche" type="text" name="protokoll-akt-suche" autocomplete="off" maxlength="200" class="kb-input log-feld">
+                                    </div>
+                                    <button id="plog-akt-apply" class="kb-btn-action log-feld" style="padding:0 12px;" data-i18n="common.apply">Anwenden</button>
+                                    <span id="plog-akt-count" class="kb-hint" style="margin:0;"></span>
+                                </div>
+                                <div id="plog-akt-status" class="plog-status" role="status"></div>
+                                <div id="plog-akt-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
+                                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+                                    <table id="plog-akt-table" class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th data-i18n="telemetry.audit_col_time">Zeit</th>
+                                                <th data-i18n="plog.akt.bereich">Bereich</th>
+                                                <th data-i18n="plog.akt.aktion">Aktion</th>
+                                                <th data-i18n="plog.akt.objekt">Gegenstand</th>
+                                                <th data-i18n="telemetry.audit_user_label">Benutzer</th>
+                                                <th data-i18n="telemetry.sprot_details">Details</th>
+                                                <th data-i18n="plog.akt.herkunft">Herkunft</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="plog-akt-tbody">
+                                            <tr><td colspan="7" class="audit-empty" data-i18n="common.loading">Lädt…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="sk-openclaw-section" style="margin-top:10px;">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="journal">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.journal.titel">Dienst-Journal</span>
@@ -5959,18 +6010,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): Klick-Zuhoerer der frueheren
          onclick-Attribute (data-klick). VOR allen anderen Skripten, damit vision.js
          den Platz el.onclick wie bisher danach ueberschreiben kann. -->
-    <script src="/static/js/settings_bedienung.js?v=5"></script>
+    <script src="/static/js/settings_bedienung.js?v=6"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=427"></script>
+    <script src="/static/js/i18n.js?v=428"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=35"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=5"></script>
     <script src="/static/js/sicherheitsprotokoll.js?v=3"></script>
-    <script src="/static/js/protokolle.js?v=3"></script>
+    <script src="/static/js/protokolle.js?v=5"></script>
     <script src="/static/js/fehleranalyse.js?v=3"></script>
     <script src="/static/js/kbgroups.js?v=6"></script>
     <script src="/static/js/skills.js?v=52"></script>
@@ -5998,7 +6049,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/newsfeed_admin.js?v=3"></script>
     <script src="/static/js/kundenverwaltung.js?v=10"></script>
     <script src="/static/js/support_admin.js?v=13"></script>
-    <script src="/static/js/telemetry.js?v=13"></script>
+    <script src="/static/js/telemetry.js?v=14"></script>
     <script src="/static/js/branding.js?v=30"></script>
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=45"></script>

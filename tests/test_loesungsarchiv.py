@@ -866,15 +866,19 @@ section("8f. Lauf von Hand beenden (2026-11-02)")
 check("ohne Lauf: anhalten() meldet 'nichts aktiv'", la.anhalten() is False)
 _vor_8f = la.einstellungen()
 la.einstellungen_speichern({**_vor_8f, "schwelle": 1}, cron_manager=CronAttrappe())
-NEU8F = [f"{BEREICH}-{i}" for i in (50, 51, 52)]
+# Mehr Tickets als das Analyse-Fenster (``PARALLEL``): sonst laufen ALLE
+# Analysen schon vor dem Druck an, und "faengt nichts Neues an" waere trivial.
+NEU8F = [f"{BEREICH}-{50 + i}" for i in range(la.PARALLEL + 3)]
 for i, k in enumerate(NEU8F):
     TICKETS[k] = _ticket(k, f"Beamer Problem {i} Projektor", f"Beamer zeigt nichts {i}", f"Lampe {i} getauscht")
     client.keys.append(k)
 
 
 class ProviderBeendet(ProviderAttrappe):
-    """Drueckt beim ERSTEN Ticket auf "Lauf beenden" – das laufende Ticket
-    muss trotzdem fertig werden, die anderen beiden nicht mehr anfangen."""
+    """Drueckt beim ERSTEN Modellaufruf auf "Lauf beenden". Seit der Pipeline
+    (2026-11-04) laufen bis zu ``PARALLEL`` Analysen voraus: was beim Druck
+    schon lief und fertig wird, wird noch eingeordnet (bezahlt ist bezahlt),
+    NEU angefangen wird nichts mehr."""
     def __init__(self):
         super().__init__(); self.gedrueckt = None
     async def generate_response(self, **kw):
@@ -888,13 +892,18 @@ erg8f = lauf(client, p8f)
 s8f = _stand()
 fertig8f = [k for k in NEU8F if k in s8f["verarbeitet"]]
 check("(Positivkontrolle) 'beenden' traf einen aktiven Lauf", p8f.gedrueckt is True, p8f.gedrueckt)
-check("⚠ das laufende Ticket wird noch fertig ausgewertet", len(fertig8f) == 1, fertig8f)
-check("⚠ die uebrigen fangen nicht mehr an (bleiben offen)",
-      _analysiert(p8f) == fertig8f, (_analysiert(p8f), fertig8f))
+_rest8f = len(NEU8F) - len(fertig8f)
+check("⚠ das laufende Ticket wird noch fertig ausgewertet", len(fertig8f) >= 1, fertig8f)
+check("⚠ nach dem Druck faengt keine NEUE Analyse an (hoechstens das Fenster)",
+      len(_analysiert(p8f)) <= la.PARALLEL and _rest8f >= 3, (_analysiert(p8f), la.PARALLEL))
+check("⚠ jede fertige Analyse wird eingeordnet (keine bezahlte verworfen)",
+      sorted(_analysiert(p8f)) == sorted(fertig8f), (_analysiert(p8f), fertig8f))
 check("der Grund sagt 'von Hand beendet' mit Fortschritt",
-      erg8f.get("grund", "").startswith("Von Hand beendet nach 1 von 3 Tickets"), erg8f.get("grund"))
+      erg8f.get("grund", "").startswith(f"Von Hand beendet nach {len(fertig8f)} von {len(NEU8F)} Tickets"),
+      erg8f.get("grund"))
 check("die offene Zahl zaehlt die nicht angefangenen mit",
-      erg8f.get("offen") == 2 and "2 Ticket(s) folgen" in erg8f.get("grund", ""), erg8f.get("offen"))
+      erg8f.get("offen") == _rest8f and f"{_rest8f} Ticket(s) folgen" in erg8f.get("grund", ""),
+      erg8f.get("offen"))
 check("⚠ regulaeres Ende: die Schranke lief (Datei des neuen Eintrags ist da)",
       bool(fertig8f) and bool((s8f["eintraege"].get(s8f["verarbeitet"][fertig8f[0]]["eintrag"]) or {}).get("rag_datei")),
       s8f["verarbeitet"].get(fertig8f[0]) if fertig8f else None)
@@ -907,6 +916,136 @@ check("der naechste Lauf macht mit den uebrigen weiter (Marke wirkt nicht nach)"
 for k in NEU8F:
     TICKETS.pop(k, None); client.keys.remove(k)
 la.einstellungen_speichern({**_vor_8f, "schwelle": 3}, cron_manager=CronAttrappe())
+
+
+# ════════════════════════════════════════════════════════════════════════════
+section("8g. Tempo: Pipeline, Zeitmessung, Denken aus (2026-11-04)")
+_vor_8g = la.einstellungen()
+NEU8G = [f"{BEREICH}-{60 + i}" for i in range(la.PARALLEL * 2 + 1)]
+for i, k in enumerate(NEU8G):
+    TICKETS[k] = _ticket(k, f"Scanner Fehler {i} Einzug", f"Scanner zieht nicht ein {i}", f"Rolle {i} gereinigt")
+    client.keys.append(k)
+
+
+class ProviderZaehlt(ProviderAttrappe):
+    """Misst, wie viele ANALYSEN gleichzeitig laufen (jede wartet kurz)."""
+    def __init__(self):
+        super().__init__(); self.jetzt = 0; self.hoechst = 0
+    async def generate_response(self, **kw):
+        analyse = "AUFGABE: Ziehe" in kw["contents"][0].parts[0].text
+        if analyse:
+            self.jetzt += 1; self.hoechst = max(self.hoechst, self.jetzt)
+            try:
+                await asyncio.sleep(0.05)
+            finally:
+                self.jetzt -= 1
+        return await super().generate_response(**kw)
+
+
+check("(Positivkontrolle) das Fenster ist groesser als 1", la.PARALLEL > 1, la.PARALLEL)
+p8g = ProviderZaehlt()
+_t8g = time.monotonic()
+erg8g = lauf(client, p8g)
+_dauer8g = time.monotonic() - _t8g
+s8g = _stand()
+check("(Positivkontrolle) alle Tickets verarbeitet", all(k in s8g["verarbeitet"] for k in NEU8G),
+      [k for k in NEU8G if k not in s8g["verarbeitet"]])
+check("⚠ Analysen laufen WIRKLICH gleichzeitig (gemessen)", p8g.hoechst > 1, p8g.hoechst)
+check("⚠ nie mehr als PARALLEL Analysen zugleich", p8g.hoechst <= la.PARALLEL, (p8g.hoechst, la.PARALLEL))
+_seriell = len(NEU8G) * 0.05
+check("die Pipeline ist schneller als seriell", _dauer8g < _seriell, (round(_dauer8g, 2), _seriell))
+z8g = erg8g.get("zeiten") or {}
+check("Ergebnis traegt die Zeiten je Schritt",
+      {"jira", "analyse", "kandidaten", "speichern"} <= set(z8g.get("je_schritt_s") or {}), z8g)
+check("Analysezeit ist gemessen (>= Wartezeit der Attrappe)",
+      (z8g.get("je_schritt_s") or {}).get("analyse", 0) >= 0.04, z8g.get("je_schritt_s"))
+check("Durchsatz und mittlere Prompt-Groesse stehen darin",
+      (z8g.get("durchsatz_s") or 0) > 0 and (z8g.get("prompt_zeichen") or 0) > 500, z8g)
+check("der Grund nennt die Zeiten (fuers Cron-Protokoll)",
+      "Ø je Aufruf: Jira" in erg8g.get("grund", "") and "s/Ticket" in erg8g.get("grund", ""),
+      erg8g.get("grund"))
+erg8g0 = lauf(client, ProviderAttrappe())
+check("ohne Tickets: keine Zeitzeile im Grund", "Ø je Aufruf" not in erg8g0.get("grund", ""), erg8g0.get("grund"))
+for k in NEU8G:
+    TICKETS.pop(k, None); client.keys.remove(k)
+
+# b) "beenden" bricht LAUFENDE Analysen ab, statt auf sie zu warten
+NEU8G2 = [f"{BEREICH}-{80 + i}" for i in range(la.PARALLEL + 2)]
+for i, k in enumerate(NEU8G2):
+    TICKETS[k] = _ticket(k, f"Tastatur Defekt {i} Taste", f"Taste klemmt {i}", f"Tastatur {i} getauscht")
+    client.keys.append(k)
+
+
+class ProviderBeendetHaengt(ProviderAttrappe):
+    """Erster Aufruf drueckt "beenden" und kommt zurueck, jeder weitere
+    haengt 30 s – ein Lauf, der auf sie wartet, faellt an der Dauer auf."""
+    def __init__(self):
+        super().__init__(); self.erster = True
+    async def generate_response(self, **kw):
+        if self.erster:
+            self.erster = False
+            la.anhalten()
+            return await super().generate_response(**kw)
+        await asyncio.sleep(30)
+        return await super().generate_response(**kw)
+
+
+_t8g2 = time.monotonic()
+erg8g2 = lauf(client, ProviderBeendetHaengt())
+_dauer8g2 = time.monotonic() - _t8g2
+s8g2 = _stand()
+_fertig8g2 = [k for k in NEU8G2 if k in s8g2["verarbeitet"]]
+check("(Positivkontrolle) der Lauf wurde beendet", erg8g2.get("beendet") is True, erg8g2.get("grund"))
+check("⚠ laufende Analysen werden abgebrochen, nicht abgewartet", _dauer8g2 < 10, round(_dauer8g2, 1))
+check("das fertige Ticket ist eingeordnet, die haengenden bleiben offen",
+      len(_fertig8g2) == 1 and erg8g2.get("offen") == len(NEU8G2) - 1, (_fertig8g2, erg8g2.get("offen")))
+lauf(client, ProviderAttrappe())
+for k in NEU8G2:
+    TICKETS.pop(k, None); client.keys.remove(k)
+la.einstellungen_speichern(_vor_8g, cron_manager=CronAttrappe())
+
+# c) Denken aus – am ECHTEN ``_provider`` mit gestelltem ``backend.llm``
+class _OAI:            # steht fuer OpenAICompatibleProvider
+    denken_aus = False
+class _Gemini:
+    pass
+_llm_attr = types.ModuleType("backend.llm")
+_llm_attr.OpenAICompatibleProvider = _OAI
+_llm_wahl = {"p": _OAI()}
+_llm_attr.provider_fuer_lauf = lambda prompt_tool_calling=None: (_llm_wahl["p"], "m")
+_llm_vorher = sys.modules.get("backend.llm")
+_pkg = sys.modules["backend"]
+_attr_vorher = getattr(_pkg, "llm", None)
+sys.modules["backend.llm"] = _llm_attr
+_pkg.llm = _llm_attr
+try:
+    pv, _ = la._provider()
+    check("⚠ OpenAI-kompatibler Provider: Denken aus", getattr(pv, "denken_aus", None) is True)
+    _llm_wahl["p"] = _Gemini()
+    pv2, _ = la._provider()
+    check("anderer Anbieter wird nicht angefasst", not hasattr(pv2, "denken_aus"))
+finally:
+    if _llm_vorher is not None:
+        sys.modules["backend.llm"] = _llm_vorher
+    else:
+        sys.modules.pop("backend.llm", None)
+    if _attr_vorher is not None:
+        _pkg.llm = _attr_vorher
+    elif hasattr(_pkg, "llm"):
+        delattr(_pkg, "llm")
+
+# d) Regel: die Aehnlichkeit (e5 auf der CPU) laeuft nicht im Event-Loop
+_ein = next((n for n in ast.walk(ast.parse((ROOT / "backend" / "loesungsarchiv.py").read_text(encoding="utf-8")))
+             if isinstance(n, ast.AsyncFunctionDef) and n.name == "ticket_einordnen"), None)
+if _ein is None:
+    print("  \033[31m✗\033[0m ticket_einordnen nicht gefunden – Abbruch"); sys.exit(2)
+_kand_aufrufe = [c for c in ast.walk(_ein) if isinstance(c, ast.Call)
+                 and (getattr(c.func, "id", None) == "kandidaten"
+                      or any(getattr(a, "id", None) == "kandidaten" for a in c.args))]
+check("(Positivkontrolle) Aufruf von kandidaten gefunden", bool(_kand_aufrufe), len(_kand_aufrufe))
+check("⚠ kandidaten laeuft ueber asyncio.to_thread",
+      bool(_kand_aufrufe) and all(ast.unparse(c.func) == "asyncio.to_thread" for c in _kand_aufrufe),
+      [ast.unparse(c) for c in _kand_aufrufe])
 
 
 # ════════════════════════════════════════════════════════════════════════════

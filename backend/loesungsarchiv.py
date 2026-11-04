@@ -67,6 +67,15 @@ Problem zugeordnet wird oder keine Loesung mehr traegt).
 Altbestand ohne gemerktes ``updated``: verglichen wird mit dem Zeitpunkt der
 Auswertung (``wann``) – sonst liefe beim ersten Lauf nach dem Update der
 GANZE Bestand noch einmal durchs Modell.
+
+⚠ TEMPO (seit 2026-11-04). Ein Lauf ueber 1000 Tickets dauerte auf ECHT wie
+DEV knapp vier Stunden, 13,7–14,1 s je Ticket. Gemessen lag das weder an der
+Ablage (``stand.json`` 1,6 MB, 25 ms je Speichern) noch am Prompt (Median
+3.400 Zeichen) noch an Jira (0,06 s), sondern am DENKEN des Modells, das der
+Haus-Server trotz ``reasoning_effort="low"`` voll ausfuehrt (``_provider``).
+Dazu laufen die Analysen jetzt in einer Pipeline voraus (``PARALLEL``), die
+Einordnung bleibt seriell. Jeder Lauf nennt seine Zeiten je Schritt
+(``Zeiten``) – ohne sie war die Ursache aus dem Protokoll nicht abzulesen.
 """
 from __future__ import annotations
 
@@ -77,6 +86,7 @@ import re
 import secrets
 import threading
 import time
+from collections import deque
 from datetime import date, datetime
 from pathlib import Path
 
@@ -90,6 +100,11 @@ JE_LAUF_MAX = 100000
 SEITE = 50                       # Tickets je Suchabruf
 KANDIDATEN_SCHWELLE = 0.80       # e5-Kosinus, ab dem ein Eintrag Kandidat ist
 KANDIDATEN_MAX = 3
+# Gleichzeitige Analysen je Lauf. Auf DEV gemessen (Haus-Server, Denken aus):
+# seriell 1,5 s je Aufruf, 4 parallel 2,4 s fuer alle vier, 8 parallel 3,8 s.
+# Bewusst 4 und nicht 8: der Haus-Server bedient tagsueber auch den Chat, und
+# ein Lauf per Knopf soll ihn nicht spuerbar belegen.
+PARALLEL = 4
 MAX_TITEL = 160
 MAX_PROBLEM = 4000
 MAX_LOESUNG = 8000
@@ -493,9 +508,31 @@ def pruefe_vergleich(obj, angeboten: list[str]) -> str | None:
 
 
 def _provider():
-    """Profil des Dienstes ueber den einen Weg (wie wissen_destillat)."""
+    """Profil des Dienstes ueber den einen Weg (wie wissen_destillat).
+
+    ⚠ DENKEN AUS (2026-11-04). Der Haus-Server (vLLM, Qwen-Vorlage) uebergeht
+    ``reasoning_effort="low"`` und denkt voll – dieselbe Messung wie beim
+    Wissensgraphen (``wissensgraph_extraktion``, Messbericht 3.1). Auf DEV an
+    echten Tickets gemessen: 12,0 s je Analyse mit Denken, 1,5 s ohne, beide
+    Male gueltiges JSON; 35 von 40 Urteilen "relevant/ohne Loesung" gleich,
+    die Abweichungen ueberwiegend Projekt-/Umstellungsauftraege, die jetzt
+    als relevant gelten.
+    ⚠ KEINE REGEL DAGEGEN – gemessen und zurueckgenommen: "Projekt-,
+    Einfuehrungs- oder Umstellungsauftraege → false" hielt die Quote bei
+    35/40, warf aber in zwei Laeufen dieselben ECHTEN Loesungen hinaus (ein
+    Upgrade mit DISM-Fehler, eine Briefkopf-Anpassung mit Zaehler 3). Die
+    Fehler sind nicht gleich teuer: ein Projektticket zu viel bleibt als
+    Einzelfall unter der Schwelle und erreicht die Wissensdatenbank nie, eine
+    verworfene Loesung fehlt still. Der Lauf brauchte damit 13,7 s je
+    Ticket – fast alles unsichtbares Denken, nicht der Prompt (Median 3.400
+    Zeichen). Die Aufgabe ist eine Extraktion nach JSON, kein Abwaegen.
+    Ein Server, der ``chat_template_kwargs`` nicht kennt, lehnt mit 400 ab;
+    der Rueckfall in ``llm`` ruft dann ohne Stufe erneut auf (langsam, aber
+    richtig) – siehe ``OpenAICompatibleProvider._apply_reasoning``."""
     from backend import llm
     provider, modell = llm.provider_fuer_lauf(prompt_tool_calling=False)
+    if isinstance(provider, llm.OpenAICompatibleProvider):
+        provider.denken_aus = True
     return provider, modell
 
 
@@ -791,30 +828,97 @@ def _ticket_loesen(stand: dict, eid: str, key: str, weg: list | None) -> None:
     _entwurf_schreiben(eid, e)
 
 
-async def ticket_verarbeiten(key: str, geloest: str, stand: dict, st: dict,
-                             provider, modell: str, vektoren, laden=None,
-                             updated: str = "", weg: list | None = None) -> str:
-    """Ein Ticket: laden → analysieren → zuordnen. Rueckgabe: "neu" | "gleich" |
-    "irrelevant". Wirft bei Fehlern – dann bleibt das Ticket offen (bzw. bei
-    einer erneuten Auswertung in seiner alten Zuordnung).
+class Zeiten:
+    """Zeitmessung je Schritt fuer EINEN Lauf (seit 2026-11-04).
 
-    ⚠ Der Stand wird erst NACH allen Modellaufrufen veraendert: scheitert ein
-    Aufruf, darf ein geaendertes Ticket nicht schon aus seinem Eintrag
-    geloest sein."""
+    Bis dahin nannte das Protokoll nur die Gesamtdauer – dass 13,7 s je
+    Ticket fast ausschliesslich unsichtbares Denken des Modells waren, liess
+    sich daraus nicht ablesen. Gemessen wird je Schritt die SUMME und die
+    Anzahl; ``text()`` nennt den Mittelwert je Aufruf und den Durchsatz.
+    Bei parallelen Analysen ist die Summe der Analysezeiten groesser als die
+    Wanduhr – deshalb steht der Durchsatz (Wanduhr / Ticket) daneben."""
+
+    SCHRITTE = (("jira", "Jira"), ("analyse", "Analyse"),
+                ("kandidaten", "Ähnlichkeit"), ("vergleich", "Vergleich"),
+                ("speichern", "Speichern"))
+
+    def __init__(self):
+        self.summe: dict[str, float] = {}
+        self.anzahl: dict[str, int] = {}
+        self.prompt_zeichen = 0
+        self.prompts = 0
+        self.versuche = 0
+
+    def plus(self, schritt: str, sekunden: float) -> None:
+        self.summe[schritt] = self.summe.get(schritt, 0.0) + max(0.0, sekunden)
+        self.anzahl[schritt] = self.anzahl.get(schritt, 0) + 1
+
+    def mittel(self, schritt: str) -> float | None:
+        n = self.anzahl.get(schritt, 0)
+        return self.summe[schritt] / n if n else None
+
+    def als_dict(self, wanduhr: float, tickets: int) -> dict:
+        return {"je_schritt_s": {k: round(self.mittel(k), 3) for k, _ in self.SCHRITTE
+                                 if self.mittel(k) is not None},
+                "aufrufe": dict(self.anzahl),
+                "durchsatz_s": round(wanduhr / tickets, 2) if tickets else None,
+                "prompt_zeichen": (self.prompt_zeichen // self.prompts) if self.prompts else None,
+                "analyse_versuche": self.versuche}
+
+    def text(self, wanduhr: float, tickets: int) -> str:
+        """Eine Zeile fuer ``grund`` – leer, wenn nichts gemessen wurde."""
+        if not tickets:
+            return ""
+        teile = [f"{name} {self.mittel(k):.1f} s".replace(".", ",")
+                 for k, name in self.SCHRITTE if self.mittel(k) is not None]
+        zeile = "Ø je Aufruf: " + " · ".join(teile)
+        zeile += f" · Durchsatz {wanduhr / tickets:.1f} s/Ticket".replace(".", ",")
+        return zeile
+
+
+async def ticket_analysieren(key: str, provider, modell: str, laden=None,
+                             zeiten: Zeiten | None = None) -> tuple[dict, dict]:
+    """Ticket laden und den ersten Modellaufruf machen: ``(ticket, analyse)``.
+
+    Haengt NICHT am Stand – deshalb laufen mehrere davon gleichzeitig
+    (``PARALLEL``). Wirft bei Fehlern; dann bleibt das Ticket offen."""
     from backend import jira_assist
     laden = laden or jira_assist.ticket_laden
+    z = zeiten or Zeiten()
+    t0 = time.monotonic()
     t = await laden(key, "")
+    t1 = time.monotonic()
+    z.plus("jira", t1 - t0)
     kennung = secrets.token_hex(4)
+    auftrag = auftrag_analyse(jira_assist._ticket_text(t, kennung))
+    z.prompt_zeichen += len(auftrag)
+    z.prompts += 1
     analyse = None
     for _ in range(2):                       # ein zweiter Versuch je Ticket
-        roh = await _modell(provider, modell,
-                            auftrag_analyse(jira_assist._ticket_text(t, kennung)))
+        z.versuche += 1
+        roh = await _modell(provider, modell, auftrag)
         analyse = pruefe_analyse(json_aus(roh))
         if analyse is not None:
             break
+    z.plus("analyse", time.monotonic() - t1)
     if analyse is None:
-        raise ArchivFehler(f"{key}: keine gültige Auswertung vom Modell")
+        # Ohne Schluessel: die Schleife in ``_lauf`` setzt ihn selbst davor.
+        raise ArchivFehler("keine gültige Auswertung vom Modell (2 Versuche)")
+    return t, analyse
 
+
+async def ticket_einordnen(key: str, geloest: str, t: dict, analyse: dict,
+                           stand: dict, provider, modell: str, vektoren,
+                           updated: str = "", weg: list | None = None,
+                           zeiten: Zeiten | None = None) -> str:
+    """Eine fertige Analyse zuordnen. Rueckgabe: "neu" | "gleich" |
+    "irrelevant". Laeuft STRIKT NACHEINANDER: Ticket N+1 kann auf einen
+    Eintrag treffen, den Ticket N gerade angelegt hat – parallel eingeordnet
+    entstuenden fuer dasselbe Problem zwei Eintraege.
+
+    ⚠ Der Stand wird erst NACH dem Vergleichsaufruf veraendert: scheitert er,
+    darf ein geaendertes Ticket nicht schon aus seinem Eintrag geloest sein."""
+    z = zeiten or Zeiten()
     eintraege = stand["eintraege"]
     # Erneute Auswertung: wo stand das Ticket bisher? Besteht der Eintrag NUR
     # aus ihm, ist er seine alte Fassung – als Kandidat faende er sich selbst.
@@ -834,11 +938,16 @@ async def ticket_verarbeiten(key: str, geloest: str, stand: dict, st: dict,
 
     ref = {"key": key, "link": str(t.get("link") or ""), "geloest": geloest[:10]}
     pool = {i: e for i, e in eintraege.items() if not (alt_allein and i == alt_id)}
-    kand = kandidaten(analyse, pool, kodieren=vektoren)
+    t0 = time.monotonic()
+    # Kodieren rechnet (e5 auf der CPU) – nicht im Loop, sonst steht der Dienst.
+    kand = await asyncio.to_thread(kandidaten, analyse, pool, vektoren)
+    z.plus("kandidaten", time.monotonic() - t0)
     treffer = None
     if kand:
+        t0 = time.monotonic()
         roh = await _modell(provider, modell,
                             auftrag_vergleich(analyse, [(i, pool[i]) for i in kand]))
+        z.plus("vergleich", time.monotonic() - t0)
         treffer = pruefe_vergleich(json_aus(roh), kand)
 
     # Ab hier keine Modellaufrufe mehr – jetzt darf der Stand sich aendern.
@@ -953,30 +1062,72 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     fehler: list[str] = []
     weg: list[str] = []             # beim Loesen entfernte, veroeffentlichte Dateien
     ausgewertet = 0                 # angefasste Tickets (bei "beenden" < len(neu))
+    zeiten = Zeiten()
+    t_lauf = time.monotonic()
     if neu and not _stopp_angefordert:
         if provider is None:
             provider = await asyncio.to_thread(_provider)
         prov, modell = provider
         vektoren = _VektorCache()
-        for t in neu:
-            if _stopp_angefordert:
-                break
-            ausgewertet += 1
-            try:
-                art = await ticket_verarbeiten(t["key"], t["geloest"], stand, st,
-                                               prov, modell, vektoren, laden,
-                                               updated=t.get("updated", ""), weg=weg)
-                zahl[art] += 1
-                if t.get("geaendert"):
-                    zahl["erneut"] += 1
-            except Exception as e:  # noqa: BLE001 – ein Ticket kippt nicht den Lauf
-                zahl["fehler"] += 1
-                if len(fehler) < 5:
-                    fehler.append(f"{t['key']}: {e}"[:200])
-            _lauf_info["fertig"] = _lauf_info.get("fertig", 0) + 1
-            # Nach JEDEM Ticket sichern: ein Neustart mitten im Lauf soll nicht
-            # Hunderte bereits bezahlte Modellaufrufe wegwerfen.
-            await asyncio.to_thread(_stand_gesperrt_speichern, stand)
+        # ⚠ PIPELINE (2026-11-04): bis zu ``PARALLEL`` Analysen laufen voraus,
+        # eingeordnet wird in der Reihenfolge der Liste und einzeln (siehe
+        # ``ticket_einordnen``). Das Fenster ist begrenzt: "Lauf beenden" und
+        # ein Abbruch treffen hoechstens ``PARALLEL`` gerade laufende Analysen
+        # – deren Tickets bleiben offen und kommen im naechsten Lauf wieder.
+        vorlauf: deque = deque()
+        quelle = iter(neu)
+
+        def nachlegen() -> None:
+            while len(vorlauf) < PARALLEL and not _stopp_angefordert:
+                t = next(quelle, None)
+                if t is None:
+                    return
+                vorlauf.append((t, asyncio.ensure_future(
+                    ticket_analysieren(t["key"], prov, modell, laden, zeiten))))
+
+        try:
+            nachlegen()
+            while vorlauf:
+                t, analyse_fertig = vorlauf[0]
+                # "Lauf beenden": nichts Neues mehr anfangen (``nachlegen``
+                # prueft die Marke), aber eine FERTIGE Analyse noch einordnen –
+                # sie ist bezahlt, verworfen kaeme dasselbe Ticket naechstes Mal
+                # ein zweites Mal durchs Modell.
+                if _stopp_angefordert and not analyse_fertig.done():
+                    break
+                vorlauf.popleft()
+                ausgewertet += 1
+                try:
+                    try:
+                        tk, analyse = await analyse_fertig
+                    finally:
+                        # Erst NACH dem Kopf nachlegen: sonst liefen kurz
+                        # PARALLEL + 1 Analysen (der Kopf zaehlt noch mit).
+                        nachlegen()
+                    art = await ticket_einordnen(t["key"], t["geloest"], tk, analyse, stand,
+                                                 prov, modell, vektoren,
+                                                 updated=t.get("updated", ""), weg=weg,
+                                                 zeiten=zeiten)
+                    zahl[art] += 1
+                    if t.get("geaendert"):
+                        zahl["erneut"] += 1
+                except Exception as e:  # noqa: BLE001 – ein Ticket kippt nicht den Lauf
+                    zahl["fehler"] += 1
+                    if len(fehler) < 5:
+                        fehler.append(f"{t['key']}: {e}"[:200])
+                _lauf_info["fertig"] = _lauf_info.get("fertig", 0) + 1
+                # Nach JEDEM Ticket sichern: ein Neustart mitten im Lauf soll nicht
+                # Hunderte bereits bezahlte Modellaufrufe wegwerfen.
+                t0 = time.monotonic()
+                await asyncio.to_thread(_stand_gesperrt_speichern, stand)
+                zeiten.plus("speichern", time.monotonic() - t0)
+        finally:
+            # Vorausgelaufene Analysen abraeumen (beenden, Abbruch, Fehler) –
+            # sonst liefen ihre Modellaufrufe ohne Abnehmer weiter.
+            for _, f in vorlauf:
+                f.cancel()
+            await asyncio.gather(*(f for _, f in vorlauf), return_exceptions=True)
+    wanduhr = time.monotonic() - t_lauf
 
     # Schwelle und Gruppen NEU lesen: ein Lauf dauert Stunden, und wer sie
     # waehrenddessen aendert (ECHT 2026-11-02: 16:00 gestartet, 16:02 auf 3
@@ -1011,9 +1162,13 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
         grund += f" · {rest} Ticket(s) folgen im nächsten Lauf"
     if idx:
         grund += " · " + idx
+    zeile = zeiten.text(wanduhr, ausgewertet)
+    if zeile:
+        grund += " · " + zeile
     erg = {"ok": zahl["fehler"] == 0, "grund": grund, **zahl, **sch,
            "offen": rest, "fehler_beispiele": fehler,
-           "beendet": bool(_stopp_angefordert)}
+           "beendet": bool(_stopp_angefordert),
+           "zeiten": zeiten.als_dict(wanduhr, ausgewertet)}
     _ergebnis_merken(erg)
     return erg
 

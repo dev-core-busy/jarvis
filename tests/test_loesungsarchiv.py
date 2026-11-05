@@ -612,9 +612,13 @@ async def _abbruch():
     p = ProviderHaengt()
     task = asyncio.ensure_future(la.lauf(ausloeser="test", client=client,
                                          provider=(p, "testmodell"), laden=laden))
-    for _ in range(300):
+    # Gewartet wird auf einen ZUSTAND, nicht auf einen Zeitpunkt: das haengende Ticket
+    # ist erreicht und alle davor sind eingeordnet. Der Abbruch "sofort beim Haengen"
+    # fiel je nach Rechner in ein laufendes Speichern (CI 2026-11-05: rot, lokal gruen).
+    for _ in range(1000):
         await asyncio.sleep(0.01)
-        if p.haengt:
+        gesamt = la._lauf_info.get("gesamt") or 0
+        if p.haengt and gesamt and la._lauf_info.get("fertig", 0) >= gesamt - 1:
             break
     task.cancel()
     try:
@@ -638,11 +642,141 @@ grund7 = str((st7.get("letzter_lauf") or {}).get("grund") or "")
 check("(Positivkontrolle) vor dem Abbruch wurden Tickets fertig", fertig7 >= 1, fertig7)
 check("⚠ der Abbruch wird weitergeworfen", ce is not None)
 check("⚠ 'letzter Lauf' nennt den Abbruch samt Fortschritt",
-      grund7.startswith("Fehler: abgebrochen nach %d von " % fertig7), grund7)
+      grund7.startswith("Fehler: abgebrochen nach %d von " % fertig7), (fertig7, grund7))
 check("⚠ derselbe Grund reist im Abbruch mit (fuer das Cron-Protokoll)",
       ce is not None and ce.args and ce.args[0] == grund7, ce.args if ce else None)
 check("das haengende Ticket bleibt offen", HAENGT not in st7["verarbeitet"])
 check("die Sperre ist wieder frei", la._lauf_aktiv is False)
+
+# Der Abbruch trifft ein laufendes Speichern – hergestellt, nicht abgewartet: der
+# Speicher-Thread steht an einem Ereignis, bis die Abbruchmeldung ihre Chance hatte.
+import threading
+_roh8b = (la._wurzel() / "stand.json").read_bytes()
+_vor8b = set(json.loads(_roh8b)["verarbeitet"])
+_ent8b = set((la._wurzel() / "entwuerfe").glob("*.md"))
+_echt_speichern = la._stand_gesperrt_speichern
+_gesehen, _weiter = threading.Event(), threading.Event()
+
+
+def _speichern_wartet(d):
+    if not _gesehen.is_set():
+        _gesehen.set()
+        _weiter.wait(20)
+    _echt_speichern(d)
+
+
+async def _abbruch_beim_speichern():
+    task = asyncio.ensure_future(la.lauf(ausloeser="test", client=client,
+                                         provider=(ProviderAttrappe(), "testmodell"), laden=laden))
+    try:
+        for _ in range(2000):
+            await asyncio.sleep(0.005)
+            if _gesehen.is_set():
+                break
+        task.cancel()
+        # Ohne Schutz liegt die Abbruchmeldung jetzt schon auf der Platte.
+        await asyncio.sleep(0.05)
+    finally:
+        _weiter.set()
+    try:
+        await task
+    except asyncio.CancelledError as e:
+        return e
+    return None
+
+
+la._stand_gesperrt_speichern = _speichern_wartet
+try:
+    _ce8 = asyncio.run(_abbruch_beim_speichern())
+finally:
+    la._stand_gesperrt_speichern = _echt_speichern
+_st8b = json.loads((la._wurzel() / "stand.json").read_text())
+_grund8b = str((_st8b.get("letzter_lauf") or {}).get("grund") or "")
+_fertig8b = len(set(_st8b["verarbeitet"]) - _vor8b)
+check("(Positivkontrolle) der Abbruch traf ein laufendes Speichern", _gesehen.is_set() and _ce8 is not None, _ce8)
+check("⚠ die Abbruchmeldung wird vom Speichern nicht ueberschrieben",
+      _grund8b.startswith("Fehler: abgebrochen nach"), _grund8b)
+check("⚠ die Zahl in der Meldung passt zum gespeicherten Stand",
+      _grund8b.startswith("Fehler: abgebrochen nach %d von " % _fertig8b), (_fertig8b, _grund8b))
+(la._wurzel() / "stand.json").write_bytes(_roh8b)
+for _f in set((la._wurzel() / "entwuerfe").glob("*.md")) - _ent8b:
+    _f.unlink()
+
+# Beenden des Dienstes: uvicorn laesst den Loop die Tasks nicht mehr abbrechen, der
+# Hook muss es selbst tun (DEV 2026-11-05: Neustart mitten im Lauf ohne jede Spur).
+async def _beenden_probe():
+    p = ProviderHaengt()
+    task = asyncio.ensure_future(la.lauf(ausloeser="test", client=client,
+                                         provider=(p, "testmodell"), laden=laden))
+    for _ in range(1000):
+        await asyncio.sleep(0.01)
+        if p.haengt:
+            break
+    belegt = la.sperre_belegt()
+    try:
+        ja = await asyncio.wait_for(la.beim_beenden(), 15)
+    except asyncio.TimeoutError:
+        ja = "haengt"
+    fertig = task.done()
+    nachher = await la.beim_beenden()
+    if not task.done():
+        task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    return p.haengt, belegt, ja, fertig, nachher
+
+
+_h8, _bel8, _ja8, _fertig8, _nach8 = asyncio.run(_beenden_probe())
+_st8c = json.loads((la._wurzel() / "stand.json").read_text())
+_grund8c = str((_st8c.get("letzter_lauf") or {}).get("grund") or "")
+check("(Positivkontrolle) der Lauf war aktiv und hielt die Sperre", _h8 and _bel8, (_h8, _bel8))
+check("⚠ Beenden erkennt den laufenden Lauf", _ja8 is True, _ja8)
+check("⚠ Beenden wartet, bis der Lauf wirklich zu Ende ist", _fertig8 is True)
+check("⚠ die Abbruchmeldung steht danach auf der Platte",
+      _grund8c.startswith("Fehler: abgebrochen nach"), _grund8c)
+check("danach meldet Beenden keinen Lauf mehr", _nach8 is False, _nach8)
+check("die Sperre ist danach frei", la.sperre_belegt() is False)
+check("ohne Lauf tut Beenden nichts", asyncio.run(la.beim_beenden()) is False)
+
+
+async def _zaeher_lauf():
+    """Ein Lauf, der den Abbruch ignoriert, darf das Beenden nicht festhalten."""
+    frei = asyncio.Event()
+
+    async def stur():
+        while not frei.is_set():
+            try:
+                await frei.wait()
+            except asyncio.CancelledError:
+                pass
+    t = asyncio.ensure_future(stur())
+    await asyncio.sleep(0)
+    la._lauf_task = t
+    try:
+        r = await asyncio.wait_for(la.beim_beenden(deckel=0.05), 5)
+    except asyncio.TimeoutError:
+        r = "haengt"
+    frei.set()
+    await asyncio.gather(t, return_exceptions=True)
+    la._lauf_task = None
+    return r
+
+
+check("⚠ der Deckel gilt: ein zaeher Lauf haelt das Beenden nicht fest", asyncio.run(_zaeher_lauf()) is True)
+(la._wurzel() / "stand.json").write_bytes(_roh8b)
+for _f in set((la._wurzel() / "entwuerfe").glob("*.md")) - _ent8b:
+    _f.unlink()
+_haupt = ast.parse((ROOT / "backend" / "main.py").read_text(encoding="utf-8"))
+_hook = next((n for n in ast.walk(_haupt) if isinstance(n, ast.AsyncFunctionDef) and n.name == "shutdown"
+              and any("on_event" in ast.unparse(d) and "shutdown" in ast.unparse(d) for d in n.decorator_list)), None)
+if _hook is None:
+    print("  \033[31m✗\033[0m Abschalt-Hook in main.py nicht gefunden – Abbruch"); sys.exit(2)
+_im_try = [t for t in _hook.body if isinstance(t, ast.Try)
+           and any(getattr(c.func, "attr", "") == "beim_beenden" for c in ast.walk(t) if isinstance(c, ast.Call))]
+check("⚠ der Abschalt-Hook ruft das Beenden des Laufs (abgesichert)", len(_im_try) == 1, len(_im_try))
+_stopp_zeile = next((c.lineno for c in ast.walk(_hook) if isinstance(c, ast.Call)
+                     and getattr(c.func, "attr", "") == "stop"), 0)
+check("das geschieht vor dem Stopp des Schedulers (der schreibt das Protokoll mit)",
+      bool(_im_try) and 0 < _im_try[0].lineno < _stopp_zeile, (_stopp_zeile,))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1007,16 +1141,14 @@ class ProviderZaehlt(ProviderAttrappe):
 
 check("(Positivkontrolle) das Fenster ist groesser als 1", la.PARALLEL > 1, la.PARALLEL)
 p8g = ProviderZaehlt()
-_t8g = time.monotonic()
 erg8g = lauf(client, p8g)
-_dauer8g = time.monotonic() - _t8g
 s8g = _stand()
 check("(Positivkontrolle) alle Tickets verarbeitet", all(k in s8g["verarbeitet"] for k in NEU8G),
       [k for k in NEU8G if k not in s8g["verarbeitet"]])
 check("⚠ Analysen laufen WIRKLICH gleichzeitig (gemessen)", p8g.hoechst > 1, p8g.hoechst)
 check("⚠ nie mehr als PARALLEL Analysen zugleich", p8g.hoechst <= la.PARALLEL, (p8g.hoechst, la.PARALLEL))
-_seriell = len(NEU8G) * 0.05
-check("die Pipeline ist schneller als seriell", _dauer8g < _seriell, (round(_dauer8g, 2), _seriell))
+# Statt der Uhr ("schneller als seriell"): die Uhr misst den Rechner, das Fenster die Zusage.
+check("⚠ das Analyse-Fenster wird voll genutzt", p8g.hoechst == la.PARALLEL, (p8g.hoechst, la.PARALLEL))
 z8g = erg8g.get("zeiten") or {}
 check("Ergebnis traegt die Zeiten je Schritt",
       {"jira", "analyse", "kandidaten", "speichern"} <= set(z8g.get("je_schritt_s") or {}), z8g)

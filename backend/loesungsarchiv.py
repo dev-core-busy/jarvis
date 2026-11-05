@@ -121,6 +121,8 @@ _STAND_SPERRE = threading.Lock()
 _lauf_aktiv = False              # EIN Lauf zugleich (Zeitplan und Knopf)
 _lauf_info: dict = {}
 _stopp_angefordert = False       # "Lauf beenden" – wirkt nach dem laufenden Ticket
+_lauf_task = None                # Aufgabe des Laufs, fuer ``beim_beenden``
+BEENDEN_DECKEL = 10              # Sekunden; deutlich unter TimeoutStopSec des Dienstes
 
 
 def anhalten() -> bool:
@@ -396,6 +398,22 @@ def _stand_gesperrt_speichern(d: dict) -> None:
     von 11:16."""
     with _STAND_SPERRE:
         _stand_speichern(d)
+
+
+async def _sichern(stand: dict) -> None:
+    """Den Stand aus dem Lauf heraus speichern, ohne dass ein Abbruch es ueberholt.
+
+    ⚠ DIE SPERRE ALLEIN REICHT NICHT: ein ``task.cancel()`` traf den Lauf, waehrend
+    das Speichern noch auf seinen Thread wartete. Die Abbruchmeldung
+    (``_ergebnis_merken``) kam dann ZUERST auf die Platte, und der spaeter startende
+    Thread schrieb den Stand ohne sie darueber – die Meldung war weg. Deshalb wartet
+    ein Abbruch hier, bis der Thread fertig ist, und geht erst dann weiter."""
+    arbeit = asyncio.ensure_future(asyncio.to_thread(_stand_gesperrt_speichern, stand))
+    try:
+        await asyncio.shield(arbeit)
+    except asyncio.CancelledError:
+        await asyncio.gather(arbeit, return_exceptions=True)
+        raise
 
 
 # ── Markdown ────────────────────────────────────────────────────────────────
@@ -1108,7 +1126,7 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
 
     Laeuft im Dienst-Loop (asyncio): der geteilte httpx-Client der Provider
     haengt daran. Jira, Platte und Embedding gehen ueber ``to_thread``."""
-    global _lauf_aktiv, _lauf_info, _stopp_angefordert
+    global _lauf_aktiv, _lauf_info, _lauf_task, _stopp_angefordert
     if _lauf_aktiv:
         return {"ok": False, "grund": "Ein Lauf ist bereits aktiv."}
     try:
@@ -1125,6 +1143,7 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
         # ausgefallener Nachtlauf darf dort nicht als erfolgreich stehen.
         return {"ok": False, "grund": "Fehler: Der Bestand wird gerade geheilt – Lauf nicht gestartet."}
     _lauf_aktiv = True
+    _lauf_task = asyncio.current_task()
     _lauf_info = {"seit": time.time(), "ausloeser": ausloeser, "fertig": 0, "gesamt": 0}
     try:
         return await _lauf(client, provider, laden, index_und_graph)
@@ -1148,12 +1167,33 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
         return erg
     finally:
         _lauf_aktiv = False
+        _lauf_task = None
         _lauf_info = {}
         # EINE Stelle setzt zurueck: ``anhalten`` setzt nur bei aktivem Lauf,
         # eine Marke kann also nicht in den naechsten Lauf hinueberreichen.
         _stopp_angefordert = False
         if sperre >= 0:
             _sperre_frei(sperre)
+
+
+async def beim_beenden(deckel: float = BEENDEN_DECKEL) -> bool:
+    """Beim Beenden des Dienstes einen laufenden Lauf abbrechen und auf seine
+    Abbruchmeldung warten. Rueckgabe: ob ein Lauf aktiv war.
+
+    ⚠ OHNE DAS BLIEB EIN NEUSTART OHNE SPUR (DEV 2026-11-05): uvicorn loest SIGTERM
+    am Ende von ``serve`` erneut aus, der Prozess stirbt, bevor der Loop seine Tasks
+    abbricht. Der ``CancelledError``-Zweig in ``lauf`` und im Scheduler lief damit
+    nie, letzter Lauf und Cron-Protokoll zeigten weiter den vorigen Lauf.
+
+    Abgebrochen wird die Aufgabe, in der der Lauf steckt – so bleibt der Weg ueber
+    Scheduler und Protokoll derselbe. Der Deckel haelt das Beenden nicht fest:
+    systemd beendet den Dienst nach ``TimeoutStopSec`` sonst hart."""
+    aufgabe = _lauf_task
+    if aufgabe is None or aufgabe.done():
+        return False
+    aufgabe.cancel()
+    await asyncio.wait({aufgabe}, timeout=deckel)
+    return True
 
 
 async def _lauf(client, provider, laden, index_und_graph) -> dict:
@@ -1182,7 +1222,7 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     sch0 = await asyncio.to_thread(schranke, stand, st)
     idx0 = ""
     if sch0["veroeffentlicht"] or sch0["aktualisiert"] or sch0["entfernt"]:
-        await asyncio.to_thread(_stand_gesperrt_speichern, stand)
+        await _sichern(stand)
         idx0 = await asyncio.to_thread(index_und_graph or _index_und_graph)
 
     neu, offen = await asyncio.to_thread(
@@ -1251,7 +1291,7 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
                 # Nach JEDEM Ticket sichern: ein Neustart mitten im Lauf soll nicht
                 # Hunderte bereits bezahlte Modellaufrufe wegwerfen.
                 t0 = time.monotonic()
-                await asyncio.to_thread(_stand_gesperrt_speichern, stand)
+                await _sichern(stand)
                 zeiten.plus("speichern", time.monotonic() - t0)
         finally:
             # Vorausgelaufene Analysen abraeumen (beenden, Abbruch, Fehler) –
@@ -1271,7 +1311,7 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
         st_ende = st
     sch = await asyncio.to_thread(schranke, stand, st_ende)
     sch["entfernt"] += len(weg)
-    await asyncio.to_thread(_stand_gesperrt_speichern, stand)
+    await _sichern(stand)
     idx = ""
     if sch["veroeffentlicht"] or sch["aktualisiert"] or sch["entfernt"]:
         idx = await asyncio.to_thread(index_und_graph or _index_und_graph)

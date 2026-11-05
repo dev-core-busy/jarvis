@@ -30428,6 +30428,15 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     """Scheduler und Watcher sauber beenden."""
+    # Zuerst: ein laufendes Loesungsarchiv abbrechen, damit Abbruchmeldung und
+    # Cron-Protokoll noch auf die Platte kommen. Der Prozess endet nach diesem Hook
+    # hart, ohne dass der Loop seine Tasks abbricht (loesungsarchiv.beim_beenden).
+    try:
+        from backend import loesungsarchiv
+        if await loesungsarchiv.beim_beenden():
+            print("⏹️  Lösungsarchiv: laufender Lauf abgebrochen", flush=True)
+    except Exception as e:  # noqa: BLE001 – das Beenden darf daran nicht haengen
+        print(f"⚠️  Lösungsarchiv beim Beenden: {e}", flush=True)
     # Gelernte Notizen aus dem Journal endgueltig in den Index schreiben. Ohne
     # das bliebe nach jedem regulaeren Neustart ein Journal liegen, das der
     # Start-Hook dann einspielt – funktioniert zwar, kostet aber bei JEDEM

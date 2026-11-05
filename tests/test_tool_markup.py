@@ -137,6 +137,23 @@ def main() -> int:
         pruefe(f"unveraendert: {t[:42]}…", rein == t and not calls)
         pruefe(f"gilt als Antwort: {t[:42]}…", not ist_nur_selbstgespraech(rein))
 
+    abschnitt("4b) Ein '<' ist noch keine Tool-Syntax (ECHT 2026-11-05)")
+    # Positivkontrolle: dieser Weg MUSS Klammerzeilen weiter entfernen, sonst
+    # waeren die Pruefungen darunter auch ohne jede Bereinigung gruen.
+    verwaist = 'Das Ergebnis steht fest.\n<tool_call>\n{"name": \n}\n</tool_call>\n}'
+    rein, _ = berge_tool_syntax(verwaist)
+    pruefe("Kontrolle: mit echter Tool-Marke verschwinden verwaiste Klammern",
+           "}" not in rein and "Ergebnis" in rein, repr(rein))
+    for name, t in (
+        ("JSON mit Platzhalter", '{\n  "loesung": "fuser <Pfad> ausfuehren",\n'
+                                 '  "schlagworte": [\n    "a"\n  ]\n}'),
+        ("JSON mit SQL-Vergleich", '{\n  "loesung": "WHERE a < b",\n  "x": [\n  ]\n}'),
+        ("C-Code", '```c\nfor (i = 0; i < n; i++) {\n    f(i);\n}\n```'),
+        ("HTML-Code", '```html\n<script>\nfunction f() {\n  return 1;\n}\n</script>\n```'),
+    ):
+        rein, calls = berge_tool_syntax(t)
+        pruefe(f"Zeichen fuer Zeichen unveraendert: {name}", rein == t and not calls, repr(rein))
+
     abschnitt("5) Selbstgespraech-Erkennung ist ENG gefasst")
     pruefe("reine Absicht wird erkannt",
            ist_nur_selbstgespraech("Ich werde jetzt die Datei schreiben und dann parsen."))

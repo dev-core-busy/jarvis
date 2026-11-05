@@ -1163,7 +1163,20 @@
                 teile.push('<div' + (ll.ok === false ? ' style="color:var(--danger);"' : '') + '>'
                     + esc(t('jlarch.letzter', 'Letzter Lauf:')) + ' ' + esc(zeit(ll.wann))
                     + ' – ' + esc(ll.grund || '') + '</div>');
-                (ll.fehler_beispiele || []).forEach(function (f) {
+                // Das Backend merkt sich nur die ersten Beispiele. Die Kuerzung
+                // steht deshalb VOR der Liste und mit Zahl (Register), und der
+                // Hinweis sagt, was der Fehler fuer den Administrator bedeutet.
+                var beisp = ll.fehler_beispiele || [];
+                var fehlerZahl = Math.max(ll.fehler || 0, beisp.length);
+                if (fehlerZahl > 0) {
+                    teile.push('<div>' + esc(t('jlarch.fehler_hinweis',
+                        'Kein Eingriff nötig: Tickets mit Fehler bleiben offen und werden im nächsten Lauf erneut ausgewertet.')) + '</div>');
+                }
+                if (beisp.length && fehlerZahl > beisp.length) {
+                    teile.push('<div>' + esc(t('jlarch.fehler_gezeigt', '{n} von {g} Fehlern gezeigt:',
+                        { n: beisp.length, g: fehlerZahl })) + '</div>');
+                }
+                beisp.forEach(function (f) {
                     teile.push('<div style="color:var(--danger);">' + esc(f) + '</div>');
                 });
             }

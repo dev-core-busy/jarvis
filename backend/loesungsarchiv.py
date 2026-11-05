@@ -79,11 +79,13 @@ Einordnung bleibt seriell. Jeder Lauf nennt seine Zeiten je Schritt
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import os
 import re
 import secrets
+import shutil
 import threading
 import time
 from collections import deque
@@ -464,38 +466,102 @@ def auftrag_vergleich(neu: dict, kandidaten: list[tuple[str, dict]]) -> str:
     return "\n".join(teile)
 
 
+def _backslashes_reparieren(s: str) -> str:
+    """Backslashes verdoppeln, die in JSON kein gueltiges Escape sind.
+
+    Das Modell schreibt Windows-Pfade oft ungeschuetzt (``\\\\Server\\Freigabe``),
+    und ``\\F`` bricht das ganze Objekt. ⚠ PAARWEISE: ein ``\\\\`` ist schon ein
+    Paar und bleibt; ein blosser Blick auf das Folgezeichen zerlegte es und machte
+    aus einem reparierbaren Pfad einen neuen Fehler (beim Bau so gemessen).
+    Mehrdeutiges wie ``\\neu`` bleibt ein Zeilenumbruch – das ist gueltiges JSON."""
+    def ersetzen(m: re.Match) -> str:
+        z = m.group(1)
+        return m.group(0) if z in '"\\/bfnrt' or len(z) == 5 else "\\\\" + z
+    return re.sub(r"\\(u[0-9a-fA-F]{4}|.)", ersetzen, s, flags=re.DOTALL)
+
+
+def antwort_lesen(roh: str) -> tuple[dict | None, str]:
+    """``(Objekt, "")`` oder ``(None, Grund)``. Der Grund nennt nur die Art des
+    Fehlers, nie Antworttext – er landet im Stand und in der Oberflaeche, und
+    die Antwort stammt aus einem Kundenticket."""
+    s = str(roh or "").strip()
+    if not s:
+        return None, "leere Antwort"
+    s = re.sub(r"^```(?:json)?\s*|\s*```$", "", s)
+    a, b = s.find("{"), s.rfind("}")
+    if a < 0:
+        return None, "Antwort enthält kein JSON"
+    if b <= a:
+        return None, "JSON unvollständig (schließende Klammer fehlt)"
+    kern = s[a:b + 1]
+    try:
+        obj = json.loads(kern)
+    except Exception:  # noqa: BLE001
+        try:
+            obj = json.loads(_backslashes_reparieren(kern))
+        except Exception as e:  # noqa: BLE001
+            if isinstance(e, json.JSONDecodeError):
+                return None, f"JSON ungültig ({e.msg}, Zeile {e.lineno})"
+            return None, f"JSON ungültig ({type(e).__name__})"
+    if not isinstance(obj, dict):
+        return None, "Antwort ist kein JSON-Objekt"
+    return obj, ""
+
+
 def json_aus(roh: str):
     """Erstes JSON-Objekt aus der Antwort – Codezaun und Vorrede toleriert,
     alles andere ist ungueltig (``None``)."""
-    s = str(roh or "").strip()
-    s = re.sub(r"^```(?:json)?\s*|\s*```$", "", s)
-    a, b = s.find("{"), s.rfind("}")
-    if a < 0 or b <= a:
-        return None
-    try:
-        obj = json.loads(s[a:b + 1])
-    except Exception:  # noqa: BLE001
-        return None
-    return obj if isinstance(obj, dict) else None
+    return antwort_lesen(roh)[0]
 
 
-def pruefe_analyse(obj) -> dict | None:
-    """Gueltige Analyse oder ``None``. ``{"relevant": False}`` ist gueltig."""
+_AUFZAEHLUNG_RE = re.compile(r"\s*(?:\d+[.)]|[-*•])\s")
+
+
+def _als_text(wert) -> str:
+    """Modellfeld als Text. Eine Liste wird zu Zeilen, nie zu ``str(liste)``.
+
+    ⚠ ECHT 2026-11-05: 1.783 von 10.563 Loesungen standen als Python-Text im
+    Stand (``['1. …', '2. …']``), 220 davon in der Wissensdatenbank – der Auftrag
+    verlangt "Loesungsweg in Schritten", und das Modell liefert das mal als Text,
+    mal als Liste. Gemessen sind es dort ausschliesslich Listen von Texten, nur 94
+    von 6.672 Zeilen tragen schon eine Nummer oder einen Spiegelstrich; die bleiben
+    unveraendert. Alles andere (Objekt, Liste mit Objekten) hat keine ehrliche
+    Textform und zaehlt als leer – dann nennt der Lauf den Grund."""
+    if isinstance(wert, list):
+        if not all(isinstance(z, (str, int, float)) for z in wert):
+            return ""
+        zeilen = [str(z).strip() for z in wert if str(z).strip()]
+        if len(zeilen) < 2 or any(_AUFZAEHLUNG_RE.match(z) for z in zeilen):
+            return "\n".join(zeilen)
+        return "\n".join(f"{i}. {z}" for i, z in enumerate(zeilen, 1))
+    if isinstance(wert, dict):
+        return ""
+    return str(wert or "").strip()
+
+
+def analyse_pruefen(obj) -> tuple[dict | None, str]:
+    """``(Analyse, "")`` oder ``(None, Grund)``. ``{"relevant": False}`` ist gueltig."""
     if not isinstance(obj, dict) or not isinstance(obj.get("relevant"), bool):
-        return None
+        return None, "Feld „relevant“ fehlt oder ist kein Wahrheitswert"
     if not obj["relevant"]:
-        return {"relevant": False}
+        return {"relevant": False}, ""
     titel = _zeile(obj.get("titel"), MAX_TITEL)
-    problem = str(obj.get("problem") or "").strip()
-    loesung = str(obj.get("loesung") or "").strip()
-    if not (titel and problem and loesung):
-        return None
+    problem = _als_text(obj.get("problem"))
+    loesung = _als_text(obj.get("loesung"))
+    leer = [n for n, w in (("titel", titel), ("problem", problem), ("loesung", loesung)) if not w]
+    if leer:
+        return None, "Pflichtfeld leer: " + ", ".join(leer)
     sw = obj.get("schlagworte") or []
     if not isinstance(sw, list):
         sw = []
     return {"relevant": True, "titel": titel, "problem": problem[:MAX_PROBLEM],
             "loesung": loesung[:MAX_LOESUNG],
-            "schlagworte": [_zeile(s, 60) for s in sw if _zeile(s, 60)][:MAX_SCHLAGWORTE]}
+            "schlagworte": [_zeile(s, 60) for s in sw if _zeile(s, 60)][:MAX_SCHLAGWORTE]}, ""
+
+
+def pruefe_analyse(obj) -> dict | None:
+    """Gueltige Analyse oder ``None`` – dasselbe Urteil wie ``analyse_pruefen``."""
+    return analyse_pruefen(obj)[0]
 
 
 def pruefe_vergleich(obj, angeboten: list[str]) -> str | None:
@@ -894,16 +960,23 @@ async def ticket_analysieren(key: str, provider, modell: str, laden=None,
     z.prompt_zeichen += len(auftrag)
     z.prompts += 1
     analyse = None
+    gruende: list[str] = []
     for _ in range(2):                       # ein zweiter Versuch je Ticket
         z.versuche += 1
         roh = await _modell(provider, modell, auftrag)
-        analyse = pruefe_analyse(json_aus(roh))
+        obj, grund = antwort_lesen(roh)
+        if obj is not None:
+            analyse, grund = analyse_pruefen(obj)
         if analyse is not None:
             break
+        gruende.append(grund)
     z.plus("analyse", time.monotonic() - t1)
     if analyse is None:
         # Ohne Schluessel: die Schleife in ``_lauf`` setzt ihn selbst davor.
-        raise ArchivFehler("keine gültige Auswertung vom Modell (2 Versuche)")
+        # Mit Grund: "keine gueltige Auswertung" allein sagte nicht, wo man
+        # suchen muss – die Ursache vom 2026-11-05 lag gar nicht am Modell.
+        raise ArchivFehler("keine gültige Auswertung vom Modell (2 Versuche): "
+                           + "; ".join(dict.fromkeys(gruende)))
     return t, analyse
 
 
@@ -1181,6 +1254,83 @@ def _ergebnis_merken(erg: dict) -> None:
             _stand_speichern(stand)
     except Exception as e:  # noqa: BLE001
         print(f"[Lösungsarchiv] Ergebnis nicht gespeichert: {e}", flush=True)
+
+
+# ── Altbestand: Felder als Python-Text ──────────────────────────────────────
+
+_LISTEN_ANFANG = ("['", '["')
+
+
+def _python_liste_lesen(text) -> list | None:
+    """Die Textliste hinter einem frueheren ``str(liste)``, sonst ``None``.
+
+    ``literal_eval`` fuehrt nichts aus – der Text stammt aus einer Modellantwort.
+    Am Deckel abgeschnittene Listen sind nicht mehr lesbar und ergeben ``None``."""
+    s = str(text or "").strip()
+    if not s.startswith(_LISTEN_ANFANG):
+        return None
+    try:
+        obj = ast.literal_eval(s)
+    except Exception:  # noqa: BLE001
+        return None
+    return obj if isinstance(obj, list) and all(isinstance(z, str) for z in obj) else None
+
+
+def loesungen_heilen(stand: dict) -> dict:
+    """Problem und Loesung im Stand von Python-Text auf Zeilen umstellen (in place).
+
+    Dieselbe Umwandlung wie bei neuen Antworten (``_als_text``), damit Altbestand
+    und Neues gleich aussehen. Nicht Lesbares bleibt stehen und wird gezaehlt –
+    raten waere schlimmer als ein sichtbarer Rest. ``aktualisiert`` bleibt: am
+    Inhalt hat sich nichts geaendert."""
+    geheilt: list[str] = []
+    unlesbar: list[str] = []
+    for eid, e in stand["eintraege"].items():
+        for feld, deckel in (("problem", MAX_PROBLEM), ("loesung", MAX_LOESUNG)):
+            alt = str(e.get(feld) or "")
+            if not alt.strip().startswith(_LISTEN_ANFANG):
+                continue
+            neu = _als_text(_python_liste_lesen(alt) or [])
+            if not neu:
+                if eid not in unlesbar:
+                    unlesbar.append(eid)
+                continue
+            e[feld] = neu[:deckel]
+            if eid not in geheilt:
+                geheilt.append(eid)
+    return {"geheilt": geheilt, "unlesbar": unlesbar,
+            "veroeffentlicht": sum(1 for eid in geheilt if stand["eintraege"][eid].get("rag_datei"))}
+
+
+def bestand_heilen(anwenden: bool = False) -> dict:
+    """Den Altbestand heilen; ohne ``anwenden`` nur zaehlen.
+
+    ⚠ NUR STAND UND ENTWUERFE. Die veroeffentlichten Dateien zieht der naechste
+    Lauf ueber seine Schranke nach (die vergleicht den Inhalt) und stoesst damit
+    den einen Indizierweg an. Ein eigener Schreibweg hier waere der zweite Weg in
+    Index und Graph, den es ausdruecklich nicht gibt – und ein Indexlauf aus einem
+    fremden Prozess ginge am FAISS-Index im Speicher des Dienstes vorbei.
+
+    ⚠ NICHT WAEHREND EINES LAUFS: der haelt den Stand im Speicher und schreibt ihn
+    nach jedem Ticket zurueck. ``_lauf_aktiv`` sieht nur diesen Prozess; wer von
+    aussen heilt, fragt vorher den Dienst (``deploy/loesungsarchiv_heilen.py``)."""
+    if _lauf_aktiv:
+        raise ArchivFehler("Ein Lauf ist aktiv – der Stand wird gerade geschrieben.")
+    with _STAND_SPERRE:
+        stand = _stand_laden()
+        erg = loesungen_heilen(stand)
+        erg["sicherung"] = ""
+        if anwenden and erg["geheilt"]:
+            quelle = _wurzel() / "stand.json"
+            sicherung = quelle.with_name(f"stand.vor-heilung-{time.strftime('%Y%m%d-%H%M%S')}.json")
+            shutil.copy2(quelle, sicherung)
+            # Erst die Entwuerfe, dann der Stand: bricht es dazwischen ab, findet
+            # ein zweiter Durchgang dieselben Eintraege wieder.
+            for eid in erg["geheilt"]:
+                _entwurf_schreiben(eid, stand["eintraege"][eid])
+            _stand_speichern(stand)
+            erg["sicherung"] = sicherung.name
+    return erg
 
 
 # ── Anzeige ─────────────────────────────────────────────────────────────────

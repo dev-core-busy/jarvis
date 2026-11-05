@@ -369,6 +369,62 @@ check("erfundene Kennung zaehlt nicht",
       la.pruefe_vergleich({"gleich": "ffffffffffff"}, ["aaaaaaaaaaaa"]) is None)
 check("angebotene Kennung (auch in Klammern) zaehlt",
       la.pruefe_vergleich({"gleich": "[aaaaaaaaaaaa]"}, ["aaaaaaaaaaaa"]) == "aaaaaaaaaaaa")
+
+# Vorfall ECHT 2026-11-05: gueltige Modellantworten, die im Lauf scheiterten.
+_ANTW = {"relevant": True, "titel": "T", "problem": "P", "loesung": "fuser <Pfad> ausfuehren",
+         "schlagworte": ["a", "b"]}
+_MEHRZEILIG = json.dumps(_ANTW, indent=2, ensure_ascii=False)
+check("Positivkontrolle: die Probe ist mehrzeilig, enthaelt '<' und Klammerzeilen",
+      "<" in _MEHRZEILIG and "\n}" in _MEHRZEILIG and "\n  ]" in _MEHRZEILIG, _MEHRZEILIG)
+try:
+    from backend import llm as _llm
+except Exception as e:  # noqa: BLE001
+    print(f"ABBRUCH: backend.llm nicht ladbar ({e})")
+    sys.exit(2)
+_rein, _ = _llm.berge_tool_syntax(_MEHRZEILIG)
+check("⚠ Antwort mit '<' uebersteht die Bereinigung des Providers",
+      la.pruefe_analyse(la.json_aus(_rein)) is not None, repr(_rein[-30:]))
+
+_pfad = '{"relevant": true, "titel": "T", "problem": "P", "loesung": "\\\\\\\\Srv\\Freigabe$\\MT940 anlegen"}'
+_ob = la.json_aus(_pfad)
+check("Positivkontrolle: die Pfad-Probe ist ohne Reparatur wirklich ungueltig",
+      wirft(json.loads, _pfad) is not None)
+check("Windows-Pfad ohne Escaping wird lesbar und bleibt der Pfad",
+      (_ob or {}).get("loesung") == "\\\\Srv\\Freigabe$\\MT940 anlegen", _ob)
+_gueltig = '{"a": "x\\ny \\"z\\" \\\\\\\\Srv \\u00e4 \\t\\/"}'
+check("gueltige Escapes bleiben bei der Reparatur Zeichen fuer Zeichen gleich",
+      la._backslashes_reparieren(_gueltig) == _gueltig, la._backslashes_reparieren(_gueltig))
+check("\\u ohne vier Hexziffern gilt als kaputt und wird repariert",
+      (la.json_aus('{"a": "C:\\users"}') or {}).get("a") == "C:\\users", la.json_aus('{"a": "C:\\users"}'))
+
+_basis = {"relevant": True, "titel": "T", "problem": "P"}
+_lo = lambda w: (la.pruefe_analyse({**_basis, "loesung": w}) or {}).get("loesung")
+check("Loesung als Liste wird zu nummerierten Zeilen, nicht zu Python-Text",
+      _lo(["Dienst stoppen", "Datei loeschen"]) == "1. Dienst stoppen\n2. Datei loeschen",
+      _lo(["Dienst stoppen", "Datei loeschen"]))
+check("schon nummerierte Liste wird nicht doppelt nummeriert",
+      _lo(["1. a", "2. b"]) == "1. a\n2. b", _lo(["1. a", "2. b"]))
+check("Liste mit Spiegelstrichen bleibt, wie sie ist", _lo(["- a", "- b"]) == "- a\n- b", _lo(["- a", "- b"]))
+check("Liste mit einem Eintrag bekommt keine Nummer", _lo(["nur ein Schritt"]) == "nur ein Schritt")
+check("leere Zeilen einer Liste fallen weg", _lo(["a", "  ", "b"]) == "1. a\n2. b", _lo(["a", "  ", "b"]))
+check("Text bleibt Text", _lo("  a\nb ") == "a\nb", _lo("  a\nb "))
+check("leere Liste ist keine Loesung", la.pruefe_analyse({**_basis, "loesung": []}) is None)
+check("Objekt ist keine Loesung (statt Python-Text)", la.pruefe_analyse({**_basis, "loesung": {"a": 1}}) is None)
+check("Liste mit Objekten ist keine Loesung (statt Python-Text)",
+      la.pruefe_analyse({**_basis, "loesung": [{"schritt": "a"}]}) is None)
+
+_lese = lambda r: la.antwort_lesen(r)[1]
+check("Grund: leere Antwort", _lese("") == "leere Antwort", _lese(""))
+check("Grund: kein JSON", "kein JSON" in _lese("geht nicht"), _lese("geht nicht"))
+check("Grund: abgeschnitten", "unvollständig" in _lese('{"relevant": true,'), _lese('{"relevant": true,'))
+check("Grund: Syntaxfehler mit Zeile", re.search(r"JSON ungültig \(.+, Zeile 2\)", _lese('{"a":\n x}')) is not None,
+      _lese('{"a":\n x}'))
+check("Grund nennt keinen Antworttext (Kundendaten)", "GEHEIM" not in _lese('{"a":\n GEHEIM}'), _lese('{"a":\n GEHEIM}'))
+check("Grund: relevant fehlt", "relevant" in la.analyse_pruefen({"titel": "T"})[1], la.analyse_pruefen({"titel": "T"}))
+check("Grund nennt genau die leeren Pflichtfelder",
+      la.analyse_pruefen({"relevant": True, "titel": "T"})[1] == "Pflichtfeld leer: problem, loesung",
+      la.analyse_pruefen({"relevant": True, "titel": "T"}))
+check("kein Grund bei gueltiger Analyse", la.analyse_pruefen({"relevant": False}) == ({"relevant": False}, ""))
 md = la.markdown({"titel": "T", "problem": "# Gekapert\nx", "loesung": "y", "zaehler": 2,
                   "tickets": [{"key": "PRJA-1", "link": "https://j/browse/PRJA-1"}]})
 check("Ueberschrift im Modelltext wird entschaerft", "\n# Gekapert" not in md and "\\# Gekapert" in md)
@@ -503,6 +559,8 @@ check("Fehler wird gezaehlt", erg4.get("fehler") == 1 and erg4.get("ok") is Fals
 check("zweiter Versuch je Ticket", len(prov4.aufrufe) == 2, len(prov4.aufrufe))
 check("Ticket bleibt offen", f"{BEREICH}-7" not in st4["verarbeitet"])
 check("Grund nennt das Ticket", any(f"{BEREICH}-7" in f for f in erg4.get("fehler_beispiele", [])), erg4)
+check("⚠ Grund nennt die Art des Fehlers, einmal statt je Versuch",
+      any(f.count("Antwort enthält kein JSON") == 1 for f in erg4.get("fehler_beispiele", [])), erg4)
 prov5 = ProviderAttrappe()
 erg5 = lauf(client, prov5)
 st5 = json.loads((la._wurzel() / "stand.json").read_text())
@@ -1098,5 +1156,90 @@ for name in ("_APP_DENY_REL", "PRIVATE_DIRS"):
 
 
 shutil.rmtree(SAND, ignore_errors=True)
+# ════════════════════════════════════════════════════════════════════════════
+section("20. Altbestand: Python-Text wird geheilt (Vorfall ECHT 2026-11-05)")
+_h_aus_liste = str(["Dienst stoppen", "Sperrdatei loeschen\nund pruefen"])
+_h_zu_lang = str(["x" * 50, "y" * 50])[:60]    # am Deckel abgeschnitten, nicht lesbar
+_h_e = lambda i, loesung, **kw: {  # noqa: E731
+    "titel": f"Eintrag {i}", "problem": "P", "loesung": loesung, "zaehler": 5, "schlagworte": [],
+    "tickets": [{"key": f"{BEREICH}-{i}", "link": "", "geloest": ""}], "rag_datei": "",
+    "angelegt": 1.0, "aktualisiert": 1.0, **kw}
+_H = {"aaaaaaaaaa01": _h_e(1, _h_aus_liste),
+      "aaaaaaaaaa02": _h_e(2, str(["1. a", "2. b"])),
+      "aaaaaaaaaa03": _h_e(3, "1. schon Text\n2. bleibt"),
+      "aaaaaaaaaa04": _h_e(4, _h_zu_lang),
+      "aaaaaaaaaa05": _h_e(5, "[1] kein Python-Text, sondern ein Verweis"),
+      "aaaaaaaaaa06": _h_e(6, "ok", problem=str(["Symptom", "Ursache"]))}
+_h_stand = {"version": 1, "verarbeitet": {"X-1": {"eintrag": "aaaaaaaaaa01", "wann": 1.0}},
+            "eintraege": json.loads(json.dumps(_H)), "letzter_lauf": {"wann": 7.0}}
+_h_datei = la._wurzel() / "stand.json"
+la._stand_speichern(_h_stand)
+_h_roh = _h_datei.read_bytes()
+for _f in (la._wurzel() / "entwuerfe").glob("aaaaaaaaaa*.md"):
+    _f.unlink()
+
+_t = la.bestand_heilen()
+check("Trockenlauf zaehlt genau die Python-Texte", sorted(_t["geheilt"]) == ["aaaaaaaaaa01", "aaaaaaaaaa02", "aaaaaaaaaa06"], _t)
+check("Trockenlauf nennt den nicht lesbaren Rest", _t["unlesbar"] == ["aaaaaaaaaa04"], _t)
+check("⚠ Trockenlauf aendert den Stand nicht (Byte fuer Byte)", _h_datei.read_bytes() == _h_roh)
+check("Trockenlauf legt keine Sicherung an", not list(la._wurzel().glob("stand.vor-heilung-*")) and _t["sicherung"] == "", _t)
+check("Trockenlauf schreibt keine Entwuerfe", not list((la._wurzel() / "entwuerfe").glob("aaaaaaaaaa*.md")))
+
+_a = la.bestand_heilen(anwenden=True)
+_nach = json.loads(_h_datei.read_text(encoding="utf-8"))
+_ne = _nach["eintraege"]
+check("Positivkontrolle: wirklich geschrieben", _a["sicherung"] != "" and len(_a["geheilt"]) == 3, _a)
+check("Liste wird zu nummerierten Zeilen, Umbruch im Eintrag bleibt echt",
+      _ne["aaaaaaaaaa01"]["loesung"] == "1. Dienst stoppen\n2. Sperrdatei loeschen\nund pruefen", _ne["aaaaaaaaaa01"]["loesung"])
+check("vorhandene Nummern werden nicht verdoppelt", _ne["aaaaaaaaaa02"]["loesung"] == "1. a\n2. b", _ne["aaaaaaaaaa02"]["loesung"])
+check("auch das Feld Problem wird geheilt", _ne["aaaaaaaaaa06"]["problem"] == "1. Symptom\n2. Ursache", _ne["aaaaaaaaaa06"]["problem"])
+check("Text bleibt unangetastet", _ne["aaaaaaaaaa03"] == _H["aaaaaaaaaa03"], _ne["aaaaaaaaaa03"])
+check("abgeschnittene Liste bleibt stehen statt geraten", _ne["aaaaaaaaaa04"] == _H["aaaaaaaaaa04"], _ne["aaaaaaaaaa04"])
+check("'[1] …' ist kein Python-Text", _ne["aaaaaaaaaa05"] == _H["aaaaaaaaaa05"], _ne["aaaaaaaaaa05"])
+check("nur die Textfelder aendern sich (Zaehler, Tickets, Zeiten nicht)",
+      all({k: v for k, v in _ne[i].items() if k not in ("problem", "loesung")}
+          == {k: v for k, v in _H[i].items() if k not in ("problem", "loesung")} for i in _H))
+check("uebriger Stand bleibt", _nach["verarbeitet"] == _h_stand["verarbeitet"]
+      and _nach["letzter_lauf"] == _h_stand["letzter_lauf"])
+_sich = la._wurzel() / _a["sicherung"]
+check("⚠ die Sicherung ist der Stand von vorher", _sich.is_file() and _sich.read_bytes() == _h_roh)
+_ew = la._entwurf_pfad("aaaaaaaaaa01")
+check("Entwurf des geheilten Eintrags ist nachgezogen",
+      _ew.is_file() and "1. Dienst stoppen" in _ew.read_text(encoding="utf-8") and "['" not in _ew.read_text(encoding="utf-8"))
+check("kein Entwurf fuer unberuehrte Eintraege", not la._entwurf_pfad("aaaaaaaaaa03").exists())
+
+_b = la.bestand_heilen(anwenden=True)
+check("⚠ zweiter Durchgang findet nichts mehr und sichert nicht erneut",
+      _b["geheilt"] == [] and _b["sicherung"] == "" and len(list(la._wurzel().glob("stand.vor-heilung-*"))) == 1, _b)
+
+# Die Wissensdatenbank zieht die Schranke nach – der eine Weg, kein zweiter.
+_h_st = {**la.einstellungen_pruefen({**gut, "schwelle": 2}), "schwelle": 2}
+_h_s2 = json.loads(json.dumps(_nach))
+la.schranke(_h_s2, _h_st)
+_pfad_alt = la._abs(_h_s2["eintraege"]["aaaaaaaaaa01"]["rag_datei"])
+_pfad_alt.write_text(la.markdown({**_h_s2["eintraege"]["aaaaaaaaaa01"], "loesung": _h_aus_liste}), encoding="utf-8")
+_sch = la.schranke(_h_s2, _h_st)
+check("⚠ die Schranke ersetzt die veroeffentlichte Datei mit dem alten Text",
+      _sch["aktualisiert"] == 1 and "1. Dienst stoppen" in _pfad_alt.read_text(encoding="utf-8")
+      and "['" not in _pfad_alt.read_text(encoding="utf-8"), _sch)
+
+la._lauf_aktiv = True
+check("waehrend eines Laufs wird nicht geheilt", isinstance(wirft(la.bestand_heilen, True), la.ArchivFehler))
+la._lauf_aktiv = False
+
+_skript = ast.parse((ROOT / "deploy" / "loesungsarchiv_heilen.py").read_text(encoding="utf-8"))
+_arg = next((n for n in ast.walk(_skript) if isinstance(n, ast.Call)
+             and getattr(n.func, "attr", "") == "add_argument"), None)
+check("Skript: schreiben nur auf ausdruecklichen Schalter",
+      _arg is not None and _arg.args[0].value == "--anwenden"
+      and any(k.arg == "action" and k.value.value == "store_true" for k in _arg.keywords))
+_main = next((n for n in _skript.body if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
+# ast.walk laeuft in die Breite, nicht in Quelltext-Reihenfolge – deshalb nach Zeilen sortiert.
+_folge = [getattr(c.func, "id", getattr(c.func, "attr", ""))
+          for c in sorted((c for c in ast.walk(_main) if isinstance(c, ast.Call)), key=lambda c: c.lineno)] if _main else []
+check("Skript: fragt den Dienst, bevor es heilt",
+      "lauf_aktiv" in _folge and "bestand_heilen" in _folge
+      and min(i for i, n in enumerate(_folge) if n == "lauf_aktiv") < _folge.index("bestand_heilen"), _folge)
+
 print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m")
 sys.exit(0 if FAIL == 0 else 1)

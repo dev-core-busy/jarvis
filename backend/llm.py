@@ -198,7 +198,15 @@ def berge_tool_syntax(text: str):
             calls.append(MockFC(name, args))
             rest = rest.replace(m.group(0), "")
 
-        rest = _TOOL_MARKUP_RE.sub("", rest)
+        ohne_marken = _TOOL_MARKUP_RE.sub("", rest)
+        # ⚠ OHNE TOOL-SYNTAX BLEIBT DER TEXT UNANGETASTET (ECHT 2026-11-05). Ein
+        # "<" im Text beweist keinen Aufruf: "lpadmin -p <Name>" oder
+        # "WHERE a < b" genuegten, und die Klammerzeilen unten nahmen formatiertem
+        # JSON sein schliessendes "]" und "}" und Code-Bloecken jedes "}". Im
+        # Loesungsarchiv waren so 14 von 20 gueltigen Antworten danach kaputt.
+        if rest == text and ohne_marken == text:
+            return text, calls
+        rest = ohne_marken
         # Ein einzelnes verwaistes "}" oder "{...}" aus einem halb geparsten
         # Aufruf ist ebenfalls kein Antworttext.
         rest = re.sub(r"^\s*[\{\}\[\]]+\s*$", "", rest, flags=re.MULTILINE)

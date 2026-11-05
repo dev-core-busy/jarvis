@@ -46,7 +46,7 @@ function mkFetch(state) {
         if (u === '/api/jira/admin/loesungsarchiv' && method === 'GET') {
             return j({ ok: true, einstellungen: state.einst, gruppen: state.gruppen,
                        tickets_verarbeitet: 0, eintraege: 0, veroeffentlicht: 0,
-                       letzter_lauf: null, naechster_lauf: null, laeuft: state.laeuft || null,
+                       letzter_lauf: state.letzter || null, naechster_lauf: null, laeuft: state.laeuft || null,
                        ablage: state.ablage });
         }
         if (u === '/api/jira/admin/loesungsarchiv/stopp' && method === 'POST') {
@@ -226,6 +226,36 @@ function klick(w, el, was) {
     await sleep(150);
     check('Lauf zu Ende: "Lauf beenden" verschwindet, "Jetzt auswerten" wieder bedienbar',
           !sichtbar(stop) && !run.disabled);
+
+    section('8. Fehler des letzten Laufs: Anzahl und was zu tun ist');
+    const zustandText = () => d.getElementById('jlarch-zustand').textContent;
+    const beispiele = [1, 2, 3, 4, 5].map((i) => 'PRJA-' + i + ': keine gültige Auswertung vom Modell (2 Versuche): JSON ungültig (Invalid \\escape, Zeile 5)');
+    state.letzter = { wann: 1700000000, ok: false, grund: '5000 Ticket(s) ausgewertet', fehler: 21, fehler_beispiele: beispiele };
+    w.JiraManager.loadArchiv();
+    await sleep(150);
+    let text = zustandText();
+    check('Positivkontrolle: die Fehlerbeispiele sind gezeichnet', text.includes('PRJA-5: keine gültige Auswertung'), text.slice(0, 200));
+    check('die Kuerzung ist beziffert', text.includes('5 von 21 Fehlern gezeigt'));
+    check('⚠ die Bezifferung steht VOR der Liste',
+          text.indexOf('5 von 21 Fehlern gezeigt') >= 0 && text.indexOf('5 von 21 Fehlern gezeigt') < text.indexOf('PRJA-1:'));
+    check('der Hinweis sagt, dass kein Eingriff noetig ist', /Kein Eingriff nötig.*erneut ausgewertet/.test(text));
+    check('der Grund aus dem Backend ist sichtbar', text.includes('Invalid \\escape'));
+
+    state.letzter = { wann: 1700000000, ok: false, grund: 'x', fehler: 3, fehler_beispiele: beispiele.slice(0, 3) };
+    w.JiraManager.loadArchiv();
+    await sleep(150);
+    text = zustandText();
+    check('alle Fehler gezeigt: keine Bezifferung, die eine Kuerzung behauptet',
+          text.includes('PRJA-3:') && !text.includes('Fehlern gezeigt'));
+    check('der Hinweis bleibt trotzdem stehen', text.includes('Kein Eingriff nötig'));
+
+    state.letzter = { wann: 1700000000, ok: true, grund: 'alles gut', fehler: 0, fehler_beispiele: [] };
+    w.JiraManager.loadArchiv();
+    await sleep(150);
+    text = zustandText();
+    check('Lauf ohne Fehler: kein Hinweis auf Fehler',
+          text.includes('alles gut') && !text.includes('Kein Eingriff nötig') && !text.includes('Fehlern gezeigt'));
+    state.letzter = null;
 
     console.log('\n\x1b[1mErgebnis: ' + ok + '/' + (ok + fail) + '\x1b[0m');
     w.close();

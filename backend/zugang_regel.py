@@ -91,6 +91,7 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/cert"): ("oeffentlich", "Server-Zertifikat zum Importieren (oeffentlicher Schluessel)"),
     ("POST", "/api/csp-report"): ("oeffentlich", "CSP-Verstossmeldungen des Browsers (BSI H4), ohne Sitzung gesendet"),
     ("GET", "/api/addin/version"): ("oeffentlich", "Versionsabgleich des Add-ins"),
+    ("POST", "/api/addin/diag"): ("oeffentlich", "Start-Diagnose des Outlook-Add-ins (vor der Anmeldung, nur Journal)"),
     ("GET", "/api/excel-addin/version"): ("oeffentlich", "Versionsabgleich des Add-ins"),
     ("GET", "/api/avatar/config"): ("selbst", "Avatar-Darstellung; prueft Sitzung/Schluessel im Rumpf"),
     ("GET", "/api/vision/download/stream-tools"): ("oeffentlich", "Weiterleitung auf den oeffentlichen Download"),

@@ -14983,6 +14983,21 @@ async def addin_manifest(request: Request):
                     media_type="application/xml", headers=_kopf)
 
 
+@app.post("/api/addin/diag")
+async def addin_diag_melden(request: Request):
+    """Startschritte des Aufgabenfensters ins Journal (``backend/addin_diag.py``).
+
+    OHNE Anmeldung – untersucht wird gerade der Weg VOR der Anmeldung. Schutz
+    im Modul: Lastbremse je IP, Schritt aus fester Liste, Feldlaengen, keine
+    IP im Journal. Antwort immer 204, ein Angreifer liest am Status nichts ab."""
+    from backend import addin_diag as _addin_diag  # noqa: PLC0415
+    koerper = await request.body()
+    _addin_diag.melden(koerper[:_addin_diag.KOERPER_MAX + 1],
+                       request.client.host if request.client else "",
+                       request.headers.get("user-agent", ""))
+    return Response(status_code=204)
+
+
 @app.get("/api/addin/version")
 async def addin_version():
     """Manifest-Version, die dieser Server AKTUELL ausliefert.
@@ -15216,13 +15231,17 @@ async def addin_icon(groesse: int):
 
 
 @app.get("/addin/taskpane.html", response_class=HTMLResponse)
-async def addin_taskpane():
+async def addin_taskpane(request: Request):
     """Aufgabenfenster des Outlook-Add-ins.
 
     Wie ``/email`` eine leere Huelle ohne Rechtepruefung: eine Navigation aus
     Outlook traegt keinen Authorization-Kopf. Angemeldet wird im Fenster selbst,
     und jeder Datenabruf haengt serverseitig an ``require_email_access``.
     """
+    from backend import addin_diag as _addin_diag  # noqa: PLC0415
+    # Start-Diagnose: ohne Zugriffsprotokoll war nicht zu sehen, ob Outlook
+    # das Fenster ueberhaupt abruft (Meldung 2026-11-05).
+    _addin_diag.abruf(dict(request.headers), request.url.query)
     f = FRONTEND_DIR / "addin" / "taskpane.html"
     if not f.exists():
         return HTMLResponse("<h1>404 – Add-in nicht installiert</h1>", status_code=404)

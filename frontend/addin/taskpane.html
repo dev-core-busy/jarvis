@@ -277,6 +277,12 @@
 </head>
 <body>
 <script src="/static/js/theme_frueh.js?v=1"></script>
+<!-- Start-Diagnose (backend/addin_diag.py): direkt hinter theme_frueh.js (das
+     muss unmittelbar nach <body> stehen, Hell-Modus vor dem ersten Zeichnen)
+     und VOR allen uebrigen Skripten, damit auch Fehler in den folgenden
+     Modulen und das Ausbleiben von Office ins Journal gelangen. Haengt an
+     nichts und stoert den Start nicht. -->
+<script src="/static/addin/diag.js?v=1"></script>
 
 <!-- ═══ Band: veraltetes Manifest ═══
      Faengt den EINEN Teil, der sich nicht von selbst aktualisiert. Das

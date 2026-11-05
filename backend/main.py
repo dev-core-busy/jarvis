@@ -12463,7 +12463,25 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
     # BSI M5: das Formular bekommt Geheimfelder leer (GET maskiert) – ein leer
     # zurueckkommendes Geheimfeld heisst "unveraendert", nicht "loeschen".
     from backend import secret_reveal as _sr
-    gespeichert = sm.get_skill_config(name) or {}
+    # ⚠ KOPIE, NICHT DAS LEBENDE DICT. `sm.get_skill_config` gibt den Bestand
+    # aus `config._skill_states` HERAUS, und `update_skill_config` schreibt mit
+    # `current_config.update(data)` in genau dieses Objekt. Ohne die Kopie
+    # traegt `gespeichert` nach dem Speichern den NEUEN Wert – jeder Vergleich
+    # "war es vorher anders?" ist dann falsch. Genau daran sind die beiden
+    # Loeschzweige unten am 2026-11-05 ausgefallen: der Schalter wurde
+    # gespeichert, die Meldung sagte "kein Kennwort gespeichert", und die
+    # Kennwoerter der persoenlichen Zugaenge blieben liegen.
+    gespeichert = dict(sm.get_skill_config(name) or {})
+
+    def _endzustand(feld: str):
+        """Wert des Feldes NACH diesem Speichern (Body gewinnt, sonst Bestand).
+
+        Entscheidend ist der Endzustand, nicht die Aenderung: haengt eine
+        Loeschung am Umschalt-MOMENT, bleibt ein Rest fuer immer liegen, sobald
+        dieser Moment einmal verpasst wurde (Dienst-Neustart, Fehlschlag,
+        Teil-Speichern aus einem anderen Knopf)."""
+        return body[feld] if feld in body else gespeichert.get(feld)
+
     # SAP "Anmeldung ueber die Portal-Kachel fordern" (Betreiber 2026-11-05):
     # mit dem Schalter liegt KEIN SAP-Kennwort mehr auf der Platte. Die
     # Geheimfelder des Sammelzugangs werden ausdruecklich geleert (ein leeres
@@ -12471,7 +12489,7 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
     # alle persoenlichen Zugaenge ihre Kennwoerter. Die Umleitungs-Pruefung
     # entfaellt dann: es bleibt kein Geheimnis, das umgeleitet werden koennte.
     # Seit 2026-11-05 auch fuer VEMAS (derselbe Schalter, dasselbe Modulmuster).
-    sap_kachel = name in ("sap", "vemas") and bool(body.get("kachel_anmeldung"))
+    sap_kachel = name in ("sap", "vemas") and bool(_endzustand("kachel_anmeldung"))
     if sap_kachel:
         if name == "sap":
             from backend import sap_accounts as _sapacc
@@ -12498,8 +12516,7 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
     success = sm.update_skill_config(name, body)
     # Jira "Persoenliche Zugaenge erlauben" ABGESCHALTET (vorher erlaubt):
     # alle persoenlichen Token loeschen. Die Oberflaeche hat vorher gewarnt.
-    if (success and name == "jira" and body.get("persoenliche_zugaenge") is False
-            and gespeichert.get("persoenliche_zugaenge") is not False):
+    if success and name == "jira" and _endzustand("persoenliche_zugaenge") is False:
         from backend import jira_accounts as _jacc
         try:
             _nj = _jacc.alle_entfernen()
@@ -12509,9 +12526,13 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
                                  "error": "Die Einstellung ist gespeichert, aber die "
                                           f"persönlichen Zugänge ließen sich nicht entfernen: {e}"},
                                 status_code=500)
-        _aktivitaet(user, "skills", "jira_persoenliche_zugaenge_aus", name,
-                    zugaenge_entfernt=_nj)
-    if success and sap_kachel and not gespeichert.get("kachel_anmeldung"):
+        if _nj or gespeichert.get("persoenliche_zugaenge") is not False:
+            _aktivitaet(user, "skills", "jira_persoenliche_zugaenge_aus", name,
+                        zugaenge_entfernt=_nj)
+    if success and sap_kachel:
+        # Kein "nur beim Einschalten": `kennwoerter_entfernen` ist idempotent
+        # (ohne Rest kein Schreibzugriff und Rueckgabe 0) und heilt damit einen
+        # Bestand, der den Schalter schon traegt und trotzdem Kennwoerter haelt.
         try:
             _n = _sapacc.kennwoerter_entfernen()
         except Exception as e:  # noqa: BLE001
@@ -12520,8 +12541,9 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
                                  "error": "Die Einstellung ist gespeichert, aber die "
                                           "Kennwörter der eigenen Zugänge ließen sich "
                                           f"nicht entfernen: {e}"}, status_code=500)
-        _aktivitaet(user, "skills", "kachel_anmeldung_an", name,
-                    kennwoerter_entfernt=_n)
+        if _n or not gespeichert.get("kachel_anmeldung"):
+            _aktivitaet(user, "skills", "kachel_anmeldung_an", name,
+                        kennwoerter_entfernt=_n)
 
     # Google-Spezialfall: Client-ID/Secret in .env schreiben
     if name == "google" and success:

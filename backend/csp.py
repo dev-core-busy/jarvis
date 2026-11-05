@@ -120,7 +120,7 @@ def einstellungen_quelle(fn) -> None:
 
 
 def office_hosts_quelle(fn) -> None:
-    """``main`` reicht ``addin_sso.erlaubte_hosts`` herein (Exchange-Hosts im Haus)."""
+    """``main`` reicht ``addin_sso.rahmen_hosts`` herein (Exchange-Hosts im Haus)."""
     global _office_hosts_quelle
     _office_hosts_quelle = fn
 

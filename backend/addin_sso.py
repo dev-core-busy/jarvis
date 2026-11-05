@@ -122,6 +122,60 @@ def erlaubte_hosts() -> set[str]:
     return hosts
 
 
+_SAN_CACHE: dict[str, frozenset] = {}
+
+
+def _san_hosts(pem: str) -> frozenset:
+    """DNS-Namen (SAN) eines PEM-Zertifikats, klein; Platzhalter fallen weg.
+
+    Zwischengespeichert je PEM-Hash – die Funktion laeuft bei jeder HTML-Antwort."""
+    schluessel = hashlib.sha256((pem or "").encode("utf-8", "replace")).hexdigest()
+    if schluessel in _SAN_CACHE:
+        return _SAN_CACHE[schluessel]
+    namen: set[str] = set()
+    try:
+        from cryptography import x509  # noqa: PLC0415
+        zert = x509.load_pem_x509_certificate((pem or "").encode("ascii", "replace"))
+        san = zert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        for n in san.get_values_for_type(x509.DNSName):
+            n = str(n).strip().lower()
+            if n and "*" not in n:
+                namen.add(n)
+    except Exception:  # noqa: BLE001 – kein/kaputtes Zertifikat: keine Zusatz-Hosts
+        namen = set()
+    ergebnis = frozenset(namen)
+    if len(_SAN_CACHE) > 16:
+        _SAN_CACHE.clear()
+    _SAN_CACHE[schluessel] = ergebnis
+    return ergebnis
+
+
+def rahmen_hosts() -> set[str]:
+    """Hosts, unter denen Outlook im Web im Haus das Aufgabenfenster EINRAHMT.
+
+    ANLASS (2026-11-05, ECHT): ``frame-ancestors`` nannte nur den EWS-Host;
+    Outlook im Web lief aber unter einem ANDEREN Namen desselben Exchange.
+    Chrome verweigerte den Rahmen ("hat die Verbindung abgelehnt"), Outlook
+    meldete nur "Add-In-Fehler".
+
+    Quelle: ``erlaubte_hosts()`` plus die DNS-Namen des VERANKERTEN
+    EWS-Zertifikats (``zert_anker.ews``) – das sind genau die Namen, unter
+    denen dieser Exchange auftritt, ohne dass jemand sie pflegen muss.
+    Bewusst NICHT in ``erlaubte_hosts()``: das ist der Vertrauensanker fuer
+    Token und bleibt so eng wie moeglich; Einrahmen-Duerfen ist etwas anderes.
+    """
+    hosts = set(erlaubte_hosts())
+    try:
+        from backend.mail_accounts import skill_config  # noqa: PLC0415
+        c = skill_config() or {}
+        anker = ((c.get("zert_anker") or {}).get("ews") or {})
+        if isinstance(anker, dict) and anker.get("pem"):
+            hosts |= _san_hosts(str(anker.get("pem")))
+    except Exception:  # noqa: BLE001
+        pass
+    return hosts
+
+
 def _tls_kontext(amurl: str):
     """TLS fuer den Abruf des Metadaten-Dokuments – IMMER geprueft.
 

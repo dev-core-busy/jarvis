@@ -14,7 +14,12 @@ Cloud-Hosts; OWA im Haus rahmt von seinem eigenen Host ein. Dazu blockierte
       die Kopfzeile; eine werfende Quelle bricht die Richtlinie nicht.
   [D] script-src der Add-in-Seiten erlaubt ajax.aspnetcdn.com, andere nicht.
   [E] main.py (Syntaxbaum) reicht eine Quelle an csp.office_hosts_quelle,
-      die addin_sso.erlaubte_hosts aufruft.
+      die addin_sso.rahmen_hosts aufruft.
+  [F] rahmen_hosts: EWS-Host PLUS die DNS-Namen des verankerten
+      EWS-Zertifikats (2026-11-05: OWA lief unter einem anderen Namen
+      desselben Exchange als EWS – Chrome verweigerte den Rahmen).
+      Platzhalter-SANs fallen weg; ohne/kaputtes Zertifikat nur EWS-Host;
+      erlaubte_hosts (Token-Anker) bleibt davon unberuehrt.
 
 Exit 0 = gruen, 1 = Regelverstoss, 2 = konnte nicht laufen.
 """
@@ -129,9 +134,62 @@ check("csp.office_hosts_quelle(<funktion>) wird aufgerufen", quelle is not None)
 ruft = False
 if quelle in funcs:
     for n in ast.walk(funcs[quelle]):
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "erlaubte_hosts":
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "rahmen_hosts":
             ruft = True
-check("Quelle ruft addin_sso.erlaubte_hosts", ruft, str(quelle))
+check("Quelle ruft addin_sso.rahmen_hosts", ruft, str(quelle))
+
+print("[F] rahmen_hosts aus EWS-Host und verankertem Zertifikat")
+import datetime  # noqa: E402
+import types  # noqa: E402
+try:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+except Exception as e:  # noqa: BLE001
+    abbruch("cryptography fehlt: %s" % e)
+
+
+def zert_pem(namen):
+    k = ec.generate_private_key(ec.SECP256R1())
+    n = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
+    jetzt = datetime.datetime.now(datetime.timezone.utc)
+    z = (x509.CertificateBuilder().subject_name(n).issuer_name(n).public_key(k.public_key())
+         .serial_number(1).not_valid_before(jetzt).not_valid_after(jetzt + datetime.timedelta(days=1))
+         .add_extension(x509.SubjectAlternativeName([x509.DNSName(x) for x in namen]), critical=False)
+         .sign(k, hashes.SHA256()))
+    return z.public_bytes(serialization.Encoding.PEM).decode()
+
+
+_CFG: dict = {}
+_ma = types.ModuleType("backend.mail_accounts")
+_ma.skill_config = lambda: _CFG
+sys.modules["backend.mail_accounts"] = _ma
+try:
+    from backend import addin_sso as sso
+except Exception as e:  # noqa: BLE001
+    abbruch("backend.addin_sso nicht importierbar: %s" % e)
+if "backend.config" in sys.modules:
+    abbruch("addin_sso hat backend.config importiert")
+if not hasattr(sso, "rahmen_hosts"):
+    abbruch("addin_sso.rahmen_hosts fehlt – Zusage existiert nicht")
+
+_CFG.update({"ews_url": "https://exchange.firma.local/EWS/Exchange.asmx"})
+# Positivkontrolle: ohne Anker genau der EWS-Host
+check("ohne Anker: nur EWS-Host", sso.rahmen_hosts() == {"exchange.firma.local"}, str(sso.rahmen_hosts()))
+_CFG["zert_anker"] = {"ews": {"host": "exchange.firma.local", "port": 443,
+                              "pem": zert_pem(["exchange.firma.local", "OWA.firma.local", "*.firma.local"])}}
+rh = sso.rahmen_hosts()
+check("SAN owa.firma.local kommt dazu (klein)", "owa.firma.local" in rh, str(rh))
+check("Platzhalter-SAN faellt weg", not any("*" in h for h in rh), str(rh))
+check("erlaubte_hosts (Token-Anker) bleibt eng", sso.erlaubte_hosts() == {"exchange.firma.local"},
+      str(sso.erlaubte_hosts()))
+_CFG["zert_anker"] = {"ews": {"pem": "-----BEGIN CERTIFICATE-----\nkaputt\n-----END CERTIFICATE-----"}}
+check("kaputtes PEM: nur EWS-Host, kein Fehler", sso.rahmen_hosts() == {"exchange.firma.local"})
+_CFG["zert_anker"] = {"ews": {"host": "x", "pem": zert_pem(["owa.firma.local"])}}
+csp.office_hosts_quelle(sso.rahmen_hosts)
+fa = direktiven(csp.richtlinie("/addin/taskpane.html")).get("frame-ancestors", [])
+check("Ende zu Ende: https://owa.firma.local in frame-ancestors", "https://owa.firma.local" in fa, str(fa))
 
 print("\nErgebnis: %d OK, %d FAIL" % (OK, FAIL))
 sys.exit(1 if FAIL else 0)

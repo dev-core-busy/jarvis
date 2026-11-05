@@ -30,6 +30,9 @@ tests/gegen_secret_key_platzhalter.py:generic-api-key:32
 tests/test_agent_keys_ui.js:generic-api-key:51
 tests/test_bildmasse.py:generic-api-key:234
 tests/test_bsi_m5.py:generic-api-key:911
+tests/test_jira_nur_lesen.py:generic-api-key:178
+tests/test_jira_nur_lesen.py:generic-api-key:179
+tests/test_jira_nur_lesen.py:generic-api-key:214
 tests/test_knowledge_sync.py:generic-api-key:168
 tests/test_knowledge_sync_ui.js:generic-api-key:126
 tests/test_knowledge_sync_ui.js:generic-api-key:129

@@ -177,7 +177,7 @@ GELTUNG = ("/api/knowledge/", "/api/wissen/", "/api/wissensgraph/", "/api/cron",
            "/api/skills/", "/api/profiles", "/api/llm/profiles/", "/api/agent_roles",
            "/api/instructions/", "/api/jira/assist/vorlagen", "/api/info_files")
 BEREICHE = {"wissen", "wissensgraph", "cron", "skills", "profile", "rollen",
-            "anweisungen", "jira", "portal"}
+            "anweisungen", "jira", "portal", "email"}
 # (Methode, Pfad) -> Grund. Ein Endpunkt steht hier nur, wenn er den gemeinsamen
 # Bestand NICHT aendert – sonst gehoert ein _aktivitaet-Aufruf hinein.
 AUSNAHMEN = {

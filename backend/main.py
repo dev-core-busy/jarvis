@@ -12520,7 +12520,7 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
                                  "error": "Die Einstellung ist gespeichert, aber die "
                                           "Kennwörter der eigenen Zugänge ließen sich "
                                           f"nicht entfernen: {e}"}, status_code=500)
-        _aktivitaet(user, "skills", f"{name}_kachel_anmeldung_an", name,
+        _aktivitaet(user, "skills", "kachel_anmeldung_an", name,
                     kennwoerter_entfernt=_n)
 
     # Google-Spezialfall: Client-ID/Secret in .env schreiben

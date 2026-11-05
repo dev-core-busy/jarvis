@@ -578,15 +578,23 @@ check("z.fingerprint" in certjs and "letzte.fingerprint" in certjs,
 check("pem" not in re.sub(r"/\*.*?\*/", "", certjs, flags=re.S).split("function mount")[1],
       "sapcert.js sendet nie ein PEM")
 
+def _einbindung(html, skript):
+    """Position von <script src=".../skript">, -1 wenn es nicht eingebunden ist."""
+    m = re.search(r'<script\b[^>]*\bsrc="[^"]*/' + re.escape(skript) + r'[?"]', html)
+    return m.start() if m else -1
+
+
 for datei, marke in (("settings.html", 'id="sapcert-odata"'),
                      ("settings.html", 'id="sapcert-hana"'),
                      ("sap.html", 'id="sp-cert-odata"'),
                      ("sap.html", 'id="sp-cert-hana"')):
     txt = (ROOT / "frontend" / datei).read_text(encoding="utf-8")
     check(marke in txt, f"{datei}: Anker {marke} vorhanden")
-    check(txt.index("sapcert.js") < txt.index(
-        "sap_portal.js" if datei == "sap.html" else "js/sap.js?"),
-        f"{datei}: sapcert.js wird vor dem Reiter-Skript geladen")
+    # Gemessen wird die echte Einbindung: ein Kommentar darf den Skriptnamen nennen.
+    ohne_kommentar = re.sub(r"<!--.*?-->", "", txt, flags=re.S)
+    baustein = _einbindung(ohne_kommentar, "sapcert.js")
+    reiter = _einbindung(ohne_kommentar, "sap_portal.js" if datei == "sap.html" else "sap.js")
+    check(0 <= baustein < reiter, f"{datei}: sapcert.js wird vor dem Reiter-Skript geladen")
 
 theme = (ROOT / "frontend" / "css" / "theme.css").read_text(encoding="utf-8")
 check(".sapcert-box" in theme, "CSS steht in theme.css (beide Seiten laden es)")

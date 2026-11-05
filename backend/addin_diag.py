@@ -16,6 +16,12 @@ ZWEI QUELLEN, beide nur ins Journal (Praefix ``[Add-in-Diagnose]``):
   (``/static/addin/diag.js``): Skript laeuft, office.js da, ``onReady``
   ausgeloest, Zeitgrenze, JS-Fehler.
 
+SCHALTER (2026-11-05, nach der Fehlersuche): ``addin_diagnose`` in der
+Konfiguration des E-Mail-Skills, Vorgabe AUS. Aus heisst: keine Journalzeile,
+und die Taskpane-Route nimmt ``diag.js`` aus der Seite (``seite_filtern``) –
+das Fenster sendet dann gar nichts. Gesetzt wird er in den Einstellungen
+unter E-Mail -> Outlook-Add-in.
+
 OHNE ANMELDUNG, weil genau der Weg VOR der Anmeldung untersucht wird. Deshalb
 dieselben Schranken wie beim CSP-Meldepfad: Lastbremse je IP, Schritt aus
 einer festen Liste, harte Feldlaengen, nur druckbare Zeichen, keine IP und
@@ -39,6 +45,28 @@ SCHRITTE = ("html", "skript", "office_da", "office_bereit", "office_zeit",
 _sperre = threading.Lock()
 _rate: dict[str, list[float]] = {}
 _HOST_INFO_OK = re.compile(r"^[A-Za-z0-9$|._\-]{1,80}$")
+
+
+SCHALTER = "addin_diagnose"
+_SKRIPT_ZEILE = re.compile(r'^[ \t]*<script[^>]*src="/static/addin/diag\.js[^"]*"[^>]*></script>[ \t]*\r?\n?',
+                          re.MULTILINE)
+
+
+def aktiv() -> bool:
+    """Ist die Start-Diagnose eingeschaltet? Fehler beim Lesen = AUS."""
+    try:
+        from backend.mail_accounts import skill_config  # noqa: PLC0415
+        wert = (skill_config() or {}).get(SCHALTER)
+    except Exception:  # noqa: BLE001
+        return False
+    if isinstance(wert, str):
+        return wert.strip().lower() in ("1", "true", "ja", "an", "on")
+    return wert is True
+
+
+def seite_filtern(html: str, an: bool) -> str:
+    """Aufgabenfenster ohne ``diag.js``, wenn die Diagnose aus ist."""
+    return html if an else _SKRIPT_ZEILE.sub("", html)
 
 
 def _kurz(v, n: int = FELD_MAX) -> str:
@@ -89,6 +117,8 @@ def abruf_zeile(kopf: dict, abfrage: str) -> str:
 
 def abruf(kopf: dict, abfrage: str) -> None:
     try:
+        if not aktiv():
+            return
         print(abruf_zeile(kopf, abfrage), flush=True)
     except Exception:  # noqa: BLE001 – Diagnose darf die Seite nie brechen
         pass
@@ -118,6 +148,8 @@ def meldung_zeile(koerper: bytes, ua: str = "") -> str | None:
 
 
 def melden(koerper: bytes, ip: str = "", ua: str = "") -> bool:
+    if not aktiv():
+        return False
     if not _rate_ok(ip or "-", time.time()):
         return False
     zeile = meldung_zeile(koerper, ua)

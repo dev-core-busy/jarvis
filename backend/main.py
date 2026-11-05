@@ -15240,12 +15240,14 @@ async def addin_taskpane(request: Request):
     """
     from backend import addin_diag as _addin_diag  # noqa: PLC0415
     # Start-Diagnose: ohne Zugriffsprotokoll war nicht zu sehen, ob Outlook
-    # das Fenster ueberhaupt abruft (Meldung 2026-11-05).
+    # das Fenster ueberhaupt abruft (Meldung 2026-11-05). Nur bei Schalter an.
     _addin_diag.abruf(dict(request.headers), request.url.query)
     f = FRONTEND_DIR / "addin" / "taskpane.html"
     if not f.exists():
         return HTMLResponse("<h1>404 – Add-in nicht installiert</h1>", status_code=404)
-    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+    # Diagnose aus (Vorgabe): diag.js gar nicht erst ausliefern.
+    html = _addin_diag.seite_filtern(f.read_text(encoding="utf-8"), _addin_diag.aktiv())
+    return HTMLResponse(content=html,
                         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 

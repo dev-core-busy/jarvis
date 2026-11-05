@@ -99,6 +99,7 @@
                 // Skill-Config und kommt mit diesem Abruf mit - ein eigener
                 // Roundtrip fuer ein Feld waere der teuerste Weg.
                 ladeAddinPfad(c);
+                setzeHaken('em-addin-diag', c.addin_diagnose === true);
                 _cfgMail = c;
                 zertMount();
             })
@@ -600,6 +601,29 @@
         ordnerKnopf();
     }
 
+    /* Start-Diagnose des Aufgabenfensters (backend/addin_diag.py). Eigener
+       Haken, eigene Teilmenge: sendet NUR addin_diagnose (Server merged). */
+    function speichereAddinDiag() {
+        var h = $('em-addin-diag');
+        if (!h) return Promise.resolve();
+        var an = !!h.checked;
+        melde('em-addin-diag-status', T('common.saving', 'Speichere…'));
+        return fetch('/api/skills/email/config', {
+            method: 'POST',
+            headers: kopf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ addin_diagnose: an })
+        }).then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            melde('em-addin-diag-status', an
+                ? T('mailadm.addin_diag_on', '✓ Eingeschaltet – gilt beim nächsten Öffnen des Add-ins.')
+                : T('mailadm.addin_diag_off', '✓ Ausgeschaltet.'), 'ok');
+            setTimeout(function () { melde('em-addin-diag-status', ''); }, 6000);
+        }).catch(function (e) {
+            h.checked = !an;   // Anzeige zeigt wieder den gespeicherten Stand
+            melde('em-addin-diag-status', T('common.error', 'Fehler') + ': ' + e.message, 'fehler');
+        });
+    }
+
     /* Eigener Knopf, eigene TEILMENGE.
      * `POST /api/skills/email/config` merged serverseitig - ein Knopf darf
      * deshalb nur seine eigenen Felder senden. Schickte er den ganzen
@@ -721,6 +745,8 @@
         // email_portal.js hat genau das den Abmelde-Knopf umbeschriftet).
         var addinSave = $('em-addin-save');
         if (addinSave) addinSave.addEventListener('click', function () { speichereAddinPfad(false); });
+        var addinDiag = $('em-addin-diag');
+        if (addinDiag) addinDiag.addEventListener('change', speichereAddinDiag);
         var addinUp = $('em-addin-upload');
         if (addinUp) addinUp.addEventListener('click', schreibeInOrdner);
         // MASSGEBLICH IST DER FELDINHALT, nicht der gespeicherte Wert: wer den
@@ -759,7 +785,7 @@
         _test: { zeichneKonten: zeichneKonten, zeichneExplorer: zeichneExplorer,
                  dateinameAus: dateinameAus, ordnerKnopf: ordnerKnopf,
                  feldPfad: feldPfad, ladeAddinPfad: ladeAddinPfad,
-                 speichereAddinPfad: speichereAddinPfad,
+                 speichereAddinPfad: speichereAddinPfad, speichereAddinDiag: speichereAddinDiag,
                  schreibeInOrdner: schreibeInOrdner, pruefeAdresse: pruefeAdresse }
     };
 })();

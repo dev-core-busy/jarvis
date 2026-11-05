@@ -594,7 +594,7 @@ function baueReiter(opt) {
                 imap_host: 'imap.firma.de', imap_port: 993, imap_ssl: true,
                 smtp_host: 'smtp.firma.de', smtp_port: 587, smtp_starttls: true,
                 ordner_eingang: 'INBOX', zeitlimit: 30, takt_sekunden: 60,
-                bereiche: 'mail,wissen' } });
+                bereiche: 'mail,wissen', ...(opt.cfg || {}) } });
         }
         if (pfad === '/api/email/admin/overview') {
             return gib({ ok: true, skill_aktiv: true, bereiche: katalog(url),
@@ -971,6 +971,32 @@ function baueReiter(opt) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
+/* Start-Diagnose des Add-ins (backend/addin_diag.py): eigener Haken, eigene
+   Teilmenge, Vorgabe AUS. */
+{
+    const { w } = baueReiter({});
+    w.EmailAdmin.onShow();
+    await warte(80);
+    const h = w.document.getElementById('em-addin-diag');
+    pruefe(!!h, 'Haken Add-in-Diagnose existiert');
+    pruefe(h && h.checked === false, 'Add-in-Diagnose: ohne Feld AUS (Vorgabe)');
+}
+{
+    const { w, rufe } = baueReiter({ cfg: { addin_diagnose: true } });
+    w.EmailAdmin.onShow();
+    await warte(80);
+    const h = w.document.getElementById('em-addin-diag');
+    pruefe(h && h.checked === true, 'Add-in-Diagnose: gespeichertes AN wird angezeigt');
+    const vorher = rufe.length;
+    h.checked = false;
+    h.dispatchEvent(new w.Event('change'));
+    await warte(40);
+    const post = rufe.slice(vorher).filter(r => r.methode === 'POST' && r.url.split('?')[0] === '/api/skills/email/config');
+    pruefe(post.length === 1, 'Add-in-Diagnose: genau EIN Speicheraufruf beim Umschalten', String(post.length));
+    pruefe(post.length === 1 && JSON.stringify(post[0].body) === '{"addin_diagnose":false}',
+        'Add-in-Diagnose: sendet NUR sein eigenes Feld', post.length ? JSON.stringify(post[0].body) : '-');
+}
+
 abschnitt('5. Verdrahtung und Texte');
 /* ═══════════════════════════════════════════════════════════════════════ */
 {

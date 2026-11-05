@@ -14,6 +14,9 @@ sehen, ob das Fenster abgerufen wurde und wo der Start abbrach.
   [D] taskpane.html: vor diag.js nur theme_frueh.js, ohne async/defer.
   [E] diag.js in jsdom mit Office-Attrappe: meldet html, office_da,
       office_bereit, mailbox; Fehler und CSP-Verstoesse werden gemeldet.
+  [F] Schalter ``addin_diagnose`` (Vorgabe AUS): aus = keine Journalzeile
+      und diag.js nicht in der ausgelieferten Seite; die Route filtert;
+      der Haken in den Einstellungen sendet nur sein eigenes Feld.
 
 Exit 0 = gruen, 1 = Regelverstoss, 2 = konnte nicht laufen.
 """
@@ -55,6 +58,18 @@ except Exception as e:  # noqa: BLE001
     abbruch("backend.addin_diag nicht importierbar: %s" % e)
 if "backend.config" in sys.modules:
     abbruch("addin_diag hat backend.config importiert")
+
+# Skill-Konfiguration als Attrappe (die echte liest die Live-settings.json).
+# [A]-[E] pruefen das Verhalten bei EINGESCHALTETER Diagnose.
+import types  # noqa: E402
+_CFG: dict = {"addin_diagnose": True}
+_ma = types.ModuleType("backend.mail_accounts")
+_ma.skill_config = lambda: _CFG
+sys.modules["backend.mail_accounts"] = _ma
+if not hasattr(d, "aktiv"):
+    abbruch("addin_diag.aktiv fehlt – Zusage existiert nicht")
+if d.aktiv() is not True:
+    abbruch("Positivkontrolle: Attrappe mit addin_diagnose=True greift nicht")
 
 UA_EDGE = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
            "Chrome/131.0.0.0 Safari/537.36 Edg/131.0.2903.70")
@@ -219,6 +234,59 @@ check("nicht ladbares Skript gemeldet (Capture)",
       any(f == "Ressource nicht ladbar: <script> https://appsforoffice.microsoft.com/lib/1/hosted/office.js"
           for f in fehler), str(fehler))
 check("Laufkennung je Seite gleich", len({m["k"]["lauf"] for m in meldungen}) == 1)
+
+print("[F] Schalter addin_diagnose")
+for wert, soll in ((None, False), (False, False), ("false", False), ("ja", True), (True, True), (1, False)):
+    _CFG.clear()
+    if wert is not None:
+        _CFG["addin_diagnose"] = wert
+    check("aktiv() bei %r -> %s" % (wert, soll), d.aktiv() is soll, str(d.aktiv()))
+_CFG.clear()
+_ma.skill_config = lambda: (_ for _ in ()).throw(RuntimeError("kaputt"))
+check("Lesefehler -> AUS", d.aktiv() is False)
+_ma.skill_config = lambda: _CFG
+d._rate.clear()
+with contextlib.redirect_stdout(io.StringIO()) as aus:
+    d.abruf({"Sec-Fetch-Dest": "iframe"}, "mv=1")
+    r = d.melden(json.dumps({"schritt": "html"}).encode(), "192.0.2.9", UA_EDGE)
+check("aus: melden liefert False", r is False)
+check("aus: keine Journalzeile", aus.getvalue() == "", repr(aus.getvalue()))
+_CFG["addin_diagnose"] = True
+with contextlib.redirect_stdout(io.StringIO()) as aus:
+    d.abruf({"Sec-Fetch-Dest": "iframe"}, "mv=1")
+check("an: Abrufzeile wird geschrieben (Gegenstueck)", d.PRAEFIX in aus.getvalue())
+
+gefiltert = d.seite_filtern(html, False)
+check("aus: diag.js nicht in der Seite", "/static/addin/diag.js" not in gefiltert)
+check("aus: sonst nichts entfernt", len(html) - len(gefiltert) < 80
+      and gefiltert.count("<script") == html.count("<script") - 1,
+      "%d Zeichen" % (len(html) - len(gefiltert)))
+check("an: Seite unveraendert", d.seite_filtern(html, True) == html)
+
+if taskpane is not None:
+    namen = {x.func.attr for x in ast.walk(taskpane) if isinstance(x, ast.Call)
+             and isinstance(x.func, ast.Attribute)}
+    check("Taskpane-Route ruft seite_filtern und aktiv", {"seite_filtern", "aktiv"} <= namen, str(namen))
+    # Die ausgelieferte Seite muss die GEFILTERTE sein: HTMLResponse(content=<Name>)
+    inhalt = [k.value for x in ast.walk(taskpane) if isinstance(x, ast.Call)
+              and getattr(x.func, "id", "") == "HTMLResponse" for k in x.keywords if k.arg == "content"]
+    zuweisung = [x for x in ast.walk(taskpane) if isinstance(x, ast.Assign)
+                 and isinstance(x.value, ast.Call) and isinstance(x.value.func, ast.Attribute)
+                 and x.value.func.attr == "seite_filtern"]
+    ziel = zuweisung[0].targets[0].id if zuweisung and isinstance(zuweisung[0].targets[0], ast.Name) else None
+    check("ausgeliefert wird das Ergebnis von seite_filtern",
+          bool(ziel) and any(isinstance(c, ast.Name) and c.id == ziel for c in inhalt), str(ziel))
+
+einst = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
+emjs = (ROOT / "frontend" / "js" / "email.js").read_text(encoding="utf-8")
+i18n = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+check("Haken em-addin-diag in den Einstellungen", 'id="em-addin-diag"' in einst)
+for k in ("mailadm.addin_diag", "mailadm.addin_diag_hint", "mailadm.addin_diag_on", "mailadm.addin_diag_off"):
+    check("i18n DE+EN: " + k, i18n.count("'%s':" % k) == 2, str(i18n.count("'%s':" % k)))
+m = re.search(r"function speichereAddinDiag\(\)\s*\{(.*?)\n    \}\n", emjs, re.S)
+koerper = m.group(1) if m else ""
+check("speichereAddinDiag vorhanden", bool(koerper))
+check("sendet NUR addin_diagnose", "JSON.stringify({ addin_diagnose: an })" in koerper, koerper[:200])
 
 print("\nErgebnis: %d OK, %d FAIL" % (OK, FAIL))
 sys.exit(1 if FAIL else 0)

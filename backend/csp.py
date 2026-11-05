@@ -81,6 +81,15 @@ _OFFICE_AJAX = "https://ajax.aspnetcdn.com"
 # office.js oeffnet selbst einen Telemetrie-Rahmen (auf DEV gemessen 2026-10-04,
 # live_csp_h4_dev.py) – nur auf den Add-in-Seiten zugelassen.
 _OFFICE_RAHMEN = "https://telemetryservice.firstpartyapps.oaspapps.com"
+# Gemessen auf ECHT 2026-11-05 (Start-Diagnose, Outlook im Web eines Exchange
+# 2019 im Haus, Chrome): office.js oeffnet zur Kommunikation mit Outlook einen
+# Rahmen von appsforoffice.microsoft.com ("frame-src blockiert …"), und das
+# gehostete microsoftajax.js deserialisiert die Antworten des Hosts per eval
+# ("script-src blockiert eval", danach TypeError cannotDeserializeInvalidJson).
+# Ohne beides loest Office.onReady nie aus. 'unsafe-eval' gilt NUR auf den
+# Add-in-Seiten – angenommenes Restrisiko, weil Microsofts Bibliothek es
+# erzwingt; alle anderen Seiten bleiben ohne (Waechter test_csp_h4 [A]).
+_OFFICE_EVAL = "'unsafe-eval'"
 _AUSGENOMMEN = ("/novnc/",)
 # Wer die Add-in-Seiten einrahmen darf (BSI H7): Outlook/Excel im Web laden das
 # Aufgabenfenster in einen iframe von Microsofts Hosts. Alle anderen Seiten nur
@@ -191,7 +200,7 @@ def richtlinie(pfad: str, host: str = "") -> str:
     """
     pfad = pfad_normal(pfad)
     addin = any(pfad.startswith(p) for p in _ADDIN_PRAEFIXE)
-    skript = "'self'" + (" " + _OFFICE_JS + " " + _OFFICE_AJAX if addin else "")
+    skript = "'self'" + (" " + _OFFICE_JS + " " + _OFFICE_AJAX + " " + _OFFICE_EVAL if addin else "")
     rahmen_von = "'self'"
     if addin:
         rahmen_von += " " + FRAME_ANCESTORS_OFFICE
@@ -213,7 +222,7 @@ def richtlinie(pfad: str, host: str = "") -> str:
         "connect-src " + verbinden,
         "media-src 'self' data: blob:",
         # PDF-/Dokumentvorschau im Rahmen (blob:), Desktop-Rahmen (/novnc).
-        "frame-src 'self' blob: data:" + (" " + _OFFICE_RAHMEN if addin else ""),
+        "frame-src 'self' blob: data:" + (" " + _OFFICE_JS + " " + _OFFICE_RAHMEN if addin else ""),
         "worker-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'self'",

@@ -13,6 +13,8 @@ Cloud-Hosts; OWA im Haus rahmt von seinem eigenen Host ein. Dazu blockierte
   [C] Unsaubere Hosts (Platzhalter, Semikolon, Leerzeichen) gelangen nicht in
       die Kopfzeile; eine werfende Quelle bricht die Richtlinie nicht.
   [D] script-src der Add-in-Seiten erlaubt ajax.aspnetcdn.com, andere nicht.
+  [D2] Add-in-Seiten: 'unsafe-eval' (microsoftajax.js) und frame-src
+      appsforoffice.microsoft.com – beides NUR dort.
   [E] main.py (Syntaxbaum) reicht eine Quelle an csp.office_hosts_quelle,
       die addin_sso.rahmen_hosts aufruft.
   [F] rahmen_hosts: EWS-Host PLUS die DNS-Namen des verankerten
@@ -120,6 +122,17 @@ print("[D] MicrosoftAjax.js fuer office.js")
 check("Add-in: ajax.aspnetcdn.com in script-src",
       "https://ajax.aspnetcdn.com" in ADDIN["script-src"], str(ADDIN["script-src"]))
 check("/ ohne aspnetcdn", "https://ajax.aspnetcdn.com" not in WURZEL.get("script-src", []))
+
+print("[D2] office.js-Kommunikation (ECHT 2026-11-05)")
+check("Add-in: 'unsafe-eval' in script-src (microsoftajax.js)",
+      "'unsafe-eval'" in ADDIN["script-src"], str(ADDIN["script-src"]))
+check("Add-in: appsforoffice.microsoft.com in frame-src",
+      "https://appsforoffice.microsoft.com" in ADDIN.get("frame-src", []), str(ADDIN.get("frame-src")))
+for _p in ("/", "/portal", "/chat"):
+    _d = direktiven(csp.richtlinie(_p))
+    check("%s ohne 'unsafe-eval'" % _p, "'unsafe-eval'" not in _d.get("script-src", []), str(_d.get("script-src")))
+    check("%s ohne appsforoffice in frame-src" % _p,
+          "https://appsforoffice.microsoft.com" not in _d.get("frame-src", []), str(_d.get("frame-src")))
 
 print("[E] main.py reicht die Quelle herein")
 baum = ast.parse((ROOT / "backend" / "main.py").read_text(encoding="utf-8"))

@@ -81,6 +81,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import fcntl
 import json
 import os
 import re
@@ -328,6 +329,49 @@ def _auftrag_abgleichen(st: dict, cm) -> None:
 
 
 # ── Stand ───────────────────────────────────────────────────────────────────
+
+class LaufAktiv(ArchivFehler):
+    """Die Sperre ist belegt – ein anderer Prozess arbeitet gerade am Stand."""
+
+
+_SPERRDATEI = "lauf.sperre"
+
+
+def _sperre_nehmen() -> int | None:
+    """Die prozessuebergreifende Sperre des Stands: Dateideskriptor oder ``None``,
+    wenn sie belegt ist. Wirft ``OSError``, wenn die Datei nicht nutzbar ist.
+
+    ⚠ DATEISPERRE STATT NACHFRAGE AM DIENST (ECHT 2026-11-05): dort verlangt die
+    Admin-Schnittstelle einen zweiten Faktor, den ein selbst ausgestelltes Token
+    nicht hat und nicht bekommen soll. ``flock`` braucht keine Rechte und raeumt
+    sich selbst auf: stirbt der Prozess, gibt der Kernel sie frei – eine Merkdatei
+    bliebe nach einem ``kill -9`` liegen. ``os.open`` setzt ``O_CLOEXEC``, gestartete
+    Unterprozesse halten sie also nicht fest."""
+    _ordner_anlegen()
+    fd = os.open(_wurzel() / _SPERRDATEI, os.O_CREAT | os.O_RDWR, 0o640)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _sperre_frei(fd: int) -> None:
+    os.close(fd)
+
+
+def sperre_belegt() -> bool:
+    """Nur nachsehen – fuer die Anzeige im Trockenlauf."""
+    fd = _sperre_nehmen()
+    if fd is None:
+        return True
+    _sperre_frei(fd)
+    return False
+
 
 def _stand_laden() -> dict:
     d = _json_lesen(_wurzel() / "stand.json", {"version": 1})
@@ -1067,6 +1111,19 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
     global _lauf_aktiv, _lauf_info, _stopp_angefordert
     if _lauf_aktiv:
         return {"ok": False, "grund": "Ein Lauf ist bereits aktiv."}
+    try:
+        sperre = _sperre_nehmen()
+    except OSError as e:
+        # Fail-open: die Sperre schuetzt nur vor der Heilung, und die weist ohne
+        # Sperrdatei selbst ab. Der naechtliche Lauf soll daran nicht haengen.
+        print(f"[Lösungsarchiv] Sperrdatei nicht nutzbar: {e}", flush=True)
+        sperre = -1
+    if sperre is None:
+        # Bewusst NICHT ``_ergebnis_merken``: das schriebe in den Stand, den die
+        # Heilung gerade umschreibt. Der Grund steht im Cron-Protokoll, und das
+        # erkennt einen Fehlschlag am Textanfang (``cron_log.ist_fehler``) – ein
+        # ausgefallener Nachtlauf darf dort nicht als erfolgreich stehen.
+        return {"ok": False, "grund": "Fehler: Der Bestand wird gerade geheilt – Lauf nicht gestartet."}
     _lauf_aktiv = True
     _lauf_info = {"seit": time.time(), "ausloeser": ausloeser, "fertig": 0, "gesamt": 0}
     try:
@@ -1095,6 +1152,8 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
         # EINE Stelle setzt zurueck: ``anhalten`` setzt nur bei aktivem Lauf,
         # eine Marke kann also nicht in den naechsten Lauf hinueberreichen.
         _stopp_angefordert = False
+        if sperre >= 0:
+            _sperre_frei(sperre)
 
 
 async def _lauf(client, provider, laden, index_und_graph) -> dict:
@@ -1312,24 +1371,36 @@ def bestand_heilen(anwenden: bool = False) -> dict:
     fremden Prozess ginge am FAISS-Index im Speicher des Dienstes vorbei.
 
     ⚠ NICHT WAEHREND EINES LAUFS: der haelt den Stand im Speicher und schreibt ihn
-    nach jedem Ticket zurueck. ``_lauf_aktiv`` sieht nur diesen Prozess; wer von
-    aussen heilt, fragt vorher den Dienst (``deploy/loesungsarchiv_heilen.py``)."""
-    if _lauf_aktiv:
-        raise ArchivFehler("Ein Lauf ist aktiv – der Stand wird gerade geschrieben.")
-    with _STAND_SPERRE:
-        stand = _stand_laden()
-        erg = loesungen_heilen(stand)
-        erg["sicherung"] = ""
-        if anwenden and erg["geheilt"]:
-            quelle = _wurzel() / "stand.json"
-            sicherung = quelle.with_name(f"stand.vor-heilung-{time.strftime('%Y%m%d-%H%M%S')}.json")
-            shutil.copy2(quelle, sicherung)
-            # Erst die Entwuerfe, dann der Stand: bricht es dazwischen ab, findet
-            # ein zweiter Durchgang dieselben Eintraege wieder.
-            for eid in erg["geheilt"]:
-                _entwurf_schreiben(eid, stand["eintraege"][eid])
-            _stand_speichern(stand)
-            erg["sicherung"] = sicherung.name
+    nach jedem Ticket zurueck. Geschrieben wird nur unter der Dateisperre
+    (``_sperre_nehmen``), die auch ein Lauf haelt – sie gilt ueber Prozessgrenzen,
+    und ein Lauf, der waehrenddessen startet, weist sich selbst ab. Fail-closed:
+    ist die Sperrdatei nicht nutzbar, wird nicht geschrieben."""
+    sperre = None
+    if anwenden:
+        try:
+            sperre = _sperre_nehmen()
+        except OSError as e:
+            raise ArchivFehler(f"Sperrdatei nicht nutzbar: {e}") from e
+        if sperre is None:
+            raise LaufAktiv("Ein Lauf ist aktiv – es wurde nichts geschrieben.")
+    try:
+        with _STAND_SPERRE:
+            stand = _stand_laden()
+            erg = loesungen_heilen(stand)
+            erg["sicherung"] = ""
+            if anwenden and erg["geheilt"]:
+                quelle = _wurzel() / "stand.json"
+                sicherung = quelle.with_name(f"stand.vor-heilung-{time.strftime('%Y%m%d-%H%M%S')}.json")
+                shutil.copy2(quelle, sicherung)
+                # Erst die Entwuerfe, dann der Stand: bricht es dazwischen ab, findet
+                # ein zweiter Durchgang dieselben Eintraege wieder.
+                for eid in erg["geheilt"]:
+                    _entwurf_schreiben(eid, stand["eintraege"][eid])
+                _stand_speichern(stand)
+                erg["sicherung"] = sicherung.name
+    finally:
+        if sperre is not None:
+            _sperre_frei(sperre)
     return erg
 
 

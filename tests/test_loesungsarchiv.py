@@ -626,7 +626,12 @@ async def _abbruch():
 
 haengt, ce = asyncio.run(_abbruch())
 if not haengt:
-    print("  Lauf erreichte das haengende Ticket nie – NICHT PRUEFBAR"); sys.exit(2)
+    print("  Lauf erreichte das haengende Ticket nie – NICHT PRUEFBAR")
+    # Mit FAILs davor ist das ein Folgefehler (z. B. Sperre nicht freigegeben, jeder
+    # weitere Lauf weist sich ab), kein kaputter Aufbau: Bilanz und Exit 1 statt Exit 2.
+    if FAIL:
+        print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m"); sys.exit(1)
+    sys.exit(2)
 st7 = json.loads((la._wurzel() / "stand.json").read_text())
 fertig7 = len(set(st7["verarbeitet"]) - vor_abbr)
 grund7 = str((st7.get("letzter_lauf") or {}).get("grund") or "")
@@ -1178,14 +1183,21 @@ _h_roh = _h_datei.read_bytes()
 for _f in (la._wurzel() / "entwuerfe").glob("aaaaaaaaaa*.md"):
     _f.unlink()
 
-_t = la.bestand_heilen()
+def _heil(anwenden=False):
+    """Ein Wurf ist hier ein Befund, kein Absturz – sonst endete eine Gegenprobe ohne Bilanz."""
+    try:
+        return la.bestand_heilen(anwenden=anwenden)
+    except Exception as e:  # noqa: BLE001
+        return {"geheilt": [], "unlesbar": [], "veroeffentlicht": 0, "sicherung": "", "wurf": repr(e)}
+
+_t = _heil()
 check("Trockenlauf zaehlt genau die Python-Texte", sorted(_t["geheilt"]) == ["aaaaaaaaaa01", "aaaaaaaaaa02", "aaaaaaaaaa06"], _t)
 check("Trockenlauf nennt den nicht lesbaren Rest", _t["unlesbar"] == ["aaaaaaaaaa04"], _t)
 check("⚠ Trockenlauf aendert den Stand nicht (Byte fuer Byte)", _h_datei.read_bytes() == _h_roh)
 check("Trockenlauf legt keine Sicherung an", not list(la._wurzel().glob("stand.vor-heilung-*")) and _t["sicherung"] == "", _t)
 check("Trockenlauf schreibt keine Entwuerfe", not list((la._wurzel() / "entwuerfe").glob("aaaaaaaaaa*.md")))
 
-_a = la.bestand_heilen(anwenden=True)
+_a = _heil(True)
 _nach = json.loads(_h_datei.read_text(encoding="utf-8"))
 _ne = _nach["eintraege"]
 check("Positivkontrolle: wirklich geschrieben", _a["sicherung"] != "" and len(_a["geheilt"]) == 3, _a)
@@ -1208,7 +1220,7 @@ check("Entwurf des geheilten Eintrags ist nachgezogen",
       _ew.is_file() and "1. Dienst stoppen" in _ew.read_text(encoding="utf-8") and "['" not in _ew.read_text(encoding="utf-8"))
 check("kein Entwurf fuer unberuehrte Eintraege", not la._entwurf_pfad("aaaaaaaaaa03").exists())
 
-_b = la.bestand_heilen(anwenden=True)
+_b = _heil(True)
 check("⚠ zweiter Durchgang findet nichts mehr und sichert nicht erneut",
       _b["geheilt"] == [] and _b["sicherung"] == "" and len(list(la._wurzel().glob("stand.vor-heilung-*"))) == 1, _b)
 
@@ -1223,23 +1235,135 @@ check("⚠ die Schranke ersetzt die veroeffentlichte Datei mit dem alten Text",
       _sch["aktualisiert"] == 1 and "1. Dienst stoppen" in _pfad_alt.read_text(encoding="utf-8")
       and "['" not in _pfad_alt.read_text(encoding="utf-8"), _sch)
 
-la._lauf_aktiv = True
-check("waehrend eines Laufs wird nicht geheilt", isinstance(wirft(la.bestand_heilen, True), la.ArchivFehler))
-la._lauf_aktiv = False
+# ── Die Sperre gilt ueber Prozessgrenzen (ECHT: Zwei-Faktor-Pflicht, keine Nachfrage am Dienst)
+import importlib.util
+import io
+import subprocess
+from contextlib import redirect_stdout
 
-_skript = ast.parse((ROOT / "deploy" / "loesungsarchiv_heilen.py").read_text(encoding="utf-8"))
-_arg = next((n for n in ast.walk(_skript) if isinstance(n, ast.Call)
+_sperr_pfad = la._wurzel() / la._SPERRDATEI
+_HALTER = ("import fcntl,os,sys,time\n"
+           "fd=os.open(sys.argv[1],os.O_CREAT|os.O_RDWR,0o640)\n"
+           "try:\n    fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)\n"
+           "except OSError:\n    print('belegt',flush=True); sys.exit(0)\n"
+           "print('hat',flush=True)\ntime.sleep(120)\n")
+
+def _halter_start():
+    p = subprocess.Popen([sys.executable, "-c", _HALTER, str(_sperr_pfad)],
+                         stdout=subprocess.PIPE, text=True)
+    if p.stdout.readline().strip() != "hat":
+        print("  \033[31m✗\033[0m Sperr-Halter bekommt die Sperre nicht – Abbruch")
+        # Mit FAILs davor ein Folgefehler (Sperre nicht freigegeben), kein kaputter Aufbau.
+        if FAIL:
+            print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m"); sys.exit(1)
+        sys.exit(2)
+    return p
+
+def _halter_tot(p):
+    p.kill()     # SIGKILL: genau der Fall, in dem eine Merkdatei liegen bliebe
+    p.wait(timeout=20)
+
+_spez = importlib.util.spec_from_file_location("_heil_skript", ROOT / "deploy" / "loesungsarchiv_heilen.py")
+_skript_mod = importlib.util.module_from_spec(_spez)
+_spez.loader.exec_module(_skript_mod)
+
+def _skript(*args):
+    alt = sys.argv
+    sys.argv = ["loesungsarchiv_heilen.py", *args]
+    aus = io.StringIO()
+    try:
+        with redirect_stdout(aus):
+            rc = _skript_mod.main()
+    except Exception as e:  # noqa: BLE001 – ein Wurf ist ein Befund, kein Absturz
+        rc = f"Wurf: {e!r}"
+    finally:
+        sys.argv = alt
+    return rc, aus.getvalue()
+
+_h_frisch = {"version": 1, "verarbeitet": {}, "letzter_lauf": {"wann": 7.0},
+             "eintraege": {"bbbbbbbbbb01": _h_e(1, str(["a", "b"]))}}
+la._stand_speichern(_h_frisch)
+_h_roh2 = _h_datei.read_bytes()
+for _f in la._wurzel().glob("stand.vor-heilung-*"):
+    _f.unlink()
+
+check("Sperre ist frei, solange niemand sie haelt", la.sperre_belegt() is False)
+_h = _halter_start()
+check("Positivkontrolle: die Sperre eines ANDEREN Prozesses wird gesehen", la.sperre_belegt() is True)
+check("⚠ Heilung weist bei belegter Sperre ab", isinstance(wirft(la.bestand_heilen, True), la.LaufAktiv))
+check("Trockenlauf geht trotz belegter Sperre", len(_heil()["geheilt"]) == 1)
+_rc, _aus = _skript("--anwenden")
+check("Skript: belegte Sperre ist Exit 3", _rc == 3, (_rc, _aus))
+check("Skript: bei Exit 3 ist nichts geschrieben",
+      _h_datei.read_bytes() == _h_roh2 and not list(la._wurzel().glob("stand.vor-heilung-*")))
+_rc, _aus = _skript()
+check("Skript: Trockenlauf nennt den aktiven Lauf", _rc == 0 and "gerade ist ein Lauf aktiv" in _aus, (_rc, _aus))
+
+_h_prov = ProviderAttrappe()
+_h_erg = lauf(client, _h_prov)
+check("⚠ ein Lauf startet nicht, solange die Heilung die Sperre haelt",
+      _h_erg.get("ok") is False and "geheilt" in _h_erg.get("grund", "") and not _h_prov.aufrufe, _h_erg)
+check("⚠ im Cron-Protokoll steht der abgewiesene Lauf als Fehlschlag",
+      str(_h_erg.get("grund")).startswith("Fehler"), _h_erg)
+check("der abgewiesene Lauf schreibt nicht in den Stand", _h_datei.read_bytes() == _h_roh2)
+check("der abgewiesene Lauf laesst keinen Laufzustand stehen", la._lauf_aktiv is False)
+
+_halter_tot(_h)
+check("⚠ stirbt der Halter hart, ist die Sperre frei", la.sperre_belegt() is False)
+_rc, _aus = _skript("--anwenden")
+_nach2 = json.loads(_h_datei.read_text(encoding="utf-8"))
+check("Skript: danach heilt es mit Exit 0",
+      _rc == 0 and (_nach2["eintraege"].get("bbbbbbbbbb01") or {}).get("loesung") == "1. a\n2. b", (_rc, _aus))
+check("die Heilung gibt die Sperre wieder frei", la.sperre_belegt() is False)
+
+class _SperrSonde(ProviderAttrappe):
+    """Misst WAEHREND des Laufs von aussen, ob die Sperre belegt ist."""
+    def __init__(self):
+        super().__init__()
+        self.belegt: list = []
+    async def generate_response(self, **kw):
+        self.belegt.append(la.sperre_belegt())
+        return await super().generate_response(**kw)
+
+# Zwei Abschnitte weiter oben steht das Archiv zuletzt auf "aus" – ohne das misst hier nichts.
+la.einstellungen_speichern({**gut, "aktiv": True, "bereiche": [BEREICH]}, cron_manager=CronAttrappe())
+_h_stand3 = json.loads(_h_datei.read_text(encoding="utf-8"))
+_h_stand3["verarbeitet"] = {}
+la._stand_speichern(_h_stand3)
+_sonde = _SperrSonde()
+_h_erg3 = lauf(client, _sonde)
+check("Positivkontrolle: der Lauf hat das Modell wirklich gefragt", len(_sonde.belegt) >= 1, _h_erg3)
+check("⚠ der Lauf haelt die Sperre, solange er arbeitet", _sonde.belegt and all(_sonde.belegt), _sonde.belegt)
+check("nach dem Lauf ist die Sperre wieder frei", la.sperre_belegt() is False)
+_alt_sperre = la._sperre_nehmen
+def _kaputt():
+    raise OSError("Keine Berechtigung")
+la._sperre_nehmen = _kaputt
+_sonde2 = ProviderAttrappe()
+_h_stand4 = json.loads(_h_datei.read_text(encoding="utf-8"))
+_h_stand4["verarbeitet"] = {}
+la._stand_speichern(_h_stand4)
+_h_erg4 = lauf(client, _sonde2)
+check("kaputte Sperrdatei haelt den Lauf nicht auf", len(_sonde2.aufrufe) >= 1 and "geheilt" not in _h_erg4.get("grund", ""), _h_erg4)
+_e = wirft(la.bestand_heilen, True)
+check("⚠ kaputte Sperrdatei: die Heilung schreibt nicht",
+      isinstance(_e, la.ArchivFehler) and not isinstance(_e, la.LaufAktiv), _e)
+_rc, _aus = _skript("--anwenden")
+check("Skript: kaputte Sperrdatei ist Exit 2", _rc == 2, (_rc, _aus))
+la._sperre_nehmen = _alt_sperre
+
+_skript_baum = ast.parse((ROOT / "deploy" / "loesungsarchiv_heilen.py").read_text(encoding="utf-8"))
+_arg = next((n for n in ast.walk(_skript_baum) if isinstance(n, ast.Call)
              and getattr(n.func, "attr", "") == "add_argument"), None)
 check("Skript: schreiben nur auf ausdruecklichen Schalter",
       _arg is not None and _arg.args[0].value == "--anwenden"
       and any(k.arg == "action" and k.value.value == "store_true" for k in _arg.keywords))
-_main = next((n for n in _skript.body if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
-# ast.walk laeuft in die Breite, nicht in Quelltext-Reihenfolge – deshalb nach Zeilen sortiert.
-_folge = [getattr(c.func, "id", getattr(c.func, "attr", ""))
-          for c in sorted((c for c in ast.walk(_main) if isinstance(c, ast.Call)), key=lambda c: c.lineno)] if _main else []
-check("Skript: fragt den Dienst, bevor es heilt",
-      "lauf_aktiv" in _folge and "bestand_heilen" in _folge
-      and min(i for i, n in enumerate(_folge) if n == "lauf_aktiv") < _folge.index("bestand_heilen"), _folge)
+_importe = {a.name for n in ast.walk(_skript_baum) if isinstance(n, ast.Import) for a in n.names}
+_namen = {a.name for n in ast.walk(_skript_baum) if isinstance(n, ast.ImportFrom) for a in n.names}
+_aufrufe = {getattr(c.func, "attr", getattr(c.func, "id", "")) for c in ast.walk(_skript_baum) if isinstance(c, ast.Call)}
+check("⚠ Skript stellt kein Token aus und spricht den Dienst nicht an",
+      "main" not in _namen and "generate_token" not in _aufrufe and "urlopen" not in _aufrufe
+      and not any(i.startswith("urllib") for i in _importe), (_importe, _namen))
 
 print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m")
 sys.exit(0 if FAIL == 0 else 1)

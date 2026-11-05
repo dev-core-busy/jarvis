@@ -7,7 +7,7 @@ sind seitdem richtig (``loesungsarchiv._als_text``); dieses Skript holt den Best
 nach. Die Umwandlung selbst steht in ``loesungsarchiv.bestand_heilen`` und wird hier
 nicht nachgebaut.
 
-Auf dem Server, mit dem Hauptschluessel (das Token muss im Dienst gelten):
+Auf dem Server, als Dienstbenutzer mit dem Hauptschluessel:
 
     bash /opt/jarvis/deploy/als_dienst.sh venv/bin/python deploy/loesungsarchiv_heilen.py
     bash /opt/jarvis/deploy/als_dienst.sh venv/bin/python deploy/loesungsarchiv_heilen.py --anwenden
@@ -15,34 +15,23 @@ Auf dem Server, mit dem Hauptschluessel (das Token muss im Dienst gelten):
 Der Trockenlauf ist die Vorgabe. ``--anwenden`` legt neben dem Stand eine Sicherung
 an. Die Dateien in der Wissensdatenbank und der Index folgen im naechsten Lauf.
 
-Exit: 0 fertig · 2 konnte nicht laufen · 3 ein Lauf ist aktiv (nichts geschrieben,
-bzw. nach dem Schreiben gestartet: dann Sicherung und Stand pruefen).
+⚠ KEIN ROOT OHNE ``als_dienst.sh``: die Sperrdatei gehoerte sonst root, und der
+Dienst kaeme nicht mehr an sie heran.
+
+Ob ein Lauf aktiv ist, entscheidet die Dateisperre in ``bestand_heilen``. Das Skript
+fragt den Dienst nicht: auf einem Server mit Zwei-Faktor-Pflicht wuerde ein selbst
+ausgestelltes Token an der Admin-Schnittstelle abgewiesen (ECHT 2026-11-05).
+
+Exit: 0 fertig · 2 konnte nicht laufen · 3 ein Lauf ist aktiv (nichts geschrieben).
 """
 import argparse
-import json
 import os
-import ssl
 import sys
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(os.environ.get("JARVIS_DIR", Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(ROOT))
 sys.dont_write_bytecode = True
-
-BASIS = os.environ.get("JARVIS_LOKAL_URL", "https://127.0.0.1")
-
-
-def lauf_aktiv() -> bool:
-    """Den LAUFENDEN Dienst fragen: ``_lauf_aktiv`` in diesem Prozess weiss nichts
-    von dessen Lauf. Nicht feststellbar wirft – dann wird nicht geschrieben."""
-    from backend import main as M
-    token = M.generate_token(os.environ.get("CRON_TESTUSER") or "jarvis")
-    anfrage = urllib.request.Request(BASIS + "/api/jira/admin/loesungsarchiv",
-                                     headers={"Authorization": "Bearer " + token})
-    with urllib.request.urlopen(anfrage, context=ssl._create_unverified_context(),
-                                timeout=60) as antwort:
-        return bool(json.loads(antwort.read().decode()).get("laeuft"))
 
 
 def main() -> int:
@@ -52,16 +41,11 @@ def main() -> int:
     anwenden = arg.parse_args().anwenden
 
     from backend import loesungsarchiv as la
-    if anwenden:
-        try:
-            if lauf_aktiv():
-                print("ABBRUCH: ein Lauf ist aktiv, es wurde nichts geschrieben.")
-                return 3
-        except Exception as e:  # noqa: BLE001
-            print(f"ABBRUCH: Zustand des Dienstes nicht feststellbar ({type(e).__name__}: {e}).")
-            return 2
     try:
         erg = la.bestand_heilen(anwenden=anwenden)
+    except la.LaufAktiv as e:
+        print(f"ABBRUCH: {e}")
+        return 3
     except la.ArchivFehler as e:
         print(f"ABBRUCH: {e}")
         return 2
@@ -72,17 +56,15 @@ def main() -> int:
           + (" – " + ", ".join(erg["unlesbar"][:10]) if erg["unlesbar"] else ""))
     if not anwenden:
         print("Trockenlauf: nichts geschrieben. Zum Schreiben: --anwenden")
+        try:
+            if la.sperre_belegt():
+                print("Hinweis: gerade ist ein Lauf aktiv, --anwenden wuerde abbrechen.")
+        except OSError as e:
+            print(f"Hinweis: Sperrdatei nicht nutzbar ({e}), --anwenden wuerde abbrechen.")
         return 0
     if erg["sicherung"]:
         print(f"Sicherung: {la._wurzel() / erg['sicherung']}")
         print("Die Dateien in der Wissensdatenbank und der Index folgen im naechsten Lauf.")
-        try:
-            if lauf_aktiv():
-                print("WARNUNG: inzwischen laeuft ein Lauf – er kann den alten Stand "
-                      "zurueckschreiben. Nach seinem Ende den Trockenlauf wiederholen.")
-                return 3
-        except Exception as e:  # noqa: BLE001
-            print(f"WARNUNG: Zustand danach nicht feststellbar ({type(e).__name__}).")
     return 0
 
 

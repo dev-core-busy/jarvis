@@ -3181,6 +3181,16 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </label>
                             <span class="kb-hint" data-i18n="sap.hana_allowed_hint">Aus: Abfragen laufen nur über OData bzw. RFC. Die KI bekommt die SQL-Werkzeuge gar nicht angeboten, und auch ein eigener SAP-Zugang kann HANA-SQL nicht benutzen.</span>
                         </div>
+                        <!-- Anmeldung ueber die Portal-Kachel: kein SAP-Kennwort auf dem
+                             Server (sap_accounts, Abschnitt "Anmeldung ueber die
+                             Portal-Kachel"). Beim Einschalten fragt sap.js nach. -->
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="checkbox" id="sap-kachel-pflicht">
+                                <span data-i18n="sap.kachel_pflicht">Anmeldung über die Portal-Kachel fordern</span>
+                            </label>
+                            <span class="kb-hint" data-i18n-html="sap.kachel_pflicht_hint">An: Auf dem Server liegt kein SAP-Kennwort mehr. Beim Einschalten werden das Kennwort dieses gemeinsamen Zugangs <b>und</b> die Kennwörter aller eigenen Zugänge gelöscht. Jeder Benutzer meldet sich im Bereich <b>SAP</b> unter „Mein SAP-Zugang“ mit seinem Kennwort an; es gilt nur für die laufende Sitzung, der Browser kann es sich merken. Zeitgesteuerte Aufträge erreichen SAP nur, solange der Benutzer angemeldet ist.</span>
+                        </div>
 
                         <!-- OData-Felder -->
                         <div id="sap-group-odata" class="sap-conn-group">
@@ -6023,7 +6033,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=429"></script>
+    <script src="/static/js/i18n.js?v=432"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=35"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6047,7 +6057,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/jira.js?v=29"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=3"></script>
-    <script src="/static/js/sap.js?v=8"></script>
+    <script src="/static/js/sap.js?v=10"></script>
     <script src="/static/js/vemas.js?v=5"></script>
     <script src="/static/js/email.js?v=9"></script>
     <script src="/static/js/short_tracks_admin.js?v=3"></script>

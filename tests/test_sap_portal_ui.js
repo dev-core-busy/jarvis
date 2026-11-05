@@ -17,6 +17,12 @@
  *  17. Nicht direkt abrufbare EntitySets (Hinweis, 404-Erklaerung) und die
  *      Service-Liste unter "Mein SAP-Zugang" -> Standard-Service
  *  18. Mitladen ($expand): Vorschlaege, Uebergabe, verschachtelte Zellen
+ *  19. Anmeldung ueber die Portal-Kachel: Formular, das der Browser als
+ *      Anmeldung erkennt; genau EIN Absenden; im Normalmodus unveraendert
+ *  20. Anmeldekarte: fragt direkt nach dem Kennwort (Browser kann vorbelegen),
+ *      prueft sofort, bietet das Merken nur bei Erfolg an
+ *  21. Einstellungen → SAP: Schalter (Rueckfrage, gesperrte Kennwortfelder)
+ *      und die Liste sagt ausdruecklich, dass kein Kennwort gespeichert ist
  *
  * WICHTIG (Fallstrick vom 2026-07-30): am Ende window.close() + process.exit(),
  * sonst haelt der 30-Sekunden-Timer der LLM-Anzeige den Prozess fuer immer offen.
@@ -36,6 +42,8 @@ const { JSDOM, VirtualConsole } = require('./lib/jsdom_laden')();
 
 const ROOT = path.resolve(__dirname, '..');
 const PORTAL_JS = process.env.SAP_PORTAL_JS || path.join(ROOT, 'frontend', 'js', 'sap_portal.js');
+// Einstellungs-Reiter (Abschnitte 14, 21); SAP_JS fuer die Gegenprobe wie SAP_PORTAL_JS.
+const SAP_JS = process.env.SAP_JS || path.join(ROOT, 'frontend', 'js', 'sap.js');
 const results = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -118,6 +126,13 @@ function build(htmlFile, me, opts) {
                 win.localStorage.setItem('jarvis_sap_history', JSON.stringify(opts.seedHistory));
             }
             win.HTMLCanvasElement.prototype.getContext = () => null;  // Chart.js
+            if (opts.merken) {
+                // Attrappe der Credential-Management-API (Chromium): zaehlt,
+                // was dem Browser zum Merken angeboten wird.
+                win.PasswordCredential = function (d) { Object.assign(this, d); };
+                Object.defineProperty(win.navigator, 'credentials', { configurable: true,
+                    value: { store: (c) => { opts.merken.push(c); return Promise.resolve(); } } });
+            }
             win.fetch = function (url, init) {
                 const u = String(url);
                 const body = (init && init.body) ? JSON.parse(init.body) : null;
@@ -133,8 +148,9 @@ function build(htmlFile, me, opts) {
                 }
                 if (u.startsWith('/api/sap/reporting-endpoints')) return json(ENDPOINTS);
                 if (u.startsWith('/api/sap/status')) {
+                    const st = typeof opts.status === 'function' ? opts.status() : opts.status;
                     return json(Object.assign({ ok: true, configured: true, connection_type: 'odata',
-                                  product: 'S/4HANA', odata: true, hana: false, rfc: false }, opts.status || {}));
+                                  product: 'S/4HANA', odata: true, hana: false, rfc: false }, st || {}));
                 }
                 if (u.startsWith('/api/sap/odata/query') && opts.odQuery) {
                     (opts.odCalls || []).push(u);
@@ -153,11 +169,15 @@ function build(htmlFile, me, opts) {
                     return json({ ok: true, answer: '## Ergebnis\n\n| A | B |\n|---|---|\n| 1 | 2 |' });
                 }
                 if (u.startsWith('/api/sap/account')) {
+                    if (opts.accountPosts && init && init.method === 'POST') opts.accountPosts.push(body);
                     return opts.account ? json({ ok: true, account: opts.account })
                                         : json({ ok: true });
                 }
                 if (u.startsWith('/api/sap/stop')) return json({ ok: true });
-                if (u.startsWith('/api/sap/test') && opts.sapTest) return json(opts.sapTest);
+                if (u.startsWith('/api/sap/test') && opts.sapTest) {
+                    if (opts.testCalls) opts.testCalls.push(u);
+                    return json(opts.sapTest);
+                }
                 if (u.startsWith('/api/sap/odata/services') && opts.odServices) {
                     (opts.odCalls || []).push(u);
                     return json(opts.odServices);
@@ -553,7 +573,7 @@ function loadScript(dom, rel) {
         s.window.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
         s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
         s.window.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
-        s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/sap.js'), 'utf8'));
+        s.window.eval(fs.readFileSync(SAP_JS, 'utf8'));
 
         check('Abschnitt im Markup vorhanden', sd.getElementById('sap-vis-list') !== null);
         check('Knoepfe im Markup vorhanden',
@@ -1206,6 +1226,268 @@ function loadScript(dom, rel) {
             if (bloecke[lg].indexOf("'" + k + "':") < 0) fehlt.push(lg + ':' + k);
         }));
         check('alle sap.ti_*/sap.od_*-Schluessel in DE und EN', fehlt.length === 0, fehlt.join(', '));
+    }
+
+    // ══ 19. Anmeldung ueber die Portal-Kachel ════════════════════════
+    section('19. Anmeldung ueber die Portal-Kachel');
+    {
+        const KONTO = { vorhanden: true, connection_type: 'odata', aktiv: true, hana_port: 443,
+                        auth_kind: 'basic', username: 'MUSTER',
+                        odata_base_url: 'https://sap.example/sap/opu/odata',
+                        anmeldefehler: 0, ausgesetzt: false, letzter_fehler: '',
+                        erlaubte_hosts: ['sap.example'], host_ok: true, cert: {} };
+        const posts = [];
+        const d = build('sap.html', { username: 'anna', is_admin: false, permissions: { sap: true } },
+                        { account: Object.assign({ kachel_pflicht: true, angemeldet: false }, KONTO),
+                          accountPosts: posts,
+                          status: { configured: false, kachel_pflicht: true, quelle: 'keine',
+                                    hinweis: 'Du bist nicht bei SAP angemeldet.' } });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/chatlib.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(160);
+        const doc = d.window.document;
+        const $ = (id) => doc.getElementById(id);
+        const form = $('sp-acc-form');
+        // Positivkontrolle: ohne das Formular um die Felder waeren alle
+        // folgenden Pruefungen ueber die Browser-Erkennung gegenstandslos.
+        check('Positivkontrolle: Formular umschliesst Benutzer, Kennwort und Anmeldeknopf',
+              !!form && form.tagName === 'FORM' && form.contains($('sp-acc-od-user'))
+              && form.contains($('sp-acc-od-pass')) && form.contains($('sp-acc-save')));
+        check('Benutzerfeld: autocomplete=username', $('sp-acc-od-user').getAttribute('autocomplete') === 'username',
+              $('sp-acc-od-user').getAttribute('autocomplete'));
+        check('Kennwortfeld: autocomplete=current-password',
+              $('sp-acc-od-pass').getAttribute('autocomplete') === 'current-password',
+              $('sp-acc-od-pass').getAttribute('autocomplete'));
+        check('Platzhalter sagt nicht mehr "leer = unverändert"',
+              !/unver/.test($('sp-acc-od-pass').placeholder), $('sp-acc-od-pass').placeholder);
+        check('Knopf ist ein Absende-Knopf "Anmelden"',
+              $('sp-acc-save').type === 'submit' && /Anmelden/.test($('sp-acc-save').textContent),
+              $('sp-acc-save').type + ' / ' + $('sp-acc-save').textContent);
+        check('Kachel-Hinweis sichtbar, normaler Hinweis verborgen',
+              !$('sp-acc-hint-kachel').hidden && $('sp-acc-hint').hidden);
+        check('Pille: nicht angemeldet', /nicht angemeldet/.test($('sp-acc-pill').textContent),
+              $('sp-acc-pill').textContent);
+        check('Anmeldebereich ist aufgeklappt', $('sp-sect-account').open === true);
+        check('Abmelden-Knopf verborgen, solange nicht angemeldet', $('sp-acc-logout').hidden === true);
+        $('sp-acc-od-pass').value = 'Kachel-Kennwort';
+        $('sp-acc-save').click();
+        await sleep(80);
+        check('Anmelden sendet GENAU einmal', posts.length === 1, String(posts.length));
+        check('...mit dem eingegebenen Kennwort', posts.length > 0 && posts[0].password === 'Kachel-Kennwort');
+        check('...und leert das Feld danach', $('sp-acc-od-pass').value === '');
+        d.window.close();
+    }
+    {
+        // Gegenrichtung: ohne Schalter bleibt alles wie vorher – kein
+        // Absenden ueber Enter, keine Browser-Anmeldung auf den SAP-Feldern.
+        const posts = [];
+        const d = build('sap.html', { username: 'anna', is_admin: false, permissions: { sap: true } },
+                        { account: { vorhanden: true, connection_type: 'odata', aktiv: true,
+                                     hana_port: 443, auth_kind: 'basic', username: 'MUSTER',
+                                     kachel_pflicht: false, anmeldefehler: 0, ausgesetzt: false,
+                                     erlaubte_hosts: ['sap.example'], host_ok: true, cert: {} },
+                          accountPosts: posts });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/chatlib.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(160);
+        const doc = d.window.document;
+        const $ = (id) => doc.getElementById(id);
+        check('Normalmodus: Benutzerfeld autocomplete=off', $('sp-acc-od-user').getAttribute('autocomplete') === 'off');
+        check('Normalmodus: Kennwortfeld autocomplete=new-password',
+              $('sp-acc-od-pass').getAttribute('autocomplete') === 'new-password');
+        check('Normalmodus: Knopf "Speichern", type=button',
+              $('sp-acc-save').type === 'button' && /Speichern/.test($('sp-acc-save').textContent),
+              $('sp-acc-save').type + ' / ' + $('sp-acc-save').textContent);
+        $('sp-acc-form').dispatchEvent(new d.window.Event('submit', { cancelable: true, bubbles: true }));
+        await sleep(40);
+        check('Normalmodus: Absenden des Formulars speichert nichts', posts.length === 0, String(posts.length));
+        $('sp-acc-save').click();
+        await sleep(80);
+        check('Normalmodus: Klick auf Speichern sendet einmal', posts.length === 1, String(posts.length));
+        d.window.close();
+    }
+    {
+        const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        const grenze = i18n.search(/\n\s*en\s*:\s*\{/);
+        const bloecke = { de: grenze > 0 ? i18n.slice(0, grenze) : '', en: grenze > 0 ? i18n.slice(grenze) : '' };
+        const quelle = fs.readFileSync(PORTAL_JS, 'utf8')
+            + fs.readFileSync(path.join(ROOT, 'frontend/sap.html'), 'utf8');
+        const keys = [...new Set([...quelle.matchAll(/'(sap\.(?:acc_(?:pass_kachel_ph|hint_kachel|pill_none|login|logout|logging_in|logged_in|logged_out)|not_logged_in))'|"(sap\.(?:acc_hint_kachel|acc_logout))"/g)]
+            .map((m) => m[1] || m[2]))];
+        check('Positivkontrolle: Kachel-Schluessel im Modul/Markup gefunden', keys.length >= 9, String(keys.length));
+        const fehlt = [];
+        keys.forEach((k) => ['de', 'en'].forEach((lg) => {
+            if (bloecke[lg].indexOf("'" + k + "':") < 0) fehlt.push(lg + ':' + k);
+        }));
+        check('Kachel-Schluessel in DE und EN', fehlt.length === 0, fehlt.join(', '));
+    }
+
+    // ══ 20. Anmeldekarte ═════════════════════════════════════════════
+    section('20. Anmeldekarte: direkt nach dem Kennwort fragen');
+    async function karte(testAntwort) {
+        const posts = [], tests = [], merken = [];
+        const konto = { vorhanden: true, connection_type: 'odata', aktiv: true, hana_port: 443,
+                        auth_kind: 'basic', username: 'MUSTER', kachel_pflicht: true, angemeldet: false,
+                        letzter_erfolg: 1730000000, anmeldefehler: 0, ausgesetzt: false,
+                        erlaubte_hosts: ['sap.example'], host_ok: true, cert: {} };
+        const d = build('sap.html', { username: 'anna', is_admin: false, permissions: { sap: true } },
+                        { account: konto, accountPosts: posts, testCalls: tests, merken: merken,
+                          sapTest: testAntwort,
+                          status: () => (posts.length && testAntwort.ok)
+                              ? { configured: true, kachel_pflicht: true, quelle: 'persoenlich', anmeldung: {} }
+                              : { configured: false, kachel_pflicht: true, quelle: 'keine',
+                                  hinweis: 'Fuer SAP ist eine Anmeldung noetig.',
+                                  anmeldung: { feld: 'password', benutzer: 'MUSTER', kanal: 'odata' } } });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/chatlib.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(160);
+        return { d, posts, tests, merken, $: (id) => d.window.document.getElementById(id) };
+    }
+    {
+        const k = await karte({ ok: true, configured: true, type: 'odata' });
+        const $ = k.$;
+        const box = $('sp-login');
+        check('Positivkontrolle: Anmeldekarte ist ein Formular mit Benutzer und Kennwort',
+              !!box && box.tagName === 'FORM' && box.contains($('sp-login-user')) && box.contains($('sp-login-pass')));
+        check('Karte erscheint ohne Klick', box && box.hidden === false);
+        check('SAP-Benutzer vorbelegt (Zuordnung fuer den Browser)', $('sp-login-user').value === 'MUSTER',
+              $('sp-login-user').value);
+        check('Benutzer autocomplete=username, Kennwort autocomplete=current-password',
+              $('sp-login-user').getAttribute('autocomplete') === 'username'
+              && $('sp-login-pass').getAttribute('autocomplete') === 'current-password');
+        check('Kennwortfeld hat den Fokus', k.d.window.document.activeElement === $('sp-login-pass'));
+        check('kein langer Hinweistext in der Statuszeile', !/Anmeldung noetig|Kachel/.test($('sp-note').textContent),
+              $('sp-note').textContent);
+        $('sp-login-pass').value = 'Richtig-123';
+        $('sp-login-btn').click();
+        await sleep(160);
+        check('genau EIN Speichern, und zwar nur das Kennwort',
+              k.posts.length === 1 && JSON.stringify(Object.keys(k.posts[0] || {})) === '["password"]',
+              JSON.stringify(k.posts));
+        check('...danach sofort ein Verbindungstest', k.tests.length === 1, String(k.tests.length));
+        check('Erfolg: Kennwort wird dem Browser zum Merken angeboten',
+              k.merken.length === 1 && k.merken[0].id === 'MUSTER' && k.merken[0].password === 'Richtig-123',
+              JSON.stringify(k.merken));
+        check('Erfolg: Karte verschwindet', $('sp-login').hidden === true);
+        check('Erfolg: Kennwortfeld geleert', $('sp-login-pass').value === '');
+        k.d.window.close();
+    }
+    {
+        const k = await karte({ ok: false, configured: true, status: 401, error: '401 Unauthorized' });
+        const $ = k.$;
+        $('sp-login-pass').value = 'Falsch-1';
+        $('sp-login-btn').click();
+        await sleep(160);
+        check('Fehlschlag: Karte bleibt stehen', $('sp-login').hidden === false);
+        const st = $('sp-login-status');
+        check('Fehlschlag: Grund steht an der Karte', /401/.test(st.textContent) && /is-error/.test(st.className),
+              st.textContent);
+        check('Fehlschlag: KEIN Angebot zum Merken', k.merken.length === 0, String(k.merken.length));
+        check('Fehlschlag: Kennwortfeld geleert', $('sp-login-pass').value === '');
+        k.d.window.close();
+    }
+    {
+        // Ohne erfolgreichen Vorlauf (anmeldung leer) gibt es keine Karte –
+        // dann fuehrt der Weg ueber "Mein SAP-Zugang".
+        const d = build('sap.html', { username: 'anna', is_admin: false, permissions: { sap: true } },
+                        { status: { configured: false, kachel_pflicht: true, quelle: 'keine',
+                                    hinweis: 'Fuer SAP ist eine Anmeldung noetig.', anmeldung: {} } });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/chatlib.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(160);
+        const doc = d.window.document;
+        check('ohne erfolgreichen Vorlauf: keine Karte', doc.getElementById('sp-login').hidden === true);
+        check('...stattdessen ist "Mein SAP-Zugang" aufgeklappt', doc.getElementById('sp-sect-account').open === true);
+        d.window.close();
+    }
+    {
+        const i18n = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
+        const grenze = i18n.search(/\n\s*en\s*:\s*\{/);
+        const bl = { de: i18n.slice(0, grenze), en: i18n.slice(grenze) };
+        const fehlt = [];
+        ['sap.login_head', 'sap.login_hint', 'sap.login_empty', 'sap.login_failed'].forEach((k) =>
+            ['de', 'en'].forEach((lg) => { if (bl[lg].indexOf("'" + k + "':") < 0) fehlt.push(lg + ':' + k); }));
+        check('Schluessel der Anmeldekarte in DE und EN', grenze > 0 && fehlt.length === 0, fehlt.join(', '));
+    }
+
+    // ══ 21. Einstellungen → SAP: Schalter und Liste ══════════════════
+    section('21. Einstellungen → SAP: Kachel-Anmeldung');
+    async function einstellungen(cfg, konten, confirmAntwort) {
+        const html = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+        const posts = [], fragen = [];
+        const s = new JSDOM(html, {
+            url: 'https://localhost/settings', runScripts: 'outside-only',
+            beforeParse(win) {
+                win.localStorage.setItem('jarvis_token', 'testtoken');
+                win.confirm = (t) => { fragen.push(t); return confirmAntwort; };
+                win.fetch = (url, init) => {
+                    const u = String(url).split('?')[0];
+                    const json = (data) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) });
+                    if (u === '/api/skills/sap/config') {
+                        if (init && init.method === 'POST') { posts.push(JSON.parse(init.body)); return json({ success: true }); }
+                        return json({ config: cfg, geheim_gesetzt: ['password'] });
+                    }
+                    if (u === '/api/sap/admin/accounts') return json(konten);
+                    return json({ ok: true });
+                };
+            },
+        });
+        const sitzung = fs.readFileSync(path.join(ROOT, 'frontend/js/sitzung.js'), 'utf8');
+        s.window.eval(sitzung);
+        s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
+        s.window.eval(sitzung);
+        s.window.eval(fs.readFileSync(SAP_JS, 'utf8'));
+        s.window.SapManager.onShow();
+        await sleep(150);
+        return { s, posts, fragen, $: (id) => s.window.document.getElementById(id) };
+    }
+    const KONTO = { user: 'm.mustermann', connection_type: 'odata', aktiv: true, vorhanden: true,
+                    ausgesetzt: false, anmeldefehler: 0, host_ok: true };
+    {
+        const e = await einstellungen({ connection_type: 'odata', kachel_anmeldung: true },
+            { ok: true, kachel_pflicht: true, erlaubte_hosts: ['sap.example'],
+              accounts: [Object.assign({ kennwort_gespeichert: false, angemeldet: false, sitzung_bis: 0 }, KONTO),
+                         Object.assign({ kennwort_gespeichert: false, angemeldet: true,
+                                         sitzung_bis: 1893456000 }, KONTO, { user: 'e.beispiel' })] }, true);
+        const txt = e.$('sap-accounts-list').textContent;
+        check('Positivkontrolle: Liste gerendert', /2 Benutzer mit eigenem Zugang/.test(txt), txt);
+        check('Kopf sagt: kein SAP-Kennwort auf dem Server', /kein SAP-Kennwort gespeichert/.test(txt), txt);
+        check('je Benutzer: kein Kennwort gespeichert',
+              (txt.match(/kein Kennwort gespeichert/g) || []).length === 2, txt);
+        check('je Benutzer: angemeldet bzw. nicht angemeldet',
+              /nicht angemeldet/.test(txt) && /angemeldet bis \d/.test(txt), txt);
+        check('Schalter steht an', e.$('sap-kachel-pflicht').checked === true);
+        check('Kennwortfelder des gemeinsamen Zugangs gesperrt',
+              ['sap-odata-pass', 'sap-odata-token', 'sap-hana-pass', 'sap-rfc-pass']
+                  .every((id) => e.$(id) && e.$(id).disabled));
+        e.$('sap-save').click();
+        await sleep(60);
+        check('schon an: Speichern fragt NICHT erneut', e.fragen.length === 0 && e.posts.length === 1,
+              e.fragen.length + '/' + e.posts.length);
+        e.s.window.close();
+    }
+    {
+        // Gegenrichtung: ohne Schalter steht "Kennwort gespeichert" da, kein Kopfsatz.
+        const e = await einstellungen({ connection_type: 'odata' },
+            { ok: true, kachel_pflicht: false, erlaubte_hosts: ['sap.example'],
+              accounts: [Object.assign({ kennwort_gespeichert: true }, KONTO)] }, false);
+        const txt = e.$('sap-accounts-list').textContent;
+        check('ohne Schalter: "Kennwort gespeichert" je Benutzer', /– Kennwort gespeichert/.test(txt), txt);
+        check('ohne Schalter: kein Kopfsatz "kein SAP-Kennwort"', !/kein SAP-Kennwort/.test(txt), txt);
+        check('ohne Schalter: Kennwortfeld frei', e.$('sap-odata-pass').disabled === false);
+        e.$('sap-kachel-pflicht').checked = true;
+        e.$('sap-kachel-pflicht').dispatchEvent(new e.s.window.Event('change'));
+        check('Haken setzen sperrt die Kennwortfelder sofort', e.$('sap-odata-pass').disabled === true);
+        e.$('sap-save').click();
+        await sleep(60);
+        check('Einschalten fragt nach (Warnhinweis)', e.fragen.length === 1 && /gelöscht/.test(e.fragen[0] || ''),
+              String(e.fragen[0]));
+        check('Abbrechen speichert nichts', e.posts.length === 0, String(e.posts.length));
+        e.s.window.close();
     }
 
     // ── Ergebnis ────────────────────────────────────────────────────

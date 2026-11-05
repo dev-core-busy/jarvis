@@ -138,6 +138,13 @@
         .sp-card { background: var(--bg-secondary); border: 1px solid var(--border);
             border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-md); }
         .sp-card + .sp-card { margin-top: 16px; }
+        /* Anmeldekarte (Anmeldung ueber die Portal-Kachel) */
+        .sp-login[hidden] { display: none; }
+        .sp-login { margin-bottom: 16px; border-color: var(--accent); }
+        .sp-login + .sp-card { margin-top: 0; }
+        .sp-login h3 { margin: 0 0 6px; font-size: 1rem; color: var(--text-primary); }
+        .sp-login .sp-row { align-items: flex-end; margin-top: 10px; }
+        .sp-login .sp-input[readonly] { opacity: .8; }
         .sp-row { display: flex; gap: 14px; flex-wrap: wrap; }
         .sp-field { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
         .sp-label { font-size: .78rem; font-weight: 600; color: var(--text-secondary); }
@@ -411,6 +418,32 @@
                     data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
                     title="Maximieren" aria-label="Maximieren">&#9974;</button>
         </div>
+        <!-- ── Anmeldung bei SAP (Anmeldung ueber die Portal-Kachel) ──
+             Erscheint nur, wenn der Administrator die Kachel-Anmeldung fordert,
+             der Zugang schon einmal funktioniert hat und gerade keine Anmeldung
+             besteht (/api/sap/status -> anmeldung). Ein echtes <form> mit
+             Benutzer (autocomplete=username) und Kennwort (current-password):
+             nur daran erkennt der Browser die Anmeldung und belegt das gemerkte
+             Kennwort vor. -->
+        <form class="sp-card sp-login" id="sp-login" autocomplete="on" novalidate hidden>
+            <h3 data-i18n="sap.login_head">Bei SAP anmelden</h3>
+            <p class="sp-sect-hint" data-i18n="sap.login_hint">Dein SAP-Kennwort wird auf dem Server nicht gespeichert und gilt nur für diese Sitzung – dein Browser kann es sich merken.</p>
+            <div class="sp-row">
+                <div class="sp-field">
+                    <label class="sp-label" for="sp-login-user" data-i18n="sap.acc_user">SAP-Benutzer</label>
+                    <input class="sp-input" id="sp-login-user" name="username" type="text" autocomplete="username" readonly>
+                </div>
+                <div class="sp-field">
+                    <label class="sp-label" for="sp-login-pass" id="sp-login-pass-label" data-i18n="sap.acc_pass">Kennwort</label>
+                    <input class="sp-input" id="sp-login-pass" name="password" type="password" autocomplete="current-password">
+                </div>
+            </div>
+            <div class="sp-actions">
+                <button class="sp-btn" id="sp-login-btn" type="submit" data-i18n="sap.acc_login">Anmelden</button>
+                <span class="sp-note" id="sp-login-status"></span>
+            </div>
+        </form>
+
         <!-- ── Analyse starten ── -->
         <div class="sp-card">
             <div class="sp-row">
@@ -464,7 +497,13 @@
                 <span class="sp-acc-pill" id="sp-acc-pill"></span>
             </summary>
             <div class="sp-sect-body">
-                <p class="sp-sect-hint" data-i18n="sap.acc_hint">Hinterlege hier deine eigenen SAP-Zugangsdaten – dann laufen Auswertungen, Chat-Abfragen und die Abfrage-Konsole mit deinen SAP-Berechtigungen. Ohne eigenen Zugang gilt der gemeinsame Lesezugang, den ein Administrator hinterlegt hat.</p>
+                <!-- Ein echtes <form>: nur daran bietet der Browser an, das
+                     SAP-Kennwort zu merken (Anmeldung ueber die Portal-Kachel,
+                     sap_portal.js accKachel). Alle Knoepfe darin sind type=button,
+                     abgesendet wird nur im Kachel-Modus. -->
+                <form id="sp-acc-form" autocomplete="on" novalidate>
+                <p class="sp-sect-hint" id="sp-acc-hint" data-i18n="sap.acc_hint">Hinterlege hier deine eigenen SAP-Zugangsdaten – dann laufen Auswertungen, Chat-Abfragen und die Abfrage-Konsole mit deinen SAP-Berechtigungen. Ohne eigenen Zugang gilt der gemeinsame Lesezugang, den ein Administrator hinterlegt hat.</p>
+                <p class="sp-sect-hint" id="sp-acc-hint-kachel" data-i18n="sap.acc_hint_kachel" hidden>Melde dich hier mit deinem SAP-Kennwort an – dann laufen Auswertungen, Chat-Abfragen und die Abfrage-Konsole mit deinen SAP-Berechtigungen. Das Kennwort wird auf dem Server nicht gespeichert und gilt nur für diese Sitzung; dein Browser kann es sich merken.</p>
 
                 <div class="sp-acc-note" id="sp-acc-note"></div>
 
@@ -610,9 +649,11 @@
                 <div class="sp-actions">
                     <button class="sp-btn" id="sp-acc-save" type="button" data-i18n="common.save">Speichern</button>
                     <button class="sp-hist-btn" id="sp-acc-test" type="button" data-i18n="profile.test">Verbindung testen</button>
+                    <button class="sp-hist-btn" id="sp-acc-logout" type="button" data-i18n="sap.acc_logout" hidden>Von SAP abmelden</button>
                     <button class="sp-hist-btn" id="sp-acc-del" type="button" data-i18n="sap.acc_remove">Eigenen Zugang entfernen</button>
                     <span class="sp-note" id="sp-acc-status"></span>
                 </div>
+                </form>
                 <div class="sp-acc-testinfo" id="sp-acc-testinfo" hidden></div>
                 <p class="sp-sect-hint" id="sp-acc-hosts"></p>
             </div>
@@ -698,7 +739,7 @@
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=16"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=429"></script>
+<script src="/static/js/i18n.js?v=432"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
@@ -716,7 +757,7 @@
 <!-- sapcert.js VOR sap_portal.js: die Benutzerkachel haengt den Baustein
      beim Laden des Zugangs ein. -->
 <script src="/static/js/sapcert.js?v=3"></script>
-<script src="/static/js/sap_portal.js?v=15"></script>
+<script src="/static/js/sap_portal.js?v=17"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR

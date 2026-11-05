@@ -151,6 +151,12 @@
             "label": "RFC Sprache",
             "default": "EN"
         },
+        "kachel_anmeldung": {
+            "type": "boolean",
+            "label": "Anmeldung ueber die Portal-Kachel fordern",
+            "description": "An = auf dem Server liegt kein SAP-Kennwort mehr. Das Kennwort des gemeinsamen Zugangs und die Kennwoerter aller eigenen Zugaenge werden beim Einschalten geloescht; jeder Benutzer meldet sich im Bereich /sap unter 'Mein SAP-Zugang' an. Das Kennwort gilt nur fuer die Sitzung (Arbeitsspeicher), der Browser darf es sich merken.",
+            "default": false
+        },
         "allowed_hosts": {
             "type": "string",
             "label": "Freigegebene SAP-Server (fuer persoenliche Zugaenge)",

@@ -120,6 +120,26 @@
                 var el = $('sp-conn'); if (!el) return;
                 if (!d) { el.textContent = ''; return; }
                 accRenderState();
+                if (!d.configured && d.kachel_pflicht && d.anmeldung && d.anmeldung.feld) {
+                    // Zugang hat schon funktioniert, es fehlt nur das Kennwort:
+                    // direkt fragen statt einen Hinweistext zu zeigen.
+                    el.className = 'sp-conn is-off';
+                    el.textContent = T('sap.not_logged_in', 'Nicht bei SAP angemeldet');
+                    el.title = '';
+                    note('');
+                    loginZeigen(d.anmeldung);
+                    return;
+                }
+                loginVerbergen();
+                if (!d.configured && d.kachel_pflicht) {
+                    el.className = 'sp-conn is-off';
+                    el.textContent = T('sap.not_logged_in', 'Nicht bei SAP angemeldet');
+                    el.title = d.hinweis || '';
+                    note(d.hinweis || T('sap.not_logged_in', 'Nicht bei SAP angemeldet'), 'error');
+                    // Den Anmeldebereich gleich aufklappen – dort geht es weiter.
+                    var sect = $('sp-sect-account'); if (sect) sect.open = true;
+                    return;
+                }
                 if (!d.configured) {
                     el.className = 'sp-conn is-off';
                     el.textContent = T('sap.not_configured', 'SAP nicht konfiguriert');
@@ -961,7 +981,10 @@
         var quelle = (_status && _status.quelle) || 'sammel';
         var hinweis = (_status && _status.hinweis) || '';
         if (pill) {
-            if (quelle === 'persoenlich') {
+            if (quelle === 'keine') {
+                pill.className = 'sp-acc-pill is-warn';
+                pill.textContent = T('sap.acc_pill_none', 'nicht angemeldet');
+            } else if (quelle === 'persoenlich') {
                 pill.className = 'sp-acc-pill is-own';
                 pill.textContent = T('sap.acc_pill_own', 'eigener Zugang');
             } else if (hinweis) {
@@ -1059,6 +1082,7 @@
                 // Kennwortfelder bleiben LEER (der Server gibt sie nie heraus);
                 // der Platzhalter sagt, dass leer "unveraendert" bedeutet.
                 accApplyType(a.connection_type || '');
+                accKachel(!!a.kachel_pflicht, !!a.angemeldet);
                 accRenderHosts();
                 accRenderState();
                 accMountCert();
@@ -1078,6 +1102,169 @@
                 }
             })
             .catch(function () {});
+    }
+
+    // ── Anmeldekarte oben auf der Seite ─────────────────────────────
+    // Fragt direkt nach dem Kennwort, wenn der Zugang schon funktioniert hat
+    // (Server meldet /api/sap/status -> anmeldung). "Anmelden" speichert das
+    // Kennwort fuer die Sitzung und prueft die Verbindung SOFORT: ein falsches
+    // Kennwort steht damit hier, nicht erst in der naechsten Auswertung – und
+    // der Browser bekommt das Kennwort nur dann zum Merken angeboten, wenn es
+    // nachweislich stimmt.
+    var _login = null;      // {feld, benutzer, kanal}
+
+    function loginStatus(msg, kind) {
+        var el = $('sp-login-status'); if (!el) return;
+        el.textContent = msg || '';
+        el.className = 'sp-note' + (kind === 'error' ? ' is-error' : kind === 'ok' ? ' is-ok' : '');
+    }
+
+    function loginZeigen(a) {
+        var box = $('sp-login'); if (!box) return;
+        var neu = !_login || box.hidden;
+        _login = a;
+        var u = $('sp-login-user'); if (u) u.value = a.benutzer || '';
+        var lbl = $('sp-login-pass-label');
+        if (lbl) {
+            var key = a.feld === 'bearer_token' ? 'sap.acc_token' : 'sap.acc_pass';
+            lbl.setAttribute('data-i18n', key);
+            lbl.textContent = T(key, a.feld === 'bearer_token' ? 'Token' : 'Kennwort');
+        }
+        box.hidden = false;
+        if (neu) {
+            loginStatus('');
+            var p = $('sp-login-pass');
+            if (p) { try { p.focus(); } catch (e) { /* belanglos */ } }
+        }
+    }
+
+    function loginVerbergen() {
+        var box = $('sp-login'); if (box) box.hidden = true;
+        _login = null;
+    }
+
+    function loginAbsenden() {
+        if (!_login) return;
+        var p = $('sp-login-pass');
+        var pw = p ? p.value : '';
+        if (!pw) {
+            loginStatus(T('sap.login_empty', 'Bitte das Kennwort eingeben.'), 'error');
+            return;
+        }
+        var feld = _login.feld, name = _login.benutzer;
+        var btn = $('sp-login-btn'); if (btn) btn.disabled = true;
+        loginStatus(T('sap.acc_logging_in', 'Melde an…'));
+        var rumpf = {}; rumpf[feld] = pw;
+        fetch('/api/sap/account', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(rumpf)
+        })
+            .then(function (r) {
+                return r.json().catch(function () { return null; }).then(function (d) {
+                    if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || T('sap.acc_save_failed', 'Speichern fehlgeschlagen.'));
+                    return fetch('/api/sap/test', { headers: authHeaders() });
+                });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (t) {
+                if (p) p.value = '';
+                if (t && t.ok) {
+                    if (feld !== 'bearer_token') kennwortMerken(name, pw);
+                    loginStatus('');
+                    loginVerbergen();
+                    note('✓ ' + T('sap.acc_logged_in', 'Angemeldet – das Kennwort gilt für diese Sitzung.'), 'ok');
+                } else {
+                    // Der Server hat die Anmeldung nach einem Anmeldefehler
+                    // bereits verworfen – die Karte bleibt fuer den naechsten Versuch.
+                    loginStatus(T('sap.login_failed', 'Anmeldung fehlgeschlagen:') + ' '
+                        + ((t && t.error) || ''), 'error');
+                }
+                loadStatus();
+                loadAccount();
+            })
+            .catch(function (e) {
+                if (p) p.value = '';
+                loginStatus((e && e.message) || T('sap.failed', 'Fehlgeschlagen.'), 'error');
+            })
+            .then(function () { if (btn) btn.disabled = false; });
+    }
+
+    // Chromium/Edge: ausdruecklich anbieten, das Kennwort zu merken. Firefox
+    // erkennt das Absenden des Formulars selbst. Fehler hier sind belanglos.
+    function kennwortMerken(name, pw) {
+        try {
+            if (!name || !pw || !window.PasswordCredential || !navigator.credentials) return;
+            navigator.credentials.store(new window.PasswordCredential({
+                id: name, password: pw, name: 'SAP ' + name
+            })).catch(function () {});
+        } catch (e) { /* belanglos */ }
+    }
+
+    // ── Anmeldung ueber die Portal-Kachel ────────────────────────────
+    // Der Administrator kann verlangen, dass kein SAP-Kennwort auf dem Server
+    // liegt (Einstellungen → SAP). Dann ist dieser Abschnitt eine ANMELDUNG:
+    // das Kennwort geht nur in den Arbeitsspeicher des Servers, und der
+    // Browser darf es sich merken. Dafuer braucht er ein <form> mit
+    // autocomplete="username"/"current-password" und ein Absenden – im
+    // normalen Modus bleiben die Felder "off"/"new-password", sonst boete der
+    // Browser dort die Jarvis-Anmeldung an.
+    var _kachel = false;
+    var BENUTZER_FELDER = ['sp-acc-od-user', 'sp-acc-hana-user', 'sp-acc-rfc-user'];
+    var KENNWORT_FELDER = ['sp-acc-od-pass', 'sp-acc-od-token', 'sp-acc-hana-pass', 'sp-acc-rfc-pass'];
+
+    function accKachel(an, angemeldet) {
+        _kachel = an;
+        var h = $('sp-acc-hint'), hk = $('sp-acc-hint-kachel');
+        if (h) h.hidden = an;
+        if (hk) hk.hidden = !an;
+        BENUTZER_FELDER.forEach(function (id) {
+            var e = $(id); if (e) e.setAttribute('autocomplete', an ? 'username' : 'off');
+        });
+        KENNWORT_FELDER.forEach(function (id) {
+            var e = $(id); if (!e) return;
+            e.setAttribute('autocomplete', an ? 'current-password' : 'new-password');
+            // Auch das i18n-Attribut umstellen – sonst setzte der naechste
+            // Sprachwechsel wieder "leer = unveraendert", und das stimmt hier nicht.
+            var key = an ? 'sap.acc_pass_kachel_ph' : 'sap.acc_pass_ph';
+            e.setAttribute('data-i18n-placeholder', key);
+            e.placeholder = an ? T(key, 'Kennwort – wird nicht gespeichert')
+                               : T(key, 'leer = unverändert');
+        });
+        var s = $('sp-acc-save');
+        if (s) {
+            s.type = an ? 'submit' : 'button';
+            var sk = an ? 'sap.acc_login' : 'common.save';
+            s.setAttribute('data-i18n', sk);
+            s.textContent = an ? T(sk, 'Anmelden') : T(sk, 'Speichern');
+        }
+        var lo = $('sp-acc-logout'); if (lo) lo.hidden = !(an && angemeldet);
+    }
+
+    // Chromium/Edge: ausdruecklich anbieten, das Kennwort zu merken. Firefox
+    // erkennt das Absenden des Formulars selbst. Fehler hier sind belanglos –
+    // die Anmeldung ist bereits erfolgt.
+    function accKennwortMerken(daten) {
+        try {
+            if (!_kachel || !window.PasswordCredential || !navigator.credentials) return;
+            var t = daten.connection_type;
+            var name = t === 'hana' ? daten.hana_user : (t === 'rfc' ? daten.rfc_user : daten.username);
+            var pw = t === 'hana' ? daten.hana_password : (t === 'rfc' ? daten.rfc_password
+                : (daten.auth_kind === 'bearer' ? '' : daten.password));
+            kennwortMerken(name, pw);
+        } catch (e) { /* belanglos */ }
+    }
+
+    function accAbmelden() {
+        fetch('/api/sap/account/sitzung', { method: 'DELETE', headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function () {
+                accClearSecrets();
+                accNote(T('sap.acc_logged_out', 'Von SAP abgemeldet.'), 'ok');
+                loadAccount();
+                loadStatus();
+            })
+            .catch(function () { accNote('❌ ' + T('sap.failed', 'Fehlgeschlagen.'), 'error'); });
     }
 
     function accCollect() {
@@ -1124,11 +1311,12 @@
                 'Bitte eine Zugangsart wählen – oder „Eigenen Zugang entfernen" drücken.'), 'error');
             return;
         }
-        accNote(T('sap.acc_saving', 'Speichere…'));
+        accNote(_kachel ? T('sap.acc_logging_in', 'Melde an…') : T('sap.acc_saving', 'Speichere…'));
+        var daten = accCollect();
         fetch('/api/sap/account', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify(accCollect())
+            body: JSON.stringify(daten)
         })
             .then(function (r) {
                 return r.json().catch(function () { return null; }).then(function (d) {
@@ -1140,10 +1328,12 @@
                     accNote((res.d && res.d.error) || T('sap.acc_save_failed', 'Speichern fehlgeschlagen.'), 'error');
                     return;
                 }
+                accKennwortMerken(daten);
                 accClearSecrets();
                 accResetTestInfo();
                 odVerwerfen();
-                accNote('✓ ' + T('sap.acc_saved', 'Gespeichert.'), 'ok');
+                accNote('✓ ' + (_kachel ? T('sap.acc_logged_in', 'Angemeldet – das Kennwort gilt für diese Sitzung.')
+                                        : T('sap.acc_saved', 'Gespeichert.')), 'ok');
                 loadAccount();
                 loadStatus();      // Pille und Verbindungsanzeige folgen sofort
             })
@@ -1367,7 +1557,10 @@
         if (accT) accT.addEventListener('change', function () { accApplyType(accT.value); accNote(''); });
         var accA = $('sp-acc-od-auth');
         if (accA) accA.addEventListener('change', accApplyAuth);
-        var accS = $('sp-acc-save'); if (accS) accS.addEventListener('click', saveAccount);
+        // Im Kachel-Modus ist der Knopf type=submit – dann loest das Absenden
+        // aus (unten), ein zweiter Aufruf hier wuerde doppelt anmelden.
+        var accS = $('sp-acc-save');
+        if (accS) accS.addEventListener('click', function () { if (!_kachel) saveAccount(); });
         var accP = $('sp-acc-test'); if (accP) accP.addEventListener('click', testAccount);
         // Der Bericht wird aus T() gebaut – nach einem Sprachwechsel neu zeichnen.
         // accRenderTestInfo ruft kein applyLang(), loest also kein Ereignis aus.
@@ -1375,6 +1568,16 @@
             if (_letzterTest) accRenderTestInfo();
         });
         var accD = $('sp-acc-del'); if (accD) accD.addEventListener('click', delAccount);
+        var accL = $('sp-acc-logout'); if (accL) accL.addEventListener('click', accAbmelden);
+        // Absenden nur im Kachel-Modus (Enter im Kennwortfeld = Anmelden).
+        // Sonst nichts tun – ohne Formular hatte Enter hier auch keine Wirkung.
+        var lf = $('sp-login');
+        if (lf) lf.addEventListener('submit', function (e) { e.preventDefault(); loginAbsenden(); });
+        var accF = $('sp-acc-form');
+        if (accF) accF.addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (_kachel) saveAccount();
+        });
 
         $('sp-instr-btn').addEventListener('click', openInstructions);
         $('sp-instr-close').addEventListener('click', function () { $('sp-instr-overlay').classList.add('hidden'); });

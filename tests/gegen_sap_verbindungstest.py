@@ -26,6 +26,7 @@ DATEIEN = {
     "client": ROOT / "backend" / "sap_client.py",
     "main": ROOT / "backend" / "main.py",
     "portal": ROOT / "frontend" / "js" / "sap_portal.js",
+    "sapjs": ROOT / "frontend" / "js" / "sap.js",
 }
 
 # (Name, Datei, alt, neu, erwarteter Exit)
@@ -173,8 +174,8 @@ PROBEN = [
      "        $('sp-od-entity').addEventListener('input', odPruefeEntity);\n",
      "", 1),
     ("Speichern verwirft die gemerkten Listen nicht", "portal",
-     "                odVerwerfen();\n                accNote('✓ ' + T('sap.acc_saved', 'Gespeichert.'), 'ok');\n",
-     "                accNote('✓ ' + T('sap.acc_saved', 'Gespeichert.'), 'ok');\n", 1),
+     "                odVerwerfen();\n                accNote('✓ ' + (_kachel ? T('sap.acc_logged_in',",
+     "                accNote('✓ ' + (_kachel ? T('sap.acc_logged_in',", 1),
     ("alte EntitySet-Antwort nach dem Speichern wird gemerkt", "portal",
      "                if (gen !== _odGeneration) return;   // Zugang inzwischen gespeichert/entfernt\n",
      "", 1),
@@ -204,11 +205,45 @@ PROBEN = [
     ("neuer Satz-Schluessel ohne i18n-Eintrag (ueber T)", "portal",
      "T('sap.ti_foot', 'Es wurden keine",
      "T('sap.ti_fuss', 'Es wurden keine", 1),
+    # Anmeldung ueber die Portal-Kachel (Abschnitt 19 im UI-Waechter)
+    ("Kachel-Modus: Klick UND Absenden melden doppelt an", "portal",
+     "accS.addEventListener('click', function () { if (!_kachel) saveAccount(); });",
+     "accS.addEventListener('click', saveAccount);", 1),
+    ("Kachel-Modus wird nie angewandt", "portal",
+     "                accKachel(!!a.kachel_pflicht, !!a.angemeldet);\n", "", 1),
+    # Anmeldekarte (Abschnitt 20 im UI-Waechter)
+    ("Anmeldekarte bietet das Merken auch bei falschem Kennwort an", "portal",
+     "                if (p) p.value = '';\n                if (t && t.ok) {\n"
+     "                    if (feld !== 'bearer_token') kennwortMerken(name, pw);\n",
+     "                if (p) p.value = '';\n                kennwortMerken(name, pw);\n"
+     "                if (t && t.ok) {\n", 1),
+    ("Anmeldekarte prueft die Verbindung nicht", "portal",
+     "                    return fetch('/api/sap/test', { headers: authHeaders() });\n",
+     "                    return Promise.resolve({ json: function () { return { ok: true }; } });\n", 1),
+    ("Anmeldekarte wird nie gezeigt", "portal",
+     "                    loginZeigen(d.anmeldung);\n                    return;\n",
+     "                    return;\n", 1),
+    # Einstellungen → SAP (Abschnitt 21 im UI-Waechter)
+    ("Liste ohne Kopfsatz 'kein SAP-Kennwort gespeichert'", "sapjs",
+     "                    if (kachel) {\n                        kopf = '<strong>'",
+     "                    if (false) {\n                        kopf = '<strong>'", 1),
+    ("Liste ohne Kennwort-Zustand je Benutzer", "sapjs",
+     "                            + Manager._kennwortZustand(a, kachel) + '</li>';",
+     "                            + '</li>';", 1),
+    ("Einschalten ohne Warnhinweis", "sapjs",
+     "            if (checked('sap-kachel-pflicht') && !(this._cfg && this._cfg.kachel_anmeldung)) {",
+     "            if (false) {", 1),
+    ("Kennwortfelder bleiben trotz Haken frei", "sapjs",
+     "                e.disabled = an;\n", "", 1),
+    ("Normalmodus: Enter im Formular speichert", "portal",
+     "            if (_kachel) saveAccount();\n        });",
+     "            saveAccount();\n        });", 1),
 ]
 
 
 def lauf(kopien: dict) -> int:
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", SAP_PORTAL_JS=str(kopien["portal"]))
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", SAP_PORTAL_JS=str(kopien["portal"]),
+               SAP_JS=str(kopien["sapjs"]))
     py = subprocess.run([sys.executable, str(PY_WAECHTER), "--modul", str(kopien["client"]),
                          "--main", str(kopien["main"])],
                         capture_output=True, text=True, env=env, timeout=300).returncode

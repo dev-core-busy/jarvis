@@ -5646,6 +5646,13 @@ async def logout(request: Request, user: str = Depends(require_auth)):
         _user_sessions.record_logout(user, display=_display_name(user))
     except Exception:  # noqa: BLE001
         pass
+    try:
+        # SAP-Anmeldung aus der Portal-Kachel (Kennwort nur im Arbeitsspeicher)
+        # endet mit der Jarvis-Abmeldung.
+        from backend import sap_accounts as _sapacc
+        _sapacc.sitzung_beenden(user)
+    except Exception:  # noqa: BLE001
+        pass
     _sicherheits_log.ereignis("abmeldung", benutzer=user,
                               ip=request.client.host if request.client else "",
                               ergebnis="erfolg")
@@ -12452,10 +12459,21 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
     # zurueckkommendes Geheimfeld heisst "unveraendert", nicht "loeschen".
     from backend import secret_reveal as _sr
     gespeichert = sm.get_skill_config(name) or {}
+    # SAP "Anmeldung ueber die Portal-Kachel fordern" (Betreiber 2026-11-05):
+    # mit dem Schalter liegt KEIN SAP-Kennwort mehr auf der Platte. Die
+    # Geheimfelder des Sammelzugangs werden ausdruecklich geleert (ein leeres
+    # Feld hiesse sonst "unveraendert"), und beim EINSCHALTEN verlieren auch
+    # alle persoenlichen Zugaenge ihre Kennwoerter. Die Umleitungs-Pruefung
+    # entfaellt dann: es bleibt kein Geheimnis, das umgeleitet werden koennte.
+    sap_kachel = name == "sap" and bool(body.get("kachel_anmeldung"))
+    if sap_kachel:
+        from backend import sap_accounts as _sapacc
+        for _f in _sapacc.GEHEIMFELDER:
+            body[_f] = ""
     # Neue Adresse + behaltenes Geheimnis = das Geheimnis ginge an die neue
     # Adresse, ohne dass es je jemand eingegeben oder aufgedeckt hat
     # (Code-Review 2026-10-07). Wer umzieht, gibt es neu ein.
-    umgeleitet = _sr.umgeleitete_geheimnisse(body, gespeichert)
+    umgeleitet = [] if sap_kachel else _sr.umgeleitete_geheimnisse(body, gespeichert)
     if umgeleitet:
         return JSONResponse({"success": False, "code": "geheimnis_neu_eingeben",
                              "felder": umgeleitet,
@@ -12464,7 +12482,22 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
                                       "die neue Adresse."},
                             status_code=400)
     body = _sr.leere_geheimfelder_behalten(body, gespeichert)
+    if sap_kachel:
+        # NACH dem Behalten: das setzt leere Geheimfelder wieder ein.
+        for _f in _sapacc.GEHEIMFELDER:
+            body[_f] = ""
     success = sm.update_skill_config(name, body)
+    if success and sap_kachel and not gespeichert.get("kachel_anmeldung"):
+        try:
+            _n = _sapacc.kennwoerter_entfernen()
+        except Exception as e:  # noqa: BLE001
+            print(f"[SAP] Kennwoerter persoenlicher Zugaenge nicht entfernt: {e}", flush=True)
+            return JSONResponse({"success": False,
+                                 "error": "Die Einstellung ist gespeichert, aber die "
+                                          "Kennwörter der eigenen Zugänge ließen sich "
+                                          f"nicht entfernen: {e}"}, status_code=500)
+        _aktivitaet(user, "skills", "sap_kachel_anmeldung_an", name,
+                    kennwoerter_entfernt=_n)
 
     # Google-Spezialfall: Client-ID/Secret in .env schreiben
     if name == "google" and success:
@@ -13987,9 +14020,17 @@ async def sap_portal_status(user: str = Depends(require_sap_access)):
     # gerade gilt (Pille) und ob ueberhaupt ein gemeinsamer Lesezugang existiert
     # (dann ist ein eigener Zugang optional, sonst Pflicht).
     sammel = False
+    kachel = False
+    anmeldung = {}
     try:
+        from backend import sap_accounts
         from backend.sap_client import SapClient
-        sammel = bool(SapClient().configured)
+        kachel = sap_accounts.kachel_pflicht()
+        # Direkt nach dem Kennwort fragen (Anmeldekarte in /sap), wenn der
+        # Zugang schon einmal funktioniert hat und nur die Anmeldung fehlt.
+        anmeldung = sap_accounts.anmeldung_anbieten(user) if kachel else {}
+        # Mit Kachelpflicht gibt es keinen gemeinsamen Lesezugang (Kennwort leer).
+        sammel = (not kachel) and bool(SapClient().configured)
     except Exception:  # noqa: BLE001
         pass
     return JSONResponse({
@@ -14006,6 +14047,8 @@ async def sap_portal_status(user: str = Depends(require_sap_access)):
         "quelle": z.get("quelle") or "sammel",
         "hinweis": z.get("hinweis") or "",
         "sammel_vorhanden": sammel,
+        "kachel_pflicht": kachel,
+        "anmeldung": anmeldung,
         "is_admin": _is_admin_user(user),
     })
 
@@ -14075,10 +14118,17 @@ async def sap_admin_accounts(user: str = Depends(require_local_auth)):
                 "letzter_erfolg": int(i.get("letzter_erfolg") or 0),
                 "letzter_fehler": i.get("letzter_fehler") or "",
                 "host_ok": bool(i.get("host_ok")),
+                # Was WIRKLICH auf der Platte liegt (Kontendatei), dazu die
+                # Anmeldung aus der Portal-Kachel – fuer die Aussage "kein
+                # Kennwort gespeichert" in Einstellungen → SAP.
+                "kennwort_gespeichert": sap_accounts.kennwort_gespeichert(un),
+                "angemeldet": bool(i.get("angemeldet")),
+                "sitzung_bis": int(i.get("sitzung_bis") or 0),
             })
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "accounts": out,
+                         "kachel_pflicht": sap_accounts.kachel_pflicht(),
                          "erlaubte_hosts": sap_accounts.hosts_erlaubt(),
                          "implizit": sap_accounts.hosts_implizit()})
 
@@ -14092,6 +14142,16 @@ async def sap_account_del(user: str = Depends(require_sap_access)):
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "removed": bool(weg),
+                         "account": sap_accounts.zugang_info(user)})
+
+
+@app.delete("/api/sap/account/sitzung")
+async def sap_account_abmelden(user: str = Depends(require_sap_access)):
+    """Von SAP abmelden (Anmeldung ueber die Portal-Kachel): das nur im
+    Arbeitsspeicher gehaltene Kennwort verwerfen. Der Zugang selbst bleibt."""
+    from backend import sap_accounts
+    weg = sap_accounts.sitzung_beenden(user)
+    return JSONResponse({"ok": True, "beendet": bool(weg),
                          "account": sap_accounts.zugang_info(user)})
 
 

@@ -218,6 +218,104 @@ AENDERBAR = ("connection_type", "aktiv", "hana_port") + TEXTFELDER + GEHEIMFELDE
 KANAELE = ("odata", "hana", "rfc")
 
 
+# ── Anmeldung ueber die Portal-Kachel (Betreiber 2026-11-05) ────────────────
+#
+# WARUM: die gespeicherten Zugangsdaten sollen vom System. Schaltet der
+# Administrator unter Einstellungen → SAP "Anmeldung ueber die Portal-Kachel
+# fordern" ein, liegt KEIN SAP-Kennwort mehr auf der Platte:
+#
+# * das Kennwort des Sammelzugangs wird geleert (``main.update_skill_config``),
+# * die Kennwoerter aller persoenlichen Zugaenge werden entfernt
+#   (``kennwoerter_entfernen``) – die Zugaenge SELBST bleiben (Server, Benutzer,
+#   Mandant, Zertifikatsanker); Vorgabe des Betreibers: "keine Kennwortarten
+#   loeschen, nur die Kennwoerter",
+# * ein neu eingegebenes Kennwort geht nur noch in den Arbeitsspeicher
+#   (``_SITZUNG``) und gilt bis zur Abmeldung, zum Ablauf oder zum Neustart.
+#
+# Damit der Benutzer es nicht jedes Mal tippen muss, darf der BROWSER es sich
+# merken (Formular mit ``autocomplete="current-password"`` in /sap) – der
+# Browser ist dann der einzige Ort, an dem es liegt.
+#
+# KEIN RUECKFALL AUF DEN SAMMELZUGANG, solange der Schalter an ist: dessen
+# Kennwort ist geleert, ein Rueckfall wuerde also nur einen sicheren 401 an SAP
+# schicken – und das zaehlt dort gegen ``login/fails_to_user_lock`` des
+# Sammelbenutzers. Stattdessen sagt ``aufloesen`` klar "bitte anmelden".
+#
+# EIN PROZESS: uvicorn laeuft ohne ``--workers`` (siehe main.py), der
+# Sitzungsspeicher ist deshalb ein schlichtes dict.
+KACHEL_SCHALTER = "kachel_anmeldung"
+SITZUNG_LAUFZEIT = 12 * 3600     # Sekunden; danach erneut anmelden
+_SITZUNG: dict = {}              # benutzer_norm -> {"felder": {...}, "bis": ts}
+
+
+def kachel_pflicht(cfg: dict | None = None) -> bool:
+    """Ist "Anmeldung ueber die Portal-Kachel fordern" eingeschaltet?"""
+    c = skill_config() if cfg is None else (cfg or {})
+    return bool(c.get(KACHEL_SCHALTER))
+
+
+def _sitzung_holen(un: str) -> dict:
+    """Die im Arbeitsspeicher gehaltenen Kennwoerter dieses Benutzers (oder {}).
+    Abgelaufene Eintraege werden dabei verworfen."""
+    s = _SITZUNG.get(un)
+    if not s:
+        return {}
+    if float(s.get("bis") or 0) < time.time():
+        _SITZUNG.pop(un, None)
+        return {}
+    return dict(s.get("felder") or {})
+
+
+def sitzung_bis(user: str) -> int:
+    """Ablaufzeitpunkt der SAP-Anmeldung (Unix-Zeit) oder 0."""
+    un = norm_user(user)
+    if not _sitzung_holen(un):
+        return 0
+    return int((_SITZUNG.get(un) or {}).get("bis") or 0)
+
+
+def sitzung_beenden(user: str) -> bool:
+    """SAP-Anmeldung aus dem Arbeitsspeicher nehmen (Abmelden, Anmeldefehler)."""
+    return _SITZUNG.pop(norm_user(user), None) is not None
+
+
+def _sitzung_setzen(un: str, felder: dict) -> None:
+    alt = _sitzung_holen(un)
+    alt.update(felder)
+    _SITZUNG[un] = {"felder": alt, "bis": time.time() + SITZUNG_LAUFZEIT}
+
+
+def kennwort_gespeichert(user: str) -> bool:
+    """Liegt fuer diesen Zugang ein Kennwort/Token auf der PLATTE?
+
+    Gemessen an der Kontendatei selbst, nicht an der Einstellung: die
+    Admin-Liste soll zeigen, was tatsaechlich gespeichert ist – auch dann,
+    wenn ein Rest den Schalter ueberlebt haette."""
+    k = _laden().get(norm_user(user)) or {}
+    return any((k.get(f + "_enc") or "").strip() for f in GEHEIMFELDER)
+
+
+def kennwoerter_entfernen() -> int:
+    """Entfernt die gespeicherten Kennwoerter ALLER persoenlichen Zugaenge.
+
+    Die Zugaenge selbst bleiben stehen. Rueckgabe: Zahl der Zugaenge, an denen
+    tatsaechlich etwas entfernt wurde."""
+    alle = _laden()
+    n = 0
+    for un, k in alle.items():
+        if not isinstance(k, dict):
+            continue
+        weg = [f + "_enc" for f in GEHEIMFELDER if f + "_enc" in k]
+        for f in weg:
+            del k[f]
+        if weg:
+            k["geaendert"] = int(time.time())
+            n += 1
+    if n:
+        _speichern(alle)
+    return n
+
+
 # ── Aussetzer nach wiederholten Anmeldefehlern ──────────────────────────────
 #
 # WARUM ES DAS GIBT: derselbe Vorfall wie beim E-Mail-Postfach (2026-08-16), nur
@@ -586,15 +684,29 @@ def zugang_info(user: str) -> dict:
     k = _laden().get(un) or _leer(un)
     erlaubt = hosts_erlaubt()
     hosts = _hosts_im_zugang(k)
+    pflicht = kachel_pflicht()
+    sitzung = _sitzung_holen(un) if pflicht else {}
+
+    def _gesetzt(feld: str) -> bool:
+        # Mit Kachelpflicht liegt nichts auf der Platte – "gesetzt" heisst dann
+        # "fuer diese Sitzung angemeldet".
+        if pflicht:
+            return bool(sitzung.get(feld))
+        return bool((k.get(feld + "_enc") or "").strip())
+
     info = {
         "vorhanden": bool(_vollstaendig(k)),
         "connection_type": (k.get("connection_type") or "").strip().lower(),
         "aktiv": bool(k.get("aktiv", True)),
         "hana_port": int(k.get("hana_port") or 443),
-        "passwort_gesetzt": bool((k.get("password_enc") or "").strip()),
-        "bearer_gesetzt": bool((k.get("bearer_token_enc") or "").strip()),
-        "hana_passwort_gesetzt": bool((k.get("hana_password_enc") or "").strip()),
-        "rfc_passwort_gesetzt": bool((k.get("rfc_password_enc") or "").strip()),
+        "passwort_gesetzt": _gesetzt("password"),
+        "bearer_gesetzt": _gesetzt("bearer_token"),
+        "hana_passwort_gesetzt": _gesetzt("hana_password"),
+        "rfc_passwort_gesetzt": _gesetzt("rfc_password"),
+        # Anmeldung ueber die Portal-Kachel: Kennwort nur im Arbeitsspeicher.
+        "kachel_pflicht": pflicht,
+        "angemeldet": bool(sitzung),
+        "sitzung_bis": sitzung_bis(un) if pflicht else 0,
         "letzter_erfolg": int(k.get("letzter_erfolg", 0) or 0),
         "letzter_fehler": k.get("letzter_fehler", ""),
         "anmeldefehler": int(k.get("anmeldefehler", 0) or 0),
@@ -680,11 +792,21 @@ def speichern(user: str, felder: dict) -> dict:
     if "aktiv" in felder:
         k["aktiv"] = bool(felder.get("aktiv"))
 
+    pflicht = kachel_pflicht()
+    sitzung_neu: dict = {}
+    if pflicht:
+        # Kein Kennwort auf der Platte – auch kein altes, das vor dem
+        # Einschalten liegen geblieben ist.
+        for f in GEHEIMFELDER:
+            k.pop(f + "_enc", None)
     for f in GEHEIMFELDER:
         if f in felder:
             wert = str(felder.get(f) or "")
             if wert.strip():
-                k[f + "_enc"] = verschluesseln(wert)
+                if pflicht:
+                    sitzung_neu[f] = wert
+                else:
+                    k[f + "_enc"] = verschluesseln(wert)
                 # NEUES Kennwort = neuer Anlauf. Ohne dieses Zuruecksetzen bliebe
                 # der Zugang nach dem Beheben der Ursache ausgesetzt, und der
                 # Benutzer haette keinen erkennbaren Weg zurueck. Nur bei einem
@@ -713,6 +835,9 @@ def speichern(user: str, felder: dict) -> dict:
     k["geaendert"] = int(time.time())
     alle[un] = k
     _speichern(alle)
+    if sitzung_neu:
+        # Erst NACH der Host-Pruefung: ein abgelehntes Speichern meldet nicht an.
+        _sitzung_setzen(un, sitzung_neu)
     return zugang_info(user)
 
 
@@ -723,6 +848,7 @@ def loeschen(user: str) -> bool:
         return False
     del alle[un]
     _speichern(alle)
+    sitzung_beenden(un)
     return True
 
 
@@ -753,6 +879,11 @@ def merke_ergebnis(user: str, ok: bool, fehler: str = "",
                   % un, flush=True)
     else:
         k["letzter_fehler"] = (fehler or "")[:500]
+        if anmeldefehler and kachel_pflicht() and sitzung_beenden(un):
+            # Ein falsches Kachel-Kennwort wird nicht weiterbenutzt: sonst
+            # wiederholten Hintergrundlaeufe den abgelehnten Logon im Takt.
+            print("[SAP] Anmeldung von '%s' nach Anmeldefehler beendet" % un,
+                  flush=True)
         if anmeldefehler:
             k["anmeldefehler"] = int(k.get("anmeldefehler", 0) or 0) + 1
             grenze = max_anmeldefehler()
@@ -799,6 +930,24 @@ def alle_benutzer() -> list[str]:
 # Fehlerklasse "eine Anzeige behauptet einen Zustand, den sie nicht kennt".
 QUELLE_PERSOENLICH = "persoenlich"
 QUELLE_SAMMEL = "sammel"
+# Kachelpflicht und (noch) keine Anmeldung: es gibt KEINEN Zugang.
+QUELLE_KEINE = "keine"
+
+
+def _kein_zugang(un: str, hinweis: str) -> dict:
+    """Ergebnis "kein Zugang" – ein Client, der nicht konfiguriert ist, damit
+    jeder Aufrufer ueber ``client.configured`` sauber abbricht, statt eine
+    Anfrage ohne Kennwort an SAP zu schicken."""
+    return {"client": SapClient({"connection_type": "odata", "read_only": True}),
+            "quelle": QUELLE_KEINE, "hinweis": hinweis, "benutzer": un,
+            "ausgesetzt": False}
+
+
+# Kurz gehalten (Rueckmeldung des Betreibers 2026-11-05: der lange Satz war
+# benutzerunfreundlich). In /sap erscheint statt dieses Textes direkt die
+# Anmeldekarte (``anmeldung_anbieten``); den Text sieht nur, wer im Chat fragt
+# oder noch keinen funktionierenden Zugang hat.
+ANMELDEN_TEXT = "Bitte im Bereich SAP mit deinem SAP-Kennwort anmelden."
 
 
 def _cfg_aus_zugang(k: dict) -> dict:
@@ -834,10 +983,14 @@ def _cfg_aus_zugang(k: dict) -> dict:
             continue
         cfg[f] = k.get(f, "")
     cfg["hana_port"] = int(k.get("hana_port") or 443)
-    cfg["password"] = entschluesseln(k.get("password_enc", ""))
-    cfg["bearer_token"] = entschluesseln(k.get("bearer_token_enc", ""))
-    cfg["hana_password"] = entschluesseln(k.get("hana_password_enc", ""))
-    cfg["rfc_password"] = entschluesseln(k.get("rfc_password_enc", ""))
+    if kachel_pflicht(c):
+        # Nur die Anmeldung aus der Kachel – nie ein Rest auf der Platte.
+        s = _sitzung_holen(norm_user(k.get("benutzer_norm") or ""))
+        for f in GEHEIMFELDER:
+            cfg[f] = s.get(f, "")
+    else:
+        for f in GEHEIMFELDER:
+            cfg[f] = entschluesseln(k.get(f + "_enc", ""))
     if not (cfg.get("auth_kind") or "").strip():
         cfg["auth_kind"] = "bearer" if cfg["bearer_token"] else "basic"
     return cfg
@@ -865,6 +1018,8 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
             user = ""
     un = norm_user(user or "")
     hinweis = ""
+    if kachel_pflicht():
+        return _aufloesen_kachel(un, trotz_aussetzer)
     if un and ":" not in un:
         try:
             k = _laden().get(un)
@@ -905,6 +1060,81 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
             "benutzer": un, "ausgesetzt": bool(hinweis)}
 
 
+def _aufloesen_kachel(un: str, trotz_aussetzer: bool) -> dict:
+    """``aufloesen`` bei eingeschalteter Kachelpflicht.
+
+    Gilt nur der persoenliche Zugang MIT Anmeldung in dieser Sitzung. Kein
+    Rueckfall auf den Sammelzugang: dessen Kennwort ist geleert (siehe Kopf
+    des Abschnitts "Anmeldung ueber die Portal-Kachel")."""
+    if not un or ":" in un:
+        return _kein_zugang(un, "SAP verlangt eine persoenliche Anmeldung in der "
+                                "SAP-Kachel – fuer diesen Kanal gibt es keine.")
+    try:
+        k = _laden().get(un)
+    except Exception:  # noqa: BLE001
+        k = None
+    if not (k and _vollstaendig(k)):
+        return _kein_zugang(un, "Es ist noch kein eigener SAP-Zugang eingerichtet. "
+                                + ANMELDEN_TEXT)
+    if not bool(k.get("aktiv", True)):
+        return _kein_zugang(un, "Dein persoenlicher SAP-Zugang steht auf inaktiv.")
+    if k.get("ausgesetzt") and not trotz_aussetzer:
+        return _kein_zugang(un, "Dein persoenlicher SAP-Zugang ist nach %d "
+                                "fehlgeschlagenen Anmeldungen ausgesetzt. %s"
+                            % (int(k.get("anmeldefehler", 0) or 0), ANMELDEN_TEXT))
+    if ((k.get("connection_type") or "").strip().lower() == "hana"
+            and not hana_erlaubt(skill_config())):
+        return _kein_zugang(un, "Dein persoenlicher SAP-Zugang benutzt HANA-SQL. %s"
+                            % HANA_GESPERRT_TEXT)
+    if not all(host_ok(h) for h in _hosts_im_zugang(k)):
+        return _kein_zugang(un, "Der Server deines persoenlichen SAP-Zugangs ist "
+                                "nicht mehr freigegeben.")
+    if not _sitzung_holen(un):
+        return _kein_zugang(un, "Fuer SAP ist eine Anmeldung noetig. " + ANMELDEN_TEXT)
+    c = SapClient(_cfg_aus_zugang(k))
+    if not c.configured:
+        return _kein_zugang(un, "Dein persoenlicher SAP-Zugang ist unvollstaendig.")
+    return {"client": c, "quelle": QUELLE_PERSOENLICH, "hinweis": "",
+            "benutzer": un, "ausgesetzt": False}
+
+
+def anmeldung_anbieten(user: str) -> dict:
+    """Soll /sap DIREKT nach dem Kennwort fragen? Rueckgabe {} = nein.
+
+    Ja nur, wenn die Kachel-Anmeldung gefordert ist, gerade keine Anmeldung
+    besteht und der Zugang schon einmal ERFOLGREICH verbunden hat (dann sind
+    Server und Benutzer erwiesen richtig, es fehlt nur das Kennwort). Ein nie
+    getesteter Zugang gehoert in den Abschnitt "Mein SAP-Zugang", nicht in
+    eine Kennwort-Abfrage.
+
+    ``benutzer`` ist der SAP-Benutzer: daran ordnet der Browser das gemerkte
+    Kennwort zu. ``feld`` ist das Geheimfeld, das die Anmeldung fuellt."""
+    if not kachel_pflicht():
+        return {}
+    un = norm_user(user or "")
+    if not un or ":" in un or _sitzung_holen(un):
+        return {}
+    k = _laden().get(un)
+    if not (k and _vollstaendig(k)) or not bool(k.get("aktiv", True)):
+        return {}
+    if not int(k.get("letzter_erfolg", 0) or 0):
+        return {}
+    if not all(host_ok(h) for h in _hosts_im_zugang(k)):
+        return {}
+    ct = (k.get("connection_type") or "").strip().lower()
+    if ct == "hana":
+        if not hana_erlaubt(skill_config()):
+            return {}
+        feld, benutzer = "hana_password", k.get("hana_user", "")
+    elif ct == "rfc":
+        feld, benutzer = "rfc_password", k.get("rfc_user", "")
+    else:
+        bearer = (k.get("auth_kind") or "").strip().lower() == "bearer"
+        feld = "bearer_token" if bearer else "password"
+        benutzer = k.get("username", "")
+    return {"feld": feld, "benutzer": benutzer or "", "kanal": ct}
+
+
 def client_fuer_lauf(user: str | None = None) -> SapClient:
     """Nur der Client – fuer Aufrufer, die den Hinweis nicht brauchen."""
     return aufloesen(user)["client"]
@@ -912,6 +1142,9 @@ def client_fuer_lauf(user: str | None = None) -> SapClient:
 
 def quelle_text(quelle: str, lang: str = "de") -> str:
     """Kurzbezeichnung fuer die Oberflaeche/den Ergebniskopf."""
+    if quelle == QUELLE_KEINE:
+        return ("no SAP access (sign-in required)" if lang.startswith("en")
+                else "kein SAP-Zugang (Anmeldung noetig)")
     if lang.startswith("en"):
         return ("your personal SAP access" if quelle == QUELLE_PERSOENLICH
                 else "the shared read-only access")
@@ -925,6 +1158,9 @@ __all__ = [
     "merke_ergebnis", "melde_fehler", "ist_anmeldefehler", "max_anmeldefehler",
     "aufloesen", "client_fuer_lauf", "quelle_text",
     "hosts_erlaubt", "hosts_admin", "hosts_implizit", "host_ok",
-    "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "AENDERBAR", "TEXTFELDER",
+    "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "QUELLE_KEINE", "AENDERBAR",
+    "kachel_pflicht", "kennwoerter_entfernen", "sitzung_beenden", "sitzung_bis",
+    "anmeldung_anbieten", "kennwort_gespeichert",
+    "KACHEL_SCHALTER", "TEXTFELDER",
     "GEHEIMFELDER", "KANAELE",
 ]

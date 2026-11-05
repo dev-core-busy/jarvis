@@ -28,11 +28,18 @@
         });
     }
 
+    // Kennwortfelder des gemeinsamen Zugangs (gesperrt bei Kachel-Anmeldung).
+    var KENNWORT_FELDER = ['sap-odata-pass', 'sap-odata-token', 'sap-hana-pass', 'sap-rfc-pass'];
     function token() { return window.JarvisSitzung.token(); }
     function authHeaders(extra) {
         return Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
     }
     function $(id) { return document.getElementById(id); }
+    // Uebersetzung mit Rueckfall: fehlt der Schluessel, liefert t() ihn selbst.
+    function T(k, fb) {
+        var v = window.t ? window.t(k) : '';
+        return (v && v !== k) ? v : fb;
+    }
     function val(id) { var e = $(id); return e ? e.value.trim() : ''; }
     function checked(id) { var e = $(id); return !!(e && e.checked); }
     function esc(s) {
@@ -86,6 +93,8 @@
             var self = this;
             var ct = $('sap-conn-type');
             if (ct) ct.addEventListener('change', function () { self._applyType(ct.value); });
+            var kp = $('sap-kachel-pflicht');
+            if (kp) kp.addEventListener('change', function () { self._applyKachel(); });
             var save = $('sap-save'); if (save) save.addEventListener('click', this.save.bind(this));
             var test = $('sap-test'); if (test) test.addEventListener('click', this.test.bind(this));
             var oq = $('sap-odata-run'); if (oq) oq.addEventListener('click', this.runOData.bind(this));
@@ -104,6 +113,18 @@
                     btn.innerHTML = hidden ? SVG_EYE_CLOSED : SVG_EYE_OPEN;
                     if (hidden) augeHolen(inp, btn, SVG_EYE_OPEN, SVG_EYE_CLOSED);
                 });
+            });
+        },
+
+        // Mit "Anmeldung ueber die Portal-Kachel" gibt es hier kein Kennwort –
+        // die Felder werden gesperrt, statt einen Wert anzunehmen, den der
+        // Server ohnehin verwirft.
+        _applyKachel: function () {
+            var an = checked('sap-kachel-pflicht');
+            KENNWORT_FELDER.forEach(function (id) {
+                var e = $(id); if (!e) return;
+                e.disabled = an;
+                if (an) e.value = '';
             });
         },
 
@@ -160,7 +181,9 @@
                     if ($('sap-rfc-lang')) $('sap-rfc-lang').value = c.rfc_lang || 'EN';
                     // Freigegebene Server fuer persoenliche Zugaenge (leer = niemand)
                     if ($('sap-allowed-hosts')) $('sap-allowed-hosts').value = c.allowed_hosts || '';
+                    if ($('sap-kachel-pflicht')) $('sap-kachel-pflicht').checked = !!c.kachel_anmeldung;
                     self._cfg = c;
+                    self._applyKachel();
                     self._mountCert();
                     self._applyType(c.connection_type || 'odata');
                 })
@@ -238,7 +261,9 @@
                 // Sichtbarkeits-Knopf sendet es NICHT mit – sonst ueberschriebe
                 // ein Klick dort den jeweils anderen Teil (gleiche Trennung wie
                 // bei hidden_analyses).
-                allowed_hosts: ($('sap-allowed-hosts') ? $('sap-allowed-hosts').value.trim() : '')
+                allowed_hosts: ($('sap-allowed-hosts') ? $('sap-allowed-hosts').value.trim() : ''),
+                // Anmeldung ueber die Portal-Kachel (Server leert dann alle Kennwoerter)
+                kachel_anmeldung: checked('sap-kachel-pflicht')
             };
         },
 
@@ -249,6 +274,13 @@
                 status('✗ ' + (window.t ? window.t('sap.hana_allowed_conflict')
                     : 'Der Verbindungstyp HANA-SQL passt nicht zu „SQL-Zugriff nicht zulassen“.'), 'error');
                 return;
+            }
+            // Einschalten der Kachel-Anmeldung loescht Kennwoerter – vorher fragen.
+            if (checked('sap-kachel-pflicht') && !(this._cfg && this._cfg.kachel_anmeldung)) {
+                var frage = window.t ? window.t('sap.kachel_pflicht_confirm') : '';
+                if (!window.confirm(frage || 'Achtung: Beim Speichern werden das Kennwort des gemeinsamen SAP-Zugangs und die gespeicherten Kennwörter ALLER eigenen SAP-Zugänge gelöscht. Danach muss sich jeder Benutzer im Bereich SAP neu anmelden. Fortfahren?')) {
+                    return;
+                }
             }
             status(window.t ? window.t('confluence.saving') : 'Speichere…');
             fetch('/api/skills/sap/config', {
@@ -264,6 +296,9 @@
             })
               .then(function () {
                   status('✓ ' + (window.t ? window.t('confluence.saved') : 'Gespeichert'), 'ok');
+                  // Neu laden: der Server hat bei der Kachel-Anmeldung die
+                  // Kennwoerter geleert – die "gesetzt"-Anzeige muss folgen.
+                  Manager.loadConfig();
                   // Die Freigabeliste entscheidet, ob vorhandene persoenliche
                   // Zugaenge noch gelten – deshalb die Liste neu zeichnen.
                   Manager.loadAccounts();
@@ -282,13 +317,27 @@
                 .then(function (d) {
                     if (!d || !d.ok) { box.textContent = 'Nicht abrufbar.'; return; }
                     var hosts = (d.erlaubte_hosts || []);
+                    var kachel = !!d.kachel_pflicht;
                     var kopf = hosts.length
                         ? 'Freigegebene Server: ' + hosts.map(esc).join(', ')
                         : '⚠ Kein Server freigegeben – niemand kann einen eigenen Zugang hinterlegen.';
+                    // Ausdruecklich sagen, dass nichts gespeichert ist – die
+                    // Liste sah sonst genauso aus wie mit gespeicherten Kennwoertern.
+                    if (kachel) {
+                        kopf = '<strong>' + esc(T('sap.adm_kachel_kopf',
+                            'Anmeldung über die Portal-Kachel: Auf dem Server ist kein SAP-Kennwort gespeichert.'))
+                            + '</strong><br>' + kopf;
+                    }
                     var list = (d.accounts || []);
                     // kopf ist bereits sicher: die Hostnamen wurden oben durch esc()
                     // geschickt, der Rest ist statischer Text. Ein zweites esc()
                     // wuerde die Entities doppelt maskieren.
+                    if (!list.length && kachel) {
+                        box.innerHTML = kopf
+                            + '<br>Kein Benutzer hat einen eigenen SAP-Zugang eingerichtet – mit der Anmeldung '
+                            + 'über die Portal-Kachel gibt es ohne ihn keinen SAP-Zugriff.';
+                        return;
+                    }
                     if (!list.length) {
                         box.innerHTML = kopf
                             + '<br>Kein Benutzer hat einen eigenen SAP-Zugang hinterlegt – alle Auswertungen '
@@ -301,11 +350,28 @@
                                 + a.anmeldefehler + ' Anmeldefehlern</span>'
                             : (!a.aktiv ? ' – inaktiv'
                             : (!a.host_ok ? ' – <span style="color:var(--danger);">Server nicht mehr freigegeben</span>' : ''));
-                        html += '<li>' + esc(a.user) + ' (' + esc(a.connection_type || '?') + ')' + mark + '</li>';
+                        html += '<li>' + esc(a.user) + ' (' + esc(a.connection_type || '?') + ')' + mark
+                            + Manager._kennwortZustand(a, kachel) + '</li>';
                     });
                     box.innerHTML = html + '</ul>';
                 })
                 .catch(function () { box.textContent = 'Nicht abrufbar.'; });
+        },
+
+        // Zusatz je Benutzer: liegt ein Kennwort auf der Platte, ist er angemeldet?
+        _kennwortZustand: function (a, kachel) {
+            if (a.kennwort_gespeichert) {
+                // Mit Kachel-Anmeldung darf das nicht vorkommen – dann laut.
+                return kachel
+                    ? ' – <span style="color:var(--danger);">' + esc(T('sap.adm_pw_rest', 'Kennwort noch gespeichert')) + '</span>'
+                    : ' – ' + esc(T('sap.adm_pw_ja', 'Kennwort gespeichert'));
+            }
+            if (!kachel) return ' – ' + esc(T('sap.adm_pw_nein', 'kein Kennwort gespeichert'));
+            var zustand = (a.angemeldet && a.sitzung_bis)
+                ? T('sap.adm_angemeldet_bis', 'angemeldet bis') + ' '
+                    + new Date(a.sitzung_bis * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : T('sap.adm_nicht_angemeldet', 'nicht angemeldet');
+            return ' – ' + esc(T('sap.adm_pw_nein', 'kein Kennwort gespeichert')) + ' · ' + esc(zustand);
         },
 
         test: function () {

@@ -131,8 +131,14 @@ BEREICHE: dict[str, dict] = {
     "wissen": {
         "de": "Wissensdatenbank (lesend)", "en": "Knowledge base (read)",
         "tools": ["knowledge_search"],
-        "hinweis_de": "Für fachlich richtige Antworten aus den eigenen Unterlagen.",
-        "hinweis_en": "For factually correct answers based on your own documents.",
+        "hinweis_de": "Für fachlich richtige Antworten aus den eigenen Unterlagen – in "
+                      "Regeln und beim Antwortvorschlag im Outlook-Add-in. Der Vorschlag "
+                      "zeigt an, ob nachgeschlagen wurde; was davon in die Antwort geht, "
+                      "prüft der Benutzer vor dem Senden.",
+        "hinweis_en": "For factually correct answers based on your own documents – in "
+                      "rules and for reply suggestions in the Outlook add-in. The "
+                      "suggestion shows whether the knowledge base was consulted; the "
+                      "user checks what goes into the reply before sending.",
     },
     "fach": {
         "de": "Interne Fachsysteme (lesend)", "en": "Internal systems (read)",

@@ -16813,63 +16813,10 @@ def mail_accounts_skill_config() -> dict:
     return mail_accounts.skill_config() or {}
 
 
-@app.post("/api/email/admin/explore")
-async def email_admin_explore(request: Request, user: str = Depends(require_local_auth)):
-    """Exchange-Explorer: Ordnerbaum (und optional Kopfdaten) eines Postfachs.
-
-    Body: ``{benutzer?, ordner?, limit?}``. Ohne ``benutzer`` wird das Postfach
-    des aufrufenden Administrators genommen.
-
-    **Es werden ausschliesslich SCHON HINTERLEGTE Konten geoeffnet** – der
-    Explorer nimmt keine Adresse samt Kennwort aus dem Request. Sonst waere der
-    Endpunkt ein Anmelde-Werkzeug gegen beliebige Postfaecher (und mit
-    ``verify_ssl=false`` gegen beliebige Server), also dasselbe SSRF-Muster wie
-    bei ``/api/profiles/test``. Dass ein Administrator die Ordner eines
-    hinterlegten Postfachs sehen kann, ist dagegen genau der Zweck: ohne
-    Ordnernamen kann er die Vorgabe-Ordner nicht einstellen."""
-    from backend import mail_accounts
-    from backend.mail_client import MailClient, MailFehler, klartext
-    hinweis = _email_skill_hinweis()
-    if hinweis:
-        return JSONResponse(hinweis, status_code=400)
-    try:
-        body = await _json_objekt(request)
-    except Exception:  # noqa: BLE001
-        body = {}
-    ziel = (body.get("benutzer") or user or "").strip()
-    ordner = (body.get("ordner") or "").strip()
-    try:
-        limit = max(0, min(int(body.get("limit") or 0), 50))
-    except (TypeError, ValueError):
-        limit = 0
-
-    if not mail_accounts.hat_konto(ziel):
-        return JSONResponse({
-            "ok": False,
-            "error": "Fuer '%s' ist kein Postfach hinterlegt. Der Explorer arbeitet "
-                     "nur mit bereits hinterlegten Konten – Zugangsdaten hinterlegt "
-                     "jeder Benutzer selbst im E-Mail-Bereich." % ziel}, status_code=400)
-
-    def _tun():
-        c = MailClient(mail_accounts.konto_fuer(ziel, trotz_aussetzer=True))
-        try:
-            raus = {"kanal": "", "ordner": c.ordner(), "nachrichten": []}
-            if limit:
-                raus["nachrichten"] = [m.kurz(text_max=0)
-                                       for m in c.liste(ordner=ordner, limit=limit)]
-            raus["kanal"] = c.aktiver_kanal
-            raus["test"] = c.test()
-            return raus
-        finally:
-            c.schliessen()
-    try:
-        res = await asyncio.to_thread(_tun)
-    except MailFehler as f:
-        return JSONResponse({"ok": False, "kategorie": f.kategorie,
-                             "error": klartext(f)}, status_code=400)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True, "benutzer": ziel, "ergebnis": res})
+# Exchange-Explorer (POST /api/email/admin/explore) am 2026-11-05 entfernt:
+# er oeffnete mit den gespeicherten Zugangsdaten eines Benutzers dessen
+# Postfach fuer einen Administrator – das Gegenteil von "gespeicherte
+# Zugangsdaten vom System nehmen". Ordnernamen nennt der Benutzer selbst.
 
 
 @app.post("/api/email/admin/areas")

@@ -377,8 +377,12 @@ _vs = RUNNER.split("async def antwort_vorschlag", 1)
 pruefe(len(_vs) == 2, "antwort_vorschlag existiert")
 _vs_roh = _vs[1].split("\nasync def ", 1)[0].split("\ndef ", 1)[0]
 _vs = _nur_code(_vs_roh)
-pruefe("_role_tools = set()" in _vs,
-       "der Lauf bekommt die LEERE Werkzeugmenge (= keine Werkzeuge)")
+# Seit 2026-11-05 darf der Lauf die lesende Wissenssuche bekommen, wenn der
+# Bereich "wissen" freigegeben ist – sonst nichts. Die WIRKUNG (welche Menge
+# der Agent wirklich bekommt) misst tests/test_mail_vorschlag_wissen.py; hier
+# steht nur die Regel, dass der Zuschnitt aus GENAU dieser Funktion kommt.
+pruefe("_role_tools = set(werkzeuge)" in _vs and "werkzeuge = vorschlag_werkzeuge()" in _vs,
+       "der Lauf bekommt den Zuschnitt aus vorschlag_werkzeuge() (leer oder nur Wissenssuche)")
 pruefe("_role_tools = None" not in _vs.split("finally", 1)[0],
        "vor dem Lauf wird NICHT auf 'keine Beschraenkung' gesetzt")
 for verboten in ("email_senden", "email_antworten", "email_weiterleiten",

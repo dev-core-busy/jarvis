@@ -4,7 +4,9 @@
    Drei Dinge, streng getrennt, weil sie unterschiedlichen Leuten gehoeren:
      1. Verbindung zum firmeninternen Exchange (Serverdaten, EINMAL fuer alle)
      2. Freigabe der Werkzeug-Bereiche, aus denen Benutzer je Regel waehlen
-     3. Exchange-Explorer + Uebersicht der angebundenen Postfaecher
+     3. Uebersicht der angebundenen Postfaecher (der Exchange-Explorer ist
+        am 2026-11-05 entfallen: er oeffnete mit gespeicherten Zugangsdaten
+        fremde Postfaecher)
 
    WAS HIER ABSICHTLICH FEHLT: die Regeln. Sie gehoeren dem Benutzer und
    werden im Bereich /email gepflegt (Entscheidung 2026-08-12). Dieser Reiter
@@ -311,7 +313,6 @@
                 _konten = d.konten || [];
                 zeichneBereiche();
                 zeichneKonten(d);
-                fuelleExplorer();
             })
             .catch(function (e) {
                 var box = $('em-accounts');
@@ -353,113 +354,6 @@
                 + '</tr>';
         });
         box.innerHTML = h + '</tbody></table>';
-    }
-
-    /* ── Explorer ──────────────────────────────────────────────────────── */
-    function fuelleExplorer() {
-        var sel = $('em-exp-user');
-        if (!sel) return;
-        var vorher = sel.value;
-        sel.innerHTML = '';
-        if (!_konten.length) {
-            var o = document.createElement('option');
-            o.value = '';
-            o.textContent = '(' + T('mailadm.exp_none', 'kein Postfach hinterlegt') + ')';
-            sel.appendChild(o);
-            return;
-        }
-        _konten.forEach(function (k) {
-            var o = document.createElement('option');
-            o.value = k.benutzer_norm;
-            o.textContent = k.benutzer + ' — ' + k.adresse;
-            sel.appendChild(o);
-        });
-        if (vorher) sel.value = vorher;
-    }
-
-    function erkunde() {
-        var user = ($('em-exp-user') || {}).value || '';
-        if (!user) {
-            melde('em-exp-status', T('mailadm.m_no_mailbox', 'Es ist kein Postfach hinterlegt, das untersucht werden könnte.'), 'fehler');
-            return Promise.resolve();
-        }
-        var limit = parseInt(($('em-exp-limit') || {}).value || '0', 10) || 0;
-        var knopf = $('em-explore');
-        if (knopf) knopf.disabled = true;
-        melde('em-exp-status', T('mail.testing', 'Verbinde… (kann bis zu einer halben Minute dauern)'));
-        var box = $('em-exp-result');
-        if (box) box.innerHTML = '';
-        return fetch('/api/email/admin/explore', {
-            method: 'POST',
-            headers: kopf({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ benutzer: user, limit: limit })
-        }).then(function (r) { return r.json().then(function (d) { return { r: r, d: d }; }); })
-            .then(function (x) {
-                if (!x.r.ok || !x.d.ok) throw new Error((x.d && x.d.error) || ('HTTP ' + x.r.status));
-                melde('em-exp-status', T('mail.test_ok', '✓ Verbindung steht')
-                    + ' (' + T('mailadm.channel', 'Zugangsweg') + ': '
-                    + esc((x.d.ergebnis || {}).kanal || '?') + ')', 'ok');
-                zeichneExplorer(x.d.ergebnis || {});
-            }).catch(function (e) {
-                melde('em-exp-status', T('common.error', 'Fehler') + ': ' + e.message, 'fehler');
-            }).finally(function () {
-                if (knopf) knopf.disabled = false;
-            });
-    }
-
-    function zeichneExplorer(res) {
-        var box = $('em-exp-result');
-        if (!box) return;
-        var t = res.test || {};
-        var h = '<div style="padding:10px 12px;border:1px solid rgba(var(--fg-rgb),0.09);'
-            + 'border-radius:10px;background:rgba(var(--fg-rgb),0.02);margin-bottom:10px;">'
-            + '<b>' + T('mailadm.exp_user', 'Postfach (Benutzer)') + ':</b> '
-            + esc(t.postfach || '?') + ' &nbsp;·&nbsp; '
-            + '<b>' + T('mailadm.channel', 'Zugangsweg') + ':</b> '
-            + esc(res.kanal || t.kanal || '?');
-        if (t.server_version) h += ' &nbsp;·&nbsp; <b>' + T('mailadm.exp_server', 'Server')
-            + ':</b> ' + esc(t.server_version);
-        if (t.ews_url) h += '<br><b>EWS:</b> <code>' + esc(t.ews_url) + '</code>';
-        if (t.imap_host) h += '<br><b>IMAP:</b> <code>' + esc(t.imap_host) + '</code>';
-        if (t.eingang_gesamt >= 0) {
-            h += '<br><b>' + T('mail.acct_inbox', 'Posteingang') + ':</b> '
-                + T('mailadm.exp_counts', '{g} Nachrichten, {u} ungelesen')
-                    .replace('{g}', t.eingang_gesamt).replace('{u}', t.eingang_ungelesen);
-        }
-        h += '</div>';
-
-        var ordner = res.ordner || [];
-        h += '<h4 style="margin:12px 0 6px;">' + T('mailadm.exp_folders', 'Ordner')
-            + ' (' + ordner.length + ')</h4>';
-        if (!ordner.length) {
-            h += '<p class="kb-hint">' + T('mailadm.exp_nofolders', 'Keine Ordner gemeldet.') + '</p>';
-        } else {
-            h += '<div class="sec-scrollbox" style="max-height:240px;">';
-            ordner.forEach(function (o) {
-                var z = o.anzahl >= 0
-                    ? ' <span class="kb-hint">(' + o.anzahl + ' / ' + o.ungelesen + ' '
-                        + T('mail.unread', 'ungelesen') + ')</span>'
-                    : '';
-                h += '<div style="padding:3px 0;"><code>' + esc(o.pfad || o.name) + '</code>' + z + '</div>';
-            });
-            h += '</div>';
-        }
-
-        var mails = res.nachrichten || [];
-        if (mails.length) {
-            h += '<h4 style="margin:12px 0 6px;">' + T('mailadm.exp_newest', 'Neueste Nachrichten')
-                + ' (' + mails.length + ')</h4>'
-                + '<table class="audit-table" style="width:100%;"><thead><tr>'
-                + '<th>' + T('mailadm.th_date', 'Datum') + '</th>'
-                + '<th>' + T('mailadm.th_from', 'Von') + '</th>'
-                + '<th>' + T('mailadm.th_subject', 'Betreff') + '</th></tr></thead><tbody>';
-            mails.forEach(function (m) {
-                h += '<tr><td>' + esc(m.datum || '?') + '</td><td>' + esc(m.von || '?')
-                    + '</td><td>' + esc(m.betreff || T('mail.log_nosubject', '(kein Betreff)')) + '</td></tr>';
-            });
-            h += '</tbody></table>';
-        }
-        box.innerHTML = h;
     }
 
     /* ── Add-in-Bereitstellung ─────────────────────────────────────────
@@ -795,7 +689,6 @@
         var b;
         if ((b = $('em-save-conn'))) b.addEventListener('click', speichereVerbindung);
         if ((b = $('em-save-areas'))) b.addEventListener('click', speichereBereiche);
-        if ((b = $('em-explore'))) b.addEventListener('click', erkunde);
         var serverSave = $('em-server-save');
         if (serverSave) serverSave.addEventListener('click', speichereServerzugriff);
         // Eigene Variablen, nicht `b` weiterverwenden: eine geteilte `var` sieht
@@ -841,7 +734,7 @@
                 });
             }).catch(function () { });
         },
-        _test: { zeichneKonten: zeichneKonten, zeichneExplorer: zeichneExplorer,
+        _test: { zeichneKonten: zeichneKonten,
                  dateinameAus: dateinameAus, ordnerKnopf: ordnerKnopf,
                  feldPfad: feldPfad, ladeAddinPfad: ladeAddinPfad,
                  speichereAddinPfad: speichereAddinPfad, speichereAddinDiag: speichereAddinDiag,

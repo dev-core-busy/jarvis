@@ -615,21 +615,6 @@ function baueReiter(opt) {
         if (pfad === '/api/email/admin/areas') {
             return gib({ ok: true, bereiche: (o.body ? JSON.parse(o.body).bereiche : []) });
         }
-        if (pfad === '/api/email/admin/explore') {
-            if (opt.expFehler) {
-                return Promise.resolve({ ok: false, status: 400,
-                    json: () => Promise.resolve({ ok: false, error: opt.expFehler }) });
-            }
-            return gib({ ok: true, benutzer: 'm.mustermann', ergebnis: {
-                kanal: 'ews',
-                test: { postfach: 'm.mustermann@firma.local', server_version: 'Exchange 2019',
-                        ews_url: 'https://mail.firma.de/EWS/Exchange.asmx',
-                        eingang_gesamt: 42, eingang_ungelesen: 5 },
-                ordner: [{ name: 'INBOX', pfad: 'INBOX', anzahl: 42, ungelesen: 5 },
-                         { name: 'Buchhaltung', pfad: 'Archiv/Buchhaltung', anzahl: 7, ungelesen: 0 }],
-                nachrichten: [{ datum: '2026-08-12', von: 'k@x.de', betreff: '<b>x</b>' }]
-            } });
-        }
         return gib({ ok: true });
     };
     w.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
@@ -763,40 +748,9 @@ function baueReiter(opt) {
     // Der Reiter darf keine Regel-Inhalte zeigen
     pruefe(tab.textContent.indexOf('Pruefe auf Rechnung') === -1,
         'der Reiter zeigt KEINE Regel-Prompts (die gehoeren dem Benutzer)');
-    const sel = w.document.getElementById('em-exp-user');
-    pruefe(sel.options.length === 2, 'der Explorer bietet die hinterlegten Konten an');
-    pruefe(sel.options[0].value === 'm.mustermann',
-        'und benutzt den normalisierten Namen als Wert');
-}
-{
-    const { w, rufe } = baueReiter({});
-    w.EmailAdmin.onShow();
-    await warte(80);
-    w.document.getElementById('em-explore').click();
-    await warte(80);
-    const exp = rufe.filter(r => r.url === '/api/email/admin/explore')[0];
-    pruefe(!!exp && exp.methode === 'POST', 'der Explorer ruft seinen Endpunkt');
-    pruefe(exp.body.benutzer === 'm.mustermann', 'mit dem gewaehlten Benutzer');
-    pruefe(!('passwort' in exp.body) && !('adresse' in exp.body),
-        'der Explorer sendet NIE Zugangsdaten (kein Anmelde-Werkzeug)');
-    const res = w.document.getElementById('em-exp-result');
-    pruefe(res.textContent.indexOf('Exchange 2019') > -1, 'die Serverangabe erscheint');
-    pruefe(res.textContent.indexOf('Archiv/Buchhaltung') > -1,
-        'der Ordnerbaum erscheint mit vollem Pfad');
-    pruefe(res.innerHTML.indexOf('<b>x</b>') === -1, 'Betreffzeilen werden entschaerft');
-    pruefe(w.document.getElementById('em-exp-status').textContent.indexOf('ews') > -1,
-        'der benutzte Kanal wird genannt');
-}
-{
-    const { w } = baueReiter({ expFehler: 'Fuer diesen Benutzer ist kein Postfach hinterlegt.' });
-    w.EmailAdmin.onShow();
-    await warte(80);
-    w.document.getElementById('em-explore').click();
-    await warte(80);
-    pruefe(w.document.getElementById('em-exp-status').textContent.indexOf('kein Postfach') > -1,
-        'ein Explorer-Fehler erscheint im Klartext');
-    pruefe(w.document.getElementById('em-explore').disabled === false,
-        'der Knopf wird danach wieder freigegeben');
+    // Exchange-Explorer am 2026-11-05 entfallen – weder Container noch Knopf.
+    pruefe(!w.document.getElementById('em-sect-explore') && !w.document.getElementById('em-explore'),
+        'kein Exchange-Explorer mehr im Reiter');
 }
 {
     const { w } = baueReiter({ konten: [] });
@@ -804,8 +758,6 @@ function baueReiter(opt) {
     await warte(80);
     pruefe(w.document.getElementById('em-accounts').textContent.indexOf('Noch kein Postfach') > -1,
         'ohne Konten steht ein erklaerender Text mit dem Weg zur Freigabe');
-    pruefe(w.document.getElementById('em-exp-user').options[0].value === '',
-        'der Explorer bietet dann kein Konto an');
 }
 {
     // onShow ist idempotent (Reiter-Klick UND openModal rufen es)

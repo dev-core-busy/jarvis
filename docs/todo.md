@@ -29,6 +29,9 @@ mehr. Die Bereiche werden nacheinander umgestellt.
       Outlook; Jarvis formuliert nur. Der Serverzugriff auf Postfächer (Regeln,
       Mail-Werkzeuge, /email) bleibt vorerst für Benutzer, die unter
       Einstellungen → E-Mail ausgewählt sind.
+- [x] **Wissensdatenbank beim Antwortvorschlag** – mit Freigabe des Bereichs
+      „Wissensdatenbank (lesend)“ unter Einstellungen → E-Mail darf der Vorschlag
+      nachschlagen (nur lesend); das Add-in zeigt, ob und wie oft.
+- [x] **Exchange-Explorer entfernt** (Einstellungen → E-Mail).
 - [ ] **Outlook (Stufe 2)** – über die Zukunft des Serverzugriffs entscheiden
-      (gespeicherte Postfach-Kennwörter); ggf. Jarvis als Wissensquelle für den
-      Antwortvorschlag.
+      (gespeicherte Postfach-Kennwörter der noch ausgewählten Benutzer).

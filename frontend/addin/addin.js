@@ -871,6 +871,15 @@
                     (_vorschlag.stil_quelle === 'auto'
                         ? ' (' + esc(T('mail.style_auto_mark', 'automatisch')) + ')' : '')
                     : '') + '</p>');
+            // Wissensdatenbank: nur wenn sie zur Verfuegung stand. Gezaehlt hat
+            // der Server – "nicht nachgeschlagen" ist eine Auskunft, kein Fehler.
+            if (_vorschlag.wissen) {
+                teile.push('<p class="ad-hint" id="ad-reply-wissen">' + esc(
+                    _vorschlag.wissen_suchen > 0
+                        ? T('addin.reply_wissen_n', 'Wissensdatenbank: {n}× nachgeschlagen – prüfe die übernommenen Angaben.')
+                            .replace('{n}', String(_vorschlag.wissen_suchen))
+                        : T('addin.reply_wissen_0', 'Wissensdatenbank: nicht nachgeschlagen.')) + '</p>');
+            }
             if (_vorschlag.stil_hinweis) {
                 teile.push('<div class="ad-warn" style="margin-top:6px;">' +
                     esc(_vorschlag.stil_hinweis) + '</div>');
@@ -1036,7 +1045,9 @@
             .then(function (d) {
                 _vorschlag = { text: d.text || '', an: d.an || '', betreff: d.betreff || '',
                                stil: d.stil || '', stil_hinweis: d.stil_hinweis || '',
-                               stil_quelle: d.stil_quelle || '' };
+                               stil_quelle: d.stil_quelle || '',
+                               wissen: d.wissen === true,
+                               wissen_suchen: Number(d.wissen_suchen) || 0 };
                 zeichneNachricht();
                 melde('ad-reply-status', '');
             })

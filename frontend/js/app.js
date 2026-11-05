@@ -730,7 +730,6 @@
                 { hdr: 'em-sect-conn-hdr',     body: 'em-sect-conn-body',     tog: 'em-sect-conn-tog'     },
                 { hdr: 'em-sect-areas-hdr',    body: 'em-sect-areas-body',    tog: 'em-sect-areas-tog'    },
                 { hdr: 'em-sect-addin-hdr',    body: 'em-sect-addin-body',    tog: 'em-sect-addin-tog'    },
-                { hdr: 'em-sect-explore-hdr',  body: 'em-sect-explore-body',  tog: 'em-sect-explore-tog'  },
                 { hdr: 'em-sect-server-hdr',   body: 'em-sect-server-body',   tog: 'em-sect-server-tog'   },
                 { hdr: 'em-sect-accounts-hdr', body: 'em-sect-accounts-body', tog: 'em-sect-accounts-tog' },
             ]);

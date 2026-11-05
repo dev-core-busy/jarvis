@@ -1068,8 +1068,7 @@ for route in ("/api/email/status", "/api/email/account", "/api/email/test",
     check(bool(treffer) and not ohne,
           f"{route} haengt an einer Berechtigung ({len(treffer)} Endpunkt(e))", "; ".join(ohne))
 
-for route in ("/api/email/admin/overview", "/api/email/admin/explore",
-              "/api/email/admin/areas"):
+for route in ("/api/email/admin/overview", "/api/email/admin/areas"):
     treffer = _routen(route)
     check(bool(treffer) and all("require_local_auth" in _schranken(f) for f, _, _ in treffer),
           f"{route} ist Administratoren vorbehalten", str([f.name for f, _, _ in treffer]))
@@ -1084,13 +1083,11 @@ check("if k in mail_accounts.AENDERBAR" not in acct,
 check("mail_accounts.speichern, user, body" in acct,
       "der Rumpf geht unveraendert an speichern()")
 
-# Der Explorer darf keine Zugangsdaten aus dem Request nehmen (SSRF/Abfluss)
-exp = main_src[main_src.index('"/api/email/admin/explore"'):]
-exp = exp[:exp.index('"/api/email/admin/areas"')]
-check("hat_konto" in exp, "der Explorer arbeitet nur mit hinterlegten Konten")
-for feld in ("body.get(\"passwort\")", "body.get('passwort')",
-             "body.get(\"imap_host\")", "body.get(\"ews_url\")"):
-    check(feld not in exp, f"der Explorer liest kein '{feld}' aus dem Rumpf")
+# Der Exchange-Explorer ist am 2026-11-05 entfallen (er oeffnete mit den
+# gespeicherten Zugangsdaten eines Benutzers dessen Postfach fuer einen
+# Administrator). Er darf nicht als Endpunkt zurueckkehren.
+check(not _routen("/api/email/admin/explore"),
+      "kein Exchange-Explorer-Endpunkt mehr")
 
 # permissions.email + Seiten-Route + Zeitplan
 check('"email": _user_may_use_email(user) and _skill_active("email")' in main_src,

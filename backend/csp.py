@@ -73,6 +73,11 @@ GESEHEN_MAX = 20000
 # Office-Add-ins laden office.js von Microsoft (Pflicht fuer Add-ins).
 _ADDIN_PRAEFIXE = ("/addin/", "/excel-addin/", "/static/addin/", "/static/excel-addin/")
 _OFFICE_JS = "https://appsforoffice.microsoft.com"
+# office.js laedt im klassischen Outlook (outlook-win32-*.js) und in Outlook im
+# Web selbst MicrosoftAjax.js von diesem CDN nach. Ohne den Eintrag scheitert
+# die Office-Initialisierung (auf ECHT gemeldet, csp_berichte.jsonl 2026-11-03:
+# script-src-elem blockiert https://ajax.aspnetcdn.com/ajax/3.5/MicrosoftAjax.js).
+_OFFICE_AJAX = "https://ajax.aspnetcdn.com"
 # office.js oeffnet selbst einen Telemetrie-Rahmen (auf DEV gemessen 2026-10-04,
 # live_csp_h4_dev.py) – nur auf den Add-in-Seiten zugelassen.
 _OFFICE_RAHMEN = "https://telemetryservice.firstpartyapps.oaspapps.com"
@@ -86,6 +91,17 @@ FRAME_ANCESTORS_OFFICE = ("https://*.office.com https://*.office365.com "
                           "https://*.microsoft.com https://*.cloud.microsoft "
                           "https://*.officeapps.live.com https://*.sharepoint.com "
                           "https://outlook.live.com https://*.outlook.com")
+# Outlook im Web eines Exchange IM HAUS rahmt das Aufgabenfenster von SEINEM
+# Host ein (z. B. https://mail.firma.de/owa) – der steht in keiner Liste von
+# Microsoft. Fehlt er, verweigert der Browser den Rahmen und OWA meldet nur
+# "Add-In-Fehler … beim Starten" (gemeldet 2026-11-05, ohne jeden Hinweis).
+# Die Hosts kommen aus derselben Quelle wie der SSO-Vertrauensanker
+# (addin_sso.erlaubte_hosts: ews_url + addin_sso_host) – main reicht sie herein.
+_office_hosts_quelle = None
+# Nur reine Hostnamen gelangen in die Kopfzeile: kein Platzhalter, kein
+# Leerzeichen, kein Semikolon – sonst schreibt ein Konfigurationswert eine
+# eigene Direktive in die CSP.
+_RAHMEN_HOST_OK = re.compile(r"^[a-z0-9](?:[a-z0-9\-]{0,62}\.)*[a-z0-9\-]{1,63}$")
 
 _get_setting = None
 _SPERRE = threading.Lock()
@@ -101,6 +117,28 @@ def einstellungen_quelle(fn) -> None:
     Live-settings.json)."""
     global _get_setting
     _get_setting = fn
+
+
+def office_hosts_quelle(fn) -> None:
+    """``main`` reicht ``addin_sso.erlaubte_hosts`` herein (Exchange-Hosts im Haus)."""
+    global _office_hosts_quelle
+    _office_hosts_quelle = fn
+
+
+def _eigene_office_rahmen() -> str:
+    """Zusaetzliche frame-ancestors fuer Outlook im Web im Haus, sortiert.
+
+    Fehler der Quelle fuehren zu "" (dann gilt nur die Microsoft-Liste) – eine
+    Kopfzeile darf an einer kaputten Konfiguration nicht scheitern."""
+    if _office_hosts_quelle is None:
+        return ""
+    try:
+        hosts = _office_hosts_quelle() or ()
+    except Exception:  # noqa: BLE001
+        return ""
+    gut = sorted({str(h).strip().lower() for h in hosts
+                  if _RAHMEN_HOST_OK.match(str(h).strip().lower())})
+    return " ".join("https://" + h for h in gut)
 
 
 def _ordner() -> Path:
@@ -153,7 +191,13 @@ def richtlinie(pfad: str, host: str = "") -> str:
     """
     pfad = pfad_normal(pfad)
     addin = any(pfad.startswith(p) for p in _ADDIN_PRAEFIXE)
-    skript = "'self'" + (" " + _OFFICE_JS if addin else "")
+    skript = "'self'" + (" " + _OFFICE_JS + " " + _OFFICE_AJAX if addin else "")
+    rahmen_von = "'self'"
+    if addin:
+        rahmen_von += " " + FRAME_ANCESTORS_OFFICE
+        eigene = _eigene_office_rahmen()
+        if eigene:
+            rahmen_von += " " + eigene
     verbinden = "'self'"
     if host and _HOST_OK.match(host):
         verbinden += " wss://" + host
@@ -174,7 +218,7 @@ def richtlinie(pfad: str, host: str = "") -> str:
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
-        "frame-ancestors 'self'" + (" " + FRAME_ANCESTORS_OFFICE if addin else ""),
+        "frame-ancestors " + rahmen_von,
         "report-uri " + MELDE_PFAD,
     ]
     return "; ".join(teile)

@@ -211,6 +211,15 @@ from backend import csp as _csp
 _csp.einstellungen_quelle(config.get_setting)
 
 
+def _csp_office_hosts():
+    """Exchange-Hosts im Haus fuer frame-ancestors der Add-in-Seiten (OWA)."""
+    from backend import addin_sso as _sso_h  # noqa: PLC0415
+    return _sso_h.erlaubte_hosts()
+
+
+_csp.office_hosts_quelle(_csp_office_hosts)
+
+
 @app.middleware("http")
 async def _csp_kopfzeilen(request: Request, call_next):
     response = await call_next(request)

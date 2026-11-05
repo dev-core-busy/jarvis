@@ -30,11 +30,11 @@ I18N = "frontend/js/i18n.js"
 PROBEN = [
     # (Name, Waechter, Datei, alt, neu)
     ("script-src mit 'unsafe-inline'", BACK, CSP,
-     '''    skript = "'self'" + (" " + _OFFICE_JS if addin else "")\n''',
-     '''    skript = "'self' 'unsafe-inline'" + (" " + _OFFICE_JS if addin else "")\n'''),
+     '''    skript = "'self'" + (" " + _OFFICE_JS + " " + _OFFICE_AJAX if addin else "")\n''',
+     '''    skript = "'self' 'unsafe-inline'" + (" " + _OFFICE_JS + " " + _OFFICE_AJAX if addin else "")\n'''),
     ("office.js auf allen Seiten", BACK, CSP,
-     '''    skript = "'self'" + (" " + _OFFICE_JS if addin else "")\n''',
-     '''    skript = "'self' " + _OFFICE_JS\n'''),
+     '''    skript = "'self'" + (" " + _OFFICE_JS + " " + _OFFICE_AJAX if addin else "")\n''',
+     '''    skript = "'self' " + _OFFICE_JS + " " + _OFFICE_AJAX\n'''),
     ("Office-Rahmen auf allen Seiten", BACK, CSP,
      '''        "frame-src 'self' blob: data:" + (" " + _OFFICE_RAHMEN if addin else ""),\n''',
      '''        "frame-src 'self' blob: data: " + _OFFICE_RAHMEN,\n'''),
@@ -74,8 +74,8 @@ PROBEN = [
      "async def security_csp_setzen(request: Request, user: str = Depends(require_local_auth)):\n",
      "async def security_csp_setzen(request: Request, user: str = Depends(require_auth)):\n"),
     ("Aufbewahrung vergisst die Meldungen", BACK, LR,
-     '                     ("csp_berichte", _prune_csp_berichte)):\n',
-     '                     ):\n'),
+     '                     ("csp_berichte", _prune_csp_berichte),\n',
+     ''),
     # Frontend-Waechter
     ("Inline-Handler in einer Seite", FRONT, CHAT,
      ' id="ctx-indicator-clear"',

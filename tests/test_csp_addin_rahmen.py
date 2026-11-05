@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Add-in-Seiten: Outlook im Web IM HAUS darf das Aufgabenfenster einrahmen.
+
+Gemeldet 2026-11-05 (ECHT): Outlook im Web des eigenen Exchange zeigte nur
+"Add-In-Fehler – Beim Starten dieses Add-Ins ist ein Fehler aufgetreten".
+Ursache: ``frame-ancestors`` der Add-in-Seiten kannte nur Microsofts
+Cloud-Hosts; OWA im Haus rahmt von seinem eigenen Host ein. Dazu blockierte
+``script-src`` das von office.js nachgeladene MicrosoftAjax.js.
+
+  [A] Positivkontrolle: Richtlinie fuer eine Add-in-Seite ist zerlegbar.
+  [B] Exchange-Hosts aus der Quelle stehen in frame-ancestors der Add-in-
+      Seiten – und NUR dort (nicht auf /, /portal).
+  [C] Unsaubere Hosts (Platzhalter, Semikolon, Leerzeichen) gelangen nicht in
+      die Kopfzeile; eine werfende Quelle bricht die Richtlinie nicht.
+  [D] script-src der Add-in-Seiten erlaubt ajax.aspnetcdn.com, andere nicht.
+  [E] main.py (Syntaxbaum) reicht eine Quelle an csp.office_hosts_quelle,
+      die addin_sso.erlaubte_hosts aufruft.
+
+Exit 0 = gruen, 1 = Regelverstoss, 2 = konnte nicht laufen.
+"""
+from __future__ import annotations
+
+import ast
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+OK = FAIL = 0
+
+
+def check(name: str, cond: bool, detail: str = "") -> None:
+    global OK, FAIL
+    if cond:
+        OK += 1
+        print("  OK   " + name)
+    else:
+        FAIL += 1
+        print("  FAIL " + name + (("\n         " + detail) if detail else ""))
+
+
+def abbruch(grund: str) -> None:
+    print("ABBRUCH (Exit 2): " + grund)
+    sys.exit(2)
+
+
+try:
+    from backend import csp
+except Exception as e:  # noqa: BLE001
+    abbruch("backend.csp nicht importierbar: %s" % e)
+if "backend.config" in sys.modules:
+    abbruch("backend.csp hat backend.config importiert")
+if not hasattr(csp, "office_hosts_quelle"):
+    abbruch("csp.office_hosts_quelle fehlt – Zusage existiert nicht")
+
+
+def direktiven(text: str) -> dict:
+    d = {}
+    for teil in text.split(";"):
+        w = teil.split()
+        if w:
+            d[w[0]] = w[1:]
+    return d
+
+
+HOSTS = {"mail.firma.local"}
+csp.office_hosts_quelle(lambda: set(HOSTS))
+ADDIN = direktiven(csp.richtlinie("/addin/taskpane.html", "jarvis.beispiel.de"))
+WURZEL = direktiven(csp.richtlinie("/", "jarvis.beispiel.de"))
+PORTAL = direktiven(csp.richtlinie("/portal", "jarvis.beispiel.de"))
+
+print("[A] Positivkontrolle")
+if "frame-ancestors" not in ADDIN or "script-src" not in ADDIN:
+    abbruch("Richtlinie ohne frame-ancestors/script-src: %r" % ADDIN)
+check("Microsoft-Hosts stehen weiter drin", "https://*.office.com" in ADDIN["frame-ancestors"])
+
+print("[B] Exchange im Haus darf einrahmen")
+check("Add-in: https://mail.firma.local in frame-ancestors",
+      "https://mail.firma.local" in ADDIN["frame-ancestors"], str(ADDIN["frame-ancestors"]))
+check("Excel-Add-in ebenso",
+      "https://mail.firma.local" in direktiven(csp.richtlinie("/excel-addin/x.html"))["frame-ancestors"])
+check("/ bleibt nur 'self'", WURZEL.get("frame-ancestors") == ["'self'"], str(WURZEL.get("frame-ancestors")))
+check("/portal bleibt nur 'self'", PORTAL.get("frame-ancestors") == ["'self'"], str(PORTAL.get("frame-ancestors")))
+HOSTS.clear()
+HOSTS.update({"b.firma.local", "a.firma.local"})
+fa = direktiven(csp.richtlinie("/addin/taskpane.html"))["frame-ancestors"]
+check("mehrere Hosts, sortiert", fa[-2:] == ["https://a.firma.local", "https://b.firma.local"], str(fa))
+
+print("[C] Unsaubere Werte")
+HOSTS.clear()
+HOSTS.update({"*.firma.local", "x.firma.local; script-src *", "a b", "", "[::1]", "GUT.firma.local"})
+roh = csp.richtlinie("/addin/taskpane.html")
+fa = direktiven(roh)["frame-ancestors"]
+check("Platzhalter nicht uebernommen", "https://*.firma.local" not in fa, str(fa))
+check("Semikolon erzeugt keine Direktive", roh.count("script-src") == 1, roh)
+check("Leerzeichen-Host nicht uebernommen", "https://a" not in fa and "b" not in fa, str(fa))
+check("gueltiger Host klein uebernommen", "https://gut.firma.local" in fa, str(fa))
+
+
+def wirft():
+    raise RuntimeError("Konfiguration kaputt")
+
+
+csp.office_hosts_quelle(wirft)
+try:
+    fa = direktiven(csp.richtlinie("/addin/taskpane.html"))["frame-ancestors"]
+    check("werfende Quelle: Microsoft-Liste bleibt", "https://*.office.com" in fa, str(fa))
+except Exception as e:  # noqa: BLE001
+    check("werfende Quelle bricht die Richtlinie nicht", False, repr(e))
+csp.office_hosts_quelle(lambda: None)
+check("Quelle liefert None: kein Fehler",
+      "frame-ancestors" in direktiven(csp.richtlinie("/addin/taskpane.html")))
+
+print("[D] MicrosoftAjax.js fuer office.js")
+check("Add-in: ajax.aspnetcdn.com in script-src",
+      "https://ajax.aspnetcdn.com" in ADDIN["script-src"], str(ADDIN["script-src"]))
+check("/ ohne aspnetcdn", "https://ajax.aspnetcdn.com" not in WURZEL.get("script-src", []))
+
+print("[E] main.py reicht die Quelle herein")
+baum = ast.parse((ROOT / "backend" / "main.py").read_text(encoding="utf-8"))
+funcs = {n.name: n for n in ast.walk(baum) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+quelle = None
+for n in ast.walk(baum):
+    if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "office_hosts_quelle" and n.args
+            and isinstance(n.args[0], ast.Name)):
+        quelle = n.args[0].id
+check("csp.office_hosts_quelle(<funktion>) wird aufgerufen", quelle is not None)
+ruft = False
+if quelle in funcs:
+    for n in ast.walk(funcs[quelle]):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "erlaubte_hosts":
+            ruft = True
+check("Quelle ruft addin_sso.erlaubte_hosts", ruft, str(quelle))
+
+print("\nErgebnis: %d OK, %d FAIL" % (OK, FAIL))
+sys.exit(1 if FAIL else 0)

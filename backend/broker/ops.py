@@ -1414,6 +1414,38 @@ def _op_certbot_obtain(args, stream):
             "stderr": ""}
 
 
+def _dienstbenutzer_abgelehnt(svc_user: str) -> str:
+    """Grund, warum ``svc_user`` nicht Dienst-Benutzer werden darf – oder ''.
+
+    Pentest-Vorbereitung 2026-11-05: ``broker_setup`` ist ``default_allow`` (ohne
+    Freigabe-Code) und uebergab ``service_user`` ungeprueft an setup_broker.sh.
+    Mit ``root`` schrieb das Skript ``User=root`` in jarvis.service und die
+    WhatsApp-Bridge und gab den Projektbaum root – jeder Prozess mit uid jarvis
+    wurde damit root, ohne TOTP. Ueber den Socket gibt es deshalb genau EINEN
+    zulaessigen Wert: den Benutzer, dem der Broker ohnehin den Socket oeffnet
+    (JARVIS_BROKER_GROUP). Einen anderen Dienst-Benutzer richtet nur root selbst
+    ein (setup_broker.sh direkt). Fail-closed: nicht lesbar heisst abgelehnt."""
+    import grp
+    import pwd
+    erlaubt = os.environ.get("JARVIS_BROKER_GROUP", "jarvis") or "jarvis"
+    if svc_user != erlaubt:
+        return f"ueber den Broker ist nur '{erlaubt}' zulaessig"
+    try:
+        pw = pwd.getpwnam(svc_user)
+    except KeyError:
+        return "kein lokales Konto"
+    if pw.pw_uid == 0 or pw.pw_gid == 0:
+        return "root-Konto"
+    try:
+        namen = {grp.getgrgid(g).gr_name for g in os.getgrouplist(svc_user, pw.pw_gid)}
+    except Exception as e:  # noqa: BLE001
+        return f"Gruppen nicht lesbar ({e})"
+    treffer = sorted(namen & _ROOT_GRUPPEN)
+    if treffer:
+        return "Mitglied von " + ", ".join(treffer)
+    return ""
+
+
 def _op_broker_mode(script_name: str, unit: str, args):
     """Betriebsart-Wechsel (getrennt <-> Alt-Betrieb) ueber das jeweilige
     Deploy-Skript. Laeuft ALS TRANSIENTE systemd-Unit (systemd-run), weil das
@@ -1429,6 +1461,10 @@ def _op_broker_mode(script_name: str, unit: str, args):
     svc_user = str(args.get("service_user") or "jarvis").strip() or "jarvis"
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.\-]{0,31}", svc_user):
         return {"ok": False, "rc": -1, "stdout": "", "stderr": "Ungueltiger Dienst-Benutzer"}
+    grund = _dienstbenutzer_abgelehnt(svc_user)
+    if grund:
+        return {"ok": False, "rc": -1, "stdout": "",
+                "stderr": f"Dienst-Benutzer '{svc_user}' abgelehnt: {grund}"}
     # Preflight SYNCHRON (Fehler sofort in der UI statt Polling-Timeout):
     # Der Dienst-Benutzer muss das Elternverzeichnis betreten koennen – bei
     # Installationen unter /root (0700) wuerde die Migration das Backend

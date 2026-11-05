@@ -1023,8 +1023,31 @@ def _auto_stil_lesen(text: str, liste: list[dict],
     return treffer, rest, True
 
 
-async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
-                            hinweis: str = "", stil_id: str = "") -> dict:
+def _nachricht_aus_addin(d: dict):
+    """Die vom Outlook-Add-in gelesene Nachricht als ``MailNachricht``.
+
+    Fremdeingabe: jedes Feld wird auf Typ und Laenge begrenzt. Entschaerft wird
+    spaeter wie bei einer aus dem Postfach geladenen Nachricht – es gibt nur
+    EINEN Weg vom Text in den Auftrag."""
+    from backend.mail_client import MailNachricht  # noqa: PLC0415
+
+    def _s(feld: str, n: int) -> str:
+        return str((d or {}).get(feld) or "")[:n]
+
+    def _liste(feld: str) -> list:
+        w = (d or {}).get(feld) or []
+        return [str(x)[:254] for x in w][:50] if isinstance(w, list) else []
+
+    return MailNachricht(von=_s("von", 254), von_name=_s("von_name", 200),
+                         an=_liste("an"), cc=_liste("cc"),
+                         betreff=_s("betreff", 500), datum=_s("datum", 40),
+                         text=_s("text", VORSCHLAG_MAX))
+
+
+async def antwort_vorschlag(user: str, msg_id: str = "", ordner: str = "",
+                            hinweis: str = "", stil_id: str = "",
+                            nachricht: dict | None = None,
+                            postfach: str = "") -> dict:
     """Formuliert eine Antwort auf EINE Nachricht – **ohne sie zu senden**.
 
     Der Weg des Outlook-Add-ins: "zeig mir erst, was du schreiben wuerdest".
@@ -1056,9 +1079,17 @@ async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
     global _agent
     from backend.agent import JarvisAgent
 
-    konto = mail_accounts.konto_fuer(user, trotz_aussetzer=True)
-    with MailClient(konto) as c:
-        n = await asyncio.to_thread(c.lesen, msg_id, ordner)
+    if nachricht is not None:
+        # Outlook-Add-in (Punkt e): die Nachricht hat das Add-in selbst aus
+        # Exchange gelesen – der Server oeffnet KEIN Postfach und braucht dafuer
+        # weder Kennwort noch Serverzugriff.
+        n = _nachricht_aus_addin(nachricht)
+        postfach_adresse = (postfach or "").strip()[:254] or "(Postfach des Benutzers)"
+    else:
+        konto = mail_accounts.konto_fuer(user, trotz_aussetzer=True)
+        with MailClient(konto) as c:
+            n = await asyncio.to_thread(c.lesen, msg_id, ordner)
+        postfach_adresse = konto.adresse
 
     # Sichtbarkeit VOR dem Lauf – wie beim Regel-Lauf. Der Eintrag entsteht auch
     # dann, wenn der Lauf danach scheitert.
@@ -1098,7 +1129,7 @@ async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
         katalog, drin, weg = "", [], []
     vorgabe = stil.get("text") or ""
     auftrag = (
-        _VORSCHLAG_VORSPANN.format(postfach=konto.adresse, nonce=nonce)
+        _VORSCHLAG_VORSPANN.format(postfach=_markensicher(postfach_adresse), nonce=nonce)
         + (("\n\n===== [%s] STILVORGABE DES POSTFACH-INHABERS =====\n" % nonce
             + (("Gewaehlter Stil: „%s\u201c\n" % _markensicher(stil["name"]))
                if stil.get("name") else "")
@@ -1185,7 +1216,7 @@ async def antwort_vorschlag(user: str, msg_id: str, ordner: str = "",
         # selbst aus der Nachricht (siehe Endpunkt).
         "an": n.von, "an_name": n.von_name or "",
         "betreff": n.betreff or "", "datum": n.datum or "",
-        "postfach": konto.adresse,
+        "postfach": postfach_adresse,
         # Welcher Stil tatsaechlich gewirkt hat – die Oberflaeche zeigt es an.
         # Ohne diese Rueckmeldung waere nicht erkennbar, ob die Wahl gegriffen
         # hat oder still der Standard galt.
@@ -1272,6 +1303,11 @@ async def automatik_durchgang() -> dict:
     for regel in mail_rules.faellige():
         if gelaufen >= MAX_LAEUFE_JE_DURCHGANG:
             break
+        # Ohne Serverzugriff (Punkt e) gibt es fuer diese Regel nichts zu tun –
+        # uebersprungen, BEVOR ein Lauf zaehlt: sonst schriebe jeder Takt eine
+        # Fehlerzeile und einen Fehlversuch am Konto.
+        if not mail_accounts.server_zugriff(regel.get("owner") or ""):
+            continue
         gelaufen += 1
         mail_rules.merke_lauf(regel["id"])
         try:

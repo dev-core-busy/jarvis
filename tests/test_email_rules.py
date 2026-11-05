@@ -181,6 +181,16 @@ _skill_states["email"]["config"].update({
     "ews_url": "https://mail.firma.de/EWS/Exchange.asmx", "autodiscover": False,
     "imap_host": "imap.firma.de", "smtp_host": "smtp.firma.de", "verify_ssl": False,
 })
+# Punkt e (2026-11-05): ohne Auswahl unter Einstellungen → E-Mail gibt es
+# KEINEN Serverzugriff – leer = niemand, auch fuer ein vollstaendiges Konto.
+try:
+    ma.konto_fuer("firma\\m.mustermann")
+    check(False, "ohne Serverzugriff-Auswahl kein Konto (leer = niemand)")
+except mc.MailFehler as e:
+    check(str(e) == ma.SERVER_ZUGRIFF_TEXT, "ohne Serverzugriff-Auswahl kein Konto (leer = niemand)", str(e))
+_skill_states["email"]["config"][ma.SERVER_ZUGRIFF_FELD] = "FIRMA\\M.Mustermann, e.beispiel"
+check(ma.server_zugriff("m.mustermann@firma.local") and not ma.server_zugriff("x.fremd"),
+      "Auswahl wird normalisiert verglichen, Fremde bleiben draussen")
 konto = ma.konto_fuer("firma\\m.mustermann")
 check(konto.ews_url == "https://mail.firma.de/EWS/Exchange.asmx"
       and konto.imap_host == "imap.firma.de",
@@ -1407,6 +1417,10 @@ section("14. Aussetzer nach wiederholten Anmeldefehlern")
 # eine vergessene Regel das Konto dauerhaft gesperrt, auch fuer Windows.
 
 AUS = "firma\\aussetzer.test"
+# Punkt e: dieser Benutzer bekommt Serverzugriff – geprueft wird hier der
+# AUSSETZER, nicht die Auswahl (die prueft Abschnitt "Serverteil" oben).
+_skill_states["email"]["config"][ma.SERVER_ZUGRIFF_FELD] = (
+    str(_skill_states["email"]["config"].get(ma.SERVER_ZUGRIFF_FELD) or "") + "," + AUS)
 ma.speichern(AUS, {"adresse": "aussetzer@firma.de", "passwort": "geheim1", "aktiv": True})
 
 check(ma.konto_info(AUS)["anmeldefehler"] == 0, "frisches Konto: kein Fehlversuch gezaehlt")

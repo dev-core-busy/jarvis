@@ -458,8 +458,12 @@ pruefe('body or {}).get("an"' not in _sd and '"empfaenger"' not in _sd,
        "der Empfaenger kommt NICHT aus dem Rumpf")
 
 # Aufgabenfenster
-pruefe("/api/email/reply/preview" in ADDINJS and "/api/email/reply/send" in ADDINJS,
-       "beide Endpunkte sind verdrahtet")
+# Punkt e (2026-11-05): Vorschlag mit dem Inhalt aus Outlook, Antwort als
+# Entwurf IN OUTLOOK (reply/form + displayReplyForm) – kein Versand ueber den
+# Server mehr.
+pruefe("/api/email/reply/preview" in ADDINJS and "/api/email/reply/form" in ADDINJS
+       and "/api/email/reply/send" not in ADDINJS,
+       "Vorschlag und Outlook-Entwurf verdrahtet, kein Serverversand")
 pruefe("ad-reply-text" in ADDINJS, "der Vorschlag ist bearbeitbar (textarea)")
 _zn = ADDINJS.split("function zeichneNachricht", 1)[1].split("\n    function ", 1)[0]
 pruefe(_zn.index("addin.reply_head") < _zn.index("addin.run_head"),

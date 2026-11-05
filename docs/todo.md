@@ -24,5 +24,11 @@ mehr. Die Bereiche werden nacheinander umgestellt.
 - [x] **Jira-Browser-Erweiterung** – dort ist nur noch die Anmeldung an Jarvis
       hinterlegt; alle Jira-Lesezugriffe, die sie auslöst (Ticket laden,
       Nachschlage-Werkzeuge), laufen über den gemeinsamen Jira-Lesezugang.
-- [ ] **Outlook** – größerer Umbau: das Add-in greift direkt auf Exchange zu;
-      Jarvis dient dort nur noch der Analyse und als Wissensquelle.
+- [x] **Outlook (Stufe 1)** – das Add-in liest die markierte Mail selbst aus
+      Exchange (Office.js, Recht bleibt „ReadItem") und öffnet die Antwort in
+      Outlook; Jarvis formuliert nur. Der Serverzugriff auf Postfächer (Regeln,
+      Mail-Werkzeuge, /email) bleibt vorerst für Benutzer, die unter
+      Einstellungen → E-Mail ausgewählt sind.
+- [ ] **Outlook (Stufe 2)** – über die Zukunft des Serverzugriffs entscheiden
+      (gespeicherte Postfach-Kennwörter); ggf. Jarvis als Wissensquelle für den
+      Antwortvorschlag.

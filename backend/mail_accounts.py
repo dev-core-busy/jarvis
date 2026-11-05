@@ -940,6 +940,8 @@ def konto_info(user: str) -> dict:
     """
     k = _laden().get(norm_user(user)) or _leer(norm_user(user))
     return {
+        # Darf der Server ueberhaupt auf dieses Postfach zugreifen? (Punkt e)
+        "server_zugriff": server_zugriff(user),
         "vorhanden": bool((k.get("adresse") or "").strip()),
         "adresse": k.get("adresse", ""),
         "benutzer": k.get("benutzer", ""),
@@ -1171,6 +1173,47 @@ def _bool(wert, vorgabe: bool) -> bool:
     return str(wert).strip().lower() in ("1", "true", "ja", "yes", "on")
 
 
+# ── Serverzugriff auf das Postfach (Betreiber 2026-11-05, Punkt e) ─────────
+#
+# Das Outlook-Add-in liest die markierte Mail inzwischen SELBST (Office.js) und
+# gibt sie Jarvis nur zur Analyse; geantwortet wird aus Outlook. Der Zugriff
+# des SERVERS auf ein Postfach (mit dem hier gespeicherten Kennwort) bleibt
+# vorerst, aber nur fuer ausdruecklich ausgewaehlte Benutzer. Die Auswahl ist
+# bewusst VORLAEUFIG und steht deshalb in Einstellungen → E-Mail, nicht unter
+# Sicherheit → Berechtigungen; waehlbar ist nur, wer die E-Mail-Berechtigung hat
+# (geprueft beim Speichern, ``main.email_admin_serverzugriff``).
+#
+# DIE SCHRANKE SITZT IN ``konto_fuer`` – jeder serverseitige Postfachzugriff
+# (Mail-Werkzeuge im Chat, zeitgesteuerte Regeln, Nachrichtenlauf, Antwort
+# senden, Ordnerliste, Verbindungstest, Signatur-Import) holt sein Konto dort.
+# Leer = niemand (Regel fuer alle Freigabefelder).
+SERVER_ZUGRIFF_FELD = "server_zugriff_benutzer"
+SERVER_ZUGRIFF_TEXT = (
+    "Jarvis greift fuer dich nicht auf das Postfach zu – der Serverzugriff ist "
+    "nur fuer ausgewaehlte Benutzer freigegeben (Einstellungen → E-Mail). Das "
+    "Outlook-Add-in funktioniert trotzdem: es liest die markierte Nachricht "
+    "selbst, und geantwortet wird aus Outlook.")
+
+
+def server_zugriff_liste(cfg: dict | None = None) -> list[str]:
+    """Normalisierte Namen der Benutzer mit Serverzugriff (Reihenfolge stabil)."""
+    c = skill_config() if cfg is None else (cfg or {})
+    roh = c.get(SERVER_ZUGRIFF_FELD) or ""
+    teile = roh if isinstance(roh, (list, tuple)) else str(roh).split(",")
+    out: list[str] = []
+    for t in teile:
+        un = norm_user(str(t))
+        if un and ":" not in un and un not in out:
+            out.append(un)
+    return out
+
+
+def server_zugriff(user: str) -> bool:
+    """Darf der SERVER fuer diesen Benutzer auf das Postfach zugreifen?"""
+    un = norm_user(user or "")
+    return bool(un) and ":" not in un and un in server_zugriff_liste()
+
+
 def konto_fuer(user: str, trotz_aussetzer: bool = False) -> MailKonto:
     """Baut das vollstaendige ``MailKonto``: Serverteil (Skill) + Benutzerteil.
 
@@ -1189,6 +1232,10 @@ def konto_fuer(user: str, trotz_aussetzer: bool = False) -> MailKonto:
     Feld "IMAP-Server" ein Weg, Jarvis mit hinterlegten Firmen-Zugangsdaten an
     einen fremden Server zu schicken (Abfluss der Zugangsdaten).
     """
+    # Serverzugriff ZUERST: ohne Freigabe wird kein Kennwort entschluesselt
+    # und keine Verbindung versucht – auch kein Test.
+    if not server_zugriff(user):
+        raise MailFehler(SERVER_ZUGRIFF_TEXT, "eingabe")
     un = norm_user(user)
     k = _laden().get(un)
     if not k or not (k.get("adresse") or "").strip():

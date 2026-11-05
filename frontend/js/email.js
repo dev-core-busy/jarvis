@@ -240,6 +240,62 @@
             });
     }
 
+    /* ── Serverzugriff auf Postfaecher (Punkt e, 2026-11-05) ────────────── */
+    // Waehlbar ist nur, wer die E-Mail-Berechtigung hat – das prueft der
+    // Server beim Speichern (Ablehnung mit Namen). Ein gewaehlter Eintrag, der
+    // die Berechtigung verloren hat, bleibt SICHTBAR und ist markiert: sonst
+    // verschwaende er still aus der Anzeige.
+    function ladeServerzugriff() {
+        var box = $('em-server-liste'); if (!box) return Promise.resolve();
+        return fetch('/api/email/admin/serverzugriff', { headers: kopf() })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.ok) throw new Error((d && d.error) || 'Abruf fehlgeschlagen');
+                var liste = d.kandidaten || [];
+                if (!liste.length) {
+                    box.innerHTML = '<p class="kb-hint">' + esc(T('mailadm.server_none',
+                        'Kein Benutzer mit E-Mail-Berechtigung gefunden.')) + '</p>';
+                    return;
+                }
+                box.innerHTML = liste.map(function (k) {
+                    var zusatz = [];
+                    if (!k.postfach) zusatz.push(T('mailadm.server_no_box', 'kein Postfach hinterlegt'));
+                    if (!k.berechtigt) zusatz.push(T('mailadm.server_no_right', 'keine E-Mail-Berechtigung mehr'));
+                    return '<label class="checkbox-group"><input type="checkbox" class="em-server-cb" value="'
+                        + esc(k.benutzer) + '"' + (k.gewaehlt ? ' checked' : '') + '><span>'
+                        + esc(k.anzeige || k.benutzer)
+                        + (zusatz.length ? ' <span class="kb-hint">(' + esc(zusatz.join(', ')) + ')</span>' : '')
+                        + '</span></label>';
+                }).join('');
+            })
+            .catch(function (e) {
+                box.innerHTML = '<p class="kb-hint" style="color:var(--danger);">'
+                    + esc(T('common.error', 'Fehler') + ': ' + e.message) + '</p>';
+            });
+    }
+
+    function speichereServerzugriff() {
+        var gew = [];
+        document.querySelectorAll('#em-server-liste .em-server-cb').forEach(function (cb) {
+            if (cb.checked) gew.push(cb.value);
+        });
+        melde('em-server-status', T('confluence.saving', 'Speichere…'));
+        return fetch('/api/email/admin/serverzugriff', {
+            method: 'POST', headers: kopf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ benutzer: gew })
+        })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (x) {
+                if (!x.ok || !x.d || !x.d.ok) throw new Error((x.d && x.d.error) || 'Speichern fehlgeschlagen');
+                melde('em-server-status', '✓ ' + T('mailadm.server_saved', 'Gespeichert:') + ' '
+                    + ((x.d.gewaehlt || []).length) + ' ' + T('mailadm.server_n', 'Benutzer mit Serverzugriff'), 'ok');
+                return ladeServerzugriff();
+            })
+            .catch(function (e) {
+                melde('em-server-status', T('common.error', 'Fehler') + ': ' + e.message, 'fehler');
+            });
+    }
+
     /* ── Uebersicht / Konten ───────────────────────────────────────────── */
     function ladeUebersicht() {
         // Sprache mitgeben: Name und Hinweis der Bereiche kommen uebersetzt vom
@@ -740,6 +796,8 @@
         if ((b = $('em-save-conn'))) b.addEventListener('click', speichereVerbindung);
         if ((b = $('em-save-areas'))) b.addEventListener('click', speichereBereiche);
         if ((b = $('em-explore'))) b.addEventListener('click', erkunde);
+        var serverSave = $('em-server-save');
+        if (serverSave) serverSave.addEventListener('click', speichereServerzugriff);
         // Eigene Variablen, nicht `b` weiterverwenden: eine geteilte `var` sieht
         // beim Klick den ZULETZT zugewiesenen Wert (Register - in
         // email_portal.js hat genau das den Abmelde-Knopf umbeschriftet).
@@ -770,6 +828,7 @@
             klappInit();
             ladeVerbindung();
             ladeUebersicht();
+            ladeServerzugriff();
             pruefeAdresse();
             // Das gemerkte Handle NUR lesen, nicht nachfragen: eine
             // Berechtigungsabfrage braucht eine Nutzergeste, und beim Oeffnen
@@ -786,6 +845,7 @@
                  dateinameAus: dateinameAus, ordnerKnopf: ordnerKnopf,
                  feldPfad: feldPfad, ladeAddinPfad: ladeAddinPfad,
                  speichereAddinPfad: speichereAddinPfad, speichereAddinDiag: speichereAddinDiag,
-                 schreibeInOrdner: schreibeInOrdner, pruefeAdresse: pruefeAdresse }
+                 schreibeInOrdner: schreibeInOrdner, pruefeAdresse: pruefeAdresse,
+                 ladeServerzugriff: ladeServerzugriff, speichereServerzugriff: speichereServerzugriff }
     };
 })();

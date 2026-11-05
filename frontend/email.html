@@ -29,6 +29,10 @@
         body { font-family: var(--font-body); background: var(--bg-primary);
                color: var(--text-primary); min-height: 100vh; }
         .hidden { display: none !important; }
+        /* Punkt e: Hinweis ohne Serverzugriff – deckende Flaeche, Text UND Rand
+           tragen die Aussage (Farbe allein ist keine Information). */
+        .em-noserver { background: var(--bg-secondary); border: 1px solid var(--warning, var(--border));
+            border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; color: var(--text-primary); }
 
         /* ── Titelleiste ── */
         .topbar { display: flex; align-items: center; justify-content: space-between;
@@ -287,6 +291,11 @@
                     data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
                     title="Maximieren" aria-label="Maximieren">&#9974;</button>
         </div>
+        <!-- Punkt e (2026-11-05): ohne Serverzugriff (Einstellungen → E-Mail)
+             laufen Regeln und Mail-Werkzeuge nicht – das muss VOR dem Postfach
+             stehen, sonst richtet jemand Regeln ein, die nie feuern. -->
+        <div class="em-noserver hidden" id="em-noserver" data-i18n="mail.no_server_access">Der Server greift für dich nicht auf dein Postfach zu – Regeln und die Mail-Werkzeuge im Chat laufen deshalb nicht. Das Outlook-Add-in schlägt Antworten trotzdem vor; geantwortet wird dort aus Outlook.</div>
+
         <!-- ═══ Mein Postfach ═══ -->
         <div class="em-card" data-klapp="acct">
             <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
@@ -544,14 +553,14 @@
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=16"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=434"></script>
+<script src="/static/js/i18n.js?v=435"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=30"></script>
 <script src="/static/js/sessions.js?v=10"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
-<script src="/static/js/email_portal.js?v=18"></script>
+<script src="/static/js/email_portal.js?v=19"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der

@@ -241,16 +241,28 @@ abschnitt('3. Add-in: Signatur-Liste wird gerendert und ist bedienbar');
             return gib({ ok: true, text: 'Vielen Dank fuer Ihre Nachricht.',
                          an: 'kunde@firma.de', betreff: 'Re: Anfrage' });
         }
-        if (pfad === '/api/email/reply/send') {
-            return gib({ ok: true, ergebnis: 'Antwort als Entwurf gespeichert.' });
+        // Punkt e: die Antwort wird in OUTLOOK geoeffnet – der Server baut nur
+        // den Rumpf (Signatur angehaengt), er sendet nichts.
+        if (pfad === '/api/email/reply/form') {
+            return gib({ ok: true, html: '<p>Vielen Dank</p><p>-- Signatur</p>', format: 'html' });
         }
         return gib({ ok: true });
     };
     // OHNE Office-Kontext wartet das Fenster OFFICE_WARTE_MS (4 s) und zeigt
     // WEDER Anmeldung NOCH Anwendung - der Test saehe ein leeres Fenster und
     // haette den Fehler im Umbau gesucht. Genau dafuer gibt es die Attrappe.
-    w.Office = { onReady: (cb) => cb({}), context: { mailbox: { item: {
-        itemId: 'AAA', subject: 'S', from: { emailAddress: 'x@y.de' } } } } };
+    // Punkt e: das Add-in liest den INHALT aus Outlook (body.getAsync) und
+    // oeffnet die Antwort dort (displayReplyForm) – beides bildet die Attrappe
+    // mit der echten Form nach (AsyncResult mit status/value).
+    w.__antwortFormular = [];
+    w.Office = { onReady: (cb) => cb({}), CoercionType: { Text: 'text' }, context: { mailbox: {
+        userProfile: { emailAddress: 'ich@firma.de' },
+        item: {
+            itemId: 'AAA', subject: 'S', from: { emailAddress: 'x@y.de', displayName: 'X Y' },
+            body: { getAsync: (art, cb) => cb({ status: 'succeeded', value: 'Inhalt aus Outlook' }) },
+            displayReplyForm: function (html) { w.__antwortFormular.push({ allen: false, html: html }); },
+            displayReplyAllForm: function (html) { w.__antwortFormular.push({ allen: true, html: html }); }
+        } } } };
     w.eval(SITZUNG);   // vor allen Modulen - erstes <script> der Seite
     /* icons.js GEHOERT HIERHER, obwohl taskpane.html es als <script src> fuehrt:
      * mit `runScripts: 'outside-only'` laedt jsdom diese Tags NICHT, die Module
@@ -341,8 +353,14 @@ function vorschau(w, d, gesendet) {
     // nicht zum Formulieren.
     pruefe(!d.getElementById('ad-reply-fmt'),
         'vor dem Vorschlag kein Format-Pulldown (es gehoert zum Versand)');
+    gesendet.length = 0;
     if (machen) machen.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
     setTimeout(function () {
+        const vor = gesendet.filter(g => g.url === '/api/email/reply/preview')[0];
+        pruefe(!!vor && vor.rumpf.nachricht && vor.rumpf.nachricht.text === 'Inhalt aus Outlook',
+            'der Vorschlag bekommt den INHALT aus Outlook', JSON.stringify(vor && vor.rumpf));
+        pruefe(!!vor && !('msg_id' in vor.rumpf),
+            'und KEINE Kennung – der Server oeffnet kein Postfach');
         const ta = d.getElementById('ad-reply-text');
         pruefe(!!ta && /Vielen Dank/.test(ta.value), 'der Vorschlag steht im Textfeld');
         // DIE SICHERHEITSAUSSAGE: die Signatur ist NICHT im Textfeld.
@@ -375,22 +393,28 @@ function vorschau(w, d, gesendet) {
         if (fmt) { fmt.value = 'html'; fmt.dispatchEvent(new w.Event('change', { bubbles: true })); }
 
         gesendet.length = 0;
-        const entwurf = d.getElementById('ad-reply-draft');
-        pruefe(!!entwurf, 'der Knopf "Als Entwurf" ist da');
-        if (entwurf) entwurf.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+        const outlook = d.getElementById('ad-reply-outlook');
+        pruefe(!!outlook, 'der Knopf "In Outlook antworten" ist da');
+        pruefe(!d.getElementById('ad-reply-send') && !d.getElementById('ad-reply-draft'),
+            'kein Senden/Entwurf ueber den Server mehr');
+        if (outlook) outlook.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
         setTimeout(function () {
-            const post = gesendet.filter(g => g.url === '/api/email/reply/send')[0];
-            pruefe(!!post, 'Senden geht an /api/email/reply/send');
+            const post = gesendet.filter(g => g.url === '/api/email/reply/form')[0];
+            pruefe(!!post, 'der Rumpf kommt von /api/email/reply/form');
+            pruefe(!gesendet.some(g => g.url === '/api/email/reply/send'),
+                'es wird NICHTS ueber den Server gesendet');
             if (post) {
                 pruefe(post.rumpf.format === 'html',
                     'das gewaehlte FORMAT geht mit', JSON.stringify(post.rumpf.format));
                 pruefe(post.rumpf.signatur === 's2',
                     'die gewaehlte SIGNATUR geht mit (als Kennung)',
                     JSON.stringify(post.rumpf.signatur));
-                pruefe(post.rumpf.entwurf === true, 'entwurf: true');
                 pruefe(!('html' in post.rumpf) && !('signatur_text' in post.rumpf),
                     'KEIN Signaturtext und KEIN HTML im Rumpf');
             }
+            const f = w.__antwortFormular;
+            pruefe(f.length === 1 && f[0].allen === false && /Signatur/.test(f[0].html),
+                'Outlook oeffnet die Antwort mit dem Rumpf samt Signatur', JSON.stringify(f));
             w.close();
             ende();
         }, 80);
@@ -437,9 +461,10 @@ function ende() {
     // Das ist die Sicherheitsaussage: eine Pflichtangabe darf nicht in einem
     // Feld stehen, das der Benutzer (oder ein Skript) noch aendern kann. Sie
     // wird serverseitig angehaengt - deshalb MUSS ein Hinweis sagen, was kommt.
-    const senden = ADDINJS.split('/api/email/reply/send', 2)[1] || '';
+    // Am AUFRUF schneiden, nicht am ersten Vorkommen (das steht im Kommentar).
+    const senden = ADDINJS.split("sende('/api/email/reply/form'", 2)[1] || '';
     pruefe(/signatur:/.test(senden.slice(0, 900)),
-        'gesendet wird die KENNUNG der Signatur');
+        'an reply/form geht die KENNUNG der Signatur');
     pruefe(!/signatur_text|sigText/.test(ADDINJS),
         'nirgends wird ein Signatur-TEXT gesendet');
     pruefe(/sig_will_append/.test(ADDINJS) && /sig_will_none/.test(ADDINJS),

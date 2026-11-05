@@ -141,6 +141,16 @@ denselben Daten wie im Browser. Ab dann meldet sich das Fenster von selbst an
 | **Postfach** | eigene Zugangsdaten, Ordner, Verbindungstest |
 | **Protokoll** | die letzten Läufe mit Ergebnis |
 
+**Serverzugriff auf das Postfach (seit 05.11.2026).** Das Add-in liest die
+markierte Mail selbst aus Outlook und öffnet die Antwort in Outlook – dafür
+braucht der Server keinen Zugriff auf das Postfach. Regeln, „Jetzt verarbeiten",
+die Reiter **Postfach** und **Protokoll** sowie die Mail-Werkzeuge im Chat
+arbeiten dagegen auf dem Server mit dem hinterlegten Kennwort und stehen nur
+Benutzern zur Verfügung, die der Administrator unter **Einstellungen → E-Mail →
+Serverzugriff auf Postfächer** ausgewählt hat (vorläufig; wählbar sind nur
+Benutzer mit E-Mail-Berechtigung, niemand gewählt = niemand). Alle anderen sehen
+in diesen Reitern einen Hinweis.
+
 **„Jetzt verarbeiten" ist echt, kein Trockenlauf.** Die Regel läuft auf genau
 dieser Nachricht und kann tatsächlich antworten, weiterleiten oder verschieben –
 deshalb die Rückfrage davor. Die Auswahl-Filter der Regel (nur ungelesen,
@@ -183,13 +193,18 @@ selben Arbeitsplatz und ist deshalb kein zweiter Faktor.
 `GET /api/addin/links` (beides nur für Administratoren). Ohne das meldete sich
 der neue Inhaber weiterhin als der alte Benutzer an.
 
-### 5.2 Antwort vorschlagen – erst ansehen, dann senden
+### 5.2 Antwort vorschlagen – erst ansehen, dann in Outlook senden
 
 Im Reiter **Nachricht** steht über dem Regel-Block der Knopf **„Antwort
-vorschlagen"**. Er formuliert eine Antwort auf die markierte Mail und zeigt sie
-in einem bearbeitbaren Feld. Gesendet wird erst mit **„Senden"** – oder mit
-**„Als Entwurf"**, wenn die Antwort noch in Outlook durchgesehen werden soll.
-**„Neu formulieren"** verwirft den Vorschlag und fragt erneut.
+vorschlagen"**. Das Add-in liest die markierte Mail aus Outlook, Jarvis formuliert
+eine Antwort und zeigt sie in einem bearbeitbaren Feld. **„In Outlook antworten"**
+bzw. **„Allen antworten"** öffnet sie als Antwort in Outlook (mit der gewählten
+Signatur) – gesendet wird dort, wie jede andere Mail. Jarvis selbst sendet nichts
+und braucht dafür keinen Zugriff auf das Postfach. **„Neu formulieren"** verwirft
+den Vorschlag und fragt erneut.
+
+> Hängt Outlook beim Antworten selbst eine Signatur an, steht sie zusätzlich zur
+> gewählten. Wer seine Outlook-Signatur nutzt, wählt im Add-in **„Keine Signatur"**.
 
 Optional: ein **Stil** (siehe unten) und ein **Hinweis** für genau diese Antwort
 („freundlich absagen", „Termin bestätigen"). Beides ist freiwillig; der Weg

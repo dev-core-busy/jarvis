@@ -294,6 +294,9 @@
     }
 
     function zeigeServerHinweis(d) {
+        // Punkt e: Serverzugriff auf das Postfach nur fuer ausgewaehlte Benutzer.
+        var ohne = $('em-noserver');
+        if (ohne) ohne.classList.toggle('hidden', !!((d.konto || {}).server_zugriff));
         var s = d.server || {};
         var wege = [];
         if (s.ews) wege.push('EWS');

@@ -380,6 +380,9 @@
                 <button type="button" class="ad-info" data-help="ad-help-security" aria-expanded="false"
                         data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></p>
             <div class="ad-help" id="ad-help-security" data-i18n-html="mail.help_security">Absender-Bedingungen gehören in das Feld „Nur von diesen Absendern“ – nur dieses Feld wird geprüft, bevor ein Sprachmodell die Nachricht sieht. Gib einer Regel nur die Werkzeuge, die sie braucht, und sieh regelmäßig ins Protokoll.</div>
+            <!-- Punkt e: ohne Serverzugriff (Einstellungen → E-Mail) laufen
+                 keine Regeln – addin.js zeichneServerHinweis schaltet um. -->
+            <div class="ad-warn ad-noserver hidden" data-i18n="addin.no_server">Der Server greift für dich nicht auf das Postfach zu – Regeln, Postfach und Protokoll stehen nur mit freigegebenem Serverzugriff zur Verfügung. Antworten vorschlagen geht trotzdem.</div>
             <button class="ad-btn ad-btn-primary ad-btn-block" id="ad-new-rule"
                     style="margin-top:8px;" data-i18n="mail.rules_new">+ Neue Regel</button>
             <p class="ad-status" id="ad-rules-status" style="margin-top:6px;"></p>
@@ -441,6 +444,7 @@
         </div>
 
         <div class="ad-pane hidden" data-pane="acct">
+            <div class="ad-warn ad-noserver hidden" data-i18n="addin.no_server">Der Server greift für dich nicht auf das Postfach zu – Regeln, Postfach und Protokoll stehen nur mit freigegebenem Serverzugriff zur Verfügung. Antworten vorschlagen geht trotzdem.</div>
             <p class="ad-hint" data-i18n="mail.acct_hint">Hier hinterlegst du dein eigenes Exchange-Postfach. Das Kennwort wird verschlüsselt gespeichert und von keiner Schnittstelle wieder herausgegeben – auch nicht an Administratoren. Lass das Feld leer, um es unverändert zu lassen.</p>
             <div class="ad-sep"></div>
             <div class="ad-field">
@@ -515,6 +519,7 @@
 
         <!-- ── Reiter: Protokoll ── -->
         <div class="ad-pane hidden" data-pane="log">
+            <div class="ad-warn ad-noserver hidden" data-i18n="addin.no_server">Der Server greift für dich nicht auf das Postfach zu – Regeln, Postfach und Protokoll stehen nur mit freigegebenem Serverzugriff zur Verfügung. Antworten vorschlagen geht trotzdem.</div>
             <p class="ad-hint" data-i18n="mail.log_hint">Was die Regeln getan haben – neueste zuerst. Nur deine eigenen Läufe.</p>
             <button class="ad-btn ad-btn-block" id="ad-log-reload" style="margin-top:8px;"
                     data-i18n="common.refresh">Aktualisieren</button>
@@ -553,7 +558,7 @@
 <script src="/static/js/sitzung.js?v=3"></script>
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
-<script src="/static/js/i18n.js?v=434"></script>
+<script src="/static/js/i18n.js?v=435"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das
@@ -561,6 +566,6 @@
      Seiten. `/api/branding` haengt an KEINER Anmeldung, die Marke steht also
      schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=30"></script>
-<script src="/static/addin/addin.js?v=19"></script>
+<script src="/static/addin/addin.js?v=20"></script>
 </body>
 </html>

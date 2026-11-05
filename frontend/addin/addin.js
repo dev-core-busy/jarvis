@@ -61,6 +61,8 @@
     var _editHeim = null;    // Heimatplatz des wandernden Formulars
     var _office = null;      // { betreff, von, id, internetId } oder null
     var _officeGrund = '';   // warum kein Kontext
+    var _item = null;        // Office.context.mailbox.item (Punkt e: Inhalt lesen,
+                             // Antwort in Outlook oeffnen) – ohne Serverzugriff
     var _updServer = '';     // Manifest-Version des Servers, sobald bekannt
     var _officeDa = false;   // Office.context.mailbox war erreichbar. NICHT
                              // dasselbe wie `_office`: das ist null, sobald
@@ -275,6 +277,70 @@
     }
 
     /* ── Outlook-Kontext ──────────────────────────────────────────────── */
+    /* Adresslisten aus Office.js (EmailAddressDetails[]) als Text. */
+    function adressen(liste) {
+        if (!liste || !liste.length) return [];
+        return Array.prototype.map.call(liste, function (a) {
+            return (a && (a.emailAddress || a.displayName)) || '';
+        }).filter(function (x) { return !!x; });
+    }
+
+    /* Punkt e (2026-11-05): der Inhalt der markierten Nachricht kommt aus
+       OUTLOOK, nicht aus einem Serverzugriff. `body.getAsync` gibt es ab
+       Mailbox 1.3 – genau der Satz, den das Manifest verlangt. Loest mit dem
+       Nachrichtenobjekt fuer `/api/email/reply/preview` auf. */
+    function nachrichtLesen() {
+        return new Promise(function (ok, fehler) {
+            if (!_item || !_item.body || !_item.body.getAsync) {
+                fehler(new Error(T('addin.no_body',
+                    'Outlook stellt den Inhalt dieser Nachricht nicht bereit.')));
+                return;
+            }
+            var art = (typeof Office !== 'undefined' && Office.CoercionType)
+                ? Office.CoercionType.Text : 'text';
+            _item.body.getAsync(art, function (erg) {
+                if (!erg || erg.status !== 'succeeded') {
+                    fehler(new Error(T('addin.no_body',
+                        'Outlook stellt den Inhalt dieser Nachricht nicht bereit.')));
+                    return;
+                }
+                ok({
+                    von: _office.vonAdresse || _office.von || '',
+                    von_name: _office.vonName || '',
+                    an: _office.an || [], cc: _office.cc || [],
+                    betreff: _office.betreff || '',
+                    datum: _office.datum || '',
+                    text: String(erg.value || '')
+                });
+            });
+        });
+    }
+
+    /* Postfachadresse des angemeldeten Outlook-Benutzers (nur Anzeige im
+       Auftrag an das Modell – kein Zugriffsrecht). */
+    function postfachAdresse() {
+        try {
+            return (Office.context.mailbox.userProfile.emailAddress) || '';
+        } catch (e) { return ''; }
+    }
+
+    /* Darf der Server fuer diesen Benutzer auf das Postfach zugreifen?
+       (Einstellungen → E-Mail, Punkt e). Ohne das gibt es keine Regeln, kein
+       Postfach-Konto und kein Protokoll – die Antwort aus Outlook geht immer. */
+    function serverZugriff() {
+        return !!(_konto && _konto.server_zugriff);
+    }
+
+    function zeichneServerHinweis() {
+        var an = !serverZugriff();
+        document.querySelectorAll('.ad-noserver').forEach(function (el) {
+            el.classList.toggle('hidden', !an);
+        });
+        document.querySelectorAll('.ad-nur-server').forEach(function (el) {
+            el.classList.toggle('hidden', an);
+        });
+    }
+
     function officeErmitteln() {
         /* Wartet begrenzt auf Office.js und liest die markierte Nachricht.
            Loest IMMER auf – ohne Kontext laeuft das Fenster im reinen
@@ -331,13 +397,21 @@
                                 'Es ist keine Nachricht geöffnet. Markiere eine E-Mail, um sie hier verarbeiten zu lassen.'));
                             return;
                         }
+                        _item = item;
                         ende({
                             // itemId ist die EWS-Kennung – genau die, mit der der
-                            // Server die Nachricht wiederfindet.
+                            // Server die Nachricht wiederfindet (nur noch fuer den
+                            // Regel-Lauf mit Serverzugriff).
                             id: item.itemId || '',
                             internetId: item.internetMessageId || '',
                             betreff: item.subject || '',
-                            von: (item.from && (item.from.emailAddress || item.from.displayName)) || ''
+                            von: (item.from && (item.from.emailAddress || item.from.displayName)) || '',
+                            vonAdresse: (item.from && item.from.emailAddress) || '',
+                            vonName: (item.from && item.from.displayName) || '',
+                            an: adressen(item.to),
+                            cc: adressen(item.cc),
+                            datum: (item.dateTimeCreated && item.dateTimeCreated.toISOString)
+                                ? item.dateTimeCreated.toISOString() : ''
                         }, '');
                     } catch (e) {
                         ende(null, T('addin.no_message',
@@ -694,6 +768,7 @@
                 _bereicheLang = sprache();
                 zeichneMarke();
                 fuelleKonto();
+                zeichneServerHinweis();
                 return d;
             })
             .catch(function (e) {
@@ -772,25 +847,9 @@
             (_office.von ? '<div class="ad-msg-from">' + esc(_office.von) + '</div>' : '') +
             '</div>');
 
-        if (!kontoBereit()) {
-            teile.push('<div class="ad-empty">' + esc(T('addin.no_account',
-                'Hinterlege zuerst dein Postfach im Reiter „Postfach".')) + '</div>');
-            box.innerHTML = teile.join('');
-            return;
-        }
-        if (imapKonto()) {
-            teile.push('<div class="ad-warn" style="margin-top:10px;">' + esc(T('addin.imap_only',
-                'Dieses Postfach arbeitet über IMAP. Die Kennung, die Outlook liefert, passt nur zum EWS-Zugang – eine einzelne Nachricht lässt sich hier deshalb nicht anstoßen. Die Regeln laufen davon unberührt nach Zeitplan.')) + '</div>');
-            box.innerHTML = teile.join('');
-            return;
-        }
-        if (!_office.id) {
-            teile.push('<div class="ad-warn" style="margin-top:10px;">' + esc(T('addin.no_itemid',
-                'Outlook hat für diese Nachricht keine Kennung geliefert (z.B. bei einem noch nicht gesendeten Entwurf).')) + '</div>');
-            box.innerHTML = teile.join('');
-            return;
-        }
-
+        // Punkt e: der Antwortvorschlag braucht KEIN hinterlegtes Postfach und
+        // keinen Serverzugriff mehr – den Inhalt liest das Add-in aus Outlook.
+        // Konto, EWS und Kennung zaehlen nur noch fuer den Regel-Lauf unten.
         var aktive = _regeln.filter(function (r) { return r.enabled !== false; });
 
         // ── Antwort vorschlagen ──
@@ -801,7 +860,7 @@
         teile.push('<div class="ad-h">' + esc(T('addin.reply_head', 'Antwort vorschlagen')) + '</div>');
         if (_vorschlag) {
             teile.push('<p class="ad-hint">' + esc(T('addin.reply_check',
-                'Prüfe den Text – du kannst ihn hier ändern. Gesendet wird erst auf Knopfdruck.')) +
+                'Prüfe den Text – du kannst ihn hier ändern. Danach öffnest du die Antwort in Outlook und sendest sie dort.')) +
                 // Welcher Stil GEWIRKT hat, nicht welcher gewaehlt wurde: eine
                 // Anzeige darf keinen Zustand behaupten, den sie nicht kennt.
                 // Bei automatischer Wahl MUSS das dabeistehen: nur so ist
@@ -834,11 +893,13 @@
                 esc(T('mail.sig_pick', 'Signatur')) + '</label>' +
                 '<select id="ad-reply-sig">' + sigOptionen(_sigWahl) + '</select></div></div>');
             teile.push('<p class="ad-hint" id="ad-reply-sighint" style="margin-top:0;"></p>');
+            // Punkt e: gesendet wird aus OUTLOOK. Die Knoepfe oeffnen dort den
+            // Antwort-Entwurf (displayReplyForm), der Benutzer sendet selbst.
             teile.push('<div class="ad-row" style="margin-top:0;">' +
-                '<button class="ad-btn ad-btn-primary" id="ad-reply-send">' +
-                esc(T('addin.reply_send', 'Senden')) + '</button>' +
-                '<button class="ad-btn" id="ad-reply-draft">' +
-                esc(T('addin.reply_draft', 'Als Entwurf')) + '</button>' +
+                '<button class="ad-btn ad-btn-primary" id="ad-reply-outlook">' +
+                esc(T('addin.reply_outlook', 'In Outlook antworten')) + '</button>' +
+                '<button class="ad-btn" id="ad-reply-outlook-all">' +
+                esc(T('addin.reply_outlook_all', 'Allen antworten')) + '</button>' +
                 '<button class="ad-btn" id="ad-reply-new">' +
                 esc(T('addin.reply_again', 'Neu formulieren')) + '</button>' +
                 '<button class="ad-btn ad-btn-danger" id="ad-reply-drop">' +
@@ -862,9 +923,22 @@
         teile.push('<p class="ad-status" id="ad-reply-status" style="margin-top:8px;"></p>');
 
         // ── Regel auf diese Nachricht anwenden ──
+        // Nur MIT Serverzugriff: der Lauf oeffnet das Postfach auf dem Server.
         teile.push('<div class="ad-sep"></div>');
         teile.push('<div class="ad-h">' + esc(T('addin.run_head', 'Mit einer Regel verarbeiten')) + '</div>');
-        if (!aktive.length) {
+        if (!serverZugriff()) {
+            teile.push('<div class="ad-empty">' + esc(T('addin.no_server',
+                'Der Server greift für dich nicht auf das Postfach zu – Regeln, Postfach und Protokoll stehen nur mit freigegebenem Serverzugriff zur Verfügung. Antworten vorschlagen geht trotzdem.')) + '</div>');
+        } else if (!kontoBereit()) {
+            teile.push('<div class="ad-empty">' + esc(T('addin.no_account',
+                'Hinterlege zuerst dein Postfach im Reiter „Postfach".')) + '</div>');
+        } else if (imapKonto()) {
+            teile.push('<div class="ad-warn" style="margin-top:10px;">' + esc(T('addin.imap_only',
+                'Dieses Postfach arbeitet über IMAP. Die Kennung, die Outlook liefert, passt nur zum EWS-Zugang – eine einzelne Nachricht lässt sich hier deshalb nicht anstoßen. Die Regeln laufen davon unberührt nach Zeitplan.')) + '</div>');
+        } else if (!_office.id) {
+            teile.push('<div class="ad-warn" style="margin-top:10px;">' + esc(T('addin.no_itemid',
+                'Outlook hat für diese Nachricht keine Kennung geliefert (z.B. bei einem noch nicht gesendeten Entwurf).')) + '</div>');
+        } else if (!aktive.length) {
             teile.push('<div class="ad-empty">' + esc(T('addin.no_rules',
                 'Du hast noch keine aktive Regel. Lege im Reiter „Regeln" eine an.')) + '</div>');
         } else {
@@ -929,8 +1003,8 @@
                 });
             }
             sigHinweis();
-            $('ad-reply-send').addEventListener('click', function () { antwortSenden(false); });
-            $('ad-reply-draft').addEventListener('click', function () { antwortSenden(true); });
+            $('ad-reply-outlook').addEventListener('click', function () { antwortInOutlook(false); });
+            $('ad-reply-outlook-all').addEventListener('click', function () { antwortInOutlook(true); });
             $('ad-reply-new').addEventListener('click', function () {
                 _vorschlag = null; zeichneNachricht();
             });
@@ -942,19 +1016,23 @@
 
     /* Antwort formulieren lassen. Der Lauf dahinter hat KEINE Werkzeuge – es
        kann also nichts gesendet oder verschoben werden, egal was in der
-       eingegangenen Mail steht. Gesendet wird erst mit `antwortSenden`. */
+       eingegangenen Mail steht. Gesendet wird aus Outlook (`antwortInOutlook`). */
     function antwortVorschlagen() {
-        if (_laeuft || !_office || !_office.id) return;
+        if (_laeuft || !_office) return;
         _laeuft = true;
         var knopf = $('ad-reply-make');
         if (knopf) knopf.disabled = true;
         melde('ad-reply-status', T('addin.reply_working', 'Formuliere eine Antwort…'));
-        sende('/api/email/reply/preview', 'POST', {
-            msg_id: _office.id,
-            ordner: '',
-            hinweis: (($('ad-reply-hint') || {}).value || '').trim(),
-            stil: (($('ad-reply-stil') || {}).value || '')
-        })
+        var hinweis = (($('ad-reply-hint') || {}).value || '').trim();
+        var stil = (($('ad-reply-stil') || {}).value || '');
+        // Punkt e: Inhalt aus Outlook, der Server oeffnet kein Postfach.
+        nachrichtLesen()
+            .then(function (n) {
+                return sende('/api/email/reply/preview', 'POST', {
+                    nachricht: n, postfach: postfachAdresse(),
+                    hinweis: hinweis, stil: stil
+                });
+            })
             .then(function (d) {
                 _vorschlag = { text: d.text || '', an: d.an || '', betreff: d.betreff || '',
                                stil: d.stil || '', stil_hinweis: d.stil_hinweis || '',
@@ -971,47 +1049,37 @@
             });
     }
 
-    /* Den freigegebenen Text abschicken. Der EMPFAENGER kommt serverseitig aus
-       der beantworteten Nachricht – hier geht nur der Text hinaus. */
-    function antwortSenden(entwurf) {
-        if (_laeuft || !_vorschlag || !_office || !_office.id) return;
+    /* Punkt e (2026-11-05): die Antwort wird IN OUTLOOK geoeffnet, gesendet
+       wird dort. Der Server haengt nur die gewaehlte Signatur an und liefert
+       HTML (`/api/email/reply/form` – kein Postfachzugriff, kein Versand).
+       Empfaenger und Zitat setzt Outlook selbst aus der markierten Nachricht. */
+    function antwortInOutlook(allen) {
+        if (_laeuft || !_vorschlag || !_item) return;
         var text = ($('ad-reply-text') || {}).value || _vorschlag.text || '';
         if (!text.trim()) {
             melde('ad-reply-status', T('addin.reply_empty', 'Der Text ist leer.'), 'fehler');
             return;
         }
         _laeuft = true;
-        ['ad-reply-send', 'ad-reply-draft'].forEach(function (id) {
-            if ($(id)) $(id).disabled = true;
-        });
-        melde('ad-reply-status', entwurf
-            ? T('addin.reply_saving', 'Speichere Entwurf…')
-            : T('addin.reply_sending', 'Sende…'));
-        sende('/api/email/reply/send', 'POST', {
-            msg_id: _office.id, ordner: '', text: text, entwurf: !!entwurf,
-            // Aus dem Pulldown, NICHT aus `_fmtWahl`/`_sigWahl` allein: der
-            // Reiter wird bei jedem Statuslauf neu gebaut, und der Merker ist
-            // nur die Bruecke darueber. Der Feldwert ist der Stand, den der
-            // Benutzer zuletzt gesehen hat.
+        sende('/api/email/reply/form', 'POST', {
+            text: text,
             format: (($('ad-reply-fmt') || {}).value || _fmtWahl || ''),
             signatur: (($('ad-reply-sig') || {}).value || _sigWahl || '')
         })
             .then(function (d) {
-                _vorschlag = null;
-                zeichneNachricht();
-                melde('ad-reply-status', d.ergebnis ||
-                    T('addin.reply_done', 'Antwort gesendet.'), 'ok');
-                ladeLog();   // Funktionsname gegen die Datei geprueft
+                var f = allen ? _item.displayReplyAllForm : _item.displayReplyForm;
+                if (typeof f !== 'function') {
+                    throw new Error(T('addin.reply_no_form',
+                        'Outlook kann hier kein Antwortfenster öffnen.'));
+                }
+                f.call(_item, d.html || '');
+                melde('ad-reply-status', T('addin.reply_opened',
+                    'Die Antwort ist in Outlook geöffnet – prüfe sie dort und sende sie ab.'), 'ok');
             })
             .catch(function (e) {
                 if (String(e.message) !== '401') melde('ad-reply-status', e.message, 'fehler');
             })
-            .then(function () {
-                _laeuft = false;
-                ['ad-reply-send', 'ad-reply-draft'].forEach(function (id) {
-                    if ($(id)) $(id).disabled = false;
-                });
-            });
+            .then(function () { _laeuft = false; });
     }
 
     function verarbeiteNachricht() {

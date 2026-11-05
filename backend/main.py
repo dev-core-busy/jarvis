@@ -16485,22 +16485,59 @@ async def email_reply_preview(request: Request,
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
     msg_id = str((body or {}).get("msg_id") or "").strip()
-    if not msg_id:
-        return JSONResponse({"ok": False, "error": "Es fehlt die Nachrichten-Kennung "
-                                                   "(msg_id)."}, status_code=400)
+    # Outlook-Add-in (Punkt e, 2026-11-05): das Add-in liest die Nachricht
+    # SELBST und schickt ihren Inhalt mit – dann oeffnet der Server kein
+    # Postfach. Ohne `nachricht` bleibt der alte Weg ueber die Kennung (der
+    # dann den Serverzugriff braucht, konto_fuer prueft ihn).
+    nachricht = (body or {}).get("nachricht")
+    if nachricht is not None and not isinstance(nachricht, dict):
+        return JSONResponse({"ok": False, "error": "Ungueltige Nachricht."}, status_code=400)
+    if not msg_id and not nachricht:
+        return JSONResponse({"ok": False, "error": "Es fehlt die Nachricht (Inhalt "
+                                                   "oder Kennung)."}, status_code=400)
     ordner = str((body or {}).get("ordner") or "").strip()
     hinw = str((body or {}).get("hinweis") or "").strip()[:500]
     # Gewaehlter Antwort-Stil (Pulldown). Leer = Standardstil, "-" = ohne Stil.
     stil_id = str((body or {}).get("stil") or "").strip()[:32]
     try:
-        daten = await mail_runner.antwort_vorschlag(user, msg_id, ordner,
-                                                    hinw, stil_id)
+        daten = await mail_runner.antwort_vorschlag(
+            user, msg_id, ordner, hinw, stil_id, nachricht=nachricht,
+            postfach=str((body or {}).get("postfach") or ""))
     except mail_client.MailFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": "Vorschlag fehlgeschlagen: %s" % e},
                             status_code=500)
     return JSONResponse({"ok": True, **daten})
+
+
+@app.post("/api/email/reply/form")
+async def email_reply_form(request: Request,
+                           user: str = Depends(require_email_access)):
+    """Den freigegebenen Text fuer den Antwort-Entwurf IN OUTLOOK aufbereiten.
+
+    Punkt e (2026-11-05): das Add-in sendet nicht mehr ueber den Server, es
+    oeffnet die Antwort mit ``displayReplyForm`` in Outlook, und der Benutzer
+    sendet dort. Hier wird nur die gewaehlte Signatur angehaengt (dieselbe
+    Regel wie beim Senden: SERVERSEITIG gewaehlt, nicht aus dem Rumpf) und HTML
+    erzeugt. **Kein Postfachzugriff, kein Sprachmodell, kein Versand.**
+    """
+    from backend import mail_accounts, mail_body
+    try:
+        body = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    text = str((body or {}).get("text") or "")
+    if not text.strip():
+        return JSONResponse({"ok": False, "error": "Der Text ist leer."}, status_code=400)
+    from backend import mail_runner
+    text = text[:mail_runner.VORSCHLAG_MAX]
+    format_ = mail_accounts.format_fuer(user, str((body or {}).get("format") or "").strip()[:16])
+    sig = mail_accounts.signatur_fuer(user, str((body or {}).get("signatur") or "").strip()[:32])
+    rumpf_text, rumpf_html = mail_body.signatur_anhaengen(text, sig, format_)
+    return JSONResponse({"ok": True, "format": format_,
+                         "html": rumpf_html or mail_body.text_zu_html(rumpf_text),
+                         "text": rumpf_text})
 
 
 @app.post("/api/email/reply/send")
@@ -16582,6 +16619,69 @@ async def email_log(regel_id: str = "", limit: int = 50,
 
 
 # ─── E-Mail: Administrator-Teil (Reiter) ─────────────────────────────────────
+
+def _email_serverzugriff_kandidaten() -> list[str]:
+    """Wer darf fuer den Serverzugriff ausgewaehlt werden? (Punkt e)
+
+    Nur Benutzer mit E-Mail-Berechtigung. Aufzaehlbar sind die ausdruecklich
+    eingetragenen (``email_allowed_users``) und alle, die schon ein Postfach
+    hinterlegt haben und die Berechtigung (auch ueber die Gruppe) besitzen –
+    die Mitglieder einer AD-Gruppe kennt der Server erst, wenn sie da waren."""
+    from backend import mail_accounts
+    namen: list[str] = []
+    roh = config.get_setting("email_allowed_users", "") or ""
+    for x in list(roh.split(",")) + list(mail_accounts.alle_benutzer()):
+        un = mail_accounts.norm_user(x)
+        if un and ":" not in un and un not in namen and _user_may_use_email(un):
+            namen.append(un)
+    return sorted(namen)
+
+
+@app.get("/api/email/admin/serverzugriff")
+async def email_admin_serverzugriff_get(user: str = Depends(require_local_auth)):
+    """Auswahl "Serverzugriff auf das Postfach" (Einstellungen → E-Mail)."""
+    from backend import mail_accounts
+    gewaehlt = mail_accounts.server_zugriff_liste()
+    konten = set(mail_accounts.alle_benutzer())
+    kand = _email_serverzugriff_kandidaten()
+    # Gewaehlte, die (nicht mehr) waehlbar sind, bleiben SICHTBAR – sonst
+    # verschwaende ein Eintrag still aus der Anzeige, waehrend er weiter gilt.
+    for g in gewaehlt:
+        if g not in kand:
+            kand.append(g)
+    return JSONResponse({"ok": True, "kandidaten": [
+        {"benutzer": u, "anzeige": _display_name(u), "gewaehlt": u in gewaehlt,
+         "postfach": u in konten, "berechtigt": _user_may_use_email(u)} for u in kand]})
+
+
+@app.post("/api/email/admin/serverzugriff")
+async def email_admin_serverzugriff_set(request: Request,
+                                        user: str = Depends(require_local_auth)):
+    """Auswahl speichern. Jeder Eintrag MUSS die E-Mail-Berechtigung haben –
+    abgelehnt wird mit Namen, nicht still verworfen."""
+    from backend import mail_accounts
+    try:
+        body = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    roh = (body or {}).get("benutzer")
+    if not isinstance(roh, list):
+        return JSONResponse({"ok": False, "error": "Liste 'benutzer' erwartet."}, status_code=400)
+    liste: list[str] = []
+    for x in roh:
+        un = mail_accounts.norm_user(str(x))
+        if un and ":" not in un and un not in liste:
+            liste.append(un)
+    ohne = [u for u in liste if not _user_may_use_email(u)]
+    if ohne:
+        return JSONResponse({"ok": False, "error":
+                             "Ohne E-Mail-Berechtigung (Einstellungen → Sicherheit → "
+                             "Berechtigungen): " + ", ".join(ohne)}, status_code=400)
+    sm = _get_skill_manager()
+    sm.update_skill_config("email", {mail_accounts.SERVER_ZUGRIFF_FELD: ",".join(liste)})
+    _aktivitaet(user, "email", "serverzugriff_gesetzt", "email", anzahl=len(liste))
+    return JSONResponse({"ok": True, "gewaehlt": liste})
+
 
 @app.get("/api/email/admin/overview")
 async def email_admin_overview(lang: str = "de",

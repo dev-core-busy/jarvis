@@ -441,9 +441,16 @@ check("sig_will_append" in ADDJS and "sig_will_none" in ADDJS,
       "das Add-in nennt die Signatur, die angehaengt wird")
 check("ad-reply-sig" in ADDJS and "ad-reply-fmt" in ADDJS,
       "Pulldowns fuer Signatur und Format in der Vorschau")
-check("signatur:" in ADDJS.split("reply/send", 1)[1][:800] and
-      "format:" in ADDJS.split("reply/send", 1)[1][:800],
-      "beide werden beim Senden mitgeschickt")
+# Punkt e (2026-11-05): das Add-in sendet nicht mehr ueber den Server, es
+# laesst sich den Rumpf von /api/email/reply/form bauen und oeffnet ihn in
+# Outlook. Signatur und Format gehen DORTHIN mit. Kein split()[1] – das wirft,
+# wenn der Anker fehlt, statt fehlzuschlagen (Register).
+_i_form = ADDJS.find("sende('/api/email/reply/form'")   # der AUFRUF, nicht der Kommentar
+_form = ADDJS[_i_form:_i_form + 800] if _i_form >= 0 else ""
+check(_i_form >= 0 and "signatur:" in _form and "format:" in _form,
+      "beide gehen an den Entwurf in Outlook (reply/form) mit")
+check("/api/email/reply/send" not in ADDJS,
+      "das Add-in sendet NICHT mehr ueber den Server")
 # Das Postfach-Formular darf die LISTE nicht als Ganzes senden.
 for name, quelle in (("addin.js", ADDJS), ("email_portal.js", EMJS)):
     _sp = quelle.split("email/account", 1)[0]

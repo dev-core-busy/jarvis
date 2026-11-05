@@ -4,7 +4,13 @@
     "version": "1.0.0",
     "author": "Jarvis",
     "module": "main",
-    "tools": ["confluence_test_connection", "confluence_list_spaces", "confluence_search", "confluence_get_page", "confluence_create_page", "confluence_update_page", "confluence_delete_page", "confluence_add_comment", "confluence_list_attachments", "confluence_upload_attachment"],
+    "tools": [
+        "confluence_test_connection",
+        "confluence_list_spaces",
+        "confluence_search",
+        "confluence_get_page",
+        "confluence_list_attachments"
+    ],
     "category": "wissen",
     "icon": "book",
     "system": false,

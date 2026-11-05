@@ -5653,6 +5653,11 @@ async def logout(request: Request, user: str = Depends(require_auth)):
         _sapacc.sitzung_beenden(user)
     except Exception:  # noqa: BLE001
         pass
+    try:
+        from backend import vemas_accounts as _vmacc
+        _vmacc.sitzung_beenden(user)
+    except Exception:  # noqa: BLE001
+        pass
     _sicherheits_log.ereignis("abmeldung", benutzer=user,
                               ip=request.client.host if request.client else "",
                               ergebnis="erfolg")
@@ -12465,9 +12470,13 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
     # Feld hiesse sonst "unveraendert"), und beim EINSCHALTEN verlieren auch
     # alle persoenlichen Zugaenge ihre Kennwoerter. Die Umleitungs-Pruefung
     # entfaellt dann: es bleibt kein Geheimnis, das umgeleitet werden koennte.
-    sap_kachel = name == "sap" and bool(body.get("kachel_anmeldung"))
+    # Seit 2026-11-05 auch fuer VEMAS (derselbe Schalter, dasselbe Modulmuster).
+    sap_kachel = name in ("sap", "vemas") and bool(body.get("kachel_anmeldung"))
     if sap_kachel:
-        from backend import sap_accounts as _sapacc
+        if name == "sap":
+            from backend import sap_accounts as _sapacc
+        else:
+            from backend import vemas_accounts as _sapacc
         for _f in _sapacc.GEHEIMFELDER:
             body[_f] = ""
     # Neue Adresse + behaltenes Geheimnis = das Geheimnis ginge an die neue
@@ -12487,6 +12496,21 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
         for _f in _sapacc.GEHEIMFELDER:
             body[_f] = ""
     success = sm.update_skill_config(name, body)
+    # Jira "Persoenliche Zugaenge erlauben" ABGESCHALTET (vorher erlaubt):
+    # alle persoenlichen Token loeschen. Die Oberflaeche hat vorher gewarnt.
+    if (success and name == "jira" and body.get("persoenliche_zugaenge") is False
+            and gespeichert.get("persoenliche_zugaenge") is not False):
+        from backend import jira_accounts as _jacc
+        try:
+            _nj = _jacc.alle_entfernen()
+        except Exception as e:  # noqa: BLE001
+            print(f"[Jira] persoenliche Zugaenge nicht entfernt: {e}", flush=True)
+            return JSONResponse({"success": False,
+                                 "error": "Die Einstellung ist gespeichert, aber die "
+                                          f"persönlichen Zugänge ließen sich nicht entfernen: {e}"},
+                                status_code=500)
+        _aktivitaet(user, "skills", "jira_persoenliche_zugaenge_aus", name,
+                    zugaenge_entfernt=_nj)
     if success and sap_kachel and not gespeichert.get("kachel_anmeldung"):
         try:
             _n = _sapacc.kennwoerter_entfernen()
@@ -12496,7 +12520,7 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
                                  "error": "Die Einstellung ist gespeichert, aber die "
                                           "Kennwörter der eigenen Zugänge ließen sich "
                                           f"nicht entfernen: {e}"}, status_code=500)
-        _aktivitaet(user, "skills", "sap_kachel_anmeldung_an", name,
+        _aktivitaet(user, "skills", f"{name}_kachel_anmeldung_an", name,
                     kennwoerter_entfernt=_n)
 
     # Google-Spezialfall: Client-ID/Secret in .env schreiben
@@ -14540,9 +14564,15 @@ async def vemas_status(user: str = Depends(require_vemas_access)):
     z = _vemas_zugang(user)
     c = z["client"]
     sammel = False
+    kachel = False
+    anmeldung = {}
     try:
         from backend import vemas_accounts
-        sammel = bool(vemas_accounts.sammel_client().configured)
+        kachel = vemas_accounts.kachel_pflicht()
+        # Mit Kachelpflicht gibt es keinen gemeinsamen Zugang (Kennwort leer).
+        sammel = (not kachel) and bool(vemas_accounts.sammel_client().configured)
+        # Direkt nach dem Kennwort fragen, wenn der Zugang schon funktioniert hat.
+        anmeldung = vemas_accounts.anmeldung_anbieten(user) if kachel else {}
     except Exception:  # noqa: BLE001
         pass
     return JSONResponse({
@@ -14558,6 +14588,8 @@ async def vemas_status(user: str = Depends(require_vemas_access)):
         "quelle": z.get("quelle") or "sammel",
         "hinweis": z.get("hinweis") or "",
         "sammel_vorhanden": sammel,
+        "kachel_pflicht": kachel,
+        "anmeldung": anmeldung,
         "is_admin": _is_admin_user(user),
     })
 
@@ -14576,7 +14608,7 @@ async def vemas_test(user: str = Depends(require_vemas_access)):
     c = z["client"]
     if not c.configured:
         return JSONResponse({"ok": False, "configured": False,
-                             "error": "VEMAS ist nicht konfiguriert."})
+                             "error": z.get("hinweis") or "VEMAS ist nicht konfiguriert."})
     try:
         res = await asyncio.to_thread(c.test)
     except VemasError as e:
@@ -14738,10 +14770,25 @@ async def vemas_admin_accounts(user: str = Depends(require_local_auth)):
                 "anmeldefehler": int(i.get("anmeldefehler") or 0),
                 "letzter_erfolg": int(i.get("letzter_erfolg") or 0),
                 "letzter_fehler": i.get("letzter_fehler") or "",
+                # Was WIRKLICH auf der Platte liegt + Anmeldung aus der Kachel
+                "kennwort_gespeichert": vemas_accounts.kennwort_gespeichert(un),
+                "angemeldet": bool(i.get("angemeldet")),
+                "sitzung_bis": int(i.get("sitzung_bis") or 0),
             })
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True, "accounts": out})
+    return JSONResponse({"ok": True, "accounts": out,
+                         "kachel_pflicht": vemas_accounts.kachel_pflicht()})
+
+
+@app.delete("/api/vemas/account/sitzung")
+async def vemas_account_abmelden(user: str = Depends(require_vemas_access)):
+    """Von VEMAS abmelden (Kachel-Anmeldung): das nur im Arbeitsspeicher
+    gehaltene Kennwort verwerfen. Der Zugang selbst bleibt."""
+    from backend import vemas_accounts
+    weg = vemas_accounts.sitzung_beenden(user)
+    return JSONResponse({"ok": True, "beendet": bool(weg),
+                         "account": vemas_accounts.zugang_info(user)})
 
 
 # ── Katalog der vorgefertigten Abfragen ─────────────────────────────────────
@@ -17920,14 +17967,12 @@ async def jira_assist_health(request: Request,
     """
     from backend import addin, jira_assist  # noqa: PLC0415
     try:
-        # DIE FRAGE IST "kommt DIESER Benutzer an Jira", nicht "gibt es einen
-        # Sammelzugang". Seit dem persoenlichen Zugang (2026-08-28) faellt
-        # beides auseinander: wer einen eigenen Token hinterlegt hat, arbeitet
-        # auch dann, wenn der Administrator gar keinen hinterlegt hat – die
-        # Anleitung duerfte ihm dann nicht "Jira ist nicht konfiguriert"
-        # melden.
+        # Seit 2026-11-05 (Punkt f) liest die Erweiterung NUR ueber den
+        # gemeinsamen Lesezugang (jira_assist._client) – also ist genau der
+        # die Antwort auf "ist der Assistent einsatzbereit". Ein persoenlicher
+        # Token wuerde hier "ja" melden, waehrend der Lauf dann scheitert.
         from backend import jira_accounts  # noqa: PLC0415
-        konfiguriert = bool(jira_accounts.aufloesen(user)["client"].configured)
+        konfiguriert = bool(jira_accounts.sammel_client().configured)
     except Exception:  # noqa: BLE001
         konfiguriert = False
     # DER REQUEST MUSS MIT. Ohne ihn faellt basis_url auf die Einstellung
@@ -18203,7 +18248,8 @@ async def jira_admin_accounts(user: str = Depends(require_local_auth)):
             })
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True, "accounts": out})
+    return JSONResponse({"ok": True, "accounts": out,
+                         "persoenlich_erlaubt": jira_accounts.persoenlich_erlaubt()})
 
 
 @app.post("/api/jira/admin/areas")

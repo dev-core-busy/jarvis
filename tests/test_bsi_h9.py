@@ -78,7 +78,6 @@ FAELLE = [
     ("telegram_send", {}, {}, W.AUSSEN),
     ("vemas_write", {}, {}, W.AUSSEN),
     ("jira_create_issue", {}, {}, W.AUSSEN),
-    ("confluence_delete_page", {}, {}, W.LOESCHEN),
     ("cron_create", {}, {}, W.ZEITPLAN),
     ("cron_delete", {}, {}, W.LOESCHEN),
     ("cron_list", {}, {}, None),

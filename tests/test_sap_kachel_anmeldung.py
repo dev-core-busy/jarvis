@@ -299,7 +299,13 @@ check(any(min(behalten) < z_ < min(speichern) for z_ in leer),
       f"behalten={behalten} leer={leer} speichern={speichern}")
 check(any(c.lineno > min(speichern) for c in _aufrufe(usc, "kennwoerter_entfernen")),
       "nach dem Speichern werden die Kennwoerter der eigenen Zugaenge entfernt")
-check(bool(_aufrufe(lo, "sitzung_beenden")), "Jarvis-Abmeldung beendet die SAP-Anmeldung")
+# Auf genau dem Namen, unter dem sap_accounts importiert wurde – seit auch
+# VEMAS dort eine Sitzung beendet, waere "irgendein Aufruf" trivial wahr.
+sap_namen = {(a.asname or a.name) for n in ast.walk(lo) if isinstance(n, ast.ImportFrom)
+             for a in n.names if a.name == "sap_accounts"}
+check(bool(sap_namen) and any(isinstance(c.func.value, ast.Name) and c.func.value.id in sap_namen
+                              for c in _aufrufe(lo, "sitzung_beenden")),
+      "Jarvis-Abmeldung beendet die SAP-Anmeldung", str(sap_namen))
 st = next((n for n in ast.walk(baum) if isinstance(n, ast.AsyncFunctionDef)
            and n.name == "sap_portal_status"), None)
 adm = next((n for n in ast.walk(baum) if isinstance(n, ast.AsyncFunctionDef)

@@ -8,6 +8,18 @@ Auth:
 - Personal Access Token (Server/Data-Center) wird immer als Bearer gesendet.
   Das Benutzerfeld wird nicht benoetigt (PAT ist nicht an einen Benutzer gebunden).
 
+NUR-LESEN (Betreiber 2026-11-05, "wie bei SAP: immer aktiv, nicht abschaltbar"):
+``_request`` laesst nur GET durch. Der Personal Access Token soll nur Leserechte
+haben; auf Server/Data-Center hat ein PAT aber KEINE Bereichsbeschraenkung, er
+traegt alle Rechte seines Benutzers – die Grenze muss deshalb hier liegen, nicht
+im Token. Die Methoden zum Aendern, Loeschen, Kommentieren und Hochladen gibt es
+nicht mehr.
+
+EINZIGE, BENANNTE AUSNAHME: ``create_page`` (+ ``upload_attachment_bytes`` fuer
+dessen Bilder) fuer "Als neue Confluence-Seite" beim Destillat in /wissen (Entscheidung des Betreibers 2026-11-05). Es legt nur an,
+nie ueberschreibt es, und es ist ein Klick des Menschen, kein KI-Werkzeug. Dafuer
+braucht der benutzte Token Schreibrecht im Zielbereich.
+
 Alle Methoden sind synchron (``requests``). Aufrufer im async-Kontext muessen
 sie via ``asyncio.to_thread`` ausfuehren, um den Event-Loop nicht zu blockieren.
 """
@@ -19,6 +31,11 @@ import re
 from urllib.parse import quote
 
 import requests
+
+# Nur-Lesen: Text der Ablehnung und die einzige erlaubte Ausnahme (siehe Kopf).
+NUR_LESEN_TEXT = ("Confluence ist nur lesend angebunden – Seiten anlegen, aendern, "
+                  "loeschen, kommentieren und Anhaenge hochladen sind gesperrt.")
+SCHREIB_AUSNAHMEN = ("destillat",)
 
 
 def get_confluence_config() -> dict:
@@ -87,7 +104,11 @@ class ConfluenceClient:
         return h
 
     def _request(self, method: str, path: str, *, params=None, json=None,
-                 headers=None, files=None, data=None):
+                 headers=None, files=None, data=None, ausnahme: str = ""):
+        # Nur-Lesen VOR allem anderen: ein gesperrter Aufruf verlaesst den
+        # Prozess nicht, auch nicht als fehlschlagender Versuch.
+        if (method or "").upper() != "GET" and ausnahme not in SCHREIB_AUSNAHMEN:
+            raise ConfluenceError(0, NUR_LESEN_TEXT)
         if not self.configured:
             raise ConfluenceError(0, "Confluence ist nicht konfiguriert (URL/Token fehlen).")
         url = self.base + path
@@ -366,6 +387,9 @@ class ConfluenceClient:
         Lesezugriff und liefert sie (auf ECHT gemessen 2026-09-29).
         ``None`` = nicht ermittelbar (RPC abgeschaltet, Netzfehler) – das ist
         "unbekannt", NICHT "keine Rechte"; der Aufrufer entscheidet.
+
+        Ein LESEZUGRIFF, obwohl er als POST geht (JSON-RPC kennt nichts anderes);
+        deshalb nicht ueber ``_request``. Gebraucht nur vom Destillat.
         """
         try:
             r = requests.post(
@@ -381,6 +405,8 @@ class ConfluenceClient:
 
     def create_page(self, space: str, title: str, body: str,
                     parent_id: str | None = None) -> dict:
+        """Neue Seite anlegen – NUR fuer das Destillat in /wissen (die einzige
+        Ausnahme vom Nur-Lesen, siehe Modulkopf). Kein KI-Werkzeug ruft das."""
         payload = {
             "type": "page",
             "title": title,
@@ -389,34 +415,25 @@ class ConfluenceClient:
         }
         if parent_id:
             payload["ancestors"] = [{"id": str(parent_id)}]
-        return self._request("POST", "/rest/api/content", json=payload)
+        return self._request("POST", "/rest/api/content", json=payload,
+                             ausnahme="destillat")
 
-    def update_page(self, page_id: str, body: str | None = None,
-                    title: str | None = None) -> dict:
-        cur = self._request("GET", "/rest/api/content/%s" % page_id,
-                            params={"expand": "version,body.storage,space"})
-        ver = (cur.get("version", {}) or {}).get("number", 1) + 1
-        new_title = title or cur.get("title", "")
-        new_body = body if body is not None else \
-            (((cur.get("body") or {}).get("storage") or {}).get("value") or "")
-        payload = {
-            "type": "page",
-            "title": new_title,
-            "version": {"number": ver},
-            "body": {"storage": {"value": new_body, "representation": "storage"}},
-        }
-        return self._request("PUT", "/rest/api/content/%s" % page_id, json=payload)
+    def upload_attachment_bytes(self, page_id: str, filename: str,
+                                daten: bytes, mime: str = "") -> dict:
+        """Anhang aus dem SPEICHER hochladen (ohne Umweg ueber eine Datei).
 
-    def delete_page(self, page_id: str) -> None:
-        self._request("DELETE", "/rest/api/content/%s" % page_id)
-
-    def add_comment(self, page_id: str, body: str) -> dict:
-        payload = {
-            "type": "comment",
-            "container": {"id": str(page_id), "type": "page"},
-            "body": {"storage": {"value": body or "", "representation": "storage"}},
-        }
-        return self._request("POST", "/rest/api/content", json=payload)
+        NUR fuer das Wissens-Destillat (Teil der einzigen Ausnahme vom
+        Nur-Lesen, siehe Modulkopf): dessen Bilder gehoeren an die gerade
+        angelegte Seite. Sie liegen als ``data:``-URI in der Anfrage und werden
+        bewusst nirgends auf Platte gelegt (Modul-Kopf von ``wissen_destillat``)
+        – eine Temp-Datei nur fuer den Upload waere genau der Rueckstand, den
+        man sich dort gespart hat.
+        """
+        files = {"file": (filename, daten, mime or "application/octet-stream")}
+        return self._request(
+            "POST", "/rest/api/content/%s/child/attachment" % page_id,
+            headers={"X-Atlassian-Token": "no-check"}, files=files,
+            ausnahme="destillat")
 
     def list_attachments(self, page_id: str) -> list[dict]:
         d = self._request("GET", "/rest/api/content/%s/child/attachment" % page_id,
@@ -555,28 +572,3 @@ class ConfluenceClient:
             for chunk in chunks:
                 fh.write(chunk)
         return target, total
-
-    def upload_attachment_bytes(self, page_id: str, filename: str,
-                                daten: bytes, mime: str = "") -> dict:
-        """Anhang aus dem SPEICHER hochladen (ohne Umweg ueber eine Datei).
-
-        Gebraucht vom Wissens-Destillat: dessen Bilder liegen als ``data:``-URI
-        in der Anfrage und werden bewusst nirgends auf Platte gelegt (der
-        Modul-Kopf von ``wissen_destillat`` begruendet das) – eine Temp-Datei
-        nur fuer den Upload waere genau der Rueckstand, den man sich dort
-        gespart hat.
-        """
-        files = {"file": (filename, daten, mime or "application/octet-stream")}
-        return self._request(
-            "POST", "/rest/api/content/%s/child/attachment" % page_id,
-            headers={"X-Atlassian-Token": "no-check"}, files=files)
-
-    def upload_attachment(self, page_id: str, file_path: str) -> dict:
-        import os
-        if not os.path.isfile(file_path):
-            raise ConfluenceError(0, "Datei nicht gefunden: %s" % file_path)
-        with open(file_path, "rb") as fh:
-            files = {"file": (os.path.basename(file_path), fh)}
-            return self._request(
-                "POST", "/rest/api/content/%s/child/attachment" % page_id,
-                headers={"X-Atlassian-Token": "no-check"}, files=files)

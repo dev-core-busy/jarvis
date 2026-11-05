@@ -96,6 +96,8 @@
             var self = this;
             var ak = $('vemas-auth-kind');
             if (ak) ak.addEventListener('change', function () { self._applyAuth(ak.value); });
+            var kp = $('vemas-kachel-pflicht');
+            if (kp) kp.addEventListener('change', function () { self._applyKachel(); });
             var save = $('vemas-save'); if (save) save.addEventListener('click', this.save.bind(this));
             var test = $('vemas-test'); if (test) test.addEventListener('click', this.test.bind(this));
             var disc = $('vemas-discover'); if (disc) disc.addEventListener('click', this.discover.bind(this));
@@ -163,7 +165,10 @@
                     // nur lesend.
                     if ($('vemas-verify-ssl')) $('vemas-verify-ssl').checked = c.verify_ssl !== false;
                     if ($('vemas-read-only')) $('vemas-read-only').checked = c.read_only !== false;
+                    if ($('vemas-kachel-pflicht')) $('vemas-kachel-pflicht').checked = !!c.kachel_anmeldung;
+                    self._cfg = c;
                     self._applyAuth(c.auth_kind || 'basic');
+                    self._applyKachel();
                 })
                 .catch(function () { status('✗ Konfiguration nicht abrufbar', 'error'); });
         },
@@ -193,12 +198,50 @@
                 verify_ssl: checked('vemas-verify-ssl'),
                 read_only: checked('vemas-read-only'),
                 test_path: val('vemas-test-path'),
-                resources: ($('vemas-resources') ? $('vemas-resources').value : '')
+                resources: ($('vemas-resources') ? $('vemas-resources').value : ''),
+                // Anmeldung ueber die Portal-Kachel (Server leert dann die Kennwoerter)
+                kachel_anmeldung: checked('vemas-kachel-pflicht')
             };
+        },
+
+        // Mit Kachel-Anmeldung gibt es hier kein Kennwort/Token – die Felder
+        // werden gesperrt, statt einen Wert anzunehmen, den der Server verwirft.
+        _cfg: {},
+        _applyKachel: function () {
+            var an = checked('vemas-kachel-pflicht');
+            ['vemas-password', 'vemas-token'].forEach(function (id) {
+                var e = $(id); if (!e) return;
+                e.disabled = an;
+                if (an) e.value = '';
+            });
+        },
+
+        // Zusatz je Benutzer in der Liste: Kennwort gespeichert? angemeldet?
+        _kennwortZustand: function (a, kachel) {
+            if (a.kennwort_gespeichert) {
+                return kachel
+                    ? ' – <span style="color:var(--danger);">' + esc(T('sap.adm_pw_rest', 'Kennwort noch gespeichert')) + '</span>'
+                    : ' – ' + esc(T('sap.adm_pw_ja', 'Kennwort gespeichert'));
+            }
+            if (!kachel) return ' – ' + esc(T('sap.adm_pw_nein', 'kein Kennwort gespeichert'));
+            var zustand = (a.angemeldet && a.sitzung_bis)
+                ? T('sap.adm_angemeldet_bis', 'angemeldet bis') + ' '
+                    + new Date(a.sitzung_bis * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : T('sap.adm_nicht_angemeldet', 'nicht angemeldet');
+            return ' – ' + esc(T('sap.adm_pw_nein', 'kein Kennwort gespeichert')) + ' · ' + esc(zustand);
         },
 
         save: function () {
             var self = this;
+            // Einschalten der Kachel-Anmeldung loescht Kennwoerter – vorher fragen.
+            if (checked('vemas-kachel-pflicht') && !(this._cfg && this._cfg.kachel_anmeldung)) {
+                if (!window.confirm(T('vemas.kachel_pflicht_confirm',
+                    'Achtung: Beim Speichern werden das Kennwort bzw. Token des gemeinsamen VEMAS-Zugangs und die '
+                    + 'gespeicherten Kennwörter ALLER eigenen VEMAS-Zugänge gelöscht. Danach muss sich jeder Benutzer '
+                    + 'im Bereich VEMAS neu anmelden. Fortfahren?'))) {
+                    return;
+                }
+            }
             status(T('confluence.saving', 'Speichere…'));
             fetch('/api/skills/vemas/config', {
                 method: 'POST',
@@ -213,6 +256,9 @@
             })
               .then(function () {
                   status('✓ ' + T('confluence.saved', 'Gespeichert'), 'ok');
+                  // Neu laden: bei Kachel-Anmeldung hat der Server die Kennwoerter
+                  // geleert – Schalterstand und "gesetzt"-Anzeige muessen folgen.
+                  self.loadConfig();
                   // Ohne Serveradresse ist kein persoenlicher Zugang moeglich –
                   // die Liste kann sich also durch das Speichern aendern.
                   self.loadAccounts();
@@ -336,13 +382,24 @@
                 .then(function (d) {
                     if (!d || !d.ok) { box.textContent = 'Nicht abrufbar.'; return; }
                     var list = d.accounts || [];
+                    var kachel = !!d.kachel_pflicht;
+                    // Ausdruecklich sagen, dass nichts gespeichert ist.
+                    var kopf = kachel ? '<strong>' + esc(T('vemas.adm_kachel_kopf',
+                        'Anmeldung über die Portal-Kachel: Auf dem Server ist kein VEMAS-Kennwort gespeichert.'))
+                        + '</strong><br>' : '';
+                    if (!list.length && kachel) {
+                        box.innerHTML = kopf + esc(T('vemas.acc_none_kachel',
+                            'Kein Benutzer hat einen eigenen VEMAS-Zugang eingerichtet – mit der Anmeldung über '
+                            + 'die Portal-Kachel gibt es ohne ihn keinen VEMAS-Zugriff.'));
+                        return;
+                    }
                     if (!list.length) {
                         box.textContent = T('vemas.acc_none_admin',
                             'Kein Benutzer hat einen eigenen VEMAS-Zugang hinterlegt – alle Abfragen laufen '
                             + 'über den gemeinsamen Zugang.');
                         return;
                     }
-                    var html = esc(list.length + ' ')
+                    var html = kopf + esc(list.length + ' ')
                         + esc(T('vemas.acc_n_admin', 'Benutzer mit eigenem Zugang:'))
                         + '<ul style="margin:6px 0 0 18px;">';
                     list.forEach(function (a) {
@@ -351,7 +408,8 @@
                               + esc(T('vemas.acc_suspended_short', 'ausgesetzt nach ')) + a.anmeldefehler
                               + esc(T('vemas.acc_authfails', ' Anmeldefehlern')) + '</span>'
                             : (!a.aktiv ? ' – ' + esc(T('vemas.acc_inactive', 'inaktiv')) : '');
-                        html += '<li>' + esc(a.user) + ' (' + esc(a.auth_kind || '?') + ')' + mark + '</li>';
+                        html += '<li>' + esc(a.user) + ' (' + esc(a.auth_kind || '?') + ')' + mark
+                            + Manager._kennwortZustand(a, kachel) + '</li>';
                     });
                     box.innerHTML = html + '</ul>';
                 })

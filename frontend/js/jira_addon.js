@@ -315,6 +315,10 @@
     /** Zeichnet Pille, Hinweiskasten und Felder aus `_acc`. */
     function accZeichnen() {
         var a = _acc || {};
+        // Persoenliche Zugaenge vom Administrator abgeschaltet: der Abschnitt
+        // entfaellt ganz (es gibt nichts mehr zu hinterlegen).
+        var sect = $('ja-sect-account');
+        if (sect) sect.style.display = (a.persoenlich_erlaubt === false) ? 'none' : '';
         var pill = $('ja-acc-pill');
         var note = $('ja-acc-note');
         var srv = $('ja-acc-server');

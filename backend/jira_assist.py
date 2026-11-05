@@ -370,15 +370,18 @@ def _client(user: str = ""):
     except Exception as e:  # noqa: BLE001
         raise AssistFehler("Die Jira-Anbindung ist auf diesem Server nicht "
                            "verfügbar.") from e
+    # Seit 2026-11-05 (Punkt f): die Erweiterung liest Tickets NUR ueber den
+    # gemeinsamen Lesezugang – ein persoenlicher Token spielt hier keine Rolle
+    # mehr (``user`` bleibt in der Signatur, damit die Aufrufer unveraendert
+    # bleiben). ``sammel_client`` ist Nur-Lesen (jira_client, Vorgabe).
     try:
         from backend import jira_accounts  # noqa: PLC0415
-        c = jira_accounts.aufloesen(user)["client"]
+        c = jira_accounts.sammel_client()
     except Exception:  # noqa: BLE001
         c = JiraClient()
     if not c.configured:
         raise AssistFehler("Jira ist nicht konfiguriert – Adresse und Token "
-                           "fehlen (Einstellungen → Jira). Alternativ einen "
-                           "eigenen Token unter „Mein Jira-Zugang\" hinterlegen.")
+                           "des gemeinsamen Lesezugangs fehlen (Einstellungen → Jira).")
     return c
 
 
@@ -874,6 +877,12 @@ async def _agent_lauf(sysp: str, auftrag: str, werkzeuge: set,
     agent._role_tools = set(werkzeuge)
     agent._role_max_steps = AGENT_MAX_SCHRITTE
     actor = _actor(user)
+    # Auch die Jira-WERKZEUGE dieses Laufs lesen ueber den gemeinsamen
+    # Lesezugang (Punkt f) – nicht ueber den Token des Benutzers, den der
+    # Agent sonst ueber current_jira_user aufloeste. Gesetzt VOR wait_for: der
+    # dort erzeugte Task kopiert den Kontext beim Anlegen.
+    from backend import jira_accounts as _jacc  # noqa: PLC0415
+    _ng = _jacc.nur_gemeinsam.set(True)
     try:
         roh = await asyncio.wait_for(
             agent.run_task_headless(auftrag, reasoning_effort="low", actor=actor),
@@ -889,6 +898,8 @@ async def _agent_lauf(sysp: str, auftrag: str, werkzeuge: set,
         from backend.llm import scrub_secrets  # noqa: PLC0415
         raise AssistFehler("Die Auswertung ist fehlgeschlagen: %s"
                            % scrub_secrets(str(e))) from e
+    finally:
+        _jacc.nur_gemeinsam.reset(_ng)
     return (roh or ""), str(getattr(agent, "current_model", "") or "")
 
 

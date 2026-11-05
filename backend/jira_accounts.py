@@ -90,6 +90,16 @@ class JiraKontoFehler(Exception):
 current_jira_user: contextvars.ContextVar = contextvars.ContextVar(
     "jarvis_jira_user", default="")
 
+# Browser-Erweiterung (Betreiber 2026-11-05, Punkt f): was sie ausloest, liest
+# Jira AUSSCHLIESSLICH ueber den gemeinsamen Lesezugang – in der Erweiterung ist
+# nur noch die Anmeldung an Jarvis hinterlegt. ``jira_assist`` setzt den Wert
+# fuer die Dauer eines Laufs; ``aufloesen`` beachtet ihn VOR jedem persoenlichen
+# Zugang. Ein ContextVar statt eines Parameters, weil die Jira-Werkzeuge des
+# Assistentenlaufs ueber den Agenten gehen und den Benutzer nur ueber
+# ``current_jira_user`` kennen.
+nur_gemeinsam: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_jira_nur_gemeinsam", default=False)
+
 
 def norm_user(name: str) -> str:
     """Kontoname ohne Domaenen-Praefix/UPN-Suffix, klein.
@@ -199,6 +209,34 @@ def _speichern(alle: dict) -> None:
 # NICHT enthalten und das ist Absicht:
 #   base_url  – die Adresse kommt IMMER aus der Skill-Config (Modul-Docstring)
 GEHEIMFELDER = ("api_token",)
+
+# ── Persoenliche Zugaenge erlauben? (Betreiber 2026-11-05) ──────────────────
+# Schalter in Einstellungen → Jira, Container "Verbindung". AUS heisst: kein
+# persoenlicher Token liegt mehr auf dem Server (beim Abschalten loescht
+# ``main.update_skill_config`` sie alle ueber ``alle_entfernen``), neue werden
+# abgelehnt, und jeder Lauf benutzt den gemeinsamen Lesezugang.
+# Vorgabe (Feld fehlt) = erlaubt: so aendert das Einspielen nichts am Betrieb.
+PERSOENLICH_SCHALTER = "persoenliche_zugaenge"
+ABGESCHALTET_TEXT = ("Persoenliche Jira-Zugaenge sind abgeschaltet – es gilt der "
+                     "gemeinsame Lesezugang.")
+
+
+def persoenlich_erlaubt(cfg: dict | None = None) -> bool:
+    if cfg is None:
+        try:
+            cfg = get_jira_config() or {}
+        except Exception:  # noqa: BLE001
+            cfg = {}
+    return cfg.get(PERSOENLICH_SCHALTER) is not False
+
+
+def alle_entfernen() -> int:
+    """Loescht ALLE persoenlichen Zugaenge (samt Token). Rueckgabe: Anzahl."""
+    alle = _laden()
+    n = len(alle)
+    if n:
+        _speichern({})
+    return n
 AENDERBAR = ("aktiv",) + GEHEIMFELDER
 
 
@@ -281,6 +319,8 @@ def zugang_info(user: str) -> dict:
         # ein eigener Token der EINZIGE Weg – dann darf die Oberflaeche ihn
         # nicht als "optional" beschreiben.
         "sammel_vorhanden": bool(sammel_client().configured),
+        # Abgeschaltet blendet die Oberflaeche "Mein Jira-Zugang" aus.
+        "persoenlich_erlaubt": persoenlich_erlaubt(),
     }
 
 
@@ -311,6 +351,8 @@ def speichern(user: str, felder: dict) -> dict:
     if ":" in un:
         # wa:/tg:/api: – Kanal-Kennungen sind keine Personen mit Jira-Benutzer.
         raise JiraKontoFehler("Fuer diese Kennung kann kein Jira-Zugang hinterlegt werden.")
+    if not persoenlich_erlaubt():
+        raise JiraKontoFehler(ABGESCHALTET_TEXT)
 
     alle = _laden()
     k = alle.get(un) or _leer(un)
@@ -422,6 +464,15 @@ def aufloesen(user: str | None = None) -> dict:
     un = norm_user(user or "")
     basis = basis_url()
     hinweis = ""
+    if nur_gemeinsam.get():
+        # Lauf der Browser-Erweiterung: nur der gemeinsame Lesezugang.
+        return {"client": sammel_client(), "quelle": QUELLE_SAMMEL,
+                "hinweis": "", "benutzer": un}
+    if not persoenlich_erlaubt():
+        # Ein Rest in der Datei (sollte es nach dem Abschalten nicht geben)
+        # darf trotzdem nicht greifen – der Schalter entscheidet, nicht die Datei.
+        return {"client": sammel_client(), "quelle": QUELLE_SAMMEL,
+                "hinweis": "", "benutzer": un}
     if un and ":" not in un:
         try:
             k = _laden().get(un)
@@ -445,7 +496,9 @@ def aufloesen(user: str | None = None) -> dict:
                 except JiraKontoFehler as e:
                     hinweis = "%s Es gilt vorerst der gemeinsame Zugang." % e
                 else:
-                    c = JiraClient({"base_url": basis, "api_token": token})
+                    # Nur der PERSOENLICHE Zugang darf schreiben (unter dem
+                    # eigenen Namen); alles andere ist Nur-Lesen.
+                    c = JiraClient({"base_url": basis, "api_token": token}, schreiben=True)
                     if c.configured:
                         return {"client": c, "quelle": QUELLE_PERSOENLICH,
                                 "hinweis": "", "benutzer": un}
@@ -477,6 +530,8 @@ def testen(user: str) -> dict:
     "ok" (weil der Sammelzugang antwortet) und der Benutzer haette keinen Weg,
     seinen Fehler zu finden – dieselbe Falle wie beim SAP-Verbindungstest.
     """
+    if not persoenlich_erlaubt():
+        raise JiraKontoFehler(ABGESCHALTET_TEXT)
     un = norm_user(user)
     k = _laden().get(un)
     if not (k and _vollstaendig(k)):
@@ -506,5 +561,6 @@ __all__ = [
     "zugang_info", "speichern", "loeschen", "hat_zugang", "alle_benutzer",
     "merke_ergebnis", "melde_fehler", "testen", "basis_url", "sammel_client",
     "aufloesen", "client_fuer_lauf", "quelle_text",
+    "persoenlich_erlaubt", "alle_entfernen", "PERSOENLICH_SCHALTER", "nur_gemeinsam",
     "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "AENDERBAR", "GEHEIMFELDER",
 ]

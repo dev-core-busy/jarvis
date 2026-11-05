@@ -323,9 +323,8 @@ _buendel_voll_cv: contextvars.ContextVar = contextvars.ContextVar(
 
 # Confluence/Jira sind im Chat ausschliesslich lesend nutzbar: schreibende Tools
 # werden dem Agenten gar nicht erst angeboten (gezielte read-only Abfragen).
+# (Confluence hat seit 2026-11-05 gar keine schreibenden Werkzeuge mehr.)
 _EXTERNAL_WRITE_TOOLS = {
-    "confluence_create_page", "confluence_update_page", "confluence_delete_page",
-    "confluence_add_comment", "confluence_upload_attachment",
     "jira_create_issue", "jira_add_comment",
 }
 

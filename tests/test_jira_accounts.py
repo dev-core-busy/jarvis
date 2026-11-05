@@ -273,8 +273,12 @@ check("main.py::_jira_client nimmt einen Benutzer entgegen",
 check("und die Endpunkte geben ihn mit",
       MAIN.count("_jira_client(user)") >= 6,
       str(MAIN.count("_jira_client(user)")))
-check("die health-Route fragt den Zugang DIESES Benutzers ab",
-      'jira_accounts.aufloesen(user)["client"].configured' in MAIN)
+# Seit 2026-11-05 (Punkt f): die Browser-Erweiterung liest NUR ueber den
+# gemeinsamen Lesezugang – also fragt ihre health-Route genau den ab. Die
+# vollstaendige Regel (samt jira_assist._client) prueft am Syntaxbaum
+# tests/test_jira_nur_lesen.py, Abschnitt 4.
+check("die health-Route fragt den gemeinsamen Lesezugang ab (Erweiterung)",
+      "jira_accounts.sammel_client().configured" in MAIN)
 check("agent.py setzt den ContextVar je Werkzeug-Aufruf",
       "current_jira_user" in AGENT)
 check("und nimmt ihn im finally zurueck (sonst haengt er am naechsten Lauf)",

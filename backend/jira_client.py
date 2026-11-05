@@ -18,6 +18,15 @@ import re
 
 import requests
 
+# Nur-Lesen (Betreiber 2026-11-05): jeder JiraClient liest nur, solange ihn
+# nicht ausdruecklich ein PERSOENLICHER Zugang mit ``schreiben=True`` baut
+# (``jira_accounts.aufloesen``). Der gemeinsame Zugang ist damit der "allgemeine
+# Jira-Lesezugang" – egal, wo er entsteht (Skill, Support-Suche,
+# Loesungsarchiv, Jira-Assistent). Vorgabe Nur-Lesen ist fail-closed: eine
+# neue Konstruktionsstelle, die den Parameter vergisst, kann nicht schreiben.
+NUR_LESEN_TEXT = ("Der gemeinsame Jira-Zugang ist nur lesend – Tickets anlegen "
+                  "und kommentieren geht nur mit einem persoenlichen Zugang.")
+
 
 def get_jira_config() -> dict:
     """Liest die in der Skill-Config hinterlegten Jira-Werte."""
@@ -200,8 +209,9 @@ class JiraError(Exception):
 class JiraClient:
     """Minimaler, geteilter Jira-REST-Client (API v2)."""
 
-    def __init__(self, cfg: dict | None = None):
+    def __init__(self, cfg: dict | None = None, *, schreiben: bool = False):
         cfg = cfg if cfg is not None else get_jira_config()
+        self.schreiben = bool(schreiben)
         self.base = (cfg.get("base_url") or "").strip().rstrip("/")
         self.token = (cfg.get("api_token") or "").strip()
 
@@ -217,6 +227,9 @@ class JiraClient:
         return h
 
     def _request(self, method: str, path: str, *, params=None, json=None, headers=None):
+        # VOR allem anderen: ein gesperrter Aufruf verlaesst den Prozess nicht.
+        if (method or "").upper() != "GET" and not self.schreiben:
+            raise JiraError(0, NUR_LESEN_TEXT)
         if not self.configured:
             raise JiraError(0, "Jira ist nicht konfiguriert (URL/Token fehlen).")
         url = self.base + path

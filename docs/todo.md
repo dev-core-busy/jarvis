@@ -10,11 +10,19 @@ mehr. Die Bereiche werden nacheinander umgestellt.
       Zugangs und die Kennwörter aller eigenen Zugänge gelöscht; angemeldet wird
       im Bereich SAP, das Kennwort gilt nur für die Sitzung, der Browser darf es
       sich merken.
-- [ ] **VEMAS** – vorerst unverändert, wird später umgestellt.
-- [ ] **Jira** – Knopf „persönliche Zugänge erlauben“ (unter Container
-      Verbindung); beim Abschalten nach Warnhinweis die persönlichen Zugänge
-      löschen und den Container „Persönliche Jira-Zugänge“ ausblenden.
-- [ ] **Confluence** – Personal Access Token bleibt; er muss nur lesend
-      berechtigt sein.
+- [x] **VEMAS** – wie SAP: Schalter „Anmeldung über die Portal-Kachel fordern“
+      (Einstellungen → Vemas); gespeicherte Kennwörter/Token werden nach
+      Warnhinweis gelöscht, angemeldet wird im Bereich VEMAS für die Sitzung.
+- [x] **Jira** – Schalter „Persönliche Zugänge erlauben“ (Container
+      Verbindung); beim Abschalten nach Warnhinweis werden die persönlichen
+      Zugänge gelöscht und „Persönliche Jira-Zugänge“ / „Mein Jira-Zugang“
+      ausgeblendet. Der gemeinsame Zugang ist hart nur lesend (allgemeiner
+      Jira-Lesezugang); schreiben kann nur ein persönlicher Zugang.
+- [x] **Confluence** – Nur-Lesen ist hart erzwungen (wie SAP, nicht
+      abschaltbar); der Personal Access Token braucht nur Leserechte. Einzige
+      Ausnahme: „Als neue Confluence-Seite“ beim Destillat im Bereich Wissen.
+- [x] **Jira-Browser-Erweiterung** – dort ist nur noch die Anmeldung an Jarvis
+      hinterlegt; alle Jira-Lesezugriffe, die sie auslöst (Ticket laden,
+      Nachschlage-Werkzeuge), laufen über den gemeinsamen Jira-Lesezugang.
 - [ ] **Outlook** – größerer Umbau: das Add-in greift direkt auf Exchange zu;
       Jarvis dient dort nur noch der Analyse und als Wissensquelle.

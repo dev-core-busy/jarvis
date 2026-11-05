@@ -169,10 +169,24 @@
                     if ($('jira-url')) $('jira-url').value = c.base_url || '';
                     geheimFeld('jira-token', 'jira:api_token', gs.indexOf('api_token') >= 0);
                     if ($('jira-max-results')) $('jira-max-results').value = c.max_results || 50;
+                    // Vorgabe (Feld fehlt) = erlaubt – dieselbe Regel wie
+                    // jira_accounts.persoenlich_erlaubt.
+                    Manager._persoenlichGespeichert = c.persoenliche_zugaenge !== false;
+                    if ($('jira-persoenlich')) $('jira-persoenlich').checked = Manager._persoenlichGespeichert;
+                    Manager._applyPersoenlich(Manager._persoenlichGespeichert);
                     if ($('jshare-chrome')) $('jshare-chrome').value = c.addon_pfad_chrome || '';
                     if ($('jshare-firefox')) $('jshare-firefox').value = c.addon_pfad_firefox || '';
                 })
                 .catch(function () {});
+        },
+
+        // Container "Persoenliche Jira-Zugaenge" nur, solange sie erlaubt sind.
+        // Folgt dem GESPEICHERTEN Stand, nicht dem Haken: ein abgewaehlter, noch
+        // nicht gespeicherter Haken hat nichts geloescht.
+        _persoenlichGespeichert: true,
+        _applyPersoenlich: function (erlaubt) {
+            var sect = $('ji-sect-acc');
+            if (sect) sect.style.display = erlaubt ? '' : 'none';
         },
 
         save: function () {
@@ -184,8 +198,17 @@
             var body = {
                 base_url: ($('jira-url') ? $('jira-url').value : '').trim(),
                 api_token: ($('jira-token') ? $('jira-token').value : '').trim(),
-                max_results: mr
+                max_results: mr,
+                persoenliche_zugaenge: $('jira-persoenlich') ? $('jira-persoenlich').checked : true
             };
+            // Abschalten loescht alle persoenlichen Token – vorher fragen.
+            if (!body.persoenliche_zugaenge && Manager._persoenlichGespeichert) {
+                if (!window.confirm(t('jira.persoenlich_confirm',
+                    'Achtung: Beim Speichern werden ALLE gespeicherten persönlichen Jira-Token gelöscht. '
+                    + 'Danach laufen alle Abfragen über den gemeinsamen Lesezugang. Fortfahren?'))) {
+                    return;
+                }
+            }
             status('Speichere…');
             fetch('/api/skills/jira/config', {
                 method: 'POST',
@@ -198,7 +221,12 @@
                     return d;
                 });
             })
-              .then(function () { status('✓ Gespeichert', 'ok'); })
+              .then(function () {
+                  status('✓ Gespeichert', 'ok');
+                  Manager._persoenlichGespeichert = body.persoenliche_zugaenge;
+                  Manager._applyPersoenlich(body.persoenliche_zugaenge);
+                  if (Manager.loadZugaenge) Manager.loadZugaenge();
+              })
               .catch(function (e) {
                 status('✗ ' + (e && e.code === 'geheimnis_neu_eingeben'
                     ? window.t('common.secret_reenter') : 'Fehler beim Speichern'), 'error');

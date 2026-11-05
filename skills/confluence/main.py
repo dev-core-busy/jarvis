@@ -19,13 +19,14 @@ def _client() -> ConfluenceClient:
 
     Seit 2026-09-29 ist der in der Skill-Config hinterlegte Token nur noch der
     RUECKFALL: wer unter *Mein Confluence-Zugang* (``/confluence-addon``) einen
-    eigenen PAT hinterlegt, arbeitet damit – und schreibt in Confluence unter
-    seinem eigenen Namen. Begruendung und Reichweite: Docstring von
+    eigenen PAT hinterlegt, arbeitet damit – und sieht genau seine eigenen
+    Bereiche. Seit 2026-11-05 liest der Skill nur noch (Nur-Lesen im
+    ``confluence_client``). Begruendung und Reichweite: Docstring von
     ``backend.confluence_accounts``.
 
     Der Benutzer kommt aus einem ContextVar, den der Dispatch je Werkzeug-Aufruf
     setzt – NIE aus einem Werkzeug-Argument: sonst koennte das Modell waehlen,
-    mit wessen Token es liest und in wessen Namen es schreibt.
+    mit wessen Token es liest.
 
     DIES IST DIE EINZIGE Konstruktionsstelle des Skills (auch ``_Base._guard``
     laeuft darueber). Waere sie nur halb umgestellt, lieferten zwei Werkzeuge
@@ -34,16 +35,6 @@ def _client() -> ConfluenceClient:
     """
     from backend import confluence_accounts  # noqa: PLC0415 – Zirkelimport
     return confluence_accounts.client_fuer_lauf()
-
-
-def _as_storage(body: str) -> str:
-    """Plaintext → Confluence-Storage-XHTML (HTML wird unveraendert gelassen)."""
-    if not body:
-        return ""
-    if "<" in body and ">" in body:
-        return body  # sieht nach (X)HTML aus
-    paras = [p.strip() for p in body.split("\n\n") if p.strip()]
-    return "".join("<p>%s</p>" % p.replace("\n", "<br/>") for p in paras) or "<p></p>"
 
 
 async def _to_thread(fn, *a, **kw):
@@ -202,134 +193,6 @@ class ConfluenceGetPageTool(_Base):
             html_to_text(body) or "(kein Textinhalt)")
 
 
-class ConfluenceCreatePageTool(_Base):
-    @property
-    def name(self): return "confluence_create_page"
-
-    @property
-    def description(self):
-        return ("Legt eine neue Seite an. Body als Text oder Confluence-Storage-XHTML; "
-                "Text wird automatisch in Absaetze umgewandelt.")
-
-    def parameters_schema(self):
-        return {"type": "OBJECT", "properties": {
-            "space": {"type": "STRING", "description": "Space-Key (z.B. 'DEV')."},
-            "title": {"type": "STRING", "description": "Titel der neuen Seite."},
-            "body": {"type": "STRING", "description": "Inhalt (Text oder Storage-XHTML)."},
-            "parent_id": {"type": "STRING", "description": "Optional: ID der uebergeordneten Seite."},
-        }, "required": ["space", "title", "body"]}
-
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
-        space = (kwargs.get("space") or "").strip()
-        title = (kwargs.get("title") or "").strip()
-        if not space or not title:
-            return "space und title sind erforderlich."
-        body = _as_storage(kwargs.get("body") or "")
-        parent = (kwargs.get("parent_id") or "").strip() or None
-        try:
-            page = await _to_thread(c.create_page, space, title, body, parent)
-        except ConfluenceError as e:
-            return _fmt_err(e)
-        link = c.link_for(page, page)
-        return "✅ Seite angelegt: %s (ID %s)%s" % (
-            page.get("title", title), page.get("id", "?"), ("\n" + link) if link else "")
-
-
-class ConfluenceUpdatePageTool(_Base):
-    @property
-    def name(self): return "confluence_update_page"
-
-    @property
-    def description(self):
-        return ("Aktualisiert eine bestehende Seite (Body und/oder Titel). Die "
-                "Versionsnummer wird automatisch erhoeht.")
-
-    def parameters_schema(self):
-        return {"type": "OBJECT", "properties": {
-            "page_id": {"type": "STRING", "description": "ID der zu aendernden Seite."},
-            "body": {"type": "STRING", "description": "Neuer Inhalt (Text oder Storage-XHTML)."},
-            "title": {"type": "STRING", "description": "Optional: neuer Titel."},
-        }, "required": ["page_id"]}
-
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
-        page_id = (kwargs.get("page_id") or "").strip()
-        if not page_id:
-            return "page_id ist erforderlich."
-        body = kwargs.get("body")
-        body = _as_storage(body) if body else None
-        title = (kwargs.get("title") or "").strip() or None
-        if body is None and not title:
-            return "Bitte body und/oder title angeben."
-        try:
-            page = await _to_thread(c.update_page, page_id, body, title)
-        except ConfluenceError as e:
-            return _fmt_err(e)
-        ver = (page.get("version", {}) or {}).get("number", "?")
-        return "✅ Seite aktualisiert: %s (ID %s, Version %s)" % (
-            page.get("title", "?"), page.get("id", page_id), ver)
-
-
-class ConfluenceDeletePageTool(_Base):
-    @property
-    def name(self): return "confluence_delete_page"
-
-    @property
-    def description(self):
-        return "Loescht (papierkorbt) eine Seite anhand ihrer ID."
-
-    def parameters_schema(self):
-        return {"type": "OBJECT", "properties": {
-            "page_id": {"type": "STRING", "description": "ID der zu loeschenden Seite."}},
-            "required": ["page_id"]}
-
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
-        page_id = (kwargs.get("page_id") or "").strip()
-        if not page_id:
-            return "page_id ist erforderlich."
-        try:
-            await _to_thread(c.delete_page, page_id)
-        except ConfluenceError as e:
-            return _fmt_err(e)
-        return "🗑️ Seite %s geloescht (in den Papierkorb verschoben)." % page_id
-
-
-class ConfluenceAddCommentTool(_Base):
-    @property
-    def name(self): return "confluence_add_comment"
-
-    @property
-    def description(self):
-        return "Fuegt einer Seite einen Kommentar hinzu."
-
-    def parameters_schema(self):
-        return {"type": "OBJECT", "properties": {
-            "page_id": {"type": "STRING", "description": "ID der Seite."},
-            "body": {"type": "STRING", "description": "Kommentartext."},
-        }, "required": ["page_id", "body"]}
-
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
-        page_id = (kwargs.get("page_id") or "").strip()
-        body = (kwargs.get("body") or "").strip()
-        if not page_id or not body:
-            return "page_id und body sind erforderlich."
-        try:
-            res = await _to_thread(c.add_comment, page_id, _as_storage(body))
-        except ConfluenceError as e:
-            return _fmt_err(e)
-        return "💬 Kommentar hinzugefuegt (ID %s)." % res.get("id", "?")
-
 
 class ConfluenceListAttachmentsTool(_Base):
     @property
@@ -449,41 +312,6 @@ class ConfluenceDownloadAttachmentTool(_Base):
         return head + "\n" + "\n".join(lines)
 
 
-class ConfluenceUploadAttachmentTool(_Base):
-    @property
-    def name(self): return "confluence_upload_attachment"
-
-    @property
-    def description(self):
-        return ("Laedt eine (server-lokale) Datei als Anhang an eine Seite hoch. "
-                "file_path ist ein Pfad auf dem Jarvis-Server.")
-
-    def parameters_schema(self):
-        return {"type": "OBJECT", "properties": {
-            "page_id": {"type": "STRING", "description": "ID der Seite."},
-            "file_path": {"type": "STRING", "description": "Pfad der hochzuladenden Datei (auf dem Server)."},
-        }, "required": ["page_id", "file_path"]}
-
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
-        page_id = (kwargs.get("page_id") or "").strip()
-        file_path = (kwargs.get("file_path") or "").strip()
-        if not page_id or not file_path:
-            return "page_id und file_path sind erforderlich."
-        try:
-            res = await _to_thread(c.upload_attachment, page_id, file_path)
-        except ConfluenceError as e:
-            return _fmt_err(e)
-        results = res.get("results", res if isinstance(res, list) else [res])
-        name = ""
-        try:
-            name = results[0].get("title", "")
-        except (IndexError, AttributeError):
-            pass
-        return "📎 Anhang hochgeladen%s (Seite %s)." % ((": " + name) if name else "", page_id)
-
 
 def get_tools():
     return [
@@ -491,11 +319,6 @@ def get_tools():
         ConfluenceListSpacesTool(),
         ConfluenceSearchTool(),
         ConfluenceGetPageTool(),
-        ConfluenceCreatePageTool(),
-        ConfluenceUpdatePageTool(),
-        ConfluenceDeletePageTool(),
-        ConfluenceAddCommentTool(),
         ConfluenceListAttachmentsTool(),
         ConfluenceDownloadAttachmentTool(),
-        ConfluenceUploadAttachmentTool(),
     ]

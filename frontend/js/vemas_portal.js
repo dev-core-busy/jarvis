@@ -110,6 +110,25 @@
                 var el = $('vm-conn'); if (!el) return;
                 if (!d) { el.textContent = ''; return; }
                 accRenderState();
+                if (!d.configured && d.kachel_pflicht && d.anmeldung && d.anmeldung.feld) {
+                    // Zugang hat schon funktioniert, es fehlt nur das Kennwort:
+                    // direkt fragen statt einen Hinweistext zu zeigen.
+                    el.className = 'vm-conn is-off';
+                    el.textContent = T('vemas.not_logged_in', 'Nicht bei VEMAS angemeldet');
+                    el.title = '';
+                    note('');
+                    loginZeigen(d.anmeldung);
+                    return;
+                }
+                loginVerbergen();
+                if (!d.configured && d.kachel_pflicht) {
+                    el.className = 'vm-conn is-off';
+                    el.textContent = T('vemas.not_logged_in', 'Nicht bei VEMAS angemeldet');
+                    el.title = d.hinweis || '';
+                    note(d.hinweis || T('vemas.not_logged_in', 'Nicht bei VEMAS angemeldet'), 'error');
+                    var sect = $('vm-sect-account'); if (sect) sect.open = true;
+                    return;
+                }
                 if (!d.configured) {
                     el.className = 'vm-conn is-off';
                     el.textContent = T('vemas.not_configured', 'VEMAS nicht konfiguriert');
@@ -584,7 +603,10 @@
         var quelle = (_status && _status.quelle) || 'sammel';
         var hinweis = (_status && _status.hinweis) || '';
         if (pill) {
-            if (quelle === 'persoenlich') {
+            if (quelle === 'keine') {
+                pill.className = 'vm-acc-pill is-warn';
+                pill.textContent = T('vemas.acc_pill_none', 'nicht angemeldet');
+            } else if (quelle === 'persoenlich') {
                 pill.className = 'vm-acc-pill is-own';
                 pill.textContent = T('vemas.acc_pill_own', 'eigener Zugang');
             } else if (hinweis) {
@@ -632,6 +654,7 @@
                 // Kennwort-/Token-Felder bleiben LEER (der Server gibt sie nie
                 // heraus); der Platzhalter sagt, dass leer "unveraendert" heisst.
                 accApplyAuth();
+                accKachel(!!a.kachel_pflicht, !!a.angemeldet);
                 accRenderWrite();
                 accRenderState();
                 if (a.ausgesetzt) {
@@ -649,6 +672,140 @@
                 }
             })
             .catch(function () {});
+    }
+
+    // ── Anmeldekarte oben auf der Seite ─────────────────────────────
+    // Wie in /sap: fragt direkt nach dem Kennwort, wenn der Zugang schon
+    // funktioniert hat; "Anmelden" prueft sofort, und der Browser bekommt das
+    // Kennwort nur zum Merken angeboten, wenn es nachweislich stimmt.
+    var _login = null;      // {feld, benutzer, kanal}
+
+    function loginStatus(msg, kind) {
+        var el = $('vm-login-status'); if (!el) return;
+        el.textContent = msg || '';
+        el.className = 'vm-note' + (kind === 'error' ? ' is-error' : kind === 'ok' ? ' is-ok' : '');
+    }
+
+    function loginZeigen(a) {
+        var box = $('vm-login'); if (!box) return;
+        var neu = !_login || box.hidden;
+        _login = a;
+        var u = $('vm-login-user'); if (u) u.value = a.benutzer || '';
+        var lbl = $('vm-login-pass-label');
+        if (lbl) {
+            var key = a.feld === 'api_token' ? 'vemas.acc_token' : 'vemas.acc_pass';
+            lbl.setAttribute('data-i18n', key);
+            lbl.textContent = T(key, a.feld === 'api_token' ? 'API-Token' : 'Kennwort');
+        }
+        box.hidden = false;
+        if (neu) {
+            loginStatus('');
+            var p = $('vm-login-pass');
+            if (p) { try { p.focus(); } catch (e) { /* belanglos */ } }
+        }
+    }
+
+    function loginVerbergen() {
+        var box = $('vm-login'); if (box) box.hidden = true;
+        _login = null;
+    }
+
+    function loginAbsenden() {
+        if (!_login) return;
+        var p = $('vm-login-pass');
+        var pw = p ? p.value : '';
+        if (!pw) {
+            loginStatus(T('vemas.login_empty', 'Bitte das Kennwort eingeben.'), 'error');
+            return;
+        }
+        var feld = _login.feld, name = _login.benutzer;
+        var btn = $('vm-login-btn'); if (btn) btn.disabled = true;
+        loginStatus(T('vemas.acc_logging_in', 'Melde an…'));
+        var rumpf = {}; rumpf[feld] = pw;
+        fetch('/api/vemas/account', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(rumpf)
+        })
+            .then(function (r) {
+                return r.json().catch(function () { return null; }).then(function (d) {
+                    if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || T('vemas.acc_save_failed', 'Speichern fehlgeschlagen.'));
+                    return fetch('/api/vemas/test', { headers: authHeaders() });
+                });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (t) {
+                if (p) p.value = '';
+                if (t && t.ok) {
+                    if (feld !== 'api_token') kennwortMerken(name, pw);
+                    loginStatus('');
+                    loginVerbergen();
+                    note('✓ ' + T('vemas.acc_logged_in', 'Angemeldet – das Kennwort gilt für diese Sitzung.'), 'ok');
+                } else {
+                    loginStatus(T('vemas.login_failed', 'Anmeldung fehlgeschlagen:') + ' '
+                        + ((t && t.error) || ''), 'error');
+                }
+                loadStatus();
+                loadAccount();
+            })
+            .catch(function (e) {
+                if (p) p.value = '';
+                loginStatus((e && e.message) || T('vemas.failed', 'Fehlgeschlagen.'), 'error');
+            })
+            .then(function () { if (btn) btn.disabled = false; });
+    }
+
+    // Chromium/Edge: ausdruecklich anbieten, das Kennwort zu merken; Firefox
+    // erkennt das Absenden des Formulars selbst. Fehler hier sind belanglos.
+    function kennwortMerken(name, pw) {
+        try {
+            if (!name || !pw || !window.PasswordCredential || !navigator.credentials) return;
+            navigator.credentials.store(new window.PasswordCredential({
+                id: name, password: pw, name: 'VEMAS ' + name
+            })).catch(function () {});
+        } catch (e) { /* belanglos */ }
+    }
+
+    // ── Kachel-Modus im Abschnitt "Mein VEMAS-Zugang" ───────────────
+    // Im normalen Modus bleiben die Felder "off"/"new-password" – sonst boete
+    // der Browser dort die Jarvis-Anmeldung an.
+    var _kachel = false;
+
+    function accKachel(an, angemeldet) {
+        _kachel = an;
+        var h = $('vm-acc-hint'), hk = $('vm-acc-hint-kachel');
+        if (h) h.hidden = an;
+        if (hk) hk.hidden = !an;
+        var u = $('vm-acc-user'); if (u) u.setAttribute('autocomplete', an ? 'username' : 'off');
+        ['vm-acc-pass', 'vm-acc-token'].forEach(function (id) {
+            var e = $(id); if (!e) return;
+            e.setAttribute('autocomplete', an ? 'current-password' : 'new-password');
+            // Auch das i18n-Attribut: sonst setzte der naechste Sprachwechsel
+            // wieder "leer = unveraendert", und das stimmt hier nicht.
+            var key = an ? 'vemas.acc_pass_kachel_ph' : 'vemas.acc_pass_ph';
+            e.setAttribute('data-i18n-placeholder', key);
+            e.placeholder = an ? T(key, 'Kennwort – wird nicht gespeichert') : T(key, 'leer = unverändert');
+        });
+        var s = $('vm-acc-save');
+        if (s) {
+            s.type = an ? 'submit' : 'button';
+            var sk = an ? 'vemas.acc_login' : 'common.save';
+            s.setAttribute('data-i18n', sk);
+            s.textContent = an ? T(sk, 'Anmelden') : T(sk, 'Speichern');
+        }
+        var lo = $('vm-acc-logout'); if (lo) lo.hidden = !(an && angemeldet);
+    }
+
+    function accAbmelden() {
+        fetch('/api/vemas/account/sitzung', { method: 'DELETE', headers: authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function () {
+                accClearSecrets();
+                accNote(T('vemas.acc_logged_out', 'Von VEMAS abgemeldet.'), 'ok');
+                loadAccount();
+                loadStatus();
+            })
+            .catch(function () { accNote('❌ ' + T('vemas.failed', 'Fehlgeschlagen.'), 'error'); });
     }
 
     function accCollect() {
@@ -682,11 +839,12 @@
                 'Bitte eine Anmeldeart wählen – oder „Eigenen Zugang entfernen" drücken.'), 'error');
             return;
         }
-        accNote(T('vemas.acc_saving', 'Speichere…'));
+        accNote(_kachel ? T('vemas.acc_logging_in', 'Melde an…') : T('vemas.acc_saving', 'Speichere…'));
+        var daten = accCollect();
         fetch('/api/vemas/account', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify(accCollect())
+            body: JSON.stringify(daten)
         })
             .then(function (r) {
                 return r.json().catch(function () { return null; }).then(function (d) {
@@ -699,8 +857,10 @@
                         || T('vemas.acc_save_failed', 'Speichern fehlgeschlagen.'), 'error');
                     return;
                 }
+                if (_kachel && daten.auth_kind !== 'bearer') kennwortMerken(daten.username, daten.password);
                 accClearSecrets();
-                accNote('✓ ' + T('vemas.acc_saved', 'Gespeichert.'), 'ok');
+                accNote('✓ ' + (_kachel ? T('vemas.acc_logged_in', 'Angemeldet – das Kennwort gilt für diese Sitzung.')
+                                        : T('vemas.acc_saved', 'Gespeichert.')), 'ok');
                 loadAccount();
                 loadStatus();      // Pille und Verbindungsanzeige folgen sofort
             })
@@ -775,9 +935,21 @@
 
         var accA = $('vm-acc-auth');
         if (accA) accA.addEventListener('change', function () { accApplyAuth(); accNote(''); });
-        var accS = $('vm-acc-save'); if (accS) accS.addEventListener('click', saveAccount);
+        // Im Kachel-Modus ist der Knopf type=submit – dann loest das Absenden
+        // aus (unten), ein zweiter Aufruf hier wuerde doppelt anmelden.
+        var accS = $('vm-acc-save');
+        if (accS) accS.addEventListener('click', function () { if (!_kachel) saveAccount(); });
         var accP = $('vm-acc-test'); if (accP) accP.addEventListener('click', testAccount);
         var accD = $('vm-acc-del'); if (accD) accD.addEventListener('click', delAccount);
+        var accL = $('vm-acc-logout'); if (accL) accL.addEventListener('click', accAbmelden);
+        // Absenden nur im Kachel-Modus (Enter im Kennwortfeld = Anmelden).
+        var accF = $('vm-acc-form');
+        if (accF) accF.addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (_kachel) saveAccount();
+        });
+        var lf = $('vm-login');
+        if (lf) lf.addEventListener('submit', function (e) { e.preventDefault(); loginAbsenden(); });
 
         var qr = $('vm-q-run'); if (qr) qr.addEventListener('click', runQuery);
 

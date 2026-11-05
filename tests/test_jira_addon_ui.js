@@ -25,7 +25,8 @@ const sitzungLaden = require("./lib/sitzung_laden");
 
 const WURZEL = path.resolve(__dirname, "..");
 const HTML = fs.readFileSync(path.join(WURZEL, "frontend/jira_addon.html"), "utf8");
-const JS = fs.readFileSync(path.join(WURZEL, "frontend/js/jira_addon.js"), "utf8");
+// JIRA_ADDON_JS: sabotierte Kopie fuer die Gegenprobe (gegen_jira_nur_lesen.py)
+const JS = fs.readFileSync(process.env.JIRA_ADDON_JS || path.join(WURZEL, "frontend/js/jira_addon.js"), "utf8");
 const SETTINGS = fs.readFileSync(path.join(WURZEL, "frontend/settings.html"), "utf8");
 const JIRA_JS = fs.readFileSync(path.join(WURZEL, "frontend/js/jira.js"), "utf8");
 const I18N = fs.readFileSync(path.join(WURZEL, "frontend/js/i18n.js"), "utf8");
@@ -44,7 +45,7 @@ function section(t) { console.log("\n═══ " + t); }
 
 /** Laedt die Seite, laesst das Skript laufen und gibt das Ergebnis zurueck. */
 async function seite({ pfade = null, istAdmin = false, healthOk = true,
-                       healthWirft = false, zert = null } = {}) {
+                       healthWirft = false, zert = null, konto = null } = {}) {
   const dom = new JSDOM(HTML, { url: "https://jarvis.test/jira-addon",
                                 runScripts: "outside-only" });
   const w = dom.window;
@@ -68,6 +69,9 @@ async function seite({ pfade = null, istAdmin = false, healthOk = true,
       return { ok: true, json: async () => Object.assign({
         ok: true, jira_konfiguriert: true,
         paket_pfade: pfade || { chrome: "", firefox: "" } }, zert || {}) };
+    }
+    if (p === "/api/jira/account" && konto) {
+      return { ok: true, json: async () => ({ ok: true, account: konto }) };
     }
     if (p === "/api/jira/assist/paket") {
       return { ok: true, blob: async () => new w.Blob(["x"]) };
@@ -477,6 +481,30 @@ section("10) Die Anleitung nennt die Seitenleiste als Vorgabe (2026-09-03)");
           "jeder Rueckfall-Text in jira_addon.html ist deckungsgleich mit DE",
           schief.join(", "));
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("Persoenliche Zugaenge abgeschaltet: 'Mein Jira-Zugang' entfaellt");
+// ═══════════════════════════════════════════════════════════════════════════
+{
+  const KONTO = { vorhanden: false, aktiv: true, token_gesetzt: false,
+                  basis_url: "https://jira.beispiel.de", server_konfiguriert: true,
+                  sammel_vorhanden: true };
+  const an = await seite({ konto: Object.assign({ persoenlich_erlaubt: true }, KONTO) });
+  await new Promise((r) => setTimeout(r, 60));
+  const sa = an.w.document.getElementById("ja-sect-account");
+  check(!!sa && sa.style.display !== "none",
+        "Positivkontrolle: erlaubt -> Abschnitt sichtbar", sa && sa.style.display);
+  check(an.gerufen.some((u) => u.indexOf("/api/jira/account") === 0),
+        "Positivkontrolle: die Seite fragt den eigenen Zugang ab");
+  an.w.close();
+  const aus = await seite({ konto: Object.assign({ persoenlich_erlaubt: false }, KONTO) });
+  await new Promise((r) => setTimeout(r, 60));
+  const sb = aus.w.document.getElementById("ja-sect-account");
+  check(!!sb && sb.style.display === "none", "abgeschaltet -> Abschnitt ausgeblendet",
+        sb && sb.style.display);
+  check(aus.fehler.length === 0, "abgeschaltet: kein Skriptfehler", aus.fehler.join("; "));
+  aus.w.close();
 }
 
 console.log("\n" + ok + " OK, " + fail + " FAIL");

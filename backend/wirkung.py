@@ -112,12 +112,8 @@ TABELLE: dict[str, "str | Callable[[dict], str | None]"] = {
     # Nachrichten an Dritte
     "whatsapp_send": AUSSEN,
     "telegram_send": AUSSEN,
-    # Fremdsysteme mit Schreibzugriff
-    "confluence_create_page": AUSSEN,
-    "confluence_update_page": AUSSEN,
-    "confluence_add_comment": AUSSEN,
-    "confluence_upload_attachment": AUSSEN,
-    "confluence_delete_page": LOESCHEN,
+    # Fremdsysteme mit Schreibzugriff (Confluence ist seit 2026-11-05 nur
+    # lesend angebunden – die Schreibwerkzeuge gibt es nicht mehr)
     "jira_add_comment": AUSSEN,
     "jira_create_issue": AUSSEN,
     "vemas_write": AUSSEN,

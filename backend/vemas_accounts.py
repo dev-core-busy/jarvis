@@ -208,6 +208,89 @@ AENDERBAR = ("aktiv",) + TEXTFELDER + GEHEIMFELDER
 ANMELDEARTEN = ("basic", "bearer", "login")
 
 
+# ── Anmeldung ueber die Portal-Kachel (Betreiber 2026-11-05, wie SAP) ───────
+#
+# Schaltet der Administrator unter Einstellungen → Vemas "Anmeldung ueber die
+# Portal-Kachel fordern" ein, liegt KEIN VEMAS-Kennwort/-Token mehr auf der
+# Platte: das des Sammelzugangs leert ``main.update_skill_config``, die der
+# persoenlichen Zugaenge ``kennwoerter_entfernen`` (die Zugaenge selbst –
+# Anmeldeart, Benutzer – bleiben). Eingegeben wird nur noch fuer die Sitzung
+# (Arbeitsspeicher, ``_SITZUNG``); der Browser darf es sich merken.
+#
+# KEIN RUECKFALL auf den Sammelzugang, solange der Schalter an ist: dessen
+# Kennwort ist geleert, ein Rueckfall schickte nur abgelehnte Anmeldungen.
+# Ein Prozess (uvicorn ohne --workers) – ein schlichtes dict genuegt.
+KACHEL_SCHALTER = "kachel_anmeldung"
+SITZUNG_LAUFZEIT = 12 * 3600
+_SITZUNG: dict = {}              # benutzer_norm -> {"felder": {...}, "bis": ts}
+
+
+def kachel_pflicht(cfg: dict | None = None) -> bool:
+    c = skill_config() if cfg is None else (cfg or {})
+    return bool(c.get(KACHEL_SCHALTER))
+
+
+def _sitzung_holen(un: str) -> dict:
+    s = _SITZUNG.get(un)
+    if not s:
+        return {}
+    if float(s.get("bis") or 0) < time.time():
+        _SITZUNG.pop(un, None)
+        return {}
+    return dict(s.get("felder") or {})
+
+
+def sitzung_bis(user: str) -> int:
+    un = norm_user(user)
+    if not _sitzung_holen(un):
+        return 0
+    return int((_SITZUNG.get(un) or {}).get("bis") or 0)
+
+
+def sitzung_beenden(user: str) -> bool:
+    """VEMAS-Anmeldung aus dem Arbeitsspeicher nehmen (Abmelden, Anmeldefehler)."""
+    return _SITZUNG.pop(norm_user(user), None) is not None
+
+
+def _sitzung_setzen(un: str, felder: dict) -> None:
+    alt = _sitzung_holen(un)
+    alt.update(felder)
+    _SITZUNG[un] = {"felder": alt, "bis": time.time() + SITZUNG_LAUFZEIT}
+
+
+def kennwort_gespeichert(user: str) -> bool:
+    """Liegt fuer diesen Zugang ein Kennwort/Token auf der PLATTE?"""
+    k = _laden().get(norm_user(user)) or {}
+    return any((k.get(f + "_enc") or "").strip() for f in GEHEIMFELDER)
+
+
+def kennwoerter_entfernen() -> int:
+    """Entfernt die gespeicherten Kennwoerter/Token ALLER persoenlichen
+    Zugaenge; die Zugaenge selbst bleiben. Rueckgabe: Zahl der betroffenen."""
+    alle = _laden()
+    n = 0
+    for k in alle.values():
+        if not isinstance(k, dict):
+            continue
+        weg = [f + "_enc" for f in GEHEIMFELDER if f + "_enc" in k]
+        for f in weg:
+            del k[f]
+        if weg:
+            k["geaendert"] = int(time.time())
+            n += 1
+    if n:
+        _speichern(alle)
+    return n
+
+
+def _eingerichtet(k: dict) -> bool:
+    """Ist der Zugang OHNE Geheimnis vollstaendig (Kachel-Anmeldung)?"""
+    ak = (k.get("auth_kind") or "").strip().lower()
+    if ak in ("basic", "login"):
+        return bool((k.get("username") or "").strip())
+    return ak == "bearer"
+
+
 # ── Aussetzer nach wiederholten Anmeldefehlern ──────────────────────────────
 #
 # WARUM ES DAS GIBT: zeitversetzte Laeufe (Cron, E-Mail-Regeln) melden sich im
@@ -298,7 +381,12 @@ def _vollstaendig(k: dict) -> bool:
     """Reicht der gespeicherte Zugang, um ueberhaupt zu verbinden?
 
     Bewusst je Anmeldeart geprueft: ein Datensatz mit Benutzernamen, aber ohne
-    Kennwort ist bei ``basic`` wertlos und wuerde nur einen 401 erzeugen."""
+    Kennwort ist bei ``basic`` wertlos und wuerde nur einen 401 erzeugen.
+
+    Mit Kachel-Anmeldung liegt das Kennwort nie auf der Platte – dort zaehlt,
+    ob der Zugang EINGERICHTET ist; ob angemeldet, entscheidet die Sitzung."""
+    if kachel_pflicht():
+        return _eingerichtet(k)
     ak = (k.get("auth_kind") or "").strip().lower()
     if ak in ("basic", "login"):
         return bool((k.get("username") or "").strip()
@@ -381,12 +469,23 @@ def zugang_info(user: str) -> dict:
     un = norm_user(user)
     k = _laden().get(un) or _leer(un)
     c = skill_config()
+    pflicht = kachel_pflicht(c)
+    sitzung = _sitzung_holen(un) if pflicht else {}
+
+    def _gesetzt(feld: str) -> bool:
+        if pflicht:
+            return bool(sitzung.get(feld))
+        return bool((k.get(feld + "_enc") or "").strip())
+
     info = {
         "vorhanden": bool(_vollstaendig(k)),
         "auth_kind": (k.get("auth_kind") or "").strip().lower(),
         "aktiv": bool(k.get("aktiv", True)),
-        "passwort_gesetzt": bool((k.get("password_enc") or "").strip()),
-        "token_gesetzt": bool((k.get("api_token_enc") or "").strip()),
+        "passwort_gesetzt": _gesetzt("password"),
+        "token_gesetzt": _gesetzt("api_token"),
+        "kachel_pflicht": pflicht,
+        "angemeldet": bool(sitzung),
+        "sitzung_bis": sitzung_bis(un) if pflicht else 0,
         "letzter_erfolg": int(k.get("letzter_erfolg", 0) or 0),
         "letzter_fehler": k.get("letzter_fehler", ""),
         "anmeldefehler": int(k.get("anmeldefehler", 0) or 0),
@@ -445,11 +544,20 @@ def speichern(user: str, felder: dict) -> dict:
     if "aktiv" in felder:
         k["aktiv"] = bool(felder.get("aktiv"))
 
+    pflicht = kachel_pflicht()
+    sitzung_neu: dict = {}
+    if pflicht:
+        # Kein Kennwort auf der Platte – auch kein Rest von vorher.
+        for f in GEHEIMFELDER:
+            k.pop(f + "_enc", None)
     for f in GEHEIMFELDER:
         if f in felder:
             wert = str(felder.get(f) or "")
             if wert.strip():
-                k[f + "_enc"] = verschluesseln(wert)
+                if pflicht:
+                    sitzung_neu[f] = wert
+                else:
+                    k[f + "_enc"] = verschluesseln(wert)
                 # NEUES Kennwort = neuer Anlauf. Ohne dieses Zuruecksetzen bliebe
                 # der Zugang nach dem Beheben der Ursache ausgesetzt, und der
                 # Benutzer haette keinen erkennbaren Weg zurueck. Nur bei einem
@@ -471,6 +579,9 @@ def speichern(user: str, felder: dict) -> dict:
     k["geaendert"] = int(time.time())
     alle[un] = k
     _speichern(alle)
+    if sitzung_neu:
+        # Erst NACH allen Pruefungen: ein abgelehntes Speichern meldet nicht an.
+        _sitzung_setzen(un, sitzung_neu)
     return zugang_info(user)
 
 
@@ -481,6 +592,7 @@ def loeschen(user: str) -> bool:
         return False
     del alle[un]
     _speichern(alle)
+    sitzung_beenden(un)
     return True
 
 
@@ -511,6 +623,10 @@ def merke_ergebnis(user: str, ok: bool, fehler: str = "",
                   "erfolgreich)" % un, flush=True)
     else:
         k["letzter_fehler"] = (fehler or "")[:500]
+        if anmeldefehler and kachel_pflicht() and sitzung_beenden(un):
+            # Ein falsches Kachel-Kennwort wird nicht weiterbenutzt.
+            print("[VEMAS] Anmeldung von '%s' nach Anmeldefehler beendet" % un,
+                  flush=True)
         if anmeldefehler:
             k["anmeldefehler"] = int(k.get("anmeldefehler", 0) or 0) + 1
             grenze = max_anmeldefehler()
@@ -556,6 +672,19 @@ def alle_benutzer() -> list[str]:
 # behauptet einen Zustand, den sie nicht kennt".
 QUELLE_PERSOENLICH = "persoenlich"
 QUELLE_SAMMEL = "sammel"
+QUELLE_KEINE = "keine"           # Kachelpflicht und (noch) keine Anmeldung
+
+ANMELDEN_TEXT = "Bitte im Bereich VEMAS mit deinem VEMAS-Kennwort anmelden."
+
+
+def _kein_zugang(un: str, hinweis: str) -> dict:
+    """Kein Zugang – ein unkonfigurierter Client, damit jeder Aufrufer ueber
+    ``configured`` sauber abbricht, statt ohne Kennwort anzufragen."""
+    c = dict(skill_config())
+    c["base_url"] = ""
+    c["read_only"] = True
+    return {"client": VemasClient(c), "quelle": QUELLE_KEINE, "hinweis": hinweis,
+            "benutzer": un, "ausgesetzt": False}
 
 
 def _cfg_aus_zugang(k: dict) -> dict:
@@ -570,8 +699,13 @@ def _cfg_aus_zugang(k: dict) -> dict:
     ak = (k.get("auth_kind") or "").strip().lower()
     c["auth_kind"] = ak or (c.get("auth_kind") or "basic")
     c["username"] = k.get("username", "")
-    c["password"] = entschluesseln(k.get("password_enc", ""))
-    c["api_token"] = entschluesseln(k.get("api_token_enc", ""))
+    if kachel_pflicht(c):
+        s = _sitzung_holen(norm_user(k.get("benutzer_norm") or ""))
+        for f in GEHEIMFELDER:
+            c[f] = s.get(f, "")
+    else:
+        for f in GEHEIMFELDER:
+            c[f] = entschluesseln(k.get(f + "_enc", ""))
     return c
 
 
@@ -612,6 +746,8 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
             user = ""
     un = norm_user(user or "")
     hinweis = ""
+    if kachel_pflicht():
+        return _aufloesen_kachel(un, trotz_aussetzer)
     if un and ":" not in un:
         try:
             k = _laden().get(un)
@@ -644,6 +780,57 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
             "benutzer": un, "ausgesetzt": bool(hinweis)}
 
 
+def _aufloesen_kachel(un: str, trotz_aussetzer: bool) -> dict:
+    """``aufloesen`` bei Kachelpflicht: nur der eigene Zugang MIT Anmeldung."""
+    if not un or ":" in un:
+        return _kein_zugang(un, "VEMAS verlangt eine persoenliche Anmeldung – "
+                                "fuer diesen Kanal gibt es keine.")
+    try:
+        k = _laden().get(un)
+    except Exception:  # noqa: BLE001
+        k = None
+    if not (k and _eingerichtet(k)):
+        return _kein_zugang(un, "Es ist noch kein eigener VEMAS-Zugang eingerichtet. "
+                                + ANMELDEN_TEXT)
+    if not bool(k.get("aktiv", True)):
+        return _kein_zugang(un, "Dein persoenlicher VEMAS-Zugang steht auf inaktiv.")
+    if k.get("ausgesetzt") and not trotz_aussetzer:
+        return _kein_zugang(un, "Dein persoenlicher VEMAS-Zugang ist nach %d "
+                                "fehlgeschlagenen Anmeldungen ausgesetzt. %s"
+                            % (int(k.get("anmeldefehler", 0) or 0), ANMELDEN_TEXT))
+    if not _sitzung_holen(un):
+        return _kein_zugang(un, "Fuer VEMAS ist eine Anmeldung noetig. " + ANMELDEN_TEXT)
+    c = VemasClient(_cfg_aus_zugang(k))
+    if not c.configured:
+        return _kein_zugang(un, "Es ist keine VEMAS-Serveradresse hinterlegt – "
+                                "wende dich an einen Administrator.")
+    return {"client": c, "quelle": QUELLE_PERSOENLICH, "hinweis": "",
+            "benutzer": un, "ausgesetzt": False}
+
+
+def anmeldung_anbieten(user: str) -> dict:
+    """Soll /vemas DIREKT nach dem Kennwort fragen? {} = nein.
+
+    Ja nur bei Kachelpflicht, ohne laufende Anmeldung, wenn der Zugang schon
+    einmal ERFOLGREICH verbunden hat (dann fehlt erwiesen nur das Kennwort).
+    ``benutzer`` ist der VEMAS-Benutzer (Zuordnung im Browser), ``feld`` das
+    Geheimfeld, das die Anmeldung fuellt."""
+    if not kachel_pflicht():
+        return {}
+    un = norm_user(user or "")
+    if not un or ":" in un or _sitzung_holen(un):
+        return {}
+    k = _laden().get(un)
+    if not (k and _eingerichtet(k)) or not bool(k.get("aktiv", True)):
+        return {}
+    if not int(k.get("letzter_erfolg", 0) or 0) or not server_konfiguriert():
+        return {}
+    bearer = (k.get("auth_kind") or "").strip().lower() == "bearer"
+    return {"feld": "api_token" if bearer else "password",
+            "benutzer": k.get("username", "") or "",
+            "kanal": (k.get("auth_kind") or "").strip().lower()}
+
+
 def client_fuer_lauf(user: str | None = None) -> VemasClient:
     """Nur der Client – fuer Aufrufer, die den Hinweis nicht brauchen."""
     return aufloesen(user)["client"]
@@ -651,6 +838,9 @@ def client_fuer_lauf(user: str | None = None) -> VemasClient:
 
 def quelle_text(quelle: str, lang: str = "de") -> str:
     """Kurzbezeichnung fuer die Oberflaeche/den Ergebniskopf."""
+    if quelle == QUELLE_KEINE:
+        return ("no VEMAS access (sign-in required)" if lang.startswith("en")
+                else "kein VEMAS-Zugang (Anmeldung noetig)")
     if lang.startswith("en"):
         return ("your personal VEMAS access" if quelle == QUELLE_PERSOENLICH
                 else "the shared access")
@@ -663,6 +853,8 @@ __all__ = [
     "zugang_info", "speichern", "loeschen", "hat_zugang", "alle_benutzer",
     "merke_ergebnis", "melde_fehler", "ist_anmeldefehler", "max_anmeldefehler",
     "aufloesen", "client_fuer_lauf", "quelle_text", "sammel_client",
-    "server_konfiguriert", "QUELLE_PERSOENLICH", "QUELLE_SAMMEL",
+    "server_konfiguriert", "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "QUELLE_KEINE",
+    "kachel_pflicht", "kennwoerter_entfernen", "kennwort_gespeichert",
+    "sitzung_beenden", "sitzung_bis", "anmeldung_anbieten", "KACHEL_SCHALTER",
     "AENDERBAR", "TEXTFELDER", "GEHEIMFELDER", "ANMELDEARTEN",
 ]

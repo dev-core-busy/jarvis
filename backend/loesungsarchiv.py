@@ -121,7 +121,8 @@ _STAND_SPERRE = threading.Lock()
 _lauf_aktiv = False              # EIN Lauf zugleich (Zeitplan und Knopf)
 _lauf_info: dict = {}
 _stopp_angefordert = False       # "Lauf beenden" – wirkt nach dem laufenden Ticket
-_lauf_task = None                # Aufgabe des Laufs, fuer ``beim_beenden``
+_lauf_task = None                # Aufgabe des letzten Laufs, fuer ``beim_beenden`` –
+                                 # bleibt danach stehen; ob sie laeuft, sagt done()
 BEENDEN_DECKEL = 10              # Sekunden; deutlich unter TimeoutStopSec des Dienstes
 
 
@@ -1167,7 +1168,6 @@ async def lauf(ausloeser: str = "zeitplan", client=None, provider=None,
         return erg
     finally:
         _lauf_aktiv = False
-        _lauf_task = None
         _lauf_info = {}
         # EINE Stelle setzt zurueck: ``anhalten`` setzt nur bei aktivem Lauf,
         # eine Marke kann also nicht in den naechsten Lauf hinueberreichen.

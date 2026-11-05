@@ -735,7 +735,16 @@ check("⚠ die Abbruchmeldung steht danach auf der Platte",
       _grund8c.startswith("Fehler: abgebrochen nach"), _grund8c)
 check("danach meldet Beenden keinen Lauf mehr", _nach8 is False, _nach8)
 check("die Sperre ist danach frei", la.sperre_belegt() is False)
-check("ohne Lauf tut Beenden nichts", asyncio.run(la.beim_beenden()) is False)
+def _beenden_ohne_lauf():
+    """Ein Wurf ist ein Befund (z. B. Warten auf eine Aufgabe eines laengst
+    geschlossenen Loops), kein Absturz ohne Bilanz."""
+    try:
+        return asyncio.run(la.beim_beenden())
+    except Exception as e:  # noqa: BLE001
+        return repr(e)
+
+
+check("ohne Lauf tut Beenden nichts", _beenden_ohne_lauf() is False, _beenden_ohne_lauf())
 
 
 async def _zaeher_lauf():

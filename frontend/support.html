@@ -468,8 +468,8 @@
                     <label id="sup-opt-open-wrap" class="hidden"><input type="checkbox" id="sup-opt-open" checked> <span data-i18n="sup.opt_open">offene Jira Tickets</span></label>
                     <label id="sup-opt-conf-wrap" class="hidden"><input type="checkbox" id="sup-opt-conf" checked> <span data-i18n="sup.opt_conf">Confluence</span></label>
                     <label><input type="checkbox" id="sup-opt-rag" checked> <span data-i18n="sup.opt_rag">RAG einbeziehen</span></label>
-                    <!-- IBS-Tickets: nur klickbar, wenn Kundenverwaltungs-API (URL + Key) konfiguriert ist -->
-                    <label id="sup-opt-ibs-wrap"><input type="checkbox" id="sup-opt-ibs" disabled> <span data-i18n="sup.opt_ibs">IBS Tickets</span></label>
+                    <!-- IBS-Tickets: sichtbar nur mit aktivem Skill Kundenverwaltung, klickbar nur mit URL + Key -->
+                    <label id="sup-opt-ibs-wrap" class="hidden"><input type="checkbox" id="sup-opt-ibs" disabled> <span data-i18n="sup.opt_ibs">IBS Tickets</span></label>
                     <!-- Fachsysteme: sichtbar nur mit Freigabe + aktivem Skill, klickbar nur
                          mit hinterlegtem Zugang. Die Berechtigung prueft der Server. -->
                     <label id="sup-opt-sap-wrap" class="hidden"><input type="checkbox" id="sup-opt-sap" disabled> <span data-i18n="sup.opt_sap">SAP</span></label>
@@ -612,7 +612,7 @@
 <script src="/static/js/profile_switcher.js?v=5"></script>
 <script src="/static/js/sessions.js?v=10"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
-<script src="/static/js/support.js?v=62"></script>
+<script src="/static/js/support.js?v=63"></script>
 <!-- Diagramme: der Support-Assistent antwortet ueber denselben
      Markdown-Renderer (chatlib.js), erzeugte also bisher Platzhalter fuer
      ```chartjs-Bloecke, die niemand hydratisiert hat – ein leerer Kasten.

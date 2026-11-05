@@ -19797,7 +19797,8 @@ async def support_status(user: str = Depends(require_auth)):
     """Status fuer die Support-Oberflaeche (Checkbox-Sichtbarkeit)."""
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
     _tmax, _tdef = _support_jira_limits(cfg)
-    # IBS/Kundenverwaltung: Checkbox nur nutzbar, wenn URL + API-Key hinterlegt sind
+    # IBS/Kundenverwaltung: ohne aktiven Skill gibt es die Option gar nicht
+    # (ibs_active); mit Skill ist sie nur nutzbar, wenn URL + API-Key hinterlegt sind.
     _jira_cfg = config.get_skill_states().get("jira", {}).get("config", {}) or {}
     _ibs_ok = bool((_jira_cfg.get("ibs_api_url") or "").strip()) and \
               bool((_jira_cfg.get("ibs_api_key") or "").strip())
@@ -19815,6 +19816,7 @@ async def support_status(user: str = Depends(require_auth)):
         "active": _skill_active("support_assistant"),
         "jira_active": _skill_active("jira"),
         "confluence_active": _skill_active("confluence"),
+        "ibs_active": _skill_active("kundenverwaltung"),
         "ibs_configured": _ibs_ok,
         **_fach,
         "has_prompt": bool((cfg.get("system_prompt") or "").strip()),
@@ -20188,7 +20190,7 @@ async def support_query(request: Request):
 
     - ``ibs`` (bool, Default false): Kundenverwaltung (IBS) durchsuchen –
       Ticket-/Ereignissuche ueber die API-Funktion 'getMatchingEvents'
-      (nur wirksam, wenn URL + API-Key der Kundenverwaltung hinterlegt sind).
+      (nur wirksam bei aktivem Skill 'Kundenverwaltung' und hinterlegten URL + API-Key).
 
     - ``sap`` / ``vemas`` (bool, Default false): das jeweilige Fachsystem als
       zusaetzliche Quelle auswerten. Die Anfrage laeuft dort als **unprivilegierter
@@ -20515,7 +20517,9 @@ async def _support_run_query(body: dict, user: str) -> dict:
     # ── Kundenverwaltung (IBS, API-Funktion 'getMatchingEvents') ────
     # Checkbox 'IBS Tickets' unter /support; Schlagworte = Suchbegriffe der
     # Anfrage (max. 5, wie die Suche im Einstellungs-Reiter Kundenverwaltung).
-    if bool(body.get("ibs")):
+    # Der Skill-Schalter gilt auch hier: Die Anfrage ist auch ohne Oberflaeche
+    # (API, veralteter Tab) moeglich, das Ausblenden allein sperrt also nichts.
+    if bool(body.get("ibs")) and _skill_active("kundenverwaltung"):
         try:
             from backend.kundenverwaltung_client import tickets_by_buzzwords
             # Der Reiter hat ZWEI Felder (Schlagworte + Adress-ID); Support hat nur

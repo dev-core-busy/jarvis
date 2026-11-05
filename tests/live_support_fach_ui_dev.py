@@ -90,8 +90,7 @@ try:
     check("die Seite ist da", js("location.pathname") == "/support", js("location.pathname"))
     check("SAP-Kaestchen unsichtbar", sichtbar("sup-opt-sap-wrap") is False)
     check("VEMAS-Kaestchen unsichtbar", sichtbar("sup-opt-vemas-wrap") is False)
-    check("die uebrigen Quellen stehen unveraendert da",
-          sichtbar("sup-opt-ibs-wrap") is True and sichtbar("sup-opt-rag") is True)
+    check("die uebrigen Quellen stehen unveraendert da", sichtbar("sup-opt-rag") is True)
 
     print("\n\033[1m2. Mit Freigabe: sichtbar, und der Zustand stimmt\033[0m")
     config.save_setting("sap_allowed_users", "jarvis")

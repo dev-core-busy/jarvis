@@ -218,16 +218,25 @@
                 $('sup-opt-jira').checked = getPref('jira');
                 $('sup-opt-conf').checked = getPref('conf');
                 $('sup-opt-rag').checked = getPref('rag');
-                // IBS-Tickets: nur klickbar, wenn URL + API-Key der Kundenverwaltung hinterlegt sind; Default AUS
+                // IBS-Tickets: Skill aus -> Kaestchen und Filtereintrag gibt es gar nicht.
+                // Skill an -> klickbar nur mit URL + API-Key der Kundenverwaltung; Default AUS.
+                // Die gespeicherte Vorbelegung bleibt unberuehrt und gilt wieder,
+                // sobald der Skill zurueck ist.
                 var ibsEl = $('sup-opt-ibs');
                 if (ibsEl) {
-                    ibsEl.disabled = !d.ibs_configured;
-                    ibsEl.checked = d.ibs_configured ? getPref('ibs', false) : false;
+                    var ibsAktiv = !!d.ibs_active, ibsBereit = ibsAktiv && !!d.ibs_configured;
+                    ibsEl.disabled = !ibsBereit;
+                    ibsEl.checked = ibsBereit ? getPref('ibs', false) : false;
                     var ibsWrap = $('sup-opt-ibs-wrap');
                     if (ibsWrap) {
-                        ibsWrap.style.opacity = d.ibs_configured ? '' : '0.45';
-                        ibsWrap.title = d.ibs_configured ? '' : T('sup.opt_ibs_hint', 'Erst URL und API-Key der Kundenverwaltung in den Einstellungen hinterlegen');
+                        ibsWrap.classList.toggle('hidden', !ibsAktiv);
+                        ibsWrap.style.opacity = ibsBereit ? '' : '0.45';
+                        ibsWrap.title = ibsBereit ? '' : T('sup.opt_ibs_hint', 'Erst URL und API-Key der Kundenverwaltung in den Einstellungen hinterlegen');
                     }
+                    // Entfernen statt verstecken: hidden an einem <option> beachten
+                    // nicht alle Browser zuverlaessig.
+                    var ibsFilter = document.querySelector('#sup-f-source option[value="IBS"]');
+                    if (ibsFilter && !ibsAktiv) ibsFilter.remove();
                 }
                 // Fachsysteme (SAP/VEMAS) – zwei getrennte Zustaende, und die
                 // Unterscheidung ist der Punkt: OHNE Freigabe gibt es das
@@ -675,7 +684,6 @@
         var openJira = !jiraHidden && $('sup-opt-open').checked;
         var useConf = !confWrap.classList.contains('hidden') && $('sup-opt-conf').checked;
         var useRag = $('sup-opt-rag').checked;
-        var useIbs = $('sup-opt-ibs') ? $('sup-opt-ibs').checked : false;
         // Ein ausgeblendetes oder abgeblendetes Kaestchen darf nichts ausloesen –
         // sonst startete ein Agentenlauf, den niemand angehakt hat. Die
         // Berechtigung entscheidet ohnehin der Server.
@@ -683,7 +691,7 @@
             var el = $('sup-opt-' + k), wrap = $('sup-opt-' + k + '-wrap');
             return !!(el && wrap && !wrap.classList.contains('hidden') && !el.disabled && el.checked);
         }
-        var useSap = fachAn('sap'), useVemas = fachAn('vemas');
+        var useIbs = fachAn('ibs'), useSap = fachAn('sap'), useVemas = fachAn('vemas');
         var useAi = $('sup-opt-ai').checked;
         // Wissensgruppen-Filter: null = alle (Feld weglassen), [] = keine, [ids] = nur diese
         var kbSel = _kbFilter ? _kbFilter.getSelection() : null;

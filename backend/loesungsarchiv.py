@@ -1229,6 +1229,9 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
         offene_tickets, client, st["bereiche"], st["start"],
         dict(stand["verarbeitet"]), _je_lauf(st))
     _lauf_info["gesamt"] = len(neu)
+    # Alle offenen Tickets, nicht nur die dieses Laufs – die Uebersicht nennt
+    # sie in Klammern, damit der Umfang des Rueckstands sichtbar bleibt.
+    _lauf_info["offen_gesamt"] = offen
 
     zahl = {"neu": 0, "gleich": 0, "irrelevant": 0, "fehler": 0, "erneut": 0}
     fehler: list[str] = []

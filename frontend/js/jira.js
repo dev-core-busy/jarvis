@@ -1139,8 +1139,13 @@
             if (d.laeuft) {
                 // Drehender Kreis wie im uebrigen Haus (.jv-pkg-spin, theme.css):
                 // ohne ihn sieht eine minutenlang gleiche Zahl wie ein Haenger aus.
-                teile.push('<div><span class="jv-pkg-spin" aria-hidden="true"></span><b>' + esc(t('jlarch.laeuft', 'Lauf aktiv: {f} von {g} Tickets',
-                    { f: d.laeuft.fertig || 0, g: d.laeuft.gesamt || 0 })) + '</b>'
+                // Liegen mehr Tickets offen, als ein Lauf schafft, steht die
+                // Gesamtzahl in Klammern dahinter; sonst waere sie dieselbe Zahl.
+                var lf = d.laeuft.fertig || 0, lg = d.laeuft.gesamt || 0, lo = d.laeuft.offen_gesamt || 0;
+                var laufText = lo > lg
+                    ? t('jlarch.laeuft_gesamt', 'Lauf aktiv: {f} von {g} Tickets (von {o} Gesamt)', { f: lf, g: lg, o: lo })
+                    : t('jlarch.laeuft', 'Lauf aktiv: {f} von {g} Tickets', { f: lf, g: lg });
+                teile.push('<div><span class="jv-pkg-spin" aria-hidden="true"></span><b>' + esc(laufText) + '</b>'
                     + (d.laeuft.stopp ? ' – ' + esc(t('jlarch.laeuft_stopp', 'wird nach dem aktuellen Ticket beendet')) : '')
                     + '</div>');
             }

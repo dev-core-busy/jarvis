@@ -578,12 +578,28 @@ for i in range(8, 13):
 # Der Deckel kommt aus der EINSTELLUNG (bis 2026-11-02 fest 300 im Code).
 _vor_deckel = la.einstellungen()
 la.einstellungen_speichern({**_vor_deckel, "je_lauf": 2}, cron_manager=CronAttrappe())
+class _ProviderMitBlick(ProviderAttrappe):
+    """Haelt die Laufinfo WAEHREND des Laufs fest – am Ende wird sie geleert."""
+    def __init__(self):
+        super().__init__()
+        self.blick: list = []
+    async def generate_response(self, **kw):
+        self.blick.append(dict(la._lauf_info))
+        return await super().generate_response(**kw)
+_prov6 = _ProviderMitBlick()
 try:
-    erg6 = lauf(client, ProviderAttrappe())
+    erg6 = lauf(client, _prov6)
 finally:
     la.einstellungen_speichern(_vor_deckel, cron_manager=CronAttrappe())
 check("nur 2 Tickets in diesem Lauf", erg6.get("neu", 0) + erg6.get("gleich", 0) == 2, erg6)
 check("offene Zahl wird genannt (3)", erg6.get("offen") == 3 and "3 Ticket(s) folgen" in erg6["grund"], erg6)
+# Die Uebersicht nennt waehrend des Laufs ALLE offenen Tickets in Klammern
+# (2026-11-06): Lauf (2) + Rest (3), nicht nur die des Laufs.
+check("⚠ Laufinfo traegt die Gesamtzahl der offenen Tickets (Lauf + Rest)",
+      bool(_prov6.blick)
+      and all(b.get("gesamt") == 2 and b.get("offen_gesamt") == 2 + (erg6.get("offen") or 0)
+              for b in _prov6.blick),
+      _prov6.blick[:2])
 
 
 # ════════════════════════════════════════════════════════════════════════════

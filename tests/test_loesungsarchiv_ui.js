@@ -209,6 +209,27 @@ function klick(w, el, was) {
     check('⚠ waehrend eines Laufs: "Lauf beenden" sichtbar und bedienbar',
           sichtbar(stop) && !stop.disabled, stop.style.display + '/' + stop.disabled);
     check('und "Jetzt auswerten" gesperrt', run.disabled === true);
+    // Gesamtzahl der offenen Tickets in Klammern (2026-11-06) – nur wenn sie
+    // ueber den Lauf hinausgeht; ohne Feld (aelterer Dienst) bleibt es beim Alten.
+    const lauftext = () => d.getElementById('jlarch-zustand').textContent;
+    check('(Positivkontrolle) die Laufzeile steht da', /Lauf aktiv: 12 von 300 Tickets/.test(lauftext()), lauftext());
+    check('ohne Gesamtzahl keine Klammer', !/Gesamt/.test(lauftext()), lauftext());
+    state.laeuft = { seit: 1, ausloeser: 'manuell', fertig: 138, gesamt: 5000, offen_gesamt: 64932 };
+    w.JiraManager.loadArchiv();
+    await sleep(150);
+    check('⚠ mit Gesamtzahl: "138 von 5000 Tickets (von 64932 Gesamt)"',
+          /Lauf aktiv: 138 von 5000 Tickets \(von 64932 Gesamt\)/.test(lauftext()), lauftext());
+    state.laeuft = { seit: 1, ausloeser: 'manuell', fertig: 3, gesamt: 40, offen_gesamt: 40 };
+    w.JiraManager.loadArchiv();
+    await sleep(150);
+    check('passt alles in den Lauf, steht keine doppelte Zahl in Klammern',
+          /Lauf aktiv: 3 von 40 Tickets/.test(lauftext()) && !/Gesamt/.test(lauftext()), lauftext());
+    check('der neue Text hat einen DE/EN-Schluessel',
+          /'jlarch\.laeuft_gesamt': 'Lauf aktiv: \{f\} von \{g\} Tickets \(von \{o\} Gesamt\)'/.test(read('frontend/js/i18n.js'))
+          && /'jlarch\.laeuft_gesamt': 'Run active: \{f\} of \{g\} tickets \(of \{o\} total\)'/.test(read('frontend/js/i18n.js')));
+    state.laeuft = { seit: 1, ausloeser: 'manuell', fertig: 12, gesamt: 300 };
+    w.JiraManager.loadArchiv();
+    await sleep(150);
     const vorher = state.calls.length;
     klick(w, stop, 'Lauf beenden');
     await sleep(200);

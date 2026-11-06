@@ -156,8 +156,12 @@
            auf die Hoehe der hoechsten ihrer Zeile – eine Ablage mit langer
            Auftragsliste zieht dann ihre Nachbarn mit und hinterlaesst grosse
            Leerflaechen (im Screenshot vom 2026-08-18 gesehen). */
+        /* `min(320px, 100%)` statt fester 320 px: unter ~390 px Fensterbreite
+           ist die Karte sonst breiter als ihr Container und wird rechts
+           abgeschnitten (Rand weg, Felder angeschnitten, bei 348 px eine
+           waagrechte Bildlaufleiste – im Browser auf DEV gesehen, 2026-11-06). */
         .st-board { display: grid; gap: 14px; align-items: start;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+            grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
         .st-dump { border: 1px solid var(--border); border-radius: var(--radius-md);
             background: rgba(var(--fg-rgb), .02); display: flex; flex-direction: column;
             overflow: hidden; }
@@ -211,6 +215,24 @@
             resize: vertical; min-height: 2.2rem; }
         .st-note:focus { outline: none; border-color: var(--accent); }
 
+        /* ── Fragefeld und Referenzen ──
+           Das Fragefeld steht UNTER dem Hinweisfeld: der Hinweis gehoert zum
+           Ablegen einer Datei, die Frage ist ein eigener Weg. Knopf rechts
+           daneben, `align-items: flex-end`, damit er beim Aufziehen des Felds
+           unten bleibt. */
+        .st-ask { display: flex; gap: 8px; align-items: flex-end; padding: 0 14px 12px; }
+        .st-ask .st-ask-text { flex: 1 1 auto; min-height: 2.8rem; }
+        .st-dump-refs { font-size: .74rem; color: var(--text-muted); margin-top: 4px;
+            line-height: 1.45; word-break: break-word; }
+        .st-ref-list { list-style: none; margin: 6px 0 0; padding: 0; }
+        .st-ref-list li { display: flex; gap: 8px; align-items: center; padding: 5px 0;
+            border-bottom: 1px solid rgba(var(--fg-rgb), .06); font-size: .82rem; }
+        .st-ref-list li:last-child { border-bottom: none; }
+        .st-ref-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; }
+        .st-ref-size { flex: 0 0 auto; color: var(--text-muted); font-size: .74rem; }
+        .st-job-art { margin: 0 6px 0 0; flex: 0 0 auto; }
+
         /* ── Auftraege in der Karte ── */
         .st-jobs { border-top: 1px solid var(--border); padding: 8px 14px 4px; }
         .st-job { padding: 7px 0; border-bottom: 1px solid rgba(var(--fg-rgb), .06);
@@ -243,6 +265,40 @@
         .st-job-res { color: var(--text-secondary); margin-top: 3px; line-height: 1.5;
             white-space: pre-wrap; word-break: break-word; }
         .st-job.is-bad .st-job-res { color: var(--danger); }
+        /* Gerenderte Antwort (setzeErgebnis): `white-space: normal`, denn
+           `pre-wrap` vererbt sich und machte jede Einrueckung des Markups
+           sichtbar (Register). Zeilen kommen vom Renderer als <br>. Regeln nach
+           dem Vorbild von .sup-ai-md auf /support. */
+        .st-job-res.is-md, .st-log-res.is-md { white-space: normal; }
+        .is-md table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: .78rem;
+            display: block; overflow-x: auto; }
+        /* `min-width` je Zelle ist Pflicht, sobald Bezeichner nicht umbrechen
+           (Regel unten): ohne sie drueckte die Tabelle die LETZTE Spalte auf
+           ein Zeichen je Zeile zusammen, statt breiter zu werden und zu
+           scrollen (im Browser gemessen: Inhalt 245 px = sichtbar 245 px). */
+        .is-md th, .is-md td { border: 1px solid var(--border); padding: 4px 7px; text-align: left;
+            vertical-align: top; min-width: 7em; }
+        .is-md th { background: rgba(var(--fg-rgb), .06); font-weight: 600; }
+        /* Bezeichner (Spalten-/Tabellennamen) in einer Zelle NICHT umbrechen:
+           auf schmalen Karten stand sonst "lfr_ken / nung" (im Browser
+           gesehen). Die Tabelle wird dann breiter und scrollt in ihrem Kasten
+           (`display: block; overflow-x: auto` oben) statt die Seite zu sprengen. */
+        .is-md td code, .is-md th code { white-space: nowrap; }
+        .is-md h1, .is-md h2, .is-md h3, .is-md h4 { margin: 8px 0 3px; line-height: 1.25;
+            font-size: .9rem; }
+        .is-md ul, .is-md ol { margin: 3px 0 5px 1.15rem; }
+        .is-md li { margin: 1px 0; }
+        .is-md pre { background: rgba(var(--fg-rgb), .08); border-radius: 8px; padding: 8px 10px;
+            overflow-x: auto; margin: 4px 0; white-space: pre; }
+        .is-md pre code { background: none; padding: 0; font-size: .78rem; }
+        .is-md a { color: var(--accent); word-break: break-word; }
+        .is-md blockquote { border-left: 3px solid var(--border); margin: 4px 0; padding: 1px 9px;
+            color: var(--text-secondary); }
+        /* Ohne eigene Regel zeichnet der Browser `<hr>` als helle Doppellinie –
+           im dunklen Thema ein greller Strich (im Browser gesehen). */
+        .is-md hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+        .is-md > :first-child { margin-top: 0; }
+        .st-img-weg { color: var(--text-muted); font-style: italic; }
         .st-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
         .st-chip { display: inline-flex; align-items: center; gap: 5px;
             padding: 3px 9px; border-radius: 12px; font-size: .76rem;
@@ -276,6 +332,12 @@
         .st-field input:focus, .st-field select:focus, .st-field textarea:focus {
             outline: none; border-color: var(--accent); }
         .st-field-full { grid-column: 1 / -1; }
+        /* Ein Kontrollkaestchen in einem .st-field (Fragefeld-Haken) darf die
+           Feldregel oben NICHT erben: `width: 100%` zog es auf volle Breite,
+           das Kaestchen stand mitten in der Zeile und der Text rechts aussen
+           (im Browser auf DEV gesehen, 2026-11-06 – jsdom rechnet kein Layout).
+           Hoehere Spezifitaet (0,2,1) gegen `.st-field input` (0,1,1). */
+        .st-field input[type="checkbox"] { width: auto; padding: 0; flex: 0 0 auto; }
 
         /* Bereichs-Kaesten: hoechstens ZWEI Spalten. `auto-fill` ergab bei den
            mehrzeiligen Beschreibungen fuenf gequetschte Spalten (Fehler vom
@@ -426,6 +488,8 @@
 
 <!-- Verstecktes Eingabefeld fuer den Klick-Weg (Datei auswaehlen statt ziehen) -->
 <input type="file" id="st-file-input" multiple class="hidden">
+<!-- Dasselbe fuer die Referenzdateien im Formular einer Ablage -->
+<input type="file" id="st-ref-input" multiple class="hidden">
 
 <script src="/static/js/sitzung.js?v=3"></script>
 <script src="/static/js/konto_hinweise.js?v=2"></script>
@@ -435,7 +499,7 @@
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=19"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=444"></script>
+<script src="/static/js/i18n.js?v=446"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=30"></script>
@@ -443,7 +507,9 @@
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/prompt_check.js?v=3"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
-<script src="/static/js/tracks.js?v=14"></script>
+<!-- Markdown-Renderer des Projekts (renderMarkdown) fuer die Ergebnistexte -->
+<script src="/static/js/chatlib.js?v=25"></script>
+<script src="/static/js/tracks.js?v=17"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der

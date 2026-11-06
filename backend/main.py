@@ -1629,6 +1629,9 @@ _ACTION_DETAILS = [
     ("PUT",    rf"/api/tracks/dumps/{_ID}",             "Short Tracks · Ablage bearbeitet"),
     ("DELETE", rf"/api/tracks/dumps/{_ID}",             "Short Tracks · Ablage gelöscht"),
     ("POST",   rf"/api/tracks/dumps/{_ID}/reset",       "Short Tracks · Ablage zurückgesetzt"),
+    ("POST",   rf"/api/tracks/dumps/{_ID}/refs",        "Short Tracks · Referenz hinzugefügt"),
+    ("DELETE", rf"/api/tracks/dumps/{_ID}/refs/{_ID}",  "Short Tracks · Referenz gelöscht"),
+    ("POST",   r"/api/tracks/ask",                      "Short Tracks · Frage gestellt"),
     ("POST",   r"/api/tracks/jobs/seen",                "Short Tracks · Ergebnisse angesehen"),
     ("DELETE", rf"/api/tracks/jobs/{_ID}",              "Short Tracks · Lauf entfernt"),
     ("POST",   r"/api/tracks/admin/.*",                 "Short Tracks · Verwaltung"),
@@ -17158,12 +17161,18 @@ async def tracks_status(lang: str = "de", user: str = Depends(require_tracks_acc
     """
     from backend import short_tracks as _st
     ist_admin = _is_admin_user(user)
+    dumps = _st.sichtbar_fuer(user, ist_admin)
+    # Referenzen je Ablage: NAME und Groesse, nie der Inhalt. Sichtbar fuer jeden,
+    # der die Ablage benutzt – wer eine Frage stellt, soll wissen, worauf sie
+    # sich beziehen kann.
+    for _d in dumps:
+        _d["referenzen"] = await asyncio.to_thread(_st.referenzen, _d.get("id") or "")
     return JSONResponse({
         "ok": True,
         "skill_aktiv": _skill_active("short-tracks"),
         "ist_admin": ist_admin,
         "internet": _user_has_internet_access(user),
-        "dumps": _st.sichtbar_fuer(user, ist_admin),
+        "dumps": dumps,
         "bereiche": _st.bereiche_katalog(lang),
         "grenzen": {
             "gleichzeitig": _st.gleichzeitig(),
@@ -17175,6 +17184,9 @@ async def tracks_status(lang: str = "de", user: str = Depends(require_tracks_acc
             "hinweis_max": _st.HINWEIS_MAX,
             "name_max": _st.NAME_MAX,
             "beschreibung_max": _st.BESCHREIBUNG_MAX,
+            "frage_max": _st.FRAGE_MAX,
+            "max_referenzen": _st.MAX_REFERENZEN,
+            "ref_max_mb": _st.ref_max_bytes() // (1024 * 1024),
         },
     })
 
@@ -17246,6 +17258,87 @@ async def tracks_dump_delete(dump_id: str, user: str = Depends(require_tracks_ac
         return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
                             status_code=404)
     return JSONResponse({"ok": True})
+
+
+# ── Referenzdateien einer Ablage ───────────────────────────────────────────
+# Gepflegt von dem, der die Ablage AENDERN darf (``darf_aendern``) – nicht von
+# jedem, der sie benutzt: eine Referenz liegt JEDEM Lauf der Ablage bei. Einen
+# Download gibt es bewusst nicht; das ist Bequemlichkeit, keine Schranke (wer
+# die Ablage benutzt, erfaehrt den Inhalt ueber seine Fragen – die Oberflaeche
+# sagt das dem Pflegenden).
+
+@app.post("/api/tracks/dumps/{dump_id}/refs")
+async def tracks_ref_upload(dump_id: str, files: list[UploadFile] = File(...),
+                            user: str = Depends(require_tracks_access)):
+    """Referenzdateien hochladen; ein gleichnamiger Upload ERSETZT die alte.
+
+    Dieselben Pruefungen wie beim Ablegen (Groesse blockweise, Magie-Bytes):
+    eine Referenz landet als Arbeitskopie im /tmp jedes Benutzers, der die
+    Ablage benutzt – ein umbenanntes Programm darf dort nicht ankommen.
+    """
+    from backend import short_tracks as _st, short_tracks_runner as _str
+    hw = _tracks_hinweis()
+    if hw:
+        return JSONResponse(hw, status_code=400)
+    ist_admin = _is_admin_user(user)
+    dump = _st.holen(dump_id)
+    if not dump or not _st.darf_aendern(dump, user, ist_admin):
+        # 404 auch fuer eine fremde Ablage – kein Existenz-Orakel.
+        return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
+                            status_code=404)
+    if len(files or []) > _st.MAX_REFERENZEN:
+        return JSONResponse({"ok": False, "error":
+                             "Es sind hoechstens %d Referenzdateien je Ablage moeglich."
+                             % _st.MAX_REFERENZEN}, status_code=400)
+    grenze = _st.ref_max_bytes()
+    uebernommen, abgewiesen = [], []
+    for f in (files or []):
+        name = os.path.basename(f.filename or "datei")
+        daten = await _tracks_lesen_mit_grenze(f, grenze)
+        if daten is None:
+            abgewiesen.append({"name": name, "grund":
+                               "Die Datei ist groesser als %d MB."
+                               % (grenze // (1024 * 1024))})
+            continue
+        if not daten:
+            abgewiesen.append({"name": name, "grund": "Die Datei ist leer."})
+            continue
+        endung = os.path.splitext(name)[1].lower().lstrip(".")
+        grund = _anhang_ausfuehrbar(endung, f.content_type or "", daten)
+        if grund:
+            abgewiesen.append({"name": name, "grund": grund})
+            continue
+        try:
+            info = await asyncio.to_thread(_st.referenz_ablegen, dump_id, user,
+                                           ist_admin, name, daten)
+        except _st.DumpFehler as e:
+            abgewiesen.append({"name": name, "grund": str(e)})
+            continue
+        uebernommen.append(info)
+        # Sichtbarkeit, nie Sperre: einmal hier statt bei jedem Lauf.
+        await _str.referenz_pruefen(user, dump, info["name"])
+    liste = await asyncio.to_thread(_st.referenzen, dump_id)
+    if not uebernommen:
+        return JSONResponse({"ok": False, "abgewiesen": abgewiesen,
+                             "referenzen": liste,
+                             "error": "Keine Datei konnte uebernommen werden."},
+                            status_code=400)
+    return JSONResponse({"ok": True, "uebernommen": uebernommen,
+                         "abgewiesen": abgewiesen, "referenzen": liste})
+
+
+@app.delete("/api/tracks/dumps/{dump_id}/refs/{name}")
+async def tracks_ref_delete(dump_id: str, name: str,
+                            user: str = Depends(require_tracks_access)):
+    """Eine Referenzdatei loeschen (Rechte wie beim Aendern der Ablage)."""
+    from backend import short_tracks as _st
+    weg = await asyncio.to_thread(_st.referenz_loeschen, dump_id, user,
+                                  _is_admin_user(user), name)
+    if not weg:
+        return JSONResponse({"ok": False, "error": "Referenz nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True,
+                         "referenzen": await asyncio.to_thread(_st.referenzen, dump_id)})
 
 
 # ── Ablegen ────────────────────────────────────────────────────────────────
@@ -17393,6 +17486,45 @@ async def tracks_drop_url(request: Request, user: str = Depends(require_tracks_a
     jobs = await _str.einreihen(dump, user, teile,
                                str(body.get("hinweis") or "")[:_st.HINWEIS_MAX])
     return JSONResponse({"ok": True, "jobs": jobs, "abgewiesen": []})
+
+
+@app.post("/api/tracks/ask")
+async def tracks_ask(request: Request, user: str = Depends(require_tracks_access)):
+    """Eine Frage im Fragefeld einer Ablage stellen – ohne Datei.
+
+    Nur fuer Ablagen mit eingeschaltetem Fragefeld (``fragen``). Der Lauf ist
+    derselbe wie beim Ablegen: Actor des Fragenden, immer unprivilegiert,
+    Werkzeug-Whitelist der Ablage, die Referenzen als Sachverhalt.
+
+    Eine zu lange Frage wird ABGEWIESEN, nicht gekuerzt: eine abgeschnittene
+    Frage kann etwas anderes fragen als die gemeinte.
+    """
+    from backend import short_tracks as _st, short_tracks_runner as _str
+    hw = _tracks_hinweis()
+    if hw:
+        return JSONResponse(hw, status_code=400)
+    try:
+        body = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    dump = _st.holen(str(body.get("dump_id") or ""))
+    if not dump or not _st.darf_benutzen(dump, user):
+        return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
+                            status_code=404)
+    if not dump.get("fragen"):
+        return JSONResponse({"ok": False, "error":
+                             "Diese Ablage nimmt keine Fragen an – das Fragefeld ist "
+                             "in ihren Einstellungen ausgeschaltet."}, status_code=400)
+    frage = str(body.get("frage") or "").strip()
+    if not frage:
+        return JSONResponse({"ok": False, "error": "Die Frage ist leer."},
+                            status_code=400)
+    if len(frage) > _st.FRAGE_MAX:
+        return JSONResponse({"ok": False, "error":
+                             "Die Frage ist zu lang (hoechstens %d Zeichen)."
+                             % _st.FRAGE_MAX}, status_code=400)
+    job = await _str.einreihen_frage(dump, user, frage)
+    return JSONResponse({"ok": True, "jobs": [job]})
 
 
 # ── Auftraege ──────────────────────────────────────────────────────────────

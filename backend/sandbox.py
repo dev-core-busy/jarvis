@@ -293,6 +293,14 @@ _APP_DENY_REL = (
     # data/instructions und email_rules.json. `short_tracks_log.jsonl` enthaelt
     # Dateinamen und Ergebnistexte fremder Laeufe.
     "data/short_tracks.json", "data/short_tracks_log.jsonl",
+    # Short-Tracks-Referenzen (data/short_tracks_ref/<ablage>/): feste
+    # Unterlagen JE ABLAGE, etwa ein Datenbankschema – auch die PRIVATER
+    # Ablagen anderer Benutzer. Ein Lauf bekommt die Referenzen SEINER Ablage
+    # ausschliesslich als Arbeitskopie im eigenen /tmp; das Verzeichnis selbst
+    # braucht niemand ausser dem Backend. Gesperrt ist das VERZEICHNIS, damit
+    # jede kuenftige Datei darin von sich aus erfasst ist (Lehre aus
+    # data/google_auth, 2026-11-06).
+    "data/short_tracks_ref",
     # Claude Subagent (backend/claude_subagent.py): bildet Delegations-Schluessel
     # auf BENUTZER ab. Seit 2026-08-23 steht der Schluessel dort im KLARTEXT
     # (er wird dauerhaft angezeigt) – Lesen ist damit gleichbedeutend mit
@@ -371,6 +379,8 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 "data/google_auth",
                 # Microsoft-Graph-Refresh-Token je Benutzer (siehe _APP_DENY_REL)
                 "data/copilot_auth",
+                # Referenzdateien der Short-Tracks-Ablagen (siehe _APP_DENY_REL)
+                "data/short_tracks_ref",
                 # Persoenliche Support-Anweisungen, eine Datei je Benutzer mit
                 # dem Benutzernamen als Dateinamen. Auf ECHT am 2026-10-22
                 # gemessen: Verzeichnis 0755, Dateien 0644 – fuer jarvis_sandbox
@@ -841,6 +851,10 @@ SHELL_SECRET_PATHS = re.compile(
     # waere das ein Dump mit `shell` unter fremder Kennung) und die
     # Ergebnistexte fremder Laeufe.
     r'short_tracks\.json\b|short_tracks_log\.jsonl\b|'
+    # Short-Tracks-Referenzen fremder Ablagen (siehe _APP_DENY_REL). OHNE
+    # fuehrenden Schraegstrich: auch `cd data && cat short_tracks_ref/*` muss
+    # treffen, nicht nur ein vollstaendiger Pfad.
+    r'short_tracks_ref\b|'
     # Claude Subagent: Delegations-Schluessel -> Benutzer. Ein eigener Eintrag
     # laesst kuenftige Laeufe unter fremder Kennung starten.
     r'claude_subagent\.json\b|'

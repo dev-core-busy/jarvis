@@ -54,6 +54,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -80,6 +81,7 @@ NAME_MAX = 60
 BESCHREIBUNG_MAX = 200
 PROMPT_MAX = 8000
 HINWEIS_MAX = 1000                # Freitext beim Ablegen
+FRAGE_MAX = 4000                  # Frage im Fragefeld einer Ablage
 MAX_STEPS_CAP = 50
 MAX_TYPEN = 20
 
@@ -89,6 +91,35 @@ EFFORT_STUFEN = ("", "off", "low", "medium", "high", "max")
 MEHRFACH_WERTE = ("einzeln", "gemeinsam")
 
 _lock = threading.RLock()
+
+# ── Referenzdateien ─────────────────────────────────────────────────────────
+# Feste Unterlagen JE ABLAGE (z. B. ein Datenbankschema), die jedem Lauf dieser
+# Ablage beiliegen – beim Ablegen einer Datei ebenso wie bei einer Frage im
+# Fragefeld. Gepflegt werden sie von dem, der die Ablage aendern darf
+# (``darf_aendern``), gelesen werden sie im Lauf dessen, der sie benutzt.
+#
+# ABLAGEORT ``data/short_tracks_ref/<dump_id>/`` – ein eigenes VERZEICHNIS, das
+# in ``sandbox._APP_DENY_REL``, ``PRIVATE_DIRS`` und ``SHELL_SECRET_PATHS``
+# steht. Ohne die Sperre koennte ein Lauf mit ``shell_execute`` die Referenzen
+# FREMDER privater Ablagen lesen (Sperrliste statt Erlaubnisliste, dieselbe
+# Lehre wie bei data/google_auth). Der Lauf bekommt seine EIGENEN Referenzen
+# ausschliesslich als Arbeitskopie im privaten /tmp des Benutzers.
+#
+# KEIN ORDNERNAME ALS KONSTANTE UNTER ``DATA_DIR``: der Pfad wird bei jedem
+# Aufruf aus ``DATA_DIR`` gebildet. Ein Test, der ``DATA_DIR`` in einen
+# Sandkasten umbiegt, trifft damit auch die Referenzen – eine zweite Konstante
+# waere die Stelle, die beim Umbiegen vergessen wird und dann ins echte
+# ``data/`` schreibt.
+#
+# ⚠ WER DIE ABLAGE BENUTZEN DARF, ERFAEHRT DEN INHALT DER REFERENZEN – ueber
+# seine Fragen ("gib das Schema vollstaendig aus"). Es gibt bewusst keinen
+# Download-Endpunkt, aber das ist Bequemlichkeit, keine Schranke: der Inhalt
+# steht im Auftrag. Die Oberflaeche sagt das dem Pflegenden ausdruecklich.
+REF_ORDNER = "short_tracks_ref"
+MAX_REFERENZEN = 10
+REF_DATEI_MB = 10
+REF_NAME_MAX = 120
+VERZ_MODUS = 0o750
 
 
 class DumpFehler(Exception):
@@ -432,8 +463,12 @@ def _alle_speichern(dumps: list[dict]) -> None:
 # ganze Punkt: ein Feld dieser Liste laeuft ungeprueft durch ``_pruefe``, der
 # Parameter dagegen durch eine ausdrueckliche Admin-Pruefung. Wer ``global`` hier
 # eintraegt, macht aus der Rechtefrage wieder ein Rumpf-Feld.
+# ``referenzen`` steht NICHT darin: die Dateien liegen im eigenen Verzeichnis
+# und werden ueber eigene Funktionen gepflegt (``referenz_ablegen``). Ein Feld
+# im Datensatz waere eine zweite Wahrheit neben dem Verzeichnis.
 AENDERBAR = ("name", "beschreibung", "prompt", "bereiche", "dateitypen",
-             "mehrfach", "profile_id", "reasoning_effort", "max_steps", "enabled")
+             "mehrfach", "profile_id", "reasoning_effort", "max_steps", "enabled",
+             "fragen")
 
 
 def _neue_id() -> str:
@@ -602,6 +637,11 @@ def _pruefe(felder: dict, bestehend: dict | None = None) -> dict:
         "reasoning_effort": _valid_effort(q.get("reasoning_effort")),
         "max_steps": _valid_steps(q.get("max_steps")),
         "enabled": bool(q.get("enabled", True)),
+        # Fragefeld auf der Karte: die Ablage nimmt dann auch eine Frage OHNE
+        # Datei an. Vorgabe AUS – eine bestehende Ablage aendert ihr Verhalten
+        # nicht still, und eine Ablage "Rechnung pruefen" hat ohne Rechnung
+        # nichts zu tun.
+        "fragen": bool(q.get("fragen", False)),
         "angelegt": int(q.get("angelegt") or 0) or int(time.time()),
         "geaendert": int(time.time()),
         "laeufe": int(q.get("laeufe") or 0),
@@ -820,6 +860,14 @@ def loeschen(dump_id: str, user: str, ist_admin: bool = False) -> bool:
                 return False     # "nicht gefunden", nicht "verboten"
             del dumps[i]
             _alle_speichern(dumps)
+            # Die Referenzen gehen MIT: sie gehoeren zu genau dieser Ablage, und
+            # ein verwaistes Verzeichnis bliebe ohne Oberflaeche liegen, bis
+            # jemand es von Hand findet. Die Kennung ist nach ID_RE geprueft
+            # (``_ref_ordner``) – rmtree laeuft nie auf einem zusammengesetzten
+            # Fremdpfad.
+            ordner = _ref_ordner(dump_id)
+            if ordner is not None and ordner.is_dir() and not ordner.is_symlink():
+                shutil.rmtree(ordner, ignore_errors=True)
             return True
         return False
 
@@ -835,6 +883,153 @@ def lauf_vermerken(dump_id: str) -> None:
                 dumps[i] = d
                 _alle_speichern(dumps)
                 return
+
+
+# ── Referenzdateien ─────────────────────────────────────────────────────────
+
+def ref_wurzel() -> Path:
+    """``data/short_tracks_ref`` – bei JEDEM Aufruf aus ``DATA_DIR`` gebildet."""
+    return DATA_DIR / REF_ORDNER
+
+
+def _ref_ordner(dump_id: str) -> Path | None:
+    """Verzeichnis der Referenzen einer Ablage, ``None`` bei ungueltiger Kennung.
+
+    Die Kennung wird gegen ``ID_RE`` geprueft, BEVOR sie Teil eines Pfads wird:
+    sie kommt aus der URL, und ``../`` darin waere sonst ein Weg aus dem
+    Verzeichnis heraus.
+    """
+    if not ID_RE.match(str(dump_id or "")):
+        return None
+    return ref_wurzel() / str(dump_id)
+
+
+def ref_max_bytes() -> int:
+    return _cfg_int("ref_datei_mb", REF_DATEI_MB, 1, 50) * 1024 * 1024
+
+
+def ref_name(name: str) -> str:
+    """Sicherer Dateiname einer Referenz – leer, wenn nichts Brauchbares bleibt.
+
+    Nur Buchstaben, Ziffern und ``._-``; fuehrende Punkte fallen weg. Ohne das
+    waere ``..`` ein gueltiger Name (Punkte sind erlaubt) und ``.x.tmp`` ein
+    Name, der mit den Zwischendateien des atomaren Schreibens kollidiert.
+    """
+    roh = os.path.basename(str(name or "").replace("\\", "/"))
+    n = "".join(c if (c.isalnum() or c in "._-") else "_" for c in roh)
+    n = n.lstrip(".").strip("_")
+    if len(n) > REF_NAME_MAX:
+        stamm, suffix = os.path.splitext(n)
+        n = stamm[:REF_NAME_MAX - len(suffix)] + suffix
+    return n
+
+
+def _ref_dateien(dump_id: str) -> list[Path]:
+    ordner = _ref_ordner(dump_id)
+    if ordner is None or not ordner.is_dir() or ordner.is_symlink():
+        return []
+    raus = []
+    for p in ordner.iterdir():
+        # Versteckte Namen sind die Zwischendateien des atomaren Schreibens;
+        # ein Symlink koennte auf eine fremde Datei zeigen und wuerde sie dem
+        # naechsten Lauf beilegen.
+        if p.name.startswith(".") or p.is_symlink() or not p.is_file():
+            continue
+        raus.append(p)
+    raus.sort(key=lambda p: p.name.lower())
+    return raus
+
+
+def referenzen(dump_id: str) -> list[dict]:
+    """Die Referenzen einer Ablage fuer die Anzeige: Name, Groesse, Stand.
+
+    Das VERZEICHNIS ist die Wahrheit – es gibt keine zweite Liste im Datensatz,
+    die davon abweichen koennte.
+    """
+    raus = []
+    for p in _ref_dateien(dump_id):
+        try:
+            s = p.stat()
+        except OSError:
+            continue
+        raus.append({"name": p.name, "groesse": int(s.st_size),
+                     "geaendert": int(s.st_mtime)})
+    return raus
+
+
+def referenz_pfade(dump_id: str) -> list[Path]:
+    """Die Dateien fuer den Lauf (nur lesend benutzt)."""
+    return _ref_dateien(dump_id)
+
+
+def referenz_ablegen(dump_id: str, user: str, ist_admin: bool, dateiname: str,
+                     daten: bytes) -> dict:
+    """Legt eine Referenz ab oder ERSETZT eine gleichnamige.
+
+    Ersetzen ist der Normalfall der Pflege: ein geaendertes Schema wird mit
+    demselben Namen neu hochgeladen. Ein Deckel zaehlt deshalb nur NEUE Namen.
+
+    Rechte wie beim Aendern der Ablage (``darf_aendern``): eine Referenz
+    bestimmt, was JEDER Lauf dieser Ablage als Sachverhalt vorgelegt bekommt –
+    das ist eine Eigenschaft der Ablage, nicht des einzelnen Laufs.
+    """
+    with _lock:
+        d = holen(dump_id)
+        if not d or not darf_aendern(d, user, ist_admin):
+            raise DumpFehler("Dump nicht gefunden.")
+        name = ref_name(dateiname)
+        if not name:
+            raise DumpFehler("Der Dateiname ist nicht verwendbar.")
+        if not daten:
+            raise DumpFehler("Die Datei ist leer.")
+        grenze = ref_max_bytes()
+        if len(daten) > grenze:
+            raise DumpFehler("Eine Referenzdatei darf hoechstens %d MB gross sein."
+                             % (grenze // (1024 * 1024)))
+        vorhanden = {p.name for p in _ref_dateien(dump_id)}
+        ersetzt = name in vorhanden
+        if not ersetzt and len(vorhanden) >= MAX_REFERENZEN:
+            raise DumpFehler("Es sind hoechstens %d Referenzdateien je Ablage moeglich "
+                             "(vorhanden: %d). Ersetze eine bestehende, indem du "
+                             "sie unter demselben Namen hochlaedst, oder loesche eine."
+                             % (MAX_REFERENZEN, len(vorhanden)))
+        ordner = _ref_ordner(dump_id)
+        for verz in (ref_wurzel(), ordner):
+            verz.mkdir(parents=True, exist_ok=True)
+            try:
+                # mkdir(mode=) unterliegt der umask – deshalb ausdruecklich.
+                os.chmod(verz, VERZ_MODUS)
+            except OSError as e:
+                print("[Tracks] Rechte fuer %s nicht gesetzt: %s" % (verz.name, e),
+                      flush=True)
+        ziel = ordner / name
+        tmp = ordner / (".%s.tmp" % secrets.token_hex(4))
+        tmp.write_bytes(daten)
+        try:
+            os.chmod(tmp, DATEI_MODUS)       # ohne Ausfuehrungsrecht
+        except OSError:
+            pass
+        os.replace(tmp, ziel)
+        return {"name": name, "groesse": len(daten), "ersetzt": ersetzt}
+
+
+def referenz_loeschen(dump_id: str, user: str, ist_admin: bool, name: str) -> bool:
+    """Eine Referenz loeschen. ``False`` = nicht gefunden (auch: nicht berechtigt).
+
+    Der Name muss GENAU dem sicheren Namen entsprechen – ein Name, den
+    ``ref_name`` veraendern wuerde, kann keine abgelegte Referenz sein.
+    """
+    with _lock:
+        d = holen(dump_id)
+        if not d or not darf_aendern(d, user, ist_admin):
+            return False
+        if not name or ref_name(name) != name:
+            return False
+        for p in _ref_dateien(dump_id):
+            if p.name == name:
+                p.unlink()
+                return True
+        return False
 
 
 # ── Dateityp-Pruefung ───────────────────────────────────────────────────────

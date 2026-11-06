@@ -120,8 +120,11 @@ QUITTIERBAR = ("offen", "nicht_im_index", "zurueckgehalten")
 # neue requirements.lock im Repo (deploy/lock_erneuern.py). Als eigene Klasse,
 # weil "behebbar" hier eine falsche Zusage waere: auf DEV am 2026-10-29 stand
 # "7 behebbar · behebt automatisch · 0 gehoben" ohne jeden Grund da.
-KLASSEN = ("behebbar", "neustart", "nicht_im_index", "zurueckgehalten", "lock", "offen",
-           "ausgenommen")
+# "nicht_in_lock": derselbe Lock-Modus, aber das Paket steht in der Lock-Datei
+# GAR NICHT (Abhaengigkeit eines Skills o. Ae.). Dann ist auch der Lock-Weg eine
+# falsche Zusage – siehe abhaengigkeiten.lock_fuehrt fuer den Vorfall.
+KLASSEN = ("behebbar", "neustart", "nicht_im_index", "zurueckgehalten", "lock",
+           "nicht_in_lock", "offen", "ausgenommen")
 _META_KERNEL = re.compile(r"^linux-(image|headers)-(?!\d)[a-z0-9-]+$")
 _KERNEL_VERSIONIERT = re.compile(r"^linux-(image|headers|modules|kbuild)-\d")
 
@@ -501,12 +504,27 @@ def _debian_im_prozess() -> dict:
 
 # ── Python und npm (OSV) ─────────────────────────────────────────────────────
 
+def python_klasse(lock: bool, gefuehrt: bool) -> str:
+    """Klasse eines Python-Befunds MIT bekanntem Fix – die Entscheidung an EINER Stelle.
+
+    Ohne Lock-Modus hebt der Server selbst, also "behebbar". Im Lock-Modus kommt
+    die Behebung aus dem Repo – aber nur fuer Pakete, die die Lock-Datei auch
+    FUEHRT. Fuer die anderen gibt es gar keinen Weg, der sie erreicht, und das
+    muss die Anzeige sagen duerfen (``nicht_in_lock``).
+    """
+    if not lock:
+        return "behebbar"
+    return "lock" if gefuehrt else "nicht_in_lock"
+
+
 def python_pruefen() -> dict:
     try:
         from backend import abhaengigkeiten as abh
         inst = abh.installiert()
         funde = abh.schwachstellen(inst)
         lock = abh.lock_modus()
+        # Nur im Lock-Modus noetig – ohne ihn liest niemand die Lock-Datei.
+        gefuehrt = abh.lock_fuehrt({f["paket"] for f in funde}) if lock else set()
     except Exception as e:  # noqa: BLE001
         return {"info": {"geprueft": False, "grund": f"{type(e).__name__}: {e}"}, "befunde": []}
     # OSV fuehrt dieselbe Luecke oft doppelt (GHSA- und PYSEC-Eintrag zur selben
@@ -528,7 +546,8 @@ def python_pruefen() -> dict:
             "cve": cve, "aliase": f["aliase"],
             "version": f["version"], "fix": f.get("behoben_in") or "", "einstufung": "",
             "klasse": "ausgenommen" if f.get("ausgenommen")
-                      else (("lock" if lock else "behebbar") if f.get("behoben_in") else "offen"),
+                      else (python_klasse(lock, f["paket"] in gefuehrt)
+                            if f.get("behoben_in") else "offen"),
             "text": "", "kernel": False})
     return {"info": {"geprueft": True, "grund": "", "lock_modus": lock,
                      "stand": python_stand(inst)}, "befunde": befunde}
@@ -1055,8 +1074,10 @@ def plan(erg: dict, einst: dict, schwelle: str | None = None) -> dict:
             elif b["klasse"] == "nicht_im_index":
                 index = True
         elif b["bereich"] == "python" and b["klasse"] == "behebbar":
-            # Im Lock-Modus gibt es kein "behebbar" fuer Python (Klasse "lock",
-            # python_pruefen) – die Entscheidung steht an EINER Stelle.
+            # Im Lock-Modus gibt es kein "behebbar" fuer Python (Klasse "lock"
+            # bzw. "nicht_in_lock", python_klasse) – die Entscheidung steht an
+            # EINER Stelle. Beide erzeugen bewusst keinen Behebungsplan: der
+            # Server hebt weder Lock-Pakete noch die ausserhalb der Lock.
             python = True
         elif b["bereich"] == "node" and b["klasse"] == "behebbar":
             # Bewusst NICHT automatisch: der Schalter "regulaere Quelle" meint
@@ -1430,6 +1451,8 @@ def kurzbericht(erg: dict) -> str:
              f"{z.get('offen', 0)} ohne Update"]
     if z.get("lock"):
         teile.append(f"{z['lock']} Python nur über die Lock-Datei")
+    if z.get("nicht_in_lock"):
+        teile.append(f"{z['nicht_in_lock']} Python nur von Hand (nicht in der Lock-Datei)")
     beh = erg.get("behebung") or {}
     n = sum(len(r.get("installiert") or []) for r in beh.get("debian") or [])
     py = len((beh.get("python") or {}).get("geaendert") or [])
@@ -1505,7 +1528,7 @@ def badge() -> dict:
                               "zaehler": {}, "ts": int(erg.get("ts") or 0)})
         e["zaehler"][b["klasse"]] = e["zaehler"].get(b["klasse"], 0) + 1
     rang = {"behebbar": 0, "neustart": 1, "nicht_im_index": 2, "zurueckgehalten": 3,
-            "lock": 4, "offen": 5}
+            "lock": 4, "nicht_in_lock": 5, "offen": 6}
     posten = sorted(je.values(), key=lambda e: (min(rang.get(k, 9) for k in e["zaehler"]),
                                                 e["titel"]))
     return {"anzahl": len(posten), "posten": posten}

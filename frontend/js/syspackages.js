@@ -100,7 +100,17 @@
     var BADGE_MS = 60000;
     // Rangfolge der Markierung: die dringlichste Klasse eines Pakets zeigt sich.
     var CVE_RANG = { behebbar: 0, neustart: 1, nicht_im_index: 2,
-                     zurueckgehalten: 3, lock: 4, offen: 5, ausgenommen: 6 };
+                     zurueckgehalten: 3, lock: 4, nicht_in_lock: 5, offen: 6,
+                     ausgenommen: 7 };
+    /* Anzeige-Reihenfolge der Klassen – EINE Quelle fuer den Badge-Hinweis, die
+     * Statuszeile und die Frage "gibt es ueberhaupt Befunde?". Die drei Listen
+     * standen ausgeschrieben an drei Stellen; die dritte war eine Negation und
+     * haette bei einer neuen Klasse "keine bekannten Luecken" behauptet,
+     * waehrend daneben ein Befund steht (2026-11-06, Klasse nicht_in_lock).
+     * "ausgenommen" ist bewertet und gehoert nicht in diese Reihe. */
+    var CVE_KLASSEN = Object.keys(CVE_RANG)
+        .filter(function (k) { return k !== 'ausgenommen'; })
+        .sort(function (a, b) { return CVE_RANG[a] - CVE_RANG[b]; });
 
     function T(key, fallback) {
         try { if (window.t) return window.t(key) || fallback; } catch (e) {}
@@ -536,7 +546,7 @@
         el.classList.toggle('is-danger', dringend);
         var zeilen = posten.map(function (p) {
             var z = p.zaehler || {};
-            var teile = ['behebbar', 'neustart', 'nicht_im_index', 'zurueckgehalten', 'lock', 'offen']
+            var teile = CVE_KLASSEN
                 .filter(function (k) { return z[k]; })
                 .map(function (k) { return z[k] + ' ' + klasseText(k); });
             return (p.bereich && p.bereich !== 'debian' ? bereichText(p.bereich) + ' ' : '')
@@ -623,6 +633,7 @@
             case 'nicht_im_index': return T('pkg.cve_k_nicht_im_index', 'Update noch nicht im Paketindex');
             case 'zurueckgehalten': return T('pkg.cve_k_zurueckgehalten', 'zurückgehalten');
             case 'lock': return T('pkg.cve_k_lock', 'Update nur über die Lock-Datei');
+            case 'nicht_in_lock': return T('pkg.cve_k_nicht_in_lock', 'Update nur von Hand');
             case 'offen': return T('pkg.cve_k_offen', 'noch keine Behebung von Debian');
             case 'ausgenommen': return T('pkg.cve_k_ausgenommen', 'bewertet');
         }
@@ -732,6 +743,12 @@
             if (b.klasse === 'lock') {
                 zusatz.push(T('pkg.cve_lock_hinweis', 'Dieser Server folgt der Lock-Datei des Repositorys und hebt Python-Pakete nicht selbst – behoben wird über eine neue Lock-Datei.'));
             }
+            // Der Lock-Weg erreicht dieses Paket NICHT – es steht nicht in der
+            // Lock-Datei. Den Unterschied muss die Zeile nennen, sonst schickt
+            // sie den Administrator auf einen Weg, der nichts aendert.
+            if (b.klasse === 'nicht_in_lock') {
+                zusatz.push(T('pkg.cve_nicht_in_lock_hinweis', 'Dieses Paket steht nicht in der Lock-Datei – es kommt als Abhängigkeit eines Skills herein. Eine neue Lock-Datei erfasst es nicht, und dieser Server bewegt es nicht von selbst: es muss in die Lock aufgenommen oder von Hand aktualisiert werden.'));
+            }
             if (b.zwischenrelease) zusatz.push(T('pkg.cve_spu', 'Behebung fürs nächste Debian-Zwischenrelease eingeplant'));
             var nd = nodsaText(b);
             if (nd) zusatz.push(nd);
@@ -796,11 +813,11 @@
             var z = erg.zaehler || {};
             var unges = quittierbareIds(cveBefunde()).length;
             teile.push(esc(T('pkg.cve_stand', 'Geprüft {zeit}').replace('{zeit}', zeitpunkt(erg.erzeugt_am))));
-            ['behebbar', 'neustart', 'nicht_im_index', 'zurueckgehalten', 'lock', 'offen'].forEach(function (k) {
+            CVE_KLASSEN.forEach(function (k) {
                 if (z[k]) teile.push('<span class="jv-pkg-cve jv-pkg-cve-' + k + ' ist-klein">'
                     + esc(klasseText(k)) + ': ' + z[k] + '</span>');
             });
-            if (!z.behebbar && !z.neustart && !z.offen && !z.nicht_im_index && !z.zurueckgehalten && !z.lock) {
+            if (!CVE_KLASSEN.some(function (k) { return z[k]; })) {
                 teile.push(esc(T('pkg.cve_keine', 'keine bekannten Lücken')));
             }
             if (unges) teile.push(esc(T('pkg.cve_neu', '{n} noch nicht gesehen').replace('{n}', String(unges))));

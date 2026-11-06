@@ -312,7 +312,14 @@ _abh.schwachstellen = lambda inst: [
     {"paket": "torch", "version": "2.12.0", "id": "PYSEC-t", "aliase": ["CVE-2026-2", "PYSEC-t"],
      "behoben_in": None, "ausgenommen": False},
     {"paket": "torch", "version": "2.12.0", "id": "GHSA-t", "aliase": ["CVE-2026-2", "GHSA-t"],
-     "behoben_in": "2.13.0", "ausgenommen": True}]
+     "behoben_in": "2.13.0", "ausgenommen": True},
+    # Der echte Fall vom 2026-11-06 (ECHT): ein Paket MIT bekannter Behebung,
+    # das die Lock-Datei gar nicht fuehrt (kommt ueber einen Skill herein).
+    {"paket": "oauthlib", "version": "4.0.0", "id": "GHSA-o", "aliase": ["CVE-2026-3", "GHSA-o"],
+     "behoben_in": "4.0.1", "ausgenommen": False}]
+# ECHTE Signatur von abhaengigkeiten.lock_fuehrt: Namen rein, die GEFUEHRTEN
+# zurueck. filelock steht in der Lock, oauthlib nicht.
+_abh.lock_fuehrt = lambda namen: {n for n in namen if n in ("filelock", "torch")}
 _abh_alt = sys.modules.get("backend.abhaengigkeiten")
 sys.modules["backend.abhaengigkeiten"] = _abh
 import backend as _backend_pkg  # noqa: E402
@@ -332,10 +339,29 @@ finally:
         _backend_pkg.abhaengigkeiten = _attr_alt
     else:
         delattr(_backend_pkg, "abhaengigkeiten")
-check([b["klasse"] for b in _pl["befunde"]] == ["lock", "offen", "ausgenommen"],
+check([b["klasse"] for b in _pl["befunde"]] == ["lock", "offen", "ausgenommen", "nicht_in_lock"],
       "Lock-Modus: Python-Behebung heisst 'lock', nicht 'behebbar'", str([b["klasse"] for b in _pl["befunde"]]))
-check([b["klasse"] for b in _pf["befunde"]] == ["behebbar", "offen", "ausgenommen"],
-      "ohne Lock-Modus bleibt es 'behebbar'")
+check([b["klasse"] for b in _pf["befunde"]] == ["behebbar", "offen", "ausgenommen", "behebbar"],
+      "ohne Lock-Modus bleibt es 'behebbar'", str([b["klasse"] for b in _pf["befunde"]]))
+# ⚠ WARUM (2026-11-06, ECHT): im Lock-Modus bekam JEDES Python-Paket mit Fix die
+# Klasse "lock" samt Hinweis "behoben wird ueber eine neue Lock-Datei" – auch
+# oauthlib, das in der Lock nicht steht. Der genannte Weg erreicht es nicht
+# (lock_erneuern.py liest requirements.txt), und der Server bewegt Pakete
+# ausserhalb der Lock bewusst nicht: die Zeile nannte einen Weg, den es fuer
+# dieses Paket nicht gibt. Gemessen wird die WIRKUNG an den drei Faellen.
+check(cve_pruefung.python_klasse(False, False) == "behebbar"
+      and cve_pruefung.python_klasse(False, True) == "behebbar",
+      "ohne Lock-Modus hebt der Server selbst -> 'behebbar'")
+check(cve_pruefung.python_klasse(True, True) == "lock",
+      "im Lock-Modus und IN der Lock -> 'lock' (eine neue Lock-Datei hilft)")
+check(cve_pruefung.python_klasse(True, False) == "nicht_in_lock",
+      "im Lock-Modus, aber NICHT in der Lock -> 'nicht_in_lock'")
+_ol = [b for b in _pl["befunde"] if b["quelle"] == "oauthlib"]
+check(len(_ol) == 1 and _ol[0]["klasse"] == "nicht_in_lock" and _ol[0]["fix"] == "4.0.1",
+      "ein Paket ausserhalb der Lock wird nicht als Lock-Fall ausgegeben", str(_ol))
+check("nicht_in_lock" in cve_pruefung.KLASSEN,
+      "die Klasse ist in KLASSEN gefuehrt – sonst zaehlt sie in keinem Zaehler mit",
+      str(cve_pruefung.KLASSEN))
 check(_pl["info"].get("stand") == cve_pruefung.python_stand({"filelock": "3.29.1"}),
       "das Ergebnis traegt den Stand der installierten Pakete (fuer nach_paketwechsel)",
       str(_pl["info"]))
@@ -350,11 +376,18 @@ check(len(_ids) == len(set(_ids)), "keine Befund-ID doppelt", str(_ids))
 _erg_lock = {"befunde": _pl["befunde"], "bereiche": {"python": _pl["info"]}}
 check(cve_pruefung.plan(_erg_lock, cve_pruefung.VORGABEN)["python"] is False,
       "im Lock-Modus wird Python nie automatisch gehoben")
-_z = {"lock": 1, "behebbar": 0}
+_z = {"lock": 1, "behebbar": 0, "nicht_in_lock": 2}
 _kb = cve_pruefung.kurzbericht({"ok": True, "zaehler": _z, "beheben": True, "bereiche": {},
                                 "behebung": {"plan": {"nur_regulaere_quelle": 3}, "debian": []}})
 check("Lock-Datei" in _kb and "regulären Quelle" in _kb,
       "der Kurzbericht nennt, WARUM nichts gehoben wurde", _kb)
+# Die beiden Lock-Faelle sind im Bericht UNTERSCHEIDBAR – "1 nur ueber die
+# Lock-Datei" und "2 nur von Hand" sind zwei verschiedene Handlungen.
+check("2 Python nur von Hand" in _kb and "1 Python nur über die Lock-Datei" in _kb,
+      "und er trennt 'ueber die Lock-Datei' von 'von Hand'", _kb)
+_kb0 = cve_pruefung.kurzbericht({"ok": True, "zaehler": {"lock": 1}, "bereiche": {}})
+check("von Hand" not in _kb0,
+      "ohne solche Befunde steht die Zeile nicht da", _kb0)
 check(not any(b["klasse"] == "offen" and "p4" in cve_pruefung.plan(ERG, cve_pruefung.VORGABEN)["debian"]
               for b in ERG["befunde"]), "offene Luecken (ohne Behebung) stehen nie im Plan")
 
@@ -1312,5 +1345,69 @@ check(_by["d"]["einmalig"] is True and _by["a"]["einmalig"] is False,
       "Einmal-Auftrag gekennzeichnet", str(_by["d"]))
 check(cve_pruefung.auftraege(None, _naechster) == [],
       "leere/fehlende Auftragsliste ergibt leere Liste")
+
+# ═══════════════════════════════════════════════════════════════════════════
+abschnitt("10. Die Oberflaeche kennt JEDE Klasse (Regel, nicht Liste)")
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠ WARUM: die Klassen standen in syspackages.js an DREI Stellen ausgeschrieben
+# (Badge-Hinweis, Statuszeile, und die Frage "gibt es ueberhaupt Befunde?" als
+# Negation). Eine neue Klasse haette die Statuszeile "keine bekannten Luecken"
+# behaupten lassen, waehrend daneben ein Befund steht – und im Badge-Hinweis
+# waere sie unsichtbar geblieben. Geprueft wird deshalb die EIGENSCHAFT: jede
+# Klasse aus KLASSEN hat Rang, Beschriftung und beide Sprachen, und die drei
+# Listen kommen aus EINER Quelle.
+_SYS = (ROOT / "frontend" / "js" / "syspackages.js").read_text(encoding="utf-8")
+_I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
+_m = _re.search(r"var CVE_RANG = \{(.*?)\};", _SYS, _re.S)
+_rang_namen = set(_re.findall(r"([a-z_]+):\s*\d", _m.group(1))) if _m else set()
+# Positivkontrolle VOR den inhaltlichen Pruefungen: ohne sie waeren sie trivial.
+if not _m or len(_rang_namen) < 4 or len(cve_pruefung.KLASSEN) < 4:
+    print("ABBRUCH: CVE_RANG oder KLASSEN nicht lesbar – Folgepruefungen waeren trivial wahr",
+          sorted(_rang_namen), cve_pruefung.KLASSEN)
+    ende(2)
+# Der EN-Block beginnt hinter demselben Anker, den test_system_packages benutzt.
+_schnitt = _I18N.find("'wissen.cpu_load': 'CPU load'")
+if _schnitt < 0:
+    print("ABBRUCH: Sprachgrenze in i18n.js nicht gefunden")
+    ende(2)
+_de, _en = _I18N[:_schnitt], _I18N[_schnitt:]
+
+_ohne_rang = [k for k in cve_pruefung.KLASSEN if k not in _rang_namen]
+check(not _ohne_rang, "jede Klasse hat einen Rang in CVE_RANG", str(_ohne_rang))
+_ohne_text = [k for k in cve_pruefung.KLASSEN if "case '%s':" % k not in _SYS]
+check(not _ohne_text, "jede Klasse hat eine Beschriftung in klasseText", str(_ohne_text))
+_ohne_de = [k for k in cve_pruefung.KLASSEN if "'pkg.cve_k_%s':" % k not in _de]
+_ohne_en = [k for k in cve_pruefung.KLASSEN if "'pkg.cve_k_%s':" % k not in _en]
+check(not _ohne_de and not _ohne_en,
+      "und einen i18n-Schluessel in DE UND EN", str((_ohne_de, _ohne_en)))
+# Eine Klasse im Rang, die das Backend nicht kennt, ist ebenso ein Befund:
+# sie wuerde gezaehlt und entstaende nie.
+_erfunden = sorted(_rang_namen - set(cve_pruefung.KLASSEN))
+check(not _erfunden, "und umgekehrt kennt die Oberflaeche keine Klasse, die es nicht gibt",
+      str(_erfunden))
+
+check("Object.keys(CVE_RANG)" in _SYS and "var CVE_KLASSEN" in _SYS,
+      "die Anzeige-Reihenfolge wird aus CVE_RANG abgeleitet, nicht zweitgepflegt")
+check(_SYS.count("CVE_KLASSEN") >= 4,
+      "und an allen drei Anzeigestellen benutzt (Definition + 3)",
+      str(_SYS.count("CVE_KLASSEN")))
+check("!z.behebbar &&" not in _SYS,
+      "die Frage 'gibt es Befunde?' ist keine ausgeschriebene Negation mehr")
+
+# Der Unterschied, um den es geht: beide Lock-Faelle nennen VERSCHIEDENE Wege.
+_h_lock = _re.search(r"'pkg\.cve_lock_hinweis': '([^']*)'", _de)
+_h_frei = _re.search(r"'pkg\.cve_nicht_in_lock_hinweis': '([^']*)'", _de)
+check(bool(_h_lock and _h_frei) and _h_lock.group(1) != _h_frei.group(1),
+      "'lock' und 'nicht_in_lock' tragen zwei verschiedene Hinweise")
+check(bool(_h_frei) and "Lock-Datei" in _h_frei.group(1)
+      and ("von Hand" in _h_frei.group(1) or "aufgenommen" in _h_frei.group(1)),
+      "und der neue Hinweis nennt den Weg, der wirklich traegt",
+      _h_frei.group(1) if _h_frei else "")
+check("b.klasse === 'nicht_in_lock'" in _SYS,
+      "der Hinweis haengt an der Klasse (sonst steht er nie da)")
+_TH = (ROOT / "frontend" / "css" / "theme.css").read_text(encoding="utf-8")
+check(".jv-pkg-cve-nicht_in_lock" in _TH,
+      "die Markierung hat eine CSS-Regel – ohne sie ist sie unsichtbar")
+
 
 ende()

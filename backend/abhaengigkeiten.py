@@ -346,6 +346,30 @@ def lock_versionen(text: str | None = None) -> dict[str, str]:
     return erg
 
 
+def lock_fuehrt(namen) -> set[str]:
+    """Teilmenge von ``namen``, die ``requirements.lock`` wirklich fuehrt.
+
+    EINE Quelle fuer die Frage "steht das Paket in der Lock?" – der Aufrufer
+    (``cve_pruefung``) kennt die Normierung nicht und soll sie nicht nachbauen.
+    Verglichen wird normiert, zurueck kommen die Namen des Aufrufers.
+
+    ⚠ WARUM (2026-11-06, ECHT): im Lock-Modus bekam JEDER Python-Befund mit
+    bekanntem Fix die Klasse "lock" samt Hinweis "behoben wird ueber eine neue
+    Lock-Datei" – auch ``oauthlib`` 4.0.0, das in der Lock gar nicht steht (es
+    kommt ueber exchangelib des E-Mail-Skills und ueber requests-oauthlib
+    herein). Fuer so ein Paket ist der Hinweis FALSCH: ``lock_erneuern.py``
+    liest requirements.txt und nimmt es nicht auf, und ``_lock_lauf`` laesst
+    Pakete ausserhalb der Lock bewusst unberuehrt. Es lag damit in einer Luecke,
+    die kein Weg erreicht – und die Anzeige nannte trotzdem einen.
+    Ohne Lock-Datei ist die Antwort die leere Menge (fail-closed: dann fuehrt
+    sie nichts).
+    """
+    if not LOCK.is_file():
+        return set()
+    soll = lock_versionen()
+    return {n for n in namen if _norm(n) in soll}
+
+
 def lock_abweichungen(inst: dict[str, str], soll: dict[str, str] | None = None) -> list[tuple]:
     """(name, ist oder None, soll) fuer jedes Lock-Paket, das fehlt oder eine andere
     Version hat – aelter UND neuer. Pakete ausserhalb der Lock zaehlen nicht."""

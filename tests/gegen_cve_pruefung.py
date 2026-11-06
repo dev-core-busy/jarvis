@@ -32,6 +32,8 @@ SC = "backend/scheduler.py"
 DA = "backend/broker/daemon.py"
 OP = "backend/broker/ops.py"
 SP = "frontend/js/syspackages.js"
+I18 = "frontend/js/i18n.js"
+TH = "frontend/css/theme.css"
 
 PROBEN = [
     ("/api/me ohne cve_badge", MA, '        "cve_badge": cve_badge,\n', ''),
@@ -52,8 +54,31 @@ PROBEN = [
     ("regulaere Quelle ohne Schalter", CP,
      'if b.get("aus_sicherheitsquelle") or einst["regulaere_quelle"]:', 'if True:'),
     ("Python im Lock-Modus gilt als behebbar", CP,
-     '(("lock" if lock else "behebbar") if f.get("behoben_in") else "offen")',
+     '(python_klasse(lock, f["paket"] in gefuehrt)\n                            if f.get("behoben_in") else "offen")',
      '("behebbar" if f.get("behoben_in") else "offen")'),
+    # Lock-Modus, aber das Paket steht NICHT in der Lock (oauthlib auf ECHT,
+    # 2026-11-06): dann nennt "nur ueber die Lock-Datei" einen Weg, der es
+    # nicht erreicht.
+    ("Lock-Fall ohne Blick in die Lock-Datei", CP,
+     'return "lock" if gefuehrt else "nicht_in_lock"', 'return "lock"'),
+    ("Kurzbericht trennt die beiden Lock-Faelle nicht", CP,
+     '    if z.get("nicht_in_lock"):\n'
+     '        teile.append(f"{z[\'nicht_in_lock\']} Python nur von Hand (nicht in der Lock-Datei)")\n',
+     ''),
+    ("Klasse ohne Rang in der Oberflaeche", SP,
+     ' nicht_in_lock: 5,', ''),
+    ("Klasse ohne Beschriftung in der Oberflaeche", SP,
+     "            case 'nicht_in_lock': return T('pkg.cve_k_nicht_in_lock', 'Update nur von Hand');\n",
+     ''),
+    ("Befundzeile ohne den Hinweis zum wirklichen Weg", SP,
+     "if (b.klasse === 'nicht_in_lock') {", 'if (false) {'),
+    ("Anzeige-Listen wieder ausgeschrieben (Negation statt einer Quelle)", SP,
+     '            if (!CVE_KLASSEN.some(function (k) { return z[k]; })) {',
+     '            if (!z.behebbar && !z.neustart && !z.offen && !z.nicht_im_index && !z.zurueckgehalten && !z.lock) {'),
+    ("Beschriftung nur auf Deutsch", I18,
+     "        'pkg.cve_k_nicht_in_lock': 'update only by hand',\n", ''),
+    ("Markierung ohne CSS-Regel", TH,
+     '.jv-pkg-cve-nicht_in_lock,\n', ''),
     ("OSV-Doppeleintraege derselben CVE nicht gebuendelt", CP,
      '        if k in je:\n            _vereinen(je[k], f, "behoben_in")',
      '        if False:\n            _vereinen(je[k], f, "behoben_in")'),
@@ -231,7 +256,7 @@ PROBEN = [
      """filter += '<label class="jv-pkg-cve-filter"><input type="checkbox" id="jv-pkg-x"'"""),
 ]
 
-DATEIEN = [CP, CA, SC, DA, OP, MA, SP, "tests/test_cve_pruefung.py"]
+DATEIEN = [CP, CA, SC, DA, OP, MA, SP, I18, TH, "tests/test_cve_pruefung.py"]
 
 WAECHTER = [
     (["python3", "tests/test_cve_pruefung.py"], r"Ergebnis: (\d+) OK, (\d+) FAIL"),

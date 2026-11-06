@@ -1050,6 +1050,7 @@ button.jv-pkg-cve { cursor: pointer; }
 .jv-pkg-cve-neustart,
 .jv-pkg-cve-nicht_im_index,
 .jv-pkg-cve-zurueckgehalten,
+.jv-pkg-cve-nicht_in_lock,
 .jv-pkg-cve-lock { background: rgba(var(--warning-rgb), .20); border-color: rgba(var(--warning-rgb), .60); }
 .jv-pkg-cve-offen { background: rgba(var(--warning-rgb), .12); border-color: rgba(var(--warning-rgb), .45); }
 .jv-pkg-cve-leise, .jv-pkg-cve-ausgenommen { color: var(--text-secondary); }

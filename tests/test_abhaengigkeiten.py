@@ -218,7 +218,34 @@ os.environ["JARVIS_ABH_LOCK"] = "1"
 check("mit Schalter und Lock-Datei: Lock-Modus", A.lock_modus())
 A.LOCK = SK / "gibtsnicht.lock"
 check("mit Schalter, aber ohne Lock-Datei: kein Lock-Modus", not A.lock_modus())
+# ⚠ lock_fuehrt – die Frage "steht das Paket ueberhaupt in der Lock?".
+# WARUM (2026-11-06, ECHT): ohne sie bekam JEDER Python-Befund mit Fix im
+# Lock-Modus den Hinweis "behoben wird ueber eine neue Lock-Datei" – auch
+# oauthlib, das die Lock nicht fuehrt (es kommt ueber exchangelib des
+# E-Mail-Skills herein). Fuer so ein Paket erreicht der genannte Weg nichts.
+# Ohne Schranke liest lock_versionen eine Datei, die es nicht gibt – das WIRFT,
+# und ein geworfener Fehler ist von "nicht gelaufen" nicht zu unterscheiden.
+# Deshalb hier gefangen: ein Absturz ist ein FAIL, keine abgebrochene Messung.
+def _fuehrt(namen):
+    try:
+        return A.lock_fuehrt(namen)
+    except Exception as e:  # noqa: BLE001
+        return f"wirft {type(e).__name__}"
+
+
+check("ohne Lock-Datei fuehrt sie nichts (fail-closed, und sie wirft nicht)",
+      _fuehrt({"numpy", "oauthlib"}) == set(), _fuehrt({"numpy", "oauthlib"}))
 A.LOCK = LK
+check("lock_fuehrt trennt gefuehrte von nicht gefuehrten Paketen",
+      A.lock_fuehrt({"numpy", "oauthlib", "paket03"}) == {"numpy", "paket03"},
+      A.lock_fuehrt({"numpy", "oauthlib", "paket03"}))
+# Der Vergleich laeuft normiert (PyJWT == pyjwt, requests_x == requests-x),
+# die RUECKGABE traegt aber den Namen des Aufrufers – der Befund nennt ihn so,
+# wie OSV ihn liefert.
+check("…normiert verglichen, Rueckgabe in der Schreibweise des Aufrufers",
+      A.lock_fuehrt({"PyJWT", "Google_GenAI"}) == {"PyJWT", "Google_GenAI"},
+      A.lock_fuehrt({"PyJWT", "Google_GenAI"}))
+check("…leere Anfrage ergibt leere Antwort", A.lock_fuehrt(set()) == set())
 
 zustand["inst"] = dict(ist)
 aufrufe.clear()

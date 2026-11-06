@@ -36,6 +36,19 @@ mehr. Die Bereiche werden nacheinander umgestellt.
 - [ ] **Outlook (Stufe 2)** – über die Zukunft des Serverzugriffs entscheiden
       (gespeicherte Postfach-Kennwörter der noch ausgewählten Benutzer).
 
+## Vor der Freigabe von E-Mail für alle Benutzer
+
+Aus der Sicherheitsprüfung vor dem Pentest (2026-11-05), bewusst zurückgestellt,
+solange E-Mail nur für Testbenutzer freigeschaltet ist:
+
+- [ ] **Mailregeln mit Außenwirkung** – eine Regel mit „Außenwirkung“ lässt den
+      Agenten auf eine eingehende fremde Mail hin ohne Bestätigung antworten oder
+      weiterleiten. Ein Absender kann damit per eingeschleuster Anweisung Mails
+      nach außen weiterleiten lassen. Vor der breiten Freigabe festlegen: ohne
+      Bestätigung nur an interne Empfänger (oder nur Antwort an den Absender),
+      und Bestandsregeln nicht mehr automatisch auf „an“ setzen
+      (`mail_rules.py`, `mail_runner.py`, `wirkung.py`).
+
 ## Short Tracks: Fragefeld und Referenzdateien – weitere Ausbaustufen
 
 Gebaut ist (2026-11-06): Referenzdateien je Ablage (z. B. ein

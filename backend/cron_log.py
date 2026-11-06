@@ -65,8 +65,13 @@ def ist_fehler(ergebnis: str) -> bool:
 
 
 def eintragen(job: dict, start: float, ende: float, ergebnis: str,
-              ausloeser: str = "zeitplan", von: str = "") -> None:
-    """Einen Lauf protokollieren. Wirft NIE (siehe Modulkopf)."""
+              ausloeser: str = "zeitplan", von: str = "",
+              ok: bool | None = None) -> None:
+    """Einen Lauf protokollieren. Wirft NIE (siehe Modulkopf).
+
+    ``ok`` ist der Status, den ein Lauf selbst meldet (Loesungsarchiv). Er kann
+    einen Lauf nur ZUM FEHLER machen, nie einen "Fehler: ..." zum Erfolg –
+    fail-closed, falls Text und Status je auseinanderlaufen."""
     try:
         p = _datei((job or {}).get("id") or "")
         if p is None:
@@ -82,7 +87,7 @@ def eintragen(job: dict, start: float, ende: float, ergebnis: str,
             "von": str(von or ""),
             "label": str((job or {}).get("label") or ""),
             "kind": str((job or {}).get("kind") or "agent"),
-            "ok": not ist_fehler(text),
+            "ok": ok is not False and not ist_fehler(text),
             "ergebnis": text[:ERGEBNIS_MAX],
             "gekuerzt": len(text) > ERGEBNIS_MAX,
         }

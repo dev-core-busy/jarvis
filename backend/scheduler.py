@@ -328,6 +328,9 @@ class CronManager:
             })
 
         result = "Fehler: AgentManager nicht verfügbar"
+        # Status des Laufs, wenn er einen eigenen meldet (Loesungsarchiv);
+        # sonst entscheidet das Protokoll am Text (cron_log.ist_fehler).
+        status_ok: bool | None = None
         t0 = time.time()
         try:
             if job.get("kind") == "reminder":
@@ -373,6 +376,11 @@ class CronManager:
                 from backend import loesungsarchiv
                 erg = await loesungsarchiv.lauf(ausloeser=ausloeser)
                 result = str(erg.get("grund") or "")
+                # Der Lauf kennt seinen Ausgang selbst (ok = keine Fehler) –
+                # dieselbe Aussage wie "Letzter Lauf" im Loesungsarchiv. Ohne
+                # das stuende ein Lauf mit Ticket-Fehlern hier als erfolgreich.
+                if isinstance(erg.get("ok"), bool):
+                    status_ok = erg["ok"]
             elif _agent_manager:
                 agent = _agent_manager.get_or_create_main()
                 from backend import wirkung as _wirkung
@@ -416,7 +424,7 @@ class CronManager:
         try:
             from backend import cron_log
             cron_log.eintragen(job, t0, time.time(), result or "",
-                               ausloeser=ausloeser, von=von)
+                               ausloeser=ausloeser, von=von, ok=status_ok)
         except Exception as _le:  # noqa: BLE001
             print(f"[Scheduler] Protokoll nicht geschrieben: {_le}", flush=True)
 

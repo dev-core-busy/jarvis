@@ -85,6 +85,19 @@ try:
     check("⚠ 'Fehler: …' ist ein gescheiterter Lauf", alle[0]["ok"] is False and alle[1]["ok"] is True,
           str(alle[:2]))
     check("Datei ist 0640", oct((SAND / "logs/cron/job-1.jsonl").stat().st_mode & 0o777) == "0o640")
+    # Ein Lauf, der seinen Ausgang selbst meldet (Loesungsarchiv, 2026-11-06):
+    # der Status gewinnt – aber nur in Richtung Fehler (fail-closed).
+    JS = {"id": "job-status", "label": "Status", "kind": "loesungsarchiv"}
+    cl.eintragen(JS, t, t + 1, "5000 Ticket(s) ausgewertet: … 39 Fehler", ok=False)
+    cl.eintragen(JS, t + 2, t + 3, "Fehler: kaputt", ok=True)
+    cl.eintragen(JS, t + 4, t + 5, "5000 Ticket(s) ausgewertet: … 0 Fehler", ok=True)
+    st = cl.lesen("job-status", 10)
+    check("(Positivkontrolle) drei Laeufe mit Status gelesen", len(st) == 3, str(len(st)))
+    check("⚠ gemeldeter Status ok=False macht den Lauf zum Fehler, auch ohne 'Fehler' im Text",
+          len(st) == 3 and st[2]["ok"] is False, str(st[2:]))
+    check("⚠ ok=True macht einen 'Fehler: …' NICHT zum Erfolg",
+          len(st) == 3 and st[1]["ok"] is False, str(st[1:2]))
+    check("ok=True mit unauffaelligem Text bleibt Erfolg", len(st) == 3 and st[0]["ok"] is True, str(st[:1]))
 
     teil = cl.lesen("job-1", 3)
     check("limit wird eingehalten", len(teil) == 3)
@@ -130,7 +143,11 @@ try:
     # ════════════════════════════════════════════════════════════════════════
     section("3. Kuerzen nach Alter")
     grenze = t + 200
-    vorab = {jid: cl.lesen(jid, 500) for jid in ("job-1", "gross", "lang", "kaputt")}
+    # Aus dem Ablageordner, nicht aus einer gepflegten Liste: ein neuer Abschnitt
+    # mit eigenem Auftrag liesse die Zaehlung sonst falsch werden.
+    vorab = {p.stem: cl.lesen(p.stem, 500) for p in cl._ordner().glob("*.jsonl")}
+    if "job-1" not in vorab:
+        print("  Ablage ohne job-1 – NICHT PRUEFBAR"); sys.exit(2)
     erwartet_weg = sum(1 for es in vorab.values() for x in es if x.get("ts") and x["ts"] < grenze)
     erwartet_rest = [x["ts"] for x in vorab["job-1"] if x["ts"] >= grenze]
     weg = cl.kuerzen(grenze)
@@ -252,6 +269,59 @@ try:
     e = (cl.lesen("nacht") or [{}])[0]
     check("⚠ ein mitgegebener Grund (Fortschritt) steht woertlich im Protokoll",
           e.get("ergebnis") == "Fehler: abgebrochen nach 26 von 300 Tickets", str(e))
+    # Loesungsarchiv-Auftrag: der Status des Laufs muss im Protokoll ankommen
+    # (vorher: ok=True, weil der Text nicht mit "Fehler" beginnt, waehrend das
+    # Loesungsarchiv denselben Lauf als fehlerhaft zeigte – ECHT 2026-11-05).
+    import backend as _backend_pkg
+    _la_vorher = sys.modules.get("backend.loesungsarchiv")
+    _la_attr = getattr(_backend_pkg, "loesungsarchiv", None)
+    _la_fake = types.ModuleType("backend.loesungsarchiv")
+    _la_fake.antwort = {}
+    async def _la_lauf(ausloeser="zeitplan"):
+        return dict(_la_fake.antwort)
+    _la_fake.lauf = _la_lauf
+    sys.modules["backend.loesungsarchiv"] = _la_fake
+    _backend_pkg.loesungsarchiv = _la_fake
+    try:
+        cm.add_job(label="Lösungsarchiv (Jira)", cron="0 21 * * *", task="x",
+                   job_id="archiv", kind="loesungsarchiv")
+        _la_fake.antwort = {"ok": False, "grund": "5000 Ticket(s) ausgewertet: 1474 neu, 39 Fehler",
+                            "fehler": 39}
+        asyncio.run(cm._execute("archiv"))
+        ea = (cl.lesen("archiv") or [{}])[0]
+        check("(Positivkontrolle) der Loesungsarchiv-Zweig lief und schrieb seinen Text",
+              ea.get("ergebnis") == "5000 Ticket(s) ausgewertet: 1474 neu, 39 Fehler", str(ea))
+        check("⚠ Lauf mit Ticket-Fehlern steht im Protokoll als Fehler (wie im Loesungsarchiv)",
+              ea.get("ok") is False, str(ea))
+        _la_fake.antwort = {"ok": True, "grund": "5000 Ticket(s) ausgewertet: 1474 neu, 0 Fehler",
+                            "fehler": 0}
+        asyncio.run(cm._execute("archiv"))
+        ea = (cl.lesen("archiv") or [{}])[0]
+        check("fehlerfreier Lauf bleibt Erfolg", ea.get("ok") is True and "0 Fehler" in ea.get("ergebnis", ""), str(ea))
+        _la_fake.antwort = {"ok": False, "grund": "Lösungsarchiv ist unvollständig eingerichtet."}
+        asyncio.run(cm._execute("archiv"))
+        ea = (cl.lesen("archiv") or [{}])[0]
+        check("⚠ auch ein nicht gestarteter Lauf ohne 'Fehler' im Text ist ein Fehler",
+              ea.get("ok") is False, str(ea))
+        _la_fake.antwort = {"ok": True, "grund": "Lösungsarchiv ist ausgeschaltet."}
+        asyncio.run(cm._execute("archiv"))
+        ea = (cl.lesen("archiv") or [{}])[0]
+        check("ausgeschaltet bleibt Erfolg (nichts zu tun)", ea.get("ok") is True, str(ea))
+        # Der Status des Archivs darf keinen spaeteren Agentenlauf faerben
+        am.a = _Agent(); am.a.antwort = "fertig"
+        asyncio.run(cm._execute("nacht"))
+        check("ein Agentenlauf danach entscheidet wieder am Text",
+              (cl.lesen("nacht") or [{}])[0].get("ok") is True)
+    finally:
+        if _la_vorher is not None:
+            sys.modules["backend.loesungsarchiv"] = _la_vorher
+        else:
+            sys.modules.pop("backend.loesungsarchiv", None)
+        if _la_attr is not None:
+            _backend_pkg.loesungsarchiv = _la_attr
+        elif hasattr(_backend_pkg, "loesungsarchiv"):
+            delattr(_backend_pkg, "loesungsarchiv")
+
     am.a = _Agent()
     am.a.antwort = "einmal erledigt"
     cm.add_job(label="Einmal", cron="0 4 * * *", task="x", job_id="einmal", once=True)

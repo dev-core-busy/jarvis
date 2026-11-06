@@ -269,6 +269,14 @@ _APP_DENY_REL = (
     # Tickets fuer Jarvis aus ("Silver Ticket") und meldet sich damit als
     # BELIEBIGER Domaenenbenutzer an – ohne Kennwort, ohne DC, ohne Spur im AD.
     "data/kerberos",
+    # Google-OAuth (backend/google_auth.py, gog-Setup in main.py): das
+    # client_secret und das Zugriffstoken des verbundenen Google-Kontos.
+    # Gesperrt wird das VERZEICHNIS, nicht die beiden heutigen Namen:
+    # _SECRET_NAMES fuehrte nur 'credentials.json' (die Datei von
+    # tools/google_auth.py), waehrend gog_client_secret.json und
+    # token.json durch JEDEN Filter fielen - Sperrliste statt
+    # Erlaubnisliste, gemessen 2026-11-06 auf DEV.
+    "data/google_auth",
     # Short Tracks (backend/short_tracks.py): `short_tracks.json` enthaelt die
     # Prompts ALLER Benutzer samt ihrem Werkzeug-Zuschnitt. SCHREIBEN waere der
     # Weg, sich einen Dump mit dem Bereich `shell` anzulegen (oder einen fremden
@@ -351,6 +359,8 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 "data/learnings", "data/erfahrung",
                 # Keytab der Windows-Anmeldung (siehe _APP_DENY_REL)
                 "data/kerberos",
+                # Google-OAuth-Geheimnisse (siehe _APP_DENY_REL)
+                "data/google_auth",
                 # Persoenliche Support-Anweisungen, eine Datei je Benutzer mit
                 # dem Benutzernamen als Dateinamen. Auf ECHT am 2026-10-22
                 # gemessen: Verzeichnis 0755, Dateien 0644 – fuer jarvis_sandbox
@@ -488,7 +498,12 @@ PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
                         "data/.wa_bridge_secret",
                         # Kerberos-Keytab: wer sie liest, meldet sich als
                         # beliebiger Domaenenbenutzer an (siehe _APP_DENY_REL).
-                        "data/kerberos/http.keytab")
+                        "data/kerberos/http.keytab",
+                        # Google-OAuth: client_secret des Clients und das
+                        # Zugriffstoken des verbundenen Kontos. Am 2026-11-06
+                        # lag gog_client_secret.json auf DEV mit 0644 da.
+                        "data/google_auth/gog_client_secret.json",
+                        "data/google_auth/token.json")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
 
@@ -780,6 +795,7 @@ SHELL_SECRET_PATHS = re.compile(
     # Windows-Anmeldung: die Keytab erlaubt, sich Tickets fuer Jarvis selbst
     # auszustellen – also die Anmeldung als beliebiger Benutzer.
     r'\.keytab\b|/kerberos/http\b|'
+    r'gog_client_secret\.json\b|/google_auth\b|'
     # Persoenliche SAP-Zugaenge: sap_accounts.json + .sapkey ergeben zusammen die
     # Klartext-Kennwoerter der SAP-Benutzer. Dasselbe fuer Jira: jira_accounts
     # .json + .jirakey ergeben die Klartext-Token, und ein PAT traegt die vollen

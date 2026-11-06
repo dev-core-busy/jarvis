@@ -1708,6 +1708,9 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/wissensgraph/trennen",            "Wissensgraph · Begriffe als verschieden markiert"),
     ("DELETE", r"/api/wissensgraph/knoten/.+",          "Wissensgraph · Begriff entfernt"),
     ("POST",   r"/api/wissensgraph/wiki/.+",            "Wissensgraph · Wiki-Seite erzeugt"),
+    # Microsoft 365 Copilot – jeder Benutzer verbindet sein EIGENES Konto
+    ("POST",   r"/api/copilot/device-start",            "Copilot · Verbindung gestartet"),
+    ("DELETE", r"/api/copilot/connection",              "Copilot · Verbindung getrennt"),
 ]
 _ACTION_DETAILS = [(m, re.compile(muster), label) for m, muster, label in _ACTION_DETAILS]
 

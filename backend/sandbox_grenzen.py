@@ -340,14 +340,434 @@ def lo_sperre_aktiv() -> bool | None:
         return False
 
 
+# ── Netz-Sperre: nur oeffentliche Ziele (Befund E1, Pentest-Vorbereitung) ───
+#
+# BEFUND E1: ein Sandbox-Lauf MIT Internet teilt den Netz-Namensraum des Hosts.
+# Die Loopback-Sperre oben schliesst nur ``oif lo``; RFC1918, CGNAT,
+# Link-Local (169.254.169.254 = Cloud-Metadaten), Multicast und die IPv6-
+# Gegenstuecke waren frei – ein Benutzer mit Internet-Freigabe konnte per
+# shell_execute das interne Netz abtasten und interne Dienste (LDAP, SMB,
+# Intranet, Verwaltungsoberflaechen) erreichen. Betreiberentscheid: "Nur
+# oeffentliche Ziele".
+#
+# Eigene Tabelle statt Erweiterung von ``jarvis_sandbox_lo``: die Loopback-
+# Sperre ist Pflicht fuer JEDEN Lauf, diese nur fuer Laeufe MIT Netz. Scheitert
+# nur sie, soll die Shell ohne Internet weiterlaufen (eigene Transaktion,
+# eigene Bereitschaftspruefung).
+#
+# Gilt fuer ALLE Sandbox-UIDs wie die Loopback-Sperre: ein Lauf ohne Internet
+# hat ``--unshare-net`` und sieht die Regeln des Hosts gar nicht; wer im
+# Host-Namensraum laeuft, hat Internet und faellt genau unter diese Sperre.
+#
+# Ausnahmen (in dieser Reihenfolge VOR jeder Abweisung):
+#   1. DNS (53/udp+tcp) NUR zu den Resolvern aus /etc/resolv.conf – ein lokaler
+#      Stub (127.0.0.53) ebenso wie ein interner Resolver. Kein pauschales
+#      "Port 53 ins interne Netz".
+#   2. ein in der Umgebung eingetragener HTTP(S)-Proxy (Host:Port), falls die
+#      Sandbox ueber ihn ins Internet geht.
+# Danach: ``oif "lo"`` (Loopback UND alle eigenen Adressen des Servers – Linux
+# stellt lokal zugestellten Verkehr ueber lo zu), die reservierten Bereiche
+# IPv4/IPv6. Jede Abweisung traegt ``meta skuid`` (Kernel-Sockets wie CIFS/NFS
+# haben keinen Eigentuemer und bleiben unberuehrt – Register 2026-09-04) und
+# einen Zaehler, an dem die Live-Probe den Treffer misst.
+
+NETZ_TABELLE = "jarvis_sandbox_netz"
+RESOLV_CONF = "/etc/resolv.conf"
+ETC_ENVIRONMENT = "/etc/environment"
+# Root-eigene Broker-Konfiguration (dasselbe Muster wie SSH_NETZE in
+# deploy/security/firewall.sh, gelesen wie backend/broker/fernzugang._konf):
+#   SANDBOX_INTERN_NETZE="192.0.2.0/24 2001:db8::/48"
+# Nachbesserung E1 (DEV-Messung): ein Firmennetz kann einen OEFFENTLICH
+# gerouteten Block benutzen – Server, Gateway und Resolver lagen dort in
+# keinem RFC-Bereich, interne Dienste waren aus der Sandbox weiter erreichbar.
+BROKER_CONF = os.environ.get("JARVIS_BROKER_CONF", "/etc/jarvis/broker.conf")
+KONF_INTERN_NETZE = "SANDBOX_INTERN_NETZE"
+
+# Nicht-oeffentliche IPv4-Bereiche (IANA Special-Purpose Registry, RFC 6890).
+# Ohne Ueberschneidung – ein Intervall-Set in nftables lehnt sich
+# ueberlappende Elemente ab (der Waechter prueft das).
+INTERN_V4 = (
+    "0.0.0.0/8",          # "dieses Netz"
+    "10.0.0.0/8",         # RFC 1918
+    "100.64.0.0/10",      # CGNAT, RFC 6598
+    "127.0.0.0/8",        # Loopback
+    "169.254.0.0/16",     # Link-Local, Cloud-Metadaten
+    "172.16.0.0/12",      # RFC 1918
+    "192.0.0.0/24",       # IETF-Protokollzuweisungen
+    "192.0.2.0/24",       # TEST-NET-1
+    "192.88.99.0/24",     # 6to4-Relay (abgekuendigt)
+    "192.168.0.0/16",     # RFC 1918
+    "198.18.0.0/15",      # Benchmarking
+    "198.51.100.0/24",    # TEST-NET-2
+    "203.0.113.0/24",     # TEST-NET-3
+    "224.0.0.0/4",        # Multicast
+    "240.0.0.0/4",        # reserviert, inkl. 255.255.255.255 (Broadcast)
+)
+# IPv6-Gegenstuecke. ``::ffff:0:0/96`` (IPv4-mapped) geht zwar als IPv4-Paket
+# hinaus und wird dort erfasst – steht trotzdem hier, falls ein Stapel es doch
+# als IPv6 sendet. 64:ff9b::/96 (NAT64, oeffentlich) bleibt bewusst frei: es
+# darf laut RFC 6052 nur globale IPv4-Adressen abbilden; 64:ff9b:1::/48 ist
+# die lokale Variante und gesperrt.
+INTERN_V6 = (
+    "::/127",             # unspezifiziert + Loopback ::1
+    "::ffff:0:0/96",      # IPv4-mapped
+    "64:ff9b:1::/48",     # NAT64 lokal
+    "100::/64",           # Discard
+    "2001::/32",          # Teredo
+    "2001:db8::/32",      # Dokumentation
+    "2002::/16",          # 6to4 (bettet IPv4 ein)
+    "fc00::/7",           # Unique Local
+    "fe80::/10",          # Link-Local
+    "fec0::/10",          # Site-Local (abgekuendigt)
+    "ff00::/8",           # Multicast
+)
+
+_PROXY_VARIABLEN = ("http_proxy", "https_proxy", "all_proxy", "ftp_proxy")
+_PROXY_STANDARDPORT = {"http": 80, "https": 443, "socks": 1080, "socks4": 1080,
+                       "socks4a": 1080, "socks5": 1080, "socks5h": 1080}
+
+
+def resolver_lesen(pfad: str = None) -> list:
+    """Nameserver aus resolv.conf (validiert, ohne IPv6-Zonenangabe)."""
+    import ipaddress
+    aus = []
+    try:
+        with open(pfad or RESOLV_CONF, encoding="utf-8", errors="replace") as f:
+            zeilen = f.read().splitlines()
+    except OSError:
+        return aus
+    for z in zeilen:
+        teile = z.split("#", 1)[0].split()
+        if len(teile) < 2 or teile[0] != "nameserver":
+            continue
+        roh = teile[1].split("%", 1)[0]
+        try:
+            a = str(ipaddress.ip_address(roh))
+        except ValueError:
+            continue
+        if a not in aus:
+            aus.append(a)
+    return aus
+
+
+def _env_datei(pfad: str) -> dict:
+    """``/etc/environment`` (KEY=WERT, optional in Anfuehrungszeichen)."""
+    aus = {}
+    try:
+        with open(pfad, encoding="utf-8", errors="replace") as f:
+            for z in f.read().splitlines():
+                z = z.strip()
+                if not z or z.startswith("#") or "=" not in z:
+                    continue
+                k, v = z.split("=", 1)
+                k = k.strip()
+                if k.startswith("export "):
+                    k = k[len("export "):].strip()
+                aus[k] = v.strip().strip("'\"")
+    except OSError:
+        pass
+    return aus
+
+
+def proxy_ziele(umgebung: dict = None, env_datei: str = None, aufloesen=None) -> list:
+    """[(ip, port)] der eingetragenen Proxys.
+
+    Quellen: die Prozessumgebung (der Broker vererbt sie an ``runuser``/bwrap,
+    also sieht die Sandbox genau diese) und ``/etc/environment`` (pam_env).
+    Ein Hostname wird hier aufgeloest, weil nftables nur Adressen kennt; die
+    Selbstheilung loest ihn bei jeder Erneuerung neu auf.
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlsplit
+    quellen = [dict(os.environ) if umgebung is None else dict(umgebung),
+               _env_datei(env_datei or ETC_ENVIRONMENT)]
+    if aufloesen is None:
+        def aufloesen(host):
+            try:
+                return sorted({i[4][0] for i in socket.getaddrinfo(
+                    host, None, proto=socket.IPPROTO_TCP)})
+            except OSError:
+                return []
+    ziele = []
+    for q in quellen:
+        for k, v in q.items():
+            if k.lower() not in _PROXY_VARIABLEN or not (v or "").strip():
+                continue
+            roh = v.strip()
+            if "://" not in roh:
+                roh = "http://" + roh
+            try:
+                teile = urlsplit(roh)
+                host = teile.hostname
+                port = teile.port or _PROXY_STANDARDPORT.get(teile.scheme.lower())
+            except ValueError:
+                continue
+            if not host or not port:
+                continue
+            try:
+                adressen = [str(ipaddress.ip_address(host.split("%", 1)[0]))]
+            except ValueError:
+                adressen = aufloesen(host)
+            for a in adressen:
+                try:
+                    a = str(ipaddress.ip_address(str(a).split("%", 1)[0]))
+                except ValueError:
+                    continue
+                if (a, int(port)) not in ziele:
+                    ziele.append((a, int(port)))
+    return ziele
+
+
+def _konf_lesen(pfad: str = None) -> dict:
+    """broker.conf lesen – letzte Zeile gewinnt, wie ``fernzugang._konf`` und
+    die Skripte unter deploy/security (dort ``sed … | tail -1``)."""
+    import re
+    werte = {}
+    try:
+        with open(pfad or BROKER_CONF, encoding="utf-8", errors="replace") as f:
+            for z in f.read().splitlines():
+                m = re.match(r"\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$", z)
+                if m:
+                    werte[m.group(1)] = m.group(2).strip().strip("'\"")
+    except OSError:
+        pass
+    return werte
+
+
+_gemeldet = set()
+
+
+def _einmal_melden(text: str) -> None:
+    """Journal-Zeile je Inhalt EINMAL je Prozess – die Erneuerung laeuft je
+    Frist, eine Zeile je Minute wuerde das Journal entwerten."""
+    if text not in _gemeldet:
+        _gemeldet.add(text)
+        _log(text)
+
+
+def konf_intern_netze(pfad: str = None) -> list:
+    """Zusaetzliche interne Netze aus ``SANDBOX_INTERN_NETZE`` (validiert).
+
+    Leerzeichen-getrennte CIDRs; ein ungueltiger Eintrag wird mit einer
+    Journal-Zeile verworfen, die gueltigen gelten weiter (ein Tippfehler darf
+    die uebrige Sperre nicht abschalten). Host-Bits werden abgeschnitten
+    (``strict=False``), ``/0`` wird verworfen – es saehe wie eine Sperre aus
+    und waere eine Sperre des ganzen Internets.
+    """
+    import ipaddress
+    aus = []
+    for roh in (_konf_lesen(pfad).get(KONF_INTERN_NETZE) or "").replace(",", " ").split():
+        try:
+            n = ipaddress.ip_network(roh, strict=False)
+        except ValueError:
+            _einmal_melden(f"{KONF_INTERN_NETZE}: ungueltiger Eintrag verworfen: {roh!r}")
+            continue
+        if n.prefixlen == 0:
+            _einmal_melden(f"{KONF_INTERN_NETZE}: {roh!r} wuerde alles sperren – verworfen")
+            continue
+        if str(n) not in aus:
+            aus.append(str(n))
+    return aus
+
+
+def _ip_json(*args):
+    import json
+    try:
+        ip = shutil.which("ip") or ("/usr/sbin/ip" if os.path.exists("/usr/sbin/ip") else "/usr/bin/ip")
+        r = subprocess.run([ip, "-j", *args], capture_output=True, text=True, timeout=10)
+        return json.loads(r.stdout or "[]") if r.returncode == 0 else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def angeschlossene_netze(adressen=None, routen=None) -> list:
+    """Direkt angeschlossene Netze des Hosts + Netz des Default-Gateways.
+
+    Deckt den Normalfall OHNE Konfiguration ab: wer im selben Netz wie der
+    Server steht, ist intern – auch wenn das Netz oeffentlich geroutet ist.
+    ``adressen``/``routen`` sind die JSON-Ausgaben von ``ip -j addr show scope
+    global`` bzw. ``ip -j route show default`` (fuer den Waechter); ohne sie
+    wird ``ip`` aufgerufen (v4 und v6). Liegt das Gateway in keinem
+    angeschlossenen Netz (onlink), wird es als Einzeladresse gesperrt.
+    """
+    import ipaddress
+    if adressen is None:
+        adressen = _ip_json("addr", "show", "scope", "global")
+        if adressen is None:
+            _log("angeschlossene Netze nicht lesbar (ip -j addr) – nur RFC- und konfigurierte Bereiche")
+            adressen = []
+    if routen is None:
+        routen = (_ip_json("-4", "route", "show", "default") or []) + \
+                 (_ip_json("-6", "route", "show", "default") or [])
+    netze = []
+    for schnitt in adressen or []:
+        for a in (schnitt.get("addr_info") or []):
+            if a.get("scope", "global") != "global":
+                continue
+            try:
+                n = ipaddress.ip_network(f"{a.get('local')}/{int(a.get('prefixlen'))}", strict=False)
+            except (ValueError, TypeError):
+                continue
+            if n.prefixlen and n not in netze:
+                netze.append(n)
+    for r in routen or []:
+        try:
+            gw = ipaddress.ip_address(str(r.get("gateway") or "").split("%", 1)[0])
+        except ValueError:
+            continue
+        if gw.is_link_local:
+            continue
+        if not any(gw.version == n.version and gw in n for n in netze):
+            netze.append(ipaddress.ip_network(gw))
+    return [str(n) for n in netze]
+
+
+def sperrmengen(zusatz=()) -> tuple:
+    """(v4, v6): RFC-Bereiche + Zusatznetze, zusammengefuehrt.
+
+    nftables lehnt in einem Intervall-Set ueberlappende Elemente ab
+    ("conflicting intervals") – ein angeschlossenes 10.1.2.0/24 neben 10/8
+    haette das Setzen der ganzen Sperre scheitern lassen. Deshalb
+    ``collapse_addresses``: Teilnetze verschwinden im Obernetz, Nachbarn werden
+    vereinigt.
+    """
+    import ipaddress
+    v4 = [ipaddress.ip_network(x) for x in INTERN_V4]
+    v6 = [ipaddress.ip_network(x) for x in INTERN_V6]
+    for x in zusatz:
+        try:
+            n = ipaddress.ip_network(str(x), strict=False)
+        except ValueError:
+            continue
+        (v4 if n.version == 4 else v6).append(n)
+    # Python schreibt IPv4-mapped als "::ffff:0.0.0.0/96"; nft bekommt die
+    # ausgeschriebene Hex-Form, damit keine Mischschreibweise im Regeltext steht.
+    return ([str(n) for n in ipaddress.collapse_addresses(v4)],
+            [n.exploded if "." in str(n) else str(n) for n in ipaddress.collapse_addresses(v6)])
+
+
+def netz_regeln(uids, resolver=(), proxys=(), zusatz=()) -> str:
+    """nftables-Text der Netz-Sperre. Atomar ersetzt (anlegen, loeschen, neu).
+
+    Reihenfolge ist die Zusage: alle ``accept`` (Resolver, Proxy) stehen VOR
+    der ersten Abweisung; jede Abweisung ist an die Sandbox-UIDs gebunden.
+    ``zusatz``: weitere interne Netze (Konfiguration, angeschlossene Netze).
+    Ein Resolver darin bleibt erreichbar – aber NUR auf Port 53.
+    """
+    import ipaddress
+    set4, set6 = sperrmengen(zusatz)
+    ids = ", ".join(str(int(u)) for u in uids)
+    sk = f"meta skuid {{ {ids} }}"
+    r4 = [str(ipaddress.ip_address(a)) for a in resolver if ipaddress.ip_address(a).version == 4]
+    r6 = [str(ipaddress.ip_address(a)) for a in resolver if ipaddress.ip_address(a).version == 6]
+    erlaubt = []
+    for fam, liste in (("ip", r4), ("ip6", r6)):
+        if liste:
+            ziel = ", ".join(liste)
+            erlaubt.append(f"        {sk} {fam} daddr {{ {ziel} }} udp dport 53 accept\n")
+            erlaubt.append(f"        {sk} {fam} daddr {{ {ziel} }} tcp dport 53 accept\n")
+    for adr, port in proxys:
+        fam = "ip" if ipaddress.ip_address(adr).version == 4 else "ip6"
+        erlaubt.append(f"        {sk} {fam} daddr {ipaddress.ip_address(adr)} "
+                       f"tcp dport {int(port)} accept\n")
+    sperre = []
+    for treffer in ('oif "lo"', "ip daddr @intern4", "ip6 daddr @intern6"):
+        sperre.append(f"        {sk} {treffer} meta l4proto tcp counter reject with tcp reset\n")
+        sperre.append(f"        {sk} {treffer} counter reject\n")
+    return (
+        f"table inet {NETZ_TABELLE} {{}}\n"
+        f"delete table inet {NETZ_TABELLE}\n"
+        f"table inet {NETZ_TABELLE} {{\n"
+        "    set intern4 {\n"
+        "        type ipv4_addr; flags interval;\n"
+        f"        elements = {{ {', '.join(set4)} }}\n"
+        "    }\n"
+        "    set intern6 {\n"
+        "        type ipv6_addr; flags interval;\n"
+        f"        elements = {{ {', '.join(set6)} }}\n"
+        "    }\n"
+        "    chain out {\n"
+        "        type filter hook output priority filter; policy accept;\n"
+        + "".join(erlaubt) + "".join(sperre) +
+        "    }\n"
+        "}\n"
+    )
+
+
+_netz_lock = threading.Lock()
+_netz_stand = {"zeit": 0.0, "schluessel": None}
+
+
+def netz_sperre_sicherstellen(erzwingen: bool = False) -> tuple:
+    """(ok, Grund). Setzt die Netz-Sperre (root) – hoechstens einmal je Frist.
+
+    Selbstheilend wie die Loopback-Sperre: ``bereit()`` ruft sie vor jedem
+    Lauf MIT Netz. Resolver, Proxy, ``SANDBOX_INTERN_NETZE`` und die
+    angeschlossenen Netze werden bei jeder Erneuerung neu gelesen
+    (spaetestens nach der Frist); aendern sich die UIDs, wird sofort neu
+    gesetzt. Ein ``nft flush ruleset`` von aussen ist so nach spaetestens
+    einer Frist geheilt.
+    """
+    if os.geteuid() != 0:
+        return False, "Netz-Sperre braucht root"
+    uids = sandbox_uids()
+    if not uids:
+        return False, "kein Sandbox-Benutzer vorhanden"
+    with _netz_lock:
+        jetzt = time.monotonic()
+        if (not erzwingen and _netz_stand["schluessel"] is not None
+                and (jetzt - _netz_stand["zeit"]) < _LO_FRIST_S
+                and _netz_stand["schluessel"][0] == uids):
+            return True, ""
+        res = resolver_lesen()
+        prx = proxy_ziele()
+        konf = konf_intern_netze()
+        zus = konf + [n for n in angeschlossene_netze() if n not in konf]
+        schluessel = (uids, res, prx, zus)
+        try:
+            r = subprocess.run([_nft(), "-f", "-"], input=netz_regeln(uids, res, prx, zus),
+                               capture_output=True, text=True, timeout=15)
+        except Exception as e:  # noqa: BLE001
+            _netz_stand.update(zeit=0.0, schluessel=None)
+            return False, f"nft nicht ausfuehrbar: {e}"
+        if r.returncode != 0:
+            _log(f"Netz-Sperre nicht gesetzt: {(r.stderr or '').strip()[:200]}")
+            _netz_stand.update(zeit=0.0, schluessel=None)
+            return False, ("Sperre interner Netze nicht setzbar: "
+                           + (r.stderr or "").strip()[:160])
+        if _netz_stand["schluessel"] != schluessel:
+            _log(f"Netz-Sperre aktiv fuer uid {uids} (DNS: {res or '-'}, "
+                 f"Proxy: {prx or '-'}, Zusatznetze: {zus or '-'})")
+        _netz_stand.update(zeit=jetzt, schluessel=schluessel)
+        return True, ""
+
+
+def netz_sperre_aktiv() -> bool | None:
+    """Ist die Netz-Sperre geladen? None = nicht messbar (kein root)."""
+    if os.geteuid() != 0:
+        return None
+    try:
+        r = subprocess.run([_nft(), "list", "table", "inet", NETZ_TABELLE],
+                           capture_output=True, text=True, timeout=10)
+        return r.returncode == 0 and "skuid" in (r.stdout or "")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ── Die Pflichtpruefung ─────────────────────────────────────────────────────
 
-def bereit(sandbox_user: str) -> tuple:
+def bereit(sandbox_user: str, ohne_netz: bool | None = None) -> tuple:
     """(ok, Grund): kann ein Lauf als ``sandbox_user`` MIT allen Grenzen starten?
 
     EINE Pruefung fuer Broker und Alt-Betrieb. Jede Antwort ausser ``True``
     heisst: der Befehl laeuft nicht (fail-closed). Der Grund ist fuer Benutzer
     und Journal formuliert, nicht fuer Entwickler.
+
+    ``ohne_netz``: laeuft der Befehl mit ``--unshare-net``? Nur dann ist die
+    Netz-Sperre entbehrlich. ``None`` (Aufrufer sagt es nicht) gilt nur fuer
+    den netzgesperrten Standardbenutzer als "ohne Netz" – im Zweifel wird die
+    Sperre verlangt (fail-closed).
     """
     if not _gueltig(sandbox_user):
         return False, f"Sandbox-Benutzer fehlt oder ist ungueltig: {sandbox_user or '-'}"
@@ -367,6 +787,15 @@ def bereit(sandbox_user: str) -> tuple:
     ok, grund = lo_sperre_sicherstellen()
     if not ok:
         return False, grund
+    if ohne_netz is None:
+        ohne_netz = sandbox_user == NOINET_USER
+    if not ohne_netz:
+        # Befund E1: ein Lauf im Host-Namensraum ohne Sperre interner Netze
+        # laeuft nicht. Laeufe ohne Internet (eigener Namensraum) trifft das
+        # nicht – sie laufen auch dann weiter, wenn nur diese Sperre fehlt.
+        ok, grund = netz_sperre_sicherstellen()
+        if not ok:
+            return False, grund
     return True, ""
 
 
@@ -387,5 +816,6 @@ def status() -> dict:
         "bwrap": bwrap,
         "isolation_gewuenscht": iso,
         "lo_sperre": lo_sperre_aktiv(),
+        "netz_sperre": netz_sperre_aktiv(),
         "sandbox_uids": sandbox_uids(),
     }

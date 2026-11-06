@@ -450,10 +450,12 @@ def _op_sandbox_lauf(args, stream):
         return _abgelehnt(f"OS-Benutzer fehlt: {user}")
     from backend import lauf_tmp as _lt
     from backend import sandbox_grenzen as _sg
-    ok, grund = _sg.bereit(user)
+    ohne_netz = bool(args.get("ohne_netz")) or user == _sg.NOINET_USER
+    # Befund E1: ein Lauf MIT Netz braucht zusaetzlich die Sperre interner
+    # Netze – deshalb steht ohne_netz VOR der Pruefung und geht hinein.
+    ok, grund = _sg.bereit(user, ohne_netz=ohne_netz)
     if not ok:
         return _abgelehnt(grund)
-    ohne_netz = bool(args.get("ohne_netz")) or user == _sg.NOINET_USER
     grenzen = _sg.grenzen_pruefen(args.get("grenzen"))
     kennung = str(args.get("arbeit") or "")
     lauf_dir = None

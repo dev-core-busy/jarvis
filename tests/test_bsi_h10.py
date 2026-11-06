@@ -221,7 +221,8 @@ class _OsRoot:
         return 0
 
 
-_sicher = {k: getattr(SG, k) for k in ("os", "SYSTEMD_RUN", "lo_sperre_sicherstellen", "_uid")}
+_sicher = {k: getattr(SG, k) for k in ("os", "SYSTEMD_RUN", "lo_sperre_sicherstellen",
+                                       "netz_sperre_sicherstellen", "_uid")}
 _sicher_lt = {k: getattr(LT, k) for k in ("bwrap_verfuegbar", "isolation_gewuenscht")}
 _sr = SANDKASTEN / "systemd-run"
 _sr.write_text("")
@@ -235,6 +236,9 @@ def stand(**ueber):
     LT.isolation_gewuenscht = lambda: ueber.get("iso", True)
     SG.lo_sperre_sicherstellen = lambda *a, **k: ((True, "") if ueber.get("lo", True)
                                                    else (False, "Loopback-Sperre nicht setzbar"))
+    # Befund E1: die Sperre interner Netze hat ihren eigenen Waechter
+    # (test_sandbox_netz.py); hier nur gestellt, damit nie echtes nft laeuft.
+    SG.netz_sperre_sicherstellen = lambda *a, **k: (True, "")
 
 
 try:
@@ -471,7 +475,7 @@ _bereitstellen = {"v": LAUF}
 try:
     _pwd.getpwnam = _getpwnam
     OPS._stream_shell = _ss
-    SG.bereit = lambda u: _bereit["v"]
+    SG.bereit = lambda u, **k: _bereit["v"]
     LT.arbeit_bereitstellen = lambda k, u: _bereitstellen["v"]
     LT.einhaengepunkte = lambda *a, **k: None
     LT.bwrap_verfuegbar = lambda *a, **k: True

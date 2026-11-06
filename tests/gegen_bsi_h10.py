@@ -91,7 +91,7 @@ PROBEN = [
      "    vorn = \"\"\n"),
     # ── Broker-Op ──
     ("Broker prueft bereit() nicht", OP,
-     "    ok, grund = _sg.bereit(user)\n", "    ok, grund = True, \"\"\n"),
+     "    ok, grund = _sg.bereit(user, ohne_netz=ohne_netz)\n", "    ok, grund = True, \"\"\n"),
     ("netzgesperrter Benutzer nicht immer ohne Netz", OP,
      "    ohne_netz = bool(args.get(\"ohne_netz\")) or user == _sg.NOINET_USER\n",
      "    ohne_netz = bool(args.get(\"ohne_netz\"))\n"),

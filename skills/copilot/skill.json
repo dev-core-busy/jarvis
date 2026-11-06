@@ -1,0 +1,51 @@
+{
+    "name": "Microsoft 365 Copilot",
+    "description": "Internet-Recherche über Microsoft 365 Copilot: der Agent stellt eine Frage, Copilot sucht im Web (Bing) und im Unternehmensbestand und antwortet mit Quellenangaben.",
+    "version": "1.0.0",
+    "author": "Jarvis",
+    "module": "main",
+    "tools": [
+        "copilot_recherche"
+    ],
+    "category": "automation",
+    "icon": "search",
+    "system": false,
+    "enabled": false,
+    "config_schema": {
+        "copilot_tenant_id": {
+            "type": "string",
+            "label": "Mandanten-Kennung (Tenant-ID)",
+            "description": "Die Verzeichnis-Kennung des Microsoft-365-Mandanten (GUID, im Entra-Portal unter Übersicht). Ohne sie gibt es keine Verbindung.",
+            "default": "",
+            "required": true
+        },
+        "copilot_client_id": {
+            "type": "string",
+            "label": "Anwendungs-Kennung (Client-ID)",
+            "description": "Die Kennung einer EIGENEN App-Registrierung in Entra ID – bewusst nicht die des Outlook-Add-ins: diese Anwendung braucht sieben Graph-Leseberechtigungen (darunter Mail.Read und Sites.Read.All), und diese Rechtefläche gehört nicht an einen Anmeldeweg. Die App muss als öffentlicher Client angelegt sein (Allow public client flows = Ja); ein Client-Geheimnis wird NICHT gebraucht und darf nicht hinterlegt werden.",
+            "default": "",
+            "required": true
+        }
+    },
+    "knowledge_docs": [],
+    "dependencies": [],
+    "permissions": [
+        "network"
+    ],
+    "help": {
+        "details": "Aktiviert das Werkzeug 'copilot_recherche'. Der Agent stellt damit eine Recherchefrage an Microsoft 365 Copilot und bekommt dessen Antwort samt Quellenangaben zurück. Copilot groundet standardmäßig im Internet (Bing) UND im Bestand des Unternehmens (Postfach, SharePoint, Teams des jeweiligen Benutzers) – was eingeflossen ist, steht in den Quellen. Voraussetzungen: eine Mandanten- und Anwendungs-Kennung oben, eine Microsoft-365-Copilot-Add-on-Lizenz für jeden recherchierenden Benutzer, und jeder Benutzer verbindet sein Microsoft-Konto einmalig selbst (Gerätecode-Anmeldung). Ohne aktiven Skill gibt es kein 'copilot_recherche' und der Agent verhält sich unverändert.",
+        "tools": [
+            {
+                "name": "copilot_recherche",
+                "label": "Recherche über Copilot",
+                "desc": "Stellt eine Frage an Microsoft 365 Copilot und gibt die Antwort mit Quellen zurück. Copilot führt keine Aktionen aus und kann nur antworten. Beispiele: aktuelle Herstellerangaben zu einem Produkt, Stand einer Norm, Marktübersicht."
+            }
+        ],
+        "use_cases": [
+            "Recherchiere, welche Lizenzmodelle der Hersteller für sein Produkt derzeit anbietet",
+            "Suche den aktuellen Stand der Norm und nenne die Quelle",
+            "Was ist zu dieser Schwachstelle öffentlich bekannt?"
+        ],
+        "notes": "SICHERHEIT: Die Frage VERLÄSST DAS HAUS. Copilot bildet aus ihr eine eigene Suchanfrage und sendet sie samt Client-IP an die Bing-Suche; für diese Suchanfragen gelten laut Microsoft weder der Datenschutz-Nachtrag (DPA) noch die EU Data Boundary. Es findet KEINE automatische Anonymisierung statt – wer Kundennamen in eine Frage schreibt, schickt sie an Microsoft. Das Werkzeug ist deshalb an die Internet-Freigabe des Benutzers gebunden (Einstellungen → Sicherheit → Berechtigungen, leer = niemand, kein Admin-Bypass) und arbeitet immer nur mit dem Microsoft-Konto des Auftraggebers; ein Lauf ohne angemeldeten Benutzer (Zeitplan, WhatsApp, Agenten-API) kann es nicht nutzen, weil Microsoft für diese Schnittstelle kein Dienstkonto zulässt. Copilot bekommt KEINE Jarvis-Werkzeuge und kann technisch nur Text zurückgeben – eine präparierte Webseite kann darüber also keine Aktion auslösen, höchstens den Antworttext beeinflussen. REIFEGRAD: Die Chat API steht bei Microsoft unter /beta; Microsoft schreibt dazu, die Nutzung in Produktivanwendungen werde nicht unterstützt. Für einen Erprobungsbetrieb geeignet, für den Produktivserver erst nach deren Freigabe."
+    }
+}

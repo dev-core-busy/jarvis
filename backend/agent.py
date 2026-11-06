@@ -5086,6 +5086,20 @@ KRITISCH – Ausfuehrungs-Regeln:
                     _c_token = _ccv.set(_uname or "")
                 except Exception:  # noqa: BLE001
                     _ccv = None
+                # Microsoft-Konto fuer copilot_recherche (Copilot-Skill).
+                # Gleiche Begruendung wie bei Postfach, SAP, Jira, VEMAS und
+                # Confluence: es ist eine Personen-, keine Rechtefrage, und der
+                # Benutzer darf NIEMALS als Werkzeug-Argument kommen – sonst
+                # koennte das Modell waehlen, mit wessen Microsoft-Konto (und
+                # damit mit wessen Postfach- und SharePoint-Zugriff) es
+                # recherchiert. Ohne Namen bleibt er leer, und das Werkzeug
+                # lehnt im Klartext ab.
+                _cp_token = _cpcv = None
+                try:
+                    from backend.copilot_client import current_copilot_user as _cpcv
+                    _cp_token = _cpcv.set(_uname or "")
+                except Exception:  # noqa: BLE001
+                    _cpcv = None
                 try:
                     result = await tool.execute(**exec_args)
                     if _mcp_weggelassen and isinstance(result, str):
@@ -5120,6 +5134,11 @@ KRITISCH – Ausfuehrungs-Regeln:
                     if _c_token is not None and _ccv is not None:
                         try:
                             _ccv.reset(_c_token)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if _cp_token is not None and _cpcv is not None:
+                        try:
+                            _cpcv.reset(_cp_token)
                         except Exception:  # noqa: BLE001
                             pass
             _dur_ms = int((_time.monotonic() - _t0) * 1000)

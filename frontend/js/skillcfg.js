@@ -27,6 +27,7 @@
     // wenn Teile der Config bereits eine eigene Oberflaeche haben.
     const TARGETS = {
         google:             { container: 'skcfg-google' },
+        copilot:            { container: 'skcfg-copilot' },
         telegram:           { container: 'skcfg-telegram' },
         browser_control:    { container: 'skcfg-browser_control' },
         agent_autonomy_kit: { container: 'skcfg-agent_autonomy_kit' },
@@ -42,6 +43,7 @@
     // render() bricht bei fehlendem TARGETS-Eintrag sauber ab.
     const TAB_BUTTONS = {
         google:             'settings-tab-btn-google',
+        copilot:            'settings-tab-btn-copilot',
         telegram:           'settings-tab-btn-telegram',
         browser_control:    'settings-tab-btn-browser',
         agent_orchestrator: 'settings-tab-btn-orchestrator',

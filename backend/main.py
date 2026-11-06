@@ -27272,6 +27272,73 @@ async def google_revoke(user: str = Depends(require_local_auth)):
     return JSONResponse({"ok": True})
 
 
+# ─── Microsoft 365 Copilot: Verbindung je BENUTZER ───────────────────
+#
+# ⚠ ANDERE RECHTESTUFE ALS GOOGLE DARÜBER, UND DAS IST ABSICHT.
+# Der Google-Zugang ist EIN zentrales Konto, deshalb hängt er an
+# ``require_local_auth``. Microsoft 365 Copilot ist das Gegenteil: die Chat API
+# gibt es ausschließlich delegiert, jeder Benutzer verbindet SEIN eigenes
+# Microsoft-Konto, und niemand kann für einen anderen verbinden. Deshalb
+# ``require_auth`` – und deshalb kommt der Benutzer in JEDEM dieser Endpunkte
+# aus der Dependency und NIE aus dem Rumpf: ein Benutzerfeld wäre hier der
+# Weg, eine fremde Verbindung zu starten oder zu lösen.
+@app.get("/api/copilot/status")
+async def copilot_status(user: str = Depends(require_auth)):
+    """Eigener Verbindungszustand – eingerichtet, verbunden, welches Konto."""
+    from backend import copilot_client as cc
+    return JSONResponse({
+        "eingerichtet": cc.eingerichtet(),
+        "verbunden": cc.verbunden(user),
+        "konto": cc.konto(user),
+        # Die Freigabe wird MITGELIEFERT, damit die Oberfläche den Grund nennen
+        # kann, statt einen Knopf anzubieten, der später mit 403 antwortet.
+        "internet_frei": _user_has_internet_access(user),
+        "skill_aktiv": _copilot_skill_aktiv(),
+    })
+
+
+def _copilot_skill_aktiv() -> bool:
+    try:
+        return bool((config.get_skill_states().get("copilot", {}) or {}).get("enabled"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+@app.post("/api/copilot/device-start")
+async def copilot_device_start(user: str = Depends(require_auth)):
+    """Startet die Geräte-Anmeldung am Microsoft-Konto DIESES Benutzers."""
+    from backend import copilot_client as cc
+    # Dieselbe Schranke wie im Werkzeug: wer nicht ins Internet darf, soll
+    # auch keine Verbindung herstellen können, die genau das ermöglicht.
+    if not _user_has_internet_access(user):
+        return JSONResponse(
+            {"error": "Für dieses Konto ist der Internet-Zugriff nicht "
+                      "freigegeben (Einstellungen → Sicherheit → "
+                      "Berechtigungen)."},
+            status_code=403)
+    try:
+        return JSONResponse(await cc.geraet_start(user))
+    except cc.CopilotFehler as e:
+        return JSONResponse({"error": str(e), "grund": e.grund}, status_code=400)
+
+
+@app.get("/api/copilot/device-status")
+async def copilot_device_status(user: str = Depends(require_auth)):
+    """Fragt einmal nach, ob die Geräte-Anmeldung bestätigt wurde."""
+    from backend import copilot_client as cc
+    try:
+        return JSONResponse(await cc.geraet_status(user))
+    except cc.CopilotFehler as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=400)
+
+
+@app.delete("/api/copilot/connection")
+async def copilot_trennen(user: str = Depends(require_auth)):
+    """Löst die eigene Verbindung – der Eintrag wird entfernt."""
+    from backend import copilot_client as cc
+    return JSONResponse({"ok": cc.trennen(user)})
+
+
 # ─── OpenClaw Gmail (gog) Setup-Endpoints ────────────────────────────
 
 import subprocess as _sp

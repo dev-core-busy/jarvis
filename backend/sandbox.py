@@ -277,6 +277,14 @@ _APP_DENY_REL = (
     # token.json durch JEDEN Filter fielen - Sperrliste statt
     # Erlaubnisliste, gemessen 2026-11-06 auf DEV.
     "data/google_auth",
+    # Microsoft 365 Copilot (backend/copilot_client.py): `tokens.json` traegt
+    # je Benutzer ein Refresh-Token fuer Microsoft Graph. Wer es LIEST, handelt
+    # als dieser Benutzer – und die Chat API verlangt alle sieben Scopes,
+    # darunter Mail.Read und Sites.Read.All: das Token oeffnet also dessen
+    # Postfach und SharePoint, nicht nur die Recherche. Gesperrt wird das
+    # VERZEICHNIS, damit eine kuenftige zweite Datei von sich aus erfasst ist
+    # (genau daran ist die Google-Sperrliste 2026-11-06 gescheitert).
+    "data/copilot_auth",
     # Short Tracks (backend/short_tracks.py): `short_tracks.json` enthaelt die
     # Prompts ALLER Benutzer samt ihrem Werkzeug-Zuschnitt. SCHREIBEN waere der
     # Weg, sich einen Dump mit dem Bereich `shell` anzulegen (oder einen fremden
@@ -361,6 +369,8 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 "data/kerberos",
                 # Google-OAuth-Geheimnisse (siehe _APP_DENY_REL)
                 "data/google_auth",
+                # Microsoft-Graph-Refresh-Token je Benutzer (siehe _APP_DENY_REL)
+                "data/copilot_auth",
                 # Persoenliche Support-Anweisungen, eine Datei je Benutzer mit
                 # dem Benutzernamen als Dateinamen. Auf ECHT am 2026-10-22
                 # gemessen: Verzeichnis 0755, Dateien 0644 – fuer jarvis_sandbox
@@ -503,7 +513,12 @@ PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
                         # Zugriffstoken des verbundenen Kontos. Am 2026-11-06
                         # lag gog_client_secret.json auf DEV mit 0644 da.
                         "data/google_auth/gog_client_secret.json",
-                        "data/google_auth/token.json")
+                        "data/google_auth/token.json",
+                        # Microsoft-Graph-Refresh-Token je Benutzer. Der NAME
+                        # ist fest, damit er hier stehen KANN: diese Liste
+                        # kennt keine Globs, und eine Datei je Benutzer waere
+                        # von harden_data_dirs nicht erfasst.
+                        "data/copilot_auth/tokens.json")
 PRIVATE_FILE_MODE_STRENG = 0o600
 
 
@@ -796,6 +811,10 @@ SHELL_SECRET_PATHS = re.compile(
     # auszustellen – also die Anmeldung als beliebiger Benutzer.
     r'\.keytab\b|/kerberos/http\b|'
     r'gog_client_secret\.json\b|/google_auth\b|'
+    # Microsoft 365 Copilot: Refresh-Token je Benutzer fuer Microsoft Graph
+    # (siehe _APP_DENY_REL). Verzeichnis UND Datei, damit auch ein `cat
+    # data/copilot_auth/*` erfasst ist.
+    r'/copilot_auth\b|'
     # Persoenliche SAP-Zugaenge: sap_accounts.json + .sapkey ergeben zusammen die
     # Klartext-Kennwoerter der SAP-Benutzer. Dasselbe fuer Jira: jira_accounts
     # .json + .jirakey ergeben die Klartext-Token, und ein PAT traegt die vollen

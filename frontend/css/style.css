@@ -9549,3 +9549,65 @@ body.light .kbwg-meldung.is-err { color: color-mix(in srgb, var(--danger) 78%, #
    Wie die Container-Titel: dunkel aufgehellter Akzent (lesbar), hell pur. */
 #kb-sect-wg-body .kb-hint a { color: color-mix(in srgb, var(--accent) 65%, #fff); }
 body.light #kb-sect-wg-body .kb-hint a { color: var(--accent); }
+
+/* ═══ Reiter Copilot: Verbindung zum Microsoft-Konto (copilot.js) ═══
+   Eigenes Praefix `cp-`, weil die Klassen nur auf dieser Seite gelten – wie
+   `em-`/`sp-` daneben. Alle Farben aus den Variablen; eine durchscheinende
+   Flaeche waere hier falsch, die Karten liegen auf dem Reiter-Grund. */
+.cp-karte {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+}
+.cp-titel { font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
+.cp-text { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.cp-karte.cp-warn { border-left: 3px solid var(--warning); }
+.cp-konto {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    word-break: break-all;
+}
+.cp-schritte { margin: 8px 0 12px 18px; padding: 0; color: var(--text-secondary); font-size: 13px; }
+.cp-schritte li { margin-bottom: 6px; }
+/* Der Code wird abgetippt – gross, einzeln lesbar, markierbar. */
+.cp-code {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    letter-spacing: 3px;
+    color: var(--text-primary);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    margin: 4px 0 10px;
+    text-align: center;
+    user-select: all;
+}
+/* `.btn-primary`/`.btn-secondary` tragen width:100% (Register) – hier als
+   eigenstaendiger Knopf in der Karte, also auf Inhaltsbreite zuruecknehmen. */
+.cp-knopf { width: auto; flex: 0 0 auto; margin-top: 10px; }
+/* Die Adresse ist ein Verweis nach aussen: wie im Wissens-Hinweis daneben
+   dunkel aufgehellter Akzent, hell pur – Browser-Blau ist hier unlesbar. */
+.cp-url { color: color-mix(in srgb, var(--accent) 65%, #fff); word-break: break-all; }
+body.light .cp-url { color: var(--accent); }
+/* --danger als Schrift haelt nur auf dunkler Flaeche (Register) – hell abdunkeln. */
+.cp-fehler { color: var(--danger); }
+body.light .cp-fehler { color: color-mix(in srgb, var(--danger) 78%, #000); }
+/* ⚠ `.kb-btn-danger` traegt `#e74c3c` als Schrift. Im hellen Thema auf der
+   Karte gemessen: 3,82:1 – unter der Textgrenze von 4,5:1. Im Bestand (cron.js)
+   ist dieser Knopf ein reiner ICON-Knopf, dort genuegen 3:1; der Trennen-Knopf
+   hier ist der erste mit TEXT. Deshalb wird NUR diese Flaeche abgedunkelt
+   (derselbe Hausweg wie `.cp-fehler`), statt die geteilte Klasse umzufaerben –
+   das traefe die Bestandsknoepfe mit. */
+body.light .cp-karte .kb-btn-danger { color: color-mix(in srgb, var(--danger) 78%, #000); }
+/* ⚠ OHNE DIESE ZEILE SIEHT DER GESPERRTE KNOPF AUS WIE DER BEDIENBARE.
+   In der optischen Abnahme am 2026-11-06 gemessen: `disabled` und nicht
+   `disabled` waren pixelgleich, bis auf `cursor: pointer` an beiden – fuer den
+   Benutzer heisst das „ein Klick macht genau NICHTS" (Register). jsdom konnte
+   es nicht zeigen, es stand nur im Markup. Werte wie `.settings-action-btn`
+   und `.sec-btn` daneben. Den GRUND nennen weiterhin die Hinweiskarten
+   darueber – Farbe allein ist keine Information. */
+.cp-knopf:disabled { opacity: 0.5; cursor: not-allowed; }

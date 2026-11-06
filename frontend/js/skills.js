@@ -93,6 +93,7 @@
         knowledge:         'knowledge',
         cron:              'cron',
         google:             'google',
+        copilot:            'copilot',
         telegram:           'telegram',
         browser_control:    'browser_control',
         claude_subagent:    'claude_subagent',

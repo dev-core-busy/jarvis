@@ -859,7 +859,7 @@
         // Reiter, deren Inhalt generisch aus dem Skill-Manifest kommt (skillcfg.js)
         const SKILLCFG_TABS = ['telegram', 'browser_control',
                                'agent_orchestrator', 'agent_autonomy_kit', 'avatar',
-                               'claude_subagent'];
+                               'claude_subagent', 'copilot'];
         const tabsSkillCfg = SKILLCFG_TABS.map(n => document.getElementById('settings-tab-' + n));
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');
@@ -930,6 +930,12 @@
                         // idempotent, ein zweiter Klick laedt nur neu.
                         if (target === 'agent_orchestrator' && window.AgentRoles) {
                             window.AgentRoles.onShow();
+                        }
+                        // Der Copilot-Reiter zeigt UNTER dem manifest-generierten
+                        // Formular die Verbindung je Benutzer. init() ist
+                        // idempotent und stoppt einen noch laufenden Abhol-Takt.
+                        if (target === 'copilot' && window.copilotVerbindung) {
+                            window.copilotVerbindung.init();
                         }
                     }
                 } else if (target === 'mcp' && tabMcp) {

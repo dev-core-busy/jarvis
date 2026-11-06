@@ -341,7 +341,10 @@ process.exit(fail ? 1 : 0);
   // Ein Abbruch darf nicht wie ein bestandener Lauf aussehen: Bilanz UND
   // Exit-Code setzen (Register – ein Wachhund ohne Ausgang ist schlimmer als
   // keiner).
-  console.log("  FAIL ABBRUCH: " + (e && e.stack || e));
-  console.log("\nERGEBNIS: " + ok + " OK, " + (fail + 1) + " FAIL (ABGEBROCHEN)");
-  process.exit(1);
+  // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+  // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+  // als Biss, samt erfundener +1 in der Bilanz.
+  console.log("  ABBRUCH: " + (e && e.stack || e));
+  console.log("\nERGEBNIS: " + ok + " OK, " + fail + " FAIL (ABGEBROCHEN, Exit 2)");
+  process.exit(2);
 });

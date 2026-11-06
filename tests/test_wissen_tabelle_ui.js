@@ -149,6 +149,13 @@ function namen(doc) {
 function kopf(doc, key) {
     return doc.querySelector('#wi-files-list th[data-sort="' + key + '"]');
 }
+// aria-sort eines Kopfes – null, wenn es den Kopf nicht gibt. `kopf(doc, k)
+// .getAttribute(...)` WARF ohne Kopf, und die Gegenprobe "Groessen-Spalte
+// fehlt" endete mit Exit 2 statt mit ihrem Befund (2026-11-06).
+function sortAttr(doc, key) {
+    const th = kopf(doc, key);
+    return th ? th.getAttribute('aria-sort') : null;
+}
 function klick(doc, key) {
     const th = kopf(doc, key);
     const b = th && th.querySelector('.wi-sortbtn');
@@ -179,14 +186,14 @@ function i18nZahl(key) {
     check('Kopfzeilen tragen die deutschen Beschriftungen',
           JSON.stringify(texte) === '["Name","Ordner","Wissensgruppen","Größe"]', JSON.stringify(texte));
     check('jeder Kopf ist ein KNOPF (per Tastatur erreichbar)',
-          koepfe.every(function (k) { return !!kopf(doc, k).querySelector('button.wi-sortbtn'); }));
+          koepfe.every(function (k) { const th = kopf(doc, k); return !!th && !!th.querySelector('button.wi-sortbtn'); }));
     check('Loeschen bleibt je Zeile erreichbar (Muelleimer)',
           doc.querySelectorAll('#wi-files-list .wi-frow .wi-file-del').length === 5);
 
     abschnitt('2 – Vorgabe: Name aufsteigend, deutsch sortiert');
-    check('Name traegt aria-sort=ascending', kopf(doc, 'name').getAttribute('aria-sort') === 'ascending');
+    check('Name traegt aria-sort=ascending', sortAttr(doc, 'name') === 'ascending');
     check('die anderen Spalten aria-sort=none',
-          ['folder', 'groups', 'size'].every(function (k) { return kopf(doc, k).getAttribute('aria-sort') === 'none'; }));
+          ['folder', 'groups', 'size'].every(function (k) { return sortAttr(doc, k) === 'none'; }));
     check('Reihenfolge: Umlaut bei A, "Datei 2" vor "Datei 10"',
           JSON.stringify(namen(doc)) === '["Äpfel.docx","Birne.pdf","Cola.txt","Datei 2.md","Datei 10.md"]',
           JSON.stringify(namen(doc)));
@@ -195,7 +202,7 @@ function i18nZahl(key) {
     klick(doc, 'name');
     check('gleiche Spalte erneut: absteigend',
           namen(doc)[0] === 'Datei 10.md' && namen(doc)[4] === 'Äpfel.docx', JSON.stringify(namen(doc)));
-    check('… aria-sort=descending', kopf(doc, 'name').getAttribute('aria-sort') === 'descending');
+    check('… aria-sort=descending', sortAttr(doc, 'name') === 'descending');
     check('… Pfeil ▼ sichtbar', kopf(doc, 'name').textContent.indexOf('▼') >= 0);
 
     klick(doc, 'folder');
@@ -203,8 +210,8 @@ function i18nZahl(key) {
           JSON.stringify(namen(doc)) === '["Äpfel.docx","Birne.pdf","Cola.txt","Datei 2.md","Datei 10.md"]',
           JSON.stringify(namen(doc)));
     check('… und nur SIE traegt jetzt den Zustand',
-          kopf(doc, 'folder').getAttribute('aria-sort') === 'ascending'
-          && kopf(doc, 'name').getAttribute('aria-sort') === 'none');
+          sortAttr(doc, 'folder') === 'ascending'
+          && sortAttr(doc, 'name') === 'none');
 
     klick(doc, 'groups');
     // "Allgemein" < "Allgemein, Zentrale" < "Zentrale"; Gleichstand nach Name.
@@ -244,7 +251,7 @@ function i18nZahl(key) {
     q.dispatchEvent(new s.win.Event('input'));
     check('gefiltert UND weiter nach Groesse absteigend',
           JSON.stringify(namen(doc)) === '["Datei 10.md","Datei 2.md"]', JSON.stringify(namen(doc)));
-    check('… Kopf zeigt weiter den Zustand', kopf(doc, 'size').getAttribute('aria-sort') === 'descending');
+    check('… Kopf zeigt weiter den Zustand', sortAttr(doc, 'size') === 'descending');
     q.value = '';
     q.dispatchEvent(new s.win.Event('input'));
 
@@ -304,7 +311,7 @@ function i18nZahl(key) {
         check('… die i18n-Attribute wandern mit',
               b.getAttribute('data-i18n-title') === 'common.minimize');
         check('… die Tabelle bleibt bedienbar (Sortierkopf-Klick sortiert weiter)',
-              klick(doc, 'name') && kopf(doc, 'name').getAttribute('aria-sort') !== 'none');
+              klick(doc, 'name') && sortAttr(doc, 'name') !== 'none');
         b.click();
         check('zweiter Klick verkleinert wieder', !doc.body.classList.contains('jv-breit')
               && b.getAttribute('aria-label') === 'Maximieren');

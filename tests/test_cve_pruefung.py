@@ -481,10 +481,17 @@ try:
           json.dumps(r)[:200])
     SIM["text"] = SIM_SICHER
     aufrufe.clear()
-    SIM["text"] = "Inst foo [1.0-1] (1.0-1+deb13u1)\nRemv wichtig [3.0]\n"
+    # ⚠ Die Inst-Zeile MUSS aus der Sicherheitsquelle stammen (SIM_SICHER): ohne
+    # Herkunft lehnt schon die Herkunftspruefung darunter ab, und die Probe
+    # "geplante Entfernung wird ignoriert" blieb stumm (2026-11-06, zwei Wege
+    # zum Treffer). Der Grund belegt, WELCHE Schranke gegriffen hat.
+    SIM["text"] = SIM_SICHER + "Remv wichtig [3.0]\n"
     r = cve_apt.beheben(["foo"], True)
     echt = [c for c in aufrufe if c[0] == "apt-get" and "-s" not in c]
-    check(r["ok"] is False and not echt, "plant apt eine Entfernung, wird NICHT installiert")
+    check(r["ok"] is False and not echt, "plant apt eine Entfernung, wird NICHT installiert",
+          json.dumps(r)[:200])
+    check("entfernen" in r["fehler"], "der Grund nennt die geplante Entfernung", r["fehler"])
+    SIM["text"] = SIM_SICHER
     aufrufe.clear()
     r = cve_apt.beheben([], True, index=True)
     check(any(c[-1] == "update" for c in aufrufe) and r["index"] is True,

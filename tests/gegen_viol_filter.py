@@ -300,9 +300,13 @@ def main():
         sichern()
         # Gemessen wird der EXIT-CODE samt Bilanzzeile, nicht das Zaehlen von
         # FAIL-Zeilen: ein Lauf, der ohne Bilanz abbricht, hat nichts gemessen.
+        # Biss nur mit Exit 1 + Bilanz: Exit 2 heisst Absturz/Zeitlimit (seit 2026-11-06
+        # enden die JS-Waechter so), und ein Absturz hat nicht gebissen (Register).
         if not bil:
             print("  \033[33m%2d. %-58s ABGEBROCHEN (keine Bilanz)\033[0m" % (i, name))
-        elif rc != 0:
+        elif rc not in (0, 1):
+            print("  \033[33m%2d. %-58s ABGEBROCHEN (Exit %d)\033[0m" % (i, name, rc))
+        elif rc == 1:
             beissen += 1
             print("  \033[32m%2d. %-58s beisst (%d FAIL)\033[0m" % (i, name, f))
         else:

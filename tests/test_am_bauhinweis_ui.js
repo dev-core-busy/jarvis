@@ -35,7 +35,10 @@ process.on('exit', () => {
 });
 
 const wach = setTimeout(() => {
-  console.log('\n⚠ TIMEOUT'); process.exit(1);
+  // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+  // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+  // als Biss, samt erfundener +1 in der Bilanz.
+  console.log('\n⚠ TIMEOUT (ABGEBROCHEN, Exit 2)'); bilanz = true; process.exit(2);
 }, 40000);
 
 (async () => {
@@ -123,8 +126,11 @@ const wach = setTimeout(() => {
   console.log('\n' + ok + ' OK, ' + fail + ' FAIL');
   process.exit(fail ? 1 : 0);
 })().catch((e) => {
+  // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+  // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+  // als Biss, samt erfundener +1 in der Bilanz.
   console.log('\n⚠ ABBRUCH: ' + (e && e.stack || e));
   bilanz = true;
-  console.log('\n' + ok + ' OK, ' + (fail + 1) + ' FAIL (ABGEBROCHEN)');
-  process.exit(1);
+  console.log('\n' + ok + ' OK, ' + fail + ' FAIL (ABGEBROCHEN, Exit 2)');
+  process.exit(2);
 });

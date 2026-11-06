@@ -18,11 +18,22 @@ const c = (t, b, d) => {
   b ? (ok++, console.log('  OK   ' + t))
     : (fail++, console.log('  FAIL ' + t + (d ? '  – ' + d : '')));
 };
+// Voraussetzung eines Folgeschritts. Fehlt das Element, hat die Sabotage es
+// entfernt: das ist ein FAIL, und der Schritt entfaellt. Vorher warf hier ein
+// TypeError, und der Lauf endete mit Exit 2 statt mit dem Befund (2026-11-06,
+// sieben Gegenproben in gegen_feedback.py).
+const vorhanden = (el, was) => {
+  if (!el) { c('(Voraussetzung) ' + was + ' ist da', false); }
+  return !!el;
+};
 // Wachhund: ohne ihn haengt ein Lauf im Fehlerfall bis zum Zeitlimit und
 // beendet ohne Bilanzzeile – von „nicht gelaufen" nicht zu unterscheiden.
 const wd = setTimeout(() => {
-  console.log('\nWACHHUND: haengt\n' + ok + ' OK, ' + (fail + 1) + ' FAIL');
-  process.exit(1);
+  // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+  // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+  // als Biss, samt erfundener +1 in der Bilanz.
+  console.log('\nWACHHUND: haengt\n' + ok + ' OK, ' + fail + ' FAIL (ABGEBROCHEN, Exit 2)');
+  process.exit(2);
 }, 30000);
 
 const FORM = {
@@ -117,7 +128,8 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
     [...doc.querySelectorAll('#fb-tabelle tbody .fb-c-nr')]
       .map(x => x.textContent).join(',') === '1,2,3');
 
-  doc.querySelector('#fb-tabelle tbody .fb-row-del').click();
+  const del1 = doc.querySelector('#fb-tabelle tbody .fb-row-del');
+  if (vorhanden(del1, 'Muelleimer der ersten Zeile')) { del1.click(); }
   c('der Muelleimer entfernt eine Zeile',
     doc.querySelectorAll('#fb-tabelle tbody tr').length === 2);
   c('und der Knopf traegt den Muelleimer, nicht ein ×',
@@ -141,31 +153,33 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   console.log('\n3. Sterne: klicken, zuruecknehmen, Tastatur');
   // ═════════════════════════════════════════════════════════════════════════
   let sterne = doc.querySelector('#fb-tabelle tbody .fb-sterne');
-  sterne.children[3].click();                      // vierter Stern
-  c('ein Klick setzt den Wert', sterne.getAttribute('data-wert') === '4');
-  c('vier Sterne sind gefuellt',
-    [...sterne.children].filter(b => b.classList.contains('is-an')).length === 4);
-  c('⚠ die Form unterscheidet sie, nicht nur die Farbe',
-    !!sterne.children[0].querySelector('.is-gesetzt')
-    && !sterne.children[4].querySelector('.is-gesetzt'),
-    'Farbe allein ist keine Information');
-  c('der Wert steht zusaetzlich als ZAHL da',
-    (sterne.parentNode.querySelector('.fb-sterne-wert') || {}).textContent === '4/5');
-  c('aria-checked folgt dem Zustand',
-    sterne.children[3].getAttribute('aria-checked') === 'true'
-    && sterne.children[4].getAttribute('aria-checked') === 'false');
+  if (vorhanden(sterne, 'Sterne-Gruppe der ersten Zeile')) {
+    sterne.children[3].click();                      // vierter Stern
+    c('ein Klick setzt den Wert', sterne.getAttribute('data-wert') === '4');
+    c('vier Sterne sind gefuellt',
+      [...sterne.children].filter(b => b.classList.contains('is-an')).length === 4);
+    c('⚠ die Form unterscheidet sie, nicht nur die Farbe',
+      !!sterne.children[0].querySelector('.is-gesetzt')
+      && !sterne.children[4].querySelector('.is-gesetzt'),
+      'Farbe allein ist keine Information');
+    c('der Wert steht zusaetzlich als ZAHL da',
+      (sterne.parentNode.querySelector('.fb-sterne-wert') || {}).textContent === '4/5');
+    c('aria-checked folgt dem Zustand',
+      sterne.children[3].getAttribute('aria-checked') === 'true'
+      && sterne.children[4].getAttribute('aria-checked') === 'false');
 
-  sterne.children[3].click();
-  c('⚠ ein Klick auf denselben Stern nimmt die Bewertung ZURUECK',
-    sterne.getAttribute('data-wert') === '0',
-    'ohne diesen Weg waere ein Fehlklick nicht korrigierbar');
+    sterne.children[3].click();
+    c('⚠ ein Klick auf denselben Stern nimmt die Bewertung ZURUECK',
+      sterne.getAttribute('data-wert') === '0',
+      'ohne diesen Weg waere ein Fehlklick nicht korrigierbar');
 
-  const ev = new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true });
-  sterne.children[0].dispatchEvent(ev);
-  c('Pfeiltaste erhoeht den Wert', sterne.getAttribute('data-wert') === '1');
-  sterne.children[0].dispatchEvent(new w.KeyboardEvent('keydown',
-    { key: 'ArrowLeft', bubbles: true }));
-  c('und die Gegenrichtung senkt ihn', sterne.getAttribute('data-wert') === '0');
+    const ev = new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true });
+    sterne.children[0].dispatchEvent(ev);
+    c('Pfeiltaste erhoeht den Wert', sterne.getAttribute('data-wert') === '1');
+    sterne.children[0].dispatchEvent(new w.KeyboardEvent('keydown',
+      { key: 'ArrowLeft', bubbles: true }));
+    c('und die Gegenrichtung senkt ihn', sterne.getAttribute('data-wert') === '0');
+  }
 
   // ═════════════════════════════════════════════════════════════════════════
   console.log('\n4. Absenden');
@@ -180,9 +194,12 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
     doc.getElementById('fb-status').textContent.length > 5);
 
   const feld = doc.querySelector('#fb-tabelle tbody textarea');
-  feld.value = 'Rechnungswesen';
-  feld.dispatchEvent(new w.Event('input', { bubbles: true }));
-  doc.querySelector('#fb-tabelle tbody .fb-sterne').children[2].click();
+  if (vorhanden(feld, 'Antwortfeld der ersten Zeile')) {
+    feld.value = 'Rechnungswesen';
+    feld.dispatchEvent(new w.Event('input', { bubbles: true }));
+  }
+  const sterne4 = doc.querySelector('#fb-tabelle tbody .fb-sterne');
+  if (vorhanden(sterne4, 'Sterne-Gruppe der ersten Zeile')) { sterne4.children[2].click(); }
   rufe.length = 0;
   doc.getElementById('fb-senden').click();
   await warte(60);
@@ -200,7 +217,7 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
     'er kommt aus der Anmeldung');
   c('nach dem Senden steht ein frisches, leeres Formular da',
     doc.querySelectorAll('#fb-tabelle tbody tr').length === 1
-    && doc.querySelector('#fb-tabelle tbody textarea').value === '');
+    && (doc.querySelector('#fb-tabelle tbody textarea') || {}).value === '');
   c('und eine Bestaetigung', doc.getElementById('fb-status').classList.contains('is-ok'));
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -313,7 +330,9 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   c('jede Karte hat einen Ziehgriff',
     !!sdoc.querySelector('#fbadm-liste .fb-card .fb-griff[draggable="true"]'));
   c('der Griff ist mit der Tastatur erreichbar',
-    (sdoc.querySelector('#fbadm-liste .fb-griff') || {}).getAttribute('tabindex') === '0');
+    // ⚠ `(x || {}).getAttribute(...)` WARF ohne Griff ({} hat keine Methode).
+    !!sdoc.querySelector('#fbadm-liste .fb-griff')
+    && sdoc.querySelector('#fbadm-liste .fb-griff').getAttribute('tabindex') === '0');
   c('der Loeschknopf traegt den Muelleimer',
     !!sdoc.querySelector('#fbadm-liste .fb-card .jv-ico-trash'));
 
@@ -422,9 +441,9 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
     'eine so entstandene Zeile haette keine Kennung und fiele serverseitig heraus');
 
   // Absenden: nur ein Stern in Zeile 3, sonst nichts.
-  const sterne3 = doc.querySelectorAll('#fb-tabelle tbody tr')[2]
-    .querySelectorAll('.fb-sterne button');
-  sterne3[3].click();                      // 4 von 5
+  const zeile3 = doc.querySelectorAll('#fb-tabelle tbody tr')[2];
+  const sterne3 = zeile3 ? zeile3.querySelectorAll('.fb-sterne button') : [];
+  if (vorhanden(sterne3[3], 'vierter Stern in Zeile 3')) { sterne3[3].click(); }   // 4 von 5
   await warte(20);
   rufe.length = 0;
   doc.getElementById('fb-senden').click();
@@ -439,7 +458,7 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   c('⚠ DER FESTE TEXT WIRD NICHT MITGESCHICKT',
     bogenRumpf.zeilen.every(z => !('k' in z)),
     'was nicht gesendet wird, kann auch nicht gefaelscht aussehen');
-  c('der gesetzte Stern kommt an', bogenRumpf.zeilen[2].b === 4);
+  c('der gesetzte Stern kommt an', (bogenRumpf.zeilen[2] || {}).b === 4);
 
   // Und die Gegenrichtung: ohne jede Eingabe darf nichts rausgehen.
   ({ w, doc, rufe } = seite({ formulare: [BOGEN] }));
@@ -613,8 +632,10 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   c('der Zeichendeckel bleibt bei 2000 (ZELLE_MAX)',
     !!ta && Number(ta.maxLength) === 2000);
 
-  ta.value = MEHR;
-  ta.dispatchEvent(new w.Event('input', { bubbles: true }));
+  if (vorhanden(ta, 'Antwortfeld')) {
+    ta.value = MEHR;
+    ta.dispatchEvent(new w.Event('input', { bubbles: true }));
+  }
   rufe.length = 0;
   doc.getElementById('fb-senden').click();
   await warte(60);
@@ -667,13 +688,17 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   // ── Enter darf nicht absenden ───────────────────────────────────────────
   rufe.length = 0;
   const ta2 = doc.querySelector('#fb-tabelle tbody textarea');
-  ta2.value = 'Zeile';
-  ta2.dispatchEvent(new w.Event('input', { bubbles: true }));
-  ta2.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await warte(30);
-  c('⚠ Enter im Antwortfeld sendet NICHT ab',
-    !rufe.some(r => r.u === '/api/feedback/abgabe'),
-    'sonst waere jeder Absatzwechsel eine Abgabe');
+  // Ohne Feld waere "sendet NICHT ab" trivial wahr – die Pruefung steht deshalb
+  // mit in der Bedingung.
+  if (vorhanden(ta2, 'Antwortfeld')) {
+    ta2.value = 'Zeile';
+    ta2.dispatchEvent(new w.Event('input', { bubbles: true }));
+    ta2.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await warte(30);
+    c('⚠ Enter im Antwortfeld sendet NICHT ab',
+      !rufe.some(r => r.u === '/api/feedback/abgabe'),
+      'sonst waere jeder Absatzwechsel eine Abgabe');
+  }
 
   // =========================================================================
   console.log('\n10. Maximieren: EIN Knopf fuer die ganze Seite, ausserhalb der Karten');
@@ -743,13 +768,13 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   const ta3 = doc.querySelector('#fb-tabelle textarea');
   c('es gibt ein Antwortfeld (Positivkontrolle)', !!ta3);
   fakeScroll = 123;
-  b3.click();                                          // maximieren
+  if (vorhanden(b3, 'Maximier-Knopf')) { b3.click(); }       // maximieren
   await warte(20);
   c('⚠ nach dem Maximieren ist die Feldhoehe neu gemessen',
     !!ta3 && ta3.style.height === '123px',
     'gesetzt: ' + (ta3 && ta3.style.height));
   fakeScroll = 77;
-  b3.click();                                          // verkleinern
+  if (b3) { b3.click(); }                              // verkleinern
   await warte(20);
   c('⚠ und nach dem Verkleinern ebenfalls',
     !!ta3 && ta3.style.height === '77px',
@@ -804,7 +829,10 @@ const warte = ms => new Promise(r => setTimeout(r, ms));
   process.exit(fail ? 1 : 0);
 })().catch(e => {
   // Ein Absturz darf nicht als Exit 0 ohne Bilanz enden (Register).
+  // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+  // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+  // als Biss, samt erfundener +1 in der Bilanz.
   console.log('\nABBRUCH: ' + (e && e.stack || e));
-  console.log(ok + ' OK, ' + (fail + 1) + ' FAIL (ABGEBROCHEN)');
-  process.exit(1);
+  console.log(ok + ' OK, ' + fail + ' FAIL (ABGEBROCHEN, Exit 2)');
+  process.exit(2);
 });

@@ -180,11 +180,14 @@ def main():
         datei.write_text(s.replace(alt, neu, 1), encoding="utf-8")
         rc, bil, f = lauf(cmd)
         datei.write_text(s, encoding="utf-8")
-        if rc != 0 and bil and f > 0:
+        # Biss nur mit Exit 1 + Bilanz: Exit 2 heisst Absturz/Zeitlimit (seit 2026-11-06
+        # enden die JS-Waechter so), und ein Absturz hat nicht gebissen (Register).
+        if rc == 1 and bil and f > 0:
             print("  \033[32m✓\033[0m %-62s beisst (%d FAIL)" % (name, f))
             beissen += 1
-        elif rc != 0 and not bil:
-            print("  \033[33m!\033[0m %-62s BRICHT AB ohne Bilanz" % name)
+        elif rc != 0 and (rc != 1 or not bil):
+            print("  \033[33m!\033[0m %-62s BRICHT AB (Exit %d%s)"
+                  % (name, rc, "" if bil else ", ohne Bilanz"))
             nicht += 1
         else:
             print("  \033[31m✗\033[0m %-62s BEISST NICHT" % name)

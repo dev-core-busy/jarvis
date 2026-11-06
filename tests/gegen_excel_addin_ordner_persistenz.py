@@ -69,7 +69,9 @@ def lauf():
     p = subprocess.run(['node', TEST], cwd=WURZEL, capture_output=True,
                        text=True, timeout=300)
     bilanz = re.search(r'Bestanden:\s*(\d+)\s*/\s*Fehlgeschlagen:\s*(\d+)', p.stdout)
-    if not bilanz:
+    # Exit 2 = Absturz/Zeitlimit; seit 2026-11-06 schreibt der Waechter dabei
+    # eine Bilanz "(ABGEBROCHEN, Exit 2)" – das ist ebenso KEIN Biss.
+    if not bilanz or p.returncode not in (0, 1):
         # Kein Bilanzblock = abgestuerzt. Das ist NICHT "beisst" (CLAUDE.md:
         # eine Sabotage, die den Waechter abstuerzen laesst, hat nicht gebissen).
         return None, None, p.stdout + p.stderr

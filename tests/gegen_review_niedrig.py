@@ -35,6 +35,8 @@ from pathlib import Path
 WURZEL = Path(__file__).resolve().parent.parent
 PY = Path(WURZEL / "venv" / "bin" / "python")
 PY = str(PY) if PY.is_file() else sys.executable
+sys.path.insert(0, str(WURZEL / "tests" / "lib"))
+from sabotage_anker import if_entfernen  # noqa: E402
 
 
 def _py(n):
@@ -117,8 +119,11 @@ PROBEN = [
      "                await _uc_sitzung_beenden(ws, grund)\n                break\n", "", W_SN),
     ("/ws/users: kein Waechter fuer stille Verbindungen", MAIN,
      "        waechter = asyncio.create_task(_uc_waechter(ws, token_str))\n", "", W_SN),
+    # Anker am Syntaxbaum (2026-11-06): die Zeile hiess frueher
+    # `if _mac_schluessel:` und steht seit ec8a3c3d als `if schluessel:` eine
+    # Ebene tiefer – gemeint ist das `if`, das das Merkmal setzt.
     ("Sicherheitsprotokoll: wieder ohne Schluessel geschrieben", SL,
-     "            if _mac_schluessel:\n                eintrag[\"mac\"] = 1\n", "", W_SN),
+     lambda q: if_entfernen(q, "ereignis", "eintrag['mac'] = 1"), None, W_SN),
     ("Sicherheitsprotokoll: letzte Zeile ohne Schluessel faellt nicht auf", SL,
      "    if _mac_schluessel and letzte_ohne_mac and letzte_ohne_mac[1]:\n", "    if False:\n", W_SN),
     # ── Abruf-Schluessel ──
@@ -330,6 +335,11 @@ try:
             schritte, erwartet = [(alt, neu)], 1
         pfad = WURZEL / rel
         quelle = pfad.read_text(encoding="utf-8")
+        try:   # Anker am Syntaxbaum: Funktion quelle -> (alt, neu)
+            schritte = [a(quelle) if callable(a) else (a, n) for a, n in schritte]
+        except AssertionError as e:
+            pruefe(False, "%s -> Anker eindeutig" % name, str(e))
+            continue
         treffer = [quelle.count(a) for a, _n in schritte]
         if treffer != [1] * len(schritte):
             pruefe(False, "%s -> Anker eindeutig" % name, "Treffer %s" % treffer)

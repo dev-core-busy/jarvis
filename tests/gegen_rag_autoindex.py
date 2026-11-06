@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tests" / "lib"))
+from sabotage_anker import eintrag_entfernen, eintrag_ergaenzen  # noqa: E402
 # ⚠ Ablage im HOME (0700), NICHT im Arbeitsbaum: dort waere sie eine verirrte
 # Datei, die `deploy/abgleich.py` meldet - und nicht nach /tmp (1777), wo ein
 # Rest eines fremden Laufs den naechsten Lauf blockiert.
@@ -63,9 +65,14 @@ def lauf():
     return r.returncode, (int(m.group(1)), int(m.group(2)))
 
 
-def patch(rel, alt, neu, anzahl=1):
+def patch(rel, alt, neu=None, anzahl=1):
+    """``alt`` ist ein Text-Anker ODER eine Funktion ``quelle -> (alt, neu)``
+    (Anker am Syntaxbaum, ``tests/lib/sabotage_anker.py``) - die
+    Trefferkontrolle danach ist fuer beide Formen dieselbe."""
     p = ROOT / rel
     s = p.read_text(encoding="utf-8")
+    if callable(alt):
+        alt, neu = alt(s)
     treffer = s.count(alt)
     assert treffer == anzahl, f"SABOTAGE TRIFFT NICHT ({treffer}x statt {anzahl}x): {alt[:70]!r}"
     p.write_text(s.replace(alt, neu, anzahl), encoding="utf-8")
@@ -130,18 +137,18 @@ PROBEN = [
          '    if False:')]),
     ("Zustand ist keine Kopie (Aufrufer kann hineinschreiben)", [
         ("backend/rag_autoindex.py", "        d = dict(_zustand)", "        d = _zustand")]),
+    # Anker am Syntaxbaum: die Whitelist waechst mit jeder Auftragsart (2026-11-06
+    # bissen beide Proben deshalb nicht mehr) - gemeint ist nur der EINE Eintrag.
     ("⚠ 'wissensabgleich' faellt aus der kind-Whitelist (wird STILL zum Agentenjob)", [
         ("backend/scheduler.py",
-         '"kind": kind if kind in ("agent", "reminder", "wissensabgleich") else "agent",',
-         '"kind": kind if kind in ("agent", "reminder") else "agent",')]),
+         lambda q: eintrag_entfernen(q, "wissensabgleich", funktion="add_job"))]),
     ("⚠ der Ausfuehrungs-Zweig faellt weg (Reindex per LLM statt direkt)", [
         ("backend/scheduler.py",
          'elif job.get("kind") == "wissensabgleich":',
          'elif False:')]),
     ("kind wird nachtraeglich aenderbar (Umschreiben zum Agentenjob)", [
         ("backend/scheduler.py",
-         'UPDATABLE_FIELDS = {"label", "cron", "task", "enabled", "once"}',
-         'UPDATABLE_FIELDS = {"label", "cron", "task", "enabled", "once", "kind"}')]),
+         lambda q: eintrag_ergaenzen(q, "UPDATABLE_FIELDS", "kind"))]),
     ("Saat ohne Marke (bewusst geloeschter Auftrag kommt zurueck)", [
         ("backend/rag_autoindex.py",
          "        if config.get_setting(_SAAT_MARKE):",
@@ -171,7 +178,7 @@ def main():
         zurueck()
 
     # REGEL statt gepflegter Liste: jede angefasste Datei muss gesichert sein.
-    angefasst = {rel for _, aend in PROBEN for rel, _, _ in aend}
+    angefasst = {rel for _, aend in PROBEN for rel, *_ in aend}
     fehlt = angefasst - set(DATEIEN)
     if fehlt:
         print(f"Exit 2: Proben fassen ungesicherte Dateien an: {sorted(fehlt)}")
@@ -193,20 +200,21 @@ def main():
         zurueck()
         sichern()
         try:
-            for rel, alt, neu in aenderungen:
-                patch(rel, alt, neu)
+            for rel, *anker in aenderungen:
+                patch(rel, *anker)
         except AssertionError as e:
             print(f"  ⚠ {name}: {e}")
             continue
         code, bilanz = lauf()
         if bilanz is None:
-            print(f"  OK(Abbruch) {name}: Waechter bricht ab (Exit {code}, keine Bilanz)")
-            beissen += 1
-        elif bilanz[1] > 0:
+            # ⚠ Ein Absturz ist KEIN Biss (Register; bis 2026-11-06 hier mitgezaehlt):
+            # ohne Bilanzzeile ist "gemeldet" von "konnte nicht laufen" nicht zu trennen.
+            print(f"  ABBRUCH {name}: Waechter stirbt ohne Bilanz (Exit {code}) – zaehlt nicht")
+        elif code == 1 and bilanz[1] > 0:
             print(f"  OK   {name}: {bilanz[1]} FAIL")
             beissen += 1
         else:
-            print(f"  ZAHNLOS {name}: 0 FAIL")
+            print(f"  ZAHNLOS {name}: {bilanz[1]} FAIL, Exit {code}")
     zurueck()
 
     print(f"\nGegenproben: {beissen} von {len(PROBEN)} beissen")

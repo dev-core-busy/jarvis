@@ -221,7 +221,10 @@ const KARTE = '[class$="-card"], [class*="-card "], .ja-card, .st-card, .wi-sect
     console.log(ok + ' OK, ' + fail + ' FAIL');
     process.exit(fail ? 1 : 0);
 })().catch(e => {
+    // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+    // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+    // als Biss, samt erfundener +1 in der Bilanz.
     console.log('\nABBRUCH: ' + (e && e.stack || e));
-    console.log(ok + ' OK, ' + (fail + 1) + ' FAIL (ABGEBROCHEN)');
-    process.exit(1);
+    console.log(ok + ' OK, ' + fail + ' FAIL (ABGEBROCHEN, Exit 2)');
+    process.exit(2);
 });

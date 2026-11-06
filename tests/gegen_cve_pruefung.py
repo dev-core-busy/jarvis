@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tests" / "lib"))
+from sabotage_anker import eintrag_entfernen  # noqa: E402
 MARKE = ROOT / "tests" / ".gegen_cve_pruefung.laufmarke"
 
 CP = "backend/cve_pruefung.py"
@@ -124,11 +126,14 @@ PROBEN = [
      'if sim.returncode != 0:'),
     ("--no-remove fehlt", CA,
      '"--only-upgrade", "--no-remove",', '"--only-upgrade",'),
+    # Anker am Syntaxbaum (2026-11-06): Whitelist und LANGE_OPS wachsen mit
+    # jedem Eintrag, der Text-Anker "letzter Eintrag + Klammer" brach dabei.
     ("Auftragsart fehlt in der Whitelist", SC,
-     '"cve_pruefung") else "agent",', ') else "agent",'),
+     lambda q: eintrag_entfernen(q, "cve_pruefung", funktion="add_job"), None),
     ("Optionen auch fuer fremde Auftragsart", SC,
      'if job.get("kind") != "cve_pruefung":', 'if False:'),
-    ("Op nicht als lange Op", DA, '"cve_beheben"})', '})'),
+    ("Op nicht als lange Op", DA,
+     lambda q: eintrag_entfernen(q, "cve_beheben", ziel="LANGE_OPS"), None),
     ("nur_sicherheit nicht fail-closed", OP,
      'nur_sicherheit=args.get("nur_sicherheit") is not False,',
      'nur_sicherheit=bool(args.get("nur_sicherheit")),'),
@@ -290,6 +295,12 @@ def main() -> int:
         for name, datei, alt, neu in PROBEN:
             pfad = ROOT / datei
             text = pfad.read_text(encoding="utf-8")
+            if callable(alt):   # Anker am Syntaxbaum: quelle -> (alt, neu)
+                try:
+                    alt, neu = alt(text)
+                except AssertionError as e:
+                    print("  ???  %s – Anker nicht gefunden: %s" % (name, e))
+                    continue
             if text.count(alt) != 1:
                 print("  ???  %s – Anker %dx gefunden" % (name, text.count(alt)))
                 continue

@@ -46,6 +46,15 @@ BACKEND = ["python3", str(ROOT / "tests" / "test_feedback.py")]
 UI = ["node", str(ROOT / "tests" / "test_feedback_ui.js")]
 
 # (Name, Datei, alt, neu, Kommando)
+def _ohne_in_allsettingstabs(quelle):
+    """(alt, neu): die EINE `const allSettingsTabs = [...]`-Zeile ohne `tabFeedback`.
+    Ohne Treffer bleibt `alt` leer -> Trefferkontrolle meldet die Probe."""
+    zeilen = re.findall(r"^[ \t]*const allSettingsTabs = \[.*$", quelle, re.M)
+    if len(zeilen) != 1 or len(re.findall(r"\btabFeedback\b", zeilen[0])) != 1:
+        return "", ""
+    return zeilen[0], re.sub(r"\btabFeedback, ", "", zeilen[0])
+
+
 PROBEN = [
     # ── Backend ────────────────────────────────────────────────────────────
     ("unbekannter Spaltentyp wird durchgelassen", "backend/feedback.py",
@@ -147,9 +156,10 @@ PROBEN = [
     ("eine Reiter-Sektion ist nicht gebunden", "frontend/js/app.js",
      "                { hdr: 'fb-sect-abg-hdr',  body: 'fb-sect-abg-body',  tog: 'fb-sect-abg-tog'  },\n",
      "", BACKEND),
+    # Anker = die allSettingsTabs-Zeile selbst, nicht ihre Nachbarn: mit
+    # `tabNewsfeed` dahinter traf der alte Text-Anker 0x (2026-11-06).
     ("das Panel steht nicht in allSettingsTabs", "frontend/js/app.js",
-     "tabEmail, tabTracks, tabExcel, tabFeedback, tabKundenverwaltung",
-     "tabEmail, tabTracks, tabExcel, tabKundenverwaltung", BACKEND),
+     _ohne_in_allsettingstabs, None, BACKEND),
     # ⚠ ENTFALLEN 2026-09-14 mit dem Freigabe-Block selbst: die Probe zielte auf
     # dessen Hinweistext. Eine Probe, die ihr Ziel nicht mehr findet, bleibt
     # sonst dauerhaft als "trifft nicht" stehen und verwaessert die Bilanz.
@@ -464,6 +474,8 @@ def main():
     for name, rel, alt, neu, cmd in PROBEN:
         datei = ROOT / rel
         s = datei.read_text(encoding="utf-8")
+        if callable(alt):   # Anker, der sich seinen Text erst sucht: quelle -> (alt, neu)
+            alt, neu = alt(s)
         if s.count(alt) != 1:
             # ⚠ EINE ERSETZUNG OHNE TREFFERKONTROLLE IST KEIN MESSWERT: die
             # Probe saehe wie ein zahnloser Waechter aus, obwohl sie ihr Ziel
@@ -475,11 +487,14 @@ def main():
         datei.write_text(s.replace(alt, neu, 1), encoding="utf-8")
         rc, bil, f = lauf(cmd)
         datei.write_text(s, encoding="utf-8")
-        if rc != 0 and bil and f > 0:
+        # Biss nur mit Exit 1 + Bilanz: Exit 2 heisst Absturz/Zeitlimit (seit 2026-11-06
+        # enden die JS-Waechter so), und ein Absturz hat nicht gebissen (Register).
+        if rc == 1 and bil and f > 0:
             print("  \033[32m✓\033[0m %-58s beisst (%d FAIL)" % (name, f))
             beissen += 1
-        elif rc != 0 and not bil:
-            print("  \033[33m!\033[0m %-58s BRICHT AB ohne Bilanz" % name)
+        elif rc != 0 and (rc != 1 or not bil):
+            print("  \033[33m!\033[0m %-58s BRICHT AB (Exit %d%s)"
+                  % (name, rc, "" if bil else ", ohne Bilanz"))
             nicht += 1
         else:
             print("  \033[31m✗\033[0m %-58s BEISST NICHT" % name)

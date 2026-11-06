@@ -90,9 +90,13 @@ if (API_FASSUNGEN.length === 0) {
    abgebrochener Lauf saehe dann wie ein bestandener aus. */
 let bilanz = false;
 const hund = setTimeout(() => {
+    // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+    // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+    // als Biss, samt erfundener +1 in der Bilanz.
     console.log('\n\x1b[31mABBRUCH: Zeitgrenze erreicht\x1b[0m');
-    console.log('Bestanden: ' + ok + ' / Fehlgeschlagen: ' + (fail + 1) + ' (ABGEBROCHEN)');
-    process.exit(1);
+    console.log('Bestanden: ' + ok + ' / Fehlgeschlagen: ' + fail + ' (ABGEBROCHEN, Exit 2)');
+    bilanz = true;
+    process.exit(2);
 }, 40000);
 process.on('exit', (c) => {
     if (!bilanz && c === 0) {

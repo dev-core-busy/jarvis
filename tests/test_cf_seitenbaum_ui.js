@@ -25,7 +25,10 @@ process.on('exit', () => {
     if (!bilanz) { console.error('\n\x1b[31mABGEBROCHEN – keine Bilanz\x1b[0m'); process.exitCode = 1; }
 });
 const wach = setTimeout(() => {
-    console.error('\n\x1b[31mZEITLIMIT – haengt\x1b[0m'); bilanz = true; process.exit(1);
+    // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+    // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+    // als Biss, samt erfundener +1 in der Bilanz.
+    console.error('\n\x1b[31mZEITLIMIT – haengt (ABGEBROCHEN, Exit 2)\x1b[0m'); bilanz = true; process.exit(2);
 }, 30000);
 
 function section(t) { console.log(`\n\x1b[1m${t}\x1b[0m`); }
@@ -253,6 +256,9 @@ process.exit(FAIL ? 1 : 0);
 })().catch(e => {
     clearTimeout(wach); bilanz = true;
     console.error('\n\x1b[31mABGEBROCHEN:\x1b[0m', e && e.stack || e);
-    console.log(`\n\x1b[1mErgebnis: ${OK}/${OK + FAIL + 1} (ABGEBROCHEN)\x1b[0m`);
-    process.exit(1);
+    // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+    // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+    // als Biss, samt erfundener +1 in der Bilanz.
+    console.log(`\n\x1b[1mErgebnis: ${OK}/${OK + FAIL} (ABGEBROCHEN, Exit 2)\x1b[0m`);
+    process.exit(2);
 });

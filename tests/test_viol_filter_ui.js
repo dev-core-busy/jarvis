@@ -99,8 +99,16 @@ function welt(antwort, lang) {
 async function mitFilter(w, user) {
   await w.SecurityIncidents.loadViolations();     // fuellt das Pulldown
   const sel = w.document.getElementById('sec-viol-user');
+  // ⚠ Fehlt Pulldown oder Option, verpufft `sel.value = …` still (Register) –
+  // das bleibt LAUT, aber als FAIL statt als Wurf: ein Wurf endete mit Exit 2,
+  // und die Gegenprobe "Pulldown fehlt im Markup" galt als nicht gebissen,
+  // obwohl Abschnitt 2 den Befund schon gemeldet hatte (2026-11-06).
+  if (!sel) { check('(Voraussetzung) das Pulldown ist da', false); return null; }
   sel.value = user;
-  if (sel.value !== user) throw new Error('Option fehlt im Pulldown: ' + user);
+  if (sel.value !== user) {
+    check('(Voraussetzung) die Option steht im Pulldown: ' + user, false);
+    return null;
+  }
   sel.dispatchEvent(new w.Event('change'));       // loest den zweiten Abruf aus
   await new Promise(r => setTimeout(r, 0));
   return sel;
@@ -172,8 +180,10 @@ w.fetch = (url) => {
   return Promise.resolve({ ok: true, json: () => Promise.resolve(
     { violations: NUR_AB, users: USERS, gesamt: GESAMT }) });
 };
-sel.value = 'firma\\a.b';
-sel.dispatchEvent(new w.Event('change'));
+if (sel) {
+  sel.value = 'firma\\a.b';
+  sel.dispatchEvent(new w.Event('change'));
+}
 await new Promise(r => setTimeout(r, 0));
 check('⚠ ein Wechsel loest einen neuen ABRUF aus (Server-Filter)',
   LETZTE_URL && LETZTE_URL.indexOf('?user=') !== -1, LETZTE_URL);
@@ -250,10 +260,13 @@ console.log('\n\x1b[1m6. Fremdtext im Namen wird nicht ausgefuehrt\x1b[0m');
   await w6.SecurityIncidents.loadViolations();
   const s6 = w6.document.getElementById('sec-viol-user');
   check('das Pulldown baut kein Markup aus dem Namen',
-    s6.querySelectorAll('img').length === 0 && s6.options[1].textContent === boes,
-    s6.innerHTML.slice(0, 80));
-  s6.value = boes;
-  s6.dispatchEvent(new w6.Event('change'));
+    !!s6 && s6.querySelectorAll('img').length === 0
+    && !!s6.options[1] && s6.options[1].textContent === boes,
+    s6 ? s6.innerHTML.slice(0, 80) : '-');
+  if (s6) {
+    s6.value = boes;
+    s6.dispatchEvent(new w6.Event('change'));
+  }
   await new Promise(r => setTimeout(r, 0));
   const t6 = w6.document.getElementById('sec-viol-list');
   check('und die Hinweiszeile ebenfalls nicht',
@@ -265,7 +278,7 @@ console.log('\n\x1b[1m7. Die getroffene Wahl ueberlebt den Neuaufbau\x1b[0m');
 {
   const w7 = welt({ violations: NUR_AB, users: USERS, gesamt: GESAMT }, 'de');
   const s7 = await mitFilter(w7, 'firma\\a.b');
-  check('die Auswahl steht nach dem Neufuellen weiter', s7.value === 'firma\\a.b', s7.value);
+  check('die Auswahl steht nach dem Neufuellen weiter', !!s7 && s7.value === 'firma\\a.b', s7 && s7.value);
   // Ein Benutzer, der inzwischen aus dem Speicher gefallen ist, bleibt
   // ausdruecklich stehen – sonst spraenge die Auswahl wortlos auf "Alle" und
   // die Liste zeigte etwas anderes, als das Pulldown behauptet.
@@ -273,9 +286,9 @@ console.log('\n\x1b[1m7. Die getroffene Wahl ueberlebt den Neuaufbau\x1b[0m');
     { violations: NUR_AB, users: ['firma\\c.d'], gesamt: GESAMT }) });
   await w7.SecurityIncidents.loadViolations();
   check('⚠ ein nicht mehr gelisteter Benutzer bleibt waehlbar, statt stumm zurueckzuspringen',
-    s7.value === 'firma\\a.b', s7.value);
+    !!s7 && s7.value === 'firma\\a.b', s7 && s7.value);
   check('genau einmal, nicht doppelt',
-    Array.from(s7.options).filter(o => o.value === 'firma\\a.b').length === 1);
+    !!s7 && Array.from(s7.options).filter(o => o.value === 'firma\\a.b').length === 1);
 }
 
 console.log('\n\x1b[1m8. Der Filter wird NICHT gemerkt\x1b[0m');
@@ -316,7 +329,7 @@ console.log('\n\x1b[1m10. Sprachwechsel und CSS\x1b[0m');
   const t10 = w10.document.getElementById('sec-viol-list').textContent;
   check('englisch: die Filterzeile ist uebersetzt', /Filtered by/.test(t10), t10.slice(0, 70));
   check('englisch: "All users" im Pulldown',
-    /All users/.test(w10.document.getElementById('sec-viol-user').options[0].textContent));
+    /All users/.test(((w10.document.getElementById('sec-viol-user') || {}).options || [{}])[0].textContent));
 }
 function regel(name) {
   // Ohne Kommentare: sonst liest der Waechter seine eigene Begruendung.
@@ -340,9 +353,11 @@ bilanz = true;
 process.exit(fail ? 1 : 0);
 
 })().catch(e => {
-  fail++;
-  console.log('  \x1b[31m✗\x1b[0m ABBRUCH: ' + (e && e.stack || e));
-  console.log('\n\x1b[1mErgebnis: ' + ok + '/' + (ok + fail) + ' (ABGEBROCHEN)\x1b[0m');
+  // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+  // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+  // als Biss, samt erfundener +1 in der Bilanz.
+  console.log('  ABBRUCH: ' + (e && e.stack || e));
+  console.log('\n\x1b[1mErgebnis: ' + ok + '/' + (ok + fail) + ' (ABGEBROCHEN, Exit 2)\x1b[0m');
   bilanz = true;
-  process.exit(1);
+  process.exit(2);
 });

@@ -59,16 +59,20 @@ def lauf(cmd) -> tuple[int, str]:
 
 
 def bewerte(cmd) -> tuple[bool, str]:
-    """(hat gemeldet?, Kurztext). Ohne Bilanzzeile = Abbruch – zaehlt als
-    Meldung, wird aber ausgewiesen."""
+    """(hat gebissen?, Kurztext). Gebissen hat nur Exit 1 MIT Bilanzzeile.
+
+    ⚠ Ein Abbruch (keine Bilanz, oder Exit 2 = Absturz/Zeitlimit) ist KEIN
+    Biss (Register). Bis 2026-11-06 zaehlte er hier als Meldung."""
     rc, aus = lauf(cmd)
     # test_seite_breit_ui.js schreibt "N OK, M FAIL" ohne "Ergebnis:".
     bil = [z.strip() for z in aus.splitlines()
            if "Ergebnis:" in z or re.match(r"\s*\d+ OK, \d+ FAIL", z)]
     fails = aus.count("✗")
     if not bil:
-        return rc != 0, f"KEINE BILANZ (rc={rc}) – Abbruch statt FAIL"
-    return rc != 0, f"{bil[-1]} / {fails} FAIL"
+        return False, f"KEINE BILANZ (rc={rc}) – Abbruch, zaehlt nicht"
+    if rc not in (0, 1):
+        return False, f"{bil[-1]} – ABBRUCH (Exit {rc}), zaehlt nicht"
+    return rc == 1, f"{bil[-1]} / {fails} FAIL"
 
 
 PROBEN = [

@@ -666,59 +666,70 @@ iz = cfa.import_zeiten()
 check("import_zeiten() nennt jede Seite", sorted(iz["seiten"]) == ["500", "501", "600"], str(iz))
 check("import_zeiten() nennt jeden Bereich", sorted(iz["bereiche"]) == ["IMP", "ZWO"], str(iz))
 
-# Unveraendert: die Zeit bleibt (sie ist die des WIRKLICHEN Imports)
-for k in st:
-    st[k]["zeit"] = "2026-01-02T03:04:05"
-st["501"]["zeit"] = "2026-01-05T00:00:00"
-d_ = stand(); d_["seiten"] = st; cfa._stand_speichern(d_)
-lauf(C)
-st = stand()["seiten"]
-check("⚠ ein Takt ohne Aenderung laesst die Importzeit stehen",
-      (st.get("500") or {}).get("zeit") == "2026-01-02T03:04:05", str(st.get("500")))
-iz = cfa.import_zeiten()
-check("⚠ je Bereich steht der JUENGSTE Import seiner Seiten",
-      iz["bereiche"].get("IMP") == "2026-01-05T00:00:00", str(iz["bereiche"]))
-# ⚠ BEIDE REIHENFOLGEN: die Seiten stehen im Stand in Mengen-Reihenfolge; ohne
-# echten Vergleich gewaenne sonst zufaellig die zuletzt gelesene Seite.
-for reihe in (("jung", "alt"), ("alt", "jung")):
-    zt = {"jung": "2026-03-03T00:00:00", "alt": "2026-02-02T00:00:00"}
+# ⚠ Die Folgemessungen setzen die drei importierten Seiten voraus. Ist die
+# Positivkontrolle oben rot, griffen sie mit st["501"] ins Leere und der Lauf
+# starb OHNE Bilanzzeile (2026-11-06, Gegenprobe "Zweig nimmt die Nachfahren
+# nicht mit") - samt den Aufraeum-Pruefungen am Ende. Der Befund steht dann
+# schon als FAIL da; hier wird nur nicht weiter auf dem kaputten Aufbau gemessen.
+def _importzeit_folgen(st):
+    # Unveraendert: die Zeit bleibt (sie ist die des WIRKLICHEN Imports)
+    for k in st:
+        st[k]["zeit"] = "2026-01-02T03:04:05"
+    st["501"]["zeit"] = "2026-01-05T00:00:00"
+    d_ = stand(); d_["seiten"] = st; cfa._stand_speichern(d_)
+    lauf(C)
+    st = stand()["seiten"]
+    check("⚠ ein Takt ohne Aenderung laesst die Importzeit stehen",
+          (st.get("500") or {}).get("zeit") == "2026-01-02T03:04:05", str(st.get("500")))
+    iz = cfa.import_zeiten()
+    check("⚠ je Bereich steht der JUENGSTE Import seiner Seiten",
+          iz["bereiche"].get("IMP") == "2026-01-05T00:00:00", str(iz["bereiche"]))
+    # ⚠ BEIDE REIHENFOLGEN: die Seiten stehen im Stand in Mengen-Reihenfolge; ohne
+    # echten Vergleich gewaenne sonst zufaellig die zuletzt gelesene Seite.
+    for reihe in (("jung", "alt"), ("alt", "jung")):
+        zt = {"jung": "2026-03-03T00:00:00", "alt": "2026-02-02T00:00:00"}
+        d_ = stand()
+        d_["seiten"] = {f"x{i}": {"space": "REIHE", "zeit": zt[w], "datei": ""}
+                        for i, w in enumerate(reihe)}
+        sichern = stand()
+        cfa._stand_speichern(d_)
+        check(f"⚠ juengster Import gewinnt unabhaengig von der Reihenfolge ({'/'.join(reihe)})",
+              cfa.import_zeiten()["bereiche"].get("REIHE") == zt["jung"], str(cfa.import_zeiten()))
+        cfa._stand_speichern(sichern)
+    C.seite("IMP", "500", "Wurzel", version=2)
+    lauf(C)
+    st = stand()["seiten"]
+    check("eine geaenderte Seite bekommt eine NEUE Importzeit",
+          str((st.get("500") or {}).get("zeit") or "") >= vor, str(st.get("500")))
+    check("…die unveraenderte Nachbarseite nicht",
+          (st.get("501") or {}).get("zeit") == "2026-01-05T00:00:00", str(st.get("501")))
+
+    # Altbestand ohne `zeit`: Aenderungszeit der Datei; ohne Datei kein Datum
     d_ = stand()
-    d_["seiten"] = {f"x{i}": {"space": "REIHE", "zeit": zt[w], "datei": ""}
-                    for i, w in enumerate(reihe)}
-    sichern = stand()
+    d_["seiten"]["600"].pop("zeit", None)
+    datei600 = SAND / d_["seiten"]["600"]["datei"]
+    _os.utime(datei600, (1767323045, 1767323045))
+    d_["seiten"]["501"].pop("zeit", None)
+    (SAND / d_["seiten"]["501"]["datei"]).unlink()
     cfa._stand_speichern(d_)
-    check(f"⚠ juengster Import gewinnt unabhaengig von der Reihenfolge ({'/'.join(reihe)})",
-          cfa.import_zeiten()["bereiche"].get("REIHE") == zt["jung"], str(cfa.import_zeiten()))
-    cfa._stand_speichern(sichern)
-C.seite("IMP", "500", "Wurzel", version=2)
-lauf(C)
-st = stand()["seiten"]
-check("eine geaenderte Seite bekommt eine NEUE Importzeit",
-      str((st.get("500") or {}).get("zeit") or "") >= vor, str(st.get("500")))
-check("…die unveraenderte Nachbarseite nicht",
-      (st.get("501") or {}).get("zeit") == "2026-01-05T00:00:00", str(st.get("501")))
+    iz = cfa.import_zeiten()
+    from datetime import datetime as _dt  # noqa: E402
+    check("⚠ Altbestand ohne Zeit: es gilt die Aenderungszeit der Datei",
+          iz["seiten"].get("600") == _dt.fromtimestamp(1767323045).isoformat(timespec="seconds"), str(iz))
+    check("⚠ Altbestand ohne Zeit UND ohne Datei: KEIN Datum (nicht raten)",
+          "501" not in iz["seiten"], str(iz))
 
-# Altbestand ohne `zeit`: Aenderungszeit der Datei; ohne Datei kein Datum
-d_ = stand()
-d_["seiten"]["600"].pop("zeit", None)
-datei600 = SAND / d_["seiten"]["600"]["datei"]
-_os.utime(datei600, (1767323045, 1767323045))
-d_["seiten"]["501"].pop("zeit", None)
-(SAND / d_["seiten"]["501"]["datei"]).unlink()
-cfa._stand_speichern(d_)
-iz = cfa.import_zeiten()
-from datetime import datetime as _dt  # noqa: E402
-check("⚠ Altbestand ohne Zeit: es gilt die Aenderungszeit der Datei",
-      iz["seiten"].get("600") == _dt.fromtimestamp(1767323045).isoformat(timespec="seconds"), str(iz))
-check("⚠ Altbestand ohne Zeit UND ohne Datei: KEIN Datum (nicht raten)",
-      "501" not in iz["seiten"], str(iz))
+    # Abgewaehlt -> entfernt -> kein Datum mehr
+    cfb.aendern(e13["id"], [{"key": "IMP", "seiten": ["500"]}], "tester", ["technik"])
+    lauf(C)
+    iz = cfa.import_zeiten()
+    check("abgewaehlte Seite / Bereich: kein Datum mehr",
+          "600" not in iz["seiten"] and "ZWO" not in iz["bereiche"], str(iz))
 
-# Abgewaehlt -> entfernt -> kein Datum mehr
-cfb.aendern(e13["id"], [{"key": "IMP", "seiten": ["500"]}], "tester", ["technik"])
-lauf(C)
-iz = cfa.import_zeiten()
-check("abgewaehlte Seite / Bereich: kein Datum mehr",
-      "600" not in iz["seiten"] and "ZWO" not in iz["bereiche"], str(iz))
+if r.get("neu") == 3 and isinstance(e13, dict):
+    _importzeit_folgen(st)
+else:
+    print("  (Folgemessungen zum Importdatum uebersprungen: Positivkontrolle oben rot)")
 
 # Unlesbarer Stand: leer, kein Wurf
 cfa._pfad().write_text("{kaputt", encoding="utf-8")

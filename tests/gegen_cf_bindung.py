@@ -28,6 +28,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tests" / "lib"))
+from sabotage_anker import in_funktion  # noqa: E402
 ABL = Path.home() / ".gegen-cf-bindung"
 MARKE = ABL / "LAUF"
 
@@ -83,14 +85,26 @@ def lauf(cmd) -> tuple[int, str]:
 
 
 def bewerte(cmd) -> tuple[bool, str]:
-    """(hat gemeldet?, Kurztext). Eine fehlende Bilanzzeile zaehlt als Meldung
-    MIT Vorbehalt – sie bedeutet Abbruch, nicht Erfolg."""
+    """(hat gebissen?, Kurztext).
+
+    Gebissen hat eine Probe nur, wenn der Waechter mit Exit 1 UND mindestens
+    einer FAIL-Zeile (✗) endet. ⚠ Ein Absturz ist KEIN Biss (Register: "eine
+    Sabotage, die den Waechter abstuerzen laesst, hat nicht gebissen") – bis
+    2026-11-06 zaehlte "keine Bilanzzeile" hier als Meldung, und die Probe
+    "Zweig nimmt die Nachfahren nicht mit" galt so als beissend, obwohl der
+    Waechter nur an einem KeyError starb. Exit 2 (konnte nicht laufen) und ein
+    Exit != 0 ohne FAIL-Zeile zaehlen ebenso wenig. Ein Abbruch NACH echten
+    FAILs (jsdom-Waechter: "Ergebnis: … (ABGEBROCHEN)") bleibt ein Biss, wird
+    aber ausgewiesen."""
     rc, aus = lauf(cmd)
     bilanz = [z for z in aus.splitlines() if "Ergebnis:" in z]
-    if not bilanz:
-        return True, "ABGEBROCHEN (keine Bilanz)"
     fails = sum(1 for z in aus.splitlines() if "✗" in z)
-    return (rc != 0), f"{bilanz[-1].strip()} / {fails} FAIL"
+    if not bilanz:
+        return False, f"ABGEBROCHEN ohne Bilanz (Exit {rc}, {fails} FAIL davor) – zaehlt nicht"
+    info = f"{bilanz[-1].strip()} / {fails} FAIL"
+    if "ABGEBROCHEN" in bilanz[-1]:
+        info += " – ⚠ Waechter danach abgestuerzt"
+    return (rc == 1 and fails > 0), info
 
 
 # ── Proben ──────────────────────────────────────────────────────────────────
@@ -103,6 +117,25 @@ SCH = "backend/scheduler.py"
 HTML = "frontend/wissen.html"
 WJS = "frontend/js/wissen.js"
 I18N = "frontend/js/i18n.js"
+
+def _im(funktion: str, alt: str, neu: str):
+    """Text-Ersatz, begrenzt auf EINE Python-Funktion (Anker am Syntaxbaum).
+
+    Fuer Zeilen, die woertlich auch anderswo stehen (2026-11-06: dieselbe
+    Gruppenermittlung in ``_cfb_rechte`` und im PUT, ``"    if fremd:\n"``
+    zugleich als eingerueckte Nachbarzeile) – beide Proben trafen deshalb
+    "2x" und galten als unbrauchbar. Trifft der Anker in der Funktion nicht
+    genau einmal, bleibt der Text unveraendert (= Probe unbrauchbar) und der
+    Grund steht in der Ausgabe."""
+    def umbau(s: str) -> str:
+        try:
+            a, n = in_funktion(s, funktion, alt, neu)
+        except AssertionError as e:
+            print(f"     ({e})")
+            return s
+        return s.replace(a, n, 1) if s.count(a) == 1 else s
+    return umbau
+
 
 def _tausche_bloecke(s: str) -> str:
     """Vertauscht den Einbindungs-Container mit dem Block "Mein Wissen".
@@ -151,7 +184,8 @@ PROBEN = [
      "        if len(k) > SEITE_MAX or not _SEITE_RE.match(k):\n", "        if False:\n", PY_W),
 
     # ── Endpunkte (main.py) ─────────────────────────────────────────────────
-    ("unsichtbarer Bereich wird angenommen", MAIN, "    if fremd:\n", "    if False:\n", PY_W),
+    ("unsichtbarer Bereich wird angenommen", MAIN,
+     _im("_cfb_auswahl_lesen", "    if fremd:\n", "    if False:\n"), None, PY_W),
     ("PUT verliert fremde Wissensgruppen", MAIN,
      "    gruppen = list(req_groups) + [g for g in (alt.get(\"gruppen\") or [])\n"
      "                                  if g not in eigene and g not in req_groups]\n",
@@ -165,8 +199,15 @@ PROBEN = [
     ("Liste traegt kein Abgleichsergebnis mehr", MAIN,
      '        c["abgleich"] = staende.get(c.get("id") or "")\n', "", PY_W),
     ("eigene Gruppen als dicts statt Kennungen", MAIN,
-     '    eigene = {g.get("id") for g in (_editable_groups_for(user) or []) if isinstance(g, dict)}\n',
-     '    eigene = set(str(g) for g in (_editable_groups_for(user) or []))\n', PY_W),
+     _im("wissen_cf_bindung_aendern",
+         '    eigene = {g.get("id") for g in (_editable_groups_for(user) or []) if isinstance(g, dict)}\n',
+         '    eigene = set(str(g) for g in (_editable_groups_for(user) or []))\n'), None, PY_W),
+    # Dieselbe Gruppenermittlung steht in der Rechte-Regel fuer Aendern/Loeschen
+    # (`_cfb_rechte` -> `_cfb_darf`) – bis 2026-11-06 ohne eigene Probe.
+    ("Rechte-Regel: eigene Gruppen als dicts statt Kennungen", MAIN,
+     _im("_cfb_rechte",
+         '    eigene = {g.get("id") for g in (_editable_groups_for(user) or []) if isinstance(g, dict)}\n',
+         '    eigene = set(str(g) for g in (_editable_groups_for(user) or []))\n'), None, PY_W),
 
     # ── Sperrlisten ─────────────────────────────────────────────────────────
     ("Abgleichsstand faellt aus _APP_DENY_REL", SB,
@@ -283,9 +324,11 @@ PROBEN = [
     ("kein Muelleimer mehr, sondern ×", WJS,
      "esc(t('wissen.cfb_del')) + '\">' + JarvisIcons.trash() + '</button>'",
      "esc(t('wissen.cfb_del')) + '\">×</button>'", JS_W),
+    # Anker OHNE das Warnsymbol: es wechselte von '⚠️' auf '⚠' (ohne
+    # Variantenselektor), die Probe traf danach 0x (2026-11-06).
     ("Fehlschlag verwirft die Markierung", WJS,
-     "                  cfbStatus('⚠️ ' + ((d && d.error) || t('wissen.cfb_err')), true);\n                  cfbAddKnopf();\n",
-     "                  cfbStatus('⚠️ ' + ((d && d.error) || t('wissen.cfb_err')), true);\n                  cfbBaumLeeren();\n", JS_W),
+     "((d && d.error) || t('wissen.cfb_err')), true);\n                  cfbAddKnopf();\n",
+     "((d && d.error) || t('wissen.cfb_err')), true);\n                  cfbBaumLeeren();\n", JS_W),
 
     # ── i18n ────────────────────────────────────────────────────────────────
     ("EN-Schluessel fehlt", I18N, "        'wissen.cfb_save': 'Save',\n", "", PY_W),

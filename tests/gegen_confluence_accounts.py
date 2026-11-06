@@ -30,6 +30,7 @@ Lauf:  python3 tests/gegen_confluence_accounts.py
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -58,6 +59,9 @@ DATEIEN = [
     "frontend/js/confluence_addon.js",
     "frontend/js/i18n.js",
     "frontend/portal.html",
+    # Portal-Logik seit BSI H4 (CSP ohne Inline-Skript) hier – die Probe
+    # "Kachel wird nie eingeblendet" zielte noch auf portal.html und traf 0x.
+    "frontend/js/portal_seite.js",
 ]
 
 UMG = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
@@ -101,6 +105,11 @@ def _einer(befehl: list) -> tuple[int, str]:
     r = subprocess.run(befehl, capture_output=True, text=True, cwd=str(ROOT),
                        env=UMG, timeout=180)
     aus = r.stdout + r.stderr
+    # Exit 2 = Absturz/Zeitlimit (seit 2026-11-06 auch mit Bilanzzeile
+    # "(ABGEBROCHEN, Exit 2)"): kein Messwert, also wie "keine Bilanz".
+    if r.returncode not in (0, 1):
+        return -1, "ABBRUCH (Exit %d) %s" % (r.returncode, next(
+            (z.strip() for z in aus.splitlines() if "ERGEBNIS:" in z), "")[:100])
     for z in aus.splitlines():
         # Die Bilanz steht nicht immer am Zeilenanfang (ANSI-Escapes, Praefixe) –
         # danach zu suchen hat im Projekt schon vier gruene Waechter wie "keine
@@ -133,6 +142,9 @@ def lauf() -> tuple[int, int, str]:
 
 
 def ersetze(rel: str, alt: str, neu: str, anzahl: int = 1) -> None:
+    # REGEL statt gepflegter Liste: eine Probe darf nur gesicherte Dateien
+    # anfassen, sonst bleibt ihre Sabotage nach dem Lauf stehen (Register).
+    assert rel in DATEIEN, "%s steht nicht in DATEIEN – Probe waere nicht rueckholbar" % rel
     p = ROOT / rel
     s = p.read_text(encoding="utf-8")
     assert s.count(alt) == anzahl, \
@@ -315,7 +327,7 @@ def p_kachel_weg():
 
 def p_kachel_nicht_eingeblendet():
     """Die Kachel wird nie eingeblendet."""
-    ersetze("frontend/portal.html", "d.permissions.confluence", "false")
+    ersetze("frontend/js/portal_seite.js", "d.permissions.confluence", "false")
 
 
 def p_auge_weg():
@@ -368,8 +380,12 @@ def p_aktivitaet_unterstrich():
 
 def p_eigenes_css():
     """Eine zweite Fassung der Kartenoptik als eigene CSS-Datei."""
-    ersetze("frontend/confluence_addon.html", "css/jira_addon.css?v=13",
-            "css/confluence_addon.css?v=1")
+    # Versionsunabhaengig: die Cache-Nummer steigt mit jeder Stilaenderung
+    # (?v=13 -> ?v=14 liess die Probe 0x treffen, 2026-11-06).
+    q = (ROOT / "frontend" / "confluence_addon.html").read_text(encoding="utf-8")
+    treffer = re.findall(r"css/jira_addon\.css\?v=\d+", q)
+    assert len(treffer) == 1, "jira_addon.css-Einbindung %dx statt 1x" % len(treffer)
+    ersetze("frontend/confluence_addon.html", treffer[0], "css/confluence_addon.css?v=1")
     (ROOT / "frontend" / "css" / "confluence_addon.css").write_text(
         "/* Wegwerf-Probe */\n", encoding="utf-8")
 

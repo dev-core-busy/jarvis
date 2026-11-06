@@ -24,7 +24,10 @@ process.on('exit', () => {
     if (!bilanz) { console.error('\n\x1b[31mABGEBROCHEN – keine Bilanz\x1b[0m'); process.exitCode = 1; }
 });
 const wach = setTimeout(() => {
-    console.error('\n\x1b[31mZEITLIMIT – haengt\x1b[0m'); bilanz = true; process.exit(1);
+    // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+    // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+    // als Biss, samt erfundener +1 in der Bilanz.
+    console.error('\n\x1b[31mZEITLIMIT – haengt (ABGEBROCHEN, Exit 2)\x1b[0m'); bilanz = true; process.exit(2);
 }, 60000);
 
 function section(t) { console.log(`\n\x1b[1m${t}\x1b[0m`); }
@@ -520,8 +523,11 @@ section('10. Suche, Liste, Loeschen, Altbestand');
           z[1] && z[1].querySelector('.wi-cfb-sync.warn') && /nicht erreichbar/.test(z[1].textContent));
     check('offene Seiten werden genannt', z[1] && /2 folgen/.test(z[1].textContent));
     check('noch nie abgeglichen: das steht da', z[2] && /Noch nicht abgeglichen/.test(z[2].textContent));
+    // ⚠ Die Sync-Zeile kann fehlen (Gegenprobe "Abgleichsergebnis fehlt in der
+    // Zeile"): dann ist das ein FAIL, kein TypeError ohne Bilanz (2026-11-06).
+    const sync0 = z[0] ? z[0].querySelector('.wi-cfb-sync') : null;
     check('⚠ Altbestand mit Fehler und 0 Seiten: KEIN "Abgeglichen", nur der Grund',
-          z[0] && !/Abgeglichen/.test(z[0].textContent) && /keiner Wissensgruppe/.test(z[0].querySelector('.wi-cfb-sync').textContent),
+          !!sync0 && !/Abgeglichen/.test(z[0].textContent) && /keiner Wissensgruppe/.test(sync0.textContent),
           z[0] ? z[0].textContent : '');
     await s.klick(z[2].querySelector('.wi-cfb-del'));
     const del = s.rufe.filter(r => r.m === 'DELETE');
@@ -613,15 +619,24 @@ section('11. Tags (Vorgabe 2026-09-27)');
     check('⚠ geänderte Tags gehen per PUT auf den Eintrag',
           put.length === 1 && put[0].pfad === '/api/wissen/confluence/bindung/e1'
           && JSON.stringify(put[0].body.tags) === '["handbuch"]', JSON.stringify(put.map(x => x.body)));
-    await s.klick(s.doc.querySelector('#wi-cfb-list .wi-cfb-edit'));
-    await warten(60);
-    inp.value = '';
-    await s.klick(s.doc.getElementById('wi-cfb-add'));
-    const put2 = s.rufe.filter(r => r.m === 'PUT');
-    check('⚠ alle Tags entfernt: PUT schickt die leere Liste (Filter aufgehoben)',
-          put2.length === 2 && JSON.stringify(put2[1].body.tags) === '[]', JSON.stringify(put2.map(x => x.body.tags)));
-    const z = s.doc.querySelectorAll('#wi-cfb-list .wi-item');
-    check('und die Liste zeigt danach keine Tag-Zeile mehr', z.length === 1 && !z[0].querySelector('.wi-cfb-tagsum'));
+    // ⚠ Positivkontrolle VOR dem zweiten Durchgang: schlug das Speichern oben
+    // fehl (Gegenprobe "Bearbeiten legt einen NEUEN Eintrag an"), steht danach
+    // kein Bearbeiten-Knopf mehr da, und klick() warf "Element fehlt" – der
+    // Lauf endete ohne eigene Bilanz (2026-11-06). Der Befund steht dann schon
+    // als FAIL oben; weitergemessen wird nur auf einem intakten Aufbau.
+    const edit2 = s.doc.querySelector('#wi-cfb-list .wi-cfb-edit');
+    check('(Positivkontrolle) nach dem Speichern ist der Eintrag wieder bearbeitbar', !!edit2);
+    if (edit2) {
+        await s.klick(edit2);
+        await warten(60);
+        inp.value = '';
+        await s.klick(s.doc.getElementById('wi-cfb-add'));
+        const put2 = s.rufe.filter(r => r.m === 'PUT');
+        check('⚠ alle Tags entfernt: PUT schickt die leere Liste (Filter aufgehoben)',
+              put2.length === 2 && JSON.stringify(put2[1].body.tags) === '[]', JSON.stringify(put2.map(x => x.body.tags)));
+        const z = s.doc.querySelectorAll('#wi-cfb-list .wi-item');
+        check('und die Liste zeigt danach keine Tag-Zeile mehr', z.length === 1 && !z[0].querySelector('.wi-cfb-tagsum'));
+    }
     s.zu();
 }
 {
@@ -690,17 +705,23 @@ section('12. Ort des Editors – beim Bearbeiten IN der Box des Eintrags (Vorgab
     await warten(60);
     await s.klick(d.getElementById('wi-cfb-add'));
     await warten(40);
-    check('(Positivkontrolle) Speichern lief als PUT', s.posts().some(x => x.m === 'PUT'));
+    const alsPut = s.posts().some(x => x.m === 'PUT');
+    check('(Positivkontrolle) Speichern lief als PUT', alsPut);
     check('⚠ nach dem Speichern: Editor zurueck oberhalb der Liste, Baum lebt',
           geparkt() && !!d.querySelector('#wi-cfb-tree li.wi-cfb-sp'));
 
-    await s.klick(zeile('e2').querySelector('.wi-cfb-edit'));
-    await warten(60);
-    await s.klick(zeile('e2').querySelector('.wi-cfb-del'));
-    await warten(40);
-    check('⚠ bearbeiteten Eintrag geloescht: Editor oberhalb der Liste, Anlege-Modus',
-          geparkt() && /Übernehmen/.test(d.getElementById('wi-cfb-add').textContent)
-          && !!d.getElementById('wi-cfb-tree'));
+    // ⚠ Nur auf intaktem Aufbau weiter: ohne PUT gibt es die Zeile e2 danach
+    // nicht mehr, und `zeile('e2').querySelector` warf (2026-11-06, Gegenprobe
+    // "Bearbeiten legt einen NEUEN Eintrag an") – ohne eigene Bilanz.
+    if (alsPut && zeile('e2')) {
+        await s.klick(zeile('e2').querySelector('.wi-cfb-edit'));
+        await warten(60);
+        await s.klick(zeile('e2').querySelector('.wi-cfb-del'));
+        await warten(40);
+        check('⚠ bearbeiteten Eintrag geloescht: Editor oberhalb der Liste, Anlege-Modus',
+              geparkt() && /Übernehmen/.test(d.getElementById('wi-cfb-add').textContent)
+              && !!d.getElementById('wi-cfb-tree'));
+    }
     s.zu();
 }
 
@@ -914,8 +935,11 @@ console.log(`\n\x1b[1mErgebnis: ${OK}/${OK + FAIL}\x1b[0m`);
 process.exit(FAIL ? 1 : 0);
 
 })().catch(e => {
+    // ⚠ Absturz -> Exit 2, nicht 1 (Register, tests/lib/bilanz.js): Exit 1
+    // heisst "Waechter beisst". Bis 2026-11-06 endete ein Absturz hier mit
+    // Exit 1, und eine Gegenprobe, die ihn ausloeste, zaehlte als Biss.
     clearTimeout(wach); bilanz = true;
     console.error('\n\x1b[31mABGEBROCHEN:\x1b[0m', e && e.stack || e);
-    console.log(`\n\x1b[1mErgebnis: ${OK}/${OK + FAIL + 1} (ABGEBROCHEN)\x1b[0m`);
-    process.exit(1);
+    console.log(`\n\x1b[1mErgebnis: ${OK}/${OK + FAIL} (ABGEBROCHEN, Exit 2)\x1b[0m`);
+    process.exit(2);
 });

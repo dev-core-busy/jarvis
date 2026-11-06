@@ -1845,9 +1845,12 @@ function angemeldetesFenster(opt) {
     // ein zahnloser Waechter (im Projekt mehrfach bezahlt).
     console.error('\nABBRUCH:', e && e.stack || e);
     console.log('\n' + '='.repeat(50));
-    console.log('Bestanden: ' + ok + ' / Fehlgeschlagen: ' + (fail + 1) +
-                '   (ABGEBROCHEN)');
-    process.exit(1);
+    // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
+    // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
+    // als Biss, samt erfundener +1 in der Bilanz.
+    console.log('Bestanden: ' + ok + ' / Fehlgeschlagen: ' + fail +
+                '   (ABGEBROCHEN, Exit 2)');
+    process.exit(2);
 });
 
 /* Zweites Netz: eine fehlende Bilanzzeile ist ein FEHLER. Node beendet eine

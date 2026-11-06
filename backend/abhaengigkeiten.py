@@ -346,8 +346,21 @@ def lock_versionen(text: str | None = None) -> dict[str, str]:
     return erg
 
 
-def lock_fuehrt(namen) -> set[str]:
+def skill_locks() -> list[Path]:
+    """Alle vorhandenen ``skills/*/requirements.lock`` (sortiert, leer ohne Ordner)."""
+    return sorted((WURZEL / "skills").glob("*/requirements.lock"))
+
+
+def lock_fuehrt(namen, mit_skills: bool = False) -> set[str]:
     """Teilmenge von ``namen``, die ``requirements.lock`` wirklich fuehrt.
+
+    ``mit_skills=True`` nimmt die Skill-Locks dazu – also die Frage "haelt
+    IRGENDEINE Lock dieses Paket fest?". Die beiden Antworten haben
+    verschiedene Aufgaben und duerfen nicht verwechselt werden:
+      * ohne Skills ist es die GRENZE des Skill-Nachziehers (ein Kernpaket
+        bewegt nur der Kern-Lauf, ``lock_offen``),
+      * mit Skills ist es die Auskunft fuer die Anzeige (``cve_pruefung``):
+        steht das Paket in einer Lock, traegt der Lock-Weg auch wirklich.
 
     EINE Quelle fuer die Frage "steht das Paket in der Lock?" – der Aufrufer
     (``cve_pruefung``) kennt die Normierung nicht und soll sie nicht nachbauen.
@@ -364,9 +377,18 @@ def lock_fuehrt(namen) -> set[str]:
     Ohne Lock-Datei ist die Antwort die leere Menge (fail-closed: dann fuehrt
     sie nichts).
     """
-    if not LOCK.is_file():
-        return set()
-    soll = lock_versionen()
+    soll: dict[str, str] = {}
+    if LOCK.is_file():
+        soll.update(lock_versionen())
+    if mit_skills:
+        for sl in skill_locks():
+            try:
+                soll.update(lock_versionen(sl.read_text(encoding="utf-8")))
+            except OSError:
+                continue
+    # Keine Abkuerzung fuer "soll ist leer": ohne Eintraege ist die Menge unten
+    # von sich aus leer. Eine zweite Schranke fuer dieselbe Frage waere nur
+    # stumm sabotierbar (Register: zwei Schranken machen Gegenproben stumm).
     return {n for n in namen if _norm(n) in soll}
 
 
@@ -563,23 +585,63 @@ def lock_bloecke(text: str) -> dict[str, str]:
     return {n: "\n".join(z) for n, z in bloecke.items()}
 
 
-def lock_fehlend(lock: Path, inst: dict[str, str]) -> list[str]:
-    """Eintraege der Skill-Lock, deren Paket nicht installiert ist."""
-    return [b for n, b in lock_bloecke(lock.read_text(encoding="utf-8")).items()
-            if n not in inst]
+def lock_offen(lock: Path, inst: dict[str, str], kern: set[str] | None = None) -> list[str]:
+    """Eintraege der Skill-Lock, die der Bestand nicht erfuellt: FEHLT oder ist AELTER.
+
+    ⚠ WARUM AUCH "AELTER" (2026-11-06): die Skill-Lock des E-Mail-Skills fuehrt
+    ``oauthlib 4.0.1`` (CVE-2026-49272 behoben), installiert waren auf DEV und
+    ECHT 4.0.0 – und nachgezogen wurde NICHTS, weil hier nur "nicht installiert"
+    zaehlte. Eine Lock-Datei, die den laufenden Bestand nicht erreicht, ist eine
+    halbe Zusage: sie gilt erst fuer die naechste Neuinstallation, und das sieht
+    man ihr nicht an.
+
+    ZWEI GRENZEN, beide mit Grund:
+      * KERNPAKETE bleiben unberuehrt (``kern``, aus der Kern-Lock). Sie stehen
+        in der Skill-Lock mit derselben Version (``tests/test_skill_lock.py``
+        prueft das); weicht der Bestand ab, ist das Sache des Kern-Laufs
+        (``_lock_lauf``) – zwei Laeufe, die dasselbe Paket bewegen, sind ein
+        Wettlauf.
+      * NUR HEBEN, nie herabstufen. Eine HOEHERE installierte Version kann eine
+        Luecke beheben, die die Lock noch nicht kennt; sie zurueckzudrehen
+        riesse sie wieder auf. Das ist der Unterschied zum Kern-Lauf, der
+        bewusst auch herabstuft (dort ist ein EINHEITLICHER Stand ueber alle
+        Server der Zweck).
+    Eine unlesbare Fassung auf einer der beiden Seiten laesst das Paket in Ruhe.
+    """
+    text = lock.read_text(encoding="utf-8")
+    bloecke = lock_bloecke(text)
+    soll = lock_versionen(text)
+    kern = lock_fuehrt(set(bloecke)) if kern is None else kern
+    offen = []
+    for n, b in bloecke.items():
+        if n not in inst:
+            offen.append(b)
+            continue
+        if n in kern:
+            continue
+        s, i = soll.get(n), inst.get(n)
+        if not s or not i:
+            continue
+        try:
+            if Version(i) < Version(s):
+                offen.append(b)
+        except InvalidVersion:
+            continue
+    return offen
 
 
 def skill_pip_aufruf(skill: str, specs: list[str], inst: dict[str, str]) -> tuple[list, str]:
     """pip-Argumente fuer die Installation eines Skills und die Temp-Datei dazu.
 
-    Mit Skill-Lock: ``install --no-deps --require-hashes -r <fehlende Eintraege>``;
-    leere Liste, wenn nichts fehlt. Ohne: ``install <specs>`` (bisheriger Weg).
+    Mit Skill-Lock: ``install --no-deps --require-hashes -r <offene Eintraege>``
+    – fehlende UND veraltete (``lock_offen``); leere Liste, wenn der Bestand die
+    Lock erfuellt. Ohne: ``install <specs>`` (bisheriger Weg).
     Die Temp-Datei raeumt der Aufrufer ab ("" = keine).
     """
     lock = skill_lock(skill)
     if lock is None:
         return ["install", *specs], ""
-    offen = lock_fehlend(lock, inst)
+    offen = lock_offen(lock, inst)
     if not offen:
         return [], ""
     import tempfile  # noqa: PLC0415
@@ -635,7 +697,12 @@ def skill_pakete_nachziehen(fehlend: dict[str, list[str]],
         installieren = os.environ.get("JARVIS_ABH_AUTO", "1") != "0"
     erg: dict = {"installieren": installieren, "geaendert": {}, "fehler": {},
                  "uebersprungen": []}
-    fehlend = {s: sorted(set(p)) for s, p in (fehlend or {}).items() if p}
+    # ⚠ Eine LEERE Liste ist kein leerer Auftrag, wenn der Skill eine Lock-Datei
+    #   hat: "nichts fehlt, die Lock entscheidet" (fehlende_pip_aktiver_skills).
+    #   Ohne diese Ausnahme fiel der Skill hier heraus, und die Hebung eines
+    #   veralteten Lock-Pakets erreichte keinen eingerichteten Server.
+    fehlend = {s: sorted(set(p)) for s, p in (fehlend or {}).items()
+               if p or skill_lock(s) is not None}
     if not fehlend or not installieren:
         erg["offen"] = fehlend
         return erg
@@ -663,7 +730,12 @@ def skill_pakete_nachziehen(fehlend: dict[str, list[str]],
             #   nicht mehr, und ein leerer pip-Lauf meldete "nachinstalliert".
             offen = [s for s in specs
                      if not s.startswith("lock:") and _spec_name(s) not in vorher]
-            if not offen:
+            # ⚠ MIT SKILL-LOCK ENTSCHEIDET SIE, ob etwas zu tun ist – auch wenn
+            #   kein Manifest-Paket fehlt: ein installiertes, aber veraltetes
+            #   Lock-Paket wird gehoben (Grund an ``lock_offen``). Ohne diese
+            #   Ausnahme war die Lock fuer jeden schon eingerichteten Server
+            #   wirkungslos, und genau dort liegt der veraltete Stand.
+            if not offen and skill_lock(skill) is None:
                 gescheitert.pop(skill, None)
                 continue
             aufruf, tmp_lock = skill_pip_aufruf(skill, offen, vorher)

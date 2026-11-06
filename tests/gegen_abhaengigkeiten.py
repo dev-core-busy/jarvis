@@ -58,11 +58,24 @@ PROBEN = [
     ("lock_fuehrt haelt jedes Paket fuer gefuehrt", M,
      '    return {n for n in namen if _norm(n) in soll}\n',
      '    return set(namen)\n'),
-    ("lock_fuehrt ohne Lock-Datei meldet alles", M,
-     '    if not LOCK.is_file():\n        return set()\n', ''),
+    # Ohne den Guard liest lock_versionen eine Datei, die es nicht gibt – der
+    # Waechter faengt den Wurf und meldet ihn als FAIL (ein Absturz waere von
+    # "nicht gelaufen" nicht zu unterscheiden).
+    ("lock_fuehrt liest die Lock-Datei ungeprueft", M,
+     '    if LOCK.is_file():\n        soll.update(lock_versionen())\n',
+     '    soll.update(lock_versionen())\n'),
     ("lock_fuehrt vergleicht ohne Normierung", M,
      '    return {n for n in namen if _norm(n) in soll}\n',
      '    return {n for n in namen if n in soll}\n'),
+    # lock_offen: fehlend ODER veraltet, aber nie Kernpakete und nie herabstufen.
+    ("Skill-Lock zieht wieder nur Fehlendes nach (alte Halb-Zusage)", M,
+     '            if Version(i) < Version(s):\n', '            if False:\n'),
+    ("Skill-Lock bewegt auch Kernpakete (Wettlauf mit dem Kern-Lauf)", M,
+     '        if n in kern:\n            continue\n', ''),
+    ("Skill-Lock stuft herab (eine neuere Behebung ginge verloren)", M,
+     '            if Version(i) < Version(s):\n', '            if Version(i) != Version(s):\n'),
+    ("lock_fuehrt ignoriert die Skill-Locks", M,
+     '    if mit_skills:\n', '    if False:\n'),
     ("Lock ohne --require-hashes installiert", M,
      '        r = _pip("install", "--require-hashes", "-Ccompile-args=-j2",\n',
      '        r = _pip("install", "-Ccompile-args=-j2",\n'),

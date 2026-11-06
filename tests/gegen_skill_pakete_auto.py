@@ -22,6 +22,19 @@ N = "backend/anonymisieren.py"
 H = "backend/main.py"
 
 PROBEN = [
+    # Der fruehe Ausstieg uebersprang die Skill-Lock, sobald kein Manifest-Paket
+    # fehlte – auf einem eingerichteten Server also IMMER (2026-11-06).
+    ("fruehe Rueckkehr uebergeht die Skill-Lock", A,
+     '            if not offen and skill_lock(skill) is None:\n',
+     '            if not offen:\n'),
+    ("Skill-Lock zieht wieder nur Fehlendes nach", A,
+     '            if Version(i) < Version(s):\n', '            if False:\n'),
+    # Die Sammelstelle: ein Skill ohne fehlendes Paket, aber mit unerfuellter
+    # Lock, muss in die Liste – sonst erreicht die Lock eingerichtete Server nie.
+    ("Sammelstelle uebergeht Skills mit unerfuellter Lock", S,
+     '            if _abh.lock_offen(lock, mit_version):\n                erg[name] = []\n', ''),
+    ("Filter wirft Skills mit leerer Liste wieder weg", A,
+     '               if p or skill_lock(s) is not None}\n', '               if p}\n'),
     ("vorhandene Pakete nicht festgenagelt (keine Constraints-Zeilen)", A,
      '    return "".join(f"{n}=={v}\\n" for n, v in sorted(inst.items()))\n',
      '    return ""\n'),
@@ -60,8 +73,9 @@ PROBEN = [
     ("Skill-Lock mit Aufloesung (ohne --no-deps)", A,
      '    return ["install", "--no-deps", "--require-hashes", "-r", tf.name], tf.name\n',
      '    return ["install", "--require-hashes", "-r", tf.name], tf.name\n'),
-    ("Skill-Lock installiert ALLES statt nur Fehlendes", A,
-     '            if n not in inst]\n', '            ]\n'),
+    ("Skill-Lock installiert ALLES statt nur Offenes", A,
+     '        if n not in inst:\n            offen.append(b)\n            continue\n',
+     '        if True:\n            offen.append(b)\n            continue\n'),
     ("Hash-Zeilen gehen beim Lesen verloren", A,
      '        elif aktuell and zeile.strip().startswith("--hash="):\n',
      '        elif False:\n'),

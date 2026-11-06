@@ -317,9 +317,22 @@ _abh.schwachstellen = lambda inst: [
     # das die Lock-Datei gar nicht fuehrt (kommt ueber einen Skill herein).
     {"paket": "oauthlib", "version": "4.0.0", "id": "GHSA-o", "aliase": ["CVE-2026-3", "GHSA-o"],
      "behoben_in": "4.0.1", "ausgenommen": False}]
-# ECHTE Signatur von abhaengigkeiten.lock_fuehrt: Namen rein, die GEFUEHRTEN
-# zurueck. filelock steht in der Lock, oauthlib nicht.
-_abh.lock_fuehrt = lambda namen: {n for n in namen if n in ("filelock", "torch")}
+# ECHTE Signatur von abhaengigkeiten.lock_fuehrt: ``(namen, mit_skills=False)``,
+# Namen rein, die GEFUEHRTEN zurueck. filelock steht in einer Lock, oauthlib
+# nicht. Die Attrappe antwortet NUR bei ``mit_skills=True`` – damit ist messbar,
+# dass python_pruefen die Skill-Locks mitfragt; ohne das waere ein Paket aus
+# einer Skill-Lock weiterhin "nicht_in_lock", obwohl der Lock-Weg es erreicht.
+_fuehrt_fragen = []
+
+
+def _lock_fuehrt_attrappe(namen, mit_skills=False):
+    _fuehrt_fragen.append(mit_skills)
+    if not mit_skills:
+        return set()
+    return {n for n in namen if n in ("filelock", "torch")}
+
+
+_abh.lock_fuehrt = _lock_fuehrt_attrappe
 _abh_alt = sys.modules.get("backend.abhaengigkeiten")
 sys.modules["backend.abhaengigkeiten"] = _abh
 import backend as _backend_pkg  # noqa: E402
@@ -359,6 +372,8 @@ check(cve_pruefung.python_klasse(True, False) == "nicht_in_lock",
 _ol = [b for b in _pl["befunde"] if b["quelle"] == "oauthlib"]
 check(len(_ol) == 1 and _ol[0]["klasse"] == "nicht_in_lock" and _ol[0]["fix"] == "4.0.1",
       "ein Paket ausserhalb der Lock wird nicht als Lock-Fall ausgegeben", str(_ol))
+check(bool(_fuehrt_fragen) and all(_fuehrt_fragen),
+      "python_pruefen fragt die Skill-Locks mit (mit_skills=True)", str(_fuehrt_fragen))
 check("nicht_in_lock" in cve_pruefung.KLASSEN,
       "die Klasse ist in KLASSEN gefuehrt – sonst zaehlt sie in keinem Zaehler mit",
       str(cve_pruefung.KLASSEN))
@@ -1399,9 +1414,16 @@ _h_lock = _re.search(r"'pkg\.cve_lock_hinweis': '([^']*)'", _de)
 _h_frei = _re.search(r"'pkg\.cve_nicht_in_lock_hinweis': '([^']*)'", _de)
 check(bool(_h_lock and _h_frei) and _h_lock.group(1) != _h_frei.group(1),
       "'lock' und 'nicht_in_lock' tragen zwei verschiedene Hinweise")
-check(bool(_h_frei) and "Lock-Datei" in _h_frei.group(1)
-      and ("von Hand" in _h_frei.group(1) or "aufgenommen" in _h_frei.group(1)),
-      "und der neue Hinweis nennt den Weg, der wirklich traegt",
+# ⚠ Der Hinweis muss BEIDE Wege nennen, und beide muessen wirklich tragen: von
+# Hand aktualisieren, oder der Skill bekommt eine Lock-Datei. Letzteres gilt erst
+# seit ``lock_offen`` auch veraltete Lock-Pakete hebt (2026-11-06); vorher waere
+# der Rat ein Weg gewesen, der sich erledigt anfuehlt und nichts behebt.
+check(bool(_h_frei) and "von Hand" in _h_frei.group(1)
+      and "Lock-Datei" in _h_frei.group(1),
+      "und der neue Hinweis nennt beide Wege, die wirklich tragen",
+      _h_frei.group(1) if _h_frei else "")
+check(bool(_h_frei) and "keiner Lock-Datei" in _h_frei.group(1),
+      "…und sagt, dass das Paket in KEINER Lock steht (nicht nur in der Kern-Lock)",
       _h_frei.group(1) if _h_frei else "")
 check("b.klasse === 'nicht_in_lock'" in _SYS,
       "der Hinweis haengt an der Klasse (sonst steht er nie da)")

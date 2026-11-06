@@ -746,8 +746,14 @@
             // Der Lock-Weg erreicht dieses Paket NICHT – es steht nicht in der
             // Lock-Datei. Den Unterschied muss die Zeile nennen, sonst schickt
             // sie den Administrator auf einen Weg, der nichts aendert.
+            // Die Klasse heisst "in KEINER Lock" – weder Kern- noch
+            // Skill-Lock (abhaengigkeiten.lock_fuehrt mit_skills=True). Beide
+            // Wege sind echte Wege, seit der Skill-Nachzieher auch veraltete
+            // Lock-Pakete hebt (lock_offen, 2026-11-06); vorher waere "nimm es
+            // in eine Lock auf" ein Rat gewesen, der sich erledigt anfuehlt und
+            // nichts behebt.
             if (b.klasse === 'nicht_in_lock') {
-                zusatz.push(T('pkg.cve_nicht_in_lock_hinweis', 'Dieses Paket steht nicht in der Lock-Datei – es kommt als Abhängigkeit eines Skills herein. Eine neue Lock-Datei erfasst es nicht, und dieser Server bewegt es nicht von selbst: es muss in die Lock aufgenommen oder von Hand aktualisiert werden.'));
+                zusatz.push(T('pkg.cve_nicht_in_lock_hinweis', 'Dieses Paket steht in keiner Lock-Datei – es kommt als Abhängigkeit eines Skills herein, der keine eigene Lock-Datei hat. Dieser Server bewegt es deshalb nicht von selbst: es muss von Hand aktualisiert werden, oder der Skill bekommt eine Lock-Datei.'));
             }
             if (b.zwischenrelease) zusatz.push(T('pkg.cve_spu', 'Behebung fürs nächste Debian-Zwischenrelease eingeplant'));
             var nd = nodsaText(b);

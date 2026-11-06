@@ -120,9 +120,10 @@ QUITTIERBAR = ("offen", "nicht_im_index", "zurueckgehalten")
 # neue requirements.lock im Repo (deploy/lock_erneuern.py). Als eigene Klasse,
 # weil "behebbar" hier eine falsche Zusage waere: auf DEV am 2026-10-29 stand
 # "7 behebbar · behebt automatisch · 0 gehoben" ohne jeden Grund da.
-# "nicht_in_lock": derselbe Lock-Modus, aber das Paket steht in der Lock-Datei
-# GAR NICHT (Abhaengigkeit eines Skills o. Ae.). Dann ist auch der Lock-Weg eine
-# falsche Zusage – siehe abhaengigkeiten.lock_fuehrt fuer den Vorfall.
+# "nicht_in_lock": derselbe Lock-Modus, aber das Paket steht in KEINER Lock –
+# weder in der Kern-Lock noch in einer Skill-Lock. Dann ist auch der Lock-Weg
+# eine falsche Zusage, und nur eine Aktualisierung von Hand hilft (siehe
+# abhaengigkeiten.lock_fuehrt und lock_offen fuer den Vorfall vom 2026-11-06).
 KLASSEN = ("behebbar", "neustart", "nicht_im_index", "zurueckgehalten", "lock",
            "nicht_in_lock", "offen", "ausgenommen")
 _META_KERNEL = re.compile(r"^linux-(image|headers)-(?!\d)[a-z0-9-]+$")
@@ -508,9 +509,10 @@ def python_klasse(lock: bool, gefuehrt: bool) -> str:
     """Klasse eines Python-Befunds MIT bekanntem Fix – die Entscheidung an EINER Stelle.
 
     Ohne Lock-Modus hebt der Server selbst, also "behebbar". Im Lock-Modus kommt
-    die Behebung aus dem Repo – aber nur fuer Pakete, die die Lock-Datei auch
-    FUEHRT. Fuer die anderen gibt es gar keinen Weg, der sie erreicht, und das
-    muss die Anzeige sagen duerfen (``nicht_in_lock``).
+    die Behebung aus dem Repo – aber nur fuer Pakete, die eine Lock-Datei auch
+    FUEHRT (Kern-Lock oder Skill-Lock). Fuer die anderen gibt es gar keinen Weg,
+    der sie erreicht, und das muss die Anzeige sagen duerfen
+    (``nicht_in_lock``).
     """
     if not lock:
         return "behebbar"
@@ -524,7 +526,10 @@ def python_pruefen() -> dict:
         funde = abh.schwachstellen(inst)
         lock = abh.lock_modus()
         # Nur im Lock-Modus noetig – ohne ihn liest niemand die Lock-Datei.
-        gefuehrt = abh.lock_fuehrt({f["paket"] for f in funde}) if lock else set()
+        # ``mit_skills``: eine Skill-Lock traegt denselben Weg, seit der
+        # Skill-Nachzieher auch veraltete Lock-Pakete hebt (lock_offen).
+        gefuehrt = abh.lock_fuehrt({f["paket"] for f in funde},
+                                   mit_skills=True) if lock else set()
     except Exception as e:  # noqa: BLE001
         return {"info": {"geprueft": False, "grund": f"{type(e).__name__}: {e}"}, "befunde": []}
     # OSV fuehrt dieselbe Luecke oft doppelt (GHSA- und PYSEC-Eintrag zur selben

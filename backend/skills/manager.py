@@ -227,10 +227,23 @@ class SkillManager:
         (``enable_skill`` ist der einzige automatische Installationsweg).
         Ausgeschaltete Skills bleiben unberuehrt – ihre Pakete kommen beim
         Einschalten, wie bisher.
+
+        ⚠ EIN SKILL OHNE FEHLENDES PAKET KANN TROTZDEM ETWAS ZU TUN HABEN
+        (2026-11-06): hat er eine Skill-Lock, deren Stand der Bestand nicht
+        erfuellt – ein installiertes, aber VERALTETES Paket –, gehoert er in die
+        Liste. Sonst erreicht die Lock genau die Server nie, die laengst
+        eingerichtet sind, und dort liegt der alte Stand: ``oauthlib 4.0.0``
+        gegen Lock 4.0.1 (CVE-2026-49272) auf DEV und ECHT. Entschieden wird es
+        an EINER Stelle (``abhaengigkeiten.lock_offen``), nicht hier nachgebaut;
+        die leere Liste heisst "nichts fehlt, die Lock entscheidet".
         """
         zustaende = config.get_skill_states() or {}
         installiert = self._installed_packages()
+        # Lazy: die Versionen kosten einen eigenen Durchlauf (~45 ms) und werden
+        # nur gebraucht, wenn ein aktiver Skill eine Lock-Datei hat.
+        mit_version: dict | None = None
         erg: dict[str, list[str]] = {}
+        from backend import abhaengigkeiten as _abh
         for info in self.loader.discover_skills():
             if "error" in info:
                 continue
@@ -242,6 +255,14 @@ class SkillManager:
             fehlt = self._missing_dependencies(info, installiert)
             if fehlt:
                 erg[name] = fehlt
+                continue
+            lock = _abh.skill_lock(name)
+            if lock is None:
+                continue
+            if mit_version is None:
+                mit_version = _abh.installiert()
+            if _abh.lock_offen(lock, mit_version):
+                erg[name] = []
         return erg
 
     def install_missing(self, name: str) -> dict:

@@ -75,6 +75,17 @@ PROBEN = [
     ("Anzeige-Listen wieder ausgeschrieben (Negation statt einer Quelle)", SP,
      '            if (!CVE_KLASSEN.some(function (k) { return z[k]; })) {',
      '            if (!z.behebbar && !z.neustart && !z.offen && !z.nicht_im_index && !z.zurueckgehalten && !z.lock) {'),
+    # Der Rat "nimm es in eine Lock auf" fuehlt sich erledigt an und behebt
+    # nichts (2026-11-06 an der Skill-Lock des E-Mail-Skills gemessen).
+    ("Hinweis nennt nur einen der beiden Wege", I18,
+     "es muss von Hand aktualisiert werden, oder der Skill bekommt eine Lock-Datei.",
+     "es ist nichts zu tun."),
+    # Ohne die Skill-Locks waere ein Paket aus einer Skill-Lock weiter
+    # "nicht_in_lock" – obwohl der Lock-Weg es seit lock_offen erreicht.
+    ("Klassen-Entscheidung fragt die Skill-Locks nicht mit", CP,
+     'gefuehrt = abh.lock_fuehrt({f["paket"] for f in funde},\n'
+     '                                   mit_skills=True) if lock else set()',
+     'gefuehrt = abh.lock_fuehrt({f["paket"] for f in funde}) if lock else set()'),
     ("Beschriftung nur auf Deutsch", I18,
      "        'pkg.cve_k_nicht_in_lock': 'update only by hand',\n", ''),
     ("Markierung ohne CSS-Regel", TH,

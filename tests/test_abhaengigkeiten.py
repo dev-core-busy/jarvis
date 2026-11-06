@@ -247,6 +247,63 @@ check("…normiert verglichen, Rueckgabe in der Schreibweise des Aufrufers",
       A.lock_fuehrt({"PyJWT", "Google_GenAI"}))
 check("…leere Anfrage ergibt leere Antwort", A.lock_fuehrt(set()) == set())
 
+# ⚠ EINE SKILL-LOCK, DIE NUR FEHLENDES NACHZIEHT, ERREICHT KEINEN EINGERICHTETEN
+# SERVER (2026-11-06): sie fuehrt oauthlib 4.0.1 (CVE behoben), installiert war
+# 4.0.0 – und nachgezogen wurde NICHTS, weil nur "nicht installiert" zaehlte.
+# Seitdem gleicht ``lock_offen`` an. Gemessen werden alle vier Richtungen, denn
+# jede einzelne ist eine Zusage: heben ja, herabstufen nie, Kernpakete nie,
+# Fehlendes mit der Version der Lock.
+_sk = SK / "skill.lock"
+_sk.write_text("oauthlib==4.0.1 \\\n    --hash=sha256:%s\n    # via x\n"
+               "exchangelib==5.6.0 \\\n    --hash=sha256:%s\n"
+               "numpy==2.0.2 \\\n    --hash=sha256:%s\n" % ("b" * 64, "c" * 64, "d" * 64),
+               encoding="utf-8")
+_bl = A.lock_bloecke(_sk.read_text(encoding="utf-8"))
+if set(_bl) != {"oauthlib", "exchangelib", "numpy"}:
+    print("ABBRUCH: lock_bloecke liest die Probe nicht – Folgepruefungen trivial", sorted(_bl))
+    sys.exit(2)
+
+
+def _offen(inst, kern=frozenset()):
+    """Namen der offenen Eintraege; wirft nicht (ein Absturz waere kein FAIL)."""
+    try:
+        return sorted(b.split("==")[0] for b in A.lock_offen(_sk, inst, set(kern)))
+    except Exception as e:  # noqa: BLE001
+        return f"wirft {type(e).__name__}"
+
+
+_voll = {"oauthlib": "4.0.1", "exchangelib": "5.6.0", "numpy": "2.0.2"}
+check("Skill-Lock: der erfuellte Bestand ergibt nichts zu tun", _offen(_voll) == [], _offen(_voll))
+check("Skill-Lock: ein veraltetes, aber installiertes Paket wird GEHOBEN",
+      _offen(dict(_voll, oauthlib="4.0.0")) == ["oauthlib"], _offen(dict(_voll, oauthlib="4.0.0")))
+# ⚠ Nie herabstufen: eine hoehere Fassung kann eine Luecke beheben, die die
+# Lock noch nicht kennt – anders als der Kern-Lauf, der Einheitlichkeit will.
+check("…eine HOEHERE Fassung bleibt stehen (kein Herabstufen)",
+      _offen(dict(_voll, oauthlib="4.1.0")) == [], _offen(dict(_voll, oauthlib="4.1.0")))
+# ⚠ Kernpakete bewegt nur der Kern-Lauf – zwei Laeufe am selben Paket sind ein Wettlauf.
+check("…ein veraltetes KERNPAKET bleibt dem Kern-Lauf",
+      _offen(dict(_voll, numpy="1.0"), kern={"numpy"}) == [],
+      _offen(dict(_voll, numpy="1.0"), kern={"numpy"}))
+check("…dasselbe Paket OHNE Kern-Schutz wuerde gehoben (Gegenkontrolle)",
+      _offen(dict(_voll, numpy="1.0")) == ["numpy"], _offen(dict(_voll, numpy="1.0")))
+check("…ein fehlendes Paket kommt mit der Version der Lock",
+      [b for b in A.lock_offen(_sk, {"exchangelib": "5.6.0", "numpy": "2.0.2"})
+       if b.startswith("oauthlib==4.0.1")] != [],
+      A.lock_offen(_sk, {"exchangelib": "5.6.0", "numpy": "2.0.2"}))
+check("…eine unlesbare Fassung laesst das Paket in Ruhe",
+      _offen(dict(_voll, oauthlib="keine-version")) == [],
+      _offen(dict(_voll, oauthlib="keine-version")))
+# Die Auskunft fuer die Anzeige: haelt IRGENDEINE Lock das Paket fest?
+check("lock_fuehrt ohne mit_skills kennt nur die Kern-Lock",
+      A.lock_fuehrt({"numpy", "oauthlib"}) == {"numpy"},
+      A.lock_fuehrt({"numpy", "oauthlib"}))
+_echte_skills = A.skill_locks()
+check("Positivkontrolle: es gibt ueberhaupt Skill-Locks im Baum",
+      len(_echte_skills) >= 1, [p.parent.name for p in _echte_skills])
+check("…mit mit_skills kommen die Skill-Lock-Pakete dazu",
+      A.lock_fuehrt({"numpy", "oauthlib"}, mit_skills=True) == {"numpy", "oauthlib"},
+      A.lock_fuehrt({"numpy", "oauthlib"}, mit_skills=True))
+
 zustand["inst"] = dict(ist)
 aufrufe.clear()
 

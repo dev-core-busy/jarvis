@@ -227,7 +227,7 @@ finally:
         A._sperre.release()
 check("Sperre belegt: kein pip install", not any(x[0] == "install" for x in aufrufe), aufrufe)
 
-print("\n── 1g. Mit Skill-Lock: nur Fehlendes, mit Hash-Pflicht, ohne Aufloesung")
+print("\n── 1g. Mit Skill-Lock: Fehlendes, mit Hash-Pflicht, ohne Aufloesung")
 LOCK_TEXT = """# Kopf
 numpy==2.0.2 \\
     --hash=sha256:aaa \\
@@ -283,6 +283,65 @@ args, tmp = A.skill_pip_aufruf("mitlock", ["spacy==3.8.18"],
                                {"numpy": "2.0.2", "spacy": "3.8.18", "de-core-news-md": "3.8.0"})
 check("mit Skill-Lock und nichts fehlt: kein Aufruf", args == [] and tmp == "", args)
 
+print("\n── 1h. Mit Skill-Lock: ein VERALTETES, aber installiertes Paket wird gehoben")
+# ⚠ WARUM (2026-11-06): bis hierher zaehlte nur "Paket fehlt". Ein eingerichteter
+# Server hat aber nichts fehlen – er hat einen ALTEN Stand. Die Skill-Lock des
+# E-Mail-Skills fuehrte oauthlib 4.0.1 (CVE behoben), auf DEV und ECHT lag 4.0.0,
+# und der Nachzieher tat NICHTS: die Lock galt erst fuer die naechste
+# Neuinstallation. Gemessen wird der ganze Durchlauf, nicht nur lock_offen.
+# Eigene Kern-Lock im Sandkasten, damit der Kernpaket-Schutz KONTROLLIERT greift
+# (ohne sie entscheidet die echte requirements.lock des Repos – ein Zufall).
+_kern = SK / "kern.lock"
+_kern.write_text("numpy==2.0.2 \\\n    --hash=sha256:%s\n" % ("e" * 64), encoding="utf-8")
+_lock_alt = A.LOCK
+A.LOCK = _kern
+gelesen2 = {}
+
+
+def pip_alt(*args, timeout=900):
+    aufrufe.append(args)
+    if args[0] == "check":
+        return R(0)
+    if args[0] == "install" and "-r" in args:
+        gelesen2["text"] = Path(args[args.index("-r") + 1]).read_text()
+        stand["inst"]["spacy"] = "3.8.18"
+    return R(0)
+
+
+# Bestand: alles DA – numpy auf Lock-Stand (Kernpaket), spacy ZU ALT, Modell da.
+neu_lauf({"numpy": "2.0.2", "spacy": "3.8.0", "de-core-news-md": "3.8.0"}, {})
+A._pip = pip_alt
+try:
+    # ⚠ MIT LEERER SPEC-LISTE, wie die Sammelstelle sie im Betrieb liefert
+    #   ("nichts fehlt, die Lock entscheidet", fehlende_pip_aktiver_skills).
+    #   Mit einer gefuellten Liste blieb der Skill schon wegen ihr im Auftrag –
+    #   die Gegenprobe auf den Filter biss nicht, und die Messung traf den
+    #   Produktivpfad nicht.
+    erg_h = A.skill_pakete_nachziehen({"mitlock": []}, installieren=True)
+finally:
+    A._pip = pip_attrappe
+    A.LOCK = _lock_alt
+inst_h = [x for x in aufrufe if x[0] == "install"]
+# ⚠ KEIN Exit-2-Guard auf "es lief ein pip install": genau DAS ist die Zusage
+# dieses Abschnitts. Ein abgeschalteter Hebungs-Zweig ist eine erwartbare
+# Produktaenderung und gehoert als FAIL mit Zahlen gemeldet – ein Abbruch waere
+# von "konnte nicht laufen" nicht zu unterscheiden (Register, dreimal bezahlt).
+# Die Folgepruefungen melden bei leerem Lauf von sich aus FAIL (leerer Text).
+check("der Durchlauf installiert, obwohl KEIN Manifest-Paket fehlt",
+      len(inst_h) == 1, "%d install-Aufrufe: %s" % (len(inst_h), aufrufe))
+# ⚠ NIE inst_h[0] ohne Netz: das WIRFT statt fehlzuschlagen, und eine
+# abgebrochene Gegenprobe ist von "nicht gelaufen" nicht zu unterscheiden
+# (beim Bau dieses Abschnitts genau so passiert).
+_erster_h = inst_h[0] if inst_h else ()
+check("…mit --no-deps und --require-hashes (wie beim Fehlenden)",
+      "--no-deps" in _erster_h and "--require-hashes" in _erster_h, _erster_h)
+check("…und zwar spacy auf den Lock-Stand 3.8.18",
+      "spacy==3.8.18" in gelesen2.get("text", ""), gelesen2.get("text"))
+check("…das KERNPAKET numpy bleibt draussen (Sache des Kern-Laufs)",
+      "numpy" not in gelesen2.get("text", ""), gelesen2.get("text"))
+check("…die Hebung wird gemeldet", "spacy 3.8.0 -> 3.8.18" in
+      (erg_h["geaendert"].get("mitlock") or []), erg_h)
+
 print("\n── 2. Welche Skills zaehlen")
 
 
@@ -310,6 +369,29 @@ check("ohne Zustand gilt die Manifest-Vorgabe (an)", "vorgabe_an" in fehlt, fehl
 check("…und (aus)", "vorgabe_aus" not in fehlt, fehlt)
 check("vollstaendiger Skill steht nicht in der Liste",
       "komplett" not in fehlt, fehlt)
+# ⚠ … AUSSER er hat eine Skill-Lock, die der Bestand nicht erfuellt (2026-11-06):
+# auf einem eingerichteten Server fehlt nichts, aber ein Lock-Paket ist VERALTET.
+# Ohne diese Zeile erreichte die Lock genau diese Server nie. Gemessen mit der
+# echten Entscheidung (abhaengigkeiten.lock_offen), nur die Eingaben gestellt.
+(A.SKILLS / "komplett").mkdir(parents=True, exist_ok=True)
+(A.SKILLS / "komplett" / "requirements.lock").write_text(
+    "numpy==2.0.2 \\\n    --hash=sha256:%s\n" % ("f" * 64), encoding="utf-8")
+_lock_alt2 = A.LOCK
+A.LOCK = SK / "kern_leer.lock"          # numpy ist hier KEIN Kernpaket
+A.LOCK.write_text("", encoding="utf-8")
+_inst_alt = A.installiert
+try:
+    A.installiert = lambda: {"numpy": "1.26.0"}      # veraltet gegenueber 2.0.2
+    fehlt2 = sm.fehlende_pip_aktiver_skills()
+    A.installiert = lambda: {"numpy": "2.0.2"}       # auf Lock-Stand
+    fehlt3 = sm.fehlende_pip_aktiver_skills()
+finally:
+    A.installiert = _inst_alt
+    A.LOCK = _lock_alt2
+check("…mit unerfuellter Skill-Lock kommt er doch in die Liste (leere Specs)",
+      fehlt2.get("komplett") == [], fehlt2)
+check("…und bei erfuellter Lock bleibt er draussen",
+      "komplett" not in fehlt3, fehlt3)
 
 print("\n── 3. Hilfsprozess startet neu, wenn Pakete dazukommen")
 

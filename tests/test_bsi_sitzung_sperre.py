@@ -38,8 +38,10 @@ AUSNAHMEN = {
     "require_auth_pwchange": "Kennwortwechsel muss bei offenem Wechsel gehen (sonst Deadlock)",
     "_query_benutzer": "Hilfsfunktion; der Aufrufer require_auth_or_query prueft die Sperren",
     "security_my_block": "zeigt einem gesperrten Konto den Grund seiner Sperre",
-    "verify_token_endpoint": "meldet nur Gueltigkeit und offenen Kennwortwechsel, keine Daten",
 }
+# verify_token_endpoint stand hier bis 2026-11-05 als Ausnahme; seit A8 fragt
+# er die Kontosperre selbst ab (kein is_admin fuer gesperrte Konten) und
+# erfuellt damit die Regel.
 
 # Endpunkte, deren Wirkung ausgefuehrt wird.
 ENDPUNKTE = ["avatar_get_config", "avatar_graphics", "avatar_ask", "avatar_stop",
@@ -123,6 +125,12 @@ def namensraum(zustand: dict) -> dict:
         "_verify_agent_api_key": lambda r: zustand.get("api", False),
         "_skill_active": lambda n: True,
         "_get_vision_engine": lambda: None,
+        # /api/vision/stream (A6, 2026-11-05): Schranke require_admin_or_query –
+        # Abruf-Schluessel im Query (hier keiner gueltig: Sitzungstokens im
+        # Query weist die strenge Vorgabe ab), Admin-Pruefung bestanden.
+        "_query_benutzer": lambda r: None,
+        "_prot_abruf_abgewiesen": lambda r: None,
+        "_user_is_admin": lambda u: True,
     }
 
 
@@ -153,7 +161,8 @@ def main() -> int:
 
     # Positivkontrolle: ohne verify_token und die Helfer misst hier nichts.
     nutzer = [f for f in funktionen.values() if "verify_token" in aufrufe(f)]
-    fehlend = [x for x in ["verify_token", "_sitzung_gesperrt", "_sitzung_oder_schluessel"] + ENDPUNKTE
+    fehlend = [x for x in ["verify_token", "_sitzung_gesperrt", "_sitzung_oder_schluessel",
+                          "require_admin_or_query"] + ENDPUNKTE
                if x not in funktionen]
     if not nutzer or fehlend:
         print("ABBRUCH: Positivkontrolle – fehlt: %s, verify_token-Aufrufer: %d"
@@ -175,7 +184,8 @@ def main() -> int:
         knoten.decorator_list = []
         return ast.unparse(knoten)
 
-    helfer = quelle("_sitzung_gesperrt") + "\n" + quelle("_sitzung_oder_schluessel")
+    helfer = (quelle("_sitzung_gesperrt") + "\n" + quelle("_sitzung_oder_schluessel")
+              + "\n" + quelle("require_admin_or_query"))
 
     print("\nWirkung der Helfer")
     for token, api, erwartet in [

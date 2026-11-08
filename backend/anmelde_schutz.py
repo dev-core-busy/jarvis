@@ -44,8 +44,32 @@ Schwelle. Dagegen drei Bausteine:
 * **Erkennung ueber alle Konten** (``spruehlage``): scheitern in
   ``SPRUEH_FENSTER_S`` Anmeldungen fuer mindestens ``SPRUEH_KONTEN``
   VERSCHIEDENE Konten, gilt das als Spruehangriff. Dann wird jede Anmeldung
-  global auf einen Versuch je ``SPRUEH_ABSTAND_S`` gebremst (``bremse``), und
-  der Aufrufer meldet den Angriff EINMAL (``sprueh_neu_melden``).
+  JE QUELLE (``ip_schluessel``) auf einen Versuch je ``SPRUEH_ABSTAND_S``
+  gebremst (``bremse``), und der Aufrufer meldet den Angriff EINMAL
+  (``sprueh_neu_melden``).
+
+  Bis 2026-11-05 bremste die Bremse GLOBAL mit unbegrenzter Warteschlange
+  (Pentest-Vorbereitung, Befund A2): zehn Fehlversuche mit erfundenen Namen
+  legten die Anmeldung fuer ALLE Benutzer lahm (einer je 2 s, Warteschlange
+  ohne Deckel). Jetzt wartet nur, wer von derselben Quelle kommt, und die
+  Warteschlange ist begrenzt (``BREMSE_WARTEND_JE_QUELLE``,
+  ``BREMSE_WARTEND_GESAMT``) – bei Ueberlauf meldet ``bremse`` False, der
+  Aufrufer antwortet 429 statt zu warten. Die Wartezeit verraet weiterhin
+  nicht, WELCHES Konto gemeint ist: der Schluessel ist die Quelle, nicht der
+  Name.
+
+RESERVIERUNG VOR DER PRUEFUNG (2026-11-05, Befund A1). Bis dahin wurde die
+Schranke GELESEN (``ip_wartezeit``/``konto_wartezeit``), dann das Kennwort im
+Thread geprueft und erst DANACH der Fehlversuch gebucht. N gleichzeitige
+Anfragen lasen alle denselben Stand und kamen alle zur Pruefung – die
+Kontoschwelle unter der Domaenen-Schwelle war damit von aussen ueberrennbar
+(Domaenenkonten sperren) und TOTP-Codes liessen sich parallel raten.
+``reservieren`` prueft und belegt jetzt UNTER EINER Sperre: je Quelle zaehlen
+laufende Pruefungen wie Fehlversuche, je Konto laeuft hoechstens EINE
+Pruefung gleichzeitig. ``freigeben`` gibt die Belegung zurueck – nach einem
+Fehlschlag ist der Fehlversuch dann schon gebucht (``fehlversuch`` VOR
+``freigeben``, die Luecke dazwischen ist also nie zu grosszuegig), nach einem
+Erfolg zaehlt nichts.
 
 Dazu ``angleichen``: jede fehlgeschlagene Anmeldung dauert mindestens
 ``FEHL_MINDESTDAUER_S`` (plus Streuung). Ohne das verraet die Antwortzeit, ob
@@ -87,6 +111,13 @@ SPRUEH_DAUER_S = 1800
 SPRUEH_ABSTAND_S = 2.0
 FEHL_MINDESTDAUER_S = 1.0
 FEHL_STREUUNG_S = 0.25
+# Warteschlange der Bremse (A2): wie viele Anmeldungen je Quelle bzw.
+# insgesamt warten duerfen, bevor ``bremse`` False meldet (-> 429).
+BREMSE_WARTEND_JE_QUELLE = 3
+BREMSE_WARTEND_GESAMT = 200
+# Reservierung (A1): verfaellt nach dieser Zeit von selbst – eine Pruefung,
+# die abstuerzt, ohne freizugeben, sperrt das Konto sonst fuer immer.
+RESERVIERUNG_MAX_S = 120
 # Deckel gegen eine Datei, die ein Angreifer mit erfundenen Namen fuellt.
 # Bei Ueberlauf fliegen die aeltesten Eintraege – nie eine laufende Sperre.
 MAX_EINTRAEGE = 20000
@@ -98,6 +129,10 @@ _gesperrt: dict[str, float] = {}      # Konto -> gesperrt bis (epoch)
 _global: list[list] = []              # [zeit, konto] aller Fehlversuche mit Konto
 _sprueh = {"seit": 0.0, "bis": 0.0, "gemeldet": False}
 _geladen = False
+# Laufende Pruefungen (nur im Speicher – ein Neustart beendet sie ohnehin):
+_res_ip: dict[str, dict[int, float]] = {}   # Quelle -> {Kennung: Beginn}
+_res_konto: dict[str, tuple[int, float]] = {}  # Konto -> (Kennung, Beginn)
+_res_naechste = [0]
 
 
 def _laden_unlocked() -> None:
@@ -208,6 +243,73 @@ def fehlversuch(ip: str, konto: str, jetzt: float | None = None) -> bool:
     return neu_gesperrt
 
 
+def _res_aufraeumen_unlocked(jetzt: float) -> None:
+    """Verfallene Reservierungen entfernen (Absturzschutz, ``RESERVIERUNG_MAX_S``)."""
+    for k in list(_res_ip):
+        _res_ip[k] = {i: t for i, t in _res_ip[k].items() if jetzt - t < RESERVIERUNG_MAX_S}
+        if not _res_ip[k]:
+            del _res_ip[k]
+    for k in [k for k, (_, t) in _res_konto.items() if jetzt - t >= RESERVIERUNG_MAX_S]:
+        del _res_konto[k]
+
+
+def reservieren(ip: str, konto: str, jetzt: float | None = None) -> tuple:
+    """Einen Pruefversuch VOR der Kennwort-/Codepruefung atomar belegen.
+
+    Rueckgabe ``(reservierung, grund, wartezeit_s)``:
+      * ``(dict, "", 0)``          – darf pruefen; danach IMMER ``freigeben``.
+      * ``(None, "ip", s)``        – Quelle hat ihre Versuche (gebucht +
+                                     laufend) ausgeschoepft.
+      * ``(None, "konto", s)``     – Konto gesperrt.
+      * ``(None, "laeuft", s)``    – fuer dieses Konto laeuft schon eine Pruefung.
+
+    Pruefen und Belegen geschehen unter EINER Sperre – das ist der ganze Punkt:
+    N gleichzeitige Anfragen sehen nicht mehr denselben Stand."""
+    jetzt = time.time() if jetzt is None else jetzt
+    schluessel = ip_schluessel(ip) if ip else ""
+    with _lock:
+        _laden_unlocked()
+        _res_aufraeumen_unlocked(jetzt)
+        if konto:
+            bis = _gesperrt.get(konto, 0.0)
+            if bis > jetzt:
+                return None, "konto", max(1, int(bis - jetzt) + 1)
+            if konto in _res_konto:
+                return None, "laeuft", 2
+        if schluessel:
+            gebucht = sorted(t for t in _ip.get(schluessel, []) if jetzt - t < IP_FENSTER_S)
+            laufend = len(_res_ip.get(schluessel, {}))
+            if len(gebucht) + laufend >= IP_MAX:
+                if len(gebucht) >= IP_MAX:
+                    warte = max(1, int(gebucht[len(gebucht) - IP_MAX] + IP_FENSTER_S - jetzt) + 1)
+                else:
+                    warte = 2   # laufende Pruefungen enden gleich
+                return None, "ip", warte
+        _res_naechste[0] += 1
+        kennung = _res_naechste[0]
+        if schluessel:
+            _res_ip.setdefault(schluessel, {})[kennung] = jetzt
+        if konto:
+            _res_konto[konto] = (kennung, jetzt)
+        return {"kennung": kennung, "ip": schluessel, "konto": konto}, "", 0
+
+
+def freigeben(reservierung) -> None:
+    """Belegung aus ``reservieren`` zurueckgeben. Mehrfach und mit None harmlos."""
+    if not isinstance(reservierung, dict):
+        return
+    kennung = reservierung.get("kennung")
+    with _lock:
+        ip = reservierung.get("ip") or ""
+        if ip in _res_ip:
+            _res_ip[ip].pop(kennung, None)
+            if not _res_ip[ip]:
+                del _res_ip[ip]
+        konto = reservierung.get("konto") or ""
+        if konto and _res_konto.get(konto, (None,))[0] == kennung:
+            del _res_konto[konto]
+
+
 def ip_schluessel(ip: str) -> str:
     """Zaehlschluessel einer Adresse: IPv6 als /64, IPv4 (auch IPv4-in-IPv6) exakt.
 
@@ -296,25 +398,51 @@ async def angleichen(start: float) -> None:
         await asyncio.sleep(rest)
 
 
-_bremse_stand: dict = {"loop": None, "lock": None, "letzte": 0.0}
+_bremse_stand: dict = {"loop": None, "locks": {}, "letzte": {}, "wartend": {}}
 
 
-async def bremse() -> None:
+async def bremse(ip: str = "") -> bool:
     """Waehrend eines Spruehangriffs: hoechstens ein Anmeldeversuch je
-    ``SPRUEH_ABSTAND_S`` – fuer ALLE, sonst verriete die Wartezeit, wer gemeint ist.
+    ``SPRUEH_ABSTAND_S`` JE QUELLE (``ip_schluessel``). True = weiter,
+    False = Warteschlange voll -> der Aufrufer antwortet 429.
 
-    Die Sperre haengt an der laufenden Ereignisschleife (asyncio.Lock darf
-    nicht zwischen Schleifen wandern); eine neue Schleife bekommt eine neue."""
+    Je Quelle statt global (Befund A2, 2026-11-05): global legten zehn
+    Fehlversuche mit erfundenen Namen die Anmeldung fuer ALLE lahm. Der
+    Schluessel ist die Quelle, nicht das Konto – die Wartezeit verraet also
+    weiterhin nicht, wer gemeint ist.
+
+    Die Sperren haengen an der laufenden Ereignisschleife (asyncio.Lock darf
+    nicht zwischen Schleifen wandern); eine neue Schleife bekommt neue."""
     if not spruehlage()["aktiv"]:
-        return
+        return True
     loop = asyncio.get_running_loop()
     if _bremse_stand["loop"] is not loop:
-        _bremse_stand.update(loop=loop, lock=asyncio.Lock())
-    async with _bremse_stand["lock"]:
-        warte = _bremse_stand["letzte"] + SPRUEH_ABSTAND_S - uhr()
-        if warte > 0:
-            await asyncio.sleep(warte)
-        _bremse_stand["letzte"] = uhr()
+        _bremse_stand.update(loop=loop, locks={}, letzte={}, wartend={})
+    quelle = ip_schluessel(ip) if ip else ""
+    wartend = _bremse_stand["wartend"]
+    if (wartend.get(quelle, 0) >= BREMSE_WARTEND_JE_QUELLE
+            or sum(wartend.values()) >= BREMSE_WARTEND_GESAMT):
+        return False
+    wartend[quelle] = wartend.get(quelle, 0) + 1
+    try:
+        sperre = _bremse_stand["locks"].setdefault(quelle, asyncio.Lock())
+        async with sperre:
+            warte = _bremse_stand["letzte"].get(quelle, 0.0) + SPRUEH_ABSTAND_S - uhr()
+            if warte > 0:
+                await asyncio.sleep(warte)
+            _bremse_stand["letzte"][quelle] = uhr()
+    finally:
+        wartend[quelle] -= 1
+        if wartend[quelle] <= 0:
+            del wartend[quelle]
+            # Aufraeumen: eine Quelle ohne Wartende braucht keine eigene Sperre
+            # mehr, sobald ihr Abstand verstrichen ist (sonst waechst die
+            # Tabelle mit jeder Adresse eines Angriffs).
+            for q in [q for q, t in _bremse_stand["letzte"].items()
+                      if q not in wartend and uhr() - t > SPRUEH_ABSTAND_S]:
+                _bremse_stand["letzte"].pop(q, None)
+                _bremse_stand["locks"].pop(q, None)
+    return True
 
 
 def erfolg(konto: str) -> None:
@@ -356,5 +484,7 @@ def _zuruecksetzen_fuer_test() -> None:
         _gesperrt.clear()
         _global.clear()
         _sprueh.update(seit=0.0, bis=0.0, gemeldet=False)
+        _res_ip.clear()
+        _res_konto.clear()
         _geladen = False
-    _bremse_stand.update(loop=None, lock=None, letzte=0.0)
+    _bremse_stand.update(loop=None, locks={}, letzte={}, wartend={})

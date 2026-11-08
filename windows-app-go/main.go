@@ -418,6 +418,18 @@ func (ja *JarvisApp) reconnect() {
 		res := DesktopExecute(cmd)
 		ja.ws.SendDesktopResult(res)
 	}
+	// Bestaetigung wirksamer Aktionen (bestaetigung.go): nativer Dialog, Antwort
+	// an den Server, Ergebnis sichtbar im Chat. Laeuft in eigener Goroutine
+	// (ws_client), der Dialog blockiert also nicht den Empfang.
+	ja.ws.OnBestaetigung = func(a Bestaetigungsanfrage) {
+		erlaubt := ZeigeBestaetigung(bestaetigungsTitel(), bestaetigungsText(a), dialogFrist(a.FristS))
+		ja.ws.SendBestaetigungAntwort(a.ID, erlaubt)
+		if erlaubt {
+			ja.chat.AddMessage(RoleStatus, t("Aktion freigegeben.", "Action allowed."))
+		} else {
+			ja.chat.AddMessage(RoleStatus, t("Aktion abgelehnt.", "Action declined."))
+		}
+	}
 	if ja.dialog != nil {
 		ja.dialog.ws = ja.ws
 	}

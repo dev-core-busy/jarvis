@@ -184,7 +184,7 @@ try:
     noetig = ["_ad_vorab_freigabe", "_gruppen_passen", "_ad_user_allowed",
               "authenticate_linux_user", "_login_ablauf", "login",
               "_anmelde_schwellen_aktualisieren", "_ldap_escape", "_group_cn_prefix",
-              "_dn_norm", "_gruppe_passt"]
+              "_dn_norm", "_gruppe_passt", "_ad_bind_name"]
     fehlt = [n for n in noetig if n not in FN]
     if fehlt:
         abbruch("in main.py nicht gefunden: %s" % fehlt)
@@ -290,8 +290,10 @@ try:
     sys.modules.setdefault("ldap3", types.ModuleType("ldap3"))
     VORAB = {"w": "nein"}
     NSC = {"ALLOWED_USERS": set(), "config": _cfg.config, "time": time,
-           "print": lambda *a, **k: None, "_ad_vorab_freigabe": lambda u: VORAB["w"]}
-    _laden(["authenticate_linux_user"], NSC)
+           "print": lambda *a, **k: None, "_ad_vorab_freigabe": lambda u: VORAB["w"],
+           "_norm_login": NSB["_norm_login"]}
+    # _ad_bind_name: seit 2026-11-05 (A10) der EINE Weg zum Bind-Namen
+    _laden(["_ad_bind_name", "authenticate_linux_user"], NSC)
     auth = NSC["authenticate_linux_user"]
     EINST.clear(); EINST.update(ad_server="ldaps://dc.firma.local", ad_domain="firma.local")
     det: dict = {}

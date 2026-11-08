@@ -172,13 +172,17 @@ _fn = next((n for n in _baum.body if isinstance(n, ast.AsyncFunctionDef)
             and n.name == "knowledge_assignments_set"), None)
 _norm_fn = next((n for n in _baum.body if isinstance(n, ast.FunctionDef)
                  and n.name == "_gruppen_normieren"), None)
-if _fn is None or _norm_fn is None:
-    abbruch("knowledge_assignments_set / _gruppen_normieren nicht in main.py")
+# Seit Befund B5 (2026-11) steht die Rechtepruefung in _kb_zuordnung_schranke –
+# die ECHTE Funktion, keine Attrappe (Wirkung: tests/test_kb_gruppen_editor.py).
+_schranke_fn = next((n for n in _baum.body if isinstance(n, ast.FunctionDef)
+                     and n.name == "_kb_zuordnung_schranke"), None)
+if _fn is None or _norm_fn is None or _schranke_fn is None:
+    abbruch("knowledge_assignments_set / _gruppen_normieren / _kb_zuordnung_schranke nicht in main.py")
 _fn.decorator_list = []
 for a in _fn.args.args + _fn.args.kwonlyargs:
     a.annotation = None
 _fn.args.defaults = [ast.Constant(None) for _ in _fn.args.defaults]
-_mod = ast.Module(body=[_norm_fn, _fn], type_ignores=[])
+_mod = ast.Module(body=[_norm_fn, _schranke_fn, _fn], type_ignores=[])
 ast.fix_missing_locations(_mod)
 
 

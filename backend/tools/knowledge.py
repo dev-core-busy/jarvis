@@ -3493,6 +3493,33 @@ def _graph_zusammenhaenge(pfade, erlaubt) -> list[str]:
         return []
 
 
+# Pentest C5 (2026-11-05): Aktionen von knowledge_manage, die jeder Benutzer
+# ausfuehren darf. Alles andere aendert die GLOBALE Skill-Konfiguration
+# (add/remove_folder), baut den Index fuer ALLE um (reindex) oder listet jedes
+# Dokument ohne Gruppenfilter (list_docs) – nur fuer privilegierte Laeufe,
+# Administratoren und globale Wissens-Editoren.
+_KM_FUER_ALLE = frozenset({"list_folders", "stats"})
+
+
+def _km_darf_verwalten(akteur: str, privilegiert: bool) -> bool:
+    """Darf dieser Akteur Wissens-Ordner/Index verwalten? Fail-closed.
+
+    Rechte kommen vom Dispatch (``_akteur``/``_privileged``), nie vom Modell –
+    Modell-Argumente mit '_' verwirft ``agent._modell_argumente`` vorher.
+    """
+    if privilegiert is True:
+        return True
+    if not akteur:
+        return False
+    try:
+        from backend.main import _is_admin_user, _may_edit_knowledge
+        return bool(_is_admin_user(akteur)) or bool(_may_edit_knowledge(akteur))
+    except Exception as e:  # noqa: BLE001
+        print(f"[knowledge_manage] Rechtepruefung nicht moeglich ({e}) – verweigert",
+              flush=True)
+        return False
+
+
 class KnowledgeManageTool(BaseTool):
     """Verwaltet Knowledge-Base-Ordner und den Suchindex."""
 
@@ -3529,7 +3556,13 @@ class KnowledgeManageTool(BaseTool):
 
     async def execute(self, **kwargs) -> str:
         action = kwargs.get("action", "")
-        folder_arg = kwargs.get("folder", "").strip()
+        folder_arg = str(kwargs.get("folder") or "").strip()
+
+        if action not in _KM_FUER_ALLE and not _km_darf_verwalten(
+                str(kwargs.get("_akteur") or ""), kwargs.get("_privileged") is True):
+            return (f"❌ Zugriff verweigert: '{action}' verändert die Wissensdatenbank für "
+                    "alle Benutzer und ist Administratoren und globalen Wissens-Editoren "
+                    "vorbehalten. Erlaubt sind 'list_folders' und 'stats'.")
 
         if action == "list_folders":
             folders = _get_folders()
@@ -3591,7 +3624,11 @@ class KnowledgeManageTool(BaseTool):
             return f"✅ Ordner '{_rag.anzeige(treffer)}' entfernt."
 
         elif action == "reindex":
-            result = await asyncio.to_thread(force_reindex)
+            # incremental=True: ein Werkzeugaufruf darf den Index nicht LEEREN
+            # (ohne das Flag ist jede Wissenssuche aller Benutzer bis zum Ende des
+            # Neuaufbaus leer – Register). Der volle Neuaufbau bleibt der
+            # Oberflaeche (Einstellungen → Wissen) vorbehalten.
+            result = await asyncio.to_thread(force_reindex, incremental=True)
             if result.get("skipped"):
                 return "ℹ️ Es läuft bereits eine Indizierung – ein Nachlauf ist vorgemerkt."
             _fail = result.get("failed_files") or 0

@@ -10,35 +10,47 @@ from pathlib import Path
 from backend.tools.base import BaseTool
 
 # ─── Verbindungs-State ───────────────────────────────────────────────────────
+# Je BENUTZER, nicht global (Pentest C1) – siehe backend/tools/geraete_verbindungen.py.
 
-_windows_ws = None
-_windows_ws_lock = asyncio.Lock()
-_pending: dict[str, asyncio.Future] = {}
-_SCREENSHOT_PATH = Path("/tmp/jarvis_winscreen.png")
+from backend.tools.geraete_verbindungen import GeraeteVerbindungen
 
-
-def set_windows_ws(ws):
-    global _windows_ws
-    _windows_ws = ws
-    if ws is not None:
-        print("[windows_desktop] Windows-Client verbunden", flush=True)
-    else:
-        print("[windows_desktop] Windows-Client getrennt", flush=True)
-        for fut in list(_pending.values()):
-            if not fut.done():
-                fut.set_exception(ConnectionError("Windows-Client getrennt"))
-        _pending.clear()
+VERBINDUNGEN = GeraeteVerbindungen("Windows")
 
 
-def on_desktop_result(result: dict):
-    req_id = result.get("request_id", "")
-    fut = _pending.pop(req_id, None)
-    if fut and not fut.done():
-        fut.set_result(result)
+def set_windows_ws(ws, benutzer: str = ""):
+    """Registrierung (main.py, Nachricht ``register``) fuer den ANMELDENDEN Benutzer.
+
+    ``ws=None`` (frueher: globales Abmelden) wird nicht mehr unterstuetzt –
+    getrennt wird je Verbindung ueber ``remove_windows_ws``.
+    """
+    if ws is None:
+        return
+    VERBINDUNGEN.registrieren(ws, benutzer)
 
 
-def is_connected() -> bool:
-    return _windows_ws is not None
+def remove_windows_ws(ws):
+    """Nur den Eintrag DIESER Verbindung entfernen (WebSocket getrennt)."""
+    VERBINDUNGEN.trennen(ws)
+
+
+def on_desktop_result(result: dict, ws=None):
+    """Ergebnis nur von der Verbindung annehmen, an die der Befehl ging."""
+    return VERBINDUNGEN.ergebnis(result, ws)
+
+
+def is_connected(benutzer: str | None = None) -> bool:
+    return VERBINDUNGEN.verbunden(benutzer)
+
+
+def _bildpfad(rid: str) -> Path:
+    """Screenshot-Ablage: im Lauf-Verzeichnis des Benutzers, sonst /tmp – je
+    Aufruf eigener Name (frueher EIN fester Pfad fuer alle Benutzer)."""
+    try:
+        from backend import lauf_tmp
+        verz = lauf_tmp.verzeichnis()
+    except Exception:  # noqa: BLE001
+        verz = None
+    return (Path(verz) if verz else Path("/tmp")) / f"jarvis_winscreen_{rid}.png"
 
 
 # ─── Tool-Klasse ─────────────────────────────────────────────────────────────
@@ -136,17 +148,18 @@ class WindowsDesktopTool(BaseTool):
         window_id: str = "",
         **kwargs,
     ) -> str:
-        if _windows_ws is None:
-            return "❌ Kein Windows-Client verbunden. Bitte die Jarvis Windows App starten."
-
-        req_id = str(uuid.uuid4())[:8]
-        loop = asyncio.get_event_loop()
-        fut = loop.create_future()
-        _pending[req_id] = fut
+        # Akteur und Rechte setzt der Dispatch (agent._execute_tool), nie das
+        # Modell – Modell-Argumente mit '_' werden dort vorher verworfen.
+        akteur = str(kwargs.get("_akteur") or "")
+        privilegiert = kwargs.get("_privileged") is True
+        ziel = VERBINDUNGEN.client_fuer(akteur, privilegiert)
+        if ziel is None:
+            return ("❌ Für deinen Benutzer ist kein Windows-Client verbunden. Bitte die "
+                    "Jarvis Windows App auf deinem PC starten und mit deinem eigenen "
+                    "Konto anmelden.")
 
         payload = {
             "type":       "desktop_command",
-            "request_id": req_id,
             "action":     action,
             "x":          x,
             "y":          y,
@@ -164,19 +177,9 @@ class WindowsDesktopTool(BaseTool):
             "window_id":  window_id,
         }
 
-        try:
-            await _windows_ws.send_json(payload)
-        except Exception as e:
-            _pending.pop(req_id, None)
-            return f"❌ Senden fehlgeschlagen: {e}"
-
-        try:
-            result = await asyncio.wait_for(fut, timeout=30.0)
-        except asyncio.TimeoutError:
-            _pending.pop(req_id, None)
-            return "❌ Timeout: Windows-Client hat nicht geantwortet (30s)"
-        except ConnectionError as e:
-            return f"❌ Verbindung verloren: {e}"
+        result, fehler = await VERBINDUNGEN.senden(ziel, payload, timeout=30.0)
+        if fehler:
+            return fehler
 
         if result.get("error"):
             return f"❌ {result['error']}"
@@ -184,9 +187,10 @@ class WindowsDesktopTool(BaseTool):
         if action == "screenshot" and result.get("data"):
             try:
                 png_bytes = base64.b64decode(result["data"])
-                _SCREENSHOT_PATH.write_bytes(png_bytes)
+                bild = _bildpfad(str(result.get("request_id") or uuid.uuid4().hex[:8]))
+                bild.write_bytes(png_bytes)
                 # IMAGE_BASE64: Format – wird vom Agent-Loop als Inline-Bild ans LLM übergeben
-                return f"IMAGE_BASE64:{_SCREENSHOT_PATH}|{result['data']}"
+                return f"IMAGE_BASE64:{bild}|{result['data']}"
             except Exception as e:
                 return f"❌ Screenshot-Dekodierung fehlgeschlagen: {e}"
 

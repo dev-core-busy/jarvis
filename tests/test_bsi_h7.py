@@ -276,9 +276,11 @@ check("Modul: /addin/ (Schraegstrich am Ende) bleibt Add-in",
       "X-Frame-Options" not in SK.kopfzeilen("/addin/", True))
 fa = direktiven(CSP.richtlinie("/static/addin/../portal.html", "")).get("frame-ancestors")
 check("CSP: /static/addin/../portal.html nur frame-ancestors 'self'", fa == ["'self'"])
-check("CSP: /novnc/../portal.html ist NICHT von der Richtlinie ausgenommen",
-      bool(CSP.kopfzeilen("/novnc/../portal.html")))
-check("Positivkontrolle CSP: /novnc/vnc.html bleibt ausgenommen", CSP.kopfzeilen("/novnc/vnc.html") == {})
+check("CSP: /novnc/../portal.html bekommt die ALLGEMEINE Richtlinie (nicht die noVNC-Fassung)",
+      bool(CSP.kopfzeilen("/novnc/../portal.html"))
+      and "frame-src 'none'" not in str(CSP.kopfzeilen("/novnc/../portal.html")))
+check("Positivkontrolle CSP: /novnc/vnc.html hat die noVNC-Richtlinie, nicht die allgemeine",
+      "frame-src 'none'" in str(CSP.kopfzeilen("/novnc/vnc.html")))
 
 # ── [D] Regeln ───────────────────────────────────────────────────────────────
 print("\n[D] Regeln")

@@ -368,21 +368,26 @@ _IMAGE_MIME: dict[str, str] = {
 # ─── URL abrufen ─────────────────────────────────────────────────────────────
 
 async def _http_get(url: str):
-    """Führt einen GET-Request aus und gibt das httpx-Response-Objekt zurück."""
+    """GET ueber die SSRF-Schranke (``netz_ziel.sicher_holen``) – gibt das
+    httpx-Response-Objekt zurueck.
+
+    Bis 2026-11 mit ``follow_redirects=True`` und ohne Zielpruefung: ein
+    Wissens-Editor (bzw. ein Gruppen-Editor auf /wissen) konnte ueber
+    „URL analysieren" interne Adressen holen und den Inhalt als Entwurf lesen.
+    Jetzt: alle aufgeloesten Adressen geprueft, jede Weiterleitung neu
+    geprueft, Verbindung auf die gepruefte Adresse festgenagelt."""
     try:
-        import httpx
+        import httpx  # noqa: F401
     except ImportError:
         raise RuntimeError("httpx nicht installiert. Bitte: pip install httpx")
+    from backend import netz_ziel
 
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; JarvisBot/1.0; +https://jarvis-ai.info)",
         "Accept": "*/*",
         "Accept-Language": "de,en;q=0.7",
     }
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-        resp = await client.get(url, headers=headers)
-        resp.raise_for_status()
-        return resp
+    return await netz_ziel.sicher_holen(url, kopf=headers, timeout=30.0)
 
 
 def _html_to_text(html: str) -> tuple[str, str]:

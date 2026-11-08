@@ -192,13 +192,20 @@ abschnitt('3. Markdown-Renderer: Fremdtext kann kein Markup einschleusen');
         });
         check('… und kein <img> mit fremden Attributen', fremd.length === 0, fremd.join(','));
     }
-    // Positivkontrolle: Bild und Link nebeneinander werden BEIDE gerendert
-    const beide = dom(md('![b](https://example.com/b.png) und [x](https://example.com)'));
+    // Positivkontrolle: Bild und Link nebeneinander werden BEIDE gerendert.
+    // Seit 2026-11-05 laedt der Renderer nur eingebettete data:-Bilder; ein
+    // FREMDES Bild wird ein Link mit Hinweis (test_markdown_bild_extern_ui.js).
+    const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+    const beide = dom(md('![b](' + PNG + ') und [x](https://example.com)'));
     check('Bild UND Link nebeneinander werden gerendert',
           beide.querySelectorAll('img').length === 1 && beide.querySelectorAll('a').length === 1,
           beide.innerHTML.slice(0, 120));
     check('ein Bild allein bleibt ohne <p>-Huelle (wie vorher)',
-          md('![b](https://example.com/b.png)').indexOf('<img') === 0);
+          md('![b](' + PNG + ')').indexOf('<img') === 0);
+    const fremd = dom(md('![b](https://example.com/b.png)'));
+    check('ein fremdes Bild wird ein Link, kein <img>',
+          fremd.querySelectorAll('img').length === 0 && fremd.querySelectorAll('a').length === 1,
+          fremd.innerHTML.slice(0, 120));
 }
 
 // ════════════════════════════════════════════════════════════════════════════

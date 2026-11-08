@@ -192,6 +192,12 @@ NS = {"Path": Path, "asyncio": asyncio, "os": os, "time": time, "threading": thr
       "Depends": lambda x: None, "require_auth_or_query": None, "require_auth": None,
       "Request": object,
       "_editable_groups_for": lambda user: [{"id": "g1"}]}
+# wissen_file entscheidet Inhaltstyp und inline/attachment seit 2026-11 ueber
+# das ECHTE backend/datei_auslieferung.py (Befund B2) – ohne Abhaengigkeiten.
+_spec_d = _ilu.spec_from_file_location("backend.datei_auslieferung",
+                                       ROOT / "backend" / "datei_auslieferung.py")
+NS["_datei"] = _ilu.module_from_spec(_spec_d)
+_spec_d.loader.exec_module(NS["_datei"])
 knoten = [ast.parse(ast.unparse(KON["_WISSEN_DATEI_DECKEL"])).body[0]]
 for name in ("_wissen_absolut", "_wissen_wurzeln", "_wissen_unter_wurzel",
              "_wissen_schluessel_erlaubt", "_wissen_datei_ziel", "wissen_file",

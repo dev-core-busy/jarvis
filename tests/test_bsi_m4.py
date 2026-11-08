@@ -319,6 +319,9 @@ ns_ws = {
     "asyncio": types.SimpleNamespace(open_connection=_kein_vnc, create_task=lambda c: c.close(),
                                      to_thread=lambda *a: None),
     "_unlock_desktop_screen": lambda: None,
+    # Kontosperre nach dem Einloesen (A9, 2026-11-05) – hier nicht Gegenstand,
+    # gemessen in test_pentest_anmeldung.py
+    "security_guard": types.SimpleNamespace(is_blocked=lambda u: False),
 }
 proxy = rumpf_ausfuehren("vnc_websocket_proxy", ns_ws)
 

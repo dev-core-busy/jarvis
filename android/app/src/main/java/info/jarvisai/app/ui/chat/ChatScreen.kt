@@ -6,6 +6,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -85,6 +86,11 @@ fun ChatScreen(
     val isTtsEnabled by viewModel.ttsEnabled.collectAsState()
     val avatarMouth by viewModel.avatarMouthState.collectAsState()
     val avatarType by viewModel.avatarType.collectAsState()
+    // Bestaetigung wirksamer Aktionen (BSI H9 / Pentest C1)
+    val bestaetigung by viewModel.bestaetigung.collectAsState()
+    bestaetigung?.let { a ->
+        BestaetigungsDialog(a, settings.uiLang) { erlaubt -> viewModel.bestaetigungBeantworten(erlaubt) }
+    }
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -686,6 +692,48 @@ fun MessageBubble(
     if (!isUser && !msg.isStreaming && !debugMode && msg.text.isNotBlank()) {
         FeedbackRow(onFeedback = onFeedback)
     }
+}
+
+/**
+ * Nativer Bestaetigungsdialog (desktop/Bestaetigung.kt). Wegwischen gilt als
+ * ABLEHNEN – nur der ausdrueckliche Knopf "Ausfuehren" gibt frei. Der Text ist
+ * scrollbar, damit ein langer Befehl die Knoepfe nicht aus dem Bild schiebt.
+ */
+@Composable
+private fun BestaetigungsDialog(
+    anfrage: info.jarvisai.app.desktop.BestaetigungsAnfrage,
+    lang: String,
+    onAntwort: (Boolean) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { onAntwort(false) },
+        title = {
+            Text(
+                text = info.jarvisai.app.desktop.Bestaetigung.titel(lang),
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        text = {
+            Text(
+                text = info.jarvisai.app.desktop.Bestaetigung.text(anfrage, lang),
+                color = Color.White,
+                modifier = Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onAntwort(true) }) {
+                Text(text = s("Ausführen", "Run", lang), color = JarvisPurple)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onAntwort(false) }) {
+                Text(text = s("Ablehnen", "Decline", lang), color = Color.White)
+            }
+        },
+    )
 }
 
 @Composable

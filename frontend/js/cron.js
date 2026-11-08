@@ -1041,7 +1041,7 @@ window.cronManager = new (class JarvisCronManager {
             const act       = w.action_type || 'agent_task';
             const trigLabel = trig === 'llm_down' ? '⚡ LLM nicht erreichbar' : (trig === 'issue_created' ? '🐞 Neuer Issue' : '📂 Datei');
             const actLabel  = act === 'whatsapp' ? '📱 WhatsApp' : (act === 'webhook' ? '🔗 Webhook' : (act === 'email' ? '✉️ E-Mail' : '🤖 ' + window.t('cron.action_agent_kurz')));
-            const evBadges  = (trig === 'file') ? (w.events || []).map(ev => `<span class="cron-event-badge">${ev}</span>`).join('') : '';
+            const evBadges  = (trig === 'file') ? (w.events || []).map(ev => `<span class="cron-event-badge">${this._esc(ev)}</span>`).join('') : '';
             const trigDetail = (trig === 'file')
                 ? `<div class="cron-item-path">📂 ${this._esc(w.path || '')} <code class="cron-item-code">${this._esc(w.pattern || '*')}</code></div>` : '';
             let detail = '';

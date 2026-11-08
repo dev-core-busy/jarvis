@@ -107,10 +107,42 @@ _cors_origins = [
     f"https://{os.getenv('SERVER_IP', '127.0.0.1')}",
     f"https://{os.getenv('SERVER_IP', '127.0.0.1')}:{config.SERVER_PORT}",
 ]
+
+
+def _cors_extra_pruefen(roh) -> tuple[list, list]:
+    """Zusaetzliche CORS-Origins aus ``cors_origins`` pruefen.
+
+    Rueckgabe ``(gueltig, verworfen)``. Gueltig ist nur eine reine Herkunft
+    ``https://host[:port]`` – kein ``*`` (mit ``allow_credentials`` liefe jede
+    Seite mit den Cookies des Benutzers), kein ``null``, kein ``http://`` (ein
+    Netzangreifer koennte unter der Herkunft Skript einschleusen), kein Pfad,
+    keine Zugangsdaten. WARUM (Pentest-Vorbereitung 2026-11-05): der Wert wurde
+    ungeprueft an die CORS-Middleware gereicht.
+    """
+    import re as _re  # noqa: PLC0415
+    teile = roh if isinstance(roh, (list, tuple)) else str(roh or "").split(",")
+    gut, weg = [], []
+    muster = _re.compile(r"^https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$"
+                         r"|^https://\[[0-9a-f:.]+\](?::\d{1,5})?$")
+    for t in teile:
+        o = str(t or "").strip()
+        if not o:
+            continue
+        o_norm = o.rstrip("/").lower()
+        if muster.match(o_norm):
+            if o_norm not in gut:
+                gut.append(o_norm)
+        else:
+            weg.append(o)
+    return gut, weg
+
+
 # Zusätzliche CORS-Origins aus Settings laden (z.B. Tailscale-Hostname)
-_extra_origins = config.get_setting("cors_origins", "")
-if _extra_origins:
-    _cors_origins.extend(o.strip() for o in _extra_origins.split(",") if o.strip())
+_cors_gut, _cors_weg = _cors_extra_pruefen(config.get_setting("cors_origins", ""))
+_cors_origins.extend(_cors_gut)
+for _cw in _cors_weg:
+    print(f"[CORS] Eintrag in cors_origins verworfen: {_cw!r} – erlaubt ist nur "
+          "https://host[:port] (kein '*', kein http://, kein Pfad)", flush=True)
 
 # ─── Deny-by-default (BSI M10) ─────────────────────────────────────────────
 # Innerste Middleware: sie laeuft NACH dem Zusammensetzen des Sitzungs-Cookies
@@ -220,6 +252,16 @@ def _csp_office_hosts():
 _csp.office_hosts_quelle(_csp_office_hosts)
 
 
+def _csp_eigene_namen():
+    """Namen/Adressen des Serverzertifikats – Herkunftspruefung der CSP-Meldungen."""
+    from backend.http_umleitung import zertifikat_namen  # noqa: PLC0415
+    from backend.security import CERT_FILE  # noqa: PLC0415
+    return zertifikat_namen(CERT_FILE)
+
+
+_csp.eigene_namen_quelle(_csp_eigene_namen)
+
+
 @app.middleware("http")
 async def _csp_kopfzeilen(request: Request, call_next):
     response = await call_next(request)
@@ -227,6 +269,26 @@ async def _csp_kopfzeilen(request: Request, call_next):
         for name, wert in _csp.kopfzeilen(_routing_pfad(request),
                                           request.headers.get("host", "")).items():
             response.headers[name] = wert
+    return response
+
+
+# ─── Datei-Antworten mit aktivem Inhalt (Befund B2, 2026-11) ────────────────
+# SVG/HTML/XML aus Datei-Endpunkten bekommen eine Sandbox-CSP + nosniff – auch
+# wenn eine Route ``inline`` ausliefert oder die Regel in
+# ``datei_auslieferung.disposition`` vergisst. NACH ``_csp_kopfzeilen``
+# registriert = aeussere Schicht: die App-CSP einer text/html-DATEI wird hier
+# ersetzt (sie wuerde Skripte der eigenen Herkunft erlauben). App-Seiten sind
+# keine Datei-Endpunkte und tragen keine Content-Disposition – unberuehrt.
+from backend import datei_auslieferung as _datei
+
+
+@app.middleware("http")
+async def _datei_aktiv_kopfzeilen(request: Request, call_next):
+    response = await call_next(request)
+    for name, wert in _datei.kopfzeilen(
+            _routing_pfad(request), response.headers.get("content-type", ""),
+            "content-disposition" in response.headers).items():
+        response.headers[name] = wert
     return response
 
 
@@ -345,6 +407,8 @@ _NOVNC_DIRS = ["/usr/share/novnc", "/usr/share/noVNC", "/snap/novnc/current/usr/
 for _nvdir in _NOVNC_DIRS:
     if Path(_nvdir).is_dir():
         app.mount("/novnc", StaticFiles(directory=_nvdir, html=True), name="novnc")
+        # Die CSP fuer /novnc/ liest die Inline-Skripte genau dieses Pakets.
+        _csp.novnc_ordner(_nvdir)
         break
 
 
@@ -369,6 +433,11 @@ async def vnc_websocket_proxy(websocket: WebSocket):
         return
     _vnc_user, _vnc_kontext = _eingeloest
     _sitzung_kontext.set(_vnc_kontext)
+    # Konto zwischen Ausstellen und Einloesen gesperrt (Befund A9, 2026-11-05):
+    # das Ticket allein ist kein Freibrief – dieselbe Sperre wie require_auth.
+    if security_guard.is_blocked(_vnc_user):
+        await websocket.close(code=4003, reason="ACCOUNT_BLOCKED")
+        return
     if not _login_still_allowed(_vnc_user):
         await websocket.close(code=4001, reason="Nicht authentifiziert")
         return
@@ -548,6 +617,48 @@ def _uc_history_max() -> int:
     Skill-Dialog aenderbar und muss ohne Dienstneustart greifen (gleiche
     Begruendung wie ``documents.retention_days()``)."""
     return _uc_cfg_int("history_max", 200, 20, 5000)
+
+
+_UC_OK_MIME = frozenset({
+    "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp", "image/bmp",
+    "audio/wav", "audio/mp3", "audio/mpeg", "audio/ogg", "audio/webm", "audio/aac",
+    "audio/flac", "audio/m4a", "audio/x-m4a",
+    "video/mp4", "video/webm", "video/ogg", "video/quicktime",
+    "application/pdf",
+})
+
+
+def _uc_anhaenge_pruefen(raw_atts, att_max: int) -> list:
+    """Bereinigte Anhaenge einer Benutzer-Chat-Nachricht (max 5, Groesse ``att_max``).
+
+    ⚠ Befund B3 (2026-11): ``data`` wurde nur auf Laenge geprueft und landete beim
+    Empfaenger in ``data:<mime>;base64,<data>`` – ein ``"`` darin war
+    HTML-Injection. Jetzt muss ``data`` echtes base64 sein
+    (``b64decode(validate=True)``), sonst wird der Anhang VERWORFEN; Typ nur aus
+    der Liste, Name ein String (gekuerzt). Unbekannte Felder fallen weg."""
+    import base64 as _b64
+    import binascii as _binascii
+    raus = []
+    if not isinstance(raw_atts, list):
+        return raus
+    for a in raw_atts[:5]:
+        if not isinstance(a, dict):
+            continue
+        mime = a.get("mime_type")
+        daten = a.get("data")
+        name = a.get("name")
+        if not isinstance(mime, str) or not isinstance(daten, str) or not daten:
+            continue
+        mime = mime.strip().lower()
+        if mime not in _UC_OK_MIME or len(daten) > att_max:
+            continue
+        try:
+            _b64.b64decode(daten, validate=True)
+        except (_binascii.Error, ValueError):
+            continue
+        name = (name if isinstance(name, str) and name.strip() else "datei")[:80]
+        raus.append({"name": name, "mime_type": mime, "data": daten})
+    return raus
 
 
 def _uc_attachment_max_b64() -> int:
@@ -1126,6 +1237,38 @@ def _konto_sperre_antwort(username: str):
          f"Bitte warte {minuten} Minute{'n' if minuten != 1 else ''}.",
          "retry_after": rest},
         status_code=429, headers={"Retry-After": str(rest)})
+
+
+def _bremse_ueberlauf_antwort():
+    """429, wenn die Bremse eines Spruehangriffs fuer diese Quelle voll ist (A2)."""
+    return JSONResponse(
+        {"success": False, "error": "Zu viele Anmeldeversuche von dieser Adresse. "
+         "Bitte in einigen Sekunden erneut versuchen."},
+        status_code=429, headers={"Retry-After": str(int(_anmelde_schutz.SPRUEH_ABSTAND_S) + 1)})
+
+
+def _anmelde_reservierung(request: Request, ip: str, username: str):
+    """Pruefversuch VOR der Kennwort-/Codepruefung atomar belegen (Befund A1).
+
+    Ohne das lasen N gleichzeitige Anfragen denselben Zaehlerstand, kamen alle
+    zur Pruefung und buchten ihre Fehlversuche erst danach – Kontoschwelle und
+    IP-Grenze waren per Parallelitaet ueberrennbar. Die Belegung landet in
+    ``request.state.anmelde_reservierung``; der Rahmen (``login``) gibt sie im
+    ``finally`` frei. Rueckgabe: None = darf pruefen, sonst die 429-Antwort."""
+    res, grund, warte = _anmelde_schutz.reservieren(ip, _norm_login(username))
+    if res is not None:
+        request.state.anmelde_reservierung = res
+        return None
+    if grund == "konto":
+        minuten = max(1, (warte + 59) // 60)
+        text = ("Zu viele Fehlversuche für dieses Konto. "
+                f"Bitte warte {minuten} Minute{'n' if minuten != 1 else ''}.")
+    elif grund == "laeuft":
+        text = "Für dieses Konto läuft bereits eine Anmeldung. Bitte kurz warten."
+    else:
+        text = "Zu viele Login-Versuche. Bitte warte 5 Minuten."
+    return JSONResponse({"success": False, "error": text, "retry_after": warte},
+                        status_code=429, headers={"Retry-After": str(warte)})
 
 
 def _kennwort_schranke(request: Request, username: str):
@@ -2508,6 +2651,24 @@ def _user_may_use_jira_assist(user: str) -> bool:
     return False
 
 
+def _support_jira_erlaubt(user: str) -> bool:
+    """Darf die Support-Suche fuer ``user`` Jira-Daten liefern?
+
+    Betreiber-Entscheid 2026-11-08 (Pentest C4): ohne Jira-Freigabe KEINE
+    Jira-Informationen – auch nicht ueber den Support-Assistenten. Die Suche
+    laeuft ueber den Sammelzugang (Server-PAT); ohne diese Schranke laese jeder
+    angemeldete Benutzer Tickets und Kundendaten, die ihm die Freigabe gerade
+    verwehrt. Der externe API-Schluessel-Benutzer ``api`` bleibt zugelassen
+    (gleiche Linie wie ``require_jira_daten_access``). Fail-closed: kein
+    Benutzer heisst nein."""
+    u = (user or "").strip()
+    if not u:
+        return False
+    if u == "api":
+        return True
+    return _user_may_use_jira_assist(u)
+
+
 async def require_jira_assist_access(request: Request,
                                      user: str = Depends(require_auth)) -> str:
     """FastAPI Dependency: Prüft die Freigabe für /api/jira/assist*."""
@@ -2517,6 +2678,42 @@ async def require_jira_assist_access(request: Request,
         detail="Kein Zugriff auf den Jira-Assistenten – nicht in der Benutzerliste/-Gruppe "
                "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
                "Spalte „Jira“; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
+async def require_jira_daten_access(request: Request) -> str:
+    """FastAPI Dependency fuer die Jira-Datenrouten (Telefon -> CRM, Tickets je
+    CRM, passende Tickets).
+
+    Pentest C4 (2026-11-05): die Routen hingen nur an ``require_auth_or_agent`` –
+    JEDE Sitzung las damit ueber den Sammelzugang (Server-PAT) Kundendaten aus
+    Jira, auch ohne Jira-Freigabe. Jetzt:
+
+    * **Sitzung:** dieselbe Bereichsfreigabe wie der Jira-Assistent
+      (``_user_may_use_jira_assist`` – Liste/Gruppe, leer = niemand, kein
+      Admin-Bypass), Begruendung dort.
+    * **Agent-Schluessel:** weiter zugelassen (Benutzer ``api``) – externe
+      Systeme (z.B. Telefonanlage, Skripte laut /support-api) rufen die Routen
+      so auf; im Repo ruft sie keine eigene Oberflaeche (Browser-Erweiterung,
+      AI-Maus, Windows-/Android-App) auf (grep 2026-11-05).
+    """
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = verify_token(token)
+    if username:
+        if _user_must_change(username):
+            raise HTTPException(status_code=403, detail="Kennwort muss zuerst geaendert werden.")
+        if security_guard.is_blocked(username):
+            raise HTTPException(status_code=403, detail="ACCOUNT_BLOCKED")
+        if not _login_still_allowed(username):
+            raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
+        if _user_may_use_jira_assist(username):
+            return username
+        raise HTTPException(status_code=403,
+            detail="Kein Zugriff auf Jira-Daten – nicht in der Benutzerliste/-Gruppe "
+                   "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
+                   "Spalte „Jira“; ggf. neu einloggen für Gruppen-Aktualisierung)")
+    if _verify_agent_api_key(request):
+        return "api"
+    raise HTTPException(status_code=401, detail="Nicht authentifiziert")
 
 
 async def require_jira_vorlagen_access(request: Request,
@@ -2709,6 +2906,29 @@ def _claudesub_user_aus_key(request: Request) -> str | None:
         return None
     user = _cs.benutzer_zu_schluessel(tok)
     if not user or not _user_may_use_claudesub(user):
+        return None
+    # Dieselben Konto-Schranken wie an einer Sitzung (Befund A5, 2026-11-05):
+    # bis hierher ueberlebte ein Schluessel Kontosperre, Entzug der
+    # Anmeldeberechtigung und Zwangsabmeldung. Die Widerrufs-Epoche greift
+    # ueber den Ausstellungszeitpunkt des Schluessels – wer nach einer
+    # Kompromittierung "alle Sitzungen beenden" drueckt, beendet auch ihn
+    # (neu erzeugen unter /claude stellt den Zugang wieder her).
+    if security_guard.is_blocked(user) or not _login_still_allowed(user):
+        return None
+    try:
+        erstellt = int((_cs.schluessel_info(user) or {}).get("erstellt") or 0)
+    except Exception:  # noqa: BLE001
+        erstellt = 0
+    if _epoche_widerrufen(user, erstellt):
+        # Endgueltig loeschen: Epochen werden nach der Sitzungslaufzeit
+        # aufgeraeumt (_save_revocations) – ohne das Loeschen lebte ein
+        # widerrufener Schluessel nach 12 h wieder auf.
+        try:
+            _cs.schluessel_loeschen(user)
+        except Exception:  # noqa: BLE001
+            pass
+        print(f"[AUTH] Delegations-Schluessel von '{user}' widerrufen "
+              f"(vor Abmelde-Epoche erzeugt) – geloescht", flush=True)
         return None
     return user
 
@@ -4041,6 +4261,47 @@ def _user_is_admin(user: str) -> bool:
     return _gruppe_trifft(plain, grp, _admin_access_cache)
 
 
+def _ad_bind_name(username: str, ad_domain: str) -> str:
+    """Bind-Name fuer den DC: ``<sAMAccountName>@<ad_domain>`` – oder "" (abweisen).
+
+    Ein Domaenen-Praefix (``FIRMA\\x``) oder UPN-Suffix (``x@irgendwo``) der
+    Eingabe wird VERWORFEN, nicht durchgereicht: die Berechtigung wird ueber
+    den blossen Namen in der EIGENEN Domaene vergeben (``_norm_login``), also
+    muss auch das Kennwort gegen genau dieses Konto geprueft werden. Fuer die
+    eigene Domaene aendert sich nichts – ``x@<ad_domain>`` ist der implizite
+    UPN jedes Kontos und war schon immer der Weg fuer Namen ohne Zusatz.
+    Leer, wenn danach nichts Verwendbares bleibt (leer, Steuerzeichen,
+    LDAP-/DN-Sonderzeichen, mehrfache Trenner)."""
+    roh = (username or "").strip()
+    dom = (ad_domain or "").strip().lower()
+    if not roh or not dom or roh.count("@") > 1 or roh.count("\\") > 1:
+        return ""
+    plain = _norm_login(roh)
+    if not plain or any(ord(z) < 0x20 or z in '@\\/,=+<>#;"*()' for z in plain):
+        return ""
+    return f"{plain}@{dom}"
+
+
+def _ad_identitaet_passt(conn, plain: str):
+    """Nach dem Bind: ist das gebundene Konto ``plain``? True/False, None = unbekannt.
+
+    LDAP "Who am I?" (RFC 4532) liefert bei AD ``u:NETBIOS\\sam``. False nur
+    bei einer BEANTWORTETEN Frage mit anderem Namen (dann kein Login) – kann
+    der DC die Frage nicht beantworten, bleibt es beim erzwungenen Bind-Namen
+    (``_ad_bind_name``), der die eigene Domaene schon festlegt. Fail-open an
+    dieser Stelle ist Absicht: eine Pruefung, die bei einem DC ohne Who-am-I
+    jede Anmeldung kippt, waere ohne Live-Messung nicht auszurollen."""
+    try:
+        wer = conn.extend.standard.who_am_i()
+    except Exception as e:  # noqa: BLE001
+        print(f"[AUTH] Who-am-I nach dem Bind nicht beantwortet ({e})", flush=True)
+        return None
+    wer = str(wer or "").strip()
+    if not wer.lower().startswith("u:"):
+        return None
+    return _norm_login(wer[2:]) == (plain or "").strip().lower()
+
+
 def authenticate_linux_user(username: str, password: str, details: dict | None = None) -> bool:
     """Authentifiziert einen Benutzer – erst PAM/lokal, dann AD/LDAP (wenn konfiguriert).
 
@@ -4091,10 +4352,16 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
     if ad_server and ad_domain:
         try:
             import ldap3
-            # Benutzername normalisieren: falls kein @ und kein \ enthalten, Domain anhaengen
-            bind_user = username
-            if "@" not in bind_user and "\\" not in bind_user:
-                bind_user = f"{username}@{ad_domain}"
+            # IMMER als <sAMAccountName>@<eigene Domaene> binden (Befund A10,
+            # 2026-11-05). Bis hierher ging eine Eingabe mit '@' oder '\\'
+            # UNVERAENDERT zum DC – "anna@vertraute-domaene" band ein Konto
+            # einer vertrauten Domaene, die Berechtigung aber wurde ueber den
+            # abgeschnittenen Namen "anna" der EIGENEN Domaene vergeben.
+            bind_user = _ad_bind_name(username, ad_domain)
+            if not bind_user:
+                print(f"[AUTH] AD-Login abgewiesen: Name nicht verwendbar: {username!r}",
+                      flush=True)
+                return False
             # Base-DN aus Domain ableiten: firma.local → DC=firma,DC=local
             base_dn = ",".join(f"DC={part}" for part in ad_domain.split("."))
             # TLS ist Pflicht (ldaps:// oder StartTLS), das Zertifikat wird
@@ -4121,6 +4388,15 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
                     details["reason"] = "ad_tls"
                 return False
             if conn.bind():
+                # Ist das gebundene Konto genau das gemeinte? (A10, s. o.)
+                if _ad_identitaet_passt(conn, _norm_login(username)) is False:
+                    print(f"[AUTH] AD-Login abgewiesen: gebundenes Konto ist nicht "
+                          f"'{_norm_login(username)}'", flush=True)
+                    try:
+                        conn.unbind()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    return False
                 # Credentials korrekt – Whitelist prüfen + Wissens-Recht cachen
                 allowed = _ad_user_allowed(conn, username, base_dn)
                 # Wissens-Bearbeitungsrecht während des aktiven Binds ermitteln und cachen
@@ -4999,22 +5275,9 @@ async def userchat_ws(ws: WebSocket):
                 raw_atts = data.get("attachments", [])
                 if not to_user or (not text and not raw_atts):
                     continue
-                # Anhänge validieren (max 5 MB pro Datei, max 5 Anhänge)
-                _UC_OK_MIME = {
-                    "image/jpeg","image/jpg","image/png","image/gif","image/webp","image/bmp",
-                    "audio/wav","audio/mp3","audio/mpeg","audio/ogg","audio/webm","audio/aac",
-                    "audio/flac","audio/m4a","audio/x-m4a",
-                    "video/mp4","video/webm","video/ogg","video/quicktime",
-                    "application/pdf",
-                }
-                clean_atts = []
-                _att_max = _uc_attachment_max_b64()
-                for _a in raw_atts[:5]:
-                    _am = (_a.get("mime_type","") or "").strip().lower()
-                    _ad = _a.get("data","")
-                    _an = _a.get("name","datei")[:80]
-                    if _am in _UC_OK_MIME and _ad and len(_ad) <= _att_max:
-                        clean_atts.append({"name": _an, "mime_type": _am, "data": _ad})
+                clean_atts = _uc_anhaenge_pruefen(raw_atts, _uc_attachment_max_b64())
+                if not text and not clean_atts:
+                    continue    # nur verworfene Anhaenge: keine leere Nachricht
                 msg_id = str(uuid.uuid4())[:8]
                 # from/to KANONISCH (normalisiert) speichern -> keine Doppel-Schluessel
                 msg = {
@@ -5246,16 +5509,24 @@ async def login(request: Request):
     dauert mindestens gleich lang – sonst verriete die Antwortzeit, ob das
     Kennwort zum Domain-Controller ging."""
     _start = _anmelde_schutz.uhr()
-    await _anmelde_schutz.bremse()
-    try:
-        resp = await _login_ablauf(request)
-    except AuthStateUnlesbar:
-        # Fail-closed: ohne lesbaren 2FA-Bestand keine Anmeldung – sonst hiesse
-        # eine beschaedigte Datei "niemand hat einen zweiten Faktor".
-        resp = JSONResponse(
-            {"success": False, "error": "Anmeldung ist gerade nicht möglich (Anmeldedaten "
-             "des Servers nicht lesbar). Bitte den Administrator informieren."},
-            status_code=503)
+    if not await _anmelde_schutz.bremse(request.client.host if request.client else ""):
+        # Warteschlange dieser Quelle voll (A2): 429 statt unbegrenzt warten.
+        resp = _bremse_ueberlauf_antwort()
+    else:
+        try:
+            resp = await _login_ablauf(request)
+        except AuthStateUnlesbar:
+            # Fail-closed: ohne lesbaren 2FA-Bestand keine Anmeldung – sonst hiesse
+            # eine beschaedigte Datei "niemand hat einen zweiten Faktor".
+            resp = JSONResponse(
+                {"success": False, "error": "Anmeldung ist gerade nicht möglich (Anmeldedaten "
+                 "des Servers nicht lesbar). Bitte den Administrator informieren."},
+                status_code=503)
+        finally:
+            # Belegung aus _anmelde_reservierung zurueck (A1) – VOR der
+            # Mindestdauer, sonst stuende das Konto eine Sekunde laenger auf
+            # "laeuft bereits". Ein Fehlversuch ist hier schon gebucht.
+            _anmelde_schutz.freigeben(getattr(request.state, "anmelde_reservierung", None))
     if getattr(resp, "status_code", 200) >= 400:
         await _anmelde_schutz.angleichen(_start)
     await _anmeldung_protokollieren(request, resp, "kennwort")
@@ -5284,7 +5555,9 @@ async def _login_ablauf(request: Request):
 
     # Konto nach zu vielen Fehlversuchen gesperrt (BSI M3) – VOR jeder
     # Kennwortpruefung, sonst ginge das Durchprobieren am Zaehler vorbei weiter.
-    _gesperrt = _konto_sperre_antwort(username)
+    # Seit 2026-11-05 (A1) pruefen UND belegen in einem Schritt: Kontosperre,
+    # IP-Grenze (gebucht + laufend) und hoechstens eine Pruefung je Konto.
+    _gesperrt = _anmelde_reservierung(request, client_ip, username)
     if _gesperrt is not None:
         return _gesperrt
 
@@ -5585,8 +5858,10 @@ async def login_windows(request: Request):
     if not (request.headers.get("authorization") or "").lower().startswith("negotiate "):
         return await _login_windows_ablauf(request)
     _start = _anmelde_schutz.uhr()
-    await _anmelde_schutz.bremse()
-    resp = await _login_windows_ablauf(request)
+    if not await _anmelde_schutz.bremse(request.client.host if request.client else ""):
+        resp = _bremse_ueberlauf_antwort()      # Warteschlange voll (A2)
+    else:
+        resp = await _login_windows_ablauf(request)
     if getattr(resp, "status_code", 200) >= 400:
         await _anmelde_schutz.angleichen(_start)
     await _anmeldung_protokollieren(request, resp, "windows")
@@ -5681,7 +5956,23 @@ async def _login_windows_ablauf(request: Request):
         print(f"[Lizenz] Windows-Anmeldung abgewiesen (Benutzergrenze): {konto}", flush=True)
         return JSONResponse({"success": False, "error": _lic_grund}, status_code=403)
 
-    token = generate_token(konto, mit_2fa=False, ohne_admin=True)
+    # Konto mit persoenlicher 2FA (Befund A3, 2026-11-05): die Kerberos-
+    # Anmeldung ist KEIN zweiter Faktor. Bis hierher bekam ein solches Konto
+    # eine vollwertige Sitzung (nur ohne Admin) – wer am Arbeitsplatz sass,
+    # umging damit die bewusst eingeschaltete 2FA fuer die ganze Oberflaeche.
+    # Jetzt gilt die Sitzung nur fuer die AI-Maus (``nur_ai_maus``, dieselbe
+    # Pfadbegrenzung wie bei der Kennwort-Anmeldung der AI-Maus ohne Code).
+    # Nicht abweisen: die AI-Maus muss weiter kennwortlos funktionieren.
+    # Fail-closed: ist der 2FA-Bestand unlesbar, gilt das Konto als mit 2FA.
+    try:
+        _krb_st = _get_user_auth_state(konto)
+        _krb_nur_maus = bool(_krb_st.get("totp_enabled") and _krb_st.get("totp_secret"))
+    except Exception:  # noqa: BLE001
+        _krb_nur_maus = True
+    token = generate_token(konto, mit_2fa=False, ohne_admin=True, nur_ai_maus=_krb_nur_maus)
+    if _krb_nur_maus:
+        print(f"[AUTH] Windows-Anmeldung eines Kontos mit 2FA: nur AI-Maus-Zugriff: {konto}",
+              flush=True)
     _anmelde_schutz.erfolg(konto)
     try:
         _user_sessions.record_login(konto, client_ip, display=_display_name(konto))
@@ -8376,6 +8667,32 @@ def _truncate_history_to_user_index(history: list, keep_user_count: int) -> int:
 # des WS-Pfades (main.py ~12175).
 
 
+def _agent_lauf_limit_lesen() -> int:
+    try:
+        from backend.agent import lauf_limit
+        return lauf_limit()
+    except Exception:  # noqa: BLE001
+        return 3
+
+
+@app.post("/api/agent/lauf-limit")
+async def api_agent_lauf_limit(request: Request, user: str = Depends(require_local_auth)):
+    """Hoechstzahl gleichzeitiger Agentenlaeufe je Benutzer setzen. NUR ADMIN.
+
+    Pentest C7 (2026-11-05): 0 = unbegrenzt, sonst 1–50; Vorgabe 3.
+    Administratoren sind vom Deckel ausgenommen (backend/agent.py,
+    ``_lauf_platz_belegen``)."""
+    from backend.agent import EINSTELLUNG_LAUF_LIMIT, lauf_limit
+    body = await _json_objekt(request)
+    try:
+        wert = int(body.get("limit"))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "Zahl erwartet"}, status_code=400)
+    wert = max(0, min(50, wert))
+    config.save_setting(EINSTELLUNG_LAUF_LIMIT, wert)
+    return JSONResponse({"ok": True, "limit": lauf_limit()})
+
+
 @app.post("/api/context/threshold")
 async def api_context_threshold(request: Request, user: str = Depends(require_local_auth)):
     """Setzt den Komprimierungs-Schwellwert (Anzahl History-Einträge). NUR ADMIN.
@@ -8978,15 +9295,23 @@ async def _sec_inspect_user(text: str, user: str, channel: str) -> bool:
     """Prueft eine angemeldete Nutzereingabe; sperrt bei Erkennung. True = gesperrt."""
     if _sec_exempt(user):
         return False
-    detected, _ = await security_guard.inspect(text, user, channel, block=True)
+    detected, _vorfall = await security_guard.inspect(text, user, channel, block=True)
     if detected:
+        # Pentest C6: eingefuegter/zitierter Text (z.B. eine Phishing-Mail mit
+        # der Frage "ist die gefaehrlich?") ist protokolliert, aber KEIN Angriff
+        # des Fragenden – keine Sperre, Nachricht geht weiter.
+        if (_vorfall or {}).get("eingefuegt"):
+            return False
         return True
     # Base64-verschleierte Payloads dekodieren + prüfen (umgeht sonst die Guard-Regex).
     marker = security_guard.decode_and_scan(text)
     if marker:
+        _eingefuegt = security_guard.wirkt_eingefuegt(text)
         security_guard.record_violation(user, channel, "encoded-payload", marker,
-                                        snippet=text, task=text, exempt=_is_admin_user(user))
-        return True
+                                        snippet=text, task=text, exempt=_is_admin_user(user),
+                                        escalate=not _eingefuegt)
+        # Eingefuegter Text (Mail mit Anhang-Block o.ae.): nur weich zaehlen.
+        return not _eingefuegt
     return False
 
 
@@ -9187,7 +9512,8 @@ async def csp_bericht(request: Request):
     Angreifer soll am Status nichts ablesen."""
     koerper = await request.body()
     _csp.melden(koerper, request.client.host if request.client else "",
-                request.headers.get("user-agent", ""))
+                request.headers.get("user-agent", ""),
+                host=request.headers.get("host", ""))
     return Response(status_code=204)
 
 
@@ -10177,8 +10503,11 @@ async def get_document(name: str, user: str = Depends(require_auth_or_query)):
         print(f"[documents] Zugriff verweigert: {user} -> {name}", flush=True)
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
     media = _MEDIA.get(ext) or mimetypes.guess_type(name)[0] or "application/octet-stream"
-    # Bilder inline (fuer <img> im Chat), alles andere als Download.
-    disp = "inline" if media.startswith("image/") else "attachment"
+    # Rasterbilder/PDF/Text inline (fuer <img> im Chat), alles andere als
+    # Download. ⚠ NICHT "image/*": ein Chat-Anhang <32hex>__x.svg kam bis
+    # 2026-11 inline und lief beim Oeffnen im Tab als Skript (gespeichertes
+    # XSS). Ein <img> zeigt das SVG trotz attachment weiter an.
+    disp = _datei.disposition(media)
     return FileResponse(str(p), media_type=media,
                         filename=f"{base}.{ext}",
                         content_disposition_type=disp,
@@ -10608,9 +10937,46 @@ async def chat_sessions_delete(sid: str, user: str = Depends(require_auth)):
     return JSONResponse({"ok": ok})
 
 
+def _profil_kurz(p: dict) -> dict:
+    """Die oeffentlichen Felder eines Profils – dieselben, die
+    ``GET /api/llm/profiles`` jedem angemeldeten Benutzer zeigt."""
+    return {"id": p.get("id", ""), "name": p.get("name", p.get("id", "")),
+            "provider": p.get("provider", ""), "model": p.get("model", "")}
+
+
+def _settings_nicht_admin(cfg, darf, aktiv_id) -> dict:
+    """Antwort von ``GET /api/settings`` / ``GET /api/profiles`` fuer
+    Nicht-Administratoren.
+
+    WARUM (Pentest-Vorbereitung 2026-11-05): beide Routen haengen an
+    ``require_auth`` und gaben JEDEM Benutzer alle LLM-Profile mit ``api_url``,
+    ``allowed_users``/``allowed_group``, den letzten vier Zeichen der
+    API-Schluessel und des ``agent_api_key``. Gebraucht wird ausserhalb der
+    (Admin-)Einstellungsseite nur ``tts_enabled``/``tts_voice`` (chat.js); der
+    Profil-Umschalter liest ``GET /api/llm/profiles``. Profile gehen deshalb nur
+    in der Kurzform und nur die, die der Benutzer nutzen darf, plus das aktive.
+    Keine Schluesselreste, keine Adressen, keine Freigabelisten.
+    """
+    profile = [_profil_kurz(p) for p in (cfg.profiles or [])
+               if isinstance(p, dict) and (darf(p) or p.get("id") == aktiv_id)]
+    return {
+        "active_profile_id": aktiv_id,
+        "profiles": profile,
+        "tts_enabled": cfg.TTS_ENABLED,
+        "tts_voice": cfg.TTS_VOICE,
+    }
+
+
 @app.get("/api/settings")
 async def get_settings(user: str = Depends(require_auth)):
-    """Gibt aktuelle Einstellungen, Profile und Provider-Optionen zurück."""
+    """Gibt aktuelle Einstellungen, Profile und Provider-Optionen zurück.
+
+    Nicht-Administratoren bekommen nur ``_settings_nicht_admin`` (siehe dort).
+    """
+    if not _user_is_admin(user):
+        return JSONResponse(_settings_nicht_admin(
+            config, lambda p: _may_use_profile(user, p),
+            config.active_profile_id_for_user(user)))
     # API-Keys maskiert zurueckgeben
     safe_profiles = []
     for p in config.profiles:
@@ -10648,6 +11014,9 @@ async def get_settings(user: str = Depends(require_auth)):
         # zeigte dann einen falschen Standardwert (derselbe Fallstrick wie bei
         # GET /api/context/stats).
         "compress_threshold": max(4, min(200, int(config.get_setting("compress_threshold") or 30))),
+        # Gleichzeitige Auftraege je Benutzer (Pentest C7); gespeichert ueber
+        # POST /api/agent/lauf-limit.
+        "agent_lauf_limit": _agent_lauf_limit_lesen(),
         "agent_api_key": _mask_key(config.AGENT_API_KEY),
         "defaults": config.DEFAULT_PROVIDERS,
         # Auswahlliste fuer die Oberflaeche ("" = Provider-Standard)
@@ -11208,7 +11577,14 @@ async def profile_zertifikat_probe(request: Request, user: str = Depends(require
 
 @app.get("/api/profiles")
 async def get_profiles(user: str = Depends(require_auth)):
-    """Gibt alle Profile und das aktive Profil zurück."""
+    """Gibt alle Profile und das aktive Profil zurück (Nicht-Administratoren:
+    nur die Kurzform aus ``_settings_nicht_admin``)."""
+    if not _user_is_admin(user):
+        kurz = _settings_nicht_admin(
+            config, lambda p: _may_use_profile(user, p),
+            config.active_profile_id_for_user(user))
+        return JSONResponse({"profiles": kurz["profiles"],
+                             "active_profile_id": kurz["active_profile_id"]})
     safe_profiles = [_profil_oeffentlich(p) for p in config.profiles]
     return JSONResponse({
         "profiles": safe_profiles,
@@ -12355,6 +12731,17 @@ async def verify_token_endpoint(request: Request):
             remaining = max(0, _sitzung.max_alter_s() - (time.time() - int(ts)))
         except Exception:
             remaining = 0
+        # Gesperrtes Konto (Befund A8, 2026-11-05): KEIN is_admin – bis hierher
+        # meldete die Antwort fuer ein gesperrtes Admin-Konto "valid + is_admin",
+        # und /settings oeffnete daraufhin die Admin-Oberflaeche (deren
+        # Schnittstellen zwar 403 sagten, die Oberflaeche aber nicht).
+        # Gueltig bleibt die Sitzung trotzdem: nur mit ihr erreicht der Benutzer
+        # /api/security/my-block und sieht den Grund seiner Sperre.
+        if security_guard.is_blocked(username):
+            return JSONResponse({"valid": True, "username": username,
+                                 "remaining_seconds": int(remaining),
+                                 "idle_seconds": int(_sitzung.leerlauf_s()),
+                                 "account_blocked": True})
         return JSONResponse({"valid": True, "username": username, "remaining_seconds": int(remaining),
                              "idle_seconds": int(_sitzung.leerlauf_s()),
                              "must_change_password": _user_must_change(username),
@@ -12462,9 +12849,16 @@ async def skill_doc(skill: str = "", file: str = "", user: str = Depends(require
 
 @app.get("/api/skills")
 async def get_skills(user: str = Depends(require_auth)):
-    """Gibt alle Skills mit Status zurück."""
+    """Gibt alle Skills mit Status zurück.
+
+    Konfiguration nur fuer Administratoren und auch dann ohne Geheimfelder
+    (secret_reveal.skills_liste_fuer) – bis 2026-11-05 ging sie roh an jeden
+    angemeldeten Benutzer, samt Jira-/Confluence-Token und Client-Secrets.
+    """
     sm = _get_skill_manager()
-    return JSONResponse({"skills": sm.list_skills()})
+    from backend import secret_reveal as _sr
+    return JSONResponse({"skills": _sr.skills_liste_fuer(
+        sm.list_skills(), _user_is_admin(user))})
 
 
 @app.post("/api/skills/{name}/enable")
@@ -15285,15 +15679,21 @@ async def _addin_sso_ablauf(request: Request):
     from backend import addin as _addin_mod, addin_sso as _sso
     erwartet = "%s/addin/taskpane.html" % _addin_mod.basis_url(request)
     try:
-        info = _sso.pruefe_token(token_roh, erwartet)
-    except _sso.SsoFehler as e:
+        # Im Thread: der Abruf des Metadaten-Dokuments blockiert bis 10 s.
+        info = await asyncio.to_thread(_sso.pruefe_token, token_roh, erwartet)
+    except Exception as e:  # noqa: BLE001
         # KEIN Fehlversuch fuer die Ratenbegrenzung: ein abgelaufenes Token oder
         # eine fehlende EWS-Adresse ist ein Konfigurations-, kein Angriffsindiz –
-        # und der Benutzer koennte es nicht abstellen. Der Grund geht im Klartext
-        # zurueck, sonst sucht ihn niemand an der richtigen Stelle.
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=401)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": "Token nicht pruefbar: %s" % e},
+        # und der Benutzer koennte es nicht abstellen.
+        # Der GRUND steht seit 2026-11-05 nur noch im Journal (Befund A4): der
+        # Endpunkt ist ohne Anmeldung erreichbar, und der Klartext nannte die
+        # hinterlegte Exchange-Adresse bzw. trug Fehlertexte eines Abrufs nach
+        # aussen. Dem Benutzer hilft "mit Kennwort anmelden" ohnehin mehr.
+        print("[Add-in] SSO abgewiesen (%s): %s: %s"
+              % (client_ip, type(e).__name__, e), flush=True)
+        return JSONResponse({"ok": False,
+                             "error": "Die automatische Anmeldung ist nicht möglich. "
+                                      "Bitte melde dich mit Kennwort an."},
                             status_code=401)
 
     username = _sso.benutzer_fuer(info["kennung"])
@@ -15313,16 +15713,24 @@ async def _addin_sso_ablauf(request: Request):
     # Exchange-Token stammt vom selben Arbeitsplatz und ist damit kein zweiter
     # Faktor – es stillschweigend als solchen zu behandeln, wuerde eine bewusst
     # eingeschaltete Schutzmassnahme aushebeln.
+    # FAIL-CLOSED (Befund A4b, 2026-11-05): bis hierher stand ``except: pass``
+    # – ein unlesbarer 2FA-Bestand hiess "keine 2FA" und das SSO ging durch.
+    # Jetzt dieselbe Antwort wie am Kennwortweg (503, AuthStateUnlesbar).
     try:
         _st = _get_user_auth_state(username)
-        if _st.get("totp_enabled") and _st.get("totp_secret"):
-            return JSONResponse(
-                {"ok": False, "zwei_faktor": True,
-                 "error": "Fuer dieses Konto ist eine Zwei-Faktor-Anmeldung "
-                          "eingeschaltet. Bitte melde dich hier mit Kennwort und "
-                          "Code an."}, status_code=403)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        print("[Add-in] SSO abgewiesen: 2FA-Bestand von %s nicht lesbar (%s)"
+              % (username, e), flush=True)
+        return JSONResponse(
+            {"ok": False, "error": "Anmeldung ist gerade nicht möglich (Anmeldedaten "
+             "des Servers nicht lesbar). Bitte den Administrator informieren."},
+            status_code=503)
+    if _st.get("totp_enabled") and _st.get("totp_secret"):
+        return JSONResponse(
+            {"ok": False, "zwei_faktor": True,
+             "error": "Fuer dieses Konto ist eine Zwei-Faktor-Anmeldung "
+                      "eingeschaltet. Bitte melde dich hier mit Kennwort und "
+                      "Code an."}, status_code=403)
 
     try:
         from backend import license_enforce as _lic_enf
@@ -18382,7 +18790,7 @@ async def jira_issue_api(key: str = "", user: str = Depends(require_local_auth))
 
 @app.get("/api/jira/phonenumber")
 async def jira_phonenumber_api(phone: str = "", phonenumber: str = "", number: str = "",
-                               limit: int = 25, user: str = Depends(require_auth_or_agent)):
+                               limit: int = 25, user: str = Depends(require_jira_daten_access)):
     """Ermittelt die CRM-Kundennummer(n) (CRM-xxxxxx) zu einer Telefonnummer über das
     Jira-Insight-CRM-Objektschema (Objekt-Key = CRM-Nummer). Sucht die Nummer in den
     Telefon-Attributen der CRM-Objekte. Parameter ``phone`` (Aliase ``phonenumber``/
@@ -18410,7 +18818,7 @@ async def jira_phonenumber_api(phone: str = "", phonenumber: str = "", number: s
 
 @app.get("/api/jira/crm-number")
 async def jira_crm_number_api(crm: str = "", crm_number: str = "", number: str = "",
-                              limit: int = 25, user: str = Depends(require_auth_or_agent)):
+                              limit: int = 25, user: str = Depends(require_jira_daten_access)):
     """Findet alle Jira-Tickets, die einer dedizierten CRM-Kundennummer (CRM-xxxxxx)
     zugeordnet sind. Sucht exakt im Insight-Organisationsfeld (findet ALLE Tickets des
     Kunden – nicht nur Volltext-Treffer). Parameter ``crm`` (Aliase ``crm_number``/
@@ -18444,7 +18852,7 @@ async def jira_crm_number_api(crm: str = "", crm_number: str = "", number: str =
 async def jira_matching_tickets_api(crm: str = "", crm_number: str = "", number: str = "",
                                     kunde: str = "", keywords: str = "", q: str = "",
                                     match: str = "all", limit: int = 25,
-                                    user: str = Depends(require_auth_or_agent)):
+                                    user: str = Depends(require_jira_daten_access)):
     """Findet die zu 2-5 Schlagworten passenden Jira-Tickets eines bestimmten
     CRM-Kunden – OFFENE UND ABGESCHLOSSENE. Die CRM-Kundennummer (CRM-xxxxxx)
     wird exakt im Insight-Organisationsfeld gesucht (findet ALLE Tickets des
@@ -20666,7 +21074,8 @@ async def _support_ai_summary(query: str, blocks: list, system_prompt: str, line
         return ""
 
 
-async def _support_summarize_block(b: dict, lines: int, lang: str, system_prompt: str, prof: dict = None):
+async def _support_summarize_block(b: dict, lines: int, lang: str, system_prompt: str, prof: dict = None,
+                                   user: str = ""):
     """Erzeugt eine mehrzeilige KI-Zusammenfassung EINES Treffers (Ticket /
     Confluence-Seite / Wissens-Chunk) und schreibt sie in ``b['summary']``.
     Bei Jira wird zusaetzlich die Beschreibung + die letzten Kommentare nachgeladen.
@@ -20677,10 +21086,15 @@ async def _support_summarize_block(b: dict, lines: int, lang: str, system_prompt
         lines = 4
     content = (b.get("_content") or b.get("summary") or "").strip()
     # Jira: vollstaendigen Vorgang (Beschreibung + Kommentare) nachladen
+    if b.get("source") == "JIRA" and b.get("_key") and not _support_jira_erlaubt(user):
+        # Ohne Freigabe auch kein Nachladen ueber den Sammelzugang (2026-11-08).
+        b["summary"] = "Keine Jira-Freigabe."
+        return
     if b.get("source") == "JIRA" and b.get("_key"):
         try:
             from backend.jira_client import html_to_text as _jt
-            c = _jira_client()
+            # Pentest C4: mit dem Benutzer – eigener Jira-Token vor Sammelzugang.
+            c = _jira_client(user)
             it = await asyncio.to_thread(c.get_issue, b["_key"])
             f = it.get("fields", {}) or {}
             parts = [b.get("title", ""), f.get("summary") or ""]
@@ -21077,6 +21491,11 @@ async def _support_run_query(body: dict, user: str) -> dict:
     import re as _re
     if _re.search(r"\b[A-Z][A-Z0-9]*-\d+\b", query):
         use_jira = True
+    # Ohne Jira-Freigabe keine Jira-Daten (Betreiber-Entscheid 2026-11-08) – erst
+    # NACH der Ticket-Key-Erkennung, sonst schaltete ein Key die Quelle wieder ein.
+    jira_verweigert = bool(use_jira and not _support_jira_erlaubt(user))
+    if jira_verweigert:
+        use_jira = False
 
     # ── Sicherheitsschicht: Support-Anfrage pruefen (echte Accounts sperren) ──
     if user and user != "api" and await _sec_inspect_user(query, user, "support"):
@@ -21115,7 +21534,8 @@ async def _support_run_query(body: dict, user: str) -> dict:
     if use_jira and _skill_active("jira"):
         try:
             from backend.jira_client import JiraError, issue_brief
-            c = _jira_client()
+            # Pentest C4: mit dem Benutzer – eigener Jira-Token vor Sammelzugang.
+            c = _jira_client(user)
             if c.configured:
                 jql = _support_jira_jql(query, open_only)
                 data = await asyncio.to_thread(c.search, jql, jira_limit)
@@ -21245,6 +21665,16 @@ async def _support_run_query(body: dict, user: str) -> dict:
             elif _b:
                 blocks.append(_b)
 
+    if jira_verweigert and _skill_active("jira"):
+        # Sichtbare Absage statt leiser Luecke: wer Jira angehakt hat, muss SEHEN,
+        # warum nichts kam (Muster _support_fach_hinweis_block). no_summary haelt
+        # den Block aus der KI-Gesamtzusammenfassung heraus.
+        blocks.append({"source": "JIRA", "title": "Jira",
+                       "summary": "Keine Jira-Freigabe – Jira-Tickets werden nicht angezeigt "
+                                  "(Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“).",
+                       "score": _SUPPORT_FACH_SCORE, "full_text": "", "link": "",
+                       "source_label": "Jira", "no_summary": True, "hinweis_block": True})
+
     blocks.sort(key=lambda b: b["score"], reverse=True)
 
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
@@ -21331,6 +21761,8 @@ async def support_summarize(request: Request):
                             status_code=400)
     if not _skill_active("jira"):
         return JSONResponse({"ok": False, "error": "Jira-Skill ist nicht aktiv."}, status_code=403)
+    if not _support_jira_erlaubt(user):
+        return JSONResponse({"ok": False, "error": "Keine Jira-Freigabe."}, status_code=403)
 
     cfg = config.get_skill_states().get("support_assistant", {}).get("config", {}) or {}
 
@@ -21343,7 +21775,7 @@ async def support_summarize(request: Request):
     b = {"source": "JIRA", "key": key, "_key": key, "title": key, "summary": ""}
     ok, _ = await _run_cancellable(
         request, _support_summarize_block(b, lines, lang, cfg.get("system_prompt") or "",
-                                          prof=config.profile_for_user(user)))
+                                          prof=config.profile_for_user(user), user=user))
     if not ok:
         return JSONResponse({"ok": False, "error": "Abgebrochen"}, status_code=499)
     summary = (b.get("summary") or "").strip()
@@ -21557,7 +21989,7 @@ async def agent_task(request: Request):
     )
 
     # Eingehende Benachrichtigung an alle verbundenen WebSocket-Clients senden
-    await _broadcast_ws({"type": "status", "message": f"📡 Externe Nachricht von {source}: {task_text}"})
+    await _rundsenden_gezielt({"type": "status", "message": f"📡 Externe Nachricht von {source}: {task_text}"})
 
     global agent_instance
     try:
@@ -21580,12 +22012,12 @@ async def agent_task(request: Request):
 
         # Ergebnis an Frontend broadcasten
         if result:
-            await _broadcast_ws({"type": "status", "message": f"🤖 Antwort: {result[:500]}"})
+            await _rundsenden_gezielt({"type": "status", "message": f"🤖 Antwort: {result[:500]}"})
 
         return JSONResponse({"success": True, "result": result or ""})
 
     except Exception as e:
-        await _broadcast_ws({"type": "status", "message": f"❌ Agent-Fehler: {str(e)[:200]}"})
+        await _rundsenden_gezielt({"type": "status", "message": f"❌ Agent-Fehler: {str(e)[:200]}"})
         return JSONResponse(
             {"success": False, "error": f"Agent-Fehler: {str(e)[:500]}"},
             status_code=500,
@@ -21601,6 +22033,47 @@ async def _broadcast_ws(message: dict):
             await ws.send_json(message)
         except Exception:
             pass
+
+
+def _ws_empfaenger_inhalt(ws, besitzer: "str | None") -> bool:
+    """Darf diese /ws-Verbindung eine Rundsendung MIT INHALT bekommen?
+
+    Pentest C3 (2026-11-05): Cron-/Watcher-Ereignisse (Ergebnistext des
+    Auftrags) und die Ereignisse von /api/agent/task (Text + Antwort) gingen an
+    JEDE angemeldete Verbindung. Jetzt nur an den Besitzer des Auftrags
+    (normalisiert verglichen wie ``_cron_visible``) und an Administratoren.
+    ``besitzer=None`` = nur Administratoren. Eine Verbindung mit Agent-
+    Schluessel (ohne Benutzer) bekommt nichts – sie ist weder Besitzer noch Admin.
+    """
+    if not _ws_rundsendung_erlaubt(ws):
+        return False
+    user = _ws_usernames.get(id(ws), "")
+    if not user:
+        return False
+    if besitzer and _norm_login(besitzer) == _norm_login(user):
+        return True
+    try:
+        return bool(_is_admin_user(user))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _rundsenden_gezielt(message: dict, besitzer: "str | None" = None) -> None:
+    """Rundsendung mit Inhalt nur an Besitzer und Administratoren (siehe oben).
+
+    EINE Stelle fuer Cron, Watcher und Agent-API. Verbindungen, deren Senden
+    scheitert, fallen aus ``_active_ws`` (wie bisher in den Cron-/Watcher-
+    Verteilern)."""
+    dead = []
+    for ws_client in list(_active_ws):
+        if not _ws_empfaenger_inhalt(ws_client, besitzer):
+            continue
+        try:
+            await ws_client.send_json(message)
+        except Exception:  # noqa: BLE001
+            dead.append(ws_client)
+    for d in dead:
+        _active_ws.discard(d)
 
 
 # ─── Knowledge Base API ───────────────────────────────────────────────
@@ -22640,7 +23113,6 @@ async def read_knowledge_file_raw(path: str, user: str = Depends(require_auth_or
     Anders als file_read funktioniert es auch fuer PDFs/Bilder (kein utf-8-Decode)."""
     from backend.tools.knowledge import _get_folders, PROJECT_ROOT
     from backend.learning import LEARNED_DIR
-    import mimetypes
     resolved = (PROJECT_ROOT / path).resolve()
     # Sicherheitscheck: Datei muss in Knowledge- oder Learned-Verzeichnis liegen
     allowed = _liegt_unter(resolved, LEARNED_DIR)   # nicht per Praefix (Code-Review 2026-10-18)
@@ -22656,11 +23128,13 @@ async def read_knowledge_file_raw(path: str, user: str = Depends(require_auth_or
         return JSONResponse({"error": "Zugriff verweigert"}, status_code=403)
     if not resolved.is_file():
         return JSONResponse({"error": "Datei nicht gefunden"}, status_code=404)
-    media, _ = mimetypes.guess_type(str(resolved))
-    # inline statt attachment: sonst zwingt Content-Disposition den Browser zum
-    # Download (auch im <iframe> der Hover-Vorschau) statt die Datei anzuzeigen.
-    return FileResponse(str(resolved), media_type=media or "application/octet-stream",
-                        filename=resolved.name, content_disposition_type="inline")
+    # inline fuer PDF/Rasterbild/Text (Hover-Vorschau im <iframe>), alles
+    # andere als Download: bis 2026-11 kam JEDER Typ inline mit geratenem MIME –
+    # ein .svg/.html im Wissensordner lief damit als Skript (gespeichertes XSS).
+    media = _datei.anzeige_typ(resolved.name)
+    return FileResponse(str(resolved), media_type=media,
+                        filename=resolved.name,
+                        content_disposition_type=_datei.disposition(media))
 
 
 @app.get("/api/knowledge/netzquelle")
@@ -22955,6 +23429,49 @@ _ZIP_MAX_DEPTH = 8                         # max. Unterordner-Tiefe im Archiv
 # Globale Wissens-Editoren sind auch hiervon ausgenommen (min_free_bytes=None).
 _ZIP_MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024   # 2 GB
 # Metadaten-Beiwerk gaengiger Packer – nie als Wissen uebernehmen
+def _upload_dateiname(roh) -> str | None:
+    """Reiner Dateiname eines Browser-Uploads – oder None, wenn keiner uebrig bleibt.
+
+    ⚠ PFAD-TRAVERSAL (Befund 2026-11, vor dem Pentest): ``target / file.filename``
+    schrieb mit einem Namen wie ``../../backend/x.py`` oder ``/opt/…`` AUSSERHALB
+    des Wissensordners – und .py/.sh sind erlaubte Wissens-Endungen, also
+    Codeausfuehrung nach dem naechsten Neustart. Der Name kommt vom Client und
+    ist Fremdeingabe: nur der letzte Pfadteil zaehlt (auch nach ``\\``, alte
+    Browser schicken den Windows-Pfad mit), leere, versteckte (``.x``),
+    ``.``/``..``-Namen und Steuerzeichen werden abgewiesen."""
+    name = str(roh or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not name or name in (".", "..") or name.startswith("."):
+        return None
+    if any(ord(c) < 32 or ord(c) == 127 for c in name):
+        return None
+    return name
+
+
+def _upload_ziel(target: Path, name: str) -> Path | None:
+    """Freier Zielpfad fuer ``name`` DIREKT in ``target`` (Kollision: ``_1``, ``_2`` …).
+
+    ``name`` muss aus ``_upload_dateiname`` stammen. Zweite Schranke: das Ziel
+    muss nach ``resolve()`` unmittelbar in ``target`` liegen – ein Symlink
+    gleichen Namens, der hinauszeigt (auch ein verwaister, den ``exists()``
+    nicht sieht), wird nicht beschrieben: None, der Upload wird abgewiesen."""
+    try:
+        basis = target.resolve()
+    except OSError:
+        return None
+    stamm, endung = Path(name).stem, Path(name).suffix
+    dest = target / name
+    zaehler = 1
+    while dest.exists():
+        dest = target / f"{stamm}_{zaehler}{endung}"
+        zaehler += 1
+    try:
+        if dest.resolve().parent != basis:
+            return None
+    except OSError:
+        return None
+    return dest
+
+
 _ZIP_SKIP_DIRS = {"__MACOSX", ".git", ".svn", "node_modules"}
 
 
@@ -24134,18 +24651,21 @@ async def upload_knowledge_files(
     saved = []
     rejected = []
     for file in files:
-        suffix = Path(file.filename).suffix.lower()
+        name = _upload_dateiname(file.filename)
+        if name is None:
+            rejected.append({"name": str(file.filename or ""), "reason": "Ungueltiger Dateiname"})
+            continue
+        suffix = Path(name).suffix.lower()
         if suffix not in all_exts:
-            rejected.append({"name": file.filename, "reason": f"Format '{suffix}' nicht unterstuetzt"})
+            rejected.append({"name": name, "reason": f"Format '{suffix}' nicht unterstuetzt"})
             continue
 
-        dest = target / file.filename
-        # Dateiname-Kollision: Nummer anhaengen
-        counter = 1
-        while dest.exists():
-            stem = Path(file.filename).stem
-            dest = target / f"{stem}_{counter}{suffix}"
-            counter += 1
+        # Nur der Basisname, Ziel MUSS im Ordner liegen (Pfad-Traversal),
+        # Kollision: Nummer anhaengen
+        dest = _upload_ziel(target, name)
+        if dest is None:
+            rejected.append({"name": name, "reason": "Ungueltiger Dateiname"})
+            continue
 
         content = await file.read()
         dest.write_bytes(content)
@@ -24506,7 +25026,11 @@ async def wissen_upload(
     # Ablagen sammeln: (Zieldatei, Anzeigename). Ein ZIP liefert mehrere Eintraege,
     # deren Ordnerstruktur unter dem Zielordner nachgebildet wird.
     for file in files:
-        suffix = Path(file.filename).suffix.lower()
+        name = _upload_dateiname(file.filename)
+        if name is None:
+            rejected.append({"name": str(file.filename or ""), "reason": "Ungueltiger Dateiname"})
+            continue
+        suffix = Path(name).suffix.lower()
 
         if suffix == ".zip":
             # Globale Wissens-Editoren duerfen die Archiv-Grenzen ueberschreiten.
@@ -24564,13 +25088,12 @@ async def wissen_upload(
             continue
 
         if suffix not in all_exts:
-            rejected.append({"name": file.filename, "reason": f"Format '{suffix}' nicht unterstuetzt"})
+            rejected.append({"name": name, "reason": f"Format '{suffix}' nicht unterstuetzt"})
             continue
-        dest = target / file.filename
-        counter = 1
-        while dest.exists():
-            dest = target / f"{Path(file.filename).stem}_{counter}{suffix}"
-            counter += 1
+        dest = _upload_ziel(target, name)
+        if dest is None:
+            rejected.append({"name": name, "reason": "Ungueltiger Dateiname"})
+            continue
         content = await file.read()
         dest.write_bytes(content)
         size_str = f"{len(content)/1024:.1f} KB" if len(content) >= 1024 else f"{len(content)} B"
@@ -24823,7 +25346,6 @@ async def wissen_file(path: str = "", user: str = Depends(require_auth_or_query)
     Nutzers zugeordnet ist. Anzeigbare Formate (PDF/Bild/Text) inline (zum Öffnen
     im Browser), alles andere als Download. Token via ?token= erlaubt (neuer Tab)."""
     from backend import knowledge_groups as kg
-    import mimetypes
     rel = (path or "").strip().lstrip("/")
     if not rel:
         return JSONResponse({"error": "Kein Pfad"}, status_code=400)
@@ -24848,12 +25370,11 @@ async def wissen_file(path: str = "", user: str = Depends(require_auth_or_query)
     if fehler:
         return JSONResponse({"error": "Nicht gefunden"}, status_code=404)
     target = ziel
-    _VIEWABLE = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
-                 ".txt", ".md", ".csv", ".log", ".json", ".html", ".htm"}
-    disp = "inline" if target.suffix.lower() in _VIEWABLE else "attachment"
-    mt = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    # Anzeigbar (inline) nur PDF/Rasterbild/Text – .svg/.html/.htm standen bis
+    # 2026-11 hier und liefen beim Oeffnen als Skript der eigenen Herkunft.
+    mt = _datei.anzeige_typ(target.name)
     return FileResponse(str(target), media_type=mt, filename=target.name,
-                        content_disposition_type=disp)
+                        content_disposition_type=_datei.disposition(mt))
 
 
 @app.delete("/api/wissen/file")
@@ -26268,6 +26789,60 @@ async def knowledge_groups_create(request: Request, user: str = Depends(require_
     return JSONResponse({"ok": True, "group": g})
 
 
+def _kb_editorfelder_schranke(user: str, gid: str, body: dict) -> dict:
+    """Editoren-Felder einer Gruppe aendern nur globale Wissens-Editoren.
+
+    ⚠ Befund B5 (2026-11): ein GRUPPEN-Editor konnte per PATCH
+    ``editors_users``/``editors_group`` seiner Gruppe beliebig setzen – also
+    weitere Konten zu Editoren machen (Rechteweitergabe ohne den, der die
+    Rechte vergibt). Der Dialog „Berechtigungen" schickt die Felder bei JEDEM
+    Speichern mit; ein UNVERAENDERTER Wert wird deshalb still uebergangen
+    (sonst saehe der Gruppen-Editor beim blossen Speichern ein 403), ein
+    GEAENDERTER ist 403. Rueckgabe: der Rumpf ohne die Felder."""
+    from backend import knowledge_groups as kg
+    if _may_edit_knowledge(user):
+        return body
+    bisher = kg.get_group(gid) or {}
+    raus = dict(body)
+    for feld in _KB_EDITOR_FIELDS:
+        neu = raus.pop(feld, None)
+        if neu is None:
+            continue
+        if str(neu).strip() != str(bisher.get(feld) or "").strip():
+            raise HTTPException(status_code=403,
+                detail="Nur globale Wissens-Editoren dürfen die Editoren einer Gruppe ändern")
+    return raus
+
+
+def _kb_zuordnung_schranke(user: str, bisher, gewuenscht) -> None:
+    """403, wenn ein Nicht-Global-Editor die Gruppen einer Datei aendern will,
+    ohne ALLE bisherigen Gruppen der Datei bearbeiten zu duerfen.
+
+    ⚠ Befund B5 (2026-11): geprueft wurden nur die GEAENDERTEN Gruppen. Ein
+    Gruppen-Editor haengte seine Gruppe an eine FREMDE Datei (die nur andere
+    Gruppen trug) und loeschte sie danach ueber ``DELETE /api/wissen/file``
+    (dort genuegt EINE gemeinsame Gruppe). Jetzt gilt: aendern darf nur, wer
+    jede bisherige UND jede hinzukommende/wegfallende Gruppe bearbeiten darf.
+    Eine Datei OHNE Gruppe gehoert niemandem ausser den globalen Editoren –
+    sonst waere „ungruppierte Datei an die eigene Gruppe haengen, dann
+    loeschen" derselbe Weg. Globale Wissens-Editoren sind unberuehrt."""
+    if _may_edit_knowledge(user):
+        return
+    from backend import knowledge_groups as kg
+    vorher = {g for g in (bisher or []) if isinstance(g, str)}
+    nachher = {g for g in (gewuenscht or []) if isinstance(g, str)}
+    geaendert = vorher ^ nachher
+    if not geaendert:
+        return
+    if not vorher:
+        raise HTTPException(status_code=403,
+            detail="Eine Datei ohne Wissensgruppe können nur globale Wissens-Editoren zuordnen")
+    for gid in sorted(vorher | geaendert):
+        if not _is_kb_group_editor(user, kg.get_group(gid)):
+            raise HTTPException(status_code=403,
+                detail=f"Keine Berechtigung für die Wissensgruppe '{gid}'")
+
+
 @app.patch("/api/knowledge/groups/{gid}")
 async def knowledge_groups_update(gid: str, request: Request, user: str = Depends(require_auth)):
     """Aktualisiert eine Wissensgruppe (Name, Farbe, Reihenfolge, Editoren oder
@@ -26286,7 +26861,8 @@ async def knowledge_groups_update(gid: str, request: Request, user: str = Depend
         raise HTTPException(status_code=403,
             detail="Keine Berechtigung, diese Wissensgruppe zu bearbeiten")
     from backend import knowledge_groups as kg
-    body = await _json_objekt(request)
+    body = dict(await _json_objekt(request))
+    body = _kb_editorfelder_schranke(user, gid, body)
     folders = body.get("folders")
     if folders is not None:
         if not _may_edit_knowledge(user):
@@ -26397,15 +26973,7 @@ async def knowledge_assignments_set(request: Request, user: str = Depends(requir
         return JSONResponse({"ok": False, "error": "keine gültige Gruppe angegeben"},
                             status_code=400)
 
-    if not _may_edit_knowledge(user):
-        # Nur geänderte Gruppen prüfen (hinzugefügt ODER entfernt).
-        current = set(kg.get_assignment(path))
-        wanted = set(g for g in groups if isinstance(g, str))
-        changed = current.symmetric_difference(wanted)
-        for gid in changed:
-            if not _is_kb_group_editor(user, kg.get_group(gid)):
-                raise HTTPException(status_code=403,
-                    detail=f"Keine Berechtigung für die Wissensgruppe '{gid}'")
+    _kb_zuordnung_schranke(user, kg.get_assignment(path), groups)
 
     saved = kg.set_assignment(path, groups)
     _aktivitaet(user, "wissen", "datei_gruppen_gesetzt", path, gruppen=saved)
@@ -28309,8 +28877,14 @@ async def vision_snapshot(user: str = Depends(require_admin_or_query)):
 async def vision_mjpeg_stream(request: Request):
     """MJPEG-Relay-Stream – erlaubt mehreren Clients den Zugriff auf den Kamera-Feed.
 
-    Auth via ?token= Query ODER ?key=<stream_key> (fuer Server-zu-Server).
+    Auth via ?key=<stream_key> (Server-zu-Server) ODER als ADMINISTRATOR mit
+    Bearer-Kopf bzw. Abruf-Schluessel in ``?token=`` (``backend/download_key.py``).
     Nutzung: Als Kamera-Quelle auf anderen Jarvis-Instanzen eintragen.
+
+    Befund A6 (2026-11-05): bis hierher genuegte IRGENDEINE Sitzung, und zwar
+    das echte Sitzungstoken in der Adresse (Protokolle, Verlauf). Das
+    Kamerabild ist dieselbe biometrische Klasse wie ``/api/vision/snapshot``
+    und bekommt jetzt dieselbe Schranke (``require_admin_or_query``).
     """
     # Auth: normaler Token ODER ein ausdruecklich gesetzter Stream-Key.
     # BSI M10 (2026-10-12): bis hierher galt ohne Einstellung der feste
@@ -28318,17 +28892,14 @@ async def vision_mjpeg_stream(request: Request):
     # Formular steht, war das auf jedem System der Fall: wer den Namen kannte,
     # sah das Kamerabild ohne Anmeldung. Jetzt nur ein selbst gesetzter
     # Schluessel (mindestens 16 Zeichen), zeitkonstant verglichen.
-    token = request.query_params.get("token", "")
     stream_key = request.query_params.get("key", "")
     expected_key = str((config.get_skill_states().get("vision", {}) or {})
                        .get("config", {}).get("stream_key") or "")
     key_ok = (len(expected_key) >= 16 and bool(stream_key)
               and hmac.compare_digest(stream_key.encode(), expected_key.encode()))
-    _stream_user = verify_token(token)
-    if not _stream_user and not key_ok:
-        raise HTTPException(status_code=401, detail="Nicht authentifiziert")
-    if _stream_user and not key_ok and _sitzung_gesperrt(_stream_user):
-        raise HTTPException(status_code=403, detail="Nicht berechtigt")
+    if not key_ok:
+        # Wirft 401/403: Kopf ODER Abruf-Schluessel, Sperren, Admin-Pruefung.
+        await require_admin_or_query(request)
     engine = _get_vision_engine()
     if not engine:
         return JSONResponse({"error": "Vision-Skill nicht geladen"}, status_code=503)
@@ -29266,17 +29837,18 @@ async def websocket_endpoint(ws: WebSocket):
         ct = _ws_client_types.pop(id(ws), "browser")
         _ws_usernames.pop(id(ws), None)
         _ws_angemeldet.discard(id(ws))
-        # Desktop-Client abmelden falls diese Verbindung es war
+        # Desktop-Client abmelden – nur den Eintrag DIESER Verbindung (Pentest C1:
+        # frueher wurde die globale Verbindung geloescht, egal wem sie gehoerte).
         if ct == "windows_desktop":
             try:
-                from backend.tools.windows_desktop import set_windows_ws
-                set_windows_ws(None)
+                from backend.tools.windows_desktop import remove_windows_ws
+                remove_windows_ws(ws)
             except Exception:
                 pass
         elif ct == "android":
             try:
-                from backend.tools.android_desktop import set_android_ws
-                set_android_ws(None)
+                from backend.tools.android_desktop import remove_android_ws
+                remove_android_ws(ws)
             except Exception:
                 pass
 
@@ -29886,8 +30458,10 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         reasoning_effort=reasoning_effort,
                         bestaetigung=_kann_bestaetigen, rechte=_ws_rechte,
                     )
-                    # Erfolg oder Benutzer-Stopp -> nicht wiederholen; letzter Versuch -> aufhören
-                    if outcome in ("ok", "stopped") or _final:
+                    # Erfolg oder Benutzer-Stopp -> nicht wiederholen; letzter Versuch -> aufhören.
+                    # "limit" (Pentest C7): zu viele gleichzeitige Auftraege – die
+                    # Meldung steht schon im Chat, ein Neuversuch waere stilles Warten.
+                    if outcome in ("ok", "stopped", "limit") or _final:
                         break
                     await ws.send_json({
                         "type": "status",
@@ -30012,13 +30586,17 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # Client registriert sich mit seinem Typ
         client_type = msg.get("client_type", "browser")
         _ws_client_types[id(ws)] = client_type
+        # Pentest C1: der Client gehoert dem Benutzer, dessen Token DIESE
+        # Nachricht traegt (Agent-Schluessel = System, leerer Schluessel). Befehle
+        # gehen nur noch an den Client des Lauf-Akteurs.
+        _reg_user = verify_token(token) or ""
         if client_type == "windows_desktop":
             from backend.tools.windows_desktop import set_windows_ws
-            set_windows_ws(ws)
+            set_windows_ws(ws, _reg_user)
             await ws.send_json({"type": "status", "message": "✅ Windows Desktop-Agent registriert"})
         elif client_type == "android":
             from backend.tools.android_desktop import set_android_ws
-            set_android_ws(ws)
+            set_android_ws(ws, _reg_user)
             await ws.send_json({"type": "status", "message": "✅ Android-Client registriert"})
 
     elif msg_type == "desktop_result":
@@ -30026,10 +30604,11 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         ct = _get_client_type(ws)
         if ct == "android":
             from backend.tools.android_desktop import on_android_result
-            on_android_result(msg)
+            on_android_result(msg, ws)
         else:
             from backend.tools.windows_desktop import on_desktop_result
-            on_desktop_result(msg)
+            # Nur von der Verbindung, an die der Befehl ging (Pentest C1).
+            on_desktop_result(msg, ws)
 
     elif msg_type == "transcribe_only":
         # Nur Transkription (kein Agent): Audio → Whisper → voice_transcript zurück
@@ -31099,18 +31678,9 @@ async def startup():
     try:
         from backend.scheduler import cron_manager, init as scheduler_init
 
-        async def _cron_broadcast(msg: dict):
-            """Sendet Cron-Events an alle verbundenen WebSocket-Clients."""
-            dead = []
-            for ws_client in list(_active_ws):
-                if not _ws_rundsendung_erlaubt(ws_client):
-                    continue
-                try:
-                    await ws_client.send_json(msg)
-                except Exception:
-                    dead.append(ws_client)
-            for d in dead:
-                _active_ws.discard(d)
+        async def _cron_broadcast(msg: dict, besitzer: "str | None" = None):
+            """Cron-Ereignisse nur an den Besitzer des Auftrags und an Admins (C3)."""
+            await _rundsenden_gezielt(msg, besitzer)
 
         from backend.agent import AgentManager as _AM
         global agent_manager
@@ -31125,18 +31695,9 @@ async def startup():
     try:
         from backend.file_watcher import watcher_manager, init as watcher_init
 
-        async def _watcher_broadcast(msg: dict):
-            """Sendet Watcher-Events an alle verbundenen WebSocket-Clients."""
-            dead = []
-            for ws_client in list(_active_ws):
-                if not _ws_rundsendung_erlaubt(ws_client):
-                    continue
-                try:
-                    await ws_client.send_json(msg)
-                except Exception:
-                    dead.append(ws_client)
-            for d in dead:
-                _active_ws.discard(d)
+        async def _watcher_broadcast(msg: dict, besitzer: "str | None" = None):
+            """Watcher-Ereignisse nur an den Besitzer des Watchers und an Admins (C3)."""
+            await _rundsenden_gezielt(msg, besitzer)
 
         async def _watcher_llm_reachable() -> bool:
             """True, wenn das aktive LLM-Profil erreichbar ist (fuer llm_down-Trigger)."""

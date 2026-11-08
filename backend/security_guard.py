@@ -326,6 +326,49 @@ def _record(user: str, channel: str, method: str, pattern: str, text: str) -> di
     return incident
 
 
+# ── Eingefuegter / zitierter Fremdtext (Pentest C6, 2026-11-05) ─────────────
+# Wer eine Phishing-Mail EINFUEGT und fragt, ob sie gefaehrlich ist, traegt
+# genau die Saetze in die Nachricht, nach denen die Heuristik sucht – und die
+# LLM-Bestaetigung sagt dazu zu Recht "Jailbreak". Bis hierher sperrte das das
+# Konto des Fragenden. Ein Text gilt als eingefuegt, wenn er eines dieser
+# Merkmale traegt (jedes fuer sich genuegt):
+#   * mindestens EINGEFUEGT_MIN_ZEILEN nicht-leere Zeilen,
+#   * mindestens EINGEFUEGT_MIN_ZEICHEN Zeichen,
+#   * eine Zitatzeile ("> …") oder ein Codeblock (```),
+#   * mindestens zwei Mail-Kopfzeilen (Von:/From:/An:/Betreff:/Subject:/…).
+# Folge: der Vorfall wird PROTOKOLLIERT (log-only, fuer Admins sichtbar), das
+# Konto aber NICHT gesperrt und die Nachricht nicht abgewiesen. Die harten
+# Schranken im Werkzeug-Dispatch gelten davon unberuehrt.
+# Preis: ein Angreifer, der seine Persona-Anweisung in 800 Zeichen Fuelltext
+# packt, sperrt sich nicht mehr selbst – er wird weiter protokolliert, und was
+# er ausloest, laeuft durch dieselben Schranken wie jeder andere Lauf.
+EINGEFUEGT_MIN_ZEILEN = 8
+EINGEFUEGT_MIN_ZEICHEN = 800
+_KOPFZEILE = re.compile(
+    r"^\s*(?:von|from|an|to|cc|betreff|subject|gesendet|sent|datum|date)\s*:",
+    re.IGNORECASE | re.MULTILINE)
+_ZITATZEILE = re.compile(r"^\s*>", re.MULTILINE)
+
+
+def wirkt_eingefuegt(text: str) -> str:
+    """Grund, warum ``text`` als eingefuegter/zitierter Fremdtext gilt – oder ""."""
+    t = text or ""
+    if not t.strip():
+        return ""
+    zeilen = [z for z in t.splitlines() if z.strip()]
+    if len(zeilen) >= EINGEFUEGT_MIN_ZEILEN:
+        return f"{len(zeilen)} Zeilen"
+    if len(t) >= EINGEFUEGT_MIN_ZEICHEN:
+        return f"{len(t)} Zeichen"
+    if _ZITATZEILE.search(t):
+        return "Zitat"
+    if "```" in t:
+        return "Codeblock"
+    if len(_KOPFZEILE.findall(t)) >= 2:
+        return "Mail-Kopfzeilen"
+    return ""
+
+
 # ── Erkennung ───────────────────────────────────────────────────────────────
 def heuristic_match(text: str):
     """Gibt den Namen des ersten passenden Musters zurueck, sonst None."""
@@ -381,13 +424,21 @@ async def inspect(text: str, user: str, channel: str,
     else:
         return (False, None)
 
+    # Pentest C6: eingefuegter/zitierter Text sperrt nicht (siehe wirkt_eingefuegt).
+    eingefuegt = wirkt_eingefuegt(text) if block else ""
+    if eingefuegt:
+        block = False
+
     if not block:
-        # Nur protokollieren (kein Account vorhanden, z.B. WhatsApp-Absender):
-        # in einem separaten "log-only"-Pseudo-Eintrag festhalten.
+        # Nur protokollieren (kein Account vorhanden, z.B. WhatsApp-Absender;
+        # oder eingefuegter Fremdtext): in einem separaten "log-only"-Pseudo-
+        # Eintrag festhalten.
         incident = {
             "ts": int(time.time()), "channel": channel, "method": method,
             "pattern": pattern, "snippet": (text or "")[:500],
         }
+        if eingefuegt:
+            incident["eingefuegt"] = eingefuegt
         with _lock:
             state = _load()
             log = state.setdefault("logonly", [])
@@ -395,7 +446,9 @@ async def inspect(text: str, user: str, channel: str,
             state["logonly"] = log[-200:]
             _save(state)
         print(f"[SecurityGuard] VORFALL ({method}/{pattern}) – log-only "
-              f"[{channel}/{user}]", flush=True)
+              f"[{channel}/{user}]"
+              + (f" – eingefuegter Text ({eingefuegt}), keine Sperre" if eingefuegt else ""),
+              flush=True)
         return (True, incident)
 
     incident = _record(user, channel, method, pattern, text)
@@ -431,7 +484,7 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
                      snippet: str = "", exempt: bool = False,
                      tool: str = "", task: str = "", ip: str = "",
                      client_type: str = "", escalate: bool = True,
-                     marke: str = "") -> dict:
+                     marke: str = "", fremdtext: str = "") -> dict:
     """Protokolliert einen Richtlinien-Verstoss und sperrt den Account ab Schwelle.
     exempt=True (lokale/Admin-Konten) -> nur protokollieren, nie sperren.
     Fuer aussagekraeftiges Logging werden zusaetzlich Tool, ausloesende Anfrage
@@ -473,6 +526,10 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
              "ip": ip or "", "client_type": client_type or ""}
     if marke:
         entry["marke"] = str(marke)[:120]
+    # Pentest C6: Fremdtext im Lauf (Werkzeugergebnis, Anhang, eingefuegter
+    # Text, Lauf ohne Oberflaeche) – der Grund, warum der Eintrag weich ist.
+    if fremdtext:
+        entry["fremdtext"] = str(fremdtext)[:200]
     if not escalate:
         entry["soft"] = True
     blocked_now = False

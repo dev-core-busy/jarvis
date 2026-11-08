@@ -106,7 +106,7 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/agent/task"): ("selbst", "nur Agent-Schluessel"),
     ("GET", "/api/knowledge/pull/manifest"): ("selbst", "Freigabe-Token des Standorts"),
     ("GET", "/api/knowledge/pull/file"): ("selbst", "Freigabe-Token des Standorts"),
-    ("GET", "/api/vision/stream"): ("selbst", "Sitzung oder ausdruecklich gesetzter Stream-Schluessel"),
+    ("GET", "/api/vision/stream"): ("selbst", "Administrator (Kopf oder Abruf-Schluessel) oder gesetzter Stream-Schluessel"),
     ("POST", "/api/tts"): ("selbst", "Sitzung oder Agent-Schluessel"),
     ("GET", "/api/tts/voices"): ("selbst", "Sitzung oder Agent-Schluessel"),
     ("POST", "/api/whatsapp/incoming"): ("selbst", "nur von localhost (WhatsApp-Bridge)"),

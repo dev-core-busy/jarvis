@@ -26,7 +26,10 @@ import info.jarvisai.app.service.JarvisNotificationService
 import info.jarvisai.app.update.DownloadPhase
 import info.jarvisai.app.update.UpdateChecker
 import info.jarvisai.app.update.UpdateState
+import info.jarvisai.app.desktop.Bestaetigung
+import info.jarvisai.app.desktop.BestaetigungsAnfrage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -103,6 +106,21 @@ class ChatViewModel @Inject constructor(
     private val _updateState = MutableStateFlow(UpdateState())
     val updateState: StateFlow<UpdateState> = _updateState
 
+    // ─── Bestaetigung wirksamer Aktionen (BSI H9 / Pentest C1) ────────
+    // Hoechstens EINE offene Anfrage: eine zweite gleichzeitige wird abgelehnt,
+    // statt die erste zu verdraengen (der Mensch soll genau sehen, was er freigibt).
+    private val _bestaetigung = MutableStateFlow<BestaetigungsAnfrage?>(null)
+    val bestaetigung: StateFlow<BestaetigungsAnfrage?> = _bestaetigung
+    private var bestaetigungFrist: Job? = null
+
+    /** Antwort aus dem Dialog. Nur die angezeigte Anfrage wird beantwortet. */
+    fun bestaetigungBeantworten(erlaubt: Boolean) {
+        val a = _bestaetigung.value ?: return
+        _bestaetigung.value = null
+        bestaetigungFrist?.cancel()
+        repo.bestaetigungAntworten(a.id, erlaubt)
+    }
+
     private var speechRecognizer: SpeechRecognizer? = null
     private var autoSendVoice = false
     private var voiceSilenceMs = 1500
@@ -150,6 +168,21 @@ class ChatViewModel @Inject constructor(
         // Update-Check beim Start
         viewModelScope.launch {
             _updateState.value = updateChecker.check()
+        }
+        // Bestaetigungsanfragen: Dialog anzeigen, nach der Frist selbst ablehnen
+        viewModelScope.launch {
+            repo.bestaetigungen.collect { a ->
+                if (_bestaetigung.value != null) {
+                    repo.bestaetigungAntworten(a.id, false)
+                    return@collect
+                }
+                _bestaetigung.value = a
+                bestaetigungFrist?.cancel()
+                bestaetigungFrist = viewModelScope.launch {
+                    delay(Bestaetigung.fristMs(a.fristS))
+                    if (_bestaetigung.value?.id == a.id) bestaetigungBeantworten(false)
+                }
+            }
         }
         // Notifications wenn Agent fertig
         viewModelScope.launch {

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import shlex
 from pathlib import Path
 
 from backend.tools.base import BaseTool
@@ -202,23 +203,44 @@ class DesktopTool(BaseTool):
                             url = part
                             break
                     
+                    # Pentest C8 (2026-11-05): die URL stand in '…' in einer
+                    # Shell-Zeile – ein Hochkomma in der URL beendete das Zitat
+                    # und der Rest lief als Shell-Befehl. Jetzt eine Argumentliste
+                    # ohne Shell; die URL ist genau EIN Argument.
+                    app_argv = ["google-chrome", "--no-sandbox", "--remote-debugging-port=9222",
+                                "--user-data-dir=/tmp/jarvis-chrome"]
+                    if url.startswith("-"):
+                        # Ein "URL"-Teil mit fuehrendem '-' waere eine Chrome-OPTION
+                        # (z.B. --renderer-cmd-prefix=…) – nie als Argument durchreichen.
+                        return f"Fehler: '{url}' ist keine Adresse."
                     if url:
                         # Starte direkt Chrome mit der URL (schnellstes Erreichen der Seite)
-                        app_cmd = f"google-chrome --no-sandbox --remote-debugging-port=9222 --user-data-dir=/tmp/jarvis-chrome '{url}'"
-                    else:
-                        # Starte nur den Browser
-                        app_cmd = "google-chrome --no-sandbox --remote-debugging-port=9222 --user-data-dir=/tmp/jarvis-chrome"
-                
-                if not app_cmd:
+                        app_argv.append(url)
+                else:
+                    # Programmname mit Argumenten wie in einer Kommandozeile,
+                    # aber OHNE Shell: ';', '|', '$(…)' haben keine Wirkung.
+                    try:
+                        app_argv = shlex.split(app_cmd or "")
+                    except ValueError as e:
+                        return f"Fehler: Programmaufruf nicht lesbar ({e})."
+
+                if not app_argv:
                     return "Fehler: Kein Programmname (weder in text noch app_name) angegeben."
-                
-                proc = await asyncio.create_subprocess_shell(
-                    f"setsid {app_cmd} &",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+
+                # Eigene Sitzung (frueher `setsid … &`), Ausgaben verworfen – das
+                # Programm laeuft weiter, ein nicht gelesenes PIPE wuerde es blockieren.
+                try:
+                    await asyncio.create_subprocess_exec(
+                        *app_argv,
+                        stdin=asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                except (FileNotFoundError, PermissionError) as e:
+                    return f"Fehler: Programm '{app_argv[0]}' konnte nicht gestartet werden ({e})."
                 await asyncio.sleep(1)  # Kurz warten bis Programm startet
-                return f"Programm '{app_cmd}' gestartet"
+                return f"Programm '{shlex.join(app_argv)}' gestartet"
 
             elif action == "get_active_window":
                 wid = await self._run("xdotool getactivewindow")

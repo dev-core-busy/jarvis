@@ -285,7 +285,8 @@ EXEMPT = {
     ("get", "/api/vision/stream"), ("get", "/api/vision/download/stream-tools"),
     # Nur von localhost (Bridge) erreichbar, eigene Pruefung im Rumpf.
     ("post", "/api/whatsapp/incoming"),
-    # Externe Automatisierung: Token ODER Agent-API-Key (require_auth_or_agent).
+    # Externe Automatisierung: Agent-API-Key ODER Sitzung MIT Jira-Freigabe
+    # (require_jira_daten_access, Pentest C4 – vorher jede Sitzung).
     ("get", "/api/jira/phonenumber"), ("get", "/api/jira/crm-number"),
     ("get", "/api/jira/passende-tickets"),
     # Jira-Assistent der Browser-Erweiterung: bewusst UNTERHALB von Admin, aber
@@ -401,6 +402,9 @@ RANK = {"require_local_auth": 3, "require_admin_or_knowledge_editor": 2,
         # hinterlegten Zugangsdaten.
         "require_vemas_access": 2,
         "require_jira_assist_access": 2,
+        # Sitzung nur mit derselben Jira-Freigabe; Agent-Schluessel zugelassen
+        # (externe Systeme) – fuer Sitzungen also die Ebene der Freigabe.
+        "require_jira_daten_access": 2,
         # Jeder Wissenseditor, Inhalte im Endpunkt auf seine Gruppen gefiltert –
         # dieselbe Ebene wie require_knowledge_editor.
         "require_wissensgraph_leser": 2,

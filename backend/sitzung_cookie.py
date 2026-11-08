@@ -197,9 +197,19 @@ class SitzungCookieMiddleware:
         if not ist_csrf(wert):
             return await self.app(scope, receive, send)
         echt = aufloesen(wert, cookie_aus_kopf(cookie_kopf))
+        # Ein Kopfsatz ist latin-1 (so liest ihn Starlette auch wieder). Ein
+        # Token mit Zeichen ausserhalb davon (Name aus dem Cookie, base64 ->
+        # utf-8) warf hier UnicodeEncodeError und endete als 500 (Befund A9,
+        # 2026-11-05). utf-8 einzusetzen hilft nicht: gelesen wird latin-1, die
+        # HMAC-Pruefung saehe ein anderes Token. Also: kein gueltiger Kopf ->
+        # der Kopfsatz entfaellt, die Anfrage endet regulaer mit 401.
+        try:
+            echt_roh = ("Bearer " + echt).encode("latin-1") if echt else b""
+        except UnicodeEncodeError:
+            echt, echt_roh = None, b""
         kopf = list(scope["headers"])
         if echt:
-            kopf[auth_i] = (b"authorization", ("Bearer " + echt).encode("latin-1"))
+            kopf[auth_i] = (b"authorization", echt_roh)
         else:
             del kopf[auth_i]
         scope = dict(scope)

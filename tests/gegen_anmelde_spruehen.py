@@ -48,9 +48,11 @@ PROBEN = [
     ("Meldung bei jedem Fehlversuch", AS,
      '        _sprueh["gemeldet"] = True\n', '        _sprueh["gemeldet"] = False\n'),
     ("Bremse wirkungslos", AS,
-     '    if not spruehlage()["aktiv"]:\n        return\n    loop', '    if True:\n        return\n    loop'),
+     '    if not spruehlage()["aktiv"]:\n        return True\n    loop', '    if True:\n        return True\n    loop'),
     ("Mindestdauer nicht verdrahtet", MAIN,
-     '        await _anmelde_schutz.angleichen(_start)\n', '        pass\n'),
+     # Anker am Login-Rahmen: dieselbe Zeile steht auch in login_windows
+     '        await _anmelde_schutz.angleichen(_start)\n    await _anmeldung_protokollieren(request, resp, "kennwort")',
+     '        pass\n    await _anmeldung_protokollieren(request, resp, "kennwort")'),
     ("Suchfehler wird zu 'nein'", MAIN,
      '        print(f"[AUTH] Vorabpruefung \'{plain}\': Suche gescheitert ({e}) – "\n'
      '              f"pruefe wie bisher nach dem Bind", flush=True)\n        return "unbekannt"',

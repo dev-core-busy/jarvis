@@ -72,6 +72,9 @@ type WSClient struct {
 	OnWakeWordResult  func(transcript string, detected bool)
 	OnVoiceTranscript func(transcript string) // Transkript einer Spracheingabe
 	OnDesktopCommand  func(DesktopCommand)    // Desktop-Steuerungsbefehle vom Backend
+	// Bestaetigung wirksamer Aktionen (bestaetigung.go). Fehlt der Rueckruf,
+	// wird jede Anfrage sofort abgelehnt – nie still zugelassen.
+	OnBestaetigung func(Bestaetigungsanfrage)
 }
 
 func NewWSClient(cfg *Config) *WSClient {
@@ -99,11 +102,14 @@ func (c *WSClient) SendTask(text string, lang string) {
 	if lang == "" {
 		lang = "de"
 	}
-	payload := map[string]string{
+	payload := map[string]interface{}{
 		"type":  "task",
 		"text":  text,
 		"token": c.cfg.SchluesselJetzt(),
 		"lang":  lang,
+		// Diese App zeigt Bestaetigungsdialoge (bestaetigung.go); ohne das Feld
+		// weist der Server wirksame Aktionen als "Client ohne Dialog" ab.
+		"bestaetigung": KannBestaetigen(),
 	}
 	data, _ := json.Marshal(payload)
 	select {
@@ -126,6 +132,7 @@ func (c *WSClient) SendTaskWithTruncate(text string, lang string, truncateUserMs
 		"token":                   c.cfg.SchluesselJetzt(),
 		"lang":                    lang,
 		"truncate_user_msg_index": truncateUserMsgIndex,
+		"bestaetigung":            KannBestaetigen(),
 	}
 	data, _ := json.Marshal(payload)
 	select {
@@ -174,6 +181,21 @@ func (c *WSClient) SendDesktopResult(res DesktopResult) {
 		"data":       res.Data,
 		"error":      res.Error,
 		"exit_code":  res.ExitCode,
+	})
+	select {
+	case c.sendCh <- b:
+	default:
+	}
+}
+
+// SendBestaetigungAntwort beantwortet eine bestaetigung_anfrage. Der Server
+// prueft selbst, dass derselbe Benutzer antwortet, dem die Anfrage gilt.
+func (c *WSClient) SendBestaetigungAntwort(id string, erlaubt bool) {
+	b, _ := json.Marshal(map[string]interface{}{
+		"type":    "bestaetigung_antwort",
+		"token":   c.cfg.SchluesselJetzt(),
+		"id":      id,
+		"erlaubt": erlaubt,
 	})
 	select {
 	case c.sendCh <- b:
@@ -339,6 +361,17 @@ func (c *WSClient) runConn() (verbunden bool, err error) {
 		if msgType == websocket.BinaryMessage {
 			if c.OnTTSAudio != nil {
 				c.OnTTSAudio(data)
+			}
+			continue
+		}
+		// Bestaetigungsanfrage VOR WSMessage abfangen: sie traegt Felder
+		// (id, argumente), deren Typ WSMessage nicht kennt – dort eingefuegt
+		// koennten sie das Dekodieren anderer Nachrichten brechen.
+		if anfrage, ok := parseBestaetigung(data); ok {
+			if c.OnBestaetigung != nil {
+				go c.OnBestaetigung(anfrage)
+			} else {
+				c.SendBestaetigungAntwort(anfrage.ID, false)
 			}
 			continue
 		}

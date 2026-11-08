@@ -21,7 +21,7 @@ _LEGACY_ACTOR = "__cron_ohne_besitzer__"
 
 # Wird von main.py gesetzt
 _agent_manager = None
-_broadcast_fn = None  # async fn(msg: dict) → sendet an alle WS-Clients
+_broadcast_fn = None  # async fn(msg, besitzer=) -> nur Besitzer + Admins (Pentest C3)
 
 
 class JobsUnlesbar(ValueError):
@@ -325,7 +325,7 @@ class CronManager:
                 "event": "started",
                 "job_id": job_id,
                 "label": label,
-            })
+            }, besitzer=(job.get("owner") or ""))
 
         result = "Fehler: AgentManager nicht verfügbar"
         # Status des Laufs, wenn er einen eigenen meldet (Loesungsarchiv);
@@ -444,7 +444,7 @@ class CronManager:
                 "job_id": job_id,
                 "label": label,
                 "result": job["last_result"],
-            })
+            }, besitzer=(job.get("owner") or ""))
 
         return result
 

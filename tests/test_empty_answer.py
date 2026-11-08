@@ -104,8 +104,13 @@ pruefe("_rollback_history" in AGENT[i_empty:i_empty + 1400],
 MAIN = (ROOT / "backend" / "main.py").read_text()
 pruefe("AUTO_RETRY_MAX" in MAIN and "is_final_attempt=_final" in MAIN,
        "automatischer Neuversuch am Aufrufort vorhanden")
-pruefe('outcome in ("ok", "stopped")' in MAIN,
-       "kein Neuversuch nach Erfolg oder Benutzer-Stopp")
+# Die Abbruch-Menge darf wachsen (Pentest C7: "limit" = zu viele gleichzeitige
+# Auftraege); geprueft wird, dass "ok" und "stopped" darin stehen.
+import re as _re
+_m = _re.search(r'outcome in \(([^)]*)\)', MAIN)
+_menge = _m.group(1) if _m else ""
+pruefe('"ok"' in _menge and '"stopped"' in _menge,
+       "kein Neuversuch nach Erfolg oder Benutzer-Stopp", _menge)
 CONFIG = (ROOT / "backend" / "config.py").read_text()
 pruefe("AUTO_RETRY_MAX" in CONFIG and "AUTO_RETRY_DELAY_SEC" in CONFIG,
        "die Schalter sind echte Konfigurationswerte (kein getattr-Phantom)")

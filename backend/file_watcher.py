@@ -21,7 +21,7 @@ _LEGACY_ACTOR = "__trigger_ohne_besitzer__"
 
 # Wird von main.py gesetzt
 _agent_manager = None
-_broadcast_fn = None  # async fn(msg: dict) → sendet an alle WS-Clients
+_broadcast_fn = None  # async fn(msg, besitzer=) -> nur Besitzer + Admins (Pentest C3)
 _loop = None          # asyncio Event-Loop (wird beim Start gespeichert)
 _llm_check_fn = None  # async () -> bool : aktives LLM-Profil erreichbar?
 _wa_send_fn = None     # async (path, method, data) -> dict : WhatsApp-Bridge
@@ -258,7 +258,7 @@ class WatcherManager:
                 "type": "watcher_event", "event": "started",
                 "watcher_id": watcher_id, "label": label,
                 "filepath": filepath, "filename": filename, "event_type": event_type,
-            })
+            }, besitzer=(watcher.get("owner") or ""))
 
         result = ""
         t0 = time.time()
@@ -302,7 +302,7 @@ class WatcherManager:
             await _broadcast_fn({
                 "type": "watcher_event", "event": "finished",
                 "watcher_id": watcher_id, "label": label, "result": watcher["last_result"],
-            })
+            }, besitzer=(watcher.get("owner") or ""))
         return result
 
     # ─── Aktionen ────────────────────────────────────────────────────────────

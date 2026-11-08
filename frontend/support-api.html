@@ -131,7 +131,9 @@
                 <li><strong>Externe Anwendung</strong>: Header <code>X-API-Key: &lt;API-Key&gt;</code> – API-Keys werden in den
                     Einstellungen verwaltet. <code>/query</code>, <code>/summarize</code> sowie die CRM-Lookups
                     (<code>/api/jira/phonenumber</code>, <code>/api/jira/crm-number</code>) akzeptieren API-Keys;
-                    die übrigen Endpunkte erfordern ein Benutzer-Token.</li>
+                    die übrigen Endpunkte erfordern ein Benutzer-Token. Mit Benutzer-Token sind die
+                    CRM-Lookups und <code>/api/jira/passende-tickets</code> nur für Benutzer mit
+                    Jira-Freigabe erreichbar (Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“).</li>
             </ul>
 
             <h4 id="endpoints" style="margin:18px 0 6px;">Endpunkte</h4>
@@ -457,7 +459,9 @@
     <li><strong>External application</strong>: header <code>X-API-Key: &lt;API key&gt;</code> – API keys are managed in the
         settings. <code>/query</code>, <code>/summarize</code> and the CRM lookups
         (<code>/api/jira/phonenumber</code>, <code>/api/jira/crm-number</code>) accept API keys;
-        the remaining endpoints require a user token.</li>
+        the remaining endpoints require a user token. With a user token, the CRM lookups and
+        <code>/api/jira/passende-tickets</code> are only available to users with Jira access
+        (Settings → Security → Permissions, column “Jira”).</li>
 </ul>
 
 <h4 id="endpoints-en" style="margin:18px 0 6px;">Endpoints</h4>

@@ -1150,7 +1150,7 @@
             chip.className = 'uc-attach-chip';
             if (att.type === 'image') {
                 const img = document.createElement('img');
-                img.src = `data:${att.mime_type};base64,${att.data}`;
+                img.src = _dataUrl(att);
                 chip.appendChild(img);
             } else {
                 const ico = document.createElement('span');
@@ -1441,8 +1441,26 @@
     // Alle Bilder der aktuell geöffneten Lightbox
     let _lbAtts = [], _lbIdx = 0, _lbMsg = null;
 
+    // Befund B3 (2026-11): mime_type und data kommen vom ABSENDER und standen
+    // unmaskiert in einem href="…"-Attribut – ein `"` darin war HTML-Injection
+    // im Chat des Empfaengers. Beide Felder werden hier auf ihre Form geprueft
+    // (der Server verwirft ungueltiges base64 zusaetzlich), und Links werden per
+    // DOM gebaut, nicht als Markup.
+    const _MIME_RE = /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i;
+    const _B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+    function _sauberesB64(att) {
+        const d = String((att && att.data) || '');
+        return _B64_RE.test(d) ? d : '';
+    }
     function _dataUrl(att) {
-        return `data:${att.mime_type};base64,${att.data}`;
+        const m = String((att && att.mime_type) || '');
+        const mime = _MIME_RE.test(m) ? m : 'application/octet-stream';
+        return 'data:' + mime + ';base64,' + _sauberesB64(att);
+    }
+    // Download immer als neutraler Datenstrom: ein data:text/html-Link im
+    // Chat waere sonst ein Dokument mit fremdem Inhalt.
+    function _downloadUrl(att) {
+        return 'data:application/octet-stream;base64,' + _sauberesB64(att);
     }
 
     // ── Lightbox ─────────────────────────────────────────────────
@@ -1490,7 +1508,7 @@
         });
         document.getElementById('uc-lb-save')?.addEventListener('click', () => {
             const att = _lbAtts[_lbIdx];
-            const a = Object.assign(document.createElement('a'), {href: _dataUrl(att), download: att.name || 'bild'});
+            const a = Object.assign(document.createElement('a'), {href: _downloadUrl(att), download: att.name || 'bild'});
             a.click();
         });
         document.getElementById('uc-lb-fwd')?.addEventListener('click', () => {
@@ -1525,7 +1543,7 @@
     (function initCtxMenu() {
         document.getElementById('uc-ctx-save-btn')?.addEventListener('click', () => {
             if (!_ctxAtt) return;
-            const a = Object.assign(document.createElement('a'), {href: _dataUrl(_ctxAtt), download: _ctxAtt.name || 'datei'});
+            const a = Object.assign(document.createElement('a'), {href: _downloadUrl(_ctxAtt), download: _ctxAtt.name || 'datei'});
             a.click();
             hideCtxMenu();
         });
@@ -1668,13 +1686,20 @@
                 <div class="uc-fc-info" style="flex:1;min-width:0;">
                     <span class="uc-fc-name" title="${escHtml(att.name||'')}">${escHtml(att.name||window.t('userchat.file'))}</span>
                     <span class="uc-fc-badge">${escHtml(badge)}</span>
-                </div>
-                <a class="uc-fc-dl" href="${src}" download="${escHtml(att.name||'datei')}" title="${escHtml(window.t('userchat.download'))}">⬇</a>`;
+                </div>`;
+            // Link per DOM (Befund B3): Adresse und Dateiname sind Fremdeingabe
+            // und gehoeren nicht in Markup.
+            const _dl = document.createElement('a');
+            _dl.className = 'uc-fc-dl';
+            _dl.href = _downloadUrl(att);
+            _dl.download = att.name || 'datei';
+            _dl.title = window.t('userchat.download');
+            _dl.textContent = '⬇';
+            wrap.appendChild(_dl);
             // BSI H4 (CSP ohne Inline-Skript, 2026-10-04): stopPropagation
             // frueher als onclick-Attribut - jetzt als Listener direkt am Link
             // (gleiche Phase: Ziel-Element, vor jedem Vorfahren-Listener).
-            const _dl = wrap.querySelector('a.uc-fc-dl');
-            if (_dl) _dl.addEventListener('click', e => e.stopPropagation());
+            _dl.addEventListener('click', e => e.stopPropagation());
             wrap.addEventListener('contextmenu', e => showCtxMenu(e, att, msg));
             addLongPress(wrap, e => showCtxMenu(e, att, msg));
         }

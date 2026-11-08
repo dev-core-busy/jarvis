@@ -44,18 +44,16 @@ unmittelbar vor dem Lauf daraus erzeugt.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import os
 import re
 import secrets
-import socket
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
 
 from backend import documents as _documents
 from backend import fremdtext
+from backend import netz_ziel as _netz_ziel
 from backend import short_tracks as st
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -346,122 +344,79 @@ def _eigene_adressen() -> set[str]:
     """Adressen DIESES Servers – gecacht, fail-safe leer.
 
     GEMESSEN AM 2026-08-18 auf DEV: die oeffentliche Adresse des Servers selbst
-    (dort 10.0.0.1) fiel durch die Bereichspruefung unten, weil sie eben
-    NICHT privat ist. Damit waere sie der Weg zurueck auf den eigenen Rechner –
-    und zwar an der Firewall vorbei: Pakete an die eigene Adresse laufen ueber
-    ``lo``, und die Loopback-Ausnahme der INPUT-Kette laesst sie durch. Ein
-    lokal lauschender Dienst waere also ueber die oeffentliche IP erreichbar,
-    obwohl die Firewall seinen Port von aussen sperrt.
+    fiel durch die Bereichspruefung, weil sie eben NICHT privat ist. Damit waere
+    sie der Weg zurueck auf den eigenen Rechner – an der Firewall vorbei (Pakete
+    an die eigene Adresse laufen ueber ``lo``). Ermittelt wird sie seit 2026-11
+    in ``netz_ziel.eigene_adressen`` (eine Stelle fuer alle Abrufwege); der
+    Modul-Cache hier bleibt, damit Tests ihn setzen koennen.
     """
     global _eigene_ips_cache
-    if _eigene_ips_cache is not None:
-        return _eigene_ips_cache
-    raus: set[str] = set()
-    try:
-        for inf in socket.getaddrinfo(socket.gethostname(), None):
-            raus.add(inf[4][0].split("%")[0])
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        # Kein Paket: ``connect`` auf einem UDP-Socket waehlt nur die Route und
-        # verraet damit die primaere Adresse dieses Rechners.
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(("1.1.1.1", 1))
-            raus.add(s.getsockname()[0])
-        finally:
-            s.close()
-    except Exception:  # noqa: BLE001
-        pass
-    _eigene_ips_cache = raus
-    return raus
+    if _eigene_ips_cache is None:
+        _eigene_ips_cache = set(_netz_ziel.eigene_adressen())
+    return _eigene_ips_cache
 
 
-def _ziel_erlaubt(host: str) -> None:
-    """Wirft ``UrlFehler``, wenn der Host auf eine interne Adresse zeigt.
+def _ziel_erlaubt(host: str) -> list[str]:
+    """Gibt die geprueften Adressen zurueck; wirft ``UrlFehler``, wenn der Host
+    auf eine interne Adresse zeigt.
 
     OHNE DIESE PRUEFUNG WAERE DER ENDPUNKT EIN PORTSCANNER: der Server holt die
     Adresse, also koennte ein Benutzer ``http://127.0.0.1:9081`` oder
     ``http://169.254.169.254/`` (Cloud-Metadaten) ablegen und am Ergebnis
-    ablesen, was dort antwortet. Geprueft werden ALLE aufgeloesten Adressen –
-    ein Name kann auf mehrere zeigen.
-
-    ⚠ WAS DAS NICHT LEISTET: in einem Netz mit OEFFENTLICHEN Adressen (so im
-    Hausnetz) sind andere Server des Hauses per IP-Bereich nicht von fremden
-    Servern zu unterscheiden. Wer das ausschliessen will, braucht eine
-    Ziel-Whitelist – das waere eine eigene Entscheidung und ist bewusst nicht
-    gebaut. Die eigene Adresse des Servers ist dagegen gesperrt (siehe
-    ``_eigene_adressen``), weil sie an der Firewall vorbei auf lokal lauschende
-    Dienste zeigt.
+    ablesen, was dort antwortet. Die Pruefung selbst (ALLE aufgeloesten
+    Adressen, eigene Adressen gesperrt) steht in ``netz_ziel.ziel_pruefen`` –
+    hier nur die Meldungstexte dieses Bereichs.
     """
-    if not host:
-        raise UrlFehler("Die Adresse enthaelt keinen Servernamen.")
     try:
-        infos = socket.getaddrinfo(host, None)
-    except Exception as e:  # noqa: BLE001
-        raise UrlFehler("Der Servername '%s' ist nicht aufloesbar (%s)." % (host, e))
-    eigene = _eigene_adressen()
-    for inf in infos:
-        adr = inf[4][0]
-        rein = adr.split("%")[0]
-        if rein in eigene:
-            raise UrlFehler(
-                "Diese Adresse ist der Jarvis-Server selbst (%s). Aus dem Bereich "
-                "Short Tracks lassen sich nur fremde, oeffentliche Seiten holen." % rein)
-        try:
-            ip = ipaddress.ip_address(rein)
-        except ValueError:
-            continue
-        if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-            raise UrlFehler(
-                "Diese Adresse zeigt in das interne Netz (%s). Aus dem Bereich "
-                "Short Tracks lassen sich nur oeffentliche Seiten holen." % adr)
+        return _netz_ziel.ziel_pruefen(host, _eigene_adressen())
+    except _netz_ziel.ZielFehler as e:
+        text = str(e)
+        if "Jarvis-Server selbst" in text:
+            text = text.replace("Es lassen sich nur fremde, oeffentliche Seiten holen.",
+                                "Aus dem Bereich Short Tracks lassen sich nur fremde, "
+                                "oeffentliche Seiten holen.")
+        else:
+            text = text.replace("Es lassen sich nur oeffentliche Seiten holen.",
+                                "Aus dem Bereich Short Tracks lassen sich nur "
+                                "oeffentliche Seiten holen.")
+        raise UrlFehler(text)
 
 
 async def url_holen(url: str) -> tuple[str, str, str]:
     """Holt eine Seite und gibt ``(titel, text, endgueltige_url)`` zurueck.
 
-    Redirects werden MANUELL verfolgt (hoechstens ``URL_SPRUENGE``) und JEDES
-    Ziel wird geprueft. ``follow_redirects=True`` waere hier falsch: eine
-    oeffentliche Adresse darf sonst per Weiterleitung auf ``169.254.169.254``
-    zeigen und die Schranke oben waere wirkungslos.
+    Ueber ``netz_ziel.sicher_holen``: Weiterleitungen MANUELL (hoechstens
+    ``URL_SPRUENGE``), JEDES Ziel mit ``_ziel_erlaubt`` geprueft und die
+    Verbindung auf die gepruefte Adresse festgenagelt (DNS-Rebinding – bis
+    2026-11 fehlte das hier: zwischen Pruefung und Verbindung konnte der Name
+    auf eine interne Adresse umspringen).
     """
     try:
-        import httpx  # noqa: PLC0415
+        import httpx  # noqa: PLC0415,F401
     except ImportError:
         raise UrlFehler("httpx ist nicht installiert – URLs koennen nicht geholt werden.")
     from backend.web_extractor import _html_to_text  # noqa: PLC0415
 
-    ziel = (url or "").strip()
     kopf = {"User-Agent": "Mozilla/5.0 (compatible; JarvisBot/1.0; +https://jarvis-ai.info)",
             "Accept": "text/html,text/plain,*/*",
             "Accept-Language": "de,en;q=0.7"}
-    async with httpx.AsyncClient(follow_redirects=False, timeout=25.0) as client:
-        for _ in range(URL_SPRUENGE + 1):
-            p = urlparse(ziel)
-            if p.scheme not in ("http", "https"):
-                raise UrlFehler("Nur http- und https-Adressen werden geholt "
-                                "(erhalten: '%s')." % (p.scheme or "ohne Schema"))
-            _ziel_erlaubt(p.hostname or "")
-            antwort = await client.get(ziel, headers=kopf)
-            if antwort.status_code in (301, 302, 303, 307, 308):
-                weiter = antwort.headers.get("location") or ""
-                if not weiter:
-                    raise UrlFehler("Weiterleitung ohne Ziel (HTTP %d)." % antwort.status_code)
-                ziel = str(antwort.url.join(weiter))
-                continue
-            if antwort.status_code >= 400:
-                raise UrlFehler("Die Seite antwortete mit HTTP %d." % antwort.status_code)
-            roh = antwort.content[:URL_MAX_BYTES]
-            typ = (antwort.headers.get("content-type") or "").lower()
-            inhalt = roh.decode(antwort.encoding or "utf-8", errors="replace")
-            if "html" in typ or inhalt.lstrip()[:200].lower().startswith(("<!doctype", "<html")):
-                titel, text = _html_to_text(inhalt)
-            else:
-                titel, text = ziel, inhalt
-            return titel, text, ziel
-    raise UrlFehler("Zu viele Weiterleitungen (mehr als %d)." % URL_SPRUENGE)
+    try:
+        antwort = await _netz_ziel.sicher_holen(
+            (url or "").strip(), kopf=kopf, timeout=25.0,
+            max_spruenge=URL_SPRUENGE, pruefer=_ziel_erlaubt)
+    except _netz_ziel.ZielFehler as e:
+        raise UrlFehler(str(e))
+    except httpx.HTTPStatusError as e:
+        raise UrlFehler("Die Seite antwortete mit HTTP %d." % e.response.status_code)
+    ziel = str(antwort.url)
+    roh = antwort.content[:URL_MAX_BYTES]
+    typ = (antwort.headers.get("content-type") or "").lower()
+    inhalt = roh.decode(antwort.encoding or "utf-8", errors="replace")
+    if "html" in typ or inhalt.lstrip()[:200].lower().startswith(("<!doctype", "<html")):
+        titel, text = _html_to_text(inhalt)
+    else:
+        titel, text = ziel, inhalt
+    return titel, text, ziel
 
 
 # ── Auftragsbau ─────────────────────────────────────────────────────────────

@@ -6,8 +6,11 @@
       in der Vorgabe NICHT (mit Meldung), nur mit ``JARVIS_AD_GRUPPE_STRENG=0``
       wieder (Notschalter, ebenfalls mit Meldung); ein blosser Name
       trifft wie bisher ueber den CN; beide Aufrufer benutzen DIESE Regel.
-  [2] REGEL (AST): jede Anmelde-Abhaengigkeit ``require_*``, die selbst ein
-      Token prueft, weist gesperrte Konten ab (``security_guard.is_blocked``).
+  [2] REGEL (AST): jede Anmelde-Abhaengigkeit ``require_*``, die – selbst oder
+      ueber Helfer – Anmeldedaten aufloest (Token, Abruf- oder
+      Delegations-Schluessel), weist gesperrte Konten ab
+      (``security_guard.is_blocked``) und prueft die Anmeldeberechtigung;
+      ein Delegations-Schluessel endet mit der Abmelde-Epoche (A5, 2026-11-05).
   [3] ``_user_is_admin`` und die Revalidierung kennen keinen Namens-Freibrief
       fuer ``root`` mehr (ein gleichnamiges AD-Konto war sonst Admin).
 Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
@@ -80,17 +83,65 @@ for n in ("_gruppen_passen", "_member_of_any_group"):
     alt = [c for c in ast.walk(FN[n]) if isinstance(c, ast.Call) and getattr(c.func, "attr", "") == "startswith"]
     check("%s benutzt _gruppe_passt (kein eigener startswith-Vergleich)" % n, rufe and not alt)
 
-print("\n[2] Sperre an jeder Token-pruefenden Abhaengigkeit")
+print("\n[2] Sperre an jeder Anmeldedaten-pruefenden Abhaengigkeit")
+# Bis 2026-11-05 zaehlte hier nur, wer verify_token SELBST ruft. Der
+# Delegations-Schluessel (require_claudesub_key) loest seine Identitaet ueber
+# einen HELFER und einen ANDEREN Aufloeser auf (benutzer_zu_schluessel) – er
+# fiel durch die Regel und ueberlebte Kontosperre, Entzug und Zwangsabmeldung
+# (Befund A5). Jetzt: jeder Aufloeser von Anmeldedaten, auch ueber Helfer bis
+# Tiefe 3. Die Sperre muss in der Abhaengigkeit selbst stehen ODER in JEDER
+# Funktion, die dort Anmeldedaten aufloest.
+AUFLOESER = {"verify_token", "benutzer_zu_schluessel", "_query_benutzer", "pruefen_voll"}
+
+
+def _direkt(fn):
+    namen = set()
+    for c in ast.walk(fn):
+        if isinstance(c, ast.Call):
+            if isinstance(c.func, ast.Name):
+                namen.add(c.func.id)
+            elif isinstance(c.func, ast.Attribute):
+                namen.add(c.func.attr)
+    return namen
+
+
+DIREKT = {n: _direkt(f) for n, f in FN.items()}
+
+
+def _huelle(name, tiefe=3):
+    gesehen, rand = {name}, {name}
+    for _ in range(tiefe):
+        rand = {c for n in rand for c in DIREKT[n]
+                if c in FN and c not in gesehen and c not in AUFLOESER}
+        gesehen |= rand
+    return gesehen
+
+
 geprueft = 0
-for name, fn in FN.items():
+ueber_helfer = []
+for name in sorted(FN):
     if not name.startswith("require_"):
         continue
-    if not any(isinstance(c, ast.Call) and getattr(c.func, "id", "") == "verify_token" for c in ast.walk(fn)):
+    orte = sorted(f for f in _huelle(name) if DIREKT[f] & AUFLOESER)
+    if not orte:
         continue
     geprueft += 1
-    sperrt = any(isinstance(c, ast.Call) and getattr(c.func, "attr", "") == "is_blocked" for c in ast.walk(fn))
-    check("%s weist gesperrte Konten ab" % name, sperrt)
-check("(Positivkontrolle) Token-pruefende Abhaengigkeiten gefunden (%d)" % geprueft, geprueft >= 4)
+    if orte != [name]:
+        ueber_helfer.append(name)
+    for pflicht, was in (("is_blocked", "weist gesperrte Konten ab"),
+                         ("_login_still_allowed", "prueft die Anmeldeberechtigung")):
+        ok = pflicht in DIREKT[name] or all(pflicht in DIREKT[f] for f in orte)
+        check("%s %s (Aufloesung in %s)" % (name, was, ", ".join(orte)), ok)
+    # Ein Aufloeser ohne eingebauten Widerruf (verify_token prueft die Epoche
+    # selbst) muss die Widerrufs-Epoche an der Fundstelle pruefen.
+    for f in orte:
+        if "benutzer_zu_schluessel" in DIREKT[f]:
+            check("%s: Schluessel endet mit der Abmelde-Epoche (_epoche_widerrufen)" % f,
+                  "_epoche_widerrufen" in DIREKT[f])
+check("(Positivkontrolle) Anmeldedaten-pruefende Abhaengigkeiten gefunden (%d)" % geprueft,
+      geprueft >= 4)
+check("(Positivkontrolle) mindestens eine loest ueber einen Helfer auf (%s)"
+      % ", ".join(ueber_helfer), bool(ueber_helfer))
 
 print("\n[3] kein Namens-Freibrief fuer root")
 for n in ("_user_is_admin",):

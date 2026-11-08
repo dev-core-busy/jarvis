@@ -18,6 +18,13 @@
 (function () {
     'use strict';
 
+    // Maskierung fuer ALLES, was aus Skill-Manifesten, dem OpenClaw-Markt,
+    // Agenten-Meldungen oder Benutzereingaben kommt (Pentest-Vorbereitung
+    // 2026-11-05): ein importiertes Manifest mit `<img onerror=...>` im Namen
+    // lief sonst auf der Admin-Seite. Dazu ' fuer Attribute in '...'.
+    const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
     // ─── Icon-Map ─────────────────────────────────────────────────────
     const ICON_MAP = {
         terminal: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>',
@@ -268,20 +275,20 @@
             item.innerHTML = `
                 <span class="sk-item-icon">${icon}</span>
                 <div class="sk-item-info">
-                    <span class="sk-item-name">${skill.name}</span>
+                    <span class="sk-item-name">${_esc(skill.name)}</span>
                     ${skill.enabled ? '' : `<span class="sk-badge-off">${window.t('skills.disabled')}</span>`}
                     ${isSystem ? '<span class="sk-badge-sys">System</span>' : ''}
                     ${isOpenClaw ? '<span class="sk-badge-oc">OpenClaw</span>' : ''}
-                    <span class="sk-item-cat">${catLabel}</span>
+                    <span class="sk-item-cat">${_esc(catLabel)}</span>
                     <span class="sk-item-tools">${toolCount} Tool${toolCount !== 1 ? 's' : ''}</span>
-                    <span class="sk-item-desc">${skill.description || ''}</span>
-                    ${fehlt ? `<span class="sk-badge-missing" title="${fehltListe}">${window.t('skills.deps_missing')}</span>` : ''}
+                    <span class="sk-item-desc">${_esc(skill.description || '')}</span>
+                    ${fehlt ? `<span class="sk-badge-missing" title="${_esc(fehltListe)}">${window.t('skills.deps_missing')}</span>` : ''}
                 </div>
                 <div class="sk-item-actions">
-                    ${fehlt ? `<button class="sk-btn sk-btn-fix" title="${window.t('skills.deps_install')}: ${fehltListe}">⤓</button>` : ''}
+                    ${fehlt ? `<button class="sk-btn sk-btn-fix" title="${window.t('skills.deps_install')}: ${_esc(fehltListe)}">⤓</button>` : ''}
                     <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
                     ${hasConfig
-                        ? `<button class="sk-btn sk-btn-cfg" title="${cfgTitle}">${SVG_CFG}</button>`
+                        ? `<button class="sk-btn sk-btn-cfg" title="${_esc(cfgTitle)}">${SVG_CFG}</button>`
                         : '<span class="sk-btn sk-btn-ghost" aria-hidden="true"></span>'}
                     <label class="skill-toggle" title="${isSystem ? 'System-Skill' : 'An / Aus'}">
                         <input type="checkbox" ${skill.enabled ? 'checked' : ''}>
@@ -409,9 +416,9 @@
             item.innerHTML = `
                 <span class="sk-item-icon sk-item-icon-dim">${icon}</span>
                 <div class="sk-item-info">
-                    <span class="sk-item-name">${skill.name}</span>
-                    <span class="sk-item-cat">${catLabel}</span>
-                    <span class="sk-item-desc">${skill.description || ''}</span>
+                    <span class="sk-item-name">${_esc(skill.name)}</span>
+                    <span class="sk-item-cat">${_esc(catLabel)}</span>
+                    <span class="sk-item-desc">${_esc(skill.description || '')}</span>
                 </div>
                 <div class="sk-item-actions">
                     <button class="sk-btn sk-btn-info" title="${window.t('skills.show_info')}">${SVG_INFO}</button>
@@ -549,10 +556,10 @@
                 resultsEl.innerHTML = skills.map((s, i) => `
                     <div class="sk-oc-card">
                         <div class="sk-oc-card-info">
-                            <strong>${s.name || 'Unbenannt'}</strong>
-                            <span class="sk-oc-card-desc">${s.description || ''}</span>
-                            ${s.author ? `<span class="sk-oc-card-meta">von ${s.author}</span>` : ''}
-                            ${s.stars != null ? `<span class="sk-oc-card-meta">⭐ ${s.stars}</span>` : ''}
+                            <strong>${_esc(s.name || 'Unbenannt')}</strong>
+                            <span class="sk-oc-card-desc">${_esc(s.description || '')}</span>
+                            ${s.author ? `<span class="sk-oc-card-meta">von ${_esc(s.author)}</span>` : ''}
+                            ${s.stars != null ? `<span class="sk-oc-card-meta">⭐ ${_esc(s.stars)}</span>` : ''}
                         </div>
                         <button class="sk-oc-import-btn" data-idx="${i}">📥 Importieren</button>
                     </div>`).join('');
@@ -663,10 +670,10 @@
                                      msg.startsWith('⏹') || msg.startsWith('⚡');
 
                     const type = isTool ? 'tool' : (isSystem ? 'sys' : 'agent');
-                    addMsg(`<span>${msg}</span>`, type);
+                    addMsg(`<span>${_esc(msg)}</span>`, type);
 
                 } else if (data.type === 'error') {
-                    addMsg(`❌ ${data.message || 'Fehler'}`, 'error');
+                    addMsg(`❌ ${_esc(data.message || 'Fehler')}`, 'error');
                 }
             };
             window.addEventListener('jarvis-ws-message', wsListener);
@@ -683,7 +690,7 @@
             const sendFollowup = () => {
                 const text = inputEl.value.trim();
                 if (!text) return;
-                addMsg(`<span>${text}</span>`, 'user');
+                addMsg(`<span>${_esc(text)}</span>`, 'user');
                 inputEl.value = '';
                 if (typeof window.sendJarvisTask === 'function') {
                     window.sendJarvisTask(text);
@@ -740,9 +747,9 @@
                     <div class="sk-info-tools">
                         ${tools.map(t => `
                         <div class="sk-info-tool">
-                            <code class="sk-info-tool-name">${t.name}</code>
-                            ${t.label && t.label !== t.name ? `<span class="sk-info-tool-label">${t.label}</span>` : ''}
-                            ${t.desc ? `<p class="sk-info-tool-desc">${t.desc}</p>` : ''}
+                            <code class="sk-info-tool-name">${_esc(t.name)}</code>
+                            ${t.label && t.label !== t.name ? `<span class="sk-info-tool-label">${_esc(t.label)}</span>` : ''}
+                            ${t.desc ? `<p class="sk-info-tool-desc">${_esc(t.desc)}</p>` : ''}
                         </div>`).join('')}
                     </div>
                 </div>`
@@ -753,7 +760,7 @@
                 ? `<div class="sk-info-section">
                     <div class="sk-info-section-title">Beispiel-Prompts</div>
                     <ul class="sk-info-use-cases">
-                        ${useCases.map(uc => `<li>${uc}</li>`).join('')}
+                        ${useCases.map(uc => `<li>${_esc(uc)}</li>`).join('')}
                     </ul>
                 </div>`
                 : '';
@@ -762,7 +769,7 @@
             const setupHTML = help.setup
                 ? `<div class="sk-info-section sk-info-section-setup">
                     <div class="sk-info-section-title">${window.t('skills.setup')}</div>
-                    <p class="sk-info-section-text">${help.setup}</p>
+                    <p class="sk-info-section-text">${_esc(help.setup)}</p>
                 </div>`
                 : '';
 
@@ -770,7 +777,7 @@
             const notesHTML = help.notes
                 ? `<div class="sk-info-section sk-info-section-notes">
                     <div class="sk-info-section-title">${window.t('skills.notes')}</div>
-                    <p class="sk-info-section-text">${help.notes}</p>
+                    <p class="sk-info-section-text">${_esc(help.notes)}</p>
                 </div>`
                 : '';
 
@@ -786,22 +793,22 @@
                     <div class="sk-info-header">
                         <span class="sk-info-icon-lg">${iconLg}</span>
                         <div class="sk-info-title-group">
-                            <span class="sk-info-name">${skill.name}</span>
+                            <span class="sk-info-name">${_esc(skill.name)}</span>
                             <div class="sk-info-badges">
                                 ${isSystem ? '<span class="sk-badge-sys">System</span>' : ''}
-                                <span class="sk-info-cat">${catLabel}</span>
+                                <span class="sk-info-cat">${_esc(catLabel)}</span>
                             </div>
                         </div>
                         <button class="sk-info-close" title="${window.t('common.close')}">✕</button>
                     </div>
                     <div class="sk-info-body">
-                        <p class="sk-info-details">${details}</p>
+                        <p class="sk-info-details">${_esc(details)}</p>
                         ${toolsHTML}
                         ${useCasesHTML}
                         ${setupHTML}
                         ${notesHTML}
                     </div>
-                    ${footerParts.length ? `<div class="sk-info-footer">${footerParts.join(' · ')}</div>` : ''}
+                    ${footerParts.length ? `<div class="sk-info-footer">${_esc(footerParts.join(' · '))}</div>` : ''}
                 </div>`;
 
             document.body.appendChild(overlay);
@@ -879,7 +886,7 @@
             overlay.className = 'skill-config-overlay';
             overlay.innerHTML = `
                 <div class="skill-config-dialog">
-                    <h3>${window.t('skills.purge_title')}: ${name}</h3>
+                    <h3>${window.t('skills.purge_title')}: ${_esc(name)}</h3>
                     <form id="sk-purge-form">
                         <div class="form-group">
                             <label class="checkbox-group">
@@ -970,7 +977,7 @@
             const section = (title, items) => {
                 if (!items || !items.length) return;
                 rows.push(`<div class="sk-info-section-title">${title}</div>`);
-                rows.push(`<ul class="sk-info-use-cases">${items.map(i => `<li>${i}</li>`).join('')}</ul>`);
+                rows.push(`<ul class="sk-info-use-cases">${items.map(i => `<li>${_esc(i)}</li>`).join('')}</ul>`);
             };
             section(window.t('skills.purge_report_removed'), report.removed_packages);
             section(window.t('skills.purge_report_kept'),
@@ -983,7 +990,7 @@
             overlay.className = 'skill-config-overlay';
             overlay.innerHTML = `
                 <div class="skill-config-dialog">
-                    <h3>${window.t('skills.purge_title')}: ${name}</h3>
+                    <h3>${window.t('skills.purge_title')}: ${_esc(name)}</h3>
                     <div class="sk-info-section">${rows.join('')}</div>
                     <div class="modal-actions">
                         <button class="btn-primary" id="sk-purge-report-close">${window.t('common.close')}</button>
@@ -1000,7 +1007,7 @@
             overlay.className = 'skill-config-overlay';
             overlay.innerHTML = `
                 <div class="skill-config-dialog">
-                    <h3>⏳ ${window.t('skills.installing').replace('{name}', name)}</h3>
+                    <h3>⏳ ${window.t('skills.installing').replace('{name}', _esc(name))}</h3>
                     <pre id="sk-install-log" style="max-height:260px;overflow:auto;
                         background:var(--bg-glass);color:var(--text-secondary);
                         border-radius:8px;padding:10px;font-size:0.78em;
@@ -1227,26 +1234,27 @@
             let formHTML = '';
             for (const [key, def] of Object.entries(schema)) {
                 const val   = currentConfig[key] !== undefined ? currentConfig[key] : (def.default || '');
-                const label = def.label || key;
+                const label = _e(def.label || key);
+                const nameAttr = _e(key);
                 const hint  = def.description ? `<small class="config-hint">${_e(def.description)}</small>` : '';
                 if (def.type === 'boolean') {
-                    formHTML += `<div class="form-group"><label class="checkbox-group"><input type="checkbox" name="${key}" ${val ? 'checked' : ''}><span>${label}</span></label>${hint}</div>`;
+                    formHTML += `<div class="form-group"><label class="checkbox-group"><input type="checkbox" name="${nameAttr}" ${val ? 'checked' : ''}><span>${label}</span></label>${hint}</div>`;
                 } else if (def.type === 'number') {
-                    formHTML += `<div class="form-group"><label>${label}</label><input type="number" name="${key}" value="${_e(val)}" class="config-input">${hint}</div>`;
+                    formHTML += `<div class="form-group"><label>${label}</label><input type="number" name="${nameAttr}" value="${_e(val)}" class="config-input">${hint}</div>`;
                 } else if (Array.isArray(def.enum) && def.enum.length) {
                     // Auswahlliste (z.B. Avatar-Grafik/Position)
                     const opts = def.enum.map(o => `<option value="${_e(o)}"${String(o) === String(val) ? ' selected' : ''}>${_e(o)}</option>`).join('');
-                    formHTML += `<div class="form-group"><label>${label}</label><select name="${key}" class="config-input">${opts}</select>${hint}</div>`;
+                    formHTML += `<div class="form-group"><label>${label}</label><select name="${nameAttr}" class="config-input">${opts}</select>${hint}</div>`;
                 } else if (def.type === 'text') {
                     // Mehrzeiliges Feld (z.B. eigene Antworten des Avatars)
-                    formHTML += `<div class="form-group"><label>${label}</label><textarea name="${key}" rows="6" class="config-input" style="resize:vertical;font-family:inherit;">${_e(val)}</textarea>${hint}</div>`;
+                    formHTML += `<div class="form-group"><label>${label}</label><textarea name="${nameAttr}" rows="6" class="config-input" style="resize:vertical;font-family:inherit;">${_e(val)}</textarea>${hint}</div>`;
                 } else {
-                    formHTML += `<div class="form-group"><label>${label}</label><input type="text" name="${key}" value="${_e(val)}" class="config-input">${hint}</div>`;
+                    formHTML += `<div class="form-group"><label>${label}</label><input type="text" name="${nameAttr}" value="${_e(val)}" class="config-input">${hint}</div>`;
                 }
             }
             overlay.innerHTML = `
                 <div class="skill-config-dialog">
-                    <h3>${window.t('skills.config_title').replace('{name}', name)}</h3>
+                    <h3>${window.t('skills.config_title').replace('{name}', _esc(name))}</h3>
                     <form id="skill-config-form">${formHTML}</form>
                     <div class="modal-actions">
                         <button class="btn-primary" id="btn-save-skill-config">${window.t('common.save')}</button>

@@ -83,30 +83,32 @@ class SearchImageTool(BaseTool):
         if not urls:
             return f"HINWEIS_AN_NUTZER: Es wurde kein Bild zu '{query}' gefunden."
 
-        import httpx
+        # Die Ergebnis-Adressen kommen aus einer FREMDEN Antwort (Suchindex) –
+        # geholt wird ueber die SSRF-Schranke (netz_ziel): keine internen Ziele,
+        # jede Weiterleitung neu geprueft, Verbindung festgenagelt.
+        from backend import netz_ziel
         _IMG_DIR.mkdir(parents=True, exist_ok=True)
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True,
-                                     headers={"User-Agent": _UA}) as client:
-            for url in urls:
-                try:
-                    resp = await client.get(url)
-                    if resp.status_code != 200:
-                        continue
-                    mime = resp.headers.get("content-type", "").split(";")[0].strip().lower()
-                    ext = _EXT_BY_MIME.get(mime)
-                    if not ext:
-                        continue
-                    if len(resp.content) > 10 * 1024 * 1024 or len(resp.content) < 200:
-                        continue
-                    fname = f"{uuid.uuid4().hex}.{ext}"
-                    (_IMG_DIR / fname).write_bytes(resp.content)
-                    local = f"/api/generated/{fname}"
-                    record_task_image(_IMG_DIR / fname, local)
-                    return (
-                        "BILD_GEFUNDEN. Gib in deiner finalen Antwort EXAKT die folgende "
-                        "Markdown-Bildreferenz unveraendert aus (mit einem kurzen Satz), damit das "
-                        f"Bild angezeigt wird:\n\n![{query[:80]}]({local})"
-                    )
-                except Exception:
+        for url in urls:
+            try:
+                resp = await netz_ziel.sicher_holen(url, kopf={"User-Agent": _UA},
+                                                    timeout=20.0)
+                if resp.status_code != 200:
                     continue
+                mime = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+                ext = _EXT_BY_MIME.get(mime)
+                if not ext:
+                    continue
+                if len(resp.content) > 10 * 1024 * 1024 or len(resp.content) < 200:
+                    continue
+                fname = f"{uuid.uuid4().hex}.{ext}"
+                (_IMG_DIR / fname).write_bytes(resp.content)
+                local = f"/api/generated/{fname}"
+                record_task_image(_IMG_DIR / fname, local)
+                return (
+                    "BILD_GEFUNDEN. Gib in deiner finalen Antwort EXAKT die folgende "
+                    "Markdown-Bildreferenz unveraendert aus (mit einem kurzen Satz), damit das "
+                    f"Bild angezeigt wird:\n\n![{query[:80]}]({local})"
+                )
+            except Exception:
+                continue
         return f"HINWEIS_AN_NUTZER: Gefundene Bilder zu '{query}' konnten nicht geladen werden."

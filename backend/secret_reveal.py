@@ -213,6 +213,60 @@ def skill_config_maskiert(cfg: dict) -> tuple[dict, list]:
     return _geh(dict(cfg or {}), ""), gesetzt
 
 
+def skill_config_fuer_liste(cfg) -> dict:
+    """Skill-Konfiguration fuer LISTEN-Antworten (``GET /api/skills``).
+
+    Strenger als ``skill_config_maskiert``: auch Listen werden durchsucht, und
+    ein Geheimfeld wird unabhaengig vom Typ geleert (auch ein Objekt oder eine
+    Zahl unter ``password``). Das geht hier, weil aus der Liste nie
+    zurueckgeschrieben wird – die Index-Verschiebung, die bei
+    ``skill_config_maskiert`` gegen Listen spricht, gibt es hier nicht.
+
+    WARUM (Pentest-Vorbereitung 2026-11-05, auf DEV gemessen): ``list_skills``
+    gab ``state["config"]`` ROH heraus, und ``GET /api/skills`` haengt an
+    ``require_auth`` – jeder angemeldete Benutzer las Jira-/Confluence-Token,
+    Google-Client-Secret und IBS-API-Key im Klartext. Die Detail-Route
+    ``/api/skills/{name}/config`` war seit 2026-08-02 maskiert, die Liste
+    daneben nicht.
+    """
+    def _geh(o):
+        if isinstance(o, dict):
+            aus = {}
+            for k, v in o.items():
+                if _geheimfeld_name(k):
+                    aus[k] = ""
+                else:
+                    aus[k] = _geh(v)
+            return aus
+        if isinstance(o, list):
+            return [_geh(x) for x in o]
+        return o
+    return _geh(cfg) if isinstance(cfg, dict) else {}
+
+
+def skills_liste_fuer(skills, ist_admin: bool) -> list:
+    """Skill-Liste fuer die Antwort von ``GET /api/skills``.
+
+    Administratoren bekommen die Konfiguration GEHEIMNISFREI (auch wenn der
+    Aufrufer ``list_skills`` umgeht und rohe Eintraege uebergibt – die
+    Maskierung laeuft hier noch einmal, die Liste ist die Grenze nach aussen);
+    alle anderen gar keine. Kein Frontend liest ``config`` aus der Liste
+    (Formulare holen sie ueber die Admin-Route ``/api/skills/{name}/config``),
+    Nicht-Administratoren brauchen sie also nicht.
+    """
+    aus = []
+    for s in skills or []:
+        if not isinstance(s, dict):
+            continue
+        e = dict(s)
+        if ist_admin and "config" in e:
+            e["config"] = skill_config_fuer_liste(e.get("config"))
+        else:
+            e.pop("config", None)
+        aus.append(e)
+    return aus
+
+
 def leere_geheimfelder_behalten(neu: dict, alt: dict) -> dict:
     """Ein leer gesendetes Geheimfeld heisst "unveraendert": den gespeicherten
     Wert einsetzen. Gilt auch in verschachtelten Objekten (gleicher Pfad)."""
@@ -418,5 +472,6 @@ __all__ = [
     "MAX_JE_STUNDE", "EINSTELLUNG_ERLAUBT",
     "drossel_ok", "benutzer_quelle", "mount", "einstellung",
     "profil", "agentkey", "skill", "webdav",
-    "skill_config_maskiert", "leere_geheimfelder_behalten",
+    "skill_config_maskiert", "skill_config_fuer_liste", "skills_liste_fuer",
+    "leere_geheimfelder_behalten",
 ]

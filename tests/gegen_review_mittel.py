@@ -88,9 +88,11 @@ PROBEN = [
     ("CSP: frame-ancestors wieder am rohen Pfad", CSP,
      "    pfad = pfad_normal(pfad)\n    addin = any(pfad.startswith(p) for p in _ADDIN_PRAEFIXE)\n",
      "    addin = any((pfad or \"\").startswith(p) for p in _ADDIN_PRAEFIXE)\n", W_H7),
-    ("CSP: /novnc/-Ausnahme wieder am rohen Pfad", CSP,
-     "pfad_normal(pfad).startswith(p) for p in _AUSGENOMMEN",
-     "(pfad or \"\").startswith(p) for p in _AUSGENOMMEN", W_H7),
+    # Seit 2026-11-05 ist /novnc/ keine Ausnahme mehr, sondern eine eigene
+    # Richtlinie – die Sabotage zielt auf deren Praefix-Entscheidung.
+    ("CSP: /novnc/-Richtlinie wieder am rohen Pfad", CSP,
+     "    if normal.startswith(_NOVNC_PRAEFIX):",
+     "    if (pfad or \"\").startswith(_NOVNC_PRAEFIX):", W_H7),
     # ── Geheimnis an neue Adresse ──
     ("Skill-Config: Umleitung wird nicht abgewiesen", MAIN,
      "    umgeleitet = _sr.umgeleitete_geheimnisse(body, gespeichert)\n    if umgeleitet:\n",

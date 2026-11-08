@@ -152,6 +152,10 @@ class ChatRepository @Inject constructor(
         ws.sendStop()
     }
 
+    // Bestaetigung wirksamer Aktionen (desktop/Bestaetigung.kt)
+    val bestaetigungen = ws.bestaetigungen
+    fun bestaetigungAntworten(id: String, erlaubt: Boolean) = ws.sendBestaetigungAntwort(id, erlaubt)
+
     private suspend fun collectEvents() {
         ws.events.collect { event ->
             try {

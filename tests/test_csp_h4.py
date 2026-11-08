@@ -132,7 +132,9 @@ for falsch in ("AUS ", "off", "", None, 0, "erzwinge"):
     erwartet = "aus" if str(falsch or "").strip().lower() == "aus" else "erzwingen"
     check("Modus %r -> %s (Tippfehler schaltet nicht ab)" % (falsch, erwartet), csp.modus() == erwartet)
 EINST["csp_modus"] = "erzwingen"
-check("noVNC (Systempaket) ausgenommen", csp.kopfzeilen("/novnc/vnc.html") == {})
+_nv = csp.kopfzeilen("/novnc/vnc.html").get("Content-Security-Policy", "")
+check("noVNC (Systempaket) hat eine EIGENE Richtlinie (seit 2026-11-05, test_csp_buendel_d)",
+      "script-src 'self'" in _nv and "frame-ancestors 'self'" in _nv, _nv[:200])
 check("Seite neben noVNC nicht ausgenommen", csp.kopfzeilen("/novnc-x") != {})
 EINST.clear()
 
@@ -152,8 +154,8 @@ with tempfile.TemporaryDirectory() as tmp:
                          "blockedURL": "https://cdn.fremd.example/x.js?k=1", "sourceFile": "",
                          "lineNumber": 0, "sample": "", "disposition": "enforce"}},
                {"type": "deprecation", "body": {}}]
-    n1 = csp.melden(json.dumps(alt).encode(), "192.0.2.1", "Mozilla/5.0 Chrome/130")
-    n2 = csp.melden(json.dumps(neu_api).encode(), "192.0.2.1", "Mozilla/5.0 Firefox/131")
+    n1 = csp.melden(json.dumps(alt).encode(), "192.0.2.1", "Mozilla/5.0 Chrome/130", host="h")
+    n2 = csp.melden(json.dumps(neu_api).encode(), "192.0.2.1", "Mozilla/5.0 Firefox/131", host="h")
     check("report-uri-Format: eine Zeile geschrieben", n1 == 1, str(n1))
     check("Reporting-API-Format: eine Zeile (fremder Typ ignoriert)", n2 == 1, str(n2))
     datei = Path(tmp) / "csp_berichte.jsonl"
@@ -172,7 +174,7 @@ with tempfile.TemporaryDirectory() as tmp:
     modus_datei = stat.S_IMODE(os.stat(datei).st_mode) if datei.exists() else -1
     check("Datei 0640", modus_datei == 0o640, oct(modus_datei))
 
-    n3 = csp.melden(json.dumps(alt).encode(), "192.0.2.2", "")
+    n3 = csp.melden(json.dumps(alt).encode(), "192.0.2.2", "", host="h")
     check("gleicher Verstoss am selben Tag: keine neue Zeile", n3 == 0)
     gelesen = csp.lesen(10)
     check("lesen: neueste zuerst, Zaehler laeuft weiter",
@@ -180,14 +182,14 @@ with tempfile.TemporaryDirectory() as tmp:
 
     for kaputt in (b"", b"{", b"[]", b"\xff\xfe", b'{"csp-report": "x"}', b"null", b"x" * 70000):
         try:
-            csp.melden(kaputt, "192.0.2.3", "")
+            csp.melden(kaputt, "192.0.2.3", "", host="h")
             ok = True
         except Exception:  # noqa: BLE001
             ok = False
         check("Muell %r wirft nicht" % kaputt[:12], ok)
 
     lang = dict(alt); lang["csp-report"] = dict(alt["csp-report"], **{"blocked-uri": "https://x/" + "a" * 5000})
-    csp.melden(json.dumps(lang).encode(), "192.0.2.4", "")
+    csp.melden(json.dumps(lang).encode(), "192.0.2.4", "", host="h")
     letzte = csp.lesen(1)[0]
     check("Feldlaenge begrenzt", len(letzte.get("blockiert", "")) <= csp.FELD_MAX)
 
@@ -195,12 +197,12 @@ with tempfile.TemporaryDirectory() as tmp:
     geschrieben = 0
     for i in range(csp.RATE_JE_MINUTE + 25):
         b = {"csp-report": {"document-uri": "https://h/s%d" % i, "violated-directive": "x"}}
-        geschrieben += csp.melden(json.dumps(b).encode(), "192.0.2.9", "")
+        geschrieben += csp.melden(json.dumps(b).encode(), "192.0.2.9", "", host="h")
     check("Lastbremse je IP greift (%d von %d)" % (geschrieben, csp.RATE_JE_MINUTE + 25),
           geschrieben == csp.RATE_JE_MINUTE)
     check("andere IP wird nicht mitgebremst",
           csp.melden(json.dumps({"csp-report": {"document-uri": "https://h/z", "violated-directive": "y"}}).encode(),
-                     "192.0.2.10", "") == 1)
+                     "192.0.2.10", "", host="h") == 1)
 
     # Kuerzen nach Alter: eine alte Zeile dazu, eine ohne Zeitstempel
     with datei.open("a") as f:
@@ -224,7 +226,7 @@ with tempfile.TemporaryDirectory() as tmp:
         for ip in range(400):
             stapel = [{"csp-report": {"document-uri": "https://h/f%d_%d" % (ip, j),
                                       "violated-directive": "x"}} for j in range(20)]
-            n += csp.melden(json.dumps(stapel).encode(), "198.51.100.%d" % ip, "")
+            n += csp.melden(json.dumps(stapel).encode(), "198.51.100.%d" % ip, "", host="h")
         return n, len(datei.read_text().splitlines()) if datei.exists() else 0
 
     geschrieben, zeilen_n = flut()
@@ -243,7 +245,7 @@ with tempfile.TemporaryDirectory() as tmp:
         f.write("x" * csp.DATEI_MAX + "\n")
     groesse = datei.stat().st_size
     n_voll = csp.melden(json.dumps({"csp-report": {"document-uri": "https://h/voll",
-                                                   "violated-directive": "z"}}).encode(), "192.0.2.77", "")
+                                                   "violated-directive": "z"}}).encode(), "192.0.2.77", "", host="h")
     check("⚠ Datei ab DATEI_MAX: nichts mehr angehaengt", datei.stat().st_size == groesse, str(n_voll))
 
 # ─── [C] Einbindung (Syntaxbaum) ─────────────────────────────────────────────

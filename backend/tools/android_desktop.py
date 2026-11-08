@@ -1,40 +1,34 @@
 """Android Desktop Tool – steuert das Android-Gerät des verbundenen Android-Clients."""
 
-import asyncio
-import uuid
-
 from backend.tools.base import BaseTool
 
 # ─── Verbindungs-State ───────────────────────────────────────────────────────
+# Je BENUTZER, nicht global (Pentest C1) – siehe backend/tools/geraete_verbindungen.py.
 
-_android_ws = None
-_pending: dict[str, asyncio.Future] = {}
+from backend.tools.geraete_verbindungen import GeraeteVerbindungen
 
-
-def set_android_ws(ws):
-    """Wird von main.py aufgerufen wenn ein Android-Client sich registriert/trennt."""
-    global _android_ws
-    _android_ws = ws
-    if ws is not None:
-        print("[android_desktop] Android-Client verbunden", flush=True)
-    else:
-        print("[android_desktop] Android-Client getrennt", flush=True)
-        for fut in list(_pending.values()):
-            if not fut.done():
-                fut.set_exception(ConnectionError("Android-Client getrennt"))
-        _pending.clear()
+VERBINDUNGEN = GeraeteVerbindungen("Android")
 
 
-def on_android_result(result: dict):
-    """Wird von main.py aufgerufen wenn desktop_result vom Android-Client ankommt."""
-    req_id = result.get("request_id", "")
-    fut = _pending.pop(req_id, None)
-    if fut and not fut.done():
-        fut.set_result(result)
+def set_android_ws(ws, benutzer: str = ""):
+    """Registrierung (main.py, Nachricht ``register``) fuer den ANMELDENDEN Benutzer."""
+    if ws is None:
+        return
+    VERBINDUNGEN.registrieren(ws, benutzer)
 
 
-def is_connected() -> bool:
-    return _android_ws is not None
+def remove_android_ws(ws):
+    """Nur den Eintrag DIESER Verbindung entfernen (WebSocket getrennt)."""
+    VERBINDUNGEN.trennen(ws)
+
+
+def on_android_result(result: dict, ws=None):
+    """Ergebnis nur von der Verbindung annehmen, an die der Befehl ging."""
+    return VERBINDUNGEN.ergebnis(result, ws)
+
+
+def is_connected(benutzer: str | None = None) -> bool:
+    return VERBINDUNGEN.verbunden(benutzer)
 
 
 # ─── Tool-Klasse ─────────────────────────────────────────────────────────────
@@ -78,36 +72,24 @@ class AndroidDesktopTool(BaseTool):
             "required": ["action"],
         }
 
-    async def execute(self, action: str, cmd: str = "", text: str = "", **_) -> str:
-        if _android_ws is None:
-            return "❌ Kein Android-Client verbunden. Bitte die Jarvis Android App öffnen."
-
-        req_id = str(uuid.uuid4())[:8]
-        loop = asyncio.get_event_loop()
-        fut = loop.create_future()
-        _pending[req_id] = fut
+    async def execute(self, action: str, cmd: str = "", text: str = "", **kwargs) -> str:
+        # Akteur und Rechte setzt der Dispatch, nie das Modell (Pentest C1/C2).
+        ziel = VERBINDUNGEN.client_fuer(str(kwargs.get("_akteur") or ""),
+                                        kwargs.get("_privileged") is True)
+        if ziel is None:
+            return ("❌ Für deinen Benutzer ist kein Android-Client verbunden. Bitte die "
+                    "Jarvis Android App öffnen und mit deinem eigenen Konto anmelden.")
 
         payload = {
             "type": "desktop_command",
-            "request_id": req_id,
             "action": action,
             "cmd": cmd,
             "text": text,
         }
 
-        try:
-            await _android_ws.send_json(payload)
-        except Exception as e:
-            _pending.pop(req_id, None)
-            return f"❌ Senden fehlgeschlagen: {e}"
-
-        try:
-            result = await asyncio.wait_for(fut, timeout=30.0)
-        except asyncio.TimeoutError:
-            _pending.pop(req_id, None)
-            return "❌ Timeout: Android-Client hat nicht geantwortet (30s)"
-        except ConnectionError as e:
-            return f"❌ Verbindung verloren: {e}"
+        result, fehler = await VERBINDUNGEN.senden(ziel, payload, timeout=30.0)
+        if fehler:
+            return fehler
 
         if result.get("error"):
             return f"❌ {result['error']}"

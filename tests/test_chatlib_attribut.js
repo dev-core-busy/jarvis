@@ -82,7 +82,9 @@ for (const [name, md] of FAELLE) {
     const fremd = fremdeAttribute(d);
     check(fremd.length === 0, name + ': keine fremden Attribute', fremd.join(', '));
 }
-const d = html('![x](https://a.test/x.png" onerror="alert(1))');
+// Gleiche Herkunft wie die Seite: seit 2026-11-05 wird nur ein EIGENES Bild
+// als <img> geladen, ein fremdes wird ein Link (test_markdown_bild_extern_ui.js).
+const d = html('![x](https://beispiel.test/x.png" onerror="alert(1))');
 const img = d.querySelector('img');
 check(img && /"/.test(img.getAttribute('src')) && !img.hasAttribute('onerror'),
       'das Anfuehrungszeichen bleibt TEIL der Adresse statt sie zu beenden', img && img.getAttribute('src'));

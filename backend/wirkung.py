@@ -124,6 +124,14 @@ TABELLE: dict[str, "str | Callable[[dict], str | None]"] = {
     # Zeitversetzt ohne Rueckfrage
     "cron_create": ZEITPLAN,
     "cron_delete": LOESCHEN,
+    # Geraete-Clients (Pentest C1, 2026-11-05): Befehl, Programmstart und
+    # Tippen wirken auf dem PC/Telefon des Benutzers OHNE jede Sandbox – dieselbe
+    # Klasse wie ein Shell-Befehl ohne Sandbox. Eine praeparierte Mail darf den
+    # Agenten nicht unbestaetigt auf dem Rechner des Lesers handeln lassen.
+    # Ein Client ohne Dialog (Windows-/Android-App selbst) bekommt sie damit
+    # abgewiesen, Laeufe ohne Oberflaeche nur mit Freigabe des Auftrags.
+    "windows_desktop": _je_aktion(shell_exec=SHELL, open_app=SHELL, type_text=SHELL),
+    "android_desktop": _je_aktion(shell_exec=SHELL, launch_app=SHELL),
     # Eigene Datenbestaende
     "memory_manage": _je_aktion(delete=LOESCHEN),
     "knowledge_manage": _je_aktion(remove_folder=LOESCHEN),

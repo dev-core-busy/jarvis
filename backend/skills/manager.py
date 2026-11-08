@@ -88,7 +88,11 @@ class SkillManager:
             # sein und bleibt trotzdem unter "Installierte". Fallback (kein Flag
             # gesetzt) = enabled-Zustand → abwaertskompatibel.
             skill_info["installed"] = state.get("installed", skill_info["enabled"])
-            skill_info["config"] = state.get("config", {})
+            # Nie roh: die Liste geht an JEDEN angemeldeten Benutzer
+            # (GET /api/skills). Geheimfelder leer, auch in Listen; die Route
+            # nimmt Nicht-Administratoren die Konfiguration ganz weg.
+            from backend import secret_reveal as _sr
+            skill_info["config"] = _sr.skill_config_fuer_liste(state.get("config", {}))
             skill_info["loaded"] = skill_name in self.loader.loaded_skills
             # Fehlende Abhaengigkeiten mitliefern, damit die Oberflaeche einen
             # Reparatur-Knopf anbieten kann. Nur fuer INSTALLIERTE Skills und nur

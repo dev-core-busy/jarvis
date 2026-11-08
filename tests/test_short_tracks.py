@@ -861,6 +861,7 @@ check(run.job_entfernen(fremder["id"], U2) is False,
 
 # ═══════════════════════════════════════════════════════════════════════════
 section("15. URL-Weg: SSRF-Schranke")
+import re as _re_st
 
 for adresse in ("127.0.0.1", "localhost", "169.254.169.254", "10.0.0.5",
                 "192.168.1.1", "172.16.0.1", "0.0.0.0"):
@@ -892,10 +893,13 @@ except run.UrlFehler as e:
           "die eigene Serveradresse wird abgewiesen (Klartext)")
 run._eigene_ips_cache = set()
 check(callable(run._eigene_adressen), "_eigene_adressen ist ermittelbar")
-check("follow_redirects=False" in CODE_RUN,
-      "Weiterleitungen werden MANUELL verfolgt (jedes Ziel geprueft)")
-check(CODE_RUN.count("_ziel_erlaubt(") >= 2,
-      "die Schranke wird je Sprung angewandt, nicht nur einmal")
+# Seit 2026-11 laeuft der Abruf ueber netz_ziel.sicher_holen (manuelle
+# Weiterleitungen, je Sprung geprueft, Verbindung festgenagelt – Wirkung in
+# tests/test_netz_ziel.py). Hier nur: der Runner reicht SEINE Schranke hinein.
+check(_re_st.search(r"sicher_holen\((?:.|\n){0,400}?pruefer=_ziel_erlaubt\)", CODE_RUN) is not None,
+      "url_holen holt ueber netz_ziel.sicher_holen mit pruefer=_ziel_erlaubt")
+check("follow_redirects=True" not in CODE_RUN,
+      "kein automatisches Folgen von Weiterleitungen im Runner")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

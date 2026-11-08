@@ -209,6 +209,8 @@ class _Req:
 ns3 = schneide({"JSONResponse": _JR, "Request": _Req, "time": time, "_sitzung": st,
                 "verify_token": lambda t: "anna", "_user_must_change": lambda u: False,
                 "_is_admin_user": lambda u: False,
+                # A8 (2026-11-05): die Antwort fragt die Kontosperre ab
+                "security_guard": types.SimpleNamespace(is_blocked=lambda u: False),
                 "_sitzung_cookie": __import__("backend.sitzung_cookie", fromlist=["x"])},
                "_token_aufloesen", "verify_token_endpoint")
 r = asyncio.run(ns3["verify_token_endpoint"](_Req({"token": "anna:%d:x" % (int(time.time()) - H)})))
@@ -303,8 +305,16 @@ ns5 = {"asyncio": asyncio, "time": time, "uuid": __import__("uuid"), "WebSocket"
        # BSI H4: userchat_ws loest das Token ueber _token_aufloesen auf – das ECHTE
        # Modul, keine Attrappe (ein Klartext-Token geht unveraendert durch)
        "_sitzung_cookie": __import__("backend.sitzung_cookie", fromlist=["x"])}
+# Befund B3 (2026-11): der dm-Zweig fuehrt seine Anhaenge ueber die ECHTE
+# _uc_anhaenge_pruefen samt der ECHTEN Typliste _UC_OK_MIME.
+_mime_knoten = next((k for k in ast.parse((ROOT / "backend" / "main.py").read_text(encoding="utf-8")).body
+                     if isinstance(k, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_UC_OK_MIME"
+                                                          for t in k.targets)), None)
+if _mime_knoten is None:
+    abbruch("main.py: _UC_OK_MIME fehlt")
+exec(compile(ast.Module(body=[_mime_knoten], type_ignores=[]), "<main:_UC_OK_MIME>", "exec"), ns5)
 schneide(ns5, "_token_aufloesen", "_uc_sitzung_ungueltig", "_uc_sitzung_beenden", "_uc_waechter",
-         "userchat_ws")
+         "_uc_anhaenge_pruefen", "userchat_ws")
 
 
 async def ws_lauf(still: bool):

@@ -1799,6 +1799,33 @@
                     }
                 });
             }
+            // Gleichzeitige Auftraege je Benutzer (Pentest C7) speichern.
+            const _btnLl = document.getElementById('btn-save-lauf-limit');
+            if (_btnLl && !_btnLl._wired) {
+                _btnLl._wired = true;
+                _btnLl.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-lauf-limit');
+                    const st = document.getElementById('lauf-limit-status');
+                    let v = parseInt(el && el.value, 10);
+                    if (isNaN(v) || v < 0) v = 0;
+                    if (v > 50) v = 50;
+                    if (el) el.value = v;
+                    try {
+                        const r = await fetch('/api/agent/lauf-limit', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ limit: v })
+                        });
+                        const d = await r.json().catch(() => null);
+                        // Nur ein bestaetigter Wert ist ein Erfolg (403 ohne Admin-Rechte).
+                        if (!r.ok || !d || d.limit === undefined) throw new Error(r.status);
+                        if (el) el.value = d.limit;
+                        if (st) { st.textContent = '✓ ' + (window.t ? window.t('profile.save_btn') : 'Gespeichert'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
             // Lizenz-Panel (einmalig verdrahten). Eigener Endpunkt /api/license,
             // NICHT /api/settings: der Schluessel wird beim Eintragen sofort
             // geprueft (Signatur + Statusabruf beim Anbieter), das Ergebnis ist
@@ -2142,6 +2169,9 @@
                 // Kontext-Komprimierungs-Schwelle (global) ins Eingabefeld
                 const _ctEl = document.getElementById('setting-compress-threshold');
                 if (_ctEl) _ctEl.value = data.compress_threshold || 30;
+                // Gleichzeitige Auftraege je Benutzer (0 = unbegrenzt ist gueltig)
+                const _llEl = document.getElementById('setting-lauf-limit');
+                if (_llEl && typeof data.agent_lauf_limit === 'number') _llEl.value = data.agent_lauf_limit;
                 // Vorhaltezeit: 0 = dauerhaft -> Haken setzen, Feld ausgrauen.
                 // Pruefung auf null/undefined, NICHT auf Falsyness – 0 ist gueltig.
                 const _rN = document.getElementById('setting-docs-retention');
@@ -3385,7 +3415,13 @@
         }).then(r => r.json()).then(data => {
             if (data.valid) {
                 currentUser = data.username || currentUser;
-                if (data.must_change_password) {
+                if (data.account_blocked) {
+                    // Gesperrtes Konto: die Antwort traegt bewusst kein is_admin
+                    // mehr. Das Portal zeigt den Sperrbildschirm (403
+                    // ACCOUNT_BLOCKED -> /api/security/my-block) – auch von
+                    // /settings aus, sonst oeffnete sich dort die Admin-Oberflaeche.
+                    window.location.replace('/portal');
+                } else if (data.must_change_password) {
                     // Erst-Kennwort noch nicht geaendert -> Maske erzwingen.
                     // Auch nach F5/Reload (serverseitig zusaetzlich gesperrt).
                     window.JarvisSitzung.maskeFreigeben();

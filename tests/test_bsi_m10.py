@@ -310,6 +310,13 @@ ep = [s for s, fn, hat in routen if s == ("GET", "/api/security/zugangsregeln") 
 check("Ueberblick-Endpunkt nur mit Anmeldung", bool(ep))
 
 # Rundsendungen an /ws nur an angemeldete Verbindungen (Nebenbefund M10)
+# Transitiv: eine Schleife darf die Pruefung auch ueber einen Helfer rufen, der
+# selbst _ws_rundsendung_erlaubt( ruft (Pentest C3: _ws_empfaenger_inhalt fuer
+# Rundsendungen mit Inhalt). Ermittelt aus dem Baum, keine gepflegte Namensliste.
+_pruef_helfer = {n.name for n in BAUM.body
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                 and n.name != "_ws_rundsendung_erlaubt"
+                 and "_ws_rundsendung_erlaubt(" in ast.unparse(n)}
 schleifen_ohne = []
 schleifen = 0
 for fn in ast.walk(BAUM):
@@ -325,9 +332,12 @@ for fn in ast.walk(BAUM):
         if "send_json" not in rumpf and "send_text" not in rumpf:
             continue
         schleifen += 1
-        if "_ws_rundsendung_erlaubt(" not in rumpf and "_ws_usernames.get(" not in rumpf:
+        if ("_ws_rundsendung_erlaubt(" not in rumpf and "_ws_usernames.get(" not in rumpf
+                and not any(h + "(" in rumpf for h in _pruef_helfer)):
             schleifen_ohne.append("%s:%d" % (fn.name, loop.lineno))
-check("Rundsende-Schleifen gefunden (Positivkontrolle, %d)" % schleifen, schleifen >= 4)
+# >= 3: seit Pentest C3 teilen sich Cron- und Watcher-Verteiler EINE Schleife
+# (_rundsenden_gezielt); vorher waren es vier.
+check("Rundsende-Schleifen gefunden (Positivkontrolle, %d)" % schleifen, schleifen >= 3)
 check("jede /ws-Rundsendung nur an angemeldete Verbindungen", not schleifen_ohne, schleifen_ohne)
 cpu = MODUL_FN.get("cpu_broadcast")
 check("CPU-Last nur an angemeldete Verbindungen",
@@ -374,24 +384,38 @@ ns.update(config=_Cfg(), verify_token=lambda t: "anna" if t == "gut" else None,
           JSONResponse=lambda d, status_code=200: ("antwort", status_code), Request=object,
           # Sperrpruefung der Sitzung (test_bsi_sitzung_sperre) – hier nicht Gegenstand
           _sitzung_gesperrt=lambda u: False)
+
+
+async def _admin_schranke(request):
+    """Attrappe von require_admin_or_query (Signatur: request) – seit A6
+    (2026-11-05) die Schranke ohne Stream-Schluessel. Ihre Wirkung (Admin,
+    Sperren, kein Sitzungstoken im Query) misst test_pentest_anmeldung.py."""
+    if request.headers.get("Authorization") != "Bearer gut":
+        raise _Abgelehnt(401)
+    return "anna"
+
+
+ns["require_admin_or_query"] = _admin_schranke
 exec(compile(quelle, "vision_mjpeg_stream", "exec"), ns)
 
 
 class _Req:
-    def __init__(self, **q):
+    def __init__(self, kopf=None, **q):
         self.query_params = q
+        self.headers = dict(kopf or {})
 
 
-def _stream(cfg, **q):
+def _stream(cfg, kopf=None, **q):
     ns["config"].zustand = cfg
     try:
-        asyncio.run(ns["vision_mjpeg_stream"](_Req(**q)))
+        asyncio.run(ns["vision_mjpeg_stream"](_Req(kopf, **q)))
         return "durch"
     except _Abgelehnt:
         return "401"
 
 
-check("Positivkontrolle: Sitzung kommt durch", _stream({}, token="gut") == "durch")
+check("Positivkontrolle: Admin-Sitzung im Kopf kommt durch",
+      _stream({}, kopf={"Authorization": "Bearer gut"}) == "durch")
 # Rueckfall des erwarteten Schluessels: ausser "" keine Konstante (kein Vorgabeschluessel)
 _erw = [n for n in ast.walk(vfn) if isinstance(n, ast.Assign)
         and any(getattr(t, "id", "") == "expected_key" for t in n.targets)]

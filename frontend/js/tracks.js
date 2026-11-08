@@ -602,6 +602,21 @@
                 (img.getAttribute('alt') ? ': ' + img.getAttribute('alt') : '') + ']';
             img.parentNode.replaceChild(ersatz, img);
         });
+        // Seit dem Pentest-Fix D3 (2026-11-05) erzeugt der Renderer fuer ein
+        // fremdes Bild gar kein <img> mehr, sondern einen Link mit Hinweis
+        // (chatlib.js, `chat-img-extern`). Hier gilt die STRENGERE Regel dieser
+        // Seite weiter: ausgeblendet benannt, nicht anklickbar – ein Ergebnis aus
+        // fremden Dumps soll keinen Weg zu einer fremden Adresse anbieten.
+        tpl.content.querySelectorAll('a.chat-img-extern').forEach(function (a) {
+            var ersatz = document.createElement('span');
+            ersatz.className = 'st-img-weg';
+            var titel = (a.textContent || '').trim();
+            ersatz.textContent = '[' + T('tracks.img_blocked', 'Bild von fremder Adresse ausgeblendet') +
+                (titel ? ': ' + titel : '') + ']';
+            var hinweis = a.nextElementSibling;
+            if (hinweis && hinweis.classList.contains('chat-img-extern-hinweis')) hinweis.remove();
+            a.parentNode.replaceChild(ersatz, a);
+        });
         el.classList.add('is-md');
         el.appendChild(tpl.content);
     }

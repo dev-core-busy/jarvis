@@ -1501,3 +1501,11 @@ body.light :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hove
     background: transparent; color: var(--text-secondary); font-size: .76rem; cursor: pointer;
 }
 .sqsf-a:hover { color: var(--text-primary); border-color: rgba(var(--accent-rgb), .5); }
+
+/* Fremdes Markdown-Bild als Link statt <img> (chatlib.js, wissen_destillat.js;
+   Pentest-Vorbereitung 2026-11-05): der Hinweis daneben sagt, warum kein Bild
+   erscheint. Globale Regel, weil der Renderer auf mehreren Seiten laeuft. */
+.chat-img-extern-hinweis, .wi-dest-img-extern-hinweis {
+    color: var(--text-secondary);
+    font-size: 0.85em;
+}

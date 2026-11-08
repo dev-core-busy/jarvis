@@ -232,6 +232,61 @@ _lauf_stats_cv: contextvars.ContextVar = contextvars.ContextVar("jarvis_lauf_sta
 _benutzer_eingabe_cv: contextvars.ContextVar = contextvars.ContextVar(
     "jarvis_benutzer_eingabe", default=None)
 
+# ── Fremdtext im Lauf (Pentest C6, 2026-11-05) ──────────────────────────────
+# Ein verbotener Shell-Befehl oder ein gesperrter Pfad zaehlte bis hierher immer
+# zur automatischen Kontosperre (3 Marken in 600 s). Steht aber FREMDTEXT im
+# Kontext – ein Werkzeugergebnis (Mail, Wissenstreffer, Webseite, Datei), ein
+# Anhang, ein eingefuegter Text, ein frueherer Werkzeug-Turn im Verlauf oder
+# ein Lauf ohne Oberflaeche –, kann eine Prompt-Injection das Modell diese
+# Befehle waehlen lassen, und gesperrt wuerde das Konto des Lesers. Dann wird
+# der Verstoss nur WEICH gezaehlt (protokolliert, fuer Admins sichtbar, keine
+# Sperre). Eine automatische Sperre bleibt Laeufen vorbehalten, deren Befehle
+# nur aus dem selbst getippten Text des Benutzers stammen koennen.
+# Wert: {"gruende": set()} des AEUSSERSTEN Laufs; Unter-Laeufe teilen ihn.
+_fremdtext_cv: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_fremdtext", default=None)
+
+
+def _fremdtext_oeffnen(*gruende):
+    """Marke fuer den Lauf anlegen; eine offene wird GEERBT (Rueckgabe None)."""
+    cur = _fremdtext_cv.get()
+    if isinstance(cur, dict):
+        cur["gruende"].update(g for g in gruende if g)
+        return None
+    return _fremdtext_cv.set({"gruende": {g for g in gruende if g}})
+
+
+def _fremdtext_merken(grund: str) -> None:
+    cur = _fremdtext_cv.get()
+    if isinstance(cur, dict) and grund:
+        cur["gruende"].add(grund)
+
+
+def _fremdtext_gruende() -> list:
+    """Warum dieser Lauf Fremdtext im Kontext hat (leer = nur eigener Text).
+
+    Ausserhalb jedes Laufs (keine Marke) gilt fail-safe "unbekannt" – also
+    weich: eine Kontosperre braucht den Nachweis eines reinen Laufs.
+    """
+    cur = _fremdtext_cv.get()
+    if not isinstance(cur, dict):
+        return ["ausserhalb eines Laufs"]
+    gruende = set(cur["gruende"])
+    eingabe = _benutzer_eingabe_cv.get() or {}
+    try:
+        from backend import security_guard as _sg
+        _g = _sg.wirkt_eingefuegt(str(eingabe.get("text") or ""))
+        if _g:
+            gruende.add("eingefuegter Text (" + _g + ")")
+    except Exception:  # noqa: BLE001
+        gruende.add("Pruefung des Auftragstexts fehlgeschlagen")
+    for eintrag in (eingabe.get("verlauf") or []):
+        teile = getattr(eintrag, "parts", None) or []
+        if any(getattr(t, "function_response", None) is not None for t in teile):
+            gruende.add("Werkzeugergebnis im Verlauf")
+            break
+    return sorted(gruende)
+
 
 # ── Lauf-Kontext (Code-Review 2026-10-18) ───────────────────────────────────
 # Rechte-Flags, Benutzer, Wissensgruppen, LLM-Profil & Co. lagen als Attribute
@@ -285,6 +340,89 @@ def _lauf_kontext_oeffnen(agent, werte: dict | None = None):
     return _lauf_kontext_cv.set({**alt, id(agent): dict(werte or {})})
 
 
+# ── Gleichzeitige Laeufe je Benutzer (Pentest C7, Betreiberentscheid 2026-11-05)
+# Ohne Deckel konnte ein Benutzer (oder ein Skript mit seiner Sitzung) beliebig
+# viele Agentenlaeufe parallel starten – jeder ein Modellaufruf mit vollem
+# Werkzeugkasten, zusammen eine Last fuer alle. Gezaehlt wird der AEUSSERSTE
+# Lauf (Chat, Folgeauftrag, Agent-API, Short Tracks, Mail-Regeln, Support,
+# Cron, Messenger); Unter-Agenten, Rollen und Delegationen zaehlen zu ihrem
+# Auftrag. Administratoren (privilegierter Lauf oder Admin-Konto) sind
+# ausgenommen. Ein weiterer Auftrag bekommt eine klare Meldung, statt still zu
+# warten. Einstellung: Einstellungen -> System -> „Gleichzeitige Aufträge je
+# Benutzer" (0 = unbegrenzt).
+EINSTELLUNG_LAUF_LIMIT = "agent_max_laeufe_je_benutzer"
+LAUF_LIMIT_VORGABE = 3
+_laufe_je_benutzer: dict[str, int] = {}
+_lauf_platz_cv: contextvars.ContextVar = contextvars.ContextVar(
+    "jarvis_lauf_platz", default=None)
+
+
+def lauf_limit() -> int:
+    """Hoechstzahl gleichzeitiger Laeufe je Benutzer (0 = unbegrenzt)."""
+    try:
+        roh = config.get_setting(EINSTELLUNG_LAUF_LIMIT, None)
+        if roh is None or roh == "":
+            return LAUF_LIMIT_VORGABE
+        return max(0, int(roh))
+    except Exception:  # noqa: BLE001
+        return LAUF_LIMIT_VORGABE
+
+
+def _lauf_limit_schluessel(benutzer: str) -> str:
+    return (benutzer or "").split("@")[0].split("\\")[-1].strip().lower()
+
+
+def _lauf_limit_ausgenommen(benutzer: str, privilegiert: bool) -> bool:
+    if privilegiert:
+        return True
+    try:
+        from backend.main import _is_admin_user
+        return bool(_is_admin_user(benutzer))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def lauf_limit_meldung(grenze: int) -> str:
+    return (f"⚠️ Du hast bereits {grenze} Aufträge gleichzeitig laufen – das ist die "
+            "Obergrenze je Benutzer. Dieser Auftrag wurde NICHT gestartet. Bitte warte, "
+            "bis einer fertig ist (oder stoppe einen), und sende ihn dann erneut.")
+
+
+def _lauf_platz_belegen(benutzer: str, privilegiert: bool):
+    """Platz fuer einen AEUSSERSTEN Lauf belegen.
+
+    Rueckgabe ``(freigabe, meldung)``: ``meldung`` gesetzt = Grenze erreicht,
+    nichts belegt. Sonst ist ``freigabe`` eine Funktion, die der Aufrufer im
+    ``finally`` ruft (None, wenn nichts zu zaehlen war: verschachtelter Lauf
+    oder ausgenommen). Ein verschachtelter Lauf (Platz-Marke schon gesetzt)
+    zaehlt nicht erneut.
+    """
+    if _lauf_platz_cv.get() is not None:
+        return None, ""
+    if _lauf_limit_ausgenommen(benutzer, privilegiert):
+        return None, ""
+    grenze = lauf_limit()
+    schluessel = _lauf_limit_schluessel(benutzer) or _ANON_ACTOR
+    if grenze > 0 and _laufe_je_benutzer.get(schluessel, 0) >= grenze:
+        print(f"[AGENT] Lauf fuer '{schluessel}' abgewiesen: {grenze} gleichzeitige "
+              "Auftraege erreicht", flush=True)
+        return None, lauf_limit_meldung(grenze)
+    _laufe_je_benutzer[schluessel] = _laufe_je_benutzer.get(schluessel, 0) + 1
+    token = _lauf_platz_cv.set(schluessel)
+
+    def _freigeben():
+        n = _laufe_je_benutzer.get(schluessel, 0) - 1
+        if n > 0:
+            _laufe_je_benutzer[schluessel] = n
+        else:
+            _laufe_je_benutzer.pop(schluessel, None)
+        try:
+            _lauf_platz_cv.reset(token)
+        except Exception:  # noqa: BLE001
+            pass
+    return _freigeben, ""
+
+
 def _mit_lauf_kontext(fn):
     """Dekorator: ``run_task`` laeuft in einem EIGENEN Lauf-Kontext (siehe _LaufWert).
 
@@ -297,13 +435,39 @@ def _mit_lauf_kontext(fn):
     ``run_task``."""
     import functools
 
+    import inspect as _inspect
+    _sig = _inspect.signature(fn)
+
     @functools.wraps(fn)
     async def huelle(self, *args, rechte: dict | None = None, **kwargs):
+        # Pentest C7: Deckel je Benutzer – VOR jedem Zustand des Laufs, damit
+        # eine Abweisung nichts aufzuraeumen hat. Benutzer und Privileg wie in
+        # run_task: der uebergebene Name, sonst der geerbte; leer/lokal = privilegiert.
+        try:
+            _gebunden = _sig.bind_partial(self, *args, **kwargs).arguments
+        except TypeError:
+            _gebunden = {}
+        _benutzer = (_gebunden.get("username") or getattr(self, "_current_username", "")
+                     or "")
+        _vererbt = getattr(self, "_current_actor_privileged", None)
+        _priv = (bool(_vererbt) if _vererbt is not None
+                 else ((not _benutzer) or _benutzer in _LOCAL_PRIVILEGED_USERS))
+        _freigeben, _meldung = _lauf_platz_belegen(_benutzer, _priv)
+        if _meldung:
+            _ws = _gebunden.get("ws")
+            if _ws is not None:
+                try:
+                    await self._send_status(_ws, _meldung, highlight=True, persist=True)
+                except Exception:  # noqa: BLE001
+                    pass
+            return "limit"
         token = _lauf_kontext_oeffnen(self, rechte)
         try:
             return await fn(self, *args, **kwargs)
         finally:
             _lauf_kontext_cv.reset(token)
+            if _freigeben is not None:
+                _freigeben()
     return huelle
 
 
@@ -804,6 +968,35 @@ def _pflicht_fehlt_grund(tool, name: str, args: dict, verfuegbar) -> str | None:
             "abgeschnitten, weil ein Argument zu gross war. Rufe das Werkzeug mit "
             "allen Pflichtangaben erneut auf; grosse Inhalte NICHT als Argument "
             f"uebergeben, sondern {weg}.")
+
+
+def _modell_argumente(name: str, args) -> dict:
+    """Werkzeug-Argumente des MODELLS ohne interne Schluessel (fuehrendes '_').
+
+    Pentest-Befund C2 (2026-11-05): der Dispatch reicht interne Werte wie
+    ``_username``, ``_privileged``, ``_root_broker``, ``_sandbox_user`` oder
+    ``_kb_groups`` als Schluesselwort-Argumente an die Werkzeuge weiter. Bis
+    hierher war ``exec_args = dict(args)`` – ein Modell, das selbst
+    ``{"_username": "fremd"}`` oder ``{"_root_broker": true}`` schickte, setzte
+    damit Akteur und Rechte des Werkzeugs (``setdefault`` liess den Modellwert
+    stehen). Kein Werkzeug-Schema deklariert ein Feld mit '_' (geprueft per
+    grep ueber backend/ und skills/); ein '_'-Argument VOM Modell ist also nie
+    legitim. Gefiltert wird an EINER Stelle – am Eingang von
+    ``_execute_tool``, vor Hook, Pflichtfeldpruefung, Pfad-Umleitung und
+    Freigaben. Alle Eintrittspunkte (Chat, headless, Auto-Lernen, Sub-Agenten,
+    MCP) laufen durch diese Methode.
+    """
+    if not isinstance(args, dict):
+        try:
+            args = dict(args or {})
+        except Exception:  # noqa: BLE001
+            return {}
+    weg = [k for k in args if str(k).startswith("_")]
+    if not weg:
+        return dict(args)
+    print(f"[AGENT] Interne Argumente vom Modell verworfen ({name}): "
+          f"{sorted(str(k) for k in weg)[:10]}", flush=True)
+    return {k: v for k, v in args.items() if not str(k).startswith("_")}
 
 
 def _reminder_exempt(tool_name: str, user: str) -> bool:
@@ -2976,6 +3169,8 @@ KRITISCH – Ausfuehrungs-Regeln:
                                     or self._current_username in _LOCAL_PRIVILEGED_USERS))
         _actor_token = _actor_cv.set((self._current_username, _lauf_privilegiert))
         _stats_token = _lauf_stats_cv.set([])
+        # Pentest C6: Fremdtext-Marke dieses Auftrags (Unter-Laeufe erben).
+        _fremd_token = _fremdtext_oeffnen("Anhang" if attachments else "")
         # Benutzereingaben dieses Laufs (MCP-Beispielpruefung). Nur der AEUSSERE
         # Lauf setzt sie – ein Sub-Agent-Auftrag ist Modelltext. "verlauf" wird
         # unten nachgetragen, sobald chat_history feststeht.
@@ -4056,6 +4251,11 @@ KRITISCH – Ausfuehrungs-Regeln:
                 _lauf_stats_cv.reset(_stats_token)
             except Exception:  # noqa: BLE001
                 pass
+            if _fremd_token is not None:
+                try:
+                    _fremdtext_cv.reset(_fremd_token)
+                except Exception:  # noqa: BLE001
+                    pass
             if _eingabe_token is not None:
                 try:
                     _benutzer_eingabe_cv.reset(_eingabe_token)
@@ -4136,14 +4336,23 @@ KRITISCH – Ausfuehrungs-Regeln:
                  if actor is not None and id(self) not in (_lauf_kontext_cv.get() or {}) else None)
         try:
             if actor is not None:
-                with self.actor_scope(
-                        str(actor.get("user") or _ANON_ACTOR),
-                        privileged=bool(actor.get("privileged")),
-                        internet=bool(actor.get("internet", True)),
-                        sap=bool(actor.get("sap", False)),
-                        vemas=bool(actor.get("vemas", False)),
-                        task=task_text):
-                    return await self._run_headless(task_text, reasoning_effort)
+                # Pentest C7: Deckel je Benutzer (aeusserster Lauf, Admins frei).
+                _freigeben, _meldung = _lauf_platz_belegen(
+                    str(actor.get("user") or _ANON_ACTOR), bool(actor.get("privileged")))
+                if _meldung:
+                    return _meldung
+                try:
+                    with self.actor_scope(
+                            str(actor.get("user") or _ANON_ACTOR),
+                            privileged=bool(actor.get("privileged")),
+                            internet=bool(actor.get("internet", True)),
+                            sap=bool(actor.get("sap", False)),
+                            vemas=bool(actor.get("vemas", False)),
+                            task=task_text):
+                        return await self._run_headless(task_text, reasoning_effort)
+                finally:
+                    if _freigeben is not None:
+                        _freigeben()
             # actor=None: bestehenden Kontext des Agenten bewusst weiterverwenden
             # (nur fuer Sub-Laeufe, die schon in einem actor_scope stehen).
             return await self._run_headless(task_text, reasoning_effort)
@@ -4160,6 +4369,13 @@ KRITISCH – Ausfuehrungs-Regeln:
         _lauf_stack.enter_context(_lauf_tmp.lauf_scope(
             self.actor_name(), self._actor_is_privileged()))
         _lauf_stack.callback(_lauf_stats_cv.reset, _lauf_stats_cv.set([]))
+        # Pentest C6: ein Lauf OHNE Oberflaeche (Cron, Mail-Regel, Watcher,
+        # Messenger, Agent-API) traegt Fremdtext bzw. hat keinen Menschen, der
+        # seine Befehle getippt hat – nie Grundlage einer Kontosperre. Innerhalb
+        # eines Laufs (Rolle, Delegation) gilt dessen Marke weiter.
+        if _fremdtext_cv.get() is None:
+            _lauf_stack.callback(_fremdtext_cv.reset,
+                                 _fremdtext_oeffnen("Lauf ohne Oberflaeche"))
         # Ohne aeusseren Lauf (Cron, Short Tracks, E-Mail-Regel) ist der
         # Auftragstext die Benutzereingabe; innerhalb eines Laufs gilt dessen.
         if _benutzer_eingabe_cv.get() is None:
@@ -4599,6 +4815,10 @@ KRITISCH – Ausfuehrungs-Regeln:
         if not tool:
             return f"Fehler: Tool '{name}' nicht gefunden"
 
+        # Pentest C2: interne Schluessel ('_…') kommen nie vom Modell – siehe
+        # _modell_argumente. Steht VOR allem, was `args` liest.
+        args = _modell_argumente(name, args)
+
         # ── Rollen-Zuschnitt: HARTE Schranke, unabhaengig von der Deklaration ──
         # Der Filter in _llm_tools bestimmt nur, was das Modell zu sehen bekommt.
         # Modelle rufen aber gelegentlich Werkzeuge auf, die nicht deklariert
@@ -4652,23 +4872,33 @@ KRITISCH – Ausfuehrungs-Regeln:
             if ws and getattr(tool, 'supports_streaming', False):
                 exec_args['_status_callback'] = lambda msg: self._send_status(ws, msg)
             # Benutzer-spezifischer Memory-Namespace
+            # Pentest C2: ZUWEISUNG statt setdefault – der Wert stammt aus dem
+            # Lauf, nie vom Modell (die Modell-Argumente sind oben bereinigt).
             if name == "memory_manage":
-                exec_args.setdefault('_username', getattr(self, '_current_username', ''))
+                exec_args['_username'] = getattr(self, '_current_username', '')
             # Zeitgesteuerte Auftraege: der ANLEGENDE Benutzer wird im Job
             # festgeschrieben und regiert spaeter dessen Ausfuehrung. Ohne diese
             # Bindung waere jeder Cron-Job eine zeitversetzte Rechteerhoehung.
             if name.startswith("cron_"):
-                exec_args.setdefault('_username', getattr(self, '_current_username', ''))
-                exec_args.setdefault('_privileged', self._actor_is_privileged())
-                exec_args.setdefault('_client_type', getattr(self, '_current_client_type', ''))
+                exec_args['_username'] = getattr(self, '_current_username', '')
+                exec_args['_privileged'] = self._actor_is_privileged()
+                exec_args['_client_type'] = getattr(self, '_current_client_type', '')
             # Vom Benutzer gewaehlter Wissensgruppen-Filter fuer die Wissenssuche
             if name == "knowledge_search":
-                exec_args.setdefault('_kb_groups', getattr(self, '_current_kb_groups', None))
+                exec_args['_kb_groups'] = getattr(self, '_current_kb_groups', None)
             # SQL-Schema-Auswahl des Benutzers fuer die schema_*-Werkzeuge. Hart
             # GESETZT, nicht setdefault: ein vom Modell mitgegebenes
             # ``_sql_schemata`` darf die Auswahl nicht erweitern.
             if name.startswith("schema_"):
                 exec_args['_sql_schemata'] = list(getattr(self, '_current_sql_schemata', None) or [])
+            # Pentest C1: Desktop-Clients (Windows/Android) gehoeren einem
+            # BENUTZER. Das Werkzeug sendet nur an den Client des Lauf-Akteurs –
+            # vom Dispatch zugewiesen, nie vom Modell.
+            # Pentest C5: knowledge_manage braucht die Rechte des Akteurs fuer
+            # alles ausser list_folders/stats.
+            if name in ("windows_desktop", "android_desktop", "knowledge_manage"):
+                exec_args['_akteur'] = self.actor_name() or ""
+                exec_args['_privileged'] = self._actor_is_privileged()
             # Read-Only Skill: schreibende Tools blockieren
             _WRITE_TOOLS = {"shell_execute", "write_file", "desktop_action"}
             if name in _WRITE_TOOLS and self.skill_manager.is_tool_readonly(name):
@@ -4846,6 +5076,13 @@ KRITISCH – Ausfuehrungs-Regeln:
             # Sicherheitsrelevanten Verstoss protokollieren + ggf. Auto-Sperre.
             # (NICHT die reine Internet-/Feature-Gating-Sperre unten.)
             if _viol and not _privileged:
+                # Pentest C6: Fremdtext im Kontext -> nur weich zaehlen (keine
+                # automatische Sperre), im Protokoll mit Grund.
+                _fremd = [] if _viol_soft else _fremdtext_gruende()
+                if _fremd:
+                    _viol_soft = True
+                    print(f"[AGENT] Verstoss '{_viol[0]}' von '{_uname}' nur weich gezaehlt "
+                          f"(Fremdtext im Lauf: {', '.join(_fremd)})", flush=True)
                 try:
                     from backend import security_guard as _sg
                     _exempt = False
@@ -4869,7 +5106,8 @@ KRITISCH – Ausfuehrungs-Regeln:
                                                ip=getattr(self, '_current_client_ip', '') or '',
                                                client_type=getattr(self, '_current_client_type', '') or '',
                                                exempt=_exempt, escalate=not _viol_soft,
-                                               marke=_viol_marke)
+                                               marke=_viol_marke,
+                                               fremdtext=", ".join(_fremd))
                     if _vr.get("blocked"):
                         result = ("🚫 Konto gesperrt: wiederholte sicherheitsrelevante Zugriffsversuche "
                                   "wurden erkannt. Bitte wende dich an einen lokalen Administrator.")
@@ -5131,6 +5369,9 @@ KRITISCH – Ausfuehrungs-Regeln:
                     _cpcv = None
                 try:
                     result = await tool.execute(**exec_args)
+                    # Pentest C6: ab hier steht ein Werkzeugergebnis (Fremdtext)
+                    # im Kontext dieses Laufs.
+                    _fremdtext_merken("Werkzeugergebnis")
                     if _mcp_weggelassen and isinstance(result, str):
                         result = _mcp_weggelassen_hinweis(_mcp_weggelassen) + result
                 finally:

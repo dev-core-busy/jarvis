@@ -98,6 +98,32 @@ def _host_von(url: str) -> str:
     return host.split(":")[0]
 
 
+def _amurl_host(amurl: str) -> str:
+    """Hostname der Metadaten-Adresse aus dem Token – oder "" (= abweisen).
+
+    Zerlegt mit ``urllib.parse.urlsplit`` statt von Hand, und nur in der
+    einen Form, die ein Exchange ausstellt: ``https``, KEINE Zugangsdaten
+    (``user:pw@``), Port leer oder 443, kein Leerraum/Steuerzeichen. Alles
+    andere ist kein Exchange-Token, sondern ein Versuch, den Abruf des
+    Metadaten-Dokuments umzulenken (Befund A4: ``https://host:443@ziel/``)."""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+    roh = str(amurl or "")
+    if not roh or roh != roh.strip() or any(ord(z) < 0x21 or z in "\\" for z in roh):
+        return ""
+    try:
+        teile = urlsplit(roh)
+        port = teile.port
+    except ValueError:
+        return ""
+    if teile.scheme.lower() != "https":
+        return ""
+    if teile.username is not None or teile.password is not None or "@" in teile.netloc:
+        return ""
+    if port not in (None, 443):
+        return ""
+    return (teile.hostname or "").lower()
+
+
 def erlaubte_hosts() -> set[str]:
     """Exchange-Hosts, deren Token wir annehmen – aus der Skill-Konfiguration.
 
@@ -209,7 +235,13 @@ def kennung(msexchuid: str, amurl: str) -> str:
 # ── Metadaten-Dokument des Exchange (enthaelt den oeffentlichen Schluessel) ──
 
 def _signaturschluessel(amurl: str) -> list[dict]:
-    """Signier-Zertifikate vom Exchange holen (mit Zwischenspeicher)."""
+    """Signier-Zertifikate vom Exchange holen (mit Zwischenspeicher).
+
+    Abgerufen wird nur eine Adresse, deren Host zur Konfiguration passt –
+    hier noch einmal geprueft, damit kein kuenftiger Aufrufer am Anker
+    vorbei eine beliebige Adresse abrufen laesst (A4)."""
+    if not _amurl_host(amurl) or _amurl_host(amurl) not in erlaubte_hosts():
+        raise SsoFehler("Die Metadaten-Adresse gehoert nicht zum hinterlegten Exchange.")
     jetzt = time.time()
     treffer = _meta_cache.get(amurl)
     if treffer and (jetzt - treffer[0]) < _META_TTL_SEK:
@@ -221,10 +253,13 @@ def _signaturschluessel(amurl: str) -> list[dict]:
         antwort.raise_for_status()
         daten = antwort.json()
     except Exception as e:  # noqa: BLE001
+        # Details nur ins Journal: der Text konnte bis 2026-11-05 Inhalte der
+        # Gegenstelle zum (nicht angemeldeten) Aufrufer tragen (A4).
+        print("[Add-in] Metadaten-Abruf gescheitert (%s): %s" % (_amurl_host(amurl), e),
+              flush=True)
         raise SsoFehler(
-            "Das Metadaten-Dokument des Exchange ist nicht abrufbar (%s). Ohne "
-            "dieses Dokument laesst sich die Signatur des Tokens nicht pruefen."
-            % e) from e
+            "Das Metadaten-Dokument des Exchange ist nicht abrufbar. Ohne "
+            "dieses Dokument laesst sich die Signatur des Tokens nicht pruefen.") from e
     schluessel = [k for k in (daten.get("keys") or [])
                   if str(k.get("usage", "")).lower() == "signing"]
     if not schluessel:
@@ -320,10 +355,15 @@ def pruefe_token(token: str, erwartete_aud: str) -> dict[str, Any]:
             "Fuer die automatische Anmeldung muss die EWS-Adresse des Exchange "
             "hinterlegt sein (Einstellungen → E-Mail). Ohne sie laesst sich "
             "nicht pruefen, ob das Token vom richtigen Server stammt.")
-    if _host_von(amurl) not in hosts:
+    # STRENG zerlegt (Befund A4, 2026-11-05): ``_host_von`` schnitt am ersten
+    # ':' – "https://exchange:443@angreifer/" ergab den hinterlegten Host,
+    # abgerufen wurde aber beim Angreifer (bzw. ein beliebiges internes Ziel:
+    # SSRF ohne Anmeldung, VOR der Signaturpruefung).
+    amurl_host = _amurl_host(amurl)
+    if amurl_host not in hosts:
         raise SsoFehler(
             "Das Token stammt von einem anderen Exchange-Server (%s), "
-            "hinterlegt ist: %s." % (_host_von(amurl), ", ".join(sorted(hosts))))
+            "hinterlegt ist: %s." % (amurl_host or "?", ", ".join(sorted(hosts))))
 
     # ── Ist das Token fuer UNSER Aufgabenfenster ausgestellt? ──
     aud = str(rumpf.get("aud") or "").strip().rstrip("/")
@@ -340,10 +380,13 @@ def pruefe_token(token: str, erwartete_aud: str) -> dict[str, Any]:
         exp = int(str(rumpf.get("exp") or 0))
     except ValueError as e:
         raise SsoFehler("Die Laufzeitangaben des Tokens sind unlesbar.") from e
+    # exp ist Pflicht (A4b): ein Token ohne Ablauf gaelte sonst fuer immer.
+    if not exp:
+        raise SsoFehler("Im Token fehlt die Ablaufzeit (exp).")
     if nbf and jetzt + UHR_TOLERANZ_SEK < nbf:
         raise SsoFehler("Das Token gilt erst spaeter – pruefe die Uhrzeit von "
                         "Server und Exchange.")
-    if exp and jetzt - UHR_TOLERANZ_SEK > exp:
+    if jetzt - UHR_TOLERANZ_SEK > exp:
         raise SsoFehler("Das Token ist abgelaufen.")
 
     # ── Signatur (zuletzt: sie kostet eine Netzanfrage) ──

@@ -4,6 +4,8 @@ import android.util.Log
 import info.jarvisai.app.data.model.AgentInfo
 import info.jarvisai.app.data.model.ConnectionState
 import info.jarvisai.app.data.model.WsEvent
+import info.jarvisai.app.desktop.Bestaetigung
+import info.jarvisai.app.desktop.BestaetigungsAnfrage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,6 +52,10 @@ private data class WsOutgoing(
     val token: String,
     val agent_id: String? = null,
     val lang: String = "de",
+    // Diese App zeigt Bestaetigungsdialoge (desktop/Bestaetigung.kt). BEWUSST
+    // ohne Vorgabewert: `json` kodiert Vorgabewerte nicht (encodeDefaults=false),
+    // ein `= true` kaeme beim Server nie an.
+    val bestaetigung: Boolean,
 )
 
 @Singleton
@@ -81,6 +87,22 @@ class JarvisWebSocket @Inject constructor(
 
     private val _desktopCommands = MutableSharedFlow<WsEvent>(extraBufferCapacity = 64)
     val desktopCommands: SharedFlow<WsEvent> = _desktopCommands
+
+    // Bestaetigungsanfragen des Servers (desktop/Bestaetigung.kt). Hoert niemand
+    // zu (kein Bildschirm aktiv), wird sofort ABGELEHNT – nie still zugelassen.
+    private val _bestaetigungen = MutableSharedFlow<BestaetigungsAnfrage>(extraBufferCapacity = 8)
+    val bestaetigungen: SharedFlow<BestaetigungsAnfrage> = _bestaetigungen
+
+    /** Beantwortet eine Bestaetigungsanfrage; der Server prueft den Benutzer selbst. */
+    fun sendBestaetigungAntwort(id: String, erlaubt: Boolean) {
+        val payload = buildJsonObject {
+            put("type", "bestaetigung_antwort")
+            put("token", apiKey)
+            put("id", id)
+            put("erlaubt", erlaubt)
+        }.toString()
+        ws?.send(payload) ?: Log.w(TAG, "sendBestaetigungAntwort: WebSocket nicht verbunden")
+    }
 
     private val _agents = MutableStateFlow<List<AgentInfo>>(emptyList())
     val agents: StateFlow<List<AgentInfo>> = _agents
@@ -125,6 +147,7 @@ class JarvisWebSocket @Inject constructor(
             token = apiKey,
             agent_id = agentId.ifBlank { null },
             lang = lang,
+            bestaetigung = true,
         )
         val payload = json.encodeToString(msg)
         ws?.send(payload) ?: Log.w(TAG, "sendTask: WebSocket nicht verbunden")
@@ -142,6 +165,7 @@ class JarvisWebSocket @Inject constructor(
             put("token", apiKey)
             put("lang", lang)
             put("truncate_user_msg_index", truncateUserMsgIndex)
+            put("bestaetigung", true)
             if (agentId.isNotBlank()) put("agent_id", agentId)
         }.toString()
         ws?.send(payload) ?: Log.w(TAG, "sendTaskWithTruncate: WebSocket nicht verbunden")
@@ -213,6 +237,15 @@ class JarvisWebSocket @Inject constructor(
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (!aktuell()) return
+                // Bestaetigungsanfrage VOR WsEvent abfangen (eigene Felder, eigener Weg).
+                Bestaetigung.parse(text)?.let { anfrage ->
+                    if (_bestaetigungen.subscriptionCount.value == 0 ||
+                        !_bestaetigungen.tryEmit(anfrage)
+                    ) {
+                        sendBestaetigungAntwort(anfrage.id, false)
+                    }
+                    return
+                }
                 try {
                     val event = json.decodeFromString<WsEvent>(text)
                     // Desktop-Befehle separat weiterleiten

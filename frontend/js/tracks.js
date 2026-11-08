@@ -595,6 +595,13 @@
             var src = img.getAttribute('src') || '';
             // Eigener Pfad (`/api/…`, aber NICHT `//host` – das ist eine fremde
             // Adresse ohne Schema) oder ein eingebettetes data:-Bild.
+            // BEWUSST DIE ZWEITE SCHRANKE: seit dem Pentest-Fix D3 erzeugt
+            // chatlib.js fuer ein fremdes Bild selbst kein <img> mehr. Dieser
+            // Filter bleibt trotzdem – faellt die Regel im Renderer je weg
+            // (Umbau, anderer Renderer), saehe diese Seite das als Erste, und hier
+            // ist Fremdinhalt der Normalfall. Die Gegenprobe sabotiert deshalb
+            // BEIDE Stellen in einem Zug (gegen_short_tracks_fragen.py); eine
+            // allein bleibt stumm, das ist die doppelte Schranke, kein Mangel.
             if (/^\/(?!\/)/.test(src) || /^data:image\//i.test(src)) return;
             var ersatz = document.createElement('span');
             ersatz.className = 'st-img-weg';
@@ -691,8 +698,16 @@
                 '<div class="st-job-head">' +
                   // Eine Frage traegt ihre Frage als Titel – die Marke sagt,
                   // dass hier keine Datei bearbeitet wurde.
+                  // Eine Nachfrage nennt, worauf sie aufbaut – sonst sieht der
+                  // Benutzer nicht, warum die Antwort „und jetzt nur 2025"
+                  // verstanden hat (und ein Zuruecksetzen den Faden kappt).
                   (j.art === 'frage'
-                      ? '<span class="st-badge st-job-art">' + esc(T('tracks.job_question', 'Frage')) + '</span>'
+                      ? (j.verlauf > 0
+                          ? '<span class="st-badge st-job-art" title="' +
+                              esc(T('tracks.job_followup_tip', 'Bezieht sich auf {n} frühere Frage(n) an diese Ablage')
+                                  .replace('{n}', j.verlauf)) + '">' +
+                              esc(T('tracks.job_followup', 'Nachfrage')) + '</span>'
+                          : '<span class="st-badge st-job-art">' + esc(T('tracks.job_question', 'Frage')) + '</span>')
                       : '') +
                   '<span class="st-job-name">' + esc(j.titel) + '</span>' +
                   '<span class="st-job-state">' +
@@ -852,7 +867,7 @@
                 '<button type="button" class="st-info" data-help="st-help-fragen" aria-expanded="false" ' +
                   'data-i18n-title="tracks.help" title="Erklärung anzeigen">&#9432;</button>' +
               '</label>' +
-              '<div class="st-help" id="st-help-fragen" data-i18n="tracks.help_fragen">Auf der Ablage erscheint ein Eingabefeld. Eine Frage dort startet die Aufgabe ohne Datei – die Aufgabe gibt den Rahmen vor (etwa „Beantworte Fragen zum Datenbankschema und schreibe dazu SQL für PostgreSQL"), die Frage sagt, was diesmal gesucht ist. Die Referenzdateien liegen jeder Frage bei.</div>' +
+              '<div class="st-help" id="st-help-fragen" data-i18n="tracks.help_fragen">Auf der Ablage erscheint ein Eingabefeld. Eine Frage dort startet die Aufgabe ohne Datei – die Aufgabe gibt den Rahmen vor (etwa „Beantworte Fragen zum Datenbankschema und schreibe dazu SQL für PostgreSQL"), die Frage sagt, was diesmal gesucht ist. Die Referenzdateien liegen jeder Frage bei. Nachfragen wie „und jetzt nur 2025“ sind möglich: deine bisherigen Fragen an diese Ablage und ihre Antworten gehen mit (die letzten 12 Stunden, die neuesten zuerst). „Zurücksetzen“ beginnt von vorn.</div>' +
             '</div>' +
             '<div class="st-field" style="margin-top:10px;">' +
               '<label><span data-i18n="tracks.f_refs">Referenzdateien</span> ' +

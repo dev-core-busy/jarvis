@@ -53,20 +53,10 @@ solange E-Mail nur für Testbenutzer freigeschaltet ist:
 
 Gebaut ist (2026-11-06): Referenzdateien je Ablage (z. B. ein
 Datenbankschema), die jedem Lauf beiliegen, und ein zuschaltbares Fragefeld
-auf der Karte – die Antwort ist Text bzw. SQL, Einzelfragen ohne Verlauf,
-Referenzen bis 24.000 Zeichen direkt im Auftrag. Offen:
+auf der Karte – die Antwort ist Text bzw. SQL, Referenzen bis 24.000 Zeichen
+direkt im Auftrag. Seit 2026-11-08 mit Nachfragen: die bisherigen Fragen
+desselben Benutzers an die Ablage gehen mit (12.000 Zeichen, 12 Stunden). Offen:
 
-- [ ] **SQL gegen eine echte Datenbank ausführen** – statt nur SQL
-      vorzuschlagen, die Abfrage ausführen und das Ergebnis zeigen. Braucht:
-      Verbindungsdaten im Tresor (nicht in der Ablage), einen ausschließlich
-      lesenden Datenbankbenutzer, Grenzen für Laufzeit und Ergebnisgröße und
-      einen eigenen Werkzeug-Bereich, den ein Administrator freigibt
-      (`short_tracks.BEREICHE`).
-- [ ] **Nachfragen mit Verlauf** („und jetzt nur 2025“) – heute ist jede Frage
-      ein eigener Lauf. Ein Gesprächsfaden je Ablage und Benutzer wäre ein neues
-      Konzept: `run_task_headless` hat bewusst keinen Chat-Verlauf, der
-      Verlauf müsste begrenzt, je Benutzer getrennt und beim Zurücksetzen
-      mitgelöscht werden.
 - [ ] **Große Schemata gezielt nachschlagen** – heute wird der Text aller
       Referenzen gekürzt in den Auftrag gelegt (24.000 Zeichen, je Datei
       mindestens 4.000), der Rest ist nur über die Arbeitskopie erreichbar.
@@ -85,3 +75,48 @@ Aus der Sicherheitsprüfung vor dem Pentest (2026-11-08):
       TLS auf LLM- und STT-Server aktivieren (IT), danach die Profile auf
       `https://` bzw. `wss://` umstellen (Einstellungen → KI-Profile,
       Sprachausgabe/-erkennung). Ein HTTPS-Profil existiert bereits.
+
+## Sicherheit und Betrieb
+
+- [ ] **Zertifikat des Domänencontrollers (Produktivsystem) – Frist 27.12.2026.**
+      Läuft der hinterlegte Anker ab, ohne dass er vorher erneuert wurde, bricht
+      die AD-Anmeldung. Alternative: die interne Zertifizierungsstelle in den
+      Systemspeicher aufnehmen und den Domänencontroller per FQDN ansprechen.
+- [ ] **Sicherheitsprotokoll ans SIEM weiterleiten** (BSI M2 Teil B) – wartet
+      auf die angeforderten Zugangsdaten; vorher nichts bauen, was das Ziel
+      raten müsste. Bauplan: `deploy/security/siem_weiterleitung.sh` nach dem
+      Muster von `ssh_haertung.sh`, Ziel nur in `/etc/jarvis/broker.conf`,
+      rsyslog per TCP+TLS mit Zertifikatsprüfung und Plattenpuffer, tägliches
+      Lebenszeichen der Hash-Kette, journald-Aufbewahrung ein Jahr.
+- [ ] **CSP erzwingen** (BSI H4, Rest) – von „melden“ auf „erzwingen“
+      umstellen und die verbliebenen Inline-Stile entfernen.
+
+## Ausbau
+
+- [ ] **Lösungsarchiv: erster echter Lauf auf DEV** – erst, wenn der laufende
+      Wissensgraph-Lauf auf DEV fertig ist. Kurzer Zeitraum (~4 Wochen),
+      Test-Wissensgruppe. Messen: Ähnlichkeitsschwelle (0,80 ist ungemessen –
+      mehrere Schwellen fahren, Positivkontrolle mit zwei absichtlich gleichen
+      Tickets), Anonymisierung an echten Texten, JSON-Quote wiederholt, landet
+      die veröffentlichte Datei im Wissensgraphen.
+- [ ] **Mehrere Postfächer je Benutzer** (E-Mail) – heute genau eines. Kern des
+      Umbaus ist nicht das Datenmodell, sondern die Bindung im Lauf: das
+      Postfach kommt aus der Regel bzw. dem Add-in-Token, nie aus dem Modell
+      oder dem Nachrichtentext (kein `postfach=`-Argument an Werkzeugen).
+      Aussetzer-Zähler je Postfach, Auswahl in `/email` und im Add-in.
+- [ ] **Portal-Kachel „Support-Agent“ umbauen** – die Kachel ist versteckt
+      (`hidden` in `frontend/portal.html`), `/supportagent` bleibt erreichbar.
+      Was umgebaut werden soll, ist noch nicht festgelegt – vor dem Bauen klären.
+- [ ] **MCP-Restpunkte** (bewusst offen) – kein OAuth/PKCE im Client;
+      MCP-Server laufen außerhalb von Skill-Lebenszyklus, Lizenzzählung und
+      Skill-Audit.
+- [ ] **Vision „Tür öffnen“** ist ein Platzhalter
+      (`skills/vision/vision_engine.py`) – GPIO-/Relais-/API-Anbindung fehlt.
+
+## Optional / Ideen
+
+- [ ] **Spracherkennung:** Fachwörter (Jira, Confluence, SAP, Firewall …) als
+      `initial_prompt` für `/api/stt`, vorher/nachher messen (Fehlerquote und
+      Zeit); Android-App mit `EXTRA_PREFER_OFFLINE` oder über `transcribe_only`;
+      Whisper-Modell für abgeschottete Server vorab bereitstellen
+      (`HF_HUB_OFFLINE`).

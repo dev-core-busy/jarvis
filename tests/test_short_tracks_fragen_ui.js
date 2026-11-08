@@ -304,14 +304,25 @@ abschnitt('3. Auftrag einer Frage');
         { id: 'j1', dump_id: 'aaaaaaaaaaaa', art: 'frage', titel: 'Welche Spalten?',
           status: 'fertig', schritte: [], ergebnis: 'id, name', dateien: [], fehler: '' },
         { id: 'j2', dump_id: 'aaaaaaaaaaaa', art: 'datei', titel: 'neu.sql',
-          status: 'fertig', schritte: [], ergebnis: 'ok', dateien: [], fehler: '' }] });
+          status: 'fertig', schritte: [], ergebnis: 'ok', dateien: [], fehler: '' },
+        { id: 'j3', dump_id: 'aaaaaaaaaaaa', art: 'frage', titel: 'und nur 2025?', verlauf: 2,
+          status: 'fertig', schritte: [], ergebnis: 'gefiltert', dateien: [], fehler: '' }] });
     await warte(100);
     const zeilen = karte(w, 'aaaaaaaaaaaa').parentNode
         .querySelectorAll('[data-jobs="aaaaaaaaaaaa"] .st-job');
-    pruefe(zeilen.length === 2, 'beide Auftraege erscheinen', String(zeilen.length));
+    pruefe(zeilen.length === 3, 'alle drei Auftraege erscheinen', String(zeilen.length));
+    // Nachfrage (seit 2026-11-08): eigene Marke mit der Zahl im Tooltip – die
+    // Zeile ohne Verlauf bleibt bei „Frage".
+    const nach = Array.from(zeilen).filter(z => z.textContent.indexOf('und nur 2025?') >= 0)[0];
+    const nachMarke = nach && nach.querySelector('.st-job-art');
+    pruefe(nachMarke && nachMarke.textContent === 'Nachfrage', 'eine Nachfrage traegt die Marke „Nachfrage“',
+        nachMarke ? nachMarke.textContent : 'keine Marke');
+    pruefe(nachMarke && /\b2\b/.test(nachMarke.getAttribute('title') || ''),
+        'der Tooltip nennt die Zahl der frueheren Fragen', nachMarke ? nachMarke.getAttribute('title') : '');
     const frage = Array.from(zeilen).filter(z => z.textContent.indexOf('Welche Spalten?') >= 0)[0];
     const datei = Array.from(zeilen).filter(z => z.textContent.indexOf('neu.sql') >= 0)[0];
-    pruefe(frage && !!frage.querySelector('.st-job-art'), 'eine Frage traegt die Marke „Frage“');
+    pruefe(frage && !!frage.querySelector('.st-job-art')
+        && frage.querySelector('.st-job-art').textContent === 'Frage', 'eine Frage traegt die Marke „Frage“');
     pruefe(datei && !datei.querySelector('.st-job-art'), 'ein Datei-Auftrag nicht');
     pruefe(frage && frage.textContent.indexOf('id, name') >= 0, 'die Antwort steht darunter');
     await schliesse(w);
@@ -477,6 +488,7 @@ abschnitt('5. Texte und Einbindung');
 {
     const keys = ['tracks.ask_ph', 'tracks.ask_btn', 'tracks.ask_empty', 'tracks.ask_too_long',
                   'tracks.ask_sending', 'tracks.ask_queued', 'tracks.job_question',
+                  'tracks.job_followup', 'tracks.job_followup_tip',
                   'tracks.refs_on_card', 'tracks.f_fragen', 'tracks.help_fragen', 'tracks.f_refs',
                   'tracks.help_refs', 'tracks.refs_none', 'tracks.refs_add', 'tracks.refs_limit',
                   'tracks.refs_after_save', 'tracks.refs_uploading', 'tracks.refs_done',

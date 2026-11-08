@@ -188,8 +188,11 @@ probe("Referenz-Upload ohne Magie-Byte-Pruefung", "py",
 
 # ── Sandbox ─────────────────────────────────────────────────────────────────
 probe("Verzeichnis nicht in _APP_DENY_REL", "py",
+      # Anker ist die FOLGEZEILE: seit dem SQL-Assistenten (2026-11-08) steht
+      # dort dessen Kommentar, nicht mehr "# Claude Subagent" – der alte Anker
+      # traf 0-mal und brach die ganze Gegenprobe ab.
       (SB, '''    "data/short_tracks_ref",
-    # Claude Subagent''', '''    # Claude Subagent'''))
+    # SQL-Assistent (data/sql_schema_graph''', '''    # SQL-Assistent (data/sql_schema_graph'''))
 probe("Verzeichnis nicht in PRIVATE_DIRS", "py",
       (SB, '''                # Referenzdateien der Short-Tracks-Ablagen (siehe _APP_DENY_REL)
                 "data/short_tracks_ref",\n''', ""))
@@ -246,12 +249,20 @@ probe("Ergebnis wird direkt ins Dokument gerendert (Filter zu spaet)", "js",
            """        el.innerHTML = lib.renderMarkdown(String(text || '').replace(_ZEICHEN_ZAUN, '```text'));
         var tpl = { content: document.createDocumentFragment() };
         el.querySelectorAll('img')"""))
-probe("fremde Bilder werden nicht ausgefiltert", "js",
+# Zwei Schranken fuer dieselbe Frage (Register): seit dem Pentest-Fix D3
+# filtert chatlib.js fremde Bilder selbst, tracks.js filtert zusaetzlich. Eine
+# Sabotage an NUR einer Stelle bleibt deshalb stumm – beide Proben treffen
+# beide Stellen in einem Zug (Begruendung am Filter in tracks.js).
+CL = "frontend/js/chatlib.js"
+probe("fremde Bilder werden nicht ausgefiltert (Renderer UND Seite)", "js",
       (TJ, "            if (/^\\/(?!\\/)/.test(src) || /^data:image\\//i.test(src)) return;",
-           "            return;"))
-probe("`//host` gilt als eigener Pfad", "js",
+           "            return;"),
+      (CL, "                if (!_bildIntern(raw)) {", "                if (false) {"))
+probe("`//host` gilt als eigener Pfad (Renderer UND Seite)", "js",
       (TJ, "            if (/^\\/(?!\\/)/.test(src) || /^data:image\\//i.test(src)) return;",
-           "            if (/^\\//.test(src) || /^data:image\\//i.test(src)) return;"))
+           "            if (/^\\//.test(src) || /^data:image\\//i.test(src)) return;"),
+      (CL, "            if (/^\\/(?![\\/\\\\])/.test(s)) return true;",
+           "            if (/^\\//.test(s)) return true;"))
 probe("Diagramm-Bloecke werden nicht als Code gezeigt", "js",
       (TJ, "        tpl.innerHTML = lib.renderMarkdown(String(text || '').replace(_ZEICHEN_ZAUN, '```text'));",
            "        tpl.innerHTML = lib.renderMarkdown(String(text || ''));"))

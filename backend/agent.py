@@ -1440,6 +1440,10 @@ _run_stop_scope: contextvars.ContextVar = contextvars.ContextVar(
 # Sentinel: unterscheidet "kb_groups nicht uebergeben" (Sub-Agent erbt) von
 # "explizit None" (Benutzer hat alle Gruppen gewaehlt -> kein Filter).
 _KB_GROUPS_UNSET = object()
+# Gleiches Muster fuer die SQL-Schema-Auswahl (SQL-Assistent, 2026-11-07):
+# NICHT uebergeben = vom Eltern-Agenten erben; None/[] = KEIN Schema – dann
+# bekommt der Lauf gar keine schema_*-Werkzeuge (Vorgabe "kein Schema").
+_SQL_SCHEMATA_UNSET = object()
 # Gleiches Muster fuer die Denktiefe: NICHT uebergeben (intern gespawnter
 # Sub-Agent) = Wahl des Eltern-Agenten erben. Explizit None = keine Vorgabe fuer
 # diesen Task. Wichtig, weil der Hauptagent von mehreren Nutzern geteilt wird –
@@ -1567,6 +1571,7 @@ class JarvisAgent:
     _current_user_sap = _LaufWert()
     _current_user_vemas = _LaufWert()
     _current_kb_groups = _LaufWert()
+    _current_sql_schemata = _LaufWert()
     _current_reasoning_effort = _LaufWert()
     _current_task = _LaufWert()
     _current_client_ip = _LaufWert()
@@ -2006,6 +2011,20 @@ KRITISCH – Ausfuehrungs-Regeln:
             except Exception as e:  # noqa: BLE001
                 print(f"[AGENT] HANA-Freigabe nicht lesbar ({e}) – Angebot unveraendert",
                       flush=True)
+        # SQL-Assistent (schema_*): dieselbe Freigabe wie im Werkzeug selbst
+        # (main.schema_zugang) – die HARTE Schranke bleibt dort. Fail-open nur
+        # fuer das ANGEBOT, wie bei der HANA-Freigabe oben.
+        # OHNE gewaehltes Schema gibt es KEIN Angebot (Vorgabe 2026-11-07:
+        # "kein Schema" ist die Vorgabe im Chat) – fail-closed, unabhaengig von
+        # der Freigabe, und ohne Rueckfrage an main.py.
+        schema_ok = bool(getattr(self, "_current_sql_schemata", None))
+        if schema_ok and any(getattr(t, "name", "").startswith("schema_") for t in tools or []):
+            try:
+                from backend import main as _m
+                schema_ok = bool(_m._user_may_use_schema(uname) and _m._skill_active(_m._SCHEMA_SKILL))
+            except Exception as e:  # noqa: BLE001
+                print(f"[AGENT] SQL-Assistent-Freigabe nicht lesbar ({e}) – Angebot unveraendert",
+                      flush=True)
         # Die Freigabe haengt am SERVER, nicht am Werkzeug: ein Urteil je
         # server_id genuegt (Code-Review 2026-10-25 – bei vielen Werkzeugen sonst
         # dieselbe Pruefung hundertfach je Schritt). Dasselbe Praedikat wie im
@@ -2019,6 +2038,8 @@ KRITISCH – Ausfuehrungs-Regeln:
             if name in _SAP_HANA_TOOLS and not hana_ok:
                 continue
             if name.startswith("vemas_") and not vemas_ok:
+                continue
+            if name.startswith("schema_") and not schema_ok:
                 continue
             # MCP: kein Admin-Bypass – wie im Dispatch (leer = niemand).
             if _ist_mcp_tool(t, name):
@@ -2863,7 +2884,7 @@ KRITISCH – Ausfuehrungs-Regeln:
         return declarations
 
     @_mit_lauf_kontext
-    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET, session_id: str = "", is_final_attempt: bool = True, reasoning_effort=_EFFORT_UNSET, bestaetigung: bool | None = None):
+    async def run_task(self, task_text: str, ws: WebSocket, client_type: str = "browser", client_ip: str = "unknown", username: str = "", lang: str = "de", attachments: list = None, kb_groups=_KB_GROUPS_UNSET, sql_schemata=_SQL_SCHEMATA_UNSET, session_id: str = "", is_final_attempt: bool = True, reasoning_effort=_EFFORT_UNSET, bestaetigung: bool | None = None):
         """Führt eine Aufgabe aus – der Agent-Loop.
 
         ``bestaetigung``: der Client kann Aktionen mit Aussen-/Loeschwirkung per
@@ -2889,6 +2910,9 @@ KRITISCH – Ausfuehrungs-Regeln:
         # gewaehlt -> Filter fuer diesen Task loeschen (kein Erben eines Altwerts).
         if kb_groups is not _KB_GROUPS_UNSET:
             self._current_kb_groups = kb_groups
+        # SQL-Schema-Auswahl (Liste von Kennungen); gleiches Erb-Muster.
+        if sql_schemata is not _SQL_SCHEMATA_UNSET:
+            self._current_sql_schemata = list(sql_schemata) if isinstance(sql_schemata, list) else None
         # Denktiefe dieses Laufs (analog kb_groups: Sentinel = vom Eltern-Agent erben)
         if reasoning_effort is not _EFFORT_UNSET:
             self._current_reasoning_effort = reasoning_effort
@@ -4640,6 +4664,11 @@ KRITISCH – Ausfuehrungs-Regeln:
             # Vom Benutzer gewaehlter Wissensgruppen-Filter fuer die Wissenssuche
             if name == "knowledge_search":
                 exec_args.setdefault('_kb_groups', getattr(self, '_current_kb_groups', None))
+            # SQL-Schema-Auswahl des Benutzers fuer die schema_*-Werkzeuge. Hart
+            # GESETZT, nicht setdefault: ein vom Modell mitgegebenes
+            # ``_sql_schemata`` darf die Auswahl nicht erweitern.
+            if name.startswith("schema_"):
+                exec_args['_sql_schemata'] = list(getattr(self, '_current_sql_schemata', None) or [])
             # Read-Only Skill: schreibende Tools blockieren
             _WRITE_TOOLS = {"shell_execute", "write_file", "desktop_action"}
             if name in _WRITE_TOOLS and self.skill_manager.is_tool_readonly(name):
@@ -5192,7 +5221,8 @@ KRITISCH – Ausfuehrungs-Regeln:
                 internet=getattr(self, '_current_user_internet', False),
                 sap=getattr(self, '_current_user_sap', False),
                 vemas=getattr(self, '_current_user_vemas', False),
-                kb_groups=getattr(self, '_current_kb_groups', None))
+                kb_groups=getattr(self, '_current_kb_groups', None),
+                sql_schemata=getattr(self, '_current_sql_schemata', None))
             _hintergrund(agent_manager.run_sub_agent(sub, task, ws), "Sub-Agent")
             return f"Sub-Agent '{label}' gestartet (ID: {sub.agent_id})"
         except Exception as e:
@@ -7517,7 +7547,7 @@ class AgentManager:
     def spawn_sub_agent(self, label: str, task: str, *, besitzer: str | None = None,
                         privilegiert: bool | None = None, internet: bool | None = None,
                         sap: bool | None = None, vemas: bool | None = None,
-                        kb_groups=None) -> JarvisAgent:
+                        kb_groups=None, sql_schemata=None) -> JarvisAgent:
         """Erstellt einen neuen Sub-Agent.
 
         Code-Review 2026-10-18: die Identitaet kam IMMER vom geteilten
@@ -7541,6 +7571,7 @@ class AgentManager:
             agent._current_user_sap = bool(sap)
             agent._current_user_vemas = bool(vemas)
             agent._current_kb_groups = kb_groups
+            agent._current_sql_schemata = sql_schemata
             agent._besitzer = besitzer_norm(besitzer)
             self.agents[agent.agent_id] = agent
             return agent
@@ -7562,6 +7593,7 @@ class AgentManager:
             agent._current_actor_privileged = (bool(agent._current_username)
                                                and parent._actor_is_privileged())
             agent._current_kb_groups = getattr(parent, "_current_kb_groups", None)
+            agent._current_sql_schemata = getattr(parent, "_current_sql_schemata", None)
             agent._besitzer = besitzer_norm(agent._current_username) or _ANON_ACTOR
         self.agents[agent.agent_id] = agent
         return agent
@@ -7612,6 +7644,7 @@ class AgentManager:
             agent._current_user_sap = getattr(parent, "_current_user_sap", False)
             agent._current_user_vemas = getattr(parent, "_current_user_vemas", False)
             agent._current_kb_groups = getattr(parent, "_current_kb_groups", None)
+            agent._current_sql_schemata = getattr(parent, "_current_sql_schemata", None)
         self.agents[agent.agent_id] = agent
         return agent
 

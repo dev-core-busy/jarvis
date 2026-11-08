@@ -409,6 +409,23 @@ def save_kb_groups(user: str, sid: str, groups) -> None:
         _write_meta(sd, meta)
 
 
+def save_sql_schemata(user: str, sid: str, schemata) -> None:
+    """SQL-Schema-Auswahl der Sitzung merken (Liste von Kennungen, [] = keins).
+
+    Nur Zeichenketten, hoechstens 100 – ob es das Schema gibt, entscheidet erst
+    der Lauf (``schema_graph_einstellungen.auswahl``); ein geloeschtes Schema in
+    einer alten Sitzung ist kein Fehler.
+    """
+    liste = [x for x in schemata if isinstance(x, str)][:100] if isinstance(schemata, list) else []
+    with _LOCK:
+        sd = _sess_dir(user, sid)
+        meta = _read_meta(sd)
+        if not meta:
+            return
+        meta["sql_schemata"] = liste
+        _write_meta(sd, meta)
+
+
 def get_session_preprompt(user: str, sid: str) -> str:
     """Eigener Prompt DIESER Sitzung (leerer String, wenn keiner hinterlegt ist).
 

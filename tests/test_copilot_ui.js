@@ -341,7 +341,14 @@ async function zeichnen(w, status) {
         pruefe(new RegExp("\\." + c + "(?![\\w-])").test(STYLE_CSS),
                "in style.css definiert: ." + c);
     }
-    const meinBlock = STYLE_CSS.slice(STYLE_CSS.indexOf("Reiter Copilot"));
+    // Der Block endet am NAECHSTEN Abschnittskopf (`/* ──`), nicht am
+    // Dateiende: bis zum Ende geschnitten zaehlte jeder spaeter angehaengte
+    // Block mit (2026-11-07: die rgba(var(--fg-rgb)) des SQL-Assistenten
+    // galten als "feste Farbe" des Copilot-Reiters – ein Pruefenster, das in
+    // den Nachbarblock greift, Register).
+    const _cpAnf = STYLE_CSS.indexOf("Reiter Copilot");
+    const _cpEnde = STYLE_CSS.indexOf("\n/* ──", _cpAnf + 1);
+    const meinBlock = STYLE_CSS.slice(_cpAnf, _cpEnde > _cpAnf ? _cpEnde : undefined);
     pruefe(meinBlock.length > 200, "der CSS-Block ist auffindbar");
     // Farben nur aus den Variablen – ausgenommen die #000/#fff IN color-mix,
     // das ist der Hausweg fuer lesbare Mischfarben (Register).

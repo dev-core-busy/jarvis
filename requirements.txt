@@ -52,6 +52,7 @@ wsgidav>=4.3.0
 requests               # jira_client, sap_client, google_auth, web_extractor, ibs
 httpx                  # knowledge_sync (Standort-Sync), model_caps, file_watcher, web_extractor
 packaging              # abhaengigkeiten (Grenzen/Versionen pruefen); ohnehin Beigabe vieler Pakete
+PyYAML                 # schema_graph_parser: YAML-Objektexporte (SQL-Assistent); bis 2026-11-07 nur Beigabe
 # cryptography traegt als EINZIGES aus diesem Block eine Untergrenze – die
 # Sicherheitslage vom 2026-10-01 geht dem Vorsatz oben vor. ⚠ Die Warnung dieses
 # Blocks hat sich dabei bestaetigt: ein nacktes `>=46.0.7` holte 50.0.2, also vier

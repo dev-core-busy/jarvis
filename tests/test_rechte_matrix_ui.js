@@ -574,11 +574,16 @@ section('12. Container "alte Benutzerberechtigungen" weg, Speichern fail-closed'
           s.$('ad-mode-hint') ? s.$('ad-mode-hint').textContent : 'fehlt');
     check('Firewall-Sperre bleibt erhalten (eigener Unter-Container)',
           !!s.d.querySelector('details.sec-sub[data-sub="egress"] #sec-egress-setup'));
-    // Speichern mit geladenem Bestand: alle 24 Freigaben im Koerper
+    // Speichern mit geladenem Bestand: ALLE Freigaben im Koerper. Die Zahl wird
+    // aus der Quelle (settings_ad.js, FREIGABEN) gelesen, nicht abgetippt –
+    // stand hier fest als 24 und wurde mit der Spalte "SQL-Assistent" (26)
+    // falsch (feste Zahl = Zeitbombe, Register).
+    const _soll = (lies('frontend/js/settings_ad.js').match(/schreiben:\s*'[a-z_]+'/g) || []).length;
+    if (_soll < 20) abbruch('FREIGABEN in settings_ad.js nicht lesbar (' + _soll + ')');
     await s.w._adSave(); await schlaf(40);
     const k1 = s.posts[s.posts.length - 1] || {};
     const fk = Object.keys(k1).filter(k => /_allowed_|_admins|_knowledge_editors|_internet_/.test(k));
-    check('mit Bestand: alle 24 Freigaben im Koerper', fk.length === 24, fk.length + ': ' + fk.join(','));
+    check('mit Bestand: alle ' + _soll + ' Freigaben im Koerper', fk.length === _soll, fk.length + ': ' + fk.join(','));
     check('… mit dem geladenen Wert', k1.ad_allowed_users === 'Bob, carla' && k1.vemas_allowed_users === 'vera',
           k1.ad_allowed_users + ' / ' + k1.vemas_allowed_users);
     // Abruf scheitert: Speichern an der Verbindung darf KEINE Freigabe schicken

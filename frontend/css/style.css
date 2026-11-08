@@ -9611,3 +9611,54 @@ body.light .cp-karte .kb-btn-danger { color: color-mix(in srgb, var(--danger) 78
    und `.sec-btn` daneben. Den GRUND nennen weiterhin die Hinweiskarten
    darueber – Farbe allein ist keine Information. */
 .cp-knopf:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Einstellungen → SQL-Assistent (sql_admin.js) ──
+   Eine Karte je Schema mit Ablagefeld (Bauform wie die Ablage in /wissen) und
+   aufklappbarer Dateiliste. `min-width: 0` an Namensfeld und Dateiname, damit
+   ein langer Name den Muelleimer nicht aus der Zeile schiebt. */
+.sqadm-schema { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+    margin-bottom: 10px; background: rgba(var(--fg-rgb), 0.02); display: flex;
+    flex-direction: column; gap: 8px; }
+.sqadm-kopf { display: flex; align-items: center; gap: 8px; }
+.sqadm-kopf .sqadm-name { flex: 1 1 auto; min-width: 0; }
+.sqadm-kopf .am-vorg-act { flex: 0 0 auto; }
+.sqadm-drop { border: 2px dashed rgba(var(--fg-rgb), 0.25); border-radius: 12px; padding: 18px;
+    text-align: center; color: var(--text-secondary); cursor: pointer; transition: all var(--transition);
+    display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.sqadm-drop:hover, .sqadm-drop.drag, .sqadm-drop:focus-visible { border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.06); color: var(--text-primary); outline: none; }
+.sqadm-drop.disabled { opacity: .55; cursor: progress; }
+.sqadm-drop-sub { font-size: 0.8rem; }
+/* .btn-secondary hat width:100% (Register) – im Ablagefeld nur so breit wie der Text. */
+.sqadm-drop .sqadm-dirbtn, .sqadm-listbtn { width: auto; flex: 0 0 auto; align-self: flex-start; }
+.sqadm-drop .sqadm-dirbtn { align-self: center; }
+.sqadm-schema .vis-progress-wrap[hidden] { display: none; }
+.sqadm-up-status { font-size: 0.85rem; }
+.sqadm-up-status:empty { display: none; }
+.sqadm-baum[hidden] { display: none; }
+.sqadm-dateien { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: 8px; }
+.sqadm-datei { display: flex; align-items: center; gap: 8px; padding-top: 3px; padding-bottom: 3px;
+    padding-right: 6px; border-bottom: 1px solid var(--border); font-size: 0.84rem; }
+.sqadm-datei:last-child { border-bottom: none; }
+.sqadm-datei.is-ordner .sqadm-dname { font-weight: 600; }
+.sqadm-dname { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text-primary);
+    font-family: var(--font-mono); line-height: 1.6; margin-left: 8px; }
+.sqadm-dgr { flex: 0 0 auto; color: var(--text-secondary); font-size: 0.78rem; }
+.sqadm-datei .am-vorg-act { flex: 0 0 auto; }
+.sqadm-lbl { font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px; }
+.sqadm-warn { font-size: 0.82rem; color: var(--warning); }
+/* Signalfarben als Schrift: hell abgedunkelt, --danger auch dunkel aufgehellt
+   (gemessen in tests/live_sql_ui_dev.py; reine Signalfarben < 4,5:1). */
+body.light .sqadm-warn { color: color-mix(in srgb, var(--warning) 55%, #000); }
+.sqadm-st { color: var(--text-secondary); }
+.sqadm-st.is-fehler { color: color-mix(in srgb, var(--danger) 72%, #fff); }
+.sqadm-st.is-ok { color: var(--success); }
+body.light .sqadm-st.is-fehler { color: color-mix(in srgb, var(--danger) 72%, #000); }
+body.light .sqadm-st.is-ok { color: color-mix(in srgb, var(--success) 60%, #000); }
+.sqadm-warn:empty { display: none; }
+.sqadm-zahlen:empty { display: none; }
+.sqadm-hinweise { margin: 8px 0 0; padding-left: 1.15rem; font-size: 0.82rem; color: var(--text-secondary); }
+.sqadm-hinweise:empty { display: none; }
+.sqadm-hinweise li { margin-bottom: 3px; }
+.sqadm-schema .am-vorg-act[data-akt^="del-"]:hover { color: var(--danger); }

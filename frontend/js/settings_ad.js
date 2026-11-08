@@ -34,6 +34,8 @@
         { feld: 'email-allowed-group',        lesen: 'email_group',             schreiben: 'email_allowed_group' },
         { feld: 'tracks-allowed-users',       lesen: 'tracks_users',            schreiben: 'tracks_allowed_users' },
         { feld: 'tracks-allowed-group',       lesen: 'tracks_group',            schreiben: 'tracks_allowed_group' },
+        { feld: 'schema-allowed-users',       lesen: 'schema_users',            schreiben: 'schema_allowed_users' },
+        { feld: 'schema-allowed-group',       lesen: 'schema_group',            schreiben: 'schema_allowed_group' },
         { feld: 'jiraassist-allowed-users',   lesen: 'jira_assist_users',       schreiben: 'jira_assist_allowed_users' },
         { feld: 'jiraassist-allowed-group',   lesen: 'jira_assist_group',       schreiben: 'jira_assist_allowed_group' },
         { feld: 'aimouse-allowed-users',      lesen: 'aimouse_users',           schreiben: 'aimouse_allowed_users' },

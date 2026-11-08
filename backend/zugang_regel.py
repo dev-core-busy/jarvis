@@ -58,6 +58,7 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/excel"): ("seite", "Seitenrahmen"),
     ("GET", "/email"): ("seite", "Seitenrahmen"),
     ("GET", "/tracks"): ("seite", "Seitenrahmen"),
+    ("GET", "/sql"): ("seite", "Seitenrahmen (Daten ueber /api/sql/*, require_schema_access)"),
     ("GET", "/claude"): ("seite", "Seitenrahmen"),
     ("GET", "/jira-addon"): ("seite", "Seitenrahmen"),
     ("GET", "/confluence-addon"): ("seite", "Seitenrahmen"),

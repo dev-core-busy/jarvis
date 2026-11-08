@@ -1635,6 +1635,13 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/tracks/jobs/seen",                "Short Tracks · Ergebnisse angesehen"),
     ("DELETE", rf"/api/tracks/jobs/{_ID}",              "Short Tracks · Lauf entfernt"),
     ("POST",   r"/api/tracks/admin/.*",                 "Short Tracks · Verwaltung"),
+    # SQL-Assistent
+    ("POST",   r"/api/sql/frage",                       "SQL-Assistent · Frage gestellt"),
+    ("POST",   r"/api/sql/admin/index",                 "SQL-Assistent · Erfassung gestartet"),
+    ("POST",   r"/api/sql/admin/index/abbrechen",       "SQL-Assistent · Erfassung abgebrochen"),
+    ("PUT",    r"/api/sql/admin",                       "SQL-Assistent · Einstellungen gespeichert"),
+    ("POST",   rf"/api/sql/admin/schema/{_ID}/upload",  "SQL-Assistent · Schema-Dateien hochgeladen"),
+    ("DELETE", rf"/api/sql/admin/schema/{_ID}/datei",   "SQL-Assistent · Schema-Datei gelöscht"),
     # Chat
     ("POST",   r"/api/agent/task",                      "Chat-Anfrage"),
     ("POST",   r"/api/chat/sessions",                   "Chat · Unterhaltung begonnen"),
@@ -1719,6 +1726,7 @@ _ACTION_DETAILS = [(m, re.compile(muster), label) for m, muster, label in _ACTIO
 
 _ACTION_LABELS = [
     ("/api/tracks/",           "Short Tracks"),
+    ("/api/sql/",              "SQL-Assistent"),
     ("/api/agent/keys",        "Einstellungen · API-Schlüssel"),
     ("/api/admin/",            "Einstellungen"),
     ("/api/agent/",            "Chat"),
@@ -1815,6 +1823,7 @@ _ACTIVITY_PAGES = {
     "api": "API-Doku",
     "supportagent": "Support-Agent",
     "tracks": "Short Tracks",
+    "sql": "SQL-Assistent",
     "excel": "Excel",
     "ai-mouse": "AI-Maus",
     "feedback": "Feedback",
@@ -2397,6 +2406,73 @@ async def require_tracks_access(request: Request, user: str = Depends(require_au
         detail="Kein Zugriff auf Short Tracks – nicht in der Benutzerliste/-Gruppe "
                "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, "
                "Spalte „Short Tracks“; ggf. neu einloggen für Gruppen-Aktualisierung)")
+
+
+_SCHEMA_SKILL = "schema_graph"
+
+
+def _user_may_use_schema(user: str) -> bool:
+    """Praedikat: Darf der Benutzer den SQL-Assistenten (Schema-Graph) nutzen?
+
+    Zuschnitt 1:1 wie ``_user_may_use_tracks``: ``schema_allowed_users`` ODER
+    ``schema_allowed_group``, **leer = niemand**, kein Admin-Bypass.
+
+    Wer freigegeben ist, darf jedes Schema WAEHLEN – eine Bindung an
+    Wissensgruppen gibt es seit 2026-11-07 nicht mehr (Vorgabe des
+    Betreibers). Gezeigt wird je Frage nur, was in den GEWAEHLTEN Schemata liegt.
+    """
+    u = (user or "").strip()
+    if not u:
+        return False
+    users_raw = config.get_setting("schema_allowed_users", "").strip()
+    grp = config.get_setting("schema_allowed_group", "").strip()
+    if not users_raw and not grp:
+        return False
+    plain = _norm_login(u)
+    if users_raw and plain in {_norm_login(x) for x in users_raw.split(",") if x.strip()}:
+        return True
+    if grp and _member_of_any_group(_user_group_dns_cache.get(plain, []), grp):
+        return True
+    return False
+
+
+def _schema_cfg() -> dict:
+    """Einstellungen des SQL-Assistenten – IMMER ueber die eine Normierung."""
+    from backend import schema_graph_einstellungen as _sge
+    st = config.get_skill_states().get(_SCHEMA_SKILL, {}) or {}
+    return _sge.aus_zustand(st.get("config") or {})
+
+
+def _schema_quellen(cfg: dict) -> list:
+    """Schemata als Quellen des Indexlaufs – je Schema der FESTE Ordner."""
+    from backend import schema_graph_einstellungen as _sge
+    return [{"id": s["id"], "ordner": [str(_sge.ordner_fuer(s["id"]))]} for s in cfg["schemata"]]
+
+
+def schema_zugang(user: str) -> dict:
+    """Fuer die Chat-Werkzeuge des Skills: dieselbe Schranke wie die Endpunkte
+    (Freigabe UND aktiver Skill), an EINER Stelle.
+
+    ``erlaubt`` sind ALLE vorhandenen Schemata – seit 2026-11-07 gibt es keine
+    Wissensgruppen-Bindung mehr; was eine Frage sieht, entscheidet die AUSWAHL
+    des Benutzers (im Chat neben den Wissensgruppen), die der Dispatch dem
+    Werkzeug mitgibt und das Werkzeug mit ``erlaubt`` schneidet.
+    """
+    darf = bool(user) and _user_may_use_schema(user) and _skill_active(_SCHEMA_SKILL)
+    ids = {s["id"] for s in _schema_cfg()["schemata"]} if darf else set()
+    return {"darf": darf, "erlaubt": ids, "admin": bool(user) and bool(_user_is_admin(user))}
+
+
+async def require_schema_access(request: Request, user: str = Depends(require_auth)) -> str:
+    """FastAPI Dependency: SQL-Assistent (→ /api/sql/*, ausser /api/sql/admin/*)."""
+    if not _skill_active(_SCHEMA_SKILL):
+        raise HTTPException(status_code=404, detail="Der SQL-Assistent ist nicht aktiv.")
+    if _user_may_use_schema(user):
+        return user
+    raise HTTPException(status_code=403,
+        detail="Kein Zugriff auf den SQL-Assistenten – nicht in der Benutzerliste/-Gruppe "
+               "freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte "
+               "„SQL-Assistent“; ggf. neu einloggen für Gruppen-Aktualisierung)")
 
 
 def _user_may_use_jira_assist(user: str) -> bool:
@@ -8786,6 +8862,9 @@ async def get_me(user: str = Depends(require_auth)):
             # der Einstellungs-Reiter unabhaengig vom Skill-Zustand bedienbar
             # bleibt.
             "tracks": _user_may_use_tracks(user) and _skill_active("short-tracks"),
+            # SQL-Assistent: Freigabe UND aktiver Skill (wie tracks). Was eine
+            # Frage sieht, entscheidet die Schema-AUSWAHL des Benutzers.
+            "schema": _user_may_use_schema(user) and _skill_active(_SCHEMA_SKILL),
             # Jira-Assistent der Browser-Erweiterung: Freigabe UND aktiver Skill.
             # Die Erweiterung fragt das beim Anmelden ab und blendet ihr Panel
             # sonst gar nicht erst ein – ein Knopf, der zuverlaessig 403 liefert,
@@ -10326,6 +10405,7 @@ async def chat_sessions_get(sid: str, user: str = Depends(require_auth)):
     return JSONResponse({"ok": True, "transcript": cs.load_transcript(user, sid),
                          "kb_groups": meta.get("kb_groups"),
                          "kb_groups_set": "kb_groups" in meta,
+                         "sql_schemata": meta.get("sql_schemata") or [],
                          "profile_id": meta.get("profile_id", ""),
                          "has_prompt": bool((meta.get("preprompt") or "").strip())})
 
@@ -10378,6 +10458,8 @@ async def chat_sessions_save_transcript(sid: str, request: Request, user: str = 
     msgs = body.get("messages", []) if isinstance(body, dict) else []
     if isinstance(body, dict) and "kb_groups" in body:
         cs.save_kb_groups(user, sid, body.get("kb_groups"))
+    if isinstance(body, dict) and "sql_schemata" in body:
+        cs.save_sql_schemata(user, sid, body.get("sql_schemata"))
     if isinstance(body, dict) and "profile_id" in body:
         cs.save_profile(user, sid, body.get("profile_id"))
     return JSONResponse({"ok": True, "messages": cs.save_transcript(user, sid, msgs)})
@@ -10620,6 +10702,10 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
         config.save_setting("tracks_allowed_users", body["tracks_allowed_users"])
     if "tracks_allowed_group" in body:
         config.save_setting("tracks_allowed_group", body["tracks_allowed_group"])
+    if "schema_allowed_users" in body:
+        config.save_setting("schema_allowed_users", body["schema_allowed_users"])
+    if "schema_allowed_group" in body:
+        config.save_setting("schema_allowed_group", body["schema_allowed_group"])
     if "jira_assist_allowed_users" in body:
         config.save_setting("jira_assist_allowed_users", body["jira_assist_allowed_users"])
     if "jira_assist_allowed_group" in body:
@@ -10870,6 +10956,8 @@ async def get_ad_status(user: str = Depends(require_local_auth)):
         "jira_assist_group": config.get_setting("jira_assist_allowed_group", ""),
         "tracks_users": config.get_setting("tracks_allowed_users", ""),
         "tracks_group": config.get_setting("tracks_allowed_group", ""),
+        "schema_users": config.get_setting("schema_allowed_users", ""),
+        "schema_group": config.get_setting("schema_allowed_group", ""),
         "excel_users": config.get_setting("excel_allowed_users", ""),
         "excel_group": config.get_setting("excel_allowed_group", ""),
         "claudesub_users": config.get_setting("claudesub_allowed_users", ""),
@@ -16925,6 +17013,425 @@ async def tracks_page():
         return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
     return HTMLResponse(content=f.read_text(encoding="utf-8"),
                         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SQL-Assistent (/sql) – Frage in Alltagssprache -> gepruefte SQL-Abfrage
+#
+# Logik in backend/schema_graph_* (Parser, Ablage, Indexlauf, GraphRAG,
+# Dienst, Einstellungen, Dateien); hier nur Rechte, Rumpf und Antwortform.
+# SCHRANKE: Freigabe (require_schema_access). Was eine Frage sieht, ist die
+# AUSWAHL des Benutzers (``schemata`` im Rumpf bzw. in der Adresse), geschnitten
+# mit den vorhandenen Schemata – seit 2026-11-07 ohne Wissensgruppen.
+# Erzeugtes SQL wird NIE ausgefuehrt.
+# ═══════════════════════════════════════════════════════════════════════════
+
+SQL_FRAGE_MAX = 2000
+_sql_laeuft: set = set()
+
+
+@app.get("/sql", response_class=HTMLResponse)
+async def sql_page():
+    """Bereich SQL-Assistent – nur bei aktivem Skill. Rechte wie /tracks: die
+    Seite ist eine leere Huelle, jeder Datenabruf haengt an require_schema_access."""
+    if not _skill_active(_SCHEMA_SKILL):
+        return HTMLResponse("<h1>404 – Der SQL-Assistent ist nicht aktiv</h1>", status_code=404)
+    f = FRONTEND_DIR / "sql.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Seite nicht gefunden</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+def _sql_graph_oeffnen():
+    from backend import schema_graph_store as _sgs
+    return _sgs.graph_lesen()
+
+
+def _sql_auswahl(roh) -> set:
+    """Auswahl aus Rumpf/Adresse -> vorhandene Schema-Kennungen."""
+    from backend import schema_graph_einstellungen as _sge
+    return _sge.auswahl(_schema_cfg(), roh)
+
+
+_SQL_KEINE_AUSWAHL = "Kein SQL-Schema gewählt – bitte oben mindestens ein Schema auswählen."
+
+
+@app.get("/api/sql/status")
+async def sql_status(user: str = Depends(require_schema_access)):
+    """Schemata zum Auswaehlen (Name, Zahlen) und Stand des Graphen."""
+    from backend import schema_graph_dienst as _sgd
+    from backend import schema_graph_index as _sgi
+    cfg = await asyncio.to_thread(_schema_cfg)
+    info = await asyncio.to_thread(_sgd.graph_info, None, cfg["schemata"])
+    return JSONResponse({"ok": True, **info, "dialekt": cfg["dialekt"], "frage_max": SQL_FRAGE_MAX,
+                         "erfassung_laeuft": bool(_sgi.status().get("laeuft"))})
+
+
+@app.post("/api/sql/frage")
+async def sql_frage(request: Request, user: str = Depends(require_schema_access)):
+    """Frage -> SQL. Eine Frage je Benutzer zugleich (jede kostet Modellzeit)."""
+    from backend import llm as _llm
+    from backend import schema_graph_rag as _sgr
+    body = await _json_objekt(request)
+    frage = body.get("frage")
+    if not isinstance(frage, str) or not frage.strip():
+        return JSONResponse({"error": "Keine Frage angegeben."}, status_code=400)
+    frage = frage.strip()
+    # Abgewiesen, nicht gekuerzt: eine still gekuerzte Frage beantwortete etwas
+    # anderes, als gefragt war.
+    if len(frage) > SQL_FRAGE_MAX:
+        return JSONResponse({"error": f"Die Frage ist länger als {SQL_FRAGE_MAX} Zeichen."},
+                            status_code=400)
+    cfg = await asyncio.to_thread(_schema_cfg)
+    erlaubt = await asyncio.to_thread(_sql_auswahl, body.get("schemata"))
+    if not erlaubt:
+        return JSONResponse({"error": _SQL_KEINE_AUSWAHL}, status_code=400)
+    dialekt = body.get("dialekt") or cfg["dialekt"]
+    if not isinstance(dialekt, str) or dialekt.strip().lower() not in _sgr.DIALEKTE:
+        return JSONResponse({"error": "Unbekannter SQL-Dialekt."}, status_code=400)
+    dialekt = dialekt.strip().lower()
+    schl = _norm_login(user)
+    if schl in _sql_laeuft:
+        return JSONResponse({"error": "Es läuft bereits eine Frage von dir – bitte warten."},
+                            status_code=429)
+    _sql_laeuft.add(schl)
+    # Das LLM-Profil DES BENUTZERS (wie im Chat), nicht das des Dienstes.
+    marke = _llm.current_agent_profile.set(config.profile_for_user(user))
+    con = None
+    try:
+        con = await asyncio.to_thread(_sql_graph_oeffnen)
+        if con is None:
+            return JSONResponse({"error": "Es gibt noch keinen Schema-Graphen. Ein Administrator "
+                                          "lädt Schema-Dateien unter Einstellungen → SQL-Assistent hoch."},
+                                status_code=409)
+        erg = await _sgr.sql_erzeugen(frage, dialekt=dialekt, con=con, erlaubt=erlaubt,
+                                      max_tabellen=cfg["max_tabellen"], max_spalten=cfg["max_spalten"])
+    except Exception as e:  # noqa: BLE001
+        from backend.llm import scrub_secrets
+        return JSONResponse({"error": scrub_secrets(str(e))}, status_code=500)
+    finally:
+        _llm.current_agent_profile.reset(marke)
+        _sql_laeuft.discard(schl)
+        if con is not None:
+            con.close()
+    if erg.get("fehler"):
+        return JSONResponse({"ok": False, "error": erg["fehler"]})
+    pr = erg.get("pruefung") or {}
+    return JSONResponse({
+        "ok": True, "dialekt": dialekt, "sql": erg.get("sql") or "",
+        "erklaerung": erg.get("erklaerung") or "", "annahmen": erg.get("annahmen") or "",
+        "pruefung": {"ok": bool(pr.get("ok")), "fehler": list(pr.get("fehler") or []),
+                     "tabellen": list(pr.get("tabellen") or []),
+                     "spalten_geprueft": int(pr.get("spalten_geprueft") or 0),
+                     # Gueltig, aber verbunden ueber eine Bedingung ohne Beleg im Schema
+                     "unbelegte_joins": [str(u.get("bedingung") or "") for u in pr.get("unbelegte_joins") or []],
+                     "joins_belegt": int(pr.get("joins_belegt") or 0)},
+        "tabellen_kontext": erg.get("tabellen_kontext") or [], "verbinder": erg.get("verbinder") or [],
+        "unverbunden": erg.get("unverbunden") or [], "runden": erg.get("runden") or 1,
+        "hauswissen": [{"titel": str(h.get("titel") or ""), "nr": int(h.get("nr") or 0)}
+                       for h in erg.get("hauswissen") or []],
+        "begriffe_quelle": erg.get("begriffe_quelle") or ""})
+
+
+def _sql_mit_graph(fn):
+    """Fuehrt ``fn(con)`` mit einer Nur-Lese-Verbindung aus (im Thread)."""
+    con = _sql_graph_oeffnen()
+    if con is None:
+        return None
+    try:
+        return fn(con)
+    finally:
+        con.close()
+
+
+@app.get("/api/sql/suche")
+async def sql_suche(q: str = "", limit: int = 20, schemata: str = "",
+                    user: str = Depends(require_schema_access)):
+    from backend import schema_graph_dienst as _sgd
+    begriffe = [b.strip() for b in (q or "").replace(";", ",").split(",") if b.strip()][:10]
+    if not begriffe:
+        return JSONResponse({"error": "Keine Suchbegriffe angegeben."}, status_code=400)
+    erlaubt = await asyncio.to_thread(_sql_auswahl, schemata)
+    if not erlaubt:
+        return JSONResponse({"error": _SQL_KEINE_AUSWAHL}, status_code=400)
+    n = max(1, min(50, int(limit or 20)))
+    treffer = await asyncio.to_thread(_sql_mit_graph, lambda c: _sgd.suche_info(c, begriffe, n, erlaubt))
+    if treffer is None:
+        return JSONResponse({"error": "Es gibt noch keinen Schema-Graphen."}, status_code=409)
+    return JSONResponse({"ok": True, "treffer": treffer})
+
+
+@app.get("/api/sql/tabelle")
+async def sql_tabelle(name: str = "", schemata: str = "", user: str = Depends(require_schema_access)):
+    from backend import schema_graph_dienst as _sgd
+    if not (name or "").strip():
+        return JSONResponse({"error": "Kein Tabellenname angegeben."}, status_code=400)
+    erlaubt = await asyncio.to_thread(_sql_auswahl, schemata)
+    if not erlaubt:
+        return JSONResponse({"error": _SQL_KEINE_AUSWAHL}, status_code=400)
+    info = await asyncio.to_thread(_sql_mit_graph, lambda c: _sgd.tabelle_info(c, name.strip()[:300], erlaubt))
+    if info is None:
+        return JSONResponse({"error": "Es gibt noch keinen Schema-Graphen."}, status_code=409)
+    if info.get("fehler"):
+        return JSONResponse({"ok": False, **info}, status_code=404)
+    return JSONResponse({"ok": True, **info})
+
+
+@app.get("/api/sql/verbindung")
+async def sql_verbindung(von: str = "", nach: str = "", schemata: str = "",
+                         user: str = Depends(require_schema_access)):
+    from backend import schema_graph_dienst as _sgd
+    if not (von or "").strip() or not (nach or "").strip():
+        return JSONResponse({"error": "Bitte beide Tabellen angeben."}, status_code=400)
+    erlaubt = await asyncio.to_thread(_sql_auswahl, schemata)
+    if not erlaubt:
+        return JSONResponse({"error": _SQL_KEINE_AUSWAHL}, status_code=400)
+    info = await asyncio.to_thread(_sql_mit_graph, lambda c: _sgd.verbindung_info(
+        c, von.strip()[:300], nach.strip()[:300], erlaubt))
+    if info is None:
+        return JSONResponse({"error": "Es gibt noch keinen Schema-Graphen."}, status_code=409)
+    if info.get("fehler"):
+        return JSONResponse({"ok": False, **info}, status_code=404)
+    return JSONResponse({"ok": True, **info})
+
+
+# ── Verwaltung (Einstellungen → SQL-Assistent) ──
+# require_local_auth und damit UNABHAENGIG von der eigenen Freigabe – ein
+# Administrator muss Schemata pflegen koennen, ohne sich einzutragen (wie
+# /api/tracks/admin/*).
+
+# Freier Platz, der nach einem Upload mindestens bleiben muss. Eine volle
+# Platte legt den ganzen Dienst lahm (Verlaeufe, Index, Journal) – fuer einen
+# Bestand von zig GB ist das eine echte Grenze, nicht nur eine theoretische.
+SQL_UPLOAD_MIN_FREI = 2 * 1024 ** 3
+
+
+def _sql_erfassen_anstossen(cfg: dict | None = None) -> str:
+    """Automatische Erfassung nach jeder Aenderung (Vorgabe 2026-11-07)."""
+    from backend import schema_graph_index as _sgi
+    cfg = cfg or _schema_cfg()
+    from backend import schema_graph_einstellungen as _sge
+    return _sgi.anstossen([], quellen=_schema_quellen(cfg), muster=_sge.erfassungs_muster(cfg),
+                          prozesse=cfg["prozesse"], fk_ableiten=cfg["fk_ableiten"], ordner_schutz=False)
+
+
+def _sql_fassung_veraltet() -> bool:
+    """Liegt ein Bestand vor, der mit einer ANDEREN Parser-Fassung erfasst wurde?"""
+    from backend import schema_graph_parser as _sgp
+    from backend import schema_graph_store as _sgs
+    if not _sgs.roh_pfad().exists():
+        return False
+    con = _sgs.roh_oeffnen()
+    try:
+        bestand = con.execute("SELECT count(*) FROM dateien").fetchone()[0]
+        return bool(bestand) and _sgs.roh_fassung(con) != _sgp.FASSUNG
+    finally:
+        con.close()
+
+
+@app.on_event("startup")
+async def startup_sql_fassung():
+    """Nach einem Update mit neuer Parser-Fassung den vorhandenen Bestand von
+    selbst neu erfassen (sonst erst beim naechsten Upload – auf DEV am
+    2026-11-07 gemessen: ein YAML-Bestand, mit dem Parser ohne YAML erfasst,
+    blieb als leerer Graph stehen). Im Hintergrund und verzoegert: der Start
+    wartet nicht, und ein Lauf ueber viele Dateien gehoert nicht in ihn."""
+    async def _spaeter():
+        await asyncio.sleep(90)
+        try:
+            if not _skill_active(_SCHEMA_SKILL):
+                return
+            cfg = await asyncio.to_thread(_schema_cfg)
+            if cfg["schemata"] and await asyncio.to_thread(_sql_fassung_veraltet):
+                antwort = await asyncio.to_thread(_sql_erfassen_anstossen, cfg)
+                print(f"[SchemaGraph] Neue Parser-Fassung – Erfassung {antwort}", flush=True)
+        except Exception as e:  # noqa: BLE001 – benannt, der Start laeuft weiter
+            print(f"[SchemaGraph] Fassungspruefung beim Start fehlgeschlagen: {e}", flush=True)
+    asyncio.create_task(_spaeter())
+
+
+def _sql_schema_pruefen(sid: str):
+    """Kennung gegen die Konfiguration – unbekannt ergibt None (-> 404)."""
+    cfg = _schema_cfg()
+    return cfg if any(s["id"] == sid for s in cfg["schemata"]) else None
+
+
+@app.get("/api/sql/admin")
+async def sql_admin_lesen(_user: str = Depends(require_local_auth)):
+    from backend import schema_graph_dateien as _sgf
+    from backend import schema_graph_dienst as _sgd
+    from backend import schema_graph_index as _sgi
+    cfg = await asyncio.to_thread(_schema_cfg)
+    graph = await asyncio.to_thread(_sgd.graph_info, None, cfg["schemata"])
+
+    def _dateien():
+        out = {}
+        for s in cfg["schemata"]:
+            b = _sgf.baum(s["id"], limit=0)
+            out[s["id"]] = {"dateien": b["dateien"], "ordner": b["ordner"], "bytes": b["bytes"]}
+        return out
+    dateien = await asyncio.to_thread(_dateien)
+    from backend import schema_graph_einstellungen as _sge
+    return JSONResponse({"ok": True, "cfg": cfg, "graph": graph, "dateien": dateien,
+                         "upload_endungen": sorted(_sge.upload_endungen(cfg)),
+                         "erfassung": _sgi.status(), "skill_aktiv": _skill_active(_SCHEMA_SKILL)})
+
+
+@app.put("/api/sql/admin")
+async def sql_admin_speichern(request: Request, _user: str = Depends(require_local_auth)):
+    """Einstellungen ersetzen (vollstaendig). Bei einem Fehler wird NICHTS
+    gespeichert. Ein aus der Liste genommenes Schema wird SAMT DATEIEN
+    geloescht – nur mit ``loeschen_bestaetigt`` im Rumpf (der Reiter fragt
+    vorher nach), sonst 409 mit der Liste der betroffenen Schemata."""
+    from backend import schema_graph_dateien as _sgf
+    from backend import schema_graph_einstellungen as _sge
+    body = await _json_objekt(request)
+    cfg, fehler, hinweise = _sge.normieren(body.get("cfg") if isinstance(body.get("cfg"), dict) else body)
+    if fehler:
+        return JSONResponse({"error": "Nicht gespeichert: " + "; ".join(fehler), "fehler": fehler},
+                            status_code=400)
+    alt = await asyncio.to_thread(_schema_cfg)
+    neu_ids = {s["id"] for s in cfg["schemata"]}
+    weg = [s for s in alt["schemata"] if s["id"] not in neu_ids]
+    if weg and body.get("loeschen_bestaetigt") is not True:
+        return JSONResponse({"error": "Beim Entfernen eines Schemas werden seine Dateien gelöscht – "
+                                      "bitte bestätigen.", "zu_loeschen": weg}, status_code=409)
+    # Frisches dict: der Skill-Zustand ist das LEBENDE Objekt aus config – wer es
+    # vor dem Speichern veraendert, verliert den Vorzustand (Register,
+    # Skill-Konfig-Nacharbeit 2026-11-05).
+    st = dict(config.get_skill_states().get(_SCHEMA_SKILL, {}) or {})
+    st["config"] = cfg
+    await asyncio.to_thread(config.save_skill_state, _SCHEMA_SKILL, st)
+    geloescht = {}
+    for s in weg:
+        try:
+            geloescht[s["id"]] = await asyncio.to_thread(_sgf.schema_loeschen, s["id"])
+        except Exception as e:  # noqa: BLE001 – benannt, nicht verschluckt
+            hinweise.append(f"Ordner von „{s['name']}“ nicht gelöscht: {e}")
+    for s in cfg["schemata"]:
+        try:
+            await asyncio.to_thread(_sgf.ordner_anlegen, s["id"])
+        except _sgf.DateiFehler as e:
+            # Gespeichert ist die Liste trotzdem – der Ordner entsteht beim
+            # ersten Upload erneut; der Grund muss aber SICHTBAR sein.
+            hinweise.append(f"Ablage für „{s['name']}“ nicht angelegt: {e}")
+    erfassung = _sql_erfassen_anstossen(cfg) if (weg or alt.get("dateimuster") != cfg["dateimuster"]
+                                                 or alt.get("fk_ableiten") != cfg["fk_ableiten"]) else None
+    return JSONResponse({"ok": True, "cfg": cfg, "hinweise": hinweise, "geloescht": geloescht,
+                         "erfassung": erfassung})
+
+
+@app.get("/api/sql/admin/schema/{sid}/dateien")
+async def sql_admin_dateien(sid: str, _user: str = Depends(require_local_auth)):
+    from backend import schema_graph_dateien as _sgf
+    if await asyncio.to_thread(_sql_schema_pruefen, sid) is None:
+        return JSONResponse({"error": "Unbekanntes Schema."}, status_code=404)
+    return JSONResponse({"ok": True, **await asyncio.to_thread(_sgf.baum, sid)})
+
+
+@app.post("/api/sql/admin/schema/{sid}/upload")
+async def sql_admin_upload(sid: str, files: list[UploadFile] = File(...), pfade: str = Form(""),
+                           _user: str = Depends(require_local_auth)):
+    """Dateien, ganze Ordner (relative Pfade in ``pfade``, JSON-Liste in der
+    Reihenfolge von ``files``) und ZIP-Archive in den Ordner des Schemas.
+
+    Jede Datei wird als STROM geschrieben (``UploadFile.file``, nie ``read()``):
+    ein Schema-Dump kann mehrere GB gross sein – auch Eintraege eines ZIP
+    (``schema_graph_dateien.zip_entpacken``, dort die Begruendung, warum nicht
+    der Entpacker von /wissen). Gleichnamiges wird ERSETZT. Platzreserve
+    ``SQL_UPLOAD_MIN_FREI``. Danach startet die Erfassung von selbst.
+    """
+    import shutil as _sh
+    from backend import schema_graph_dateien as _sgf
+    from backend import schema_graph_einstellungen as _sge
+    cfg = await asyncio.to_thread(_sql_schema_pruefen, sid)
+    if cfg is None:
+        return JSONResponse({"error": "Unbekanntes Schema."}, status_code=404)
+    try:
+        rel_liste = json.loads(pfade) if pfade else []
+    except ValueError:
+        return JSONResponse({"error": "pfade: keine gültige Liste."}, status_code=400)
+    if not isinstance(rel_liste, list):
+        rel_liste = []
+    endungen = _sge.upload_endungen(cfg)
+    try:
+        basis = await asyncio.to_thread(_sgf.ordner_anlegen, sid)
+    except _sgf.DateiFehler as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    gespeichert, abgelehnt = [], []
+    for i, f in enumerate(files or []):
+        rel = rel_liste[i] if i < len(rel_liste) and isinstance(rel_liste[i], str) and rel_liste[i] else f.filename
+        rel = str(rel or "").replace("\\", "/").lstrip("/")
+        frei = _sh.disk_usage(basis).free
+        if frei < SQL_UPLOAD_MIN_FREI:
+            abgelehnt.append({"name": rel, "grund": f"Zu wenig freier Speicher auf dem Server "
+                                                    f"({frei // 1024 ** 2} MB frei)."})
+            continue
+        if rel.lower().endswith(".zip"):
+            # Entpackt wird in den Ordner, in dem das Archiv laege.
+            ordner_rel = rel.rsplit("/", 1)[0] if "/" in rel else ""
+            try:
+                gesp, abgl = await asyncio.to_thread(_sgf.zip_entpacken, sid, ordner_rel, f.file,
+                                                     endungen, SQL_UPLOAD_MIN_FREI)
+            except _sgf.DateiFehler as e:
+                abgelehnt.append({"name": rel, "grund": str(e)})
+                continue
+            gespeichert.extend(gesp)
+            abgelehnt.extend({"name": f"{rel}: {a['name']}", "grund": a["grund"]} for a in abgl)
+            continue
+        try:
+            erg = await asyncio.to_thread(_sgf.datei_speichern, sid, rel, f.file, endungen)
+            gespeichert.append(erg)
+        except _sgf.DateiFehler as e:
+            abgelehnt.append({"name": rel, "grund": str(e)})
+    erfassung = _sql_erfassen_anstossen() if gespeichert else None
+    return JSONResponse({"ok": True, "gespeichert": gespeichert, "abgelehnt": abgelehnt,
+                         "erfassung": erfassung})
+
+
+@app.delete("/api/sql/admin/schema/{sid}/datei")
+async def sql_admin_datei_loeschen(sid: str, pfad: str = "", _user: str = Depends(require_local_auth)):
+    """Datei oder Ordner im Schema loeschen; danach Erfassung (traegt aus)."""
+    from backend import schema_graph_dateien as _sgf
+    if await asyncio.to_thread(_sql_schema_pruefen, sid) is None:
+        return JSONResponse({"error": "Unbekanntes Schema."}, status_code=404)
+    try:
+        erg = await asyncio.to_thread(_sgf.loeschen, sid, pfad)
+    except _sgf.DateiFehler as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"ok": True, **erg, "erfassung": _sql_erfassen_anstossen()})
+
+
+@app.get("/api/sql/admin/index")
+async def sql_admin_index_status(_user: str = Depends(require_local_auth)):
+    from backend import schema_graph_index as _sgi
+    return JSONResponse({"ok": True, "erfassung": _sgi.status(), "hier": _sgi.laeuft_hier()})
+
+
+@app.post("/api/sql/admin/index")
+async def sql_admin_index_start(_user: str = Depends(require_local_auth)):
+    """Erfassung von Hand (z. B. nach Aenderung von Dateien direkt auf dem Server)."""
+    cfg = await asyncio.to_thread(_schema_cfg)
+    if not cfg["schemata"]:
+        return JSONResponse({"error": "Noch kein Schema angelegt."}, status_code=400)
+    antwort = await asyncio.to_thread(_sql_erfassen_anstossen, cfg)
+    from backend import schema_graph_index as _sgi
+    return JSONResponse({"ok": True, "antwort": antwort, "erfassung": _sgi.status()})
+
+
+@app.post("/api/sql/admin/index/abbrechen")
+async def sql_admin_index_abbrechen(_user: str = Depends(require_local_auth)):
+    from backend import schema_graph_index as _sgi
+    if not _sgi.laeuft_hier():
+        # Ein Lauf von der Kommandozeile ist ein anderer Prozess – den haelt
+        # dieser Knopf nicht an. Das sagen, statt "abgebrochen" zu melden.
+        laeuft = bool(_sgi.status().get("laeuft"))
+        return JSONResponse({"error": "Die laufende Erfassung wurde auf dem Server gestartet und lässt "
+                                      "sich hier nicht abbrechen." if laeuft else
+                                      "Es läuft keine Erfassung."}, status_code=409)
+    _sgi.abbrechen()
+    return JSONResponse({"ok": True})
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -29253,6 +29760,11 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         kb_groups = msg.get("kb_groups")
         if kb_groups is not None and not isinstance(kb_groups, list):
             kb_groups = None
+        # SQL-Schema-Auswahl (SQL-Assistent): fehlt/leer = KEIN Schema. Nur
+        # Zeichenketten; ob es das Schema gibt, schneidet das Werkzeug.
+        sql_schemata = msg.get("sql_schemata")
+        sql_schemata = ([x for x in sql_schemata if isinstance(x, str)][:100]
+                        if isinstance(sql_schemata, list) else [])
         # Denktiefe (Reasoning) fuer genau diese Anfrage: off|low|medium|high|max.
         # Fehlt das Feld oder ist der Wert unbekannt -> None, dann greifen
         # Profil-Vorgabe und globale Einstellung. Immer explizit uebergeben, damit
@@ -29305,7 +29817,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 target._current_user_sap = _ws_sap
                 target._current_user_vemas = _ws_vemas
                 from backend.agent import _hintergrund
-                _hintergrund(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, reasoning_effort=reasoning_effort, bestaetigung=_kann_bestaetigen, rechte=_ws_rechte), "Folgeauftrag")
+                _hintergrund(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, sql_schemata=sql_schemata, reasoning_effort=reasoning_effort, bestaetigung=_kann_bestaetigen, rechte=_ws_rechte), "Folgeauftrag")
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -29369,6 +29881,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                         task_text, ws, client_type=client_type, client_ip=client_ip,
                         username=_get_ws_username(ws), lang=ui_lang,
                         attachments=image_attachments, kb_groups=kb_groups,
+                        sql_schemata=sql_schemata,
                         session_id=chat_sid, is_final_attempt=_final,
                         reasoning_effort=reasoning_effort,
                         bestaetigung=_kann_bestaetigen, rechte=_ws_rechte,

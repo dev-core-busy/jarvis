@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL-Assistent</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=51">
+    <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
+    <style>
+        /* ═══════════════════════════════════════════════════════════════
+           SQL-Assistent (/sql)
+           ───────────────────────────────────────────────────────────────
+           Titelleiste bewusst identisch zu /tracks, /email und /sap – wer
+           zwischen den Bereichen wechselt, findet die Knoepfe am selben Platz.
+           Praefix `sq-` fuer alles hier (im Projekt frei).
+           Farben ausschliesslich ueber Theme-Variablen.
+           ═══════════════════════════════════════════════════════════════ */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); min-height: 100vh; }
+        .hidden { display: none !important; }
+
+        .topbar { display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px; border-bottom: 1px solid var(--border);
+            background: var(--bg-glass); backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 30; flex-wrap: wrap; gap: 6px; }
+        .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+        .topbar-right { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+        .topbar-avatar { width: 32px; height: 32px; border-radius: 50%;
+            background: var(--gradient); display: flex; align-items: center;
+            justify-content: center; font-size: 14px; font-weight: 700; color: #fff;
+            flex-shrink: 0; overflow: hidden; }
+        .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+        .btn-theme { background: none; border: none; color: var(--text-muted);
+            padding: 4px 8px; border-radius: 8px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color .2s, background .2s; }
+        .btn-theme:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
+        .btn-theme svg { width: 20px; height: 20px; }
+        .lang-toggle { display: flex; gap: 2px; background: rgba(var(--fg-rgb, 148,163,184), .05);
+            border: 1px solid rgba(var(--fg-rgb, 148,163,184), .1); border-radius: 8px; padding: 2px; }
+        .lang-toggle-btn { background: transparent; border: none; color: var(--text-secondary);
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 3px 10px;
+            border-radius: 6px; cursor: pointer; font-family: var(--font-body);
+            transition: background .15s, color .15s; }
+        .lang-toggle-btn:hover { color: var(--text-primary); }
+        .lang-toggle-btn.active { background: rgba(var(--accent-rgb), .35); color: var(--text-primary); }
+
+        .sq-wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+        .sq-card { background: var(--bg-glass); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: 16px 18px; margin-bottom: 16px; }
+        .sq-card h2 { font-size: 1.02rem; font-weight: 600; margin-bottom: 0; }
+        /* Titel zuerst, Pfeil als zweites Kind (space-between) – Lehre vom
+           2026-08-13 im Add-in-Fenster. */
+        .sq-card-head { display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; cursor: pointer; user-select: none; }
+        .sq-card-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+        .sq-caret { color: var(--text-muted); font-size: .8rem; flex: 0 0 auto; transition: transform .15s; }
+        .sq-card.is-zu .sq-caret { transform: rotate(-90deg); }
+        .sq-card.is-zu .sq-card-body { display: none; }
+        .sq-card-body { padding-top: 8px; }
+        /* --text-secondary statt --text-muted: letzteres liegt in BEIDEN Themen
+           unter 4,5:1 (im Chrome gemessen 3,7–3,8:1, Register). */
+        .sq-hint { color: var(--text-secondary); font-size: .82rem; line-height: 1.55; }
+        .sq-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+        .sq-row[hidden] { display: none; }
+        .sq-status { font-size: .82rem; color: var(--text-secondary); }
+        /* Signalfarben als SCHRIFT reichen in keinem Thema (Register): dunkel
+           aufgehellt, hell abgedunkelt – gemessen in live_sql_ui_dev.py. */
+        .sq-status.is-fehler { color: color-mix(in srgb, var(--danger) 72%, #fff); }
+        .sq-status.is-ok { color: var(--success); }
+        body.light .sq-status.is-fehler { color: color-mix(in srgb, var(--danger) 72%, #000); }
+        body.light .sq-status.is-ok { color: color-mix(in srgb, var(--success) 60%, #000); }
+
+        .sq-btn { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: .85rem; display: inline-flex; align-items: center; gap: 6px;
+            font-family: var(--font-body); white-space: nowrap; flex: 0 0 auto; }
+        .sq-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .sq-btn:disabled { opacity: .5; cursor: default; }
+        .sq-btn-primary { background: var(--gradient); border: none; color: #fff; font-weight: 600; }
+        .sq-btn-primary:hover { filter: brightness(1.08); color: #fff; }
+
+        .sq-input, .sq-select, .sq-textarea { background: var(--bg-secondary); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
+            font-family: var(--font-body); font-size: .9rem; min-width: 0; }
+        .sq-input:focus, .sq-select:focus, .sq-textarea:focus { outline: none; border-color: var(--accent); }
+        .sq-textarea { width: 100%; min-height: 84px; resize: vertical; line-height: 1.5; }
+        .sq-input { flex: 1 1 220px; }
+        .sq-select option { background: var(--bg-secondary); color: var(--text-primary); }
+        .sq-lbl { font-size: .82rem; color: var(--text-secondary); }
+
+        /* Drehkreis nur waehrend eine Frage laeuft; daneben steht immer Text. */
+        .sq-spin { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto;
+            border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+            border-top-color: var(--accent); animation: sq-dreh .8s linear infinite; }
+        @keyframes sq-dreh { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) { .sq-spin { animation-duration: 2.4s; } }
+
+        /* Pruefstatus: Zeichen UND Text, nicht nur Farbe. */
+        .sq-pill { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+            padding: 3px 10px; border-radius: 12px; font-size: .78rem; font-weight: 600;
+            border: 1px solid var(--border); color: var(--text-secondary); }
+        .sq-pill.is-ok { color: var(--success);
+            border-color: color-mix(in srgb, var(--success) 45%, transparent);
+            background: color-mix(in srgb, var(--success) 12%, transparent); }
+        .sq-pill.is-bad { color: color-mix(in srgb, var(--danger) 72%, #fff);
+            border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+            background: color-mix(in srgb, var(--danger) 12%, transparent); }
+        body.light .sq-pill.is-ok { color: color-mix(in srgb, var(--success) 60%, #000); }
+        body.light .sq-pill.is-bad { color: color-mix(in srgb, var(--danger) 72%, #000); }
+        /* Gueltig mit Vorbehalt (Join ohne Beleg): --warning pur haelt hell keinen
+           Kontrast, dunkel schon – wie .sq-warn je Thema gemischt. */
+        .sq-pill.is-warn { color: var(--warning);
+            border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+            background: color-mix(in srgb, var(--warning) 12%, transparent); }
+        body.light .sq-pill.is-warn { color: color-mix(in srgb, var(--warning) 55%, #000); }
+        .sq-ergebnis { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+        .sq-code { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+            padding: 12px 14px; font-family: var(--font-mono, ui-monospace, monospace); font-size: .85rem;
+            line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text-primary);
+            overflow-x: auto; }
+        .sq-befunde { margin: 0; padding-left: 1.15rem; color: var(--text-secondary); font-size: .85rem; }
+        .sq-befunde li { margin-bottom: 3px; }
+        .sq-text { font-size: .88rem; line-height: 1.55; color: var(--text-secondary); white-space: pre-wrap; }
+        .sq-text b { color: var(--text-primary); }
+        .sq-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .sq-chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .75rem;
+            background: rgba(var(--fg-rgb), .07); color: var(--text-secondary);
+            font-family: var(--font-mono, ui-monospace, monospace); cursor: pointer;
+            border: 1px solid transparent; }
+        .sq-chip:hover { border-color: var(--accent); color: var(--text-primary); }
+        .sq-chip.is-glied { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+
+        /* Trefferliste / Tabellendetail */
+        .sq-liste { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+        .sq-treffer { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+            cursor: pointer; background: rgba(var(--fg-rgb), .02); }
+        .sq-treffer:hover { border-color: var(--accent); }
+        .sq-treffer-name { font-family: var(--font-mono, ui-monospace, monospace); font-size: .86rem;
+            color: var(--text-primary); word-break: break-all; }
+        .sq-treffer-meta { font-size: .76rem; color: var(--text-secondary); margin-top: 2px; }
+        .sq-detail { margin-top: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+            background: var(--bg-secondary); }
+        .sq-detail h3 { font-size: .95rem; font-family: var(--font-mono, ui-monospace, monospace);
+            word-break: break-all; }
+        .sq-tab-wrap { overflow-x: auto; margin-top: 8px; }
+        table.sq-tab { border-collapse: collapse; width: 100%; font-size: .8rem; }
+        .sq-tab th, .sq-tab td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border);
+            vertical-align: top; }
+        .sq-tab th { color: var(--text-secondary); font-weight: 600; background: var(--bg-secondary);
+            position: sticky; top: 0; }
+        .sq-tab td.sq-mono { font-family: var(--font-mono, ui-monospace, monospace); white-space: nowrap; }
+        .sq-quellen { margin-top: 6px; font-size: .8rem; color: var(--text-secondary); }
+        /* Schema-Auswahl: gilt fuer Frage, Suche und Join-Pfad gemeinsam. */
+        .sq-schemabar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+            margin-bottom: 14px; padding: 10px 14px; border-radius: 12px;
+            background: var(--bg-glass); border: 1px solid var(--border); }
+        .sq-schemabar .sq-lbl { margin: 0 4px 0 0; }
+        .sq-schema { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+            border-radius: 999px; border: 1px solid var(--border); font-size: .82rem;
+            color: var(--text-primary); cursor: pointer; user-select: none; }
+        .sq-schema:hover { border-color: rgba(var(--accent-rgb), .5); }
+        .sq-schema.is-an { border-color: rgba(var(--accent-rgb), .6); background: rgba(var(--accent-rgb), .14); }
+        .sq-schema input { margin: 0; cursor: pointer; }
+        .sq-schema-n { font-size: .74rem; color: var(--text-secondary); }
+        .sq-warn { color: var(--warning); font-size: .84rem; }
+        body.light .sq-warn { color: color-mix(in srgb, var(--warning) 55%, #000); }
+    </style>
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+
+<div id="sq-app" class="hidden">
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="topbar-avatar">J</div>
+            <span class="topbar-title"><span class="brand-app-name">Jarvis</span>
+                <span data-i18n="sql.title">SQL-Assistent</span></span>
+        </div>
+        <div class="topbar-right">
+            <div class="lang-toggle">
+                <button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>
+                <button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>
+            </div>
+            <button class="btn-theme jv-issues-btn" id="sq-issues-btn" data-i18n-title="sup.issues" title="Issues / Feedback"
+                    data-issues-oeffnen>
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </button>
+            <button class="btn-theme" id="btn-theme-toggle" title="Hell/Dunkel umschalten" data-i18n-title="chat.theme">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="btn-theme" id="sq-portal-btn" title="Zum Portal" data-i18n-title="nav.home">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
+            <!-- Einstellungen: nur fuer Admins, blendet settings_btn.js ein -->
+            <button class="btn-theme" id="sq-settings-btn" data-jarvis-settings="/sql" data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button class="btn-theme" id="sq-logout-btn" title="Abmelden" data-i18n-title="chat.logout">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="sq-wrap" data-jv-breit>
+        <div class="jv-max-row">
+            <button type="button" class="jv-max-btn" id="jv-max" data-seite="sql" aria-pressed="false"
+                    data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
+                    title="Maximieren" aria-label="Maximieren">&#9974;</button>
+        </div>
+
+        <!-- ═══ Schema-Auswahl (gilt fuer alle drei Karten) ═══ -->
+        <div class="sq-schemabar" id="sq-schemata" aria-live="polite"></div>
+
+        <!-- ═══ Frage ═══ -->
+        <div class="sq-card" data-klapp="frage">
+            <div class="sq-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="sql.ask_head">Frage an die Datenbank</h2>
+                <span class="sq-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="sq-card-body">
+                <p class="sq-hint" data-i18n="sql.ask_hint">Stelle eine Frage in Alltagssprache. Der Assistent sucht die passenden Tabellen, verbindet sie über die Beziehungen des Schemas und schreibt daraus eine lesende SQL-Abfrage, die gegen das Schema geprüft wird. Die Abfrage wird nicht ausgeführt.</p>
+                <div class="sq-quellen" id="sq-quellen"></div>
+                <div class="sq-row">
+                    <textarea class="sq-textarea" id="sq-frage" maxlength="2000"
+                              data-i18n-placeholder="sql.ask_ph"
+                              placeholder="z. B. Wie hoch war der Nettoumsatz je Land im Jahr 2025?"></textarea>
+                </div>
+                <div class="sq-row">
+                    <label class="sq-lbl" for="sq-dialekt" data-i18n="sql.dialect">SQL-Dialekt</label>
+                    <select class="sq-select" id="sq-dialekt"></select>
+                    <button class="sq-btn sq-btn-primary" id="sq-los" type="button" data-i18n="sql.ask_btn">SQL erzeugen</button>
+                    <span class="sq-spin hidden" id="sq-spin" aria-hidden="true"></span>
+                    <span class="sq-status" id="sq-frage-status"></span>
+                </div>
+                <div class="sq-ergebnis hidden" id="sq-ergebnis">
+                    <span class="sq-pill" id="sq-pill"></span>
+                    <ul class="sq-befunde hidden" id="sq-befunde"></ul>
+                    <pre class="sq-code" id="sq-sql"></pre>
+                    <div class="sq-row" style="margin-top:0">
+                        <button class="sq-btn" id="sq-kopieren" type="button" data-i18n="sql.copy">Kopieren</button>
+                        <span class="sq-status" id="sq-kopier-status"></span>
+                    </div>
+                    <div class="sq-text" id="sq-erklaerung"></div>
+                    <div class="sq-text" id="sq-annahmen"></div>
+                    <div class="sq-text" id="sq-hauswissen"></div>
+                    <div>
+                        <div class="sq-lbl" data-i18n="sql.basis">Grundlage (Klick zeigt die Tabelle):</div>
+                        <div class="sq-chips" id="sq-basis" style="margin-top:6px"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Schema durchsuchen ═══ -->
+        <div class="sq-card" data-klapp="suche">
+            <div class="sq-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="sql.search_head">Schema durchsuchen</h2>
+                <span class="sq-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="sq-card-body">
+                <p class="sq-hint" data-i18n="sql.search_hint">Findet Tabellen und Sichten über Name, Beschreibung und Spaltennamen. Mehrere Begriffe kommagetrennt.</p>
+                <div class="sq-row">
+                    <input type="text" class="sq-input" id="sq-suchfeld" autocomplete="off"
+                           data-i18n-placeholder="sql.search_ph" placeholder="z. B. kunde, lieferadresse">
+                    <button class="sq-btn" id="sq-suchen" type="button" data-i18n="common.search">Suchen</button>
+                    <span class="sq-status" id="sq-such-status"></span>
+                </div>
+                <div class="sq-liste" id="sq-treffer"></div>
+                <div class="sq-detail hidden" id="sq-detail"></div>
+            </div>
+        </div>
+
+        <!-- ═══ Join-Pfad ═══ -->
+        <div class="sq-card is-zu" data-klapp="pfad">
+            <div class="sq-card-head" role="button" tabindex="0" aria-expanded="false">
+                <h2 data-i18n="sql.path_head">Wie hängen zwei Tabellen zusammen?</h2>
+                <span class="sq-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="sq-card-body">
+                <p class="sq-hint" data-i18n="sql.path_hint">Zeigt den kürzesten Weg über die Beziehungen des Schemas und die Join-Bedingung je Schritt.</p>
+                <div class="sq-row">
+                    <input type="text" class="sq-input" id="sq-von" autocomplete="off" data-i18n-placeholder="sql.path_from" placeholder="erste Tabelle">
+                    <input type="text" class="sq-input" id="sq-nach" autocomplete="off" data-i18n-placeholder="sql.path_to" placeholder="zweite Tabelle">
+                    <button class="sq-btn" id="sq-pfad-los" type="button" data-i18n="sql.path_btn">Weg suchen</button>
+                    <span class="sq-status" id="sq-pfad-status"></span>
+                </div>
+                <div class="sq-liste" id="sq-pfad"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/js/sitzung.js?v=3"></script>
+<script src="/static/js/konto_hinweise.js?v=2"></script>
+<script src="/static/js/icons.js?v=11"></script>
+<script src="/static/js/dlkey.js?v=4"></script>
+<script src="/static/js/cpubar.js?v=2"></script>
+<script src="/static/js/i18n.js?v=451"></script>
+<script src="/static/js/theme.js?v=3"></script>
+<script src="/static/js/branding.js?v=30"></script>
+<script src="/static/js/logo_home.js?v=1"></script>
+<script src="/static/js/seite_breit.js?v=1"></script>
+<script src="/static/js/sql.js?v=5"></script>
+<script src="/static/js/settings_btn.js?v=7"></script>
+<script src="/static/js/activity.js?v=3"></script>
+<script src="/static/js/issues.js?v=16"></script>
+</body>
+</html>

@@ -118,6 +118,11 @@
             if (trCard) trCard.classList.remove('hidden');
             refreshTracks();
         }
+        // SQL-Assistent: Freigabe UND aktiver Skill (wie sap/email).
+        if (d.permissions && d.permissions.schema) {
+            var sqCard = document.getElementById('pt-card-sql');
+            if (sqCard) sqCard.classList.remove('hidden');
+        }
         // AI-Maus: Freigabe UND aktiver Skill.
         if (d.permissions && d.permissions.ai_mouse) {
             var amCard = document.getElementById('pt-card-aimouse');

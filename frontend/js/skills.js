@@ -840,6 +840,7 @@
                 if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
                 if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
+                if (typeof window.updateSchemaSecVisibility === 'function') window.updateSchemaSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
@@ -953,6 +954,7 @@
                 if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
                 if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
+                if (typeof window.updateSchemaSecVisibility === 'function') window.updateSchemaSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit
@@ -1068,6 +1070,7 @@
                 if (typeof window.updateVemasTabVisibility === 'function') window.updateVemasTabVisibility();
                 if (typeof window.updateEmailTabVisibility === 'function') window.updateEmailTabVisibility();
                 if (typeof window.updateTracksSecVisibility === 'function') window.updateTracksSecVisibility();
+                if (typeof window.updateSchemaSecVisibility === 'function') window.updateSchemaSecVisibility();
                 if (typeof window.updateKundenverwaltungTabVisibility === 'function') window.updateKundenverwaltungTabVisibility();
                 if (typeof window.updateSupportTabVisibility === 'function') window.updateSupportTabVisibility();
                 // Messenger-Skill an/aus -> Abschnitt "Erinnerungen per Messenger" in Sicherheit

@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""Gegenprobe zu tests/test_schema_graph.py: beisst der Waechter?
+
+Jede Probe dreht EINE Zusage im Produktcode zurueck und erwartet mindestens
+einen FAIL. Gruener Basislauf vorher, Byte-Gleichheit danach (md5). Die
+Sicherung liegt vor jeder Probe auf Platte (HOME, 0700) samt Laufmarke: wird
+der Harness abgeschossen, nimmt der naechste Start den Rueckstand zurueck.
+Laeuft ohne Bytecode (gleich grosse Sabotage in derselben Sekunde liesse
+sonst eine veraltete .pyc laden).
+
+Nie in einem Sammellauf mitlaufen lassen – die Proben patchen Dateien.
+Exit 0 = alle Proben beissen, 1 = mindestens eine nicht, 2 = konnte nicht laufen.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+WAECHTER = ROOT / "tests" / "test_schema_graph.py"
+SICHERUNG = Path.home() / ".jarvis_gegen_schema_graph"
+
+PA = "backend/schema_graph_parser.py"
+ST = "backend/schema_graph_store.py"
+IX = "backend/schema_graph_index.py"
+RG = "backend/schema_graph_rag.py"
+MN = "skills/schema_graph/main.py"
+EI = "backend/schema_graph_einstellungen.py"
+
+PROBEN = [
+    ("Blockgrenze darf hinter '-' liegen", PA,
+     '                    while grenze > start and puf[grenze - 1] in "-/*$":',
+     '                    while False:'),
+    ("Kopf nach dem ersten Wort entschieden", PA,
+     "    UNBEKANNT_AB = 80\n", "    UNBEKANNT_AB = 1\n"),
+    ("Pufferanfang ohne Kontextzeichen", PA,
+     "                puf = puf[pos - 1:]\n                start = 1\n",
+     "                puf = puf[pos:]\n                start = 0\n"),
+    ("Dollar-Lookbehind fehlt im Zweig 'str'", PA,
+     r"""        |(?<![\w$])\$\$.*?\$\$|(?<![\w$])\$(?P<tag>[A-Za-z_]\w*)\$.*?\$(?P=tag)\$)""",
+     r"""        |\$\$.*?\$\$|\$(?P<tag>[A-Za-z_]\w*)\$.*?\$(?P=tag)\$)"""),
+    ("Dollar-Lookbehind fehlt im Zweig 'offen'", PA,
+     r"""        |(?<![\w$])\$(?:[A-Za-z_]\w*)?\$.*\Z|(?<![\w$])\$[A-Za-z_]\w*\Z)""",
+     r"""        |\$(?:[A-Za-z_]\w*)?\$.*\Z|\$[A-Za-z_]\w*\Z)"""),
+    ("Ueberlese-Modus puffert", PA,
+     '        if self.modus == "x":\n            return\n        self.teile.append(teil)',
+     '        self.teile.append(teil)'),
+    ("COPY-Datenblock nicht erkannt", PA,
+     '                if anw.modus == "x" and anw.ist_copy_stdin():',
+     '                if False:'),
+    ("Abgeleitete Kante als fk ausgegeben", ST,
+     '        kanten.append((oid, treffer, "abgeleitet", json.dumps([name]),',
+     '        kanten.append((oid, treffer, "fk", json.dumps([name]),'),
+    ("Abgeleitet trotz deklariertem FK", ST,
+     "        if (oid, name_l) in fk_spalten:\n            continue\n", ""),
+    ("Mehrdeutiges wird geraten", ST,
+     "        self.mehrdeutig += 1\n        return None\n",
+     "        self.mehrdeutig += 1\n        return kand[0]\n"),
+    ("Kein atomarer Tausch (direkt ins Ziel)", ST,
+     '    neu = ziel.with_name(ziel.stem + ".neu.sqlite")\n',
+     '    neu = ziel\n'),
+    ("Hub zaehlt bei der Bereichsbildung mit", ST,
+     "        if grad[von] > BEREICH_HUB_GRAD or grad[nach] > BEREICH_HUB_GRAD:\n            continue\n", ""),
+    ("Negativ-Cache zaehlt nicht hoch", IX,
+     '"THEN versuche+1 ELSE 1 END, groesse=excluded.groesse, "',
+     '"THEN versuche ELSE 1 END, groesse=excluded.groesse, "'),
+    ("Verschwundene Dateien bleiben", IX,
+     "            for p in weg:\n                store.roh_entfernen(con, p)\n",
+     "            for p in weg[:0]:\n                store.roh_entfernen(con, p)\n"),
+    ("Hub wird ausgebreitet", RG,
+     "            continue   # Hub: erreichbar, aber nicht ausbreiten\n",
+     "            pass\n"),
+    ("Steiner: kein Join-Glied", RG,
+     "                if k not in anker:\n                    verbinder.append(k)\n",
+     "                pass\n"),
+    ("Kuerzungshinweis entfaellt", RG,
+     '            zeilen.append(f"  Spalten ({len(gewaehlt)} von {len(sp)} gezeigt',
+     '            zeilen.append(f"  Spalten: #({len(gewaehlt)} gezeigt'),
+    ("Verbotene Schluesselwoerter nicht geprueft", RG,
+     "    m = _VERBOTEN.search(ohne_namen)\n", "    m = None\n"),
+    ("Namen in Anfuehrungszeichen als Schluesselwort", RG,
+     "    m = _VERBOTEN.search(ohne_namen)\n", "    m = _VERBOTEN.search(s)\n"),
+    ("Mehrere Anweisungen erlaubt", RG,
+     '    if ";" in s:\n', '    if False:\n'),
+    ("Spalten nicht geprueft", RG,
+     "        if sp not in bekannt:\n", "        if False:\n"),
+    ("Tabellenname als Alias.Spalte gelesen", RG,
+     '        if stelle in tabellen_stellen or "." not in t or t.endswith(".*"):',
+     '        if "." not in t or t.endswith(".*"):'),
+    ("FROM in EXTRACT(...) als Tabellenquelle", RG,
+     '        if low[i] in ("from", "join") and ebene_von[i] == "abfrage":',
+     '        if low[i] in ("from", "join"):'),
+    ("Unterabfrage-Ebene nicht erkannt", RG,
+     '            stapel.append("abfrage" if nxt in ("select", "with") or vor in ("from", "join")',
+     '            stapel.append("ausdruck" if nxt in ("select", "with") or vor in ("from", "join")'),
+    ("Keine Reparaturrunde", RG,
+     "            if pr[\"ok\"] or reparaturen >= MAX_REPARATUR:\n",
+     "            if True:\n"),
+    ("Reparaturen ungedeckelt (eine zu viel)", RG,
+     "            if pr[\"ok\"] or reparaturen >= MAX_REPARATUR:\n",
+     "            if pr[\"ok\"] or reparaturen > MAX_REPARATUR:\n"),
+    ("BRAUCHE ohne Neues bricht ab", RG,
+     "                if neu:\n                    ids = ids + neu",
+     "                if not neu:\n                    return {\"fehler\": \"x\"}\n                if neu:\n                    ids = ids + neu"),
+    ("Pruefstatus GEPRUEFT auch bei Befund", MN,
+     '    elif pr.get("ok"):\n        kopf = (f"SQL ({dialekt}) – GEPRÜFT',
+     '    elif True:\n        kopf = (f"SQL ({dialekt}) – GEPRÜFT'),
+    ("Erfassen aus dem Chat ohne Schalter", MN,
+     '            if cfg.get("index_aus_chat") is not True:\n',
+     '            if False:\n'),
+    # ── YAML (2026-11-07)
+    ("YAML-Weg fehlt", PA, "    if str(pfad).lower().endswith(YAML_ENDUNGEN):", "    if False:"),
+    ("YAML-Fremdschluessel ohne Schema", PA,
+     '            fks.append({"von": _liste(f.get("columns")), "ziel": f"{zs}.{zt}" if zs else zt,',
+     '            fks.append({"von": _liste(f.get("columns")), "ziel": zt,'),
+    ("YAML-PK aus constraints ignoriert", PA, '                pk = _liste(c.get("columns"))', "                pk = []"),
+    ("YAML-Typ ohne Laenge", PA, '            return f"{typ}({n})"', "            return typ[:80]"),
+    ("Ausdruck ohne Alias uebergangen (halbe Liste)", PA, "        if not name:\n            return []",
+     "        if not name:\n            continue"),
+    ("END als Alias genommen", PA, "        if kand and kand.upper() not in _KEIN_ALIAS:", "        if kand:"),
+    ("Alias-Baum wird geladen", PA,
+     '                    raise yaml.YAMLError("YAML-Aliase (*name) werden nicht verarbeitet")', "                    pass"),
+    ("YAML ohne Groessengrenze", PA, "    if groesse > YAML_MAX:", "    if False:"),
+    ("Verzeichnisdatei nicht erkannt", PA,
+     '    if "index_version" in d or ("object_type" not in d and isinstance(d.get("tables"), list)):', "    if False:"),
+    ("Sequenz als Tabelle", PA, "    if typ in _OBJEKT_TABELLE:", '    if typ in _OBJEKT_TABELLE or typ == "SEQUENCE":'),
+    ("Gleicher PK: allgemeine Namen zugelassen", ST, "        if _PK_ZUSAMMENGESETZT.fullmatch(pk.lower()):", "        if True:"),
+    ("Gleicher PK: Mehrdeutiges geraten", ST, "        if len(andere) != 1:\n            continue\n",
+     "        if not andere:\n            continue\n"),
+    ("Gleicher PK: eigener PK verweist weiter", ST,
+     '        if ist_pk and pk_ein.get(oid, "").lower() == name_l:\n            continue\n', ""),
+    ("Gleicher PK: deklarierter FK doppelt", ST, "        if not ziele or (oid, name_l) in fk_spalten:", "        if not ziele:"),
+    ("Gleicher PK: Sichten einbezogen", ST, '"WHERE o.art = \'tabelle\'").fetchall():', '"WHERE 1=1").fetchall():'),
+    # ── Join-Pruefung (2026-11-07)
+    ("Join-Pruefung fehlt", RG, "    _joins_pruefen(con, toks, aliase, tabellen, erg)\n", ""),
+    ("Join-Beleg nur in einer Richtung", RG,
+     "            if (von, nach) == (o2, o1) and (c2, c1) in paare:\n                return True\n", ""),
+    ("Gleichnamige Schluesselspalte nicht als Beleg", RG,
+     "        if c1 == c2 and (c1 in pk_cache.get(o1, set()) or c2 in pk_cache.get(o2, set())):", "        if False:"),
+    ("Joins mit Sichten als unbelegt", RG,
+     '        if art(o1) != "tabelle" or art(o2) != "tabelle":', "        if False:"),
+    ("Keine Runde fuer unbelegte Joins", RG,
+     '            if pr["ok"] and pr["unbelegte_joins"] and not join_runde:', "            if False:"),
+    ("Join-Runde ohne Deckel", RG,
+     '            if pr["ok"] and pr["unbelegte_joins"] and not join_runde:', '            if pr["ok"] and pr["unbelegte_joins"]:'),
+    ("Join-Runde darf verschlechtern", RG,
+     '        if gueltig_vor_join is not None and (ergebnis is None or not ergebnis["pruefung"]["ok"]):',
+     "        if False:"),
+    ("Prompt erlaubt erfundene Joins", RG, '"VERMUTET markierte Beziehung nur, wenn nötig – dann nennst du sie unter ANNAHMEN. ERFINDE KEINE "',
+     '"VERMUTET markierte Beziehung nur, wenn nötig – dann nennst du sie unter ANNAHMEN. "'),
+    ("Vorbehalt fehlt in der Werkzeugausgabe", MN, "    if pr.get(\"ok\") and unbelegt:", "    if False:"),
+    # ── Begleitdokumente / Hauswissen (2026-11-08)
+    ("Dokumente als SQL gelesen", PA, "    if str(pfad).lower().endswith(DOK_ENDUNGEN):", "    if False:"),
+    ("Markdown-Ueberschrift nur mit Leerzeile erkannt", PA,
+     '            if not im_code and re.match(r"#{1,6}\\s", z):', "            if False:"),
+    ("'#' im Codeblock als Ueberschrift", PA,
+     '            if not im_code and re.match(r"#{1,6}\\s", z):', '            if re.match(r"#{1,6}\\s", z):'),
+    ("Dokument ohne Text still angenommen", PA,
+     '        raise ValueError("kein lesbarer Text (gescanntes PDF oder nur Bilder?)")', "        return []"),
+    ("Abschnitte ungedeckelt", PA, "        while len(t) > DOK_TEIL:", "        while False:"),
+    ("Dokument ohne Schema-Zuordnung", ST,
+     '            q = quelle_von(datei) or ""\n            teile = [t for t in', '            q = ""\n            teile = [t for t in'),
+    ("Hauswissen ungefiltert (fremde Schemata)", RG, '    filt, werte = _filter(erlaubt, "d.quelle")', '    filt, werte = "", []'),
+    ("Alter Graph ohne Dokument-Tabelle wirft", RG,
+     'f"WHERE dokument_fts MATCH ?{filt} ORDER BY s LIMIT ?", [ausdruck] + werte + [limit]).fetchall()\n    except sqlite3.OperationalError:',
+     'f"WHERE dokument_fts MATCH ?{filt} ORDER BY s LIMIT ?", [ausdruck] + werte + [limit]).fetchall()\n    except KeyError:'),
+    ("Codezaun im Hauswissen nicht entschaerft", RG, '        text = a["text"].replace(_ZAUN, "\'" * 3)', '        text = a["text"]'),
+    ("Genannte Tabellen kein Anker", RG,
+     "            treffer = [(o, oben) for o in genannt if o not in vorhanden] + treffer", "            treffer = treffer"),
+    ("Begriffsrunde ohne Hauswissen", RG,
+     "        begriffe, quelle = await begriffe_ermitteln(con, frage, modell, erlaubt, hauswissen_text(hw_frage))",
+     "        begriffe, quelle = await begriffe_ermitteln(con, frage, modell, erlaubt)"),
+    ("SQL-Runde ohne Hauswissen", RG, '        hw_text = ("\\n\\n" + hauswissen_text(hw)) if hw else ""', '        hw_text = ""'),
+    ("Ergebnis verschweigt das Hauswissen", RG,
+     '                "hauswissen": [{"titel": a["titel"], "nr": a["nr"]} for a in hw],', '                "hauswissen": [],'),
+    ("Endungslisten laufen auseinander", EI, 'DOK_ENDUNGEN = (".md", ".docx", ".pdf")', 'DOK_ENDUNGEN = (".md", ".docx")'),
+]
+DATEIEN = [PA, ST, IX, RG, MN, EI, "tests/test_schema_graph.py"]
+
+
+def md5(p):
+    return hashlib.md5((ROOT / p).read_bytes()).hexdigest()
+
+
+def lauf():
+    r = subprocess.run([sys.executable, str(WAECHTER)], capture_output=True, text=True,
+                       timeout=600, cwd=str(ROOT), env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+    m = re.search(r"Bilanz: (\d+) OK, (\d+) FAIL", r.stdout)
+    return (int(m.group(2)) if m and r.returncode != 2 else -1), r.returncode
+
+
+def sichern():
+    SICHERUNG.mkdir(mode=0o700, exist_ok=True)
+    for d in DATEIEN:
+        ziel = SICHERUNG / d.replace("/", "__")
+        ziel.write_bytes((ROOT / d).read_bytes())
+    (SICHERUNG / "laufmarke.json").write_text(json.dumps(DATEIEN))
+
+
+def zurueck(grund: str) -> None:
+    marke = SICHERUNG / "laufmarke.json"
+    if not marke.exists():
+        return
+    for d in json.loads(marke.read_text()):
+        q = SICHERUNG / d.replace("/", "__")
+        if q.exists() and q.read_bytes() != (ROOT / d).read_bytes():
+            (ROOT / d).write_bytes(q.read_bytes())
+            print(f"  zurueckgenommen ({grund}): {d}")
+    marke.unlink()
+
+
+def main():
+    fehlt = {p[1] for p in PROBEN} - set(DATEIEN)
+    if fehlt:
+        print("ABBRUCH: Proben fassen ungesicherte Dateien an: %s" % sorted(fehlt))
+        return 2
+    zurueck("Rueckstand eines abgebrochenen Laufs")
+    vorher = {d: md5(d) for d in DATEIEN}
+    f, rc = lauf()
+    if f != 0:
+        print("ABBRUCH: Basislauf nicht gruen (FAIL=%s, rc=%s)" % (f, rc))
+        return 2
+    print("Basislauf gruen.\n")
+    sichern()
+    beissen = 0
+    try:
+        for name, datei, alt, neu in PROBEN:
+            p = ROOT / datei
+            t = p.read_text(encoding="utf-8")
+            if t.count(alt) != 1:
+                print("  ???  %-50s Anker %dx gefunden" % (name, t.count(alt)))
+                continue
+            p.write_text(t.replace(alt, neu), encoding="utf-8")
+            try:
+                f, rc = lauf()
+            finally:
+                p.write_bytes((SICHERUNG / datei.replace("/", "__")).read_bytes())
+            if f > 0:
+                beissen += 1
+                print("  BISS %-50s %d FAIL" % (name, f))
+            elif f < 0:
+                print("  ABBR %-50s rc=%s (kein Biss: Lauf ohne Bilanz)" % (name, rc))
+            else:
+                print("  ZAHN %-50s 0 FAIL – beisst NICHT" % name)
+    finally:
+        zurueck("Ende")
+    if {d: md5(d) for d in DATEIEN} != vorher:
+        print("ABBRUCH: Dateien nicht byte-gleich")
+        return 2
+    print("\n%d/%d Proben beissen (Dateien byte-gleich wiederhergestellt)" % (beissen, len(PROBEN)))
+    return 0 if beissen == len(PROBEN) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

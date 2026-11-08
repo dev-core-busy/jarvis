@@ -66,6 +66,8 @@
         feedback:           'settings-tab-btn-feedback',
         // Wie feedback: handgebaute Oberflaeche (newsfeed_admin.js).
         newsfeed:           'settings-tab-btn-newsfeed',
+        // Wie newsfeed: handgebaute Oberflaeche (sql_admin.js).
+        schema_graph:       'settings-tab-btn-sql',
     };
 
 

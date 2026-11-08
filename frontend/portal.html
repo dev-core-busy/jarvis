@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jarvis – Start</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=49">
+    <link rel="stylesheet" href="/static/css/theme.css?v=51">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
@@ -528,6 +528,14 @@
             <div class="pt-card-title" data-i18n="portal.card_tracks">Short Tracks</div>
             <div class="pt-card-desc" data-i18n="portal.card_tracks_desc">Ablagen mit hinterlegter Aufgabe: Datei darauf ziehen, Ergebnis abholen.</div>
         </a>
+        <!-- SQL-Assistent: Freigabe UND aktiver Skill (permissions.schema). Was
+             der Benutzer auf /sql sieht, entscheiden zusaetzlich die
+             Wissensgruppen der Schema-Quellen – serverseitig. -->
+        <a class="pt-card hidden" id="pt-card-sql" href="/sql">
+            <div class="pt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div>
+            <div class="pt-card-title" data-i18n="portal.card_sql">SQL-Assistent</div>
+            <div class="pt-card-desc" data-i18n="portal.card_sql_desc">Fragen zu Daten in Alltagssprache stellen und eine geprüfte SQL-Abfrage erhalten.</div>
+        </a>
         <!-- Jira: haengt an Freigabe UND aktivem Jira-Skill
              (permissions.jira_assist). Bewusst KEIN eigener Skill: der
              Jira-Skill traegt das Feature bereits, ein zweiter kostete nur
@@ -761,7 +769,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=19"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=446"></script>
+<script src="/static/js/i18n.js?v=451"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=30"></script>
 <script src="/static/js/security_incidents.js?v=45"></script>
@@ -774,7 +782,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/portal_tiles.js?v=2"></script>
 <script src="/static/js/alpha_sort.js?v=2"></script>
 <script src="/static/js/newsfeed.js?v=4"></script>
-<script src="/static/js/portal_seite.js?v=10"></script>
+<script src="/static/js/portal_seite.js?v=11"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

@@ -807,6 +807,14 @@
             ]);
         }
 
+        function _initSqlCollapse() {
+            _collapseInit([
+                { hdr: 'sq-sect-quellen-hdr', body: 'sq-sect-quellen-body', tog: 'sq-sect-quellen-tog' },
+                { hdr: 'sq-sect-allg-hdr',    body: 'sq-sect-allg-body',    tog: 'sq-sect-allg-tog'    },
+                { hdr: 'sq-sect-erf-hdr',     body: 'sq-sect-erf-body',     tog: 'sq-sect-erf-tog'     },
+            ]);
+        }
+
         function _initFeedbackCollapse() {
             _collapseInit([
                 { hdr: 'fb-sect-form-hdr', body: 'fb-sect-form-body', tog: 'fb-sect-form-tog' },
@@ -852,6 +860,7 @@
         const tabAimouse = document.getElementById('settings-tab-aimouse');
         const tabFeedback = document.getElementById('settings-tab-feedback');
         const tabNewsfeed = document.getElementById('settings-tab-newsfeed');
+        const tabSql = document.getElementById('settings-tab-sql');
         const tabSap     = document.getElementById('settings-tab-sap');
         const tabVemas   = document.getElementById('settings-tab-vemas');
         const tabKundenverwaltung = document.getElementById('settings-tab-kundenverwaltung');
@@ -864,7 +873,7 @@
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');
         const tabExcel   = document.getElementById('settings-tab-excel');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabNewsfeed, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabFehleranalyse, tabSecurity, tabCron].concat(tabsSkillCfg);
+        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabNewsfeed, tabSql, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabFehleranalyse, tabSecurity, tabCron].concat(tabsSkillCfg);
 
         // Zuletzt benutzter Reiter, je Browser. openModal stellt ihn wieder her;
         // bis 2026-11-02 oeffneten die Einstellungen IMMER auf "KI & System".
@@ -975,6 +984,11 @@
                     tabNewsfeed.classList.add('active');
                     _initNewsfeedCollapse();
                     if (window.NewsfeedAdmin) window.NewsfeedAdmin.onShow();
+                } else if (target === 'sql' && tabSql) {
+                    tabSql.style.display = '';
+                    tabSql.classList.add('active');
+                    _initSqlCollapse();
+                    if (window.SqlAdmin) window.SqlAdmin.onShow();
                 } else if (target === 'sap' && tabSap) {
                     tabSap.style.display = '';
                     tabSap.classList.add('active');
@@ -1272,6 +1286,21 @@
             }
         };
 
+        // ── SQL-Assistent: Berechtigungs-Spalte nur bei aktivem Skill ──
+        // Der REITER wird von skillcfg.js::updateTabs() geschaltet (TAB_BUTTONS);
+        // hier geht es nur um die Spalte (Begruendung bei _rechteBereich).
+        window.updateSchemaSecVisibility = async function updateSchemaSecVisibility() {
+            try {
+                const skills = await _skillsOnce();
+                const sp = Array.isArray(skills)
+                    ? skills.find(s => s.dir_name === 'schema_graph')
+                    : null;
+                _rechteBereich('schema', !!(sp && sp.enabled));
+            } catch (e) {
+                // Fehler ignorieren – die Spalte bleibt weg
+            }
+        };
+
         // ── Jira-Assistent: Berechtigungs-Spalte nur bei aktivem Skill ──
         // Begruendung bei _rechteBereich; ohne aktiven
         // Jira-Skill gibt es weder Adresse noch Token, die Freigabe waere eine
@@ -1533,6 +1562,7 @@
             await updateVemasTabVisibility();
             await updateEmailTabVisibility();
             await updateTracksSecVisibility();
+            await updateSchemaSecVisibility();
             await updateJiraAssistSecVisibility();
             await updateAimouseSecVisibility();
             await updateClaudesubSecVisibility();

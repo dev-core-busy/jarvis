@@ -1448,11 +1448,56 @@ body.light .frg-fehler { color: color-mix(in srgb, var(--danger) 78%, #000); }
    auf allen gemessenen dunklen Flaechen mindestens 4,68:1. Helles Thema:
    ``--accent`` pur (6,68:1). ``body`` im Selektor hebt die Spezifitaet ueber
    Seitenregeln, die NACH theme.css stehen. */
-body :is(.ja-card-head, .em-card-head, .st-card-head, .cs-card-head, .kb-collapse-header):hover > :is(h1, h2, h3, h4),
+body :is(.ja-card-head, .em-card-head, .st-card-head, .sq-card-head, .cs-card-head, .kb-collapse-header):hover > :is(h1, h2, h3, h4),
 body :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hover {
     color: color-mix(in srgb, var(--accent) 65%, #fff);
 }
-body.light :is(.ja-card-head, .em-card-head, .st-card-head, .cs-card-head, .kb-collapse-header):hover > :is(h1, h2, h3, h4),
+body.light :is(.ja-card-head, .em-card-head, .st-card-head, .sq-card-head, .cs-card-head, .kb-collapse-header):hover > :is(h1, h2, h3, h4),
 body.light :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hover {
     color: var(--accent);
 }
+
+/* ── SQL-Schema-Auswahl in der Chat-Eingabeleiste (sqlschemafilter.js) ──
+   Gleiche Bauform wie der Wissensgruppen-Filter daneben; das Aufklappfeld ist
+   DECKEND (--bg-secondary), weil es ueber dem Verlauf liegt. Der Zustand steht
+   als Text im Abzeichen ("aus" / Anzahl), die Toenung ist nur Zugabe. */
+.sqsf-wrap { position: relative; display: inline-flex; flex: 0 0 auto; }
+.sqsf-wrap[hidden] { display: none; }
+.sqsf-btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg-glass); color: var(--text-secondary);
+    font-size: .82rem; cursor: pointer; line-height: 1; white-space: nowrap;
+}
+.sqsf-btn:hover { color: var(--text-primary); border-color: rgba(var(--accent-rgb), .5); }
+.sqsf-badge {
+    font-size: .72rem; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: rgba(var(--fg-rgb), .08); color: var(--text-primary);
+}
+.sqsf-btn.sqsf-aktiv { color: var(--text-primary); border-color: rgba(var(--accent-rgb), .55); }
+.sqsf-btn.sqsf-aktiv .sqsf-badge { background: rgba(var(--accent-rgb), .25); }
+.sqsf-caret { transition: transform .15s ease; font-size: .7rem; }
+.sqsf-btn[aria-expanded="true"] .sqsf-caret { transform: rotate(180deg); }
+.sqsf-panel {
+    position: absolute; z-index: 10050; min-width: 250px; max-width: 340px;
+    background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px; box-shadow: var(--shadow-lg);
+}
+.sqsf-panel[hidden] { display: none; }
+.sqsf-panel.sqsf-up { bottom: calc(100% + 8px); left: 0; }
+.sqsf-panel.sqsf-down { top: calc(100% + 8px); left: 0; }
+.sqsf-head { font-size: .76rem; color: var(--text-secondary); margin: 0 2px 8px; }
+.sqsf-list { max-height: 44vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.sqsf-row {
+    display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 8px;
+    cursor: pointer; font-size: .85rem; color: var(--text-primary);
+}
+.sqsf-row:hover { background: rgba(var(--fg-rgb), .06); }
+.sqsf-row input { flex: 0 0 auto; cursor: pointer; }
+.sqsf-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sqsf-zahl { flex: 0 0 auto; font-size: .74rem; color: var(--text-secondary); }
+.sqsf-empty { padding: 8px 6px; color: var(--text-secondary); font-size: .82rem; }
+.sqsf-a {
+    margin-top: 8px; width: 100%; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-secondary); font-size: .76rem; cursor: pointer;
+}
+.sqsf-a:hover { color: var(--text-primary); border-color: rgba(var(--accent-rgb), .5); }

@@ -1,0 +1,59 @@
+{
+  "name": "SQL-Assistent (Schema-Graph)",
+  "description": "Wandelt Fragen in Alltagssprache in geprüfte SQL-Abfragen um – auch bei sehr großen Datenbankschemata. Die Schema-Definitionen werden einmal als Graph aus Tabellen, Spalten und Beziehungen erfasst; je Frage sucht der Assistent die passenden Tabellen, verbindet sie über die Join-Pfade des Graphen und prüft das erzeugte SQL gegen das Schema.",
+  "version": "1.0.0",
+  "author": "Jarvis",
+  "module": "main",
+  "tools": [
+    "schema_sql",
+    "schema_suche",
+    "schema_tabelle",
+    "schema_verbindung",
+    "schema_index"
+  ],
+  "category": "daten",
+  "icon": "database",
+  "system": false,
+  "enabled": false,
+  "dependencies": [],
+  "permissions": [],
+  "knowledge_docs": [],
+  "config_schema": {},
+  "help": {
+    "details": "Der Assistent arbeitet in zwei Schritten. Erstens das Erfassen: ein Administrator legt unter Einstellungen → SQL-Assistent je Datenbank ein Schema an und lädt dessen Schema-Dateien hoch (einzelne Dateien, ganze Ordner oder ZIP-Archive). Daraus entsteht von selbst ein Graph aus Tabellen, Spalten und Beziehungen samt Themenbereichen (SQL-DDL: CREATE TABLE/VIEW, ALTER TABLE, COMMENT ON, Beschreibungen aus SQL Server und MySQL; oder YAML-Exporte mit einem Datenbankobjekt je Datei – Spalten, Primär- und Fremdschlüssel, Kommentare, Sicht-Definitionen); Datenblöcke in den Dateien (INSERT, COPY) werden überlesen, nicht gespeichert, und ein erneutes Erfassen liest nur neue und geänderte Dateien. Zweitens die Frage – auf der Seite „SQL-Assistent“ (Portal-Kachel) oder im Chat: Der Assistent übersetzt sie in Suchbegriffe, findet die passenden Tabellen, verbindet sie über die kürzesten Join-Pfade und lässt das Modell daraus genau eine lesende SQL-Abfrage schreiben. Diese wird gegen das Schema geprüft (nur lesend, alle Tabellen und Spalten vorhanden) und bei Fehlern bis zu zweimal korrigiert. Die Abfrage wird NICHT ausgeführt. Wer den Assistenten benutzen darf, steht unter Sicherheit → Berechtigungen, Spalte „SQL-Assistent“ (leer = niemand). Welches Schema eine Frage betrifft, wählt der Benutzer selbst: im Chat über die Auswahl „SQL-Schema“ neben den Wissensgruppen (Vorgabe: kein Schema – dann stehen die SQL-Werkzeuge in diesem Chat nicht zur Verfügung), auf der Seite oben.",
+    "tools": [
+      {
+        "name": "schema_sql",
+        "label": "SQL aus Frage",
+        "desc": "Erzeugt aus einer Frage eine geprüfte SQL-Abfrage samt Erklärung und Annahmen."
+      },
+      {
+        "name": "schema_suche",
+        "label": "Tabellen suchen",
+        "desc": "Findet Tabellen und Sichten zu Begriffen (Name, Beschreibung, Spalten)."
+      },
+      {
+        "name": "schema_tabelle",
+        "label": "Tabelle anzeigen",
+        "desc": "Zeigt alle Spalten einer Tabelle und ihre Beziehungen zu anderen Tabellen."
+      },
+      {
+        "name": "schema_verbindung",
+        "label": "Join-Pfad",
+        "desc": "Zeigt, über welche Tabellen und Bedingungen zwei Tabellen verbunden sind."
+      },
+      {
+        "name": "schema_index",
+        "label": "Erfassung",
+        "desc": "Zeigt den Stand der Erfassung; Administratoren starten oder stoppen sie, wenn das aus dem Chat erlaubt ist."
+      }
+    ],
+    "use_cases": [
+      "Wie hoch war der Umsatz je Kunde und Land im letzten Quartal? Gib mir das SQL.",
+      "In welcher Tabelle stehen die Lieferadressen?",
+      "Wie hängen Auftrag und Lager zusammen?",
+      "Wie weit ist die Erfassung des Schemas?"
+    ],
+    "notes": "Schema-Quellen, Dialekt und das Erfassen (Start, Fortschritt, Abbruch) stehen im Reiter „SQL-Assistent“ der Einstellungen. Auf dem Server lässt sich das Erfassen auch als root im Programmverzeichnis starten: `bash deploy/als_dienst.sh venv/bin/python -m backend.schema_graph_index`. Die Güte hängt am Schema: deklarierte Fremdschlüssel und Kommentare verbessern die Treffer deutlich; abgeleitete Beziehungen sind Vermutungen und werden als solche ausgewiesen. Der Graph liegt in data/schema_graph auf dem Server."
+  }
+}

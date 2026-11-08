@@ -301,6 +301,14 @@ _APP_DENY_REL = (
     # jede kuenftige Datei darin von sich aus erfasst ist (Lehre aus
     # data/google_auth, 2026-11-06).
     "data/short_tracks_ref",
+    # SQL-Assistent (data/sql_schema_graph/<schema>/ und _graph/): hochgeladene
+    # Schema-Definitionen und der daraus abgeleitete Graph. Wer welches Schema
+    # sieht, entscheidet die Auswahl im Chat bzw. auf /sql – ein Lauf mit
+    # Dateiwerkzeug oder Shell ginge an der Auswahl vorbei und laese ALLE
+    # Schemata (auch Spaltenkommentare mit Fachwissen). Das Verzeichnis braucht
+    # niemand ausser dem Backend; gesperrt ist es als GANZES (Lehre aus
+    # data/google_auth, 2026-11-06).
+    "data/sql_schema_graph",
     # Claude Subagent (backend/claude_subagent.py): bildet Delegations-Schluessel
     # auf BENUTZER ab. Seit 2026-08-23 steht der Schluessel dort im KLARTEXT
     # (er wird dauerhaft angezeigt) – Lesen ist damit gleichbedeutend mit
@@ -381,6 +389,8 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 "data/copilot_auth",
                 # Referenzdateien der Short-Tracks-Ablagen (siehe _APP_DENY_REL)
                 "data/short_tracks_ref",
+                # Schema-Dateien und Graph des SQL-Assistenten (siehe _APP_DENY_REL)
+                "data/sql_schema_graph",
                 # Persoenliche Support-Anweisungen, eine Datei je Benutzer mit
                 # dem Benutzernamen als Dateinamen. Auf ECHT am 2026-10-22
                 # gemessen: Verzeichnis 0755, Dateien 0644 – fuer jarvis_sandbox
@@ -855,6 +865,9 @@ SHELL_SECRET_PATHS = re.compile(
     # fuehrenden Schraegstrich: auch `cd data && cat short_tracks_ref/*` muss
     # treffen, nicht nur ein vollstaendiger Pfad.
     r'short_tracks_ref\b|'
+    # Schema-Dateien und Graph des SQL-Assistenten (siehe _APP_DENY_REL), auch
+    # relativ (`cd data && ls sql_schema_graph`).
+    r'sql_schema_graph\b|'
     # Claude Subagent: Delegations-Schluessel -> Benutzer. Ein eigener Eintrag
     # laesst kuenftige Laeufe unter fremder Kennung starten.
     r'claude_subagent\.json\b|'

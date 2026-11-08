@@ -28,6 +28,7 @@
         { sub: 'vemas',      users: 'vemas-allowed-users',      group: 'vemas-allowed-group',        key: 'rmx.col_vemas',      skill: true },
         { sub: 'email',      users: 'email-allowed-users',      group: 'email-allowed-group',        key: 'rmx.col_email',      skill: true },
         { sub: 'tracks',     users: 'tracks-allowed-users',     group: 'tracks-allowed-group',       key: 'rmx.col_tracks',     skill: true },
+        { sub: 'schema',     users: 'schema-allowed-users',     group: 'schema-allowed-group',       key: 'rmx.col_schema',     skill: true },
         { sub: 'jiraassist', users: 'jiraassist-allowed-users', group: 'jiraassist-allowed-group',   key: 'rmx.col_jiraassist', skill: true },
         { sub: 'aimouse',    users: 'aimouse-allowed-users',    group: 'aimouse-allowed-group',      key: 'rmx.col_aimouse',    skill: true },
         { sub: 'claudesub',  users: 'claudesub-allowed-users',  group: 'claudesub-allowed-group',    key: 'rmx.col_claudesub',  skill: true },

@@ -660,6 +660,9 @@
 
     // Wissensgruppen-Filter (aufklappbare Checkbox-Liste in der Eingabeleiste)
     let _kbFilter = null;
+    // SQL-Schema-Auswahl (SQL-Assistent) direkt hinter den Wissensgruppen.
+    // Vorgabe: kein Schema – dann bekommt der Lauf keine SQL-Werkzeuge.
+    let _sqlFilter = null;
     let _profSel = null;   // KI-Profil-Pulldown (hinter dem Wissensgruppen-Filter)
     // ── Wissensquellen-Vorauswahl fuer NEUE Chats ────────────────────────────
     // Gehalten wird die Liste der ABGEWAEHLTEN Gruppen-Ids (wie im Backend und
@@ -713,6 +716,12 @@
         _kbFilter = window.KbGroupFilter.mount({ anchor: slot, place: 'append', direction: 'up', key: 'chat' });
         // Auswahländerung sofort in der aktiven Sitzung merken
         if (_kbFilter.onChange) _kbFilter.onChange(function () { _persistSession(); });
+        // SQL-Schema-Auswahl: blendet sich selbst aus, wenn der Benutzer nicht
+        // fuer den SQL-Assistenten freigegeben ist.
+        if (window.SqlSchemaFilter && !_sqlFilter) {
+            _sqlFilter = window.SqlSchemaFilter.mount({ anchor: slot, direction: 'up' });
+            _sqlFilter.onChange(function () { _persistSession(); });
+        }
         // KI-Profil-Pulldown direkt HINTER den Wissensgruppen; Auswahl pro Sitzung merken
         if (window.ProfileSwitcher && !_profSel) {
             _profSel = window.ProfileSwitcher.mount({
@@ -1164,6 +1173,11 @@
         if (_kbFilter) {
             const _sel = _kbFilter.getSelection();
             if (_sel !== null) msg.kb_groups = _sel;
+        }
+        // SQL-Schemata: nur mitschicken, wenn welche gewaehlt sind (fehlt = keins)
+        if (_sqlFilter) {
+            const _sq = _sqlFilter.getSelection();
+            if (_sq.length) msg.sql_schemata = _sq;
         }
         wsSend(msg);
 
@@ -2582,6 +2596,8 @@
         const body = { messages: _chatHistory };
         // Wissensgruppen-Auswahl der Sitzung mitspeichern (null=alle, []=keine, [ids])
         if (_kbFilter) body.kb_groups = _kbFilter.getSelection();
+        // SQL-Schema-Auswahl der Sitzung mitspeichern ([] = kein Schema)
+        if (_sqlFilter) body.sql_schemata = _sqlFilter.getSelection();
         // Gewaehltes KI-Profil der Sitzung mitspeichern (Pulldown-Zustand im Verlauf)
         if (_profSel) body.profile_id = _profSel.getSelected() || '';
         fetch('/api/chat/sessions/' + encodeURIComponent(_activeSid) + '/transcript', {
@@ -3405,6 +3421,9 @@
             else if (_chatHistory.length === 0) _kbFilter.setSelection(await _kbDefAlsAuswahl());
             else _kbFilter.setSelection(null);
         }
+        // SQL-Schemata: gespeicherte Auswahl der Sitzung, sonst KEIN Schema –
+        // auch fuer alte Sitzungen (Vorgabe "kein Schema").
+        if (_sqlFilter) _sqlFilter.setSelection((_sdata && _sdata.sql_schemata) || []);
         // Gewaehltes KI-Profil dieser Sitzung wiederherstellen + aktivieren
         if (_profSel && _sdata && _sdata.profile_id) _profSel.setSelected(_sdata.profile_id, { activate: true });
         if (_chatHistory.length === 0) {

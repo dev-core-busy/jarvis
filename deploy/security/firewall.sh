@@ -282,8 +282,19 @@ _nft_speichern() {
     # NUR die eigene Tabelle sichern – ein `nft list ruleset` wuerde die
     # Tailscale- und egress_guard-Tabellen mitschreiben und beim Laden
     # verdoppeln.
+    #
+    # Erst in eine Zwischendatei, dann mit `nft -c` PRUEFEN, erst danach
+    # ersetzen (Pentest-Vorbereitung 2026-11-08): eine kaputte Datei ersetzte
+    # sonst die gute, und der naechste Boot liefe ohne Paketfilter. Scheitert
+    # die Pruefung, bleibt die alte Datei stehen und das Skript endet mit Fehler.
+    local neu="$FW_ETC/firewall.nft.neu"
     { echo 'table inet jarvis_fw'; echo 'delete table inet jarvis_fw'; \
-      nft list table inet jarvis_fw; } > "$FW_ETC/firewall.nft"
+      nft list table inet jarvis_fw; } > "$neu"
+    if ! nft -c -f "$neu"; then
+        echo "FEHLER: erzeugte Regeldatei ist ungueltig – $FW_ETC/firewall.nft bleibt unveraendert ($neu zur Ansicht)." >&2
+        return 1
+    fi
+    mv -f "$neu" "$FW_ETC/firewall.nft"
 }
 
 regeln_setzen() {
@@ -355,7 +366,12 @@ persistieren() {
     # und auch dann, wenn der Jarvis-Bootstrap scheitert.
     mkdir -p "$FW_ETC"
     if ! _hat_iptables; then
-        _nft_speichern
+        _nft_speichern || return 1
+        # KEIN `|| true` im ExecStart (Pentest-Vorbereitung 2026-11-08): die
+        # Unit haengt nur per WantedBy=sysinit.target am Boot – scheitert sie,
+        # bootet der Server trotzdem. `|| true` verhinderte nur, dass der
+        # Fehlschlag SICHTBAR wird (systemctl --failed); ein Server ohne
+        # Paketfilter sah aus wie einer mit.
         cat > "$FW_UNIT_DIR/jarvis-firewall.service" <<'UNIT2'
 [Unit]
 Description=Jarvis Paketfilter (nftables, DROP als Vorgabe)
@@ -366,7 +382,7 @@ Wants=network-pre.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c '/usr/sbin/nft -f /etc/jarvis/firewall.nft || true'
+ExecStart=/usr/sbin/nft -f /etc/jarvis/firewall.nft
 
 [Install]
 WantedBy=sysinit.target
@@ -389,11 +405,12 @@ After=systemd-modules-load.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# `|| true`: ein Fehler beim Laden darf den Boot nicht anhalten – dann gilt der
-# Kernel-Standard (ACCEPT), was schlechter als gewollt, aber besser als ein
-# Server ist, der nicht hochkommt.
-ExecStart=/bin/sh -c 'iptables-restore < /etc/jarvis/firewall-v4.rules || true'
-ExecStart=/bin/sh -c 'ip6tables-restore < /etc/jarvis/firewall-v6.rules || true'
+# Kein `|| true` (2026-11-08): die Unit haengt nur per WantedBy am Boot, ein
+# Fehlschlag haelt ihn NICHT an – er wird aber sichtbar (systemctl --failed).
+ExecStart=/bin/sh -c 'iptables-restore < /etc/jarvis/firewall-v4.rules'
+# v6 nur, wenn gespeichert (ip6tables-save darf beim Sichern fehlen) – sonst
+# schluege die Unit ohne echten Fehler fehl.
+ExecStart=/bin/sh -c 'if [ -s /etc/jarvis/firewall-v6.rules ]; then ip6tables-restore < /etc/jarvis/firewall-v6.rules; fi'
 
 [Install]
 WantedBy=sysinit.target
@@ -518,7 +535,9 @@ case "${1:---status}" in
         sichern >/dev/null
         systemctl stop fw-rollback.timer 2>/dev/null || true
         if _hat_iptables; then regeln_setzen; else regeln_setzen_nft; fi
-        persistieren
+        # Ohne `set -e` liefe ein Fehlschlag sonst in "status" weiter und das
+        # Skript endete mit Exit 0 – genau der stille Ausfall, der hier weg soll.
+        persistieren || { echo "FEHLER: Regeln NICHT dauerhaft gespeichert." >&2; exit 1; }
         echo
         status
         ;;

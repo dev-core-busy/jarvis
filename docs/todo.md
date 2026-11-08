@@ -73,3 +73,15 @@ Referenzen bis 24.000 Zeichen direkt im Auftrag. Offen:
       Für sehr große Schemata: eine Suche über die Referenzen (Tabellen-/
       Spaltennamen), die das Modell gezielt abfragt, statt bei jeder Frage den
       ganzen Text mitzuschicken.
+
+## Verschlüsselte Verbindung zu LLM- und Sprachserver
+
+Aus der Sicherheitsprüfung vor dem Pentest (2026-11-08):
+
+- [ ] **TLS zum LLM- und STT-Server** – mehrere LLM-Profile sprechen per
+      `http://`, die Spracherkennung per `ws://` mit den internen Servern.
+      Chatinhalte (auch Kunden- und Ticketdaten), der API-Schlüssel des
+      LLM-Servers und Audio gehen damit unverschlüsselt durchs Netz. Schritte:
+      TLS auf LLM- und STT-Server aktivieren (IT), danach die Profile auf
+      `https://` bzw. `wss://` umstellen (Einstellungen → KI-Profile,
+      Sprachausgabe/-erkennung). Ein HTTPS-Profil existiert bereits.

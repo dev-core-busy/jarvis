@@ -93,15 +93,23 @@ class SchemaSqlTool(BaseTool):
             "frage": {"type": "STRING", "description": "Die Frage in Alltagssprache."},
             "dialekt": {"type": "STRING", "description": "Optional: SQL-Dialekt, wenn abweichend von der "
                         "Einstellung (postgresql, mysql, oracle, mssql, sqlite, db2, hana, …)."},
+            "praefix": {"type": "STRING", "description": "Optional: nur Tabellen dieser Datenbankschemata als "
+                        "Ausgangspunkt (Schema-Präfix, kommagetrennt, z. B. eines von zwei Schemata im selben "
+                        "Export). Nur setzen, wenn der Benutzer es nennt oder eine vorige Antwort Tabellen "
+                        "aus mehreren Präfixen meldete."},
         }, "required": ["frage"]}
 
-    async def execute(self, frage: str = "", dialekt: str = "", _sql_schemata=None, **kwargs):
+    async def execute(self, frage: str = "", dialekt: str = "", praefix: str = "", _sql_schemata=None, **kwargs):
         from backend import schema_graph_rag as rag  # noqa: PLC0415
         if kwargs:
             return "Unbekannte Parameter: " + ", ".join(sorted(kwargs))
         frage = (frage or "").strip()
         if not frage:
             return "Keine Frage angegeben."
+        try:
+            praefixe = rag.praefixe_normal(praefix or None)
+        except ValueError as e:
+            return str(e)
         z = await asyncio.to_thread(_zugang, _sql_schemata)
         if not z.get("darf") or not z.get("erlaubt"):
             return _abgewiesen(z)
@@ -114,7 +122,8 @@ class SchemaSqlTool(BaseTool):
             return _ohne_graph()
         try:
             erg = await rag.sql_erzeugen(frage, dialekt=d, con=con, erlaubt=z["erlaubt"],
-                                         max_tabellen=cfg["max_tabellen"], max_spalten=cfg["max_spalten"])
+                                         max_tabellen=cfg["max_tabellen"], max_spalten=cfg["max_spalten"],
+                                         praefixe=praefixe)
         finally:
             con.close()
         return ausgabe(erg, d)
@@ -164,6 +173,14 @@ def ausgabe(erg: dict, dialekt: str) -> str:
     if erg.get("hauswissen"):
         z.append("Hintergrund aus den Hausdokumenten: " + ", ".join(
             f"{h['titel']} (Abschnitt {h['nr']})" for h in erg["hauswissen"][:6]))
+    pk = erg.get("praefixe_sql") or {}
+    if len(pk) > 1 and not erg.get("praefixe"):
+        z.append("Hinweis: Die Abfrage verbindet Tabellen aus mehreren Datenbankschemata ("
+                 + ", ".join(f"{k} {v}" for k, v in pk.items()) + "). Ist eines gemeint, die Frage mit "
+                 "praefix erneut stellen – dem Benutzer die Wahl nennen.")
+    if erg.get("gleichwertig"):
+        z.append("Zusammengelegt (Sicht zeigt alle Spalten der Tabelle): " + ", ".join(
+            f"{g['sicht']} statt {g['tabelle']}" for g in erg["gleichwertig"][:8]))
     if erg.get("begriffe_quelle") == "frage":
         z.append("Hinweis: Suchbegriffe nur aus der Frage (die Begriffserweiterung durch das Modell fiel aus).")
     return "\n".join(z)

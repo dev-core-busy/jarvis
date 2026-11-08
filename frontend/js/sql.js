@@ -35,6 +35,9 @@
     // und die Vorgabe des Administrators kam nie an (UI-Waechter, 2026-11-07).
     var _dialektGewaehlt = false;
     var _auswahl = null;   // Set der gewaehlten Schema-Kennungen (null = noch nicht geladen)
+    // Schema-PRAEFIX: eine Ablage kann mehrere Datenbankschemata enthalten
+    // (z. B. ALT. und NEU.). '' = alle. Gemerkt je Benutzer wie die Auswahl.
+    var _praefix = null;
 
     function $(id) { return document.getElementById(id); }
     function token() {
@@ -135,6 +138,43 @@
         try { localStorage.setItem(speicherSchluessel(), JSON.stringify(Array.from(_auswahl || []))); } catch (e) { }
     }
     function gewaehlt() { return Array.from(_auswahl || []); }
+
+    function praefixSchluessel() { return speicherSchluessel().replace('_schemata_', '_praefix_'); }
+    // Datenbankschemata der GEWAEHLTEN Ablagen, Objekte summiert
+    function praefixListe() {
+        var summe = {};
+        ((_status && _status.schemata) || []).forEach(function (q) {
+            if (!_auswahl || !_auswahl.has(q.id)) return;
+            (q.praefixe || []).forEach(function (p) {
+                summe[p.name] = (summe[p.name] || 0) + (p.objekte || 0);
+            });
+        });
+        return Object.keys(summe).sort().map(function (n) { return { name: n, objekte: summe[n] }; });
+    }
+    function zeichnePraefixe() {
+        var sel = $('sq-praefix'), lbl = $('sq-praefix-lbl');
+        if (!sel) return;
+        if (_praefix === null) {
+            try { _praefix = localStorage.getItem(praefixSchluessel()) || ''; } catch (e) { _praefix = ''; }
+        }
+        var liste = praefixListe();
+        var namen = liste.map(function (p) { return p.name; });
+        if (namen.indexOf(_praefix) < 0) _praefix = '';
+        // Ein einziges Datenbankschema: nichts zu waehlen
+        var zeigen = liste.length > 1;
+        sel.classList.toggle('hidden', !zeigen);
+        if (lbl) lbl.classList.toggle('hidden', !zeigen);
+        sel.innerHTML = '<option value="">' + esc(T('sql.prefix_all', 'alle')) + '</option>' + liste.map(function (p) {
+            return '<option value="' + esc(p.name) + '">' + esc(p.name) + ' (' + esc(String(p.objekte)) + ')</option>';
+        }).join('');
+        sel.value = zeigen ? _praefix : '';
+    }
+    function praefixWahl() { var sel = $('sq-praefix'); return sel && !sel.classList.contains('hidden') && sel.value ? [sel.value] : []; }
+    function praefixSetzen(name) {
+        _praefix = name || '';
+        try { localStorage.setItem(praefixSchluessel(), _praefix); } catch (e) { }
+        zeichnePraefixe();
+    }
     function schemataParam() { return '&schemata=' + encodeURIComponent(gewaehlt().join(',')); }
 
     function zeichneQuellen() {
@@ -166,6 +206,7 @@
                 if (cb.checked) _auswahl.add(id); else _auswahl.delete(id);
                 auswahlMerken();
                 zeichneQuellen();
+                zeichnePraefixe();
                 knopfZustand();
             });
         });
@@ -189,6 +230,7 @@
             _auswahl = auswahlLaden(d.schemata || []);
             zeichneQuellen();
             zeichneDialekte();
+            zeichnePraefixe();
             var fm = $('sq-frage');
             if (fm && d.frage_max) fm.setAttribute('maxlength', String(d.frage_max));
             knopfZustand();
@@ -224,7 +266,7 @@
         $('sq-spin').classList.remove('hidden');
         melde('sq-frage-status', T('sql.running', 'Die Frage wird bearbeitet …'));
         $('sq-ergebnis').classList.add('hidden');
-        hole('/api/sql/frage', { method: 'POST', body: JSON.stringify({ frage: frage, dialekt: $('sq-dialekt').value, schemata: gewaehlt() }) })
+        hole('/api/sql/frage', { method: 'POST', body: JSON.stringify({ frage: frage, dialekt: $('sq-dialekt').value, schemata: gewaehlt(), praefixe: praefixWahl() }) })
             .then(function (d) {
                 melde('sq-frage-status', '');
                 zeichneErgebnis(d);
@@ -273,6 +315,7 @@
         var hw = d.hauswissen || [];
         $('sq-hauswissen').innerHTML = hw.length ? '<b>' + esc(T('sql.hauswissen', 'Hintergrund aus den Hausdokumenten')) + ':</b> '
             + hw.map(function (h) { return esc(h.titel) + ' (' + esc(T('sql.abschnitt', 'Abschnitt {n}', { n: h.nr })) + ')'; }).join(', ') : '';
+        zeichneHinweise(d);
         var glieder = d.verbinder || [];
         $('sq-basis').innerHTML = (d.tabellen_kontext || []).map(function (n) {
             var g = glieder.indexOf(n) >= 0;
@@ -281,6 +324,42 @@
                 + esc(n) + (g ? ' ↔' : '') + '</span>';
         }).join('');
         $('sq-ergebnis').classList.remove('hidden');
+    }
+
+    // Woher der Ausschnitt kam: eingegrenzt, gemischt oder zusammengelegt
+    function zeichneHinweise(d) {
+        var box = $('sq-hinweise');
+        if (!box) return;
+        var h = [];
+        // Am SQL, nicht am Ausschnitt: der stammt fast immer aus mehreren
+        // Schemata, das SQL selten (DEV 2026-11-08: 2 von 8) – ein staendiger
+        // Hinweis wird ueberlesen.
+        var pk = d.praefixe_sql || {};
+        var namen = Object.keys(pk);
+        if ((d.praefixe || []).length) {
+            h.push('<div>' + esc(T('sql.prefix_used', 'Eingegrenzt auf das Datenbankschema {p}.', { p: d.praefixe.join(', ') })) + '</div>');
+        } else if (namen.length > 1) {
+            h.push('<div><b>' + esc(T('sql.prefix_mixed_lbl', 'Mehrere Datenbankschemata')) + ':</b> '
+                + esc(T('sql.prefix_mixed', 'Die Abfrage verbindet Tabellen aus {liste}. Ist nur eines gemeint, die Frage darauf eingrenzen:',
+                    { liste: namen.map(function (n) { return n + ' (' + pk[n] + ')'; }).join(', ') }))
+                + ' ' + namen.map(function (n) {
+                    return '<button type="button" class="sq-btn" data-praefix="' + esc(n) + '">'
+                        + esc(T('sql.prefix_ask', 'nur {p} fragen', { p: n })) + '</button>';
+                }).join(' ') + '</div>');
+        }
+        var gw = d.gleichwertig || [];
+        if (gw.length) {
+            h.push('<div><b>' + esc(T('sql.same_lbl', 'Zusammengelegt')) + ':</b> ' + gw.map(function (g) {
+                return esc(T('sql.same', '{s} zeigt alle Spalten von {t}', { s: g.sicht, t: g.tabelle }));
+            }).join('; ') + '. ' + esc(T('sql.same_hint', 'Im Ausschnitt stand nur die Sicht.')) + '</div>');
+        }
+        box.innerHTML = h.join('');
+        box.querySelectorAll('button[data-praefix]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                praefixSetzen(b.getAttribute('data-praefix'));
+                fragen();
+            });
+        });
     }
 
     function kopieren() {
@@ -413,6 +492,7 @@
         });
         kp.addEventListener('click', kopieren);
         $('sq-dialekt').addEventListener('change', function () { _dialektGewaehlt = true; });
+        $('sq-praefix').addEventListener('change', function () { praefixSetzen($('sq-praefix').value); });
         var sf = $('sq-suchfeld');
         $('sq-suchen').addEventListener('click', suchen);
         sf.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); suchen(); } });
@@ -443,7 +523,7 @@
         window.addEventListener('jarvis-lang-changed', function () {
             if (window._lang === lang) return;
             lang = window._lang;
-            zeichneQuellen(); zeichneDialekte(); knopfZustand();
+            zeichneQuellen(); zeichneDialekte(); zeichnePraefixe(); knopfZustand();
         });
     }
 
@@ -474,6 +554,6 @@
     // Fuer Tests und die Konsole
     window.jarvisSql = {
         ladeStatus: ladeStatus, fragen: fragen, suchen: suchen, zeigeTabelle: zeigeTabelle,
-        pfadSuchen: pfadSuchen, _darfFragen: darfFragen, _gewaehlt: gewaehlt
+        pfadSuchen: pfadSuchen, _darfFragen: darfFragen, _gewaehlt: gewaehlt, _praefixWahl: praefixWahl
     };
 })();

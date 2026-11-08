@@ -247,6 +247,10 @@ try:
     check(code == 200 and "ERP-Probe-Q9" in namen and "Geheim-Probe-Q9" in namen, "Status nennt beide Schemata zum Auswaehlen", namen)
     zahlen = {q["id"]: q["tabellen"] for q in d.get("schemata") or []}
     check(zahlen.get(S_ERP) == 3 and zahlen.get(S_GEH) == 1, "Tabellen je Schema gezaehlt", zahlen)
+    praef = {q["id"]: q.get("praefixe") for q in d.get("schemata") or []}
+    check([p.get("name", "").upper() for p in praef.get(S_ERP) or []] == ["ERP"]
+          and (praef.get(S_ERP) or [{}])[0].get("objekte") == 3,
+          "Status nennt je Schema seine Datenbankschemata (Praefix) mit Anzahl", praef)
     code, d = ruf("/api/sql/suche?q=gehalt,zz_geheim_q9,umsatz,kunde", TU)
     check(code == 400 and "Schema" in (d.get("error") or ""), "Ohne Auswahl: 400 mit Grund", (code, d))
     code, d = ruf(f"/api/sql/suche?q=gehalt,zz_geheim_q9,umsatz,kunde&schemata={S_ERP}", TU)
@@ -278,6 +282,17 @@ try:
             print("       " + " ".join(sql.split())[:240])
     code, d = ruf("/api/sql/frage", TU, "POST", {"frage": "x" * 2001, "schemata": [S_ERP]})
     check(code == 400, "Ueberlange Frage abgewiesen (nicht gekuerzt)", code)
+    code, d = ruf("/api/sql/frage", TU, "POST", {"frage": "Kunden je Land", "schemata": [S_ERP], "praefixe": ["a;b"]})
+    check(code == 400 and "Präfix" in (d.get("error") or ""), "Ungueltiger Praefix: 400 vor jedem Modellaufruf", (code, d))
+    code, d = ruf("/api/sql/frage", TU, "POST", {"frage": "Kunden je Land", "schemata": [S_ERP], "praefixe": ["xx"]})
+    check(code == 200 and d.get("ok") is False and "eingegrenzt auf XX" in (d.get("error") or ""),
+          "Praefix ohne Tabellen: Fehler nennt die Eingrenzung", (code, d))
+    code, d = ruf("/api/sql/frage", TU, "POST", {"frage": "Welche Kunden haben keinen Auftrag?", "schemata": [S_ERP],
+                                                 "praefixe": ["erp"]})
+    check(code == 200 and d.get("ok") and d.get("praefixe") == ["ERP"]
+          and set((d.get("praefixe_kontext") or {})) <= {"erp", "ERP"} and isinstance(d.get("gleichwertig"), list),
+          "Mit Praefix: Antwort traegt Wahl, Herkunft des Ausschnitts und Zusammengelegtes",
+          (code, d.get("error"), d.get("praefixe"), d.get("praefixe_kontext")))
 
     print("5. Loeschen wirkt")
     code, d = ruf(f"/api/sql/admin/schema/{S_GEH}/datei?pfad=hr", TA, "DELETE")

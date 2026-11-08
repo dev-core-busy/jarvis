@@ -108,6 +108,13 @@ def graph_info(erlaubt, schemata_cfg: list[dict]) -> dict:
                              for q in schemata_cfg or [] if erlaubt is None or q["id"] in erlaubt]}
     try:
         meta = {k: v for k, v in con.execute("SELECT k, v FROM meta")}
+        # Datenbankschemata je Ablage (z. B. ALT. und NEU.) – zum Eingrenzen einer Frage
+        praefixe: dict[str, list] = {}
+        for quelle, schema, n in con.execute(
+                "SELECT COALESCE(quelle,''), COALESCE(schema,''), count(*) FROM objekt "
+                "WHERE art IN ('tabelle','sicht') GROUP BY 1, 2 ORDER BY 1, 3 DESC"):
+            if schema:
+                praefixe.setdefault(quelle, []).append({"name": schema, "objekte": int(n)})
     finally:
         con.close()
     try:
@@ -121,5 +128,5 @@ def graph_info(erlaubt, schemata_cfg: list[dict]) -> dict:
         z = je.get(q["id"]) or {}
         out.append({"id": q["id"], "name": q["name"], "tabellen": int(z.get("tabelle", 0)),
                     "sichten": int(z.get("sicht", 0)), "spalten": int(z.get("spalten", 0)),
-                    "dokumente": int(z.get("dokumente", 0))})
+                    "dokumente": int(z.get("dokumente", 0)), "praefixe": praefixe.get(q["id"], [])})
     return {"vorhanden": True, "stand": meta.get("stand"), "schemata": out}

@@ -42,8 +42,9 @@ import re
 # 2026-11-07: 8431 YAML-Dateien, mit dem Parser OHNE YAML erfasst, waeren nach
 # dem Einbau des YAML-Wegs nie wieder gelesen worden (Graph blieb leer).
 # 1 = SQL-DDL, 2 = dazu YAML-Objektexporte, 3 = dazu Begleitdokumente,
-# 4 = dazu Herkunft der Sichtspalten (Join-Pruefung ueber Sichten).
-FASSUNG = 4
+# 4 = dazu Herkunft der Sichtspalten (Join-Pruefung ueber Sichten),
+# 5 = dazu Texterkennung in Bildern der Begleitdokumente.
+FASSUNG = 5
 
 BLOCK = 4 * 1024 * 1024
 # Obergrenze fuer EINE Struktur-Anweisung. Ein CREATE TABLE ueber 64 MB gibt
@@ -909,16 +910,188 @@ def yaml_zerlegen(pfad: str, stat: Statistik) -> list[dict]:
 # Konventionen, SQL-Beispiele, Best Practices). Ohne sie verwechselte das
 # Modell Fachbegriffe ("Verfahren" -> Gerichtsverfahren statt der Verfahren des Hauses)
 # und erfand Joins. Sie werden in Abschnitte zerlegt und je Frage passend als
-# HAUSWISSEN mitgegeben. Bilder bleiben aussen vor (nur Text).
+# HAUSWISSEN mitgegeben.
+#
+# BILDER (seit Fassung 5): ein Dokument "Datenbankmodel Diagramme" bestand im
+# echten Bestand NUR aus vier Diagrammen unter Ueberschriften und fiel als
+# "kein lesbarer Text" heraus. Auf DEV gemessen (2026-11-08): tesseract liest
+# daraus die Tabellennamen MIT ihrer deutschen Bezeichnung (Kuerzel einer
+# Rezepttabelle -> "Rezepte zur Abrechnung"), 1-2 s je Bild. Die Linien des
+# Diagramms (Beziehungen) liest es nicht – der Text kommt deshalb als
+# "[Bild, Texterkennung]" gekennzeichnet ins Hauswissen, nicht als Beleg.
 
 DOK_ENDUNGEN = (".md", ".docx", ".pdf")
 DOK_MAX = 64 * 1024 * 1024
 DOK_TEIL = 1500
 DOK_MAX_TEILE = 2000
 
+# Grenzen der Texterkennung – die Bilder stammen aus hochgeladenen Dateien:
+# ein Bild mit gefaelschter Groesse im Kopf entpackt sonst auf Gigabytes, und
+# ein Dokument voller Bilder haelt die Erfassung beliebig lange auf.
+OCR_BILD_BYTES = 20 * 1024 * 1024
+OCR_BILD_PIXEL = 40_000_000
+OCR_MIN_SEITE = 40             # kleiner: Symbol oder Zierrat, kein Text
+OCR_MAX_BILDER = 100           # je Dokument
+OCR_ZEIT_DOKUMENT = 300.0      # Sekunden je Dokument insgesamt
+OCR_ZEIT_BILD = 60.0
+OCR_SPRACHEN = ("deu", "eng")
+OCR_KENNUNG = "[Bild, Texterkennung]"
+OCR_FORMATE = ("PNG", "JPEG", "GIF", "BMP", "TIFF")
+_RASTER = ("image/png", "image/jpeg", "image/jpg", "image/gif", "image/bmp", "image/tiff", "image/x-png")
+_ocr_sprache_cache: list = []
 
-def _dok_absaetze(pfad: str) -> list[tuple[str, str]]:
-    """(art, text) in Lesereihenfolge; art 'kopf' fuer Ueberschriften."""
+
+def _ocr_sprache() -> str | None:
+    """'deu+eng' (was davon installiert ist) oder None ohne tesseract.
+    Einmal je Arbeitsprozess gefragt."""
+    if _ocr_sprache_cache:
+        return _ocr_sprache_cache[0]
+    import subprocess  # noqa: PLC0415
+    try:
+        r = subprocess.run(["tesseract", "--list-langs"], capture_output=True, text=True, timeout=20,
+                           env={"PATH": "/usr/bin:/bin:/usr/local/bin"})
+        da = {z.strip() for z in (r.stdout or "").splitlines()[1:]}
+        sprachen = [x for x in OCR_SPRACHEN if x in da]
+        wert = "+".join(sprachen) if r.returncode == 0 and sprachen else None
+    except (OSError, subprocess.SubprocessError):
+        wert = None
+    _ocr_sprache_cache.append(wert)
+    return wert
+
+
+def _zaehle(stat, schluessel: str) -> None:
+    if stat is not None:
+        stat[schluessel] = stat.get(schluessel, 0) + 1
+
+
+def _bild_lesen(blob: bytes, stat, ende: float) -> str:
+    """Text aus EINEM Rasterbild (leer, wenn nichts Lesbares darin steht).
+
+    Ohne temporaere Datei: das Bild geht als PNG ueber stdin an tesseract.
+    IMMER neu kodiert, nie das Original durchgereicht: tesseract liest eine
+    Eingabe, die kein Bild ist, als LISTE VON DATEIPFADEN (lokal gemessen:
+    ``echo test | tesseract stdin stdout`` sucht die Datei "test") – ein
+    praepariertes "Bild" im Dokument koennte so Serverdateien ins Hauswissen
+    holen. Was PIL nicht als Bild oeffnet, erreicht tesseract nicht.
+    Transparenz wird auf WEISS gelegt – ein RGBA-Diagramm mit durchsichtigem
+    Hintergrund waere nach einem blossen convert("RGB") schwarze Schrift auf
+    schwarzem Grund."""
+    import io  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    if len(blob) > OCR_BILD_BYTES:
+        _zaehle(stat, "bilder_zu_gross")
+        return ""
+    rest = ende - time.monotonic()
+    if rest <= 1:
+        _zaehle(stat, "bilder_ohne_zeit")
+        return ""
+    sprache = _ocr_sprache()
+    if sprache is None:
+        _zaehle(stat, "bilder_ohne_ocr")
+        return ""
+    from PIL import Image  # noqa: PLC0415
+    try:
+        # NUR Rasterformate: PIL oeffnet sonst auch EPS – und uebergibt das
+        # beim Laden an Ghostscript, einen Interpreter fuer fremden Code.
+        im = Image.open(io.BytesIO(blob), formats=OCR_FORMATE)
+        b, h = im.size                     # nur der Kopf ist gelesen
+        if b * h > OCR_BILD_PIXEL:
+            _zaehle(stat, "bilder_zu_gross")
+            return ""
+        if min(b, h) < OCR_MIN_SEITE:
+            _zaehle(stat, "bilder_klein")
+            return ""
+        im.load()
+        if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+            rgba = im.convert("RGBA")
+            grund = Image.new("RGB", rgba.size, (255, 255, 255))
+            grund.paste(rgba, mask=rgba.getchannel("A"))
+            im = grund
+        else:
+            im = im.convert("RGB")
+        puffer = io.BytesIO()
+        im.save(puffer, "PNG")
+    except Exception:  # noqa: BLE001 – ein kaputtes Bild kippt nicht das Dokument
+        _zaehle(stat, "bilder_unlesbar")
+        return ""
+    try:
+        r = subprocess.run(["tesseract", "stdin", "stdout", "-l", sprache], input=puffer.getvalue(),
+                           capture_output=True, timeout=min(OCR_ZEIT_BILD, rest),
+                           # Ein Kern je Bild: tesseract belegt sonst alle Kerne,
+                           # und die Erfassung laeuft ohnehin mit mehreren Prozessen.
+                           env={"OMP_THREAD_LIMIT": "1", "PATH": "/usr/bin:/bin:/usr/local/bin"})
+    except subprocess.TimeoutExpired:
+        _zaehle(stat, "bilder_ohne_zeit")
+        return ""
+    except OSError:
+        _zaehle(stat, "bilder_ohne_ocr")
+        return ""
+    if r.returncode != 0:
+        _zaehle(stat, "bilder_unlesbar")
+        return ""
+    zeilen = []
+    for z in r.stdout.decode("utf-8", errors="replace").splitlines():
+        z = " ".join(z.split())
+        # Rauschen ("~~ —", einzelne Striche aus Diagrammlinien) faellt weg
+        if sum(ch.isalnum() for ch in z) >= 2:
+            zeilen.append(z)
+    if not zeilen:
+        _zaehle(stat, "bilder_ohne_text")
+        return ""
+    _zaehle(stat, "bilder_gelesen")
+    return "\n".join(zeilen)
+
+
+class _Bilder:
+    """Texterkennung ueber die Bilder EINES Dokuments: Obergrenzen fuer
+    Anzahl und Zeit, jedes Bild nur einmal (ein Logo auf jeder Seite)."""
+
+    def __init__(self, stat):
+        import time  # noqa: PLC0415
+        self.stat = stat
+        self.ende = time.monotonic() + OCR_ZEIT_DOKUMENT
+        self.gesehen: set = set()
+        self.anzahl = 0
+
+    def lesen(self, blob: bytes) -> str:
+        import hashlib  # noqa: PLC0415
+        kennung = hashlib.sha256(blob).digest()
+        if kennung in self.gesehen:
+            return ""
+        self.gesehen.add(kennung)
+        _zaehle(self.stat, "bilder")
+        if self.anzahl >= OCR_MAX_BILDER:
+            _zaehle(self.stat, "bilder_ueber_grenze")
+            return ""
+        self.anzahl += 1
+        t = _bild_lesen(blob, self.stat, self.ende)
+        return f"{OCR_KENNUNG} {t}" if t else ""
+
+
+_NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+_NS_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_NS_V = "{urn:schemas-microsoft-com:vml}"
+
+
+def _docx_bilder(el, teil) -> list[bytes]:
+    """Rasterbilder, die das Element (Absatz oder Tabelle) einbettet – in
+    Lesereihenfolge. Vektorformate (EMF/WMF/SVG) liest tesseract nicht."""
+    out = []
+    for knoten in el.iter(f"{_NS_A}blip", f"{_NS_V}imagedata"):
+        rid = knoten.get(f"{_NS_R}embed") or knoten.get(f"{_NS_R}id")
+        ziel = teil.related_parts.get(rid) if rid else None
+        if ziel is None or (getattr(ziel, "content_type", "") or "").lower() not in _RASTER:
+            continue
+        out.append(ziel.blob)
+    return out
+
+
+def _dok_absaetze(pfad: str, stat=None) -> list[tuple[str, str]]:
+    """(art, text) in Lesereihenfolge; art 'kopf' fuer Ueberschriften.
+
+    Bilder (DOCX) und Seiten ohne Text (PDF, z. B. gescannt) gehen durch die
+    Texterkennung; ``stat`` zaehlt, was dabei gelesen und was ausgelassen wurde."""
     endung = pfad.lower().rsplit(".", 1)[-1]
     out: list[tuple[str, str]] = []
     if endung == "md":
@@ -953,15 +1126,15 @@ def _dok_absaetze(pfad: str) -> list[tuple[str, str]]:
         from docx.table import Table  # noqa: PLC0415
         from docx.text.paragraph import Paragraph  # noqa: PLC0415
         d = docx.Document(pfad)
+        bilder = _Bilder(stat)
         for el in d.element.body.iterchildren():
             tag = el.tag.rsplit("}", 1)[-1]
             if tag == "p":
                 par = Paragraph(el, d)
                 t = par.text.strip()
-                if not t:
-                    continue
-                stil = (par.style.name if par.style is not None else "") or ""
-                out.append(("kopf" if re.match(r"(?:Heading|Überschrift|Title|Titel)\b", stil, re.I) else "text", t))
+                if t:
+                    stil = (par.style.name if par.style is not None else "") or ""
+                    out.append(("kopf" if re.match(r"(?:Heading|Überschrift|Title|Titel)\b", stil, re.I) else "text", t))
             elif tag == "tbl":
                 for zeile in Table(el, d).rows:
                     zellen = []
@@ -971,17 +1144,41 @@ def _dok_absaetze(pfad: str) -> list[tuple[str, str]]:
                             zellen.append(ct)
                     if zellen:
                         out.append(("text", " | ".join(zellen)))
+            else:
+                continue
+            # Bilder NACH dem Text ihres Absatzes, also unter derselben Ueberschrift
+            for blob in _docx_bilder(el, d.part):
+                bt = bilder.lesen(blob)
+                if bt:
+                    out.append(("text", bt))
         return out
     if endung == "pdf":
         import pdfplumber  # noqa: PLC0415
+        bilder = _Bilder(stat)
         with pdfplumber.open(pfad) as pdf:
             for seite in pdf.pages:
                 t = seite.extract_text() or ""
+                if not t.strip() and seite.images:
+                    # Seite ohne Textebene, aber mit Bild: gescannt -> als Bild lesen
+                    t = _pdf_seite_lesen(seite, bilder)
                 for block in re.split(r"\n\s*\n", t):
                     if block.strip():
                         out.append(("text", block.strip()))
         return out
     return out
+
+
+def _pdf_seite_lesen(seite, bilder: _Bilder) -> str:
+    """Eine PDF-Seite ohne Textebene als Bild (200 dpi) durch die Texterkennung."""
+    import io  # noqa: PLC0415
+    try:
+        bild = seite.to_image(resolution=200).original
+        puffer = io.BytesIO()
+        bild.save(puffer, "PNG")
+    except Exception:  # noqa: BLE001 – Seite nicht darstellbar: auslassen, gezaehlt
+        _zaehle(bilder.stat, "bilder_unlesbar")
+        return ""
+    return bilder.lesen(puffer.getvalue())
 
 
 def dokument_teile(absaetze: list[tuple[str, str]]) -> list[str]:
@@ -1026,8 +1223,19 @@ def dokument_zerlegen(pfad: str, stat: Statistik) -> list[dict]:
     stat["bytes"] = groesse
     if groesse > DOK_MAX:
         raise ValueError(f"Dokument groesser als {DOK_MAX // 1024 // 1024} MB – nicht gelesen")
-    teile = dokument_teile(_dok_absaetze(pfad))
+    teile = dokument_teile(_dok_absaetze(pfad, stat))
     if not teile:
+        if stat.get("bilder_ohne_ocr"):
+            raise ValueError("enthält nur Bilder, und die Texterkennung (tesseract mit deu/eng) "
+                             "fehlt auf dem Server – 'apt install tesseract-ocr tesseract-ocr-deu'")
+        if stat.get("bilder"):
+            gruende = [f"{stat[k]} {w}" for k, w in (
+                ("bilder_ohne_text", "ohne lesbaren Text"), ("bilder_klein", "zu klein"),
+                ("bilder_zu_gross", "zu groß"), ("bilder_unlesbar", "nicht lesbar"),
+                ("bilder_ohne_zeit", "nach Ablauf der Zeitgrenze"),
+                ("bilder_ueber_grenze", "über der Höchstzahl")) if stat.get(k)]
+            raise ValueError(f"enthält nur Bilder ({stat['bilder']}), die Texterkennung fand keinen Text: "
+                             + ", ".join(gruende))
         raise ValueError("kein lesbarer Text (gescanntes PDF oder nur Bilder?)")
     stat["dokument_teile"] = len(teile)
     titel = os.path.basename(pfad).rsplit(".", 1)[0]

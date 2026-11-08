@@ -37,7 +37,7 @@ import json
 import re
 import sqlite3
 import time
-from collections import deque
+from collections import Counter, deque
 
 from backend import schema_graph_store as store
 
@@ -108,6 +108,43 @@ def _filter(erlaubt, spalte: str = "o.quelle") -> tuple[str, list]:
     return f" AND {spalte} IN ({','.join('?' * len(werte))})", werte
 
 
+# Schema-PRAEFIX (z. B. ALT. und NEU.): EIN Schema der Konfiguration (eine
+# Ablage) kann mehrere Datenbankschemata enthalten – im echten Bestand ein
+# altes und ein neues Datenmodell, das schrittweise abloest. Gemessen auf DEV
+# 2026-11-08: bei vier von vier Fachfragen lagen die Anker in BEIDEN, und das
+# Modell nahm mal das eine, mal das andere. Die Eingrenzung wirkt auf die
+# ANKER (Suche, im Hauswissen genannte Tabellen), nicht auf die Join-Glieder:
+# eine Sicht des neuen Modells beruht oft auf einer Tabelle des alten (1001
+# solche Kanten), ein Weg darf also durch das andere Schema fuehren.
+MAX_PRAEFIXE = 20
+_PRAEFIX_GUELTIG = re.compile(r"^[A-Za-z0-9_$#]{1,128}$")
+
+
+def praefixe_normal(roh) -> set[str] | None:
+    """Liste oder Kommaliste -> Menge in Grossschreibung; leer/None = alle.
+    Ungueltiges wirft ValueError (-> 400): ein Tippfehler, der still zu "alle"
+    wuerde, beantwortete die Frage im falschen Schema."""
+    if roh is None or roh == "" or roh == []:
+        return None
+    if isinstance(roh, str):
+        roh = [x for x in roh.split(",")]
+    if not isinstance(roh, list) or len(roh) > MAX_PRAEFIXE:
+        raise ValueError("Ungültige Auswahl des Schema-Präfixes.")
+    out = set()
+    for x in roh:
+        if not isinstance(x, str) or not _PRAEFIX_GUELTIG.match(x.strip().rstrip(".")):
+            raise ValueError("Ungültige Auswahl des Schema-Präfixes.")
+        out.add(x.strip().rstrip(".").upper())
+    return out or None
+
+
+def _praefix_filter(praefixe, spalte: str = "o.schema") -> tuple[str, list]:
+    if not praefixe:
+        return "", []
+    werte = sorted(praefixe)
+    return f" AND UPPER(COALESCE({spalte},'')) IN ({','.join('?' * len(werte))})", werte
+
+
 def sichtbar(con, oid: int, erlaubt) -> bool:
     if erlaubt is None:
         return True
@@ -116,12 +153,15 @@ def sichtbar(con, oid: int, erlaubt) -> bool:
 
 
 def suche(con: sqlite3.Connection, begriffe: list[str], limit: int = MAX_TREFFER,
-          erlaubt=None) -> list[tuple[int, float]]:
-    """(objekt_id, punkte) – hoeher ist besser. Exakte Namenstreffer +50 %."""
+          erlaubt=None, praefixe=None) -> list[tuple[int, float]]:
+    """(objekt_id, punkte) – hoeher ist besser. Exakte Namenstreffer +50 %.
+    ``praefixe``: nur Objekte dieser Datenbankschemata (None = alle)."""
     ausdruck = _fts_ausdruck(begriffe)
     if not ausdruck:
         return []
     filt, werte = _filter(erlaubt)
+    pf, pw = _praefix_filter(praefixe)
+    filt, werte = filt + pf, werte + pw
     try:
         zeilen = con.execute(
             "SELECT objekt_fts.rowid, bm25(objekt_fts, 10.0, 3.0, 1.0) AS s FROM objekt_fts "
@@ -194,22 +234,127 @@ def hauswissen_text(auszuege: list[dict]) -> str:
     return "\n".join(z)
 
 
-def dokument_objekte(con, auszuege: list[dict], erlaubt=None, limit: int = 6) -> list[int]:
+NAEHE_ZEICHEN = 80
+
+
+def dokument_objekte(con, auszuege: list[dict], erlaubt=None, limit: int = 6,
+                     begriffe: list[str] | None = None, praefixe=None) -> list[int]:
     """Tabellen/Sichten, die ein Auszug BEIM NAMEN nennt (z. B. eine
     Konvention "Mandate stehen in CTS.V_VKAUF_AUFTRAG") – sie gehoeren als
-    Anker in die Auswahl, auch wenn die Suchbegriffe sie nicht trafen."""
+    Anker in die Auswahl, auch wenn die Suchbegriffe sie nicht trafen.
+
+    Nennt ein Auszug MEHR Namen als ``limit``, entscheidet die Naehe zu den
+    ``begriffe``n (Begriffe im Umkreis von ``NAEHE_ZEICHEN`` um den Namen),
+    nicht die Reihenfolge im Text: ein Diagramm aus der Texterkennung nennt
+    40 Tabellen, und die ersten sechs waren bei einer Frage nach Rezepten
+    sechs Stammtabellen der Aufnahme – Rezepte standen weiter unten (DEV,
+    2026-11-08). Ohne Begriff in der Naehe zaehlt ein Name dann nicht."""
     filt, werte = _filter(erlaubt)
-    out = []
+    pf, pw = _praefix_filter(praefixe)
+    filt, werte = filt + pf, werte + pw
+    # Wortanfang (6 Zeichen) statt ganzem Wort: "Rezepte" soll "REZEPT" und
+    # "Rezeptdaten" treffen – eine Grundformbildung waere hier zu viel Aufwand.
+    such = sorted({w.lower()[:6] for b in begriffe or [] for w in store.namens_woerter(b) if len(w) >= 4})
+    gesamt = []
     for a in auszuege:
-        for m in _BEZ_IM_TEXT.finditer(a["text"]):
+        text = a["text"]
+        kandidaten = []
+        for m in _BEZ_IM_TEXT.finditer(text):
             n = m.group(0).lower()
             r = con.execute(f"SELECT o.id FROM objekt o WHERE (o.schluessel=? OR o.name_l=?){filt} LIMIT 2",
                             [n, n.rsplit(".", 1)[-1]] + werte).fetchall()
-            if len(r) == 1 and r[0][0] not in out:
-                out.append(r[0][0])
-            if len(out) >= limit:
-                return out
+            if len(r) != 1:
+                continue
+            umkreis = text[max(0, m.start() - NAEHE_ZEICHEN):m.end() + NAEHE_ZEICHEN].lower()
+            kandidaten.append((r[0][0], sum(1 for w in such if w in umkreis)))
+        eindeutig = list(dict.fromkeys(o for o, _p in kandidaten))
+        if len(eindeutig) <= limit:
+            gesamt.extend((o, 1) for o in eindeutig)
+            continue
+        punkte: dict[int, int] = {}
+        for o, pkt in kandidaten:
+            punkte[o] = max(punkte.get(o, 0), pkt)
+        gesamt.extend((o, pkt) for o, pkt in sorted(punkte.items(), key=lambda kv: -kv[1]) if pkt > 0)
+    out = []
+    for o, _p in gesamt:
+        if o not in out:
+            out.append(o)
+        if len(out) >= limit:
+            break
     return out
+
+
+# ─── Gleichwertige Objekte (Sicht 1:1 ueber einer Tabelle) ──────────────────
+#
+# Anlass (DEV, 2026-11-08): unter den zwoelf Tabellen einer Frage stand
+# dieselbe Sache oft doppelt – NEU.ABCFAL_FAELLE (Sicht) und
+# NEU.ABCFAL_T_FAELLE (Tabelle dahinter; Namen hier erfunden). Das kostet Plaetze im
+# Ausschnitt und laesst das Modell zwischen Gleichwertigem waehlen. Die
+# Hausdokumente regeln den Fall ("Zu jeder Tabelle gibt es eine View, die nur
+# Saetze des aktuellen Mandanten ... ausgibt"): die Sicht ist der Zugriff.
+#
+# GLEICHWERTIG heisst hier, am Graphen gemessen, nicht am Namen: die Sicht
+# beruht auf GENAU dieser einen Tabelle (gleiches Datenbankschema), jede ihrer
+# Spalten stammt aus ihr, und sie zeigt ALLE Spalten der Tabelle (oder t.*).
+# Zusammengelegt wird nur, wenn BEIDE gefunden wurden – eine Tabelle, die allein
+# gefunden wurde, wird nie gegen eine Sicht getauscht, die niemand gesucht hat
+# (eine Sicht kann Zeilen filtern; das sieht der Graph nicht).
+
+
+def gleichwertige(con, ids) -> dict[int, int]:
+    """{tabelle_id: sicht_id} fuer gleichwertige Paare, die BEIDE in ``ids``
+    stehen. Ein Graph ohne Herkunft (vor Parser-Fassung 4) liefert {}."""
+    menge = list(dict.fromkeys(ids))
+    if len(menge) < 2:
+        return {}
+    ph = ",".join("?" * len(menge))
+    try:
+        paare = con.execute(
+            "SELECT DISTINCT k.von, k.nach FROM kante k JOIN objekt v ON v.id=k.von JOIN objekt t ON t.id=k.nach "
+            f"WHERE k.art='sicht' AND k.von IN ({ph}) AND k.nach IN ({ph}) AND v.art='sicht' "
+            "AND t.art='tabelle' AND COALESCE(v.schema,'')=COALESCE(t.schema,'')", menge + menge).fetchall()
+        kandidaten: dict[int, list[int]] = {}
+        for v, t in paare:
+            basen = {r[0] for r in con.execute("SELECT DISTINCT nach FROM kante WHERE von=? AND art='sicht'", (v,))}
+            if basen != {t}:
+                continue
+            hk = con.execute("SELECT spalte_l, basis_id, basis_spalte_l FROM herkunft WHERE sicht_id=?",
+                             (v,)).fetchall()
+            if any(b != t for _s, b, _bs in hk):
+                continue
+            t_spalten = {r[0] for r in con.execute("SELECT name_l FROM spalte WHERE objekt_id=?", (t,))}
+            v_spalten = {r[0] for r in con.execute("SELECT name_l FROM spalte WHERE objekt_id=?", (v,))}
+            stern = any(sp == "*" for sp, _b, _bs in hk)
+            aus_t = {bs for sp, _b, bs in hk if sp != "*"}
+            woher = {sp for sp, _b, _bs in hk if sp != "*"}
+            if not t_spalten:
+                continue
+            if stern or (v_spalten and woher >= v_spalten and aus_t >= t_spalten):
+                kandidaten.setdefault(t, []).append(v)
+    except sqlite3.OperationalError:
+        return {}
+    # Zwei gleichwertige Sichten auf eine Tabelle: welche gilt, ist nicht zu
+    # entscheiden – dann bleibt alles stehen.
+    return {t: vs[0] for t, vs in kandidaten.items() if len(vs) == 1}
+
+
+def zusammenlegen(con, treffer: list[tuple[int, float]]) -> tuple[list[tuple[int, float]], dict[int, int]]:
+    """Gleichwertige Tabellen aus der Trefferliste nehmen. Die Sicht erbt den
+    BESSEREN Platz und die hoehere Punktzahl der beiden. Rueckgabe: (neue
+    Liste, {sicht_id: tabelle_id})."""
+    paar = gleichwertige(con, [o for o, _p in treffer])
+    if not paar:
+        return treffer, {}
+    punkte = dict(treffer)
+    out: list[tuple[int, float]] = []
+    gesehen = set()
+    for o, p in treffer:
+        ziel = paar.get(o, o)
+        if ziel in gesehen:
+            continue
+        gesehen.add(ziel)
+        out.append((ziel, max(p, punkte.get(ziel, p), *(punkte[t] for t, v in paar.items() if v == ziel))))
+    return out, {v: t for t, v in paar.items()}
 
 
 def _grad(con, oid: int, cache: dict) -> int:
@@ -328,7 +473,7 @@ def tabelle_laden(con, oid: int, erlaubt=None) -> dict | None:
         "SELECT name, typ, pk, nullable, kommentar FROM spalte WHERE objekt_id=? ORDER BY pos", (oid,))]
     bereich = _bereichsname(con, o["bereich"], erlaubt)
     voll = f"{o['schema']}.{o['name']}" if o["schema"] else o["name"]
-    return {"id": oid, "name": voll, "art": o["art"], "kommentar": o["kommentar"] or "",
+    return {"id": oid, "name": voll, "schema": o["schema"] or "", "art": o["art"], "kommentar": o["kommentar"] or "",
             "spalten": sp, "bereich": bereich, "datei": o["datei"], "quelle": o["quelle"] or ""}
 
 
@@ -346,8 +491,10 @@ def kanten_zwischen(con, ids: list[int]) -> list[dict]:
 
 
 def kontext_bauen(con, ids: list[int], begriffe: list[str], max_spalten: int,
-                  erlaubt=None) -> tuple[str, dict]:
-    """Schema-Ausschnitt als Text fuer das Modell + Namensverzeichnis."""
+                  erlaubt=None, gleich: dict | None = None) -> tuple[str, dict]:
+    """Schema-Ausschnitt als Text fuer das Modell + Namensverzeichnis.
+    ``gleich``: {sicht_id: tabelle_id} aus ``zusammenlegen`` – die Tabelle
+    steht dann nicht eigens im Ausschnitt, die Sicht nennt sie."""
     tabs = {i: tabelle_laden(con, i, erlaubt) for i in ids}
     tabs = {i: t for i, t in tabs.items() if t}
     kanten = kanten_zwischen(con, list(tabs))
@@ -407,6 +554,12 @@ def kontext_bauen(con, ids: list[int], begriffe: list[str], max_spalten: int,
             f"AND k.art='sicht'{filt}", [t["id"]] + werte)]
         if nutzt:
             zeilen.append(f"  Sicht {t['name']} beruht auf: {', '.join(nutzt[:10])}")
+        g = (gleich or {}).get(t["id"])
+        # Kam die Tabelle spaeter doch in den Ausschnitt (Reparatur), entfaellt der Satz
+        gt = tabelle_laden(con, g, erlaubt) if g and g not in tabs else None
+        if gt:
+            zeilen.append(f"  Sicht {t['name']} zeigt ALLE Spalten von {gt['name']} (gleichwertig; die Tabelle "
+                          "steht deshalb nicht eigens im Ausschnitt – bevorzuge die Sicht)")
     return "\n".join(zeilen), tabs
 
 
@@ -947,13 +1100,39 @@ async def begriffe_ermitteln(con, frage: str, modell=None, erlaubt=None,
     return eigene, "frage"
 
 
+def praefixe_im_sql(con, tabellen: list[str], erlaubt=None) -> dict[str, int]:
+    """{Datenbankschema: Anzahl} der Tabellen, die das erzeugte SQL BENUTZT.
+
+    Daran haengt der Mischhinweis, nicht am Ausschnitt: am echten Bestand
+    stammte der Ausschnitt in 7 von 8 Laeufen aus beiden Schemata, das SQL nur
+    in 2 (DEV, 2026-11-08) – ein Hinweis bei fast jeder Frage wird ueberlesen."""
+    zaehl: Counter = Counter()
+    for name in tabellen or []:
+        o = finde_objekt(con, name, erlaubt)
+        if not o or o[0] == "mehrdeutig":
+            continue
+        r = con.execute("SELECT schema FROM objekt WHERE id=?", (o[0],)).fetchone()
+        if r and r[0]:
+            zaehl[r[0]] += 1
+    return dict(sorted(zaehl.items()))
+
+
+def _vollname(con, oid: int) -> str:
+    r = con.execute("SELECT schema, name FROM objekt WHERE id=?", (oid,)).fetchone()
+    if not r:
+        return ""
+    return f"{r[0]}.{r[1]}" if r[0] else r[1]
+
+
 async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int = 12,
-                       max_spalten: int = 40, con=None, modell=None, erlaubt=None) -> dict:
+                       max_spalten: int = 40, con=None, modell=None, erlaubt=None,
+                       praefixe=None) -> dict:
     """Die ganze Kette. Rueckgabe: dict mit sql, pruefung, erklaerung, tabellen,
     runden, hinweise (fuer die Ausgabe in ``main.py``).
 
     ``erlaubt``: gewaehlte Schemata (siehe Abschnitt "Sichtbarkeit");
     eine LEERE Menge heisst "nichts sichtbar" und endet vor jedem Modellaufruf.
+    ``praefixe``: Datenbankschemata fuer die Anker (Abschnitt "Schema-PRAEFIX").
     """
     if erlaubt is not None and not erlaubt:
         return {"fehler": "Kein SQL-Schema gewählt – bitte mindestens ein Schema auswählen."}
@@ -984,19 +1163,22 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
             if all(a["id"] != b["id"] for b in hw) and len(hw) < MAX_HAUSWISSEN + 1:
                 hw.append(a)
         hw_text = ("\n\n" + hauswissen_text(hw)) if hw else ""
-        treffer = await asyncio.to_thread(suche, con, begriffe, MAX_TREFFER, erlaubt)
+        treffer = await asyncio.to_thread(suche, con, begriffe, MAX_TREFFER, erlaubt, praefixe)
         # Vom Hauswissen beim Namen genannte Tabellen sind Anker
-        genannt = await asyncio.to_thread(dokument_objekte, con, hw, erlaubt)
+        genannt = await asyncio.to_thread(dokument_objekte, con, hw, erlaubt, 6, woerter(frage) + begriffe,
+                                          praefixe)
         if genannt:
             oben = max((pk for _o, pk in treffer), default=1.0) * 1.2
             vorhanden = {o for o, _pk in treffer}
             treffer = [(o, oben) for o in genannt if o not in vorhanden] + treffer
         if not treffer:
-            return {"fehler": "Zu den Begriffen der Frage wurde keine Tabelle gefunden.",
+            return {"fehler": "Zu den Begriffen der Frage wurde keine Tabelle gefunden"
+                    + (f" (eingegrenzt auf {', '.join(sorted(praefixe))})." if praefixe else "."),
                     "begriffe": begriffe}
+        treffer, gleich = await asyncio.to_thread(zusammenlegen, con, treffer)
         wahl = await asyncio.to_thread(auswahl, con, treffer, max_tabellen, erlaubt)
         ids = wahl["ids"]
-        kontext, tabs = await asyncio.to_thread(kontext_bauen, con, ids, begriffe, max_spalten, erlaubt)
+        kontext, tabs = await asyncio.to_thread(kontext_bauen, con, ids, begriffe, max_spalten, erlaubt, gleich)
         zeiten["graph"] = round(time.monotonic() - t0, 2)
         system = SYSTEM_SQL.format(dialekt=dialekt)
         verlauf = []
@@ -1020,13 +1202,18 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
                 # Zweite Graph-Runde: nachgeforderte Begriffe suchen, an den
                 # vorhandenen Baum haengen.
                 brauche_runde = True
-                gef = await asyncio.to_thread(suche, con, a["brauche"], 10, erlaubt)
+                gef = await asyncio.to_thread(suche, con, a["brauche"], 10, erlaubt, praefixe)
                 neu = [oid for oid, _ in gef if oid not in ids]
                 begriffe = begriffe + a["brauche"]
                 if neu:
                     ids = ids + neu[:max(3, max_tabellen // 2)]
+                    # Auch die Nachforderung kann eine Tabelle UND ihre Sicht bringen
+                    paar = await asyncio.to_thread(gleichwertige, con, ids)
+                    for t_id, v_id in paar.items():
+                        gleich.setdefault(v_id, t_id)
+                    ids = [i for i in ids if i not in paar]
                     kontext, tabs = await asyncio.to_thread(kontext_bauen, con, ids, begriffe, max_spalten,
-                                                            erlaubt)
+                                                            erlaubt, gleich)
                     auftrag = f"FRAGE: {frage}{hw_text}\n\nSCHEMA-AUSSCHNITT:\n{kontext}"
                 else:
                     # Nichts Neues: das sagen, statt die Kette abzubrechen – die
@@ -1079,7 +1266,7 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
                 o = await asyncio.to_thread(finde_objekt, con, name, erlaubt)
                 if o and o[0] != "mehrdeutig" and o[0] not in ids:
                     ids.append(o[0])
-            kontext, tabs = await asyncio.to_thread(kontext_bauen, con, ids, begriffe, max_spalten, erlaubt)
+            kontext, tabs = await asyncio.to_thread(kontext_bauen, con, ids, begriffe, max_spalten, erlaubt, gleich)
             auftrag = (f"FRAGE: {frage}{hw_text}\n\nSCHEMA-AUSSCHNITT:\n{kontext}\n\nDEINE LETZTE ABFRAGE:\n```sql\n"
                        f"{a['sql']}\n```\nPRÜFUNG FEHLGESCHLAGEN:\n- " + "\n- ".join(pr["fehler"])
                        + "\nKorrigiere die Abfrage (gleiches Format).")
@@ -1096,6 +1283,13 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
                 "begriffe_grund": "; ".join(begriffe_grund), "zeiten": zeiten,
                 "hauswissen": [{"titel": a["titel"], "nr": a["nr"]} for a in hw],
                 "tabellen_kontext": [t["name"] for t in tabs.values()],
+                # Aus welchen Datenbankschemata Ausschnitt und SQL stammen – nutzt
+                # das SQL mehr als eines ohne Eingrenzung, benennt die Seite das.
+                "praefixe": sorted(praefixe or []),
+                "praefixe_kontext": dict(sorted(Counter(t["schema"] for t in tabs.values()).items())),
+                "praefixe_sql": praefixe_im_sql(con, (ergebnis.get("pruefung") or {}).get("tabellen") or [], erlaubt),
+                "gleichwertig": [{"sicht": tabs[v]["name"], "tabelle": _vollname(con, t)}
+                                 for v, t in gleich.items() if v in tabs and t not in tabs],
                 "verbinder": [tabs[i]["name"] for i in wahl["verbinder"] if i in tabs],
                 "unverbunden": [tabs[i]["name"] for i in wahl["unverbunden"] if i in tabs],
                 "runden": len(verlauf), "verlauf": verlauf}

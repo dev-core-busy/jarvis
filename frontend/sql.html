@@ -230,6 +230,10 @@
                 <div class="sq-row">
                     <label class="sq-lbl" for="sq-dialekt" data-i18n="sql.dialect">SQL-Dialekt</label>
                     <select class="sq-select" id="sq-dialekt"></select>
+                    <!-- Nur sichtbar, wenn die gewaehlten Schemata mehrere Datenbankschemata enthalten -->
+                    <label class="sq-lbl hidden" for="sq-praefix" id="sq-praefix-lbl" data-i18n="sql.prefix">Schema-Präfix</label>
+                    <select class="sq-select hidden" id="sq-praefix" data-i18n-title="sql.prefix_title"
+                            title="Nur Tabellen dieses Datenbankschemas als Ausgangspunkt der Frage"></select>
                     <button class="sq-btn sq-btn-primary" id="sq-los" type="button" data-i18n="sql.ask_btn">SQL erzeugen</button>
                     <span class="sq-spin hidden" id="sq-spin" aria-hidden="true"></span>
                     <span class="sq-status" id="sq-frage-status"></span>
@@ -245,6 +249,7 @@
                     <div class="sq-text" id="sq-erklaerung"></div>
                     <div class="sq-text" id="sq-annahmen"></div>
                     <div class="sq-text" id="sq-hauswissen"></div>
+                    <div class="sq-text" id="sq-hinweise"></div>
                     <div>
                         <div class="sq-lbl" data-i18n="sql.basis">Grundlage (Klick zeigt die Tabelle):</div>
                         <div class="sq-chips" id="sq-basis" style="margin-top:6px"></div>
@@ -300,12 +305,12 @@
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=19"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=453"></script>
+<script src="/static/js/i18n.js?v=455"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=30"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
-<script src="/static/js/sql.js?v=5"></script>
+<script src="/static/js/sql.js?v=7"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <script src="/static/js/activity.js?v=3"></script>
 <script src="/static/js/issues.js?v=16"></script>

@@ -17542,6 +17542,11 @@ async def sql_frage(request: Request, user: str = Depends(require_schema_access)
     if not isinstance(dialekt, str) or dialekt.strip().lower() not in _sgr.DIALEKTE:
         return JSONResponse({"error": "Unbekannter SQL-Dialekt."}, status_code=400)
     dialekt = dialekt.strip().lower()
+    # Datenbankschemata INNERHALB der gewaehlten Ablagen (z. B. ein altes und ein neues Datenmodell)
+    try:
+        praefixe = _sgr.praefixe_normal(body.get("praefixe"))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
     schl = _norm_login(user)
     if schl in _sql_laeuft:
         return JSONResponse({"error": "Es läuft bereits eine Frage von dir – bitte warten."},
@@ -17557,7 +17562,8 @@ async def sql_frage(request: Request, user: str = Depends(require_schema_access)
                                           "lädt Schema-Dateien unter Einstellungen → SQL-Assistent hoch."},
                                 status_code=409)
         erg = await _sgr.sql_erzeugen(frage, dialekt=dialekt, con=con, erlaubt=erlaubt,
-                                      max_tabellen=cfg["max_tabellen"], max_spalten=cfg["max_spalten"])
+                                      max_tabellen=cfg["max_tabellen"], max_spalten=cfg["max_spalten"],
+                                      praefixe=praefixe)
     except Exception as e:  # noqa: BLE001
         from backend.llm import scrub_secrets
         return JSONResponse({"error": scrub_secrets(str(e))}, status_code=500)
@@ -17585,7 +17591,14 @@ async def sql_frage(request: Request, user: str = Depends(require_schema_access)
         "begriffe_quelle": erg.get("begriffe_quelle") or "",
         # Warum die Begriffsrunde zurueckfiel (leer = sie fiel nicht zurueck)
         "begriffe_grund": erg.get("begriffe_grund") or "",
-        "zeiten": erg.get("zeiten") or {}})
+        "zeiten": erg.get("zeiten") or {},
+        # Eingrenzung auf Datenbankschemata und woraus der Ausschnitt stammte
+        "praefixe": [str(x) for x in erg.get("praefixe") or []],
+        "praefixe_kontext": {str(k): int(v) for k, v in (erg.get("praefixe_kontext") or {}).items()},
+        "praefixe_sql": {str(k): int(v) for k, v in (erg.get("praefixe_sql") or {}).items()},
+        # Tabellen, die nicht eigens im Ausschnitt standen, weil ihre Sicht dieselben Spalten zeigt
+        "gleichwertig": [{"sicht": str(g.get("sicht") or ""), "tabelle": str(g.get("tabelle") or "")}
+                         for g in erg.get("gleichwertig") or []]})
 
 
 def _sql_mit_graph(fn):

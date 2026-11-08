@@ -19,6 +19,9 @@
  *   6. alles vom Server wird MASKIERT (Tabellennamen, Kommentare, SQL)
  *   7. Suche -> Treffer -> Tabellendetail, Kuerzung beziffert
  *   8. Join-Pfad: "kein Pfad" sagt die Schrittzahl
+ *   9. Schema-Praefix: Auswahl nur bei mehreren Datenbankschemata der
+ *      GEWAEHLTEN Ablagen, POST traegt sie, gemerkt; Mischhinweis mit
+ *      "nur X fragen", Zusammengelegtes genannt – alles maskiert
  */
 'use strict';
 require('./lib/bilanz')();
@@ -64,6 +67,7 @@ async function seite(cfg) {
     win.localStorage.setItem('jarvis_token', 'test-token');
     win.localStorage.setItem('jarvis_user', 'anna');
     if (cfg.gemerkt !== undefined) win.localStorage.setItem('jarvis_sql_schemata_anna', JSON.stringify(cfg.gemerkt));
+    if (cfg.praefixGemerkt !== undefined) win.localStorage.setItem('jarvis_sql_praefix_anna', cfg.praefixGemerkt);
     win.matchMedia = win.matchMedia || function () {
         return { matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} };
     };
@@ -245,6 +249,95 @@ function klick(s, el) {
     const hwz = s.doc.getElementById('sq-hauswissen');
     check('Hauswissen: Herkunft genannt (Titel + Abschnitt), maskiert', hwz && /Konventionen/.test(hwz.textContent)
           && /Abschnitt 3/.test(hwz.textContent) && !s.doc.querySelector('#sq-hauswissen img') && !s.win.__xss, hwz && hwz.innerHTML);
+    s.win.close();
+
+    abschnitt('5c. Schema-Praefix');
+    const MIT_PRAEFIX = { schemata: [
+        { id: 'erp', name: 'ERP', tabellen: 12, sichten: 1, spalten: 99,
+          praefixe: [{ name: 'ALT', objekte: 5 }, { name: 'NEU', objekte: 7 }] },
+        { id: 'hr', name: 'Personal', tabellen: 3, sichten: 0, spalten: 9, praefixe: [{ name: 'NEU', objekte: 2 }] }] };
+    const GEMISCHT = { ok: true, sql: 'SELECT 1', erklaerung: '', annahmen: '',
+        pruefung: { ok: true, fehler: [], tabellen: [], spalten_geprueft: 0 }, tabellen_kontext: [], verbinder: [],
+        unverbunden: [], runden: 1, praefixe: [], praefixe_kontext: { ALT: 5, NEU: 7 }, praefixe_sql: { ALT: 3, NEU: 4 },
+        gleichwertig: [{ sicht: 'NEU.S' + BOESE, tabelle: 'NEU.S_T' }] };
+    s = await seite({ status: MIT_PRAEFIX, frage: GEMISCHT });
+    const psel = s.doc.getElementById('sq-praefix');
+    const opts = psel ? Array.prototype.map.call(psel.options, function (o) { return o.value + '=' + o.textContent; }) : [];
+    check('Mehrere Datenbankschemata: Auswahl sichtbar, je Praefix summiert, Vorgabe "alle"',
+          psel && !psel.classList.contains('hidden') && !s.doc.getElementById('sq-praefix-lbl').classList.contains('hidden')
+          && JSON.stringify(opts) === JSON.stringify(['=alle', 'ALT=ALT (5)', 'NEU=NEU (9)']) && psel.value === '', opts);
+    klick(s, s.doc.querySelector('#sq-schemata input[data-schema="erp"]'));
+    s.doc.querySelector('#sq-schemata input[data-schema="erp"]').checked = false;
+    s.doc.querySelector('#sq-schemata input[data-schema="erp"]').dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    await schlaf(10);
+    check('Nur EIN Datenbankschema in der Auswahl: nichts zu waehlen (verborgen)',
+          s.doc.getElementById('sq-praefix').classList.contains('hidden'), s.doc.getElementById('sq-praefix').outerHTML.slice(0, 120));
+    const erpK = s.doc.querySelector('#sq-schemata input[data-schema="erp"]');
+    erpK.checked = true;
+    erpK.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    await schlaf(10);
+    tippe(s, 'sq-frage', 'Faelle je Art');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    const fposts = function () { return s.gerufen.filter(function (g) { return g.pfad === '/api/sql/frage'; }); };
+    let pr0 = null;
+    try { pr0 = JSON.parse(fposts()[0].opt.body); } catch (e) { pr0 = null; }
+    check('Ohne Wahl: POST traegt praefixe []', pr0 && JSON.stringify(pr0.praefixe) === '[]', pr0 && JSON.stringify(pr0));
+    const hin = s.doc.getElementById('sq-hinweise');
+    const knoepfe = hin ? hin.querySelectorAll('button[data-praefix]') : [];
+    check('Gemischter Ausschnitt: Hinweis nennt beide mit Anzahl, je ein Knopf',
+          hin && /ALT \(3\)/.test(hin.textContent) && /NEU \(4\)/.test(hin.textContent) && knoepfe.length === 2
+          && /nur ALT fragen/.test(knoepfe[0].textContent), hin && hin.innerHTML.slice(0, 300));
+    check('Zusammengelegtes genannt, maskiert', hin && /zeigt alle Spalten von NEU\.S_T/.test(hin.textContent)
+          && !s.doc.querySelector('#sq-hinweise img') && !s.win.__xss, hin && hin.textContent);
+    klick(s, knoepfe[0]);
+    await schlaf(40);
+    let pr1 = null;
+    try { pr1 = JSON.parse(fposts()[1].opt.body); } catch (e) { pr1 = null; }
+    check('"nur ALT fragen": neue Frage mit praefixe ["ALT"], Auswahl steht auf ALT, gemerkt',
+          pr1 && JSON.stringify(pr1.praefixe) === '["ALT"]' && s.doc.getElementById('sq-praefix').value === 'ALT'
+          && s.win.localStorage.getItem('jarvis_sql_praefix_anna') === 'ALT', pr1 && JSON.stringify(pr1));
+    s.win.close();
+    s = await seite({ status: MIT_PRAEFIX, praefixGemerkt: 'NEU',
+                      frage: Object.assign({}, GEMISCHT, { praefixe: ['NEU'], praefixe_sql: { ALT: 1, NEU: 4 }, gleichwertig: [] }) });
+    check('Gemerkter Praefix gilt beim Laden', s.doc.getElementById('sq-praefix').value === 'NEU', s.doc.getElementById('sq-praefix').value);
+    tippe(s, 'sq-frage', 'x');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    const hin2 = s.doc.getElementById('sq-hinweise');
+    check('Mit Wahl: Hinweis "eingegrenzt", kein Mischhinweis', /Eingegrenzt auf das Datenbankschema NEU/.test(hin2.textContent)
+          && !hin2.querySelector('button[data-praefix]'), hin2.textContent);
+    s.win.close();
+    // Ausschnitt gemischt, SQL aus EINEM Schema: kein Hinweis (sonst stuende er
+    // am echten Bestand bei fast jeder Frage)
+    s = await seite({ status: MIT_PRAEFIX, frage: Object.assign({}, GEMISCHT, { praefixe_sql: { NEU: 2 }, gleichwertig: [] }) });
+    tippe(s, 'sq-frage', 'x');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    const hin3 = s.doc.getElementById('sq-hinweise');
+    check('Nur der Ausschnitt gemischt, das SQL nicht: kein Mischhinweis', hin3 && hin3.textContent === ''
+          && !hin3.querySelector('button[data-praefix]'), hin3 && hin3.innerHTML);
+    s.win.close();
+    // Gemerkter Praefix, den es nicht mehr gibt: "alle" (das DOM haelt das schon
+    // selbst – ein unbekannter Wert ist keine Option; geprueft wird die Wirkung)
+    s = await seite({ status: MIT_PRAEFIX, praefixGemerkt: 'WEG', frage: GEMISCHT });
+    tippe(s, 'sq-frage', 'x');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    let prw = null;
+    try { prw = JSON.parse(s.gerufen.filter(function (g) { return g.pfad === '/api/sql/frage'; })[0].opt.body); } catch (e) { prw = null; }
+    check('Gemerkter, verschwundener Praefix: Auswahl "alle", POST praefixe []',
+          s.doc.getElementById('sq-praefix').value === '' && prw && JSON.stringify(prw.praefixe) === '[]', prw && JSON.stringify(prw));
+    s.win.close();
+    s = await seite({ praefixGemerkt: 'WEG', frage: GEMISCHT });
+    check('Aelterer Server ohne praefixe: Auswahl verborgen, gemerkter Wert greift nicht',
+          s.doc.getElementById('sq-praefix').classList.contains('hidden'));
+    tippe(s, 'sq-frage', 'x');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    let pr2 = null;
+    try { pr2 = JSON.parse(s.gerufen.filter(function (g) { return g.pfad === '/api/sql/frage'; })[0].opt.body); } catch (e) { pr2 = null; }
+    check('... und der POST traegt praefixe []', pr2 && JSON.stringify(pr2.praefixe) === '[]', pr2 && JSON.stringify(pr2));
     s.win.close();
 
     abschnitt('6. Fehler vom Server bleibt stehen');

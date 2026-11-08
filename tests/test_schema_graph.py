@@ -755,7 +755,7 @@ check("Abschnitte gedeckelt (DOK_TEIL), Kopf an jedem Teil", all(len(t) <= P.DOK
       and all(t.startswith("[K]") for t in lang) and len(lang) >= 3, [len(t) for t in lang])
 check("Begleitdokument-Endungen: Einstellungen == Parser", tuple(sorted(E_DOK())) == tuple(sorted(P.DOK_ENDUNGEN)),
       (E_DOK(), P.DOK_ENDUNGEN))
-check("Parser-Fassung 4 (Herkunft der Sichtspalten)", P.FASSUNG == 4, P.FASSUNG)
+check("Parser-Fassung >= 5 (Herkunft der Sichtspalten, Texterkennung)", P.FASSUNG >= 5, P.FASSUNG)
 
 # Durch den ganzen Lauf, mit der Regel "gleichnamiger Primaerschluessel"
 S.ORDNER = TMP / "ablage_yaml"
@@ -1007,6 +1007,210 @@ check("Kette: Fachbegriff ohne Bezeichner -> Tabelle ueber das Hauswissen im Aus
 check("Kette: Ergebnis nennt das benutzte Hauswissen", eh.get("pruefung", {}).get("ok")
       and any(h["titel"] == "Konventionen" for h in eh.get("hauswissen") or []), (eh.get("fehler"), eh.get("hauswissen")))
 gy.close()
+
+# ─── 6c. Gleichwertige Objekte, Schema-Praefix, Namensnaehe ─────────────────
+# Zwei Datenbankschemata in EINER Ablage (wie im echten Bestand ein altes und ein
+# neues Datenmodell; Namen erfunden). Gleichwertig = Sicht ueber GENAU einer Tabelle desselben
+# Schemas, alle Spalten aus ihr, alle ihre Spalten gezeigt.
+print("6c. Gleichwertig / Praefix / Namensnaehe")
+Z = TMP / "zwei"
+(Z / "o").mkdir(parents=True)
+
+
+def _tab(schema, name, spalten, kommentar=""):
+    sp = "".join(f"- {{name: {c}, type: NUMBER}}\n" for c in spalten)
+    (Z / "o" / f"{schema}_TABLE_{name}.yaml").write_text(
+        f"name: {name}\nobject_type: TABLE\nschema: {schema}\ncomment: {kommentar or name}\ncolumns:\n{sp}"
+        f"constraints:\n- {{name: PK_{name}, type: PRIMARY_KEY, columns: [{spalten[0]}]}}\n", encoding="utf-8")
+
+
+def _sicht(schema, name, definition, kommentar=""):
+    (Z / "o" / f"{schema}_VIEW_{name}.yaml").write_text(
+        f"name: {name}\nobject_type: VIEW\nschema: {schema}\ncomment: {kommentar or name}\n"
+        f"definition: \"{definition}\"\n", encoding="utf-8")
+
+
+_tab("NEU", "ABCFAL_T_FAELLE", ["ABCFAL_ID", "ABCFAL_FALLART", "ABCFAL_MANDANT"], "Patientenfaelle")
+_sicht("NEU", "ABCFAL_FAELLE", "SELECT t.ABCFAL_ID, t.ABCFAL_FALLART, t.ABCFAL_MANDANT FROM ABCFAL_T_FAELLE t",
+       "Patientenfaelle des Mandanten")
+_sicht("NEU", "ABCFAL_TEIL", "SELECT t.ABCFAL_ID FROM ABCFAL_T_FAELLE t", "Patientenfaelle kurz")
+_sicht("NEU", "ABCFAL_X", "SELECT t.ABCFAL_ID, t.ABCFAL_FALLART, t.ABCFAL_MANDANT, UPPER(t.ABCFAL_FALLART) AS GROSS "
+       "FROM ABCFAL_T_FAELLE t", "Patientenfaelle gross")
+_tab("NEU", "ABCART_T_FALLART", ["ABCART_ID", "ABCART_BEZ"], "Fallart")
+_sicht("NEU", "ABCART_FALLART", "SELECT * FROM ABCART_T_FALLART", "Fallart des Mandanten")
+_tab("NEU", "XYZLOG_T_LOG", ["XYZLOG_ID"], "Protokoll")
+_sicht("NEU", "XYZLOG_LOG1", "SELECT * FROM XYZLOG_T_LOG", "Protokoll eins")
+_sicht("NEU", "XYZLOG_LOG2", "SELECT * FROM XYZLOG_T_LOG", "Protokoll zwei")
+_tab("ALT", "P_FALL", ["PFALL_NR", "PFALL_FALLART"], "Patientenfaelle alt")
+_sicht("ALT", "V_FAELLE_NEU", "SELECT * FROM NEU.ABCFAL_T_FAELLE", "Patientenfaelle ueber das neue Schema")
+for _i in range(1, 8):
+    _tab("ALT", f"S_STAMM{_i}", [f"SSTAMM{_i}_ID"], f"Stammdaten {_i}")
+_tab("ALT", "P_REZEPT", ["PREZEPT_ID"], "Rezepte")
+# Ein Paar ohne Nachbarsichten (sonst kommt die Tabelle als Join-Glied zwischen
+# zwei Sichten wieder herein – das ist richtig, misst aber das Zusammenlegen nicht)
+_tab("NEU", "QRSPOS_T_POSITION", ["QRSPOS_ID", "QRSPOS_MENGE"], "Rechnungsposition")
+_sicht("NEU", "QRSPOS_POSITION", "SELECT p.QRSPOS_ID, p.QRSPOS_MENGE FROM QRSPOS_T_POSITION p",
+       "Rechnungsposition des Mandanten")
+S.ORDNER = TMP / "ablage_zwei"
+st_z = I.lauf([], quellen=[{"id": "z", "ordner": [str(Z)]}], muster="*.yaml", prozesse=1, ordner_schutz=False)
+gz = S.graph_lesen()
+_zid = {r[0]: r[1] for r in gz.execute("SELECT schluessel, id FROM objekt")} if gz is not None else {}
+
+
+def zid(n):
+    return _zid.get(n.lower(), -1)
+
+
+# Fehlen die Objekte (z. B. ohne YAML-Weg), ist das ein FAIL dieses Abschnitts –
+# kein Abbruch des ganzen Laufs: ein Abbruch ohne Bilanz zaehlt in der
+# Gegenprobe nicht als Biss (gemessen 2026-11-08: "YAML-Weg fehlt" -> rc=2).
+_z_da = gz is not None and min(zid("neu.abcfal_t_faelle"), zid("neu.abcfal_faelle"), zid("alt.p_fall")) > 0
+check("Positivkontrolle: Graph mit zwei Datenbankschemata erfasst", _z_da, (st_z.get("fehler"), sorted(_zid)[:10]))
+
+
+def _abschnitt_zwei_schemata():
+    check("Positivkontrolle: Herkunft der 1:1-Sicht erfasst",
+          wert(gz, "SELECT count(*) FROM herkunft WHERE sicht_id=?", (zid("neu.abcfal_faelle"),)) == 3,
+          gz.execute("SELECT * FROM herkunft WHERE sicht_id=?", (zid("neu.abcfal_faelle"),)).fetchall())
+    alle = list(_zid.values())
+    gw = R.gleichwertige(gz, alle)
+    check("Gleichwertig: Sicht mit allen Spalten aus EINER Tabelle (Liste und t.*)",
+          gw.get(zid("neu.abcfal_t_faelle")) == zid("neu.abcfal_faelle")
+          and gw.get(zid("neu.abcart_t_fallart")) == zid("neu.abcart_fallart"), gw)
+    check("Nicht gleichwertig: Teilsicht, Ausdrucksspalte, zwei Sichten auf eine Tabelle, anderes Schema",
+          set(gw) == {zid("neu.abcfal_t_faelle"), zid("neu.abcart_t_fallart"), zid("neu.qrspos_t_position")},
+          {k: v for k, v in gw.items()})
+    check("Gleichwertig nur, wenn BEIDE gefunden wurden",
+          R.gleichwertige(gz, [zid("neu.abcfal_t_faelle"), zid("alt.p_fall")]) == {})
+    zt, zg = R.zusammenlegen(gz, [(zid("neu.abcfal_t_faelle"), 10.0), (zid("alt.p_fall"), 7.0),
+                                  (zid("neu.abcfal_faelle"), 5.0)])
+    check("Zusammenlegen: Sicht erbt Platz und Punkte der Tabelle, Tabelle faellt weg",
+          zt == [(zid("neu.abcfal_faelle"), 10.0), (zid("alt.p_fall"), 7.0)]
+          and zg == {zid("neu.abcfal_faelle"): zid("neu.abcfal_t_faelle")}, (zt, zg))
+    zt2, zg2 = R.zusammenlegen(gz, [(zid("neu.abcfal_t_faelle"), 10.0), (zid("alt.p_fall"), 7.0)])
+    check("Zusammenlegen: allein gefundene Tabelle bleibt (kein Tausch gegen eine ungesuchte Sicht)",
+          zt2 == [(zid("neu.abcfal_t_faelle"), 10.0), (zid("alt.p_fall"), 7.0)] and zg2 == {}, (zt2, zg2))
+    kz, _tz = R.kontext_bauen(gz, [zid("neu.abcfal_faelle")], ["fallart"], 40, None, zg)
+    check("Ausschnitt nennt die zusammengelegte Tabelle an der Sicht",
+          "zeigt ALLE Spalten von NEU.ABCFAL_T_FAELLE" in kz and "TABELLE NEU.ABCFAL_T_FAELLE" not in kz, kz)
+    _gz_alt = _sq.connect(":memory:")
+    _gz_alt.execute("CREATE TABLE kante(von, nach, art, von_spalten, nach_spalten)")
+    _gz_alt.execute("CREATE TABLE objekt(id, schema, art)")
+    try:
+        _r = R.gleichwertige(_gz_alt, [1, 2])
+    except Exception as _e:  # noqa: BLE001 – ein Wurf ist hier der Befund
+        _r = f"WURF {type(_e).__name__}"
+    check("Graph ohne Herkunft: nichts zusammengelegt, kein Fehler", _r == {}, _r)
+    _gz_alt.close()
+
+    # Schema-Praefix
+    check("Praefix: leer heisst alle", R.praefixe_normal(None) is None and R.praefixe_normal("") is None
+          and R.praefixe_normal([]) is None)
+    check("Praefix: Gross, ohne Punkt, Liste oder Komma", R.praefixe_normal("alt") == {"ALT"}
+          and R.praefixe_normal(["ALT.", " neu "]) == {"ALT", "NEU"} and R.praefixe_normal("ALT,NEU") == {"ALT", "NEU"})
+    for _roh in ("ALT;DROP", ["ALT", 3], [f"S{_i}" for _i in range(R.MAX_PRAEFIXE + 1)], {"a": 1}, "a b"):
+        try:
+            R.praefixe_normal(_roh)
+            check(f"Praefix ungueltig wird abgewiesen: {str(_roh)[:30]}", False)
+        except ValueError:
+            check(f"Praefix ungueltig wird abgewiesen: {str(_roh)[:30]}", True)
+    _sch = lambda tr: {gz.execute("SELECT schema FROM objekt WHERE id=?", (o,)).fetchone()[0] for o, _p in tr}  # noqa: E731
+    check("Positivkontrolle: Suche ohne Praefix trifft BEIDE Schemata", _sch(R.suche(gz, ["patientenfaelle"])) == {"ALT", "NEU"},
+          _sch(R.suche(gz, ["patientenfaelle"])))
+    check("Suche mit Praefix: nur dieses Schema", _sch(R.suche(gz, ["patientenfaelle"], praefixe={"ALT"})) == {"ALT"}
+          and _sch(R.suche(gz, ["patientenfaelle"], praefixe={"NEU"})) == {"NEU"})
+    # Exakter Name aus dem ANDEREN Schema: der Zusatzweg "exakte Namen" in suche()
+    # hat einen eigenen Filter. ("p_fall" trifft ueber das Wortteil "fall" auch
+    # NEU-Spalten wie FALLART – deshalb wird die ID geprueft, nicht die leere Liste.)
+    check("Suche mit Praefix: auch exakte Namenstreffer gefiltert",
+          zid("alt.p_fall") not in dict(R.suche(gz, ["p_fall"], praefixe={"NEU"}))
+          and zid("alt.p_fall") in dict(R.suche(gz, ["p_fall"], praefixe={"ALT"}))
+          and _sch(R.suche(gz, ["p_fall"], praefixe={"NEU"})) <= {"NEU"})
+
+    # Namensnaehe: ein Auszug mit mehr Namen als ``limit``
+    _fern = " ." * 60
+    _diagramm = {"text": "".join(f"ALT.S_STAMM{_i} Stammdaten{_fern}\n" for _i in range(1, 8))
+                 + f"ALT.P_REZEPT Rezepte zur Abrechnung{_fern}"}
+    check("Viele Namen, kein Begriff in der Naehe: KEINER zaehlt (nicht die ersten sechs)",
+          R.dokument_objekte(gz, [_diagramm]) == [], R.dokument_objekte(gz, [_diagramm]))
+    check("Positivkontrolle: alle acht Namen des Auszugs sind im Graphen eindeutig",
+          all(zid(f"alt.s_stamm{_i}") > 0 for _i in range(1, 8)) and zid("alt.p_rezept") > 0)
+    check("Viele Namen im Auszug: der zur Frage passende zaehlt, nicht der erste",
+          R.dokument_objekte(gz, [_diagramm], begriffe=["Rezepte"]) == [zid("alt.p_rezept")],
+          R.dokument_objekte(gz, [_diagramm], begriffe=["Rezepte"]))
+    _kurz = {"text": "Faelle stehen in NEU.ABCFAL_FAELLE, die Arten in NEU.ABCART_FALLART."}
+    check("Wenige Namen im Auszug: alle zaehlen (auch ohne passenden Begriff)",
+          R.dokument_objekte(gz, [_kurz], begriffe=["xyz"]) == [zid("neu.abcfal_faelle"), zid("neu.abcart_fallart")])
+    check("Genannte Tabelle ausserhalb des Praefixes zaehlt nicht",
+          R.dokument_objekte(gz, [_kurz], praefixe={"ALT"}) == [])
+
+    # Kette: Praefix, Mischung, Zusammenlegen
+    BEGR_Z = '{"begriffe": ["patientenfaelle", "fallart", "abcfal", "faelle"]}'
+    BEGR_P = '{"begriffe": ["rechnungsposition", "position", "menge"]}'
+    SQL_P = ("```sql\nSELECT SUM(p.QRSPOS_MENGE) FROM NEU.QRSPOS_POSITION p\n```\nERKLÄRUNG: x\nANNAHMEN: keine")
+    SQL_ZWEI = ("```sql\nSELECT f.ABCFAL_FALLART, COUNT(*) FROM NEU.ABCFAL_FAELLE f JOIN ALT.P_FALL p "
+                "ON p.PFALL_NR = f.ABCFAL_ID GROUP BY f.ABCFAL_FALLART\n```\nERKLÄRUNG: x\nANNAHMEN: keine")
+    SQL_Z = ("```sql\nSELECT f.ABCFAL_FALLART, COUNT(*) FROM NEU.ABCFAL_FAELLE f GROUP BY f.ABCFAL_FALLART\n```\n"
+             "ERKLÄRUNG: x\nANNAHMEN: keine")
+
+
+    async def _z_kette():
+        m1 = Attrappe([BEGR_Z, SQL_Z])
+        e1 = await R.sql_erzeugen("Patientenfälle je Fallart", con=gz, modell=m1)
+        m2 = Attrappe([BEGR_Z, SQL_Z])
+        e2 = await R.sql_erzeugen("Patientenfälle je Fallart", con=gz, modell=m2, praefixe={"NEU"})
+        m3 = Attrappe([BEGR_Z, SQL_Z])
+        e3 = await R.sql_erzeugen("Patientenfälle je Fallart", con=gz, modell=m3, praefixe={"XX"})
+        m4 = Attrappe([BEGR_P, SQL_P])
+        e4 = await R.sql_erzeugen("Menge der Rechnungspositionen", con=gz, modell=m4)
+        # Nachforderung bringt Tabelle UND Sicht: auch dort zusammengelegt
+        m5 = Attrappe(['{"begriffe": ["stammdaten"]}', "BRAUCHE: rechnungsposition, position", SQL_P])
+        e5 = await R.sql_erzeugen("Stammdaten", con=gz, modell=m5)
+        # SQL, das BEIDE Datenbankschemata verbindet
+        m6 = Attrappe([BEGR_Z, SQL_ZWEI, SQL_ZWEI])
+        e6 = await R.sql_erzeugen("Patientenfälle je Fallart", con=gz, modell=m6)
+        return (m1, e1), (m2, e2), (m3, e3), (m4, e4), (m5, e5), (m6, e6)
+
+
+    (m1z, e1z), (m2z, e2z), (m3z, e3z), (m4z, e4z), (m5z, e5z), (m6z, e6z) = asyncio.run(_z_kette())
+    check("Mischung am SQL gemessen: Ausschnitt aus beiden, SQL aus EINEM -> nur NEU",
+          len(e1z.get("praefixe_kontext") or {}) == 2 and e1z.get("praefixe_sql") == {"NEU": 1},
+          (e1z.get("praefixe_kontext"), e1z.get("praefixe_sql")))
+    check("SQL verbindet beide Datenbankschemata -> beide gezaehlt",
+          e6z.get("praefixe_sql") == {"ALT": 1, "NEU": 1}, (e6z.get("praefixe_sql"), e6z.get("fehler"),
+                                                             (e6z.get("pruefung") or {}).get("fehler")))
+    _a5 = m5z.auftraege[2][0] if len(m5z.auftraege) > 2 else ""
+    check("Positivkontrolle: Nachforderung brachte die Position in den Ausschnitt", "NEU.QRSPOS_POSITION" in _a5, _a5[-500:])
+    check("Nachforderung: Tabelle und Sicht zusammengelegt, Paar gemeldet",
+          "TABELLE NEU.QRSPOS_T_POSITION" not in _a5 and "zeigt ALLE Spalten von NEU.QRSPOS_T_POSITION" in _a5
+          and {"sicht": "NEU.QRSPOS_POSITION", "tabelle": "NEU.QRSPOS_T_POSITION"} in (e5z.get("gleichwertig") or []),
+          (_a5[-500:], e5z.get("gleichwertig")))
+    check("Positivkontrolle: Suche trifft Tabelle UND Sicht der Position",
+          {zid("neu.qrspos_t_position"), zid("neu.qrspos_position")} <= set(dict(R.suche(gz, ["rechnungsposition", "position"]))))
+    check("Kette ohne Praefix: Ausschnitt aus beiden Schemata, gezaehlt", set(e1z.get("praefixe_kontext") or {}) == {"ALT", "NEU"}
+          and e1z.get("praefixe") == [], (e1z.get("praefixe_kontext"), e1z.get("fehler")))
+    check("Kette: Tabelle UND ihre Sicht gefunden -> nur die Sicht im Ausschnitt, Paar gemeldet",
+          "NEU.QRSPOS_POSITION" in (e4z.get("tabellen_kontext") or [])
+          and "NEU.QRSPOS_T_POSITION" not in (e4z.get("tabellen_kontext") or [])
+          and {"sicht": "NEU.QRSPOS_POSITION", "tabelle": "NEU.QRSPOS_T_POSITION"} in (e4z.get("gleichwertig") or []),
+          (e4z.get("tabellen_kontext"), e4z.get("gleichwertig")))
+    _az = m4z.auftraege[1][0] if len(m4z.auftraege) > 1 else ""
+    check("Kette: das Modell erfaehrt die Gleichwertigkeit im Ausschnitt", "zeigt ALLE Spalten von NEU.QRSPOS_T_POSITION" in _az,
+          _az[-600:])
+    check("Kette: kam die Tabelle als Join-Glied doch herein, meldet die Antwort KEIN Paar fuer sie",
+          not any(g["tabelle"] in (e1z.get("tabellen_kontext") or []) for g in e1z.get("gleichwertig") or []),
+          (e1z.get("tabellen_kontext"), e1z.get("gleichwertig")))
+    check("Kette mit Praefix NEU: Anker nur aus NEU, Wahl gemeldet",
+          e2z.get("praefixe") == ["NEU"] and "ALT.P_FALL" not in (e2z.get("tabellen_kontext") or [])
+          and (e2z.get("tabellen_kontext") or []), (e2z.get("tabellen_kontext"), e2z.get("fehler")))
+    check("Kette mit unbekanntem Praefix: Fehler mit Grund, keine SQL-Runde",
+          "eingegrenzt auf XX" in (e3z.get("fehler") or "") and len(m3z.auftraege) == 1, (e3z, len(m3z.auftraege)))
+
+
+if _z_da:
+    _abschnitt_zwei_schemata()
+if gz is not None:
+    gz.close()
 S.ORDNER = TMP / "ablage"
 
 # ─── 7. Skill ───────────────────────────────────────────────────────────────
@@ -1051,6 +1255,21 @@ aus = M.ausgabe({**e1, "pruefung": {**e1["pruefung"], "unbelegte_joins": [{"bedi
                 "postgresql").splitlines()
 check("Join ohne Beleg: VORBEHALT samt Bedingung in der ersten Zeile",
       aus and "MIT VORBEHALT" in aus[0] and "p.x = a.y" in aus[0] and "ANNAHME" in aus[0], aus[:1])
+aus = M.ausgabe({**e1, "praefixe": [], "praefixe_sql": {"ALT": 1, "NEU": 2}}, "postgresql")
+check("Werkzeug: SQL aus mehreren Datenbankschemata wird benannt, mit Weg (praefix)",
+      "mehreren Datenbankschemata" in aus and "ALT 1" in aus and "praefix" in aus, aus[-400:])
+aus = M.ausgabe({**e1, "praefixe": [], "praefixe_kontext": {"ALT": 3, "NEU": 4}, "praefixe_sql": {"NEU": 2}},
+                "postgresql")
+check("Werkzeug: nur der AUSSCHNITT gemischt, das SQL nicht -> kein Hinweis", "mehreren Datenbankschemata" not in aus,
+      aus[-300:])
+aus = M.ausgabe({**e1, "praefixe": ["NEU"], "praefixe_sql": {"ALT": 1, "NEU": 4}}, "postgresql")
+check("Werkzeug: mit gewaehltem Praefix kein Mischhinweis", "mehreren Datenbankschemata" not in aus, aus[-300:])
+aus = M.ausgabe({**e1, "gleichwertig": [{"sicht": "NEU.S", "tabelle": "NEU.S_T"}]}, "postgresql")
+check("Werkzeug: Zusammengelegtes wird genannt", "NEU.S statt NEU.S_T" in aus, aus[-300:])
+_tsql = erstes(t for t in M.get_tools() if t.name == "schema_sql")
+check("Werkzeug: Parameter praefix angeboten", "praefix" in (_tsql.parameters_schema().get("properties") or {}))
+antwort = asyncio.run(_tsql.execute(frage="x", praefix="A;B", _sql_schemata=[""]))
+check("Werkzeug: ungueltiger Praefix abgewiesen, vor jedem Zugriff", "Ungültige Auswahl" in antwort, antwort)
 t_idx = erstes(t for t in M.get_tools() if t.name == "schema_index")
 t_tab = erstes(t for t in M.get_tools() if t.name == "schema_tabelle")
 t_v = erstes(t for t in M.get_tools() if t.name == "schema_verbindung")

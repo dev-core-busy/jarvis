@@ -41,8 +41,9 @@ import re
 # und liest sonst nur neue und geaenderte Dateien – gemessen auf DEV
 # 2026-11-07: 8431 YAML-Dateien, mit dem Parser OHNE YAML erfasst, waeren nach
 # dem Einbau des YAML-Wegs nie wieder gelesen worden (Graph blieb leer).
-# 1 = SQL-DDL, 2 = dazu YAML-Objektexporte, 3 = dazu Begleitdokumente.
-FASSUNG = 3
+# 1 = SQL-DDL, 2 = dazu YAML-Objektexporte, 3 = dazu Begleitdokumente,
+# 4 = dazu Herkunft der Sichtspalten (Join-Pruefung ueber Sichten).
+FASSUNG = 4
 
 BLOCK = 4 * 1024 * 1024
 # Obergrenze fuer EINE Struktur-Anweisung. Ein CREATE TABLE ueber 64 MB gibt
@@ -441,13 +442,21 @@ def zerlege(text: str) -> dict | None:
     if m:
         rest = t[m.end():]
         nutzt = sorted({bezeichner(x.group("t")) for x in _VON_JOIN.finditer(rest)} - {""})
-        spalten = []
         km = re.match(r"\s*\((?P<sp>[^)]*)\)\s*AS\b", rest, re.I)
+        herkunft = sicht_herkunft(rest[km.end():] if km else rest)
+        nutzt = sorted(set(nutzt) | set(herkunft.pop("tabellen")))
         if km:
-            spalten = [{"name": s, "typ": "", "pk": False, "null": True, "kommentar": ""}
-                       for s in _spaltenliste(km.group("sp"))]
+            # Ausdrueckliche Liste: die Namen gelten POSITIONSWEISE – die
+            # Herkunft der Auswahl steht unter anderen Namen, und ein ``*``
+            # bildet ``(a, b)`` auf die ersten Spalten ab, nicht auf gleiche
+            # Namen. Beides waere eine falsche Zuordnung, also keine.
+            namen = _spaltenliste(km.group("sp"))
+            herkunft = {"spalten": {}, "stern": []}   # (die FROM-Liste ist oben schon uebernommen)
+        else:
+            namen = sicht_spalten(rest)
+        spalten = [{"name": s, "typ": "", "pk": False, "null": True, "kommentar": ""} for s in namen]
         return {"art": "sicht", "name": bezeichner(m.group("name")), "spalten": spalten,
-                "pk": [], "fks": [], "kommentar": "", "nutzt": nutzt}
+                "pk": [], "fks": [], "kommentar": "", "nutzt": nutzt, "herkunft": herkunft}
     m = _ALTER_TABLE.match(t)
     if m:
         rest = t[m.end():]
@@ -653,14 +662,11 @@ def _alias(ausdruck: str) -> str | None:
     return None
 
 
-def sicht_spalten(definition: str) -> list[str]:
-    """Spaltennamen einer Sicht aus ihrer SELECT-Liste – NUR wenn sie vollstaendig
-    bestimmbar sind (``*`` oder ein Ausdruck ohne Alias -> ``[]``).
+def _erste_auswahl(definition: str) -> tuple[str, str, str] | None:
+    """(Text, SELECT-Liste, Rest ab FROM) der ERSTEN Auswahl auf oberster Ebene.
 
-    Eine halbe Liste waere schlimmer als keine: die Pruefung des erzeugten SQL
-    ueberspringt Sichten ohne Spaltenliste, wiese aber mit einer unvollstaendigen
-    gueltige Spalten als unbekannt ab. Massgeblich ist die ERSTE Auswahl
-    (bei UNION bestimmt sie die Namen; bei WITH die nach den CTEs).
+    Eine Sicht in Klammern (``(SELECT …)``) wird bis zu dreimal ausgepackt.
+    ``None``, wenn es keine Auswahl gibt.
     """
     t = _ohne_kommentare(definition or "").strip()
     for _ in range(3):
@@ -677,13 +683,141 @@ def sicht_spalten(definition: str) -> list[str]:
             zu = _klammer_ende(t, 0)
             t = t[1:zu].strip() if zu != -1 else ""
             continue
-        return []
+        return None
     if sel is None:
-        return []
+        return None
     liste = t[sel + 6:fro if fro is not None else len(t)]
     liste = re.sub(r"^\s*(?:DISTINCT|UNIQUE|ALL)\b", " ", liste, flags=re.I)
-    namen = []
+    return t, liste, (t[fro:] if fro is not None else "")
+
+
+def _klammern_leeren(text: str) -> str:
+    """Inhalt jeder Klammer (samt Zeichenketten darin) durch Leerzeichen ersetzen,
+    die Klammern selbst bleiben stehen – Unterabfragen sind damit unsichtbar."""
+    out, tiefe = [], 0
+    for c in text:
+        if c == "(":
+            tiefe += 1
+            out.append(c if tiefe == 1 else " ")
+        elif c == ")":
+            out.append(c if tiefe == 1 else " ")
+            tiefe = max(0, tiefe - 1)
+        else:
+            out.append(" " if tiefe else c)
+    return "".join(out)
+
+
+# Wo die FROM-Liste endet (oberste Ebene, Klammerinhalte sind vorher geleert)
+_VON_ENDE = re.compile(
+    r"\b(?:WHERE|GROUP\s+BY|ORDER\s+BY|HAVING|CONNECT\s+BY|START\s+WITH|WITH\s+(?:CHECK|READ)|"
+    r"FETCH|LIMIT|OFFSET|WINDOW|QUALIFY|MODEL|FOR\s+UPDATE)\b", re.I)
+# Mengenoperatoren: die Herkunft gilt dann nur fuer EINEN Zweig – also keine
+_MENGE = re.compile(r"\b(?:UNION|INTERSECT|MINUS|EXCEPT)\b", re.I)
+_JOIN_TRENNER = re.compile(r",|\bJOIN\b", re.I)
+_VOR_TABELLE = re.compile(r"^\s*(?:FROM|LATERAL|ONLY)\b", re.I)
+_NACH_TABELLE = re.compile(r"\b(?:ON|USING|INNER|LEFT|RIGHT|FULL|CROSS|NATURAL|OUTER|PARTITION|"
+                           r"SAMPLE|TABLESAMPLE|WITH|AS\s+OF|VERSIONS)\b", re.I)
+
+
+def sicht_herkunft(definition: str) -> dict:
+    """Woher die Spalten einer Sicht stammen – fuer die Join-Pruefung.
+
+    Rueckgabe ``{"spalten": {name_klein: [tabelle, spalte]}, "stern": [tabelle, …],
+    "tabellen": [tabelle, …]}`` – ``tabellen`` ist die FROM-Liste der Auswahl
+    (auch durch Komma getrennt; ``_VON_JOIN`` sieht nur die erste davon).
+    Aufgenommen wird NUR, was eindeutig ist: ein blosser Spaltenverweis
+    (``a.X``, ``a.X AS Y``, ``X`` bei genau einer Tabelle) auf eine Tabelle der
+    FROM-Liste. Ausdruecke (``NVL(a.x, 0) x``), Unterabfragen, CTEs und
+    Mengenoperatoren (UNION …) liefern nichts – eine falsch zugeordnete Herkunft
+    wuerde einen erfundenen Join als belegt durchwinken, und das ist teurer als
+    ein ehrliches "ungeprueft". ``*`` bzw. ``t.*`` steht unter ``stern``:
+    jede Spalte gleichen Namens kommt aus dieser Tabelle.
+    """
+    leer = {"spalten": {}, "stern": [], "tabellen": []}
+    roh = _ohne_kommentare(definition or "").strip()
+    a = _erste_auswahl(roh)
+    if a is None:
+        return leer
+    t, liste, von = a
+    # WITH vor der Auswahl: FROM-Namen koennen CTEs sein, keine Tabellen
+    if re.match(r"[\s(]*WITH\b", roh, re.I):
+        return leer
+    flach = _klammern_leeren(von)
+    if _MENGE.search(flach):
+        return leer
+    e = _VON_ENDE.search(flach)
+    flach = flach[:e.start()] if e else flach
+    # alias/name (klein) -> Tabelle
+    quellen: dict[str, str] = {}
+    tabellen: list[str] = []
+    for stueck in _JOIN_TRENNER.split(flach):
+        stueck = _VOR_TABELLE.sub(" ", stueck)
+        n = _NACH_TABELLE.search(stueck)
+        stueck = (stueck[:n.start()] if n else stueck).strip()
+        if not stueck:
+            continue
+        if stueck.startswith("("):
+            tabellen.append("")   # Unterabfrage: zaehlt, ist aber keine Tabelle
+            continue
+        m = re.fullmatch(rf"({_ID})(?:\s+(?:AS\s+)?({_ID1}))?", stueck, re.I)
+        if not m:
+            tabellen.append("")
+            continue
+        tab = bezeichner(m.group(1))
+        tabellen.append(tab)
+        quellen.setdefault(tab.lower(), tab)
+        quellen.setdefault(tab.rsplit(".", 1)[-1].lower(), tab)
+        if m.group(2):
+            al = bezeichner(m.group(2)).lower()
+            if al.upper() not in _KEIN_ALIAS:
+                quellen[al] = tab
+    if not tabellen:
+        return leer
+    einzige = tabellen[0] if len(tabellen) == 1 and tabellen[0] else None
+    erg = {"spalten": {}, "stern": [], "tabellen": [x for x in tabellen if x]}
     for teil in _teile_oben(liste):
+        teil = teil.strip()
+        sm = re.fullmatch(rf"(?:({_ID})\s*\.\s*)?\*", teil)
+        if sm:
+            if sm.group(1):
+                q = quellen.get(bezeichner(sm.group(1)).lower())
+                if q:
+                    erg["stern"].append(q)
+            elif einzige:
+                erg["stern"].append(einzige)
+            continue
+        name = _alias(teil)
+        if not name:
+            continue
+        ausdruck = re.sub(rf"\s+(?:AS\s+)?{_ID1}\s*$", "", teil, flags=re.I) \
+            if not re.fullmatch(_ID, teil) else teil
+        if not re.fullmatch(_ID, ausdruck.strip()):
+            continue
+        teile = bezeichner(ausdruck).split(".")
+        if len(teile) == 1:
+            if einzige:
+                erg["spalten"][name.lower()] = [einzige, teile[0]]
+            continue
+        q = quellen.get(".".join(teile[:-1]).lower())
+        if q:
+            erg["spalten"][name.lower()] = [q, teile[-1]]
+    return erg
+
+
+def sicht_spalten(definition: str) -> list[str]:
+    """Spaltennamen einer Sicht aus ihrer SELECT-Liste – NUR wenn sie vollstaendig
+    bestimmbar sind (``*`` oder ein Ausdruck ohne Alias -> ``[]``).
+
+    Eine halbe Liste waere schlimmer als keine: die Pruefung des erzeugten SQL
+    ueberspringt Sichten ohne Spaltenliste, wiese aber mit einer unvollstaendigen
+    gueltige Spalten als unbekannt ab. Massgeblich ist die ERSTE Auswahl
+    (bei UNION bestimmt sie die Namen; bei WITH die nach den CTEs).
+    """
+    a = _erste_auswahl(definition)
+    if a is None:
+        return []
+    namen = []
+    for teil in _teile_oben(a[1]):
         # ``*`` und ``t.*`` haben keinen Alias -> die Liste ist nicht bestimmbar
         # (eine eigene Abfrage dafuer war messbar wirkungslos, Gegenprobe).
         name = _alias(teil)
@@ -742,9 +876,12 @@ def yaml_objekt(d, stat: Statistik) -> list[dict]:
             namen = [str(c.get("name")) for c in d["columns"] if isinstance(c, dict) and c.get("name")]
         else:
             namen = sicht_spalten(definition)
+        herkunft = sicht_herkunft(definition)
+        nutzt = sorted((set(nutzt) | set(herkunft.pop("tabellen"))) - {voll})
         stat["struktur"] += 1
         return [{"art": "sicht", "name": voll, "kommentar": kommentar, "nutzt": nutzt, "pk": [], "fks": [],
-                 "spalten": [{"name": n, "typ": "", "pk": False, "null": True, "kommentar": ""} for n in namen]}]
+                 "spalten": [{"name": n, "typ": "", "pk": False, "null": True, "kommentar": ""} for n in namen],
+                 "herkunft": herkunft}]
     # SEQUENCE, PACKAGE, FUNCTION, PROCEDURE, TRIGGER …: fuer Joins ohne Belang
     stat["objekt_uebersprungen"] = stat.get("objekt_uebersprungen", 0) + 1
     return []

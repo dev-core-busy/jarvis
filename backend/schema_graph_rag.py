@@ -36,6 +36,7 @@ import difflib
 import json
 import re
 import sqlite3
+import time
 from collections import deque
 
 from backend import schema_graph_store as store
@@ -641,8 +642,15 @@ def _joins_pruefen(con, toks: list, aliase: dict, tabellen: dict, erg: dict) -> 
     gruen. Ein erfundener Join ist im SQL nicht von einem richtigen zu
     unterscheiden – also wird er BENANNT. Kein Fehler: bei 169 deklarierten
     Fremdschluesseln auf 4033 Tabellen kann ein unbelegter Join fachlich
-    richtig sein. Sichten haben keine Spalten-Beziehungen – Joins mit ihnen
-    sind nicht pruefbar und werden als solche gezaehlt.
+    richtig sein.
+
+    Sichten haben selbst keine Beziehungen. Eine Sichtspalte wird deshalb auf
+    ihre HERKUNFT zurueckgefuehrt (``herkunft``: ``v.X`` stammt aus ``t.X``,
+    auch ueber mehrere Sichten) und der Join an den Basistabellen geprueft –
+    auf ECHT liegen 2215 Sichten neben 4033 Tabellen, und das Modell greift
+    bevorzugt zu den Sichten. Ist die Herkunft nicht eindeutig bekannt
+    (Ausdruck, UNION, Unterabfrage), zaehlt der Join als ungeprueft – eine
+    geratene Herkunft wuerde einen erfundenen Join als belegt durchwinken.
     """
     kanten_cache: dict[tuple[int, int], list] = {}
     art_cache: dict[int, str] = {}
@@ -657,6 +665,48 @@ def _joins_pruefen(con, toks: list, aliase: dict, tabellen: dict, erg: dict) -> 
             except ValueError:
                 pk_cache[oid] = set()
         return art_cache[oid]
+
+    herkunft_cache: dict[int, list] = {}
+    spalten_von: dict[int, set] = {}
+
+    def hat_spalte(oid, c) -> bool | None:
+        if oid not in spalten_von:
+            spalten_von[oid] = {r[0] for r in con.execute("SELECT name_l FROM spalte WHERE objekt_id=?", (oid,))}
+        return (c in spalten_von[oid]) if spalten_von[oid] else None
+
+    def basis(oid, c, tiefe=0):
+        """(Tabellen-ID, Spalte) hinter ``oid.c`` oder None (nicht eindeutig).
+
+        Die Tiefengrenze ist zugleich der Schutz gegen Kreise (Sicht A auf B
+        auf A) – ein zweiter dafuer waere nicht messbar (Register)."""
+        a = art(oid)
+        if a == "tabelle":
+            return oid, c
+        if a != "sicht" or tiefe >= 5:
+            return None
+        if oid not in herkunft_cache:
+            try:
+                herkunft_cache[oid] = con.execute(
+                    "SELECT spalte_l, basis_id, basis_spalte_l FROM herkunft WHERE sicht_id=?", (oid,)).fetchall()
+            except sqlite3.OperationalError:
+                herkunft_cache[oid] = []   # Graph vor Fassung 4: keine Herkunft
+        zeilen = herkunft_cache[oid]
+        genau = [(b, bs) for sp, b, bs in zeilen if sp == c]
+        if len(genau) == 1:
+            return basis(genau[0][0], genau[0][1], tiefe + 1)
+        if genau:
+            return None
+        stern = [b for sp, b, _bs in zeilen if sp == "*"]
+        if len(stern) > 1:
+            # SELECT a.*, b.* – die Spalte muss genau EINE der Tabellen haben
+            stern = [b for b in stern if hat_spalte(b, c)]
+        if len(stern) != 1 or hat_spalte(stern[0], c) is False:
+            return None
+        return basis(stern[0], c, tiefe + 1)
+
+    def name_von(oid) -> str:
+        r = con.execute("SELECT schema, name FROM objekt WHERE id=?", (oid,)).fetchone()
+        return (f"{r[0]}.{r[1]}" if r and r[0] else (r[1] if r else "?"))
 
     def belegt(o1, c1, o2, c2) -> bool:
         if c1 == c2 and (c1 in pk_cache.get(o1, set()) or c2 in pk_cache.get(o2, set())):
@@ -688,14 +738,22 @@ def _joins_pruefen(con, toks: list, aliase: dict, tabellen: dict, erg: dict) -> 
         gesehen.add(bed.lower())
         if o1 == o2 and c1 == c2:
             continue
-        if art(o1) != "tabelle" or art(o2) != "tabelle":
+        b1, b2 = basis(o1, c1), basis(o2, c2)
+        if b1 is None or b2 is None:
             erg["joins_ungeprueft"] += 1
             continue
-        if belegt(o1, c1, o2, c2):
+        (p1, d1), (p2, d2) = b1, b2
+        if (p1 == p2 and d1 == d2) or belegt(p1, d1, p2, d2):
+            # gleiche Basisspalte: Sicht gegen ihre eigene Tabelle verbunden
             erg["joins_belegt"] += 1
         else:
-            erg["unbelegte_joins"].append({"bedingung": bed, "von": tabellen.get(o1, ""), "nach": tabellen.get(o2, ""),
-                                           "von_id": o1, "nach_id": o2})
+            von, nach = tabellen.get(o1, ""), tabellen.get(o2, "")
+            if p1 != o1:
+                von += f" (Sicht auf {name_von(p1)}.{d1})"
+            if p2 != o2:
+                nach += f" (Sicht auf {name_von(p2)}.{d2})"
+            erg["unbelegte_joins"].append({"bedingung": bed, "von": von, "nach": nach,
+                                           "von_id": p1, "nach_id": p2})
 
 
 def joins_hinweis(con, unbelegt: list, erlaubt=None) -> str:
@@ -725,17 +783,32 @@ def joins_hinweis(con, unbelegt: list, erlaubt=None) -> str:
 
 # ─── Modellaufrufe ──────────────────────────────────────────────────────────
 
-async def _modell(auftrag: str, system: str) -> str:
+async def _modell(auftrag: str, system: str, denken: bool = True) -> str:
     """EIN Aufruf ohne Werkzeuge ueber das Profil des laufenden Agenten
-    (``provider_fuer_lauf`` – der eine Weg fuer Werkzeuge mit eigenem Modell)."""
+    (``provider_fuer_lauf`` – der eine Weg fuer Werkzeuge mit eigenem Modell).
+
+    ``denken=False`` schaltet das Denken ab, wo der Anbieter es zulaesst
+    (``denken_aus``: vLLM mit Qwen3-Vorlage uebergeht ``reasoning_effort``,
+    Register). Der Anbieter entsteht je Aufruf neu – das Setzen bleibt also
+    bei DIESEM Aufruf und erreicht keinen Chat."""
     from google.genai import types  # noqa: PLC0415
     from backend import llm  # noqa: PLC0415
     provider, modell = llm.provider_fuer_lauf(prompt_tool_calling=False)
+    if not denken and isinstance(provider, llm.OpenAICompatibleProvider):
+        provider.denken_aus = True
     resp = await provider.generate_response(
         model=modell, system_prompt=system,
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=auftrag)])],
         tools=[], reasoning_effort="low")
     return "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None))
+
+
+async def _modell_ohne_denken(auftrag: str, system: str) -> str:
+    """Fuer die BEGRIFFSRUNDE: eine Wortliste nach JSON, kein Abwaegen.
+    Auf DEV am echten Bestand gemessen (2026-11-08, je 9 Laeufe): Median
+    13,8 s mit Denken, 0,6 s ohne, alle Antworten gueltig. Die SQL-Runde
+    behaelt das Denken – dort wird abgewogen (Joins, Spaltenwahl)."""
+    return await _modell(auftrag, system, denken=False)
 
 
 SYSTEM_BEGRIFFE = (
@@ -766,13 +839,46 @@ SYSTEM_SQL = (
 
 
 def _json_aus(text: str) -> dict:
-    m = re.search(r"\{.*\}", text or "", re.S)
-    if not m:
-        return {}
-    try:
-        return json.loads(m.group(0))
-    except ValueError:
-        return {}
+    """Das ERSTE JSON-Objekt im Text (auch in einem Codeblock, auch mit Text
+    oder einem zweiten Objekt dahinter). Gierig ``\\{.*\\}`` las vom ersten
+    ``{`` bis zum LETZTEN ``}`` – ein Satz mit Klammern hinter dem Objekt
+    machte die ganze Antwort unlesbar."""
+    t = text or ""
+    dek = json.JSONDecoder()
+    i = t.find("{")
+    while i != -1:
+        try:
+            obj, _ende = dek.raw_decode(t, i)
+            if isinstance(obj, dict):
+                return obj
+        except ValueError:
+            pass
+        i = t.find("{", i + 1)
+    return {}
+
+
+def _begriffe_aus(roh: str) -> tuple[list[str], str]:
+    """(Begriffe, Grund bei leerer Liste). Angenommen werden
+    ``{"begriffe": [..]}``, ``{"begriffe": "a, b"}`` und eine nackte Liste –
+    das Modell liefert dieselbe Sache mal so, mal so (Register: Typ pruefen,
+    nicht "nicht leer")."""
+    text = (roh or "").strip()
+    if not text:
+        return [], "leere Modellantwort"
+    wert = _json_aus(text).get("begriffe")
+    if wert is None:
+        m = re.search(r"\[[^\[\]]*\]", text)
+        if m:
+            try:
+                wert = json.loads(m.group(0))
+            except ValueError:
+                wert = None
+    if isinstance(wert, str):
+        wert = re.split(r"[,;\n]", wert)
+    if not isinstance(wert, list):
+        return [], "kein Feld 'begriffe' in der Antwort: " + " ".join(text.split())[:160]
+    begr = [str(x).strip() for x in wert if isinstance(x, (str, int)) and str(x).strip()][:25]
+    return begr, ("" if begr else "Liste 'begriffe' leer")
 
 
 def antwort_zerlegen(text: str) -> dict:
@@ -814,8 +920,12 @@ def _bereiche_fuer_prompt(con, erlaubt) -> list[str]:
 
 
 async def begriffe_ermitteln(con, frage: str, modell=None, erlaubt=None,
-                             hauswissen: str = "") -> tuple[list[str], str]:
-    """(Begriffe, Quelle). Quelle 'modell' oder 'frage' (Rueckfall)."""
+                             hauswissen: str = "", grund: list | None = None) -> tuple[list[str], str]:
+    """(Begriffe, Quelle). Quelle 'modell' oder 'frage' (Rueckfall).
+
+    ``grund``: Liste, in die beim Rueckfall die URSACHE kommt (Ausnahme oder
+    Form der Antwort). Bis 2026-11-08 fiel die Runde still zurueck – im
+    Durchstich zweimal, und niemand konnte sagen, warum."""
     modell = modell or _modell
     bereiche = await asyncio.to_thread(_bereiche_fuer_prompt, con, erlaubt)
     auftrag = f"Frage: {frage}\n"
@@ -826,13 +936,14 @@ async def begriffe_ermitteln(con, frage: str, modell=None, erlaubt=None,
     eigene = woerter(frage)
     try:
         roh = await modell(auftrag, SYSTEM_BEGRIFFE)
-        liste = _json_aus(roh).get("begriffe")
-        if isinstance(liste, list):
-            begr = [str(x).strip() for x in liste if str(x).strip()][:25]
-            if begr:
-                return list(dict.fromkeys(eigene + begr)), "modell"
-    except Exception:  # noqa: BLE001 – Rueckfall auf die Frage selbst
-        pass
+        begr, warum = _begriffe_aus(roh)
+        if begr:
+            return list(dict.fromkeys(eigene + begr)), "modell"
+    except Exception as e:  # noqa: BLE001 – Rueckfall auf die Frage selbst, mit Grund
+        warum = f"{type(e).__name__}: {e}"[:200]
+    print(f"[SchemaGraph] Begriffsrunde ohne Ergebnis, Rueckfall auf die Frage: {warum}", flush=True)
+    if grund is not None:
+        grund.append(warum)
     return eigene, "frage"
 
 
@@ -851,11 +962,23 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
     if con is None:
         return {"fehler": "Es gibt noch keinen Schema-Graphen – zuerst indizieren (schema_index)."}
     modell = modell or _modell
+    # Zeiten je Phase (Sekunden): eine Frage dauert im Betrieb 23 bis 70 s –
+    # ohne Aufteilung ist nicht zu sagen, ob Graph oder Modell sie kostet.
+    zeiten = {"begriffe": 0.0, "graph": 0.0, "modell": []}
+    t_start = time.monotonic()
+    begriffe_grund: list[str] = []
     try:
         # Hauswissen zweimal: zur FRAGE (damit die Suchbegriffe die Fachsprache
         # des Hauses treffen) und danach zu Frage + Begriffen (fuer die SQL-Runde).
         hw_frage = await asyncio.to_thread(dokument_suche, con, woerter(frage), erlaubt, 3, 3000)
-        begriffe, quelle = await begriffe_ermitteln(con, frage, modell, erlaubt, hauswissen_text(hw_frage))
+        t0 = time.monotonic()
+        # Eigenes Modell nur fuer die Begriffsrunde (ohne Denken) – eine
+        # uebergebene Attrappe gilt fuer BEIDE Runden.
+        modell_begriffe = _modell_ohne_denken if modell is _modell else modell
+        begriffe, quelle = await begriffe_ermitteln(con, frage, modell_begriffe, erlaubt, hauswissen_text(hw_frage),
+                                                    grund=begriffe_grund)
+        zeiten["begriffe"] = round(time.monotonic() - t0, 2)
+        t0 = time.monotonic()
         hw = await asyncio.to_thread(dokument_suche, con, woerter(frage) + begriffe, erlaubt)
         for a in hw_frage:
             if all(a["id"] != b["id"] for b in hw) and len(hw) < MAX_HAUSWISSEN + 1:
@@ -874,6 +997,7 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
         wahl = await asyncio.to_thread(auswahl, con, treffer, max_tabellen, erlaubt)
         ids = wahl["ids"]
         kontext, tabs = await asyncio.to_thread(kontext_bauen, con, ids, begriffe, max_spalten, erlaubt)
+        zeiten["graph"] = round(time.monotonic() - t0, 2)
         system = SYSTEM_SQL.format(dialekt=dialekt)
         verlauf = []
         auftrag = f"FRAGE: {frage}{hw_text}\n\nSCHEMA-AUSSCHNITT:\n{kontext}"
@@ -886,7 +1010,9 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
         gueltig_vor_join = None
         reparaturen = 0
         while True:
+            t0 = time.monotonic()
             roh = await modell(auftrag, system)
+            zeiten["modell"].append(round(time.monotonic() - t0, 2))
             a = antwort_zerlegen(roh)
             verlauf.append({"runde": len(verlauf) + 1, "brauche": a["brauche"], "sql": a["sql"][:2000],
                             "befunde": []})
@@ -965,7 +1091,9 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
         # ihrem Vorbehalt.
         if gueltig_vor_join is not None and (ergebnis is None or not ergebnis["pruefung"]["ok"]):
             ergebnis = gueltig_vor_join
+        zeiten["gesamt"] = round(time.monotonic() - t_start, 2)
         return {**ergebnis, "begriffe": begriffe, "begriffe_quelle": quelle,
+                "begriffe_grund": "; ".join(begriffe_grund), "zeiten": zeiten,
                 "hauswissen": [{"titel": a["titel"], "nr": a["nr"]} for a in hw],
                 "tabellen_kontext": [t["name"] for t in tabs.values()],
                 "verbinder": [tabs[i]["name"] for i in wahl["verbinder"] if i in tabs],

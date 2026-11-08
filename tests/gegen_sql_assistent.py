@@ -233,6 +233,14 @@ PROBEN = [
      "    function esc(s) {\n        return String(s == null ? '' : s).replace(/[&<>\"]/g,",
      "    function esc(s) {\n        return String(s == null ? '' : s); String('').replace(/[&<>\"]/g,"),
     ("chat.js schickt die Auswahl nicht", CJ, W_ZUG, "            if (_sq.length) msg.sql_schemata = _sq;", ""),
+    # Ordnerrechte (Pentest 2026-11-08: Zwischenordner auf ECHT 0755)
+    ("Zwischenordner wieder per mkdir(parents=True)", FD, W_ZUG, "        _ordner_kette(basis, ziel.parent)\n",
+     "        ziel.parent.mkdir(mode=DIR_MODUS, parents=True, exist_ok=True)\n"),
+    ("Bestand: zu offene Rechte bleiben", FD, W_ZUG, "                if stat.S_IMODE(st.st_mode) & ~soll:",
+     "                if False:"),
+    ("Bestand: Heilung folgt Verknuepfungen", FD, W_ZUG,
+     "                if stat.S_ISLNK(st.st_mode) or st.st_uid != ich", "                if st.st_uid != ich"),
+    ("Altbestand-Ordner nicht nachgezogen", FD, W_ZUG, "            os.chmod(p, DIR_MODUS)   # auch einen Altbestand nachziehen\n", "            pass\n"),
 ]
 
 KOPIEREN = ["backend", "frontend", "tests", "skills"]

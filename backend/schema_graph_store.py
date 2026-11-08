@@ -193,6 +193,8 @@ _GRAPH_SCHEMA = """
         pk INTEGER, nullable INTEGER, kommentar TEXT);
     CREATE TABLE kante(
         von INTEGER, nach INTEGER, art TEXT, von_spalten TEXT, nach_spalten TEXT);
+    CREATE TABLE herkunft(
+        sicht_id INTEGER, spalte_l TEXT, basis_id INTEGER, basis_spalte_l TEXT);
     CREATE TABLE dokument(
         id INTEGER PRIMARY KEY, quelle TEXT, datei TEXT, titel TEXT, nr INTEGER, text TEXT);
     CREATE TABLE bereich(id INTEGER PRIMARY KEY, name TEXT, groesse INTEGER);
@@ -203,6 +205,7 @@ _GRAPH_INDEX = """
     CREATE INDEX spalte_obj ON spalte(objekt_id);
     CREATE INDEX spalte_name ON spalte(name_l);
     CREATE INDEX kante_von ON kante(von);
+    CREATE INDEX herkunft_sicht ON herkunft(sicht_id, spalte_l);
     CREATE INDEX kante_nach ON kante(nach);
     CREATE INDEX objekt_bereich ON objekt(bereich);
     CREATE INDEX objekt_quelle ON objekt(quelle);
@@ -252,6 +255,36 @@ class _Aufloeser:
         return None
 
 
+def _herkunft_aufloesen(oid: int, hk: dict, aufgeloest: dict, z: Counter) -> list[tuple]:
+    """Herkunft der Sichtspalten (Parser: Tabellenname wie geschrieben) ->
+    Zeilen ``(sicht_id, spalte_l, basis_id, basis_spalte_l)``; ``*`` = jede
+    Spalte gleichen Namens.
+
+    Jede Herkunftstabelle steht in ``nutzt`` (der Parser nimmt die FROM-Liste
+    dorthin mit) und ist damit schon aufgeloest – ein zweites Nachschlagen
+    zaehlte denselben Verweis doppelt als "mehrdeutig"/"unbekannt".
+    """
+    def ziel(t: str) -> int | None:
+        return aufgeloest.get(schluessel(t))
+
+    zeilen = []
+    if not isinstance(hk, dict):
+        return zeilen
+    for name, paar in (hk.get("spalten") or {}).items():
+        if not (isinstance(paar, list) and len(paar) == 2 and all(isinstance(x, str) for x in paar)):
+            continue
+        zid = ziel(paar[0])
+        if zid is not None and zid != oid:
+            zeilen.append((oid, str(name).lower(), zid, paar[1].lower()))
+            z["herkunft_spalten"] += 1
+    for t in hk.get("stern") or []:
+        zid = ziel(t) if isinstance(t, str) else None
+        if zid is not None and zid != oid:
+            zeilen.append((oid, "*", zid, "*"))
+            z["herkunft_stern"] += 1
+    return zeilen
+
+
 def _schema_und_name(schl_original: str) -> tuple[str, str]:
     teile = schl_original.split(".")
     if len(teile) == 1:
@@ -292,7 +325,7 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
     auf = _Aufloeser()
     # Spalten je Objekt, um Kommentare/PKs aus anderen Dateien nachzutragen.
     fks_roh: list[tuple[int, list, str, list]] = []
-    sicht_roh: list[tuple[int, list]] = []
+    sicht_roh: list[tuple[int, list, dict]] = []
     nach_alter: list[tuple[str, dict]] = []
     kommentare: list[dict] = []
 
@@ -336,8 +369,8 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
             z["spalten"] += len(f.get("spalten") or [])
             for fk in f.get("fks") or []:
                 fks_roh.append((oid, fk.get("von") or [], fk.get("ziel") or "", fk.get("nach") or []))
-            if f.get("nutzt"):
-                sicht_roh.append((oid, f["nutzt"]))
+            if f.get("nutzt") or f.get("herkunft"):
+                sicht_roh.append((oid, f.get("nutzt") or [], f.get("herkunft") or {}))
         elif art == "dokument":
             # Begleitdokument: je Abschnitt eine Zeile, Sichtbarkeit am Schema
             q = quelle_von(datei) or ""
@@ -399,12 +432,17 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
         for s in von:
             fk_spalten.add((oid, s.lower()))
         z["fk"] += 1
-    for oid, nutzt in sicht_roh:
+    herkunft_zeilen = []
+    for oid, nutzt, hk in sicht_roh:
+        aufgeloest: dict[str, int | None] = {}
         for t in nutzt:
             zid = auf.finde(t, auf.schema_von.get(oid, ""))
+            aufgeloest[schluessel(t)] = zid
             if zid is not None and zid != oid:
                 kanten.append((oid, zid, "sicht", "[]", "[]"))
                 z["sicht_kanten"] += 1
+        herkunft_zeilen.extend(_herkunft_aufloesen(oid, hk, aufgeloest, z))
+    g.executemany("INSERT INTO herkunft VALUES (?,?,?,?)", herkunft_zeilen)
 
     if fk_ableiten:
         melde("Beziehungen aus Spaltennamen ableiten")

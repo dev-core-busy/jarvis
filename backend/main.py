@@ -17582,7 +17582,10 @@ async def sql_frage(request: Request, user: str = Depends(require_schema_access)
         "unverbunden": erg.get("unverbunden") or [], "runden": erg.get("runden") or 1,
         "hauswissen": [{"titel": str(h.get("titel") or ""), "nr": int(h.get("nr") or 0)}
                        for h in erg.get("hauswissen") or []],
-        "begriffe_quelle": erg.get("begriffe_quelle") or ""})
+        "begriffe_quelle": erg.get("begriffe_quelle") or "",
+        # Warum die Begriffsrunde zurueckfiel (leer = sie fiel nicht zurueck)
+        "begriffe_grund": erg.get("begriffe_grund") or "",
+        "zeiten": erg.get("zeiten") or {}})
 
 
 def _sql_mit_graph(fn):
@@ -17694,6 +17697,12 @@ async def startup_sql_fassung():
             if not _skill_active(_SCHEMA_SKILL):
                 return
             cfg = await asyncio.to_thread(_schema_cfg)
+            from backend import schema_graph_dateien as _sgf
+            for s in cfg["schemata"]:
+                n = await asyncio.to_thread(_sgf.rechte_heilen, s["id"])
+                if n:
+                    print(f"[SchemaGraph] Rechte von {n} Eintraegen in „{s['name']}“ auf 0750/0640 gezogen",
+                          flush=True)
             if cfg["schemata"] and await asyncio.to_thread(_sql_fassung_veraltet):
                 antwort = await asyncio.to_thread(_sql_erfassen_anstossen, cfg)
                 print(f"[SchemaGraph] Neue Parser-Fassung – Erfassung {antwort}", flush=True)
@@ -17810,6 +17819,7 @@ async def sql_admin_upload(sid: str, files: list[UploadFile] = File(...), pfade:
         basis = await asyncio.to_thread(_sgf.ordner_anlegen, sid)
     except _sgf.DateiFehler as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+    await asyncio.to_thread(_sgf.rechte_heilen, sid)
     gespeichert, abgelehnt = [], []
     for i, f in enumerate(files or []):
         rel = rel_liste[i] if i < len(rel_liste) and isinstance(rel_liste[i], str) and rel_liste[i] else f.filename

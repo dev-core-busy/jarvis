@@ -500,6 +500,28 @@ check("Dauerhaft schreibend: nicht bestanden", e3.get("pruefung", {}).get("ok") 
 check("Reparaturen gedeckelt", len(m3.auftraege) == 1 + 1 + R.MAX_REPARATUR, len(m3.auftraege))
 check("Rueckfall ohne Begriffsmodell", e4.get("begriffe_quelle") == "frage" and e4.get("pruefung", {}).get("ok"),
       (e4.get("begriffe_quelle"), e4.get("fehler")))
+check("Rueckfall nennt den GRUND (Ausnahme), nicht still", "Modell weg" in e4.get("begriffe_grund", ""),
+      e4.get("begriffe_grund"))
+check("Ohne Rueckfall kein Grund", e1.get("begriffe_quelle") == "modell" and e1.get("begriffe_grund") == "",
+      (e1.get("begriffe_quelle"), e1.get("begriffe_grund")))
+_z = e1.get("zeiten") or {}
+check("Zeiten je Phase: Begriffe, Graph, je Modellrunde, gesamt",
+      set(_z) == {"begriffe", "graph", "modell", "gesamt"} and len(_z.get("modell") or []) == e1.get("runden")
+      and all(isinstance(x, float) and x >= 0 for x in [_z.get("begriffe", -1), _z.get("graph", -1),
+                                                         _z.get("gesamt", -1)] + list(_z.get("modell") or [])), _z)
+# Antwortformen der Begriffsrunde: dieselbe Sache kommt mal so, mal so
+for _roh, _soll in (
+        ('{"begriffe": ["a1", "b2"]}', ["a1", "b2"]),
+        ('```json\n{"begriffe": ["a1"]}\n```\nHinweis: {x} ist kein JSON', ["a1"]),   # Klammern dahinter
+        ('{"begriffe": "kunde, auftrag; land"}', ["kunde", "auftrag", "land"]),          # Zeichenkette
+        ('["kunde", "land"]', ["kunde", "land"]),                                         # nackte Liste
+        # Zeichenkette statt Liste: sonst faende der Listen-Rueckfall ["z9"] auch
+        # ohne die Objektsuche – die Probe haette zwei Wege und mass keinen (Register)
+        ('Text {kaputt} und dann {"begriffe": "z9"}', ["z9"])):                          # erstes GUELTIGES Objekt
+    check(f"Begriffe aus {_roh[:34]!r}", R._begriffe_aus(_roh)[0] == _soll, R._begriffe_aus(_roh))
+for _roh, _grund in (("", "leer"), ('{"x": 1}', "kein Feld"), ('{"begriffe": []}', "leer")):
+    check(f"Kein Begriff aus {_roh!r}: Grund '{_grund}'", R._begriffe_aus(_roh)[0] == []
+          and _grund in R._begriffe_aus(_roh)[1], R._begriffe_aus(_roh))
 
 def E_DOK():
     from backend import schema_graph_einstellungen as _E  # noqa: PLC0415
@@ -602,6 +624,17 @@ object_type: VIEW
 schema: CTS
 definition: SELECT * FROM A_KDKND_KUNDE
 """, encoding="utf-8")
+# Sicht auf Sicht (Herkunft ueber zwei Stufen) und Sicht mit zwei Sternen
+(Y / "objekte" / "CTS_VIEW_V_KUNDE_LAND.yaml").write_text("""name: V_KUNDE_LAND
+object_type: VIEW
+schema: CTS
+definition: SELECT u.KUNDE AS KNAME, u.ALLLND_LAND FROM V_KUNDE_UMSATZ u
+""", encoding="utf-8")
+(Y / "objekte" / "CTS_VIEW_V_ZWEI.yaml").write_text("""name: V_ZWEI
+object_type: VIEW
+schema: CTS
+definition: SELECT k.*, p.* FROM A_KDKND_KUNDE k, L_LGLOG_PROTOKOLL p
+""", encoding="utf-8")
 (Y / "objekte" / "CTS_SEQUENCE_X_SEQ.yaml").write_text("name: X_SEQ\nobject_type: SEQUENCE\nschema: CTS\nmin_value: 1\n",
                                                      encoding="utf-8")
 (Y / "CTS_SCHEMA_INDEX.yaml").write_text("schema: CTS\nindex_version: '1.0'\ntables:\n- {name: A_KDKND_KUNDE, file: x.yaml}\n",
@@ -643,6 +676,38 @@ for definition, soll in (
         ("SELECT a, a FROM t", []),                                               # doppelt
         ("SELECT f(x, ' FROM ') AS g FROM t", ["g"])):
     check(f"sicht_spalten: {definition[:42]!r}", P.sicht_spalten(definition) == soll, P.sicht_spalten(definition))
+# Herkunft der Sichtspalten: NUR eindeutige Verweise, sonst nichts
+for definition, soll in (
+        ("SELECT a.X, a.Y AS Z, b.W FROM t1 a, s.t2 b WHERE a.k = b.k",
+         {"spalten": {"x": ["t1", "X"], "z": ["t1", "Y"], "w": ["s.t2", "W"]}, "stern": []}),
+        ("SELECT X, Y Z FROM s.t1", {"spalten": {"x": ["s.t1", "X"], "z": ["s.t1", "Y"]}, "stern": []}),
+        ("SELECT t1.X FROM s.t1", {"spalten": {"x": ["s.t1", "X"]}, "stern": []}),
+        ("SELECT * FROM s.t1", {"spalten": {}, "stern": ["s.t1"]}),
+        ("SELECT a.*, b.ID AS BID FROM t1 a JOIN t2 b ON a.k = b.k",
+         {"spalten": {"bid": ["t2", "ID"]}, "stern": ["t1"]}),
+        ("SELECT X FROM t1 a LEFT OUTER JOIN t2 b ON a.k = b.k", {"spalten": {}, "stern": []}),   # zwei Tabellen
+        ("SELECT NVL(a.X, 0) X FROM t1 a", {"spalten": {}, "stern": []}),                        # Ausdruck
+        ("SELECT q.X FROM (SELECT X FROM t1) q", {"spalten": {}, "stern": []}),                  # Unterabfrage
+        ("SELECT a.X FROM t1 a WHERE a.k = 1 UNION SELECT b.X FROM t2 b", {"spalten": {}, "stern": []}),  # Mengenop.
+        ("SELECT X FROM (SELECT X FROM t1) q, t2", {"spalten": {}, "stern": []}),               # Unterabfrage + Tabelle
+        ("WITH c AS (SELECT X FROM t1) SELECT c.X FROM c", {"spalten": {}, "stern": []}),        # CTE
+        ("SELECT T.ID FROM T_X T WHERE (T.M = SYS_CONTEXT('c', 'm')) WITH CHECK OPTION",
+         {"spalten": {"id": ["T_X", "ID"]}, "stern": []}),
+        ("SELECT a.X FROM t1 a WHERE a.Y IN (SELECT b.Y FROM t2 b)", {"spalten": {"x": ["t1", "X"]}, "stern": []})):
+    _hk = {k: v for k, v in P.sicht_herkunft(definition).items() if k != "tabellen"}
+    check(f"sicht_herkunft: {definition[:46]!r}", _hk == soll, _hk)
+check("FROM-Liste mit Komma: alle Tabellen (fuer die Sicht-Kanten)",
+      P.sicht_herkunft("SELECT r.A FROM s.t1 r,\n t2 a, (SELECT 1 FROM t3) q WHERE a.k = r.k")["tabellen"] == ["s.t1", "t2"],
+      P.sicht_herkunft("SELECT r.A FROM s.t1 r,\n t2 a, (SELECT 1 FROM t3) q WHERE a.k = r.k"))
+f_ddl = P.zerlege("CREATE VIEW v AS SELECT r.A FROM t1 r, t2 a WHERE a.k = r.k")
+check("DDL-Sicht: Komma-Tabelle in 'nutzt'", f_ddl and f_ddl.get("nutzt") == ["t1", "t2"], f_ddl)
+f_ddl = P.zerlege("CREATE VIEW v (A, B) AS SELECT * FROM kunde")
+check("DDL-Sicht mit eigener Spaltenliste: KEINE Herkunft (Namen gelten positionsweise)",
+      f_ddl and f_ddl.get("herkunft") == {"spalten": {}, "stern": []}, f_ddl)
+f_ddl = P.zerlege("CREATE VIEW v AS SELECT k.ID, k.NAME AS KNAME FROM kunde k")
+check("DDL-Sicht ohne Liste: Spalten und Herkunft aus der Auswahl",
+      f_ddl and [x["name"] for x in f_ddl.get("spalten") or []] == ["ID", "KNAME"]
+      and f_ddl.get("herkunft", {}).get("spalten") == {"id": ["kunde", "ID"], "kname": ["kunde", "NAME"]}, f_ddl)
 e = P.datei_zerlegen(str(Y / "objekte" / "CTS_SEQUENCE_X_SEQ.yaml"))
 check("Sequenz: uebersprungen und GEZAEHLT, kein Fehler", e["ok"] and not e["fakten"]
       and e["stat"].get("objekt_uebersprungen") == 1, e)
@@ -690,7 +755,7 @@ check("Abschnitte gedeckelt (DOK_TEIL), Kopf an jedem Teil", all(len(t) <= P.DOK
       and all(t.startswith("[K]") for t in lang) and len(lang) >= 3, [len(t) for t in lang])
 check("Begleitdokument-Endungen: Einstellungen == Parser", tuple(sorted(E_DOK())) == tuple(sorted(P.DOK_ENDUNGEN)),
       (E_DOK(), P.DOK_ENDUNGEN))
-check("Parser-Fassung 3 (Begleitdokumente)", P.FASSUNG == 3, P.FASSUNG)
+check("Parser-Fassung 4 (Herkunft der Sichtspalten)", P.FASSUNG == 4, P.FASSUNG)
 
 # Durch den ganzen Lauf, mit der Regel "gleichnamiger Primaerschluessel"
 S.ORDNER = TMP / "ablage_yaml"
@@ -705,7 +770,7 @@ def _kante(von, nach):
         "SELECT k.art, k.von_spalten FROM kante k JOIN objekt a ON a.id=k.von JOIN objekt b ON b.id=k.nach "
         "WHERE a.schluessel=? AND b.schluessel=?", (von, nach)).fetchall()]
 check("YAML-Lauf: Tabellen und Sichten im Graphen", wert(gy, "SELECT count(*) FROM objekt WHERE art='tabelle'") == 8
-      and wert(gy, "SELECT count(*) FROM objekt WHERE art='sicht'") == 3, st.get("fehler"))
+      and wert(gy, "SELECT count(*) FROM objekt WHERE art='sicht'") == 5, st.get("fehler"))
 check("Kaputte/Bomben-Datei steht als Fehler im Status, der Rest ist da", any("kaputt.yaml" in f for f in st["fehler"])
       or st.get("dateien_neu", 0) >= 1, st.get("fehler"))
 check("Deklarierter Fremdschluessel als fk", ("fk", '["AKDKND_ID"]') in _kante("cts.v_vkauf_auftrag", "cts.a_kdknd_kunde"),
@@ -730,6 +795,9 @@ check("Sichten nehmen an der Regel nicht teil (sie haengen ueber 'sicht')",
       _kante("cts.v_kunde_umsatz", "cts.a_lllnd_land"))
 check("Sicht haengt an ihren Tabellen", _kante("cts.v_kunde_umsatz", "cts.a_kdknd_kunde")
       and _kante("cts.v_kunde_umsatz", "cts.v_vkauf_auftrag"))
+check("Sicht mit Komma-FROM haengt an BEIDEN Tabellen", _kante("cts.v_zwei", "cts.a_kdknd_kunde")
+      and _kante("cts.v_zwei", "cts.l_lglog_protokoll"), (_kante("cts.v_zwei", "cts.a_kdknd_kunde"),
+                                                          _kante("cts.v_zwei", "cts.l_lglog_protokoll")))
 pr = R.pruefen(gy, "SELECT u.KUNDE, u.UMSATZ FROM CTS.V_KUNDE_UMSATZ u")
 check("Pruefung kennt die Sicht-Spalten aus der Definition", pr["ok"], pr["fehler"])
 pr = R.pruefen(gy, "SELECT u.GIBTSNICHT FROM CTS.V_KUNDE_UMSATZ u")
@@ -751,9 +819,74 @@ pr = R.pruefen(gy, ERF_SQL)
 check("Erfundener Join: BENANNT, die Abfrage bleibt gueltig",
       pr["ok"] and [u["bedingung"] for u in pr["unbelegte_joins"]] == ["p.LLGLOG_ID = a.VVKAUF_ID"], pr)
 check("'<=' ist kein Join", pr["joins_belegt"] == 0 and len(pr["unbelegte_joins"]) == 1, pr)
+# Joins ueber Sichten: die Sichtspalte wird auf ihre Basisspalte zurueckgefuehrt
+def _herkunft(sicht, spalte):
+    return [tuple(r) for r in gy.execute(
+        "SELECT b.schluessel, h.basis_spalte_l FROM herkunft h JOIN objekt s ON s.id=h.sicht_id "
+        "JOIN objekt b ON b.id=h.basis_id WHERE s.schluessel=? AND h.spalte_l=?", (sicht, spalte)).fetchall()]
+check("Positivkontrolle: Herkunft im Graphen (Alias, Spaltenname, Stern, Sicht auf Sicht)",
+      _herkunft("cts.v_kunde_umsatz", "kunde") == [("cts.a_kdknd_kunde", "akdknd_name")]
+      and _herkunft("cts.v_kunde_umsatz", "alllnd_land") == [("cts.a_kdknd_kunde", "alllnd_land")]
+      and _herkunft("cts.v_alles", "*") == [("cts.a_kdknd_kunde", "*")]
+      and _herkunft("cts.v_kunde_land", "kname") == [("cts.v_kunde_umsatz", "kunde")],
+      (_herkunft("cts.v_kunde_umsatz", "kunde"), _herkunft("cts.v_alles", "*"), _herkunft("cts.v_kunde_land", "kname")))
+check("Ausdruck (SUM) hat keine Herkunft", _herkunft("cts.v_kunde_umsatz", "umsatz") == [])
 pr = R.pruefen(gy, "SELECT v.KUNDE FROM CTS.V_KUNDE_UMSATZ v JOIN CTS.A_KDKND_KUNDE k ON v.KUNDE = k.AKDKND_NAME")
-check("Join mit einer Sicht: nicht pruefbar, nicht 'unbelegt'", pr["ok"] and pr["joins_ungeprueft"] == 1
+check("Sicht gegen ihre eigene Basisspalte: belegt", pr["ok"] and pr["joins_belegt"] == 1
+      and not pr["unbelegte_joins"] and pr["joins_ungeprueft"] == 0, pr)
+pr = R.pruefen(gy, "SELECT l.ALLLND_BEZ FROM CTS.V_KUNDE_UMSATZ u JOIN CTS.A_LLLND_LAND l ON l.ALLLND_LAND = u.ALLLND_LAND")
+check("Sichtspalte -> Basis mit abgeleiteter Beziehung: belegt", pr["joins_belegt"] == 1 and not pr["unbelegte_joins"], pr)
+pr = R.pruefen(gy, "SELECT a.VVKAUF_ID FROM CTS.V_ALLES x JOIN CTS.V_VKAUF_AUFTRAG a ON a.AKDKND_ID = x.AKDKND_ID")
+check("SELECT * -Sicht: Spalte gleichen Namens, Fremdschluessel: belegt", pr["joins_belegt"] == 1
       and not pr["unbelegte_joins"], pr)
+pr = R.pruefen(gy, "SELECT l.ALLLND_BEZ FROM CTS.V_KUNDE_LAND v JOIN CTS.A_LLLND_LAND l ON l.ALLLND_LAND = v.ALLLND_LAND")
+check("Sicht auf Sicht (zwei Stufen): belegt", pr["joins_belegt"] == 1 and not pr["unbelegte_joins"], pr)
+pr = R.pruefen(gy, "SELECT p.LLGLOG_ID FROM CTS.V_ALLES x JOIN CTS.L_LGLOG_PROTOKOLL p ON p.LLGLOG_ID = x.AKDKND_ID")
+u0 = erstes(pr["unbelegte_joins"]) or {}
+check("Erfundener Join UEBER eine Sicht: benannt, mit der Basistabelle",
+      len(pr["unbelegte_joins"]) == 1 and "Sicht auf CTS.A_KDKND_KUNDE.akdknd_id" in u0.get("nach", "")
+      and u0.get("nach_id") == wert(gy, "SELECT id FROM objekt WHERE schluessel='cts.a_kdknd_kunde'")
+      and "Sicht" not in u0.get("von", "x"), pr)
+check("... und die Korrekturrunde bekommt den belegten Weg an der Basis",
+      "belegter Weg:" in R.joins_hinweis(gy, pr["unbelegte_joins"]), R.joins_hinweis(gy, pr["unbelegte_joins"]))
+pr = R.pruefen(gy, "SELECT a.VVKAUF_ID FROM CTS.V_KUNDE_UMSATZ u JOIN CTS.V_VKAUF_AUFTRAG a ON a.VVKAUF_NETTO = u.UMSATZ")
+check("Sichtspalte ohne Herkunft (Ausdruck): ungeprueft, nicht 'unbelegt'", pr["joins_ungeprueft"] == 1
+      and not pr["unbelegte_joins"] and pr["joins_belegt"] == 0, pr)
+pr = R.pruefen(gy, "SELECT p.LLGLOG_ID FROM CTS.V_ZWEI z JOIN CTS.L_LGLOG_PROTOKOLL p ON p.LLGLOG_ID = z.LLGLOG_ID")
+check("Zwei Sterne: die Spalte gibt es nur in EINER Tabelle -> aufgeloest", pr["joins_belegt"] == 1
+      and pr["joins_ungeprueft"] == 0, pr)
+pr = R.pruefen(gy, "SELECT l.ALLLND_BEZ FROM CTS.V_ZWEI z JOIN CTS.A_LLLND_LAND l ON l.ALLLND_LAND = z.ALLLND_LAND")
+check("Zwei Sterne: die Spalte gibt es in BEIDEN -> ungeprueft statt geraten", pr["joins_ungeprueft"] == 1
+      and pr["joins_belegt"] == 0 and not pr["unbelegte_joins"], pr)
+pr = R.pruefen(gy, "SELECT p.LLGLOG_ID FROM CTS.V_ALLES x JOIN CTS.L_LGLOG_PROTOKOLL p ON p.LLGLOG_ID = x.GIBTSNICHT")
+check("Stern-Sicht, Spalte fehlt in der Basis: ungeprueft", pr["joins_ungeprueft"] == 1 and not pr["unbelegte_joins"], pr)
+import sqlite3 as _sq0
+_gk = _sq0.connect(":memory:")
+gy.backup(_gk)
+# .get statt [..]: fehlt eine Sicht, soll das FEHLSCHLAGEN, nicht werfen (Register)
+_ids = {r[0]: r[1] for r in _gk.execute("SELECT schluessel, id FROM objekt WHERE art='sicht'")}
+_va, _vb = _ids.get("cts.v_kunde_land"), _ids.get("cts.v_kunde_umsatz")
+if _va is None or _vb is None:
+    check("Kreis zwischen zwei Sichten: endet, ungeprueft", False, "Sichten fehlen im Graphen")
+else:
+    try:
+        _gk.execute("DELETE FROM herkunft WHERE sicht_id IN (?, ?)", (_va, _vb))
+        _gk.executemany("INSERT INTO herkunft VALUES (?,?,?,?)", [(_va, "alllnd_land", _vb, "alllnd_land"),
+                                                                  (_vb, "alllnd_land", _va, "alllnd_land")])
+        pr = R.pruefen(_gk, "SELECT l.ALLLND_BEZ FROM CTS.V_KUNDE_LAND v JOIN CTS.A_LLLND_LAND l ON l.ALLLND_LAND = v.ALLLND_LAND")
+        check("Kreis zwischen zwei Sichten: endet, ungeprueft", pr["joins_ungeprueft"] == 1, pr)
+    except (RecursionError, Exception) as ex:  # noqa: BLE001
+        check("Kreis zwischen zwei Sichten: endet, ungeprueft", False, repr(ex)[:200])
+try:
+    _gk.execute("DROP TABLE herkunft")
+except Exception:  # noqa: BLE001 – ohne Tabelle (Graph vor Fassung 4) ist das der gemeinte Zustand
+    pass
+try:
+    pr = R.pruefen(_gk, "SELECT a.VVKAUF_ID FROM CTS.V_ALLES x JOIN CTS.V_VKAUF_AUFTRAG a ON a.AKDKND_ID = x.AKDKND_ID")
+    check("Graph vor Fassung 4 (ohne Herkunft): ungeprueft, kein Absturz", pr["ok"] and pr["joins_ungeprueft"] == 1, pr)
+except Exception as ex:  # noqa: BLE001 – ein Absturz soll FEHLSCHLAGEN, nicht den Lauf beenden
+    check("Graph vor Fassung 4 (ohne Herkunft): ungeprueft, kein Absturz", False, repr(ex))
+_gk.close()
 pr = R.pruefen(gy, "SELECT o.OBJEKTID FROM CTS.Z_ZZOBJ_OBJEKT o JOIN CTS.V_VKAUF_AUFTRAG a ON a.OBJEKTID = o.OBJEKTID")
 check("Gleichnamige Spalte, auf einer Seite Primaerschluessel: belegt", pr["joins_belegt"] == 1
       and not pr["unbelegte_joins"], pr)
@@ -788,6 +921,51 @@ check("Kette: bleibt der Join, geht er MIT Vorbehalt hinaus (genau eine Join-Run
 check("Kette: verschlechtert die Join-Runde, gilt die gueltige Fassung davor",
       ec.get("pruefung", {}).get("ok") and ec.get("sql", "").startswith("SELECT p.LLGLOG_ID FROM CTS.V_VKAUF_AUFTRAG"),
       (ec.get("sql"), ec.get("pruefung", {}).get("fehler")))
+# Begriffsrunde ohne Denken, SQL-Runde mit (Attrappe des Anbieters, echte Signatur)
+import types as _ty  # noqa: E402
+from backend import llm as _llm  # noqa: E402
+
+
+class _AnbieterAttrappe(_llm.OpenAICompatibleProvider):
+    def __init__(self):
+        self.denken_aus = False
+        self.gesehen = []
+
+    async def generate_response(self, model, system_prompt, contents, tools=None, reasoning_effort=None,
+                                temperature=None):
+        self.gesehen.append((self.denken_aus, reasoning_effort))
+        return _ty.SimpleNamespace(parts=[_ty.SimpleNamespace(text="ok")])
+
+
+_anb = []
+
+
+def _anbieter_fuer_lauf(prompt_tool_calling=None):
+    _anb.append(_AnbieterAttrappe())
+    return _anb[-1], "m"
+
+
+_alt_pfl = _llm.provider_fuer_lauf
+_llm.provider_fuer_lauf = _anbieter_fuer_lauf
+try:
+    asyncio.run(R._modell_ohne_denken("a", "s"))
+    asyncio.run(R._modell("a", "s"))
+finally:
+    _llm.provider_fuer_lauf = _alt_pfl
+check("Begriffsrunde ohne Denken, SQL-Runde mit, je eigener Anbieter",
+      [a.gesehen for a in _anb] == [[(True, "low")], [(False, "low")]], [a.gesehen for a in _anb])
+# Standardweg der Kette (ohne uebergebenes Modell): WIRKUNG gemessen, nicht der Text
+_a_sql, _a_begr = Attrappe([BELEGT_TXT]), Attrappe([BEGR_Y])
+_alt_m, _alt_mo = R._modell, R._modell_ohne_denken
+R._modell, R._modell_ohne_denken = _a_sql, _a_begr
+try:
+    asyncio.run(R.sql_erzeugen("Protokoll je Land", con=gy))
+finally:
+    R._modell, R._modell_ohne_denken = _alt_m, _alt_mo
+check("Kette (Standardweg): Begriffsrunde ohne Denken, SQL-Runde mit",
+      [x[1] for x in _a_begr.auftraege] == [R.SYSTEM_BEGRIFFE] and len(_a_sql.auftraege) >= 1
+      and all(x[1] != R.SYSTEM_BEGRIFFE for x in _a_sql.auftraege),
+      ([x[1][:30] for x in _a_begr.auftraege], [x[1][:30] for x in _a_sql.auftraege]))
 check("Systemvorgabe verbietet erfundene Joins", "ERFINDE KEINE" in R.SYSTEM_SQL and "unbelegter Join" in R.SYSTEM_SQL)
 
 # Hauswissen: Suche, Sichtbarkeit, Anker, Kette

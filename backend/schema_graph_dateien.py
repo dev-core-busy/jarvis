@@ -121,6 +121,52 @@ def _rechte_grund(p: Path) -> str:
             f"Abhilfe auf dem Server: chown -R <Dienstbenutzer> {E.BASIS} und chmod 750 {E.BASIS}.")
 
 
+def _ordner_kette(basis: Path, ordner: Path) -> None:
+    """Jeden Ordner von ``basis`` bis ``ordner`` mit ``DIR_MODUS`` anlegen.
+
+    ⚠ ``mkdir(mode=…, parents=True)`` setzt den Modus NUR auf den letzten
+    Ordner – die Zwischenordner bekommen die Vorgabe der umask (auf ECHT
+    2026-11-08 gemessen: ``KB`` 0755 unter 0750). Vorhandene eigene Ordner
+    werden dabei nachgezogen; ein fremder bleibt, wie er ist (chmod waere EPERM).
+    """
+    p = basis
+    for teil in ordner.relative_to(basis).parts:
+        p = p / teil
+        try:
+            p.mkdir(mode=DIR_MODUS)
+        except FileExistsError:
+            if not p.is_dir():
+                raise
+        st = os.lstat(p)
+        if stat.S_IMODE(st.st_mode) != DIR_MODUS and st.st_uid == os.geteuid():
+            os.chmod(p, DIR_MODUS)   # auch einen Altbestand nachziehen
+
+
+def rechte_heilen(sid: str) -> int:
+    """Ordner (0750) und Dateien (0640) eines Schemas auf die zugesagten Rechte
+    ziehen – fuer den Bestand von VOR ``_ordner_kette`` (ECHT 2026-11-08: ein
+    Zwischenordner 0755). Nur eigene Eintraege, keine Verknuepfungen; einmal je
+    Upload und beim Start, nicht je Datei. Rueckgabe: Anzahl geaenderter Eintraege."""
+    basis = _basis(sid)
+    if not basis.is_dir() or basis.is_symlink():
+        return 0
+    ich, n = os.geteuid(), 0
+    for dp, dn, fn in os.walk(basis, followlinks=False):
+        for name, soll in [(d, DIR_MODUS) for d in dn] + [(f, DATEI_MODUS) for f in fn]:
+            p = os.path.join(dp, name)
+            try:
+                st = os.lstat(p)
+                if stat.S_ISLNK(st.st_mode) or st.st_uid != ich or stat.S_IMODE(st.st_mode) == soll:
+                    continue
+                # Nur ENGER machen: eine Datei mit weniger Rechten bleibt, wie sie ist
+                if stat.S_IMODE(st.st_mode) & ~soll:
+                    os.chmod(p, stat.S_IMODE(st.st_mode) & soll)
+                    n += 1
+            except OSError:
+                continue
+    return n
+
+
 def datei_speichern(sid: str, rel: str, quelle, endungen: set[str]) -> dict:
     """Eine Datei aus einem Datei-Objekt (``UploadFile.file``) als Strom ablegen.
 
@@ -131,9 +177,9 @@ def datei_speichern(sid: str, rel: str, quelle, endungen: set[str]) -> dict:
     if ziel.suffix.lower() not in endungen:
         raise DateiFehler(f"Format „{ziel.suffix or '(ohne Endung)'}“ gehört nicht zu den Dateimustern "
                           f"({', '.join(sorted(endungen))}): {rel}")
-    ordner_anlegen(sid)
+    basis = ordner_anlegen(sid)
     try:
-        ziel.parent.mkdir(mode=DIR_MODUS, parents=True, exist_ok=True)
+        _ordner_kette(basis, ziel.parent)
     except (FileExistsError, NotADirectoryError):
         raise DateiFehler(f"Ein Teil des Pfads ist eine Datei, kein Ordner: {rel}") from None
     # Zwischenordner ebenfalls ohne Verknuepfung (mkdir folgt keinen Links,

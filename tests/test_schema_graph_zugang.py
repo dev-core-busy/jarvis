@@ -392,6 +392,35 @@ ziel = basis / "erp/stamm/kunde.sql"
 check("Gespeichert samt Unterordnern", ziel.read_bytes() == b"CREATE TABLE a (id int);"
       and erg == {"pfad": "erp/stamm/kunde.sql", "groesse": 24, "ersetzt": False}, erg)
 check("Datei 0640", stat.S_IMODE(ziel.stat().st_mode) == 0o640, oct(stat.S_IMODE(ziel.stat().st_mode)))
+# mkdir(parents=True) setzt den Modus nur auf den LETZTEN Ordner (ECHT 2026-11-08: Zwischenordner 0755)
+_alt_umask = os.umask(0o022)
+try:
+    F_.datei_speichern(SID, "z1/z2/z3/t.sql", io.BytesIO(b"x"), END)
+    os.chmod(basis / "erp", 0o755)   # Altbestand von vor der Behebung
+    F_.datei_speichern(SID, "erp/stamm/zweit.sql", io.BytesIO(b"x"), END)
+finally:
+    os.umask(_alt_umask)
+_modi = {d: oct(stat.S_IMODE((basis / d).stat().st_mode)) for d in ("z1", "z1/z2", "z1/z2/z3", "erp", "erp/stamm")}
+check("JEDER Zwischenordner 0750 (auch bei umask 022), Altbestand nachgezogen",
+      set(_modi.values()) == {"0o750"}, _modi)
+# Bestand von vor der Behebung: rechte_heilen zieht nach, macht nichts weiter auf
+os.chmod(basis / "z1" / "z2", 0o755)
+os.chmod(basis / "z1" / "z2" / "z3" / "t.sql", 0o644)
+os.chmod(basis / "z1", 0o700)                     # enger als zugesagt: bleibt
+os.symlink(TMP / "draussen", basis / "z1" / "lnk")
+_vor_draussen = stat.S_IMODE((TMP / "draussen").stat().st_mode)
+_n = F_.rechte_heilen(SID)
+check("rechte_heilen: zu offene Eintraege enger, engere bleiben, Verknuepfung nicht verfolgt",
+      _n == 2 and oct(stat.S_IMODE((basis / "z1/z2").stat().st_mode)) == "0o750"
+      and oct(stat.S_IMODE((basis / "z1/z2/z3/t.sql").stat().st_mode)) == "0o640"
+      and oct(stat.S_IMODE((basis / "z1").stat().st_mode)) == "0o700"
+      and stat.S_IMODE((TMP / "draussen").stat().st_mode) == _vor_draussen,
+      (_n, {d: oct(stat.S_IMODE((basis / d).stat().st_mode)) for d in ("z1", "z1/z2", "z1/z2/z3/t.sql")}))
+check("rechte_heilen: zweiter Lauf aendert nichts", F_.rechte_heilen(SID) == 0)
+(basis / "z1" / "lnk").unlink()
+os.chmod(basis / "z1", 0o750)
+shutil.rmtree(basis / "z1")              # Zusatzmaterial weg: die Baum-Pruefungen
+(basis / "erp/stamm/zweit.sql").unlink()  # unten zaehlen den Bestand genau
 erg = F_.datei_speichern(SID, "erp/stamm/kunde.sql", io.BytesIO(b"CREATE TABLE b (id int);"), END)
 check("Gleichnamiges ERSETZT (kein _1 daneben)", erg["ersetzt"] is True
       and ziel.read_bytes().startswith(b"CREATE TABLE b") and not list(ziel.parent.glob("kunde_*")),

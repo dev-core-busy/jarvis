@@ -56,9 +56,13 @@ except TypeError:
 
 print("\n1. Agent-API-Schluessel (backend/main.py)")
 code = schneide("backend/main.py", "_is_valid_agent_key")
-if not code:
-    print("ABBRUCH: _is_valid_agent_key nicht gefunden")
+# Seit Pentest A7 (2026-11-08) holt die Pruefung ihre Kandidaten aus EINEM
+# Helfer (auch die Kurzkennung der Abruf-Schluessel nutzt ihn) – mitschneiden.
+helfer = schneide("backend/main.py", "_agent_key_kandidaten")
+if not code or not helfer:
+    print("ABBRUCH: _is_valid_agent_key/_agent_key_kandidaten nicht gefunden")
     sys.exit(2)
+code = helfer + "\n" + code
 ns = {"hmac": hmac,
       "config": types.SimpleNamespace(AGENT_API_KEY="legacy-key-123"),
       "_load_agent_keys": lambda: [{"key": "benannt-456"}]}

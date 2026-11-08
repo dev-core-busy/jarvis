@@ -543,9 +543,13 @@ _vorlagen = re.findall(r'\?token=\$\{([^}]*)\}', au)
 check("in die Adresse kommt nur der gepruefte Wert (wert), nie token()/tok",
       bool(_vorlagen) and all("wert" in v and "token()" not in v and not re.search(r"\btok\b", v)
                               for v in _vorlagen), _vorlagen)
-check("Rueckfall nur fuer einen Programmschluessel, nie fuers Sitzungstoken",
-      re.search(r"val\s+istSitzung\s*=\s*tok\.count\s*\{\s*it\s*==\s*':'\s*\}\s*>=\s*2", au) is not None
-      and re.search(r"abrufSchluessel\(\)\s*\?:\s*tok\.takeUnless\s*\{\s*istSitzung\s*\}", au) is not None)
+# Bis 2026-11-08 stand hier "Rueckfall nur fuer einen Programmschluessel". Seit
+# Pentest A7 gibt es GAR KEINEN Rueckfall mehr: auch der Programmschluessel
+# bekommt einen Abruf-Schluessel (Art "p"), und der Server nimmt ihn in
+# ?token= nicht mehr an (tests/test_pentest_programm_abruf.py).
+check("kein Rueckfall auf einen dauerhaften Schluessel (weder Sitzung noch Programm)",
+      re.search(r"val\s+wert\s*=\s*abrufSchluessel\(\)\s*$", au, re.M) is not None
+      and "token()" not in au and not re.search(r"\btok\b", au), au[:200])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nErgebnis: %d OK, %d FAIL" % (OK, FAIL))

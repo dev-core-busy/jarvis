@@ -134,7 +134,8 @@ def _sitz_text(sitzung) -> str:
 
 def erzeugen(user: str, ttl_min: int | None = None,
              eingeschraenkt: bool = False,
-             sitzung: "tuple[int, str] | None" = None) -> tuple[str, int]:
+             sitzung: "tuple[int, str] | None" = None,
+             programm: bool = False) -> tuple[str, int]:
     """Schluessel + Ablaufzeitpunkt (Epoche) fuer diesen Benutzer.
 
     Der Benutzername wird base64url kodiert: er kann einen Domaenen-Praefix mit
@@ -145,7 +146,12 @@ def erzeugen(user: str, ttl_min: int | None = None,
         raise ValueError("kein Benutzer")
     ttl = ttl_minuten() if ttl_min is None else max(1, min(int(ttl_min), _TTL_MAX))
     exp = int(time.time()) + ttl * 60
-    art = "e" if eingeschraenkt else "v"
+    # Art "p" (Pentest A7, 2026-11-08): Schluessel fuer einen PROGRAMMSCHLUESSEL
+    # (Agent-API-Key) statt fuer eine Sitzung. ``sitzung`` traegt dann (0,
+    # Kurzkennung des ausstellenden Programmschluessels) – beim Einloesen gilt
+    # er nur, solange genau dieser Programmschluessel noch existiert. Die Art
+    # steht in der Signatur; ein Sitzungs-Schluessel laesst sich nicht umetikettieren.
+    art = "p" if programm else ("e" if eingeschraenkt else "v")
     sitz = _sitz_text(sitzung)
     return f"{PRAEFIX}.{_b64(user)}.{exp}.{art}.{sitz}.{_sig(user, exp, art, sitz)}", exp
 
@@ -203,7 +209,7 @@ def pruefen_voll(schluessel: str) -> "tuple[str | None, bool, tuple[int, str] | 
         sitz = None
         if len(teile) == 6:
             _, b_user, s_exp, art, sitz, sig = teile
-            if art not in ("v", "e"):
+            if art not in ("v", "e", "p"):
                 return nein
         elif len(teile) == 5:
             _, b_user, s_exp, art, sig = teile
@@ -233,6 +239,25 @@ def pruefen_voll(schluessel: str) -> "tuple[str | None, bool, tuple[int, str] | 
         return user, art != "v", sitzung
     except Exception:  # noqa: BLE001
         return nein
+
+
+def programm_kennung(schluessel: str) -> str | None:
+    """Kurzkennung des ausstellenden Programmschluessels – oder None.
+
+    None heisst: KEIN gueltiger Schluessel der Art "p" (andere Art, Form,
+    Ablauf oder Signatur falsch). Nur die 6-teilige Form kann Art "p" tragen.
+    Der Aufrufer prueft die Kennung gegen die heute gueltigen Programmschluessel
+    (ein widerrufener Schluessel nimmt seine Abruf-Schluessel mit)."""
+    try:
+        teile = (schluessel or "").split(".")
+        if len(teile) != 6 or teile[3] != "p":
+            return None
+        user, _, sitzung = pruefen_voll(schluessel)
+        if not user or not sitzung or sitzung[0] != 0:
+            return None
+        return sitzung[1]
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def pruefen_mit_art(schluessel: str) -> tuple[str | None, bool]:

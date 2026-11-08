@@ -3156,6 +3156,11 @@ def _query_benutzer(request: Request) -> str | None:
     if _dlkey.ist_abrufschluessel(wert):
         # Ein abgelaufener Schluessel faellt hier durch und wird NICHT als
         # Sitzungstoken nachgeprueft – die Form ist eindeutig.
+        if wert.split(".")[3:4] == ["p"]:
+            # Art "p" (Programmschluessel) ist KEIN Benutzer-Schluessel – sie
+            # wird nur in require_auth_or_query gegen die gueltigen
+            # Programmschluessel geprueft, nie als Konto "api" eingeloest.
+            return None
         name, eingeschraenkt, sitz = _dlkey.pruefen_voll(wert)
         if name and sitz is not None and (
                 _epoche_widerrufen(name, sitz[0])
@@ -3217,6 +3222,16 @@ async def require_auth_or_query(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = verify_token(token)
     if not username:
+        # Abruf-Schluessel eines PROGRAMMSCHLUESSELS (Art "p", Pentest A7): gilt
+        # nur, solange der ausstellende Programmschluessel existiert. Er laeuft
+        # NIE durch die Konto-Pruefungen darunter – ein AD-Konto "api" bekommt
+        # damit nichts, was der Programmschluessel hat.
+        _pk = _dlkey.programm_kennung(request.query_params.get("token", ""))
+        if _pk is not None:
+            if _agent_kennung_gueltig(_pk):
+                return "api"
+            _prot_abruf_abgewiesen(request)
+            raise HTTPException(status_code=401, detail="Nicht authentifiziert")
         username = _query_benutzer(request)
     if username:
         if _user_must_change(username):
@@ -3226,8 +3241,11 @@ async def require_auth_or_query(request: Request) -> str:
         if not _login_still_allowed(username):
             raise HTTPException(status_code=403, detail="NOT_AUTHORIZED")
         return username
-    # Agent-API-Key: Header (X-API-Key/Bearer) ODER ?token=<key>
-    if _verify_agent_api_key(request) or _is_valid_agent_key(request.query_params.get("token", "")):
+    # Agent-API-Key NUR im Kopfsatz (X-API-Key/Bearer). Seit Pentest A7
+    # (2026-11-08) nicht mehr in ``?token=``: dort landete der dauerhafte
+    # Schluessel in Verlauf und Protokollen; native Apps holen sich jetzt einen
+    # Abruf-Schluessel der Art "p" (/api/download-key).
+    if _verify_agent_api_key(request):
         return "api"
     _prot_abruf_abgewiesen(request)
     raise HTTPException(status_code=401, detail="Nicht authentifiziert")
@@ -10132,7 +10150,7 @@ async def get_generated_image(name: str, user: str = Depends(require_auth_or_que
 
 
 @app.get("/api/download-key")
-async def download_key_holen(user: str = Depends(require_auth)):
+async def download_key_holen(request: Request, user: str = Depends(require_auth_or_agent)):
     """Kurzlebiger Abruf-Schluessel fuer Datei-Adressen (jeder Angemeldete).
 
     Ersetzt das Sitzungstoken in ``?token=``. Der Client holt ihn EINMAL je
@@ -10143,7 +10161,32 @@ async def download_key_holen(user: str = Depends(require_auth)):
     Bewusst OHNE Ziel-Parameter: der Schluessel ist an den Benutzer gebunden,
     nicht an eine Datei. Ein Ziel entgegenzunehmen wuerde eine Bindung
     vortaeuschen, die es nicht gibt.
+
+    Pentest A7 (2026-11-08): auch ein PROGRAMMSCHLUESSEL (native Apps) bekommt
+    einen Abruf-Schluessel – Art "p", gebunden an die Kurzkennung genau dieses
+    Programmschluessels. Vorher bekam er keinen, und die Android-App setzte als
+    Rueckfall den Programmschluessel SELBST in ``?token=`` (Verlauf, Protokolle).
+    Eine Sitzung geht weiterhin durch ``require_auth`` – die Dependency
+    ``require_auth_or_agent`` ist hier nur die Tuer fuer den Programmschluessel,
+    keine Lockerung fuer Sitzungen.
     """
+    # Zuerst die Sitzung (mit allen Sperren). NUR "nicht angemeldet" (401) fuehrt
+    # zum Programmschluessel – ein gesperrtes Konto (403) faellt nicht hinein.
+    try:
+        user = await require_auth(request)
+    except HTTPException as e:
+        if e.status_code != 401:
+            raise
+        bearer = request.headers.get("Authorization", "").replace("Bearer ", "")
+        kennung = _agent_key_kennung(request.headers.get("X-API-Key", "") or bearer)
+        if not kennung:
+            raise
+        try:
+            key, exp = _dlkey.erzeugen("api", sitzung=(0, kennung), programm=True)
+        except Exception as e2:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": str(e2)}, status_code=500)
+        return JSONResponse({"ok": True, "key": key, "exp": exp,
+                             "ttl_min": _dlkey.ttl_minuten()})
     try:
         key, exp = _dlkey.erzeugen(user, eingeschraenkt=_sitzung_ohne_admin(user),
                                    sitzung=_abruf_sitzung(user))
@@ -21905,16 +21948,43 @@ async def support_history_delete_entry(request: Request, user: str = Depends(req
 
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
 
+def _agent_key_kandidaten() -> list:
+    """Alle heute gueltigen Programmschluessel (Legacy + benannte) – EINE Liste
+    fuer Pruefung und Kurzkennung, damit beide nie auseinanderlaufen."""
+    candidates = []
+    if config.AGENT_API_KEY:
+        candidates.append(config.AGENT_API_KEY)
+    candidates.extend(k.get("key", "") for k in _load_agent_keys() if k.get("key"))
+    return [c for c in candidates if c]
+
+
+def _agent_key_hash(wert: str) -> str:
+    return hashlib.sha256(str(wert).encode("utf-8", "surrogatepass")).hexdigest()[:24]
+
+
+def _agent_key_kennung(presented: str) -> str:
+    """Kurzkennung eines GUELTIGEN Programmschluessels (sonst ''), fuer den
+    Abruf-Schluessel der Art "p" (Pentest A7). Ein Hash, nicht der Schluessel:
+    die Kennung steht in einer Adresse und darf ihn nicht verraten."""
+    return _agent_key_hash(presented) if _is_valid_agent_key(presented) else ""
+
+
+def _agent_kennung_gueltig(kennung: str) -> bool:
+    """Gehoert ``kennung`` zu einem HEUTE gueltigen Programmschluessel? Ein
+    widerrufener Schluessel nimmt damit seine Abruf-Schluessel sofort mit."""
+    if not kennung:
+        return False
+    k = str(kennung).encode()
+    return any(hmac.compare_digest(k, _agent_key_hash(c).encode()) for c in _agent_key_kandidaten())
+
+
 def _is_valid_agent_key(presented: str) -> bool:
     """Prüft einen präsentierten Key timing-sicher gegen den Legacy-Key
     (AGENT_API_KEY) ODER einen der benannten Keys. Genutzt von HTTP- UND
     WebSocket-Auth (Konsistenz: benannte Keys gelten ueberall)."""
     if not presented:
         return False
-    candidates = []
-    if config.AGENT_API_KEY:
-        candidates.append(config.AGENT_API_KEY)
-    candidates.extend(k.get("key", "") for k in _load_agent_keys() if k.get("key"))
+    candidates = _agent_key_kandidaten()
     # Als BYTES vergleichen: compare_digest wirft bei str mit Nicht-ASCII-Zeichen
     # einen TypeError – ein solcher Schluessel im Kopf ergab auf ECHT einen 500er
     # (8x in 14 Tagen, gemessen 2026-10-11). Falsche Eingabe = nein, kein Fehler.

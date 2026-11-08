@@ -229,11 +229,15 @@ def skill_config_fuer_liste(cfg) -> dict:
     ``/api/skills/{name}/config`` war seit 2026-08-02 maskiert, die Liste
     daneben nicht.
     """
+    # ``*_enc``-Felder (Chiffrat eines Moduls, z.B. ``password_enc`` der
+    # Freigaben) nimmt ``ist_geheimer_name`` bewusst aus – fuer den TRESOR
+    # richtig (nicht doppelt verpacken), fuer eine Liste nicht: auch ein
+    # Chiffrat hat dort nichts verloren (Live-Probe DEV 2026-11-08).
     def _geh(o):
         if isinstance(o, dict):
             aus = {}
             for k, v in o.items():
-                if _geheimfeld_name(k):
+                if _geheimfeld_name(k) or str(k).strip().lower().endswith("_enc"):
                     aus[k] = ""
                 else:
                     aus[k] = _geh(v)

@@ -48,6 +48,9 @@ GEHEIM = {
     "ibs_api_key": "SONDE-IBS-KEY-3",
     "bot_token": "SONDE-TELEGRAM-4",
     "hana_password": "SONDE-HANA-5",
+    # Chiffrat eines Moduls (Freigaben der Wissensdatenbank): kein Klartext,
+    # gehoert aber trotzdem nicht in eine Liste (Live-Probe DEV 2026-11-08).
+    "password_enc": "SONDE-MOUNT-CHIFFRAT-6",
 }
 NICHT_GEHEIM = {"base_url": "https://jira.beispiel.de", "org_field": "customfield_1"}
 
@@ -61,6 +64,9 @@ ZUSTAENDE = {
         "verbindung": {"bot_token": GEHEIM["bot_token"]}}},
     "sap": {"enabled": True, "config": {
         "systeme": [{"name": "P01", "hana_password": GEHEIM["hana_password"]}]}},
+    "knowledge": {"enabled": True, "config": {
+        "mounts": [{"name": "freigabe1", "username": "leser",
+                    "password_enc": GEHEIM["password_enc"]}]}},
 }
 
 # ── Attrappe backend.config ─────────────────────────────────────────────

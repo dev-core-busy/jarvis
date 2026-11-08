@@ -359,9 +359,15 @@ for _w, _soll in ((False, False), ("false", False), ("0", False), ("nein", False
     check("download_key_strict=%r -> streng %s (nur ausdrueckliches Nein schaltet ab)" % (_w, _soll),
           dk.streng() is _soll)
 _EINST.pop("download_key_strict", None)
+# Am Syntaxbaum statt an der Schreibweise der Signatur: seit Pentest A7
+# (2026-11-08) traegt der Endpunkt zusaetzlich ``request`` (Programmschluessel-
+# Zweig) und haengt an require_auth_or_agent – ein ZIEL nimmt er weiterhin nicht.
+_dkh = next((k for k in ast.parse(QUELLE).body if isinstance(k, ast.AsyncFunctionDef)
+             and k.name == "download_key_holen"), None)
 check("der Endpunkt nimmt KEIN Ziel entgegen (er bindet an den Benutzer, nicht an eine Datei)",
-      re.search(r'@app\.get\("/api/download-key"\)\s*\nasync def download_key_holen\('
-                r'user: str = Depends\(require_auth\)\)', QUELLE) is not None)
+      _dkh is not None and sorted(a.arg for a in _dkh.args.args) == ["request", "user"]
+      and not _dkh.args.kwonlyargs and _dkh.args.vararg is None and _dkh.args.kwarg is None,
+      _dkh and [a.arg for a in _dkh.args.args])
 
 print("\n\033[1m6. Der Schluessel traegt die Einschraenkung seiner Sitzung (Review 2026-10-07)\033[0m")
 # Vorher galten beim Einloesen die Admin-Rechte des KONTOS: eine App-Sitzung
@@ -452,8 +458,18 @@ if len(_fns) == 3:
 for _n in ("_openapi_url", "download_key_holen"):
     _k = next((k for k in baum.body if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef))
                and k.name == _n), None)
-    _aufrufe = [c for c in ast.walk(_k) if isinstance(c, ast.Call)
-                and ast.unparse(c.func) == "_dlkey.erzeugen"] if _k else []
+    _alle = [c for c in ast.walk(_k) if isinstance(c, ast.Call)
+             and ast.unparse(c.func) == "_dlkey.erzeugen"] if _k else []
+    # Art "p" (Programmschluessel, Pentest A7) hat keine Sitzung – sie bindet an
+    # die Kennung des Programmschluessels (tests/test_pentest_programm_abruf.py).
+    _prog = [c for c in _alle if any(kw.arg == "programm" and ast.unparse(kw.value) == "True"
+                                     for kw in c.keywords)]
+    _aufrufe = [c for c in _alle if c not in _prog]
+    if _n == "download_key_holen":
+        check(f"{_n}: genau ein Programm-Aufruf, fest an 'api' und eine Kennung gebunden",
+              len(_prog) == 1 and ast.unparse(_prog[0].args[0]) == "'api'"
+              and any(kw.arg == "sitzung" for kw in _prog[0].keywords),
+              [ast.unparse(c) for c in _prog])
     check(f"{_n}: jedes erzeugen() gibt die Sitzungs-Einschraenkung mit",
           bool(_aufrufe) and all(any(kw.arg == "eingeschraenkt" and "_sitzung_ohne_admin" in ast.unparse(kw.value)
                                      for kw in c.keywords) for c in _aufrufe),

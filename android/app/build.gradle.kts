@@ -18,8 +18,8 @@ android {
         applicationId = "info.jarvisai.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 860
-        versionName = "0.860"
+        versionCode = 861
+        versionName = "0.861"
 
     }
 

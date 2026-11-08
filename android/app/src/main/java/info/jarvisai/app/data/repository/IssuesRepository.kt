@@ -146,14 +146,14 @@ class IssuesRepository @Inject constructor(
      * Die Adresse landet dort im Verlauf und auf dem Server im Protokoll – sie traegt
      * deshalb einen Abruf-Schluessel (15 Minuten, nur Lesen), NIE das Sitzungstoken.
      * Seit BSI M4 weist der Server ein Sitzungstoken in ``?token=`` ab.
-     * Ein von Hand eingetragener Programmschluessel (kein ``user:ts:sig``) bleibt der
-     * Rueckfall: der Server nimmt ihn dort weiter an, einen Abruf-Schluessel bekommt
-     * er nicht.
+     * Seit Pentest A7 (2026-11-08) gilt dasselbe fuer den Programmschluessel: er
+     * bekommt vom Server selbst einen Abruf-Schluessel. Den dauerhaften Schluessel
+     * als Rueckfall in die Adresse zu schreiben, gibt es deshalb NICHT mehr – ohne
+     * Abruf-Schluessel bleibt die Adresse ohne Merkmal (der Abruf scheitert dann
+     * sichtbar, statt den Schluessel in fremde Verlaeufe zu tragen).
      */
     suspend fun attachmentUrl(id: String, name: String): String {
-        val tok = token()
-        val istSitzung = tok.count { it == ':' } >= 2
-        val wert = abrufSchluessel() ?: tok.takeUnless { istSitzung }
+        val wert = abrufSchluessel()
         val basis = "${baseUrl()}/api/issues/$id/attachments/$name"
         return if (wert.isNullOrBlank()) basis
                else "$basis?token=${java.net.URLEncoder.encode(wert, "UTF-8")}"

@@ -121,12 +121,13 @@ def offene_begriffe(gruppen=None) -> list[tuple[str, dict]]:
     stand = wg.quellen_index()
     grenze = max(3, wg.HUB_ANTEIL * g["quellen"])
     wi = wg.wiki_index_lesen()
+    umfang = wgx.im_umfang_menge(stand, gruppen or [])
     raus = []
     for k in g["knoten"]:
         if k["typ"] == wg.TYP_QUELLE:
             continue
         q = {m: stand[m] for m in k["sources"] if m in stand}
-        im = [m for m in q if wgx.im_umfang(m, gruppen or [])]
+        im = [m for m in q if m in umfang]
         if not 2 <= len(im) <= grenze:
             continue
         alt = wi.get(k["id"]) or {}

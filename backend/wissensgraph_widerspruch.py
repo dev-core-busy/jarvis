@@ -204,11 +204,12 @@ def offene_begriffe(gruppen=None) -> list[tuple[str, dict]]:
     stand = wg.quellen_index()
     grenze = _grenze(g["quellen"])
     geprueft = wg.widersprueche_lesen()["geprueft"]
+    umfang = wgx.im_umfang_menge(stand, gruppen or [])
     raus = []
     for k in g["knoten"]:
         if k["typ"] == wg.TYP_QUELLE:
             continue
-        q = {m: stand[m] for m in k["sources"] if m in stand and wgx.im_umfang(m, gruppen or [])}
+        q = {m: stand[m] for m in k["sources"] if m in umfang}
         if not 2 <= len(q) <= grenze:
             continue
         alt = geprueft.get(k["id"]) or {}
@@ -240,6 +241,7 @@ def _befund_id(kid: str, a: str, b: str) -> str:
 def _vermerken(kid: str, quellen: dict, befunde: list[dict] | None, fehler: str = "") -> None:
     with wg._sperre:
         w = wg.widersprueche_lesen()
+        vorher = w["befunde"]           # die Liste wird unten ERSETZT, nicht veraendert
         alt = w["geprueft"].get(kid) or {}
         eintrag = {"quellen": quellen, "zeit": time.time()}
         if fehler:
@@ -248,7 +250,7 @@ def _vermerken(kid: str, quellen: dict, befunde: list[dict] | None, fehler: str 
         w["geprueft"][kid] = eintrag
         if befunde is not None:
             w["befunde"] = [b for b in w["befunde"] if b.get("kid") != kid] + befunde
-        wg.widersprueche_schreiben(w)
+        wg.widersprueche_schreiben(w, vorher_befunde=vorher)
 
 
 async def begriff_pruefen(kid: str, quellen: dict, provider, modell: str, drossel,

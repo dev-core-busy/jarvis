@@ -553,6 +553,22 @@ def im_umfang(manifest: str, gruppen: list, ordner: str = "") -> bool:
     return True
 
 
+def im_umfang_menge(manifeste, gruppen: list) -> set:
+    """``{m for m in manifeste if im_umfang(m, gruppen)}`` – in EINEM Durchgang.
+
+    Fuer die Nachlauf-Listen, die je Begriff jede Quelle pruefen: dort fiel
+    ``im_umfang`` 211.000-mal je Schritt (ECHT 2026-11-09, 0,65 s), und mit
+    gesetzten Gruppen hiesse jeder Aufruf ein Laden des Gruppen-Manifests.
+    Hier wird jede Quelle einmal geprueft und das Manifest einmal gelesen –
+    dieselbe Regel, nur gebuendelt (``filter_paths_by_groups`` gibt die
+    uebergebenen Pfade unveraendert zurueck)."""
+    erlaubt = [m for m in dict.fromkeys(manifeste) if wg._erlaubt(m)]
+    if gruppen and erlaubt:
+        from backend import knowledge_groups as kg
+        return set(kg.filter_paths_by_groups(erlaubt, list(gruppen)))
+    return set(erlaubt)
+
+
 def abgleich(gruppen=None, ordner: str = "", voll: bool = False) -> dict:
     """Index ↔ Graph abgleichen: Verwaistes bereinigen, Fehlendes einreihen.
 

@@ -65,6 +65,9 @@ _sperre = threading.RLock()
 _graph_cache: dict | None = None
 _graph_veraltet = True
 _queue_cache: dict | None = None
+# quellen_index(): (Ordner, Inode, mtime_ns) -> Index; siehe dort.
+_index_cache: tuple | None = None
+_INDEX_FRISCH_S = 2.0
 
 
 # ─── Pfade ──────────────────────────────────────────────────────────────────
@@ -146,13 +149,59 @@ def _ordner_anlegen() -> None:
             pass
 
 
+def _json_teile(daten, tiefe: int = 1, block: int = 1000):
+    """Derselbe Text wie ``json.dumps(daten, ensure_ascii=False)``, in Stuecken.
+
+    ⚠ WARUM NICHT ``json.dump(daten, f)``: das benutzt den PYTHON-Encoder
+    (``iterencode`` ohne ``_one_shot``) – gemessen auf ECHT 1,27 s fuer die
+    17-MB-``widersprueche.json`` gegen 0,17 s mit dem C-Encoder von
+    ``json.dumps``, und der Nachlauf schreibt sie je geprueftem Begriff.
+    Ein einziges ``dumps`` haelte dafuer die 161-MB-``graph.json`` zweimal im
+    Speicher (Text + Bytes). Deshalb: die obersten ``tiefe`` Ebenen werden
+    zerlegt, und darunter geht eine grosse Liste bzw. ein grosses dict in
+    Bloecken zu ``block`` Elementen an ``dumps`` – C-Tempo, Speicher begrenzt
+    auf einen Block. Je ELEMENT ein ``dumps`` waere wieder langsam (auf DEV
+    gemessen: 10.649 Eintraege ≈ dreimal ein einzelnes ``dumps``).
+    Trenner wie bei ``json.dumps`` (``", "`` und ``": "``)."""
+    # Nicht-String-Schluessel wandelt json.dumps selbst um (True -> "true",
+    # None -> "null"); ein solches dict geht deshalb im Ganzen an dumps.
+    nur_str = isinstance(daten, dict) and all(isinstance(k, str) for k in daten)
+    if tiefe > 0 and daten and nur_str:
+        yield "{"
+        for i, (k, v) in enumerate(daten.items()):
+            yield ("" if i == 0 else ", ") + json.dumps(k, ensure_ascii=False) + ": "
+            yield from _json_teile(v, tiefe - 1, block)
+        yield "}"
+    elif tiefe > 0 and isinstance(daten, (list, tuple)) and daten:
+        yield "["
+        for i, v in enumerate(daten):
+            if i:
+                yield ", "
+            yield from _json_teile(v, tiefe - 1, block)
+        yield "]"
+    elif isinstance(daten, (list, tuple)) and len(daten) > block:
+        # dumps(Teilliste)[1:-1] sind die Elemente samt ", " dazwischen
+        yield "["
+        for j in range(0, len(daten), block):
+            yield ("" if j == 0 else ", ") + json.dumps(list(daten[j:j + block]), ensure_ascii=False)[1:-1]
+        yield "]"
+    elif nur_str and len(daten) > block:
+        paare = list(daten.items())
+        yield "{"
+        for j in range(0, len(paare), block):
+            yield ("" if j == 0 else ", ") + json.dumps(dict(paare[j:j + block]), ensure_ascii=False)[1:-1]
+        yield "}"
+    else:
+        yield json.dumps(daten, ensure_ascii=False)
+
+
 def _json_schreiben(p: Path, daten) -> None:
     """Atomar: erst Temp-Datei vollstaendig, dann ``os.replace``."""
     _ordner_anlegen()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(f"{p.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(daten, f, ensure_ascii=False)
+        f.writelines(_json_teile(daten))
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, p)
@@ -248,8 +297,30 @@ def quellen_alle() -> list[dict]:
 
 
 def quellen_index() -> dict[str, float]:
-    """``{manifest: mtime}`` aller Quellen – fuer Abgleich und Bereinigen."""
-    return {q["pfad"]: float(q.get("mtime") or 0) for q in quellen_alle()}
+    """``{manifest: mtime}`` aller Quellen – fuer Abgleich und Bereinigen.
+
+    ⚠ GECACHT, und zwar am STAND DES ORDNERS, nicht an einer Liste von
+    Schreibstellen: der Nachlauf fragt je Schritt, und jede Frage las alle
+    Quelldateien (ECHT 2026-11-09: 13.247 Dateien, 1,1 s CPU je Schritt).
+    Jede Aenderung einer Quelle laeuft ueber ``os.replace`` bzw. Anlegen/
+    Loeschen und aendert damit die mtime des Ordners – auch die eines fremden
+    Prozesses; ein ausgetauschter Ordner (Uebernahme) hat eine andere Inode.
+    Die Zeitstempel des Dateisystems sind grob (ext4: ein Kernel-Takt), zwei
+    Aenderungen im selben Takt waeren also nicht unterscheidbar: ein Ordner,
+    der juenger als ``_INDEX_FRISCH_S`` ist, wird deshalb nie gecacht."""
+    global _index_cache
+    d = _o() / "quellen"
+    with _sperre:
+        try:
+            s = d.stat()
+        except OSError:
+            return {}
+        schluessel = (str(d), s.st_ino, s.st_mtime_ns)
+        if _index_cache is not None and _index_cache[0] == schluessel:
+            return dict(_index_cache[1])
+        idx = {q["pfad"]: float(q.get("mtime") or 0) for q in quellen_alle()}
+        _index_cache = (schluessel, idx) if time.time() - s.st_mtime > _INDEX_FRISCH_S else None
+        return dict(idx)
 
 
 def _entfernen_einzeln(m: str) -> bool:
@@ -1085,15 +1156,22 @@ def _widerspruch_kanten(befunde) -> set:
             for b in befunde or [] if isinstance(b, dict)}
 
 
-def widersprueche_schreiben(d: dict) -> None:
+def widersprueche_schreiben(d: dict, vorher_befunde: list | None = None) -> None:
     """Ablage schreiben; den Graphen nur dann neu ableiten, wenn sich seine
     Widerspruchskanten aendern. ⚠ Bis 2026-11-01 markierte JEDES Schreiben den
     Graphen als veraltet – der Nachlauf schreibt je geprueftem Begriff, und
     jeder Schritt leitete den ganzen Graphen neu ab (auf DEV 1,4 s plus 58 MB
     graph.json, 5.726-mal fuer 26 Befunde): ein Kern dauerhaft belegt, und die
-    Pruefliste rechnete wegen des neuen Zeitstempels nie zu Ende."""
+    Pruefliste rechnete wegen des neuen Zeitstempels nie zu Ende.
+
+    ``vorher_befunde``: die Befunde, wie sie GERADE auf Platte stehen – nur von
+    einem Aufrufer, der die Ablage unter derselben ``_sperre`` eben gelesen hat
+    (spart das zweite Parsen der 17 MB je Schritt). Ein falscher Wert liesse
+    eine Kantenaenderung unbemerkt; ohne Angabe wird wie bisher gelesen."""
     with _sperre:
-        vorher = _widerspruch_kanten(widersprueche_lesen()["befunde"])
+        if vorher_befunde is None:
+            vorher_befunde = widersprueche_lesen()["befunde"]
+        vorher = _widerspruch_kanten(vorher_befunde)
         _json_schreiben(_o() / "widersprueche.json", d)
         if _widerspruch_kanten(d.get("befunde")) != vorher:
             _veraltet_markieren()
@@ -1225,8 +1303,8 @@ def status_schreiben(d: dict) -> None:
 
 def _zuruecksetzen_fuer_test() -> None:
     """Speicher-Caches verwerfen (Tests lenken ``ORDNER`` um)."""
-    global _graph_cache, _graph_veraltet, _queue_cache
+    global _graph_cache, _graph_veraltet, _queue_cache, _index_cache
     with _sperre:
-        _graph_cache, _graph_veraltet, _queue_cache = None, True, None
+        _graph_cache, _graph_veraltet, _queue_cache, _index_cache = None, True, None, None
         _vek_cache.clear()
         _pruef.update(erzeugt=None, paare=[], zeit=0.0, laeuft=False, fehler="")

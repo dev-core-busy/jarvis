@@ -147,6 +147,21 @@
         return String(name || '').split('@')[0].split('\\').pop().trim();
     }
 
+    // Alphabetisch nach dem ANGEZEIGTEN Namen, nicht nach dem Login: der Login
+    // traegt mal einen Domaenen-Praefix ("firma\\c.becker") und mal nicht – nach
+    // ihm sortiert stand der angezeigte "c.becker" unter F, also hinter "e.wolf".
+    // Gross/Klein und Akzente entscheiden nicht, "user2" vor "user10"
+    // (dieselben Regeln wie alpha_sort.js).
+    function _nameVergleich(a, b) {
+        var x = _displayName(a), y = _displayName(b);
+        try {
+            return new Intl.Collator(window._lang || 'de',
+                { sensitivity: 'base', numeric: true }).compare(x, y) || x.localeCompare(y);
+        } catch (e) {
+            return x.localeCompare(y);
+        }
+    }
+
     // Ist der Login (in beliebiger Schreibweise) der eigene Benutzer?
     function _isMe(name) { return _normLogin(name) === _normLogin(myUser); }
     // Konversations-Schluessel: IMMER normalisiert, damit dieselbe Person –
@@ -632,7 +647,7 @@
         entries.sort((a, b) => {
             const ao = a.online ? 1 : 0, bo = b.online ? 1 : 0;
             if (ao !== bo) return bo - ao;
-            return a.username.localeCompare(b.username);
+            return _nameVergleich(a.username, b.username);
         });
 
         const activeNorm = _normLogin(activePartner);
@@ -1566,7 +1581,7 @@
         if (users.length === 0) {
             list.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;text-align:center;padding:8px 0;">' + window.t('userchat.no_other_users') + '</p>';
         } else {
-            users.sort((a,b) => (_online[b]?1:0) - (_online[a]?1:0) || a.localeCompare(b));
+            users.sort((a,b) => (_online[b]?1:0) - (_online[a]?1:0) || _nameVergleich(a, b));
             for (const u of users) {
                 const row = document.createElement('div');
                 row.className = 'uc-fwd-user';

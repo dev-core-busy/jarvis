@@ -158,8 +158,10 @@ probe("Endpunkt ignoriert ?user=",
 # ── 8: Endpunkt liefert keine Benutzerliste ─────────────────────────────────
 probe("Endpunkt liefert 'users' nicht mit",
       lambda: ersetze("backend/main.py",
-                      "    for n in _mit_anzeigenamen(security_guard.known_violation_users()):",
-                      "    for n in []:  # known_violation_users"),
+                      # Seit 2026-11-09 sortiert (anzeige_sortierung) – vorher
+                      # eine Schleife ueber dieselbe Quelle.
+                      "        _mit_anzeigenamen(security_guard.known_violation_users()))",
+                      "        [])  # known_violation_users"),
       PY_W)
 
 # ── 9: 'gesamt' aus der GEFILTERTEN Liste (Zaehler luegt) ───────────────────

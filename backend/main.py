@@ -240,6 +240,7 @@ async def no_cache_static(request: Request, call_next):
 # entschieden, nicht am Pfad: HTML kommt aus Routen (/chat, /settings …),
 # aus /static/*.html und aus den Add-in-Routen. JSON/JS/CSS brauchen keine.
 from backend import csp as _csp
+from backend import anzeige_sortierung as _anzeige_sortierung
 _csp.einstellungen_quelle(config.get_setting)
 
 
@@ -5099,7 +5100,10 @@ async def userchat_known_users(user: str = Depends(require_userchat_access)):
     # Online = AKTIVE Portal-Session (kuerzlicher authentifizierter Request) ODER
     # gerade im Benutzerchat verbunden – NICHT nur "im Benutzerchat".
     out = [{"username": u, "online": _uc_user_active(u)} for u in by_norm.values()]
-    out.sort(key=lambda x: (not x["online"], x["username"].lower()))
+    # Nach dem blossen Kontonamen (so zeigt ihn der Benutzerchat an) – nach dem
+    # Login sortiert landete "firma\\c.becker" unter F.
+    out.sort(key=lambda x: (not x["online"],
+                            _anzeige_sortierung.text_schluessel(_norm_login(x["username"]))))
     return JSONResponse({"users": out})
 
 
@@ -8293,16 +8297,25 @@ async def api_conv_log(request: Request, user: str = Depends(require_local_auth)
 
 @app.get("/api/conv_log/ips")
 async def api_conv_log_ips(user: str = Depends(require_local_auth)):
-    """Liefert die Liste der bekannten IP-Adressen aus dem Konversations-Log."""
-    return JSONResponse(get_known_ips())
+    """Liefert die Liste der bekannten IP-Adressen aus dem Konversations-Log.
+
+    Numerisch sortiert (``anzeige_sortierung``) – die Quelle liefert die
+    Reihenfolge der letzten Aktivitaet, im Filter sucht man eine Adresse."""
+    return JSONResponse(_anzeige_sortierung.ips_sortiert(get_known_ips()))
 
 @app.get("/api/conv_log/users")
 async def api_conv_log_users(user: str = Depends(require_local_auth)):
     """Liefert die Liste der bekannten Benutzer aus dem Konversations-Log.
 
     Mit Domaenen-Praefix – sonst zeigt das Filter-Pulldown andere Namen als die
-    Liste darunter, und ein aus der Liste kopierter Name findet nichts."""
-    return JSONResponse(_mit_anzeigenamen(get_known_users()))
+    Liste darunter, und ein aus der Liste kopierter Name findet nichts.
+
+    Alphabetisch NACH der Aufbereitung (``anzeige_sortierung``): die Quelle
+    liefert die Reihenfolge der letzten Aktivitaet, und sortiert wird nach dem
+    Text, den der Leser sieht. Benutzt von Telemetrie → Verlauf und
+    Einstellungen → Fehleranalyse."""
+    return JSONResponse(_anzeige_sortierung.namen_sortiert(
+        _mit_anzeigenamen(get_known_users())))
 
 @app.delete("/api/conv_log")
 async def api_conv_log_clear(user: str = Depends(require_local_auth)):
@@ -9448,12 +9461,11 @@ async def security_violations(request: Request, user: str = Depends(require_loca
     # Nach der Namensaufbereitung DOPPELTE entfernen: derselbe Mensch kann zwei
     # Schluessel haben (einmal getippt mit, einmal ohne Domaenen-Praefix) und
     # steht dann zweimal im Pulldown. Beide Eintraege fuehren ohnehin zur selben
-    # Auswahl – der Filter vergleicht normalisiert.
-    namen, gesehen = [], set()
-    for n in _mit_anzeigenamen(security_guard.known_violation_users()):
-        if n not in gesehen:
-            gesehen.add(n)
-            namen.append(n)
+    # Auswahl – der Filter vergleicht normalisiert. Und alphabetisch: die Quelle
+    # liefert „neueste Aktivitaet zuerst", im Filter sucht man aber einen Namen.
+    # Beides erledigt ``anzeige_sortierung.namen_sortiert``.
+    namen = _anzeige_sortierung.namen_sortiert(
+        _mit_anzeigenamen(security_guard.known_violation_users()))
     return JSONResponse(_mit_anzeigenamen({
         "violations": liste,
         "gesamt": {"hart": hart, "weich": len(voll) - hart, "anzahl": len(voll)},

@@ -296,6 +296,14 @@ class ConfluenceDownloadAttachmentTool(_Base):
         for nm in names:
             try:
                 path, size = await _to_thread(c.download_attachment, page_id, nm, ziel_verz)
+                # Als EINGABE anmelden (Host-Pfad, vor der Umschreibung): sonst
+                # haelt die Auslieferung den /tmp-Pfad im Ergebnis fuer eine
+                # Ergebnisdatei und verschiebt sie nach data/documents, bevor
+                # der naechste Schritt sie lesen kann (ECHT 2026-11-09).
+                try:
+                    _lt.eingabe_merken(path)
+                except Exception:  # noqa: BLE001
+                    pass
                 path = "/tmp/" + _os.path.basename(path)
                 ok.append((nm, path, size))
             except ConfluenceError as e:

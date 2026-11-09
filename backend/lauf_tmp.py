@@ -930,6 +930,68 @@ def temp_datei_freigeben(pfad: str) -> None:
         _log(f"Temp-Skript nicht freigebbar ({pfad}): {e}")
 
 
+# ── Eingaben im Arbeitsverzeichnis (Vorfall 2026-11-09, ECHT) ────────────────
+# Ein Download-Werkzeug (``confluence_download_attachment``) legt seine Datei ins
+# Arbeitsverzeichnis, damit die Shell sie unter ``/tmp/<name>`` findet. Dort
+# liegen aber auch die ERGEBNISSE – und ``_deliver_docs`` erkennt einen
+# ``/tmp/…pdf``-Pfad in jedem Werkzeug-Ergebnis als Ergebnisdatei, VERSCHIEBT sie
+# nach data/documents und stellt einen Download-Chip ein. Gemessen auf ECHT:
+# das 59-MB-Anwenderhandbuch war 0,5 s nach dem Download weg, `pdftotext` lief
+# in "No such file or directory", ein zweiter Download blieb liegen (der Pfad
+# stand schon in ``delivered``). Die Fehleranalyse hielt das fuer eine Race
+# Condition. Es war keine: es war die Auslieferung.
+#
+# Am ORT ist Eingabe und Ergebnis nicht zu unterscheiden; das weiss nur, wer die
+# Datei geschrieben hat. Deshalb meldet der Schreiber sie hier an.
+#
+# Gemerkt wird (inode, mtime_ns), nicht nur der Pfad: ueberschreibt der Lauf die
+# Datei spaeter mit einem echten Ergebnis gleichen Namens, ist sie keine
+# Eingabe mehr und wird wie jedes Ergebnis ausgeliefert. Prozessweit statt je
+# Lauf, weil auch ausserhalb der Lauf-Klammer ausgeliefert wird (Short Tracks
+# nach ``run_task_headless``); ein Dienst-Neustart vergisst die Liste – dann
+# schuetzt nur noch das mtime-Fenster von ``_deliver_docs``.
+_eingaben: dict = {}
+_EINGABEN_DECKEL = 512
+_eingaben_lock = threading.Lock()
+
+
+def _datei_kennung(pfad) -> tuple[str, tuple[int, int]] | None:
+    """(aufgeloester Pfad, (inode, mtime_ns)) einer regulaeren Datei – sonst None."""
+    try:
+        p = os.path.realpath(str(pfad))
+        st = os.stat(p)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        return p, (st.st_ino, st.st_mtime_ns)
+    except OSError:
+        return None
+
+
+def eingabe_merken(pfad) -> None:
+    """Meldet eine Datei als EINGABE an: die Auslieferung zieht sie nicht weg.
+
+    Aufzurufen von jedem Werkzeug, das eine fremde Datei (Download, Abruf) an
+    einen Ort legt, an dem auch Ergebnisse entstehen. Mit dem HOST-Pfad.
+    """
+    k = _datei_kennung(pfad)
+    if not k:
+        return
+    with _eingaben_lock:
+        _eingaben.pop(k[0], None)          # neu einsortieren (Reihenfolge = Alter)
+        _eingaben[k[0]] = k[1]
+        while len(_eingaben) > _EINGABEN_DECKEL:
+            _eingaben.pop(next(iter(_eingaben)))
+
+
+def ist_eingabe(pfad) -> bool:
+    """True, wenn genau DIESE Fassung der Datei als Eingabe angemeldet wurde."""
+    k = _datei_kennung(pfad)
+    if not k:
+        return False
+    with _eingaben_lock:
+        return _eingaben.get(k[0]) == k[1]
+
+
 def gehoert_arbeitsbereich(pfad, benutzer: str) -> bool | None:
     """Gehoert ein Pfad unter ARBEIT_ROOT DIESEM Benutzer?
 

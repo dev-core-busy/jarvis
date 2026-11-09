@@ -44,6 +44,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 AGENT = ROOT / "backend" / "agent.py"
+try:
+    from backend import lauf_tmp as _LT_ECHT     # echtes Eingabe-Register
+except Exception as _e:  # noqa: BLE001
+    print(f"ABBRUCH: backend.lauf_tmp nicht ladbar: {_e}")
+    sys.exit(2)
 
 ok = 0
 fehler = 0
@@ -217,6 +222,13 @@ class LaufTmpStub:
         if self.arbeit and s.startswith("/tmp/"):
             return str(self.arbeit / s[len("/tmp/"):])
         return pfad
+
+    # Das Eingabe-Register (ECHT 2026-11-09) ist KEINE Attrappe, sondern das
+    # ECHTE aus backend/lauf_tmp.py: es arbeitet nur auf Dateien (inode +
+    # mtime) und hat keine Abhaengigkeiten. Eine nachgebaute Fassung wuerde
+    # hier nur die Annahme ihres Autors pruefen (Register).
+    def ist_eingabe(self, pfad):
+        return _LT_ECHT.ist_eingabe(pfad)
 
 
 def baue(tmpdir: Path, dok: DokStub, lauf=None):
@@ -892,6 +904,137 @@ def main() -> int:
         pruefe("chat.js entscheidet persist VOR der Praefix-Regel",
                0 < _i_persist < _i_praefix,
                f"persist@{_i_persist} praefix@{_i_praefix}")
+
+        abschnitt("14) Download-EINGABE wird nicht weggezogen (Vorfall 2026-11-09, ECHT)")
+        # DER GEMELDETE FALL: `confluence_download_attachment` legte das
+        # 59-MB-Anwenderhandbuch ins Arbeitsverzeichnis und meldete
+        # "- Anwenderhandbuch.pdf -> /tmp/Anwenderhandbuch.pdf".
+        # Zweig (b) hielt den Pfad im WERKZEUG-Ergebnis fuer eine Ergebnisdatei,
+        # verschob sie nach data/documents (0,5 s nach dem Download, auf ECHT an
+        # der mtime gemessen) – `pdftotext` lief in "No such file or directory".
+        # Ein zweiter Download blieb liegen, weil der Pfad schon in `delivered`
+        # stand. Die Fehleranalyse nannte das eine Race Condition.
+        arb3 = tmpdir / "jarvis-arbeit" / "5e1f00aa"
+        arb3.mkdir(parents=True, exist_ok=True)
+        deliver3, _clean3 = baue(tmpdir, dok, LaufTmpStub(arb3))
+
+        def _chips(s_):
+            return [m for m in s_.gesendet if "/api/documents/" in m]
+
+        def _warn(s_):
+            return [m for m in s_.gesendet if "Konnte nicht zum Download" in m]
+
+        def _werkzeugtext(n_):
+            return f"1 von 1 Anhang/Anhaengen geladen:\n- {n_} -> /tmp/{n_} (64 Byte)"
+
+        # POSITIVKONTROLLE: ohne Anmeldung zieht derselbe Aufruf die Datei weg –
+        # genau der Vorfall. Gelingt das nicht, stellt der Aufbau den Fall nicht
+        # her, und jede Pruefung unten ("liegt noch da") waere trivial wahr.
+        _p0 = arb3 / f"ohne_anmeldung_{uuid.uuid4().hex[:6]}.pdf"
+        _p0.write_bytes(b"%PDF-1.4 kontrolle")
+        _s0 = AgentStub(EXT)
+        asyncio.run(deliver3(_s0, None, _werkzeugtext(_p0.name), set(), "u",
+                             since=jetzt, melden=False, aus_werkzeug=True))
+        if _p0.exists() or not _chips(_s0):
+            print("ABBRUCH: Positivkontrolle – ein NICHT angemeldeter Pfad im "
+                  "Werkzeug-Ergebnis wurde nicht ausgeliefert; der Aufbau stellt den "
+                  "Vorfall nicht her (Exit 2).")
+            return 2
+        pruefe("Positivkontrolle: ohne Anmeldung wird verschoben (der Vorfall)", True)
+
+        _name = f"Handbuch_{uuid.uuid4().hex[:6]}.pdf"
+        _modell = f"/tmp/{_name}"
+        _p = arb3 / _name
+        _inhalt = b"%PDF-1.4 " + b"x" * 64
+        _p.write_bytes(_inhalt)
+        _LT_ECHT.eingabe_merken(_p)
+        pruefe("Register: die angemeldete Datei gilt als Eingabe, die Kontrolle nicht",
+               _LT_ECHT.ist_eingabe(_p) and not _LT_ECHT.ist_eingabe(arb3 / "gibt_es_nicht.pdf"))
+        _geliefert = set()
+
+        _s1 = AgentStub(EXT)
+        asyncio.run(deliver3(_s1, None, _werkzeugtext(_name), _geliefert, "u",
+                             since=jetzt, melden=False, aus_werkzeug=True))
+        pruefe("die Datei liegt nach dem Download-Ergebnis NOCH da (der gemeldete Fall)",
+               _p.is_file())
+        pruefe("und es gibt keinen ungefragten Chip fuer die Eingabe",
+               not _chips(_s1), str(_s1.gesendet))
+
+        # Schritt [26] im Vorfall: ein `ls -la` nennt den Pfad im Shell-Ergebnis.
+        _s2 = AgentStub(EXT)
+        asyncio.run(deliver3(_s2, None, f"-rw-r--r-- 1 jarvis jarvis 73 {_modell}",
+                             _geliefert, "u", since=jetzt, melden=False, aus_werkzeug=True))
+        pruefe("auch ein Shell-Ergebnis mit dem Pfad zieht sie nicht weg",
+               _p.is_file() and not _chips(_s2), str(_s2.gesendet))
+
+        # Endantwort nennt die Eingabe als Quelle – als Pfad UND als blossen Namen.
+        _s3 = AgentStub(EXT)
+        asyncio.run(deliver3(_s3, None,
+                             f"Laut {_modell} (Kapitel 38) geht das so. Quelle: {_name}",
+                             _geliefert, "u", since=jetzt, melden=True))
+        pruefe("die Endantwort liefert die Eingabe nicht aus (Pfad und Name)",
+               _p.is_file() and not _chips(_s3), str(_s3.gesendet))
+        pruefe("und warnt auch nicht, dass etwas fehle",
+               not _warn(_s3), str(_s3.gesendet))
+
+        # Ausdruecklich angefordert (Liefer-Marker): Chip JA – als KOPIE, die
+        # Eingabe bleibt fuer den naechsten Schritt liegen.
+        _s4 = AgentStub(EXT)
+        asyncio.run(deliver3(_s4, None, f"Hier das Handbuch: [[JARVIS_DELIVER:{_modell}]]",
+                             _geliefert, "u", since=jetzt, melden=True))
+        _u4 = chip_url(_s4.gesendet)
+        pruefe("ein Liefer-Marker liefert die Eingabe trotzdem aus",
+               _u4 is not None and (docs / _u4).is_file()
+               and (docs / _u4).read_bytes() == _inhalt, str(_s4.gesendet))
+        pruefe("… und laesst die Quelle liegen (Kopie, kein Umzug)", _p.is_file())
+
+        # Die Anmeldung haengt an DIESER Fassung: ueberschreibt der Lauf die
+        # Datei mit einem Ergebnis gleichen Namens, wird sie wie jedes Ergebnis
+        # ausgeliefert. Sonst waere die Anmeldung ein Dauerschutz fuer einen
+        # Namen, und ein echtes Ergebnis bliebe ohne Chip.
+        _p.write_bytes(b"%PDF-1.4 ueberarbeitet")
+        os.utime(_p, (jetzt + 5, jetzt + 5))
+        pruefe("ueberschrieben gilt die Datei nicht mehr als Eingabe",
+               not _LT_ECHT.ist_eingabe(_p))
+        _s5 = AgentStub(EXT)
+        asyncio.run(deliver3(_s5, None, f"Fertig, das Ergebnis: {_modell}",
+                             set(), "u", since=jetzt, melden=True))
+        pruefe("… und wird als Ergebnis ausgeliefert", bool(_chips(_s5)), str(_s5.gesendet))
+
+        # Der PRODUZENT: das Confluence-Werkzeug meldet seine Datei WIRKLICH an
+        # (ausgefuehrt, nicht gelesen – Register: ein Vorkommen misst keine
+        # Wirkung). Der Client ist eine Attrappe mit der ECHTEN Signatur
+        # `download_attachment(page_id, filename, dest_dir) -> (pfad, groesse)`.
+        import importlib.util as _ilu
+        import types as _types
+        _cfg = _types.ModuleType("backend.config")
+        _cfg.config = _types.SimpleNamespace(get_skill_states=lambda: {},
+                                             get_setting=lambda k, d=None: d)
+        sys.modules.setdefault("backend.config", _cfg)
+        try:
+            _spec = _ilu.spec_from_file_location(
+                "_conf_skill", ROOT / "skills" / "confluence" / "main.py")
+            _conf = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_conf)
+        except Exception as _e:  # noqa: BLE001
+            print(f"ABBRUCH: skills/confluence/main.py nicht ladbar: {_e}")
+            return 2
+        _dl_ziel = arb3 / f"Anhang_{uuid.uuid4().hex[:6]}.pdf"
+
+        class _ClientAttrappe:
+            configured = True
+
+            def download_attachment(self, page_id, filename, dest_dir=None):
+                _dl_ziel.write_bytes(b"%PDF-1.4 download")
+                return str(_dl_ziel), 17
+
+        _werk = _conf.ConfluenceDownloadAttachmentTool()
+        _werk._guard = lambda: _ClientAttrappe()
+        _erg = asyncio.run(_werk.execute(page_id="1", filename=_dl_ziel.name))
+        pruefe("Positivkontrolle: das Werkzeug hat wirklich geladen",
+               _dl_ziel.is_file() and f"/tmp/{_dl_ziel.name}" in _erg, _erg)
+        pruefe("confluence_download_attachment meldet die Datei als EINGABE an",
+               _LT_ECHT.ist_eingabe(_dl_ziel), _erg)
 
     print(f"\n{ok} ok, {fehler} Fehler ({ok + fehler} Pruefungen)")
     return 1 if fehler else 0

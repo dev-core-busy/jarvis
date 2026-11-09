@@ -48,6 +48,8 @@ DATEIEN = [
     "frontend/css/chat.css",
     "tests/test_doc_delivery.py",
     "tests/test_chat_status_sichtbar.js",
+    "backend/lauf_tmp.py",
+    "skills/confluence/main.py",
 ]
 
 SICHER = Path.home() / ".gegen-docdelivery"
@@ -86,8 +88,12 @@ def lauf(welcher: str):
     """
     datei = WAECHTER[welcher]
     befehl = [sys.executable, str(datei)] if welcher == "py" else ["node", str(datei)]
+    # Ohne Bytecode: `backend/lauf_tmp.py` wird importiert, und eine .pyc aus
+    # einer Probe kann bei gleicher Groesse und Sekunde spaeter wieder geladen
+    # werden (Register, 2026-09-29).
+    import os as _os
     r = subprocess.run(befehl, capture_output=True, text=True, timeout=300,
-                       cwd=str(ROOT))
+                       cwd=str(ROOT), env={**_os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     m = (re.search(r"(\d+)\s*ok,\s*(\d+)\s*Fehler", r.stdout)
          or re.search(r"Ergebnis:\s*(\d+)\s*OK,\s*(\d+)\s*FAIL", r.stdout))
     if not m:
@@ -324,6 +330,45 @@ probe("Fehler-Praefixliste im Waechter leer (Regel trivial wahr)", "py",
       "tests/test_doc_delivery.py",
       '        _FEHLER_PRAEFIXE = ("⚠️", "❌")',
       '        _FEHLER_PRAEFIXE = ()')
+
+
+# F – Download-EINGABE (Vorfall 2026-11-09, ECHT: Handbuch nach dem Download
+# verschoben, `pdftotext` ins Leere). Jede Schranke einzeln.
+probe("Eingabe-Schranke in Zweig (b) entfernt (Zustand vor dem Fix)", "py",
+      "backend/agent.py",
+      "            if _lauf_tmp.ist_eingabe(rp):\n                continue\n",
+      "")
+
+probe("Eingabe in (b) als geliefert vermerkt (sperrt den Liefer-Marker)", "py",
+      "backend/agent.py",
+      "            if _lauf_tmp.ist_eingabe(rp):\n                continue\n",
+      "            if _lauf_tmp.ist_eingabe(rp):\n                delivered.add(key)\n"
+      "                continue\n")
+
+probe("Eingabe-Schranke in Zweig (c) entfernt (Name in der Endantwort)", "py",
+      "backend/agent.py",
+      "            if _lauf_tmp.ist_eingabe(found):\n                return\n",
+      "")
+
+probe("Liefer-Marker verschiebt auch eine Eingabe", "py",
+      "backend/agent.py",
+      "_ingest(p, docs_dir / fname, behalten=_lauf_tmp.ist_eingabe(rp))",
+      "_ingest(p, docs_dir / fname)")
+
+probe("_ingest ignoriert `behalten`", "py",
+      "backend/agent.py",
+      "            if behalten:\n                return\n            try:\n                _Path(src).unlink()",
+      "            try:\n                _Path(src).unlink()")
+
+probe("Register merkt nur den Pfad, nicht die Fassung", "py",
+      "backend/lauf_tmp.py",
+      "        return _eingaben.get(k[0]) == k[1]",
+      "        return k[0] in _eingaben")
+
+probe("Confluence-Werkzeug meldet die Datei nicht an", "py",
+      "skills/confluence/main.py",
+      "                    _lt.eingabe_merken(path)\n",
+      "                    pass\n")
 
 
 # ── REGEL statt gepflegter Liste ────────────────────────────────────────────

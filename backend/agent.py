@@ -7080,8 +7080,13 @@ KRITISCH – Ausfuehrungs-Regeln:
             b = _os.path.basename(str(n or "")).translate(_UML).lower()
             return re.sub(r"[^a-z0-9.]+", "", b)
 
-        def _ingest(src, dst):
+        def _ingest(src, dst, behalten: bool = False):
             """Holt die Datei nach data/documents – Aufraeumen der Quelle ist OPTIONAL.
+
+            ``behalten=True``: die Quelle ist eine angemeldete EINGABE
+            (``lauf_tmp.ist_eingabe``) und bleibt liegen – der Lauf arbeitet
+            womoeglich noch mit ihr (ECHT 2026-11-09: das Handbuch war nach der
+            Auslieferung weg, `pdftotext` lief ins Leere).
 
             Hier stand frueher ``shutil.move``. Das ist bei Geraetewechsel
             (/tmp ist tmpfs, data/ liegt auf der Platte) ``copy2`` + ``unlink`` –
@@ -7096,6 +7101,13 @@ KRITISCH – Ausfuehrungs-Regeln:
             scheitern – eine Restdatei in tmpfs ist harmlos).
             """
             _shutil.copy2(str(src), str(dst))
+            # Eine Journal-Zeile je Auslieferung: dass die Quelle hier
+            # VERSCHWINDET, stand bis 2026-11-09 nirgends – die Fehleranalyse
+            # hielt das Fehlen der Datei deshalb fuer eine Race Condition.
+            _log(f"Ausgeliefert: {src} -> {_Path(dst).name}"
+                 f"{' (Eingabe, Quelle bleibt)' if behalten else ''}")
+            if behalten:
+                return
             try:
                 _Path(src).unlink()
             except Exception as e:
@@ -7315,7 +7327,10 @@ KRITISCH – Ausfuehrungs-Regeln:
             fname = f"{_uuid.uuid4().hex}__{base}.{safe_ext}"
             try:
                 docs_dir.mkdir(parents=True, exist_ok=True)
-                _ingest(p, docs_dir / fname)
+                # Ein Marker ist eine AUSDRUECKLICHE Bitte – auch eine Eingabe
+                # (Download) darf so heraus, aber als KOPIE: der Lauf kann sie
+                # im naechsten Schritt noch brauchen.
+                _ingest(p, docs_dir / fname, behalten=_lauf_tmp.ist_eingabe(rp))
             except Exception as e:
                 _verfehlt_merken(raw, disp_name, f"Ingest fehlgeschlagen: {e}")
                 continue
@@ -7377,6 +7392,14 @@ KRITISCH – Ausfuehrungs-Regeln:
             if not _aus_diesem_lauf(rp):
                 _log(f"Pfad-Treffer verworfen (nicht aus diesem Lauf): {rp}")
                 delivered.add(key)
+                continue
+            # EINGABE, kein Ergebnis (ECHT 2026-11-09): ein Download-Werkzeug hat
+            # die Datei ins Arbeitsverzeichnis gelegt und nennt ihren Pfad. Ohne
+            # diese Schranke wurde sie hier verschoben – der naechste Schritt
+            # fand sie nicht mehr, der Benutzer bekam ungefragt einen Chip.
+            # NICHT in `delivered` vermerken: sonst sperrte `key in delivered`
+            # einen spaeteren Liefer-Marker, der sie ausdruecklich anfordert.
+            if _lauf_tmp.ist_eingabe(rp):
                 continue
             delivered.add(key)
             ext = p.suffix.lower().lstrip(".")
@@ -7556,6 +7579,10 @@ KRITISCH – Ausfuehrungs-Regeln:
             if not _aus_diesem_lauf(found):
                 _log(f"Namens-Treffer verworfen (nicht aus diesem Lauf): {found}")
                 delivered.add(key)
+                return
+            # Eine angemeldete EINGABE (Download) ist keine Ergebnisdatei – die
+            # Endantwort nennt sie als Quelle ("laut Handbuch.pdf").
+            if _lauf_tmp.ist_eingabe(found):
                 return
             delivered.add(key)
             ext = found.suffix.lower().lstrip(".")

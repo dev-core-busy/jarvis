@@ -82,8 +82,10 @@ PROBEN = [
      '    return {"aktiv": datetime.date.today() <= ende, "bis": ende.isoformat()}\n',
      '    return {"aktiv": True, "bis": ende.isoformat()}\n'),
     ("H5: Uebergang auch bei gesetztem Anker", TLS,
-     '        if not ue["aktiv"] or sap_cert.passt(eintrag, host, port):\n',
-     '        if not ue["aktiv"]:\n'),
+     # Seit e1261c86 (2026-10-29) prueft eine eigene Zeile VOR der
+     # Uebergangsfrage, ob ein Anker passt – die Sabotage schaltet sie ab.
+     '        if sap_cert.passt(eintrag, host, port):\n',
+     '        if False:\n'),
     ("H5: Uebergang meldet 'ungeprueft' nicht", TLS,
      '        info["ungeprueft"] = True\n',
      '        pass\n'),

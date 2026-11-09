@@ -422,6 +422,15 @@ _fn = next((n for n in BAUM.body if isinstance(n, ast.FunctionDef)
             and n.name == "authenticate_linux_user"), None)
 if _fn is None:
     abbruch("authenticate_linux_user nicht in main.py")
+# Seit A10 (2026-11-05) bildet der AD-Zweig den Bind-Namen ueber _ad_bind_name
+# und prueft danach die Identitaet (_ad_identitaet_passt) – beide samt
+# _norm_login ECHT aus main.py, keine Attrappe: gemessen werden soll der
+# Bind-Name, den die Anmeldung wirklich an den DC schickt.
+_HELFER = ("_norm_login", "_ad_bind_name", "_ad_identitaet_passt")
+_helfer = [n for n in BAUM.body if isinstance(n, ast.FunctionDef) and n.name in _HELFER]
+if sorted(f.name for f in _helfer) != sorted(_HELFER):
+    abbruch("Helfer fehlen in main.py: %s"
+            % sorted(set(_HELFER) - {f.name for f in _helfer}))
 _fn.decorator_list = []
 for _a in _fn.args.args:
     _a.annotation = None
@@ -441,7 +450,7 @@ _ns: dict = {
     "_user_group_dns_cache": {}, "_ad_seen_users": {}, "_revoked_logins": {},
     "_save_ad_caches": lambda **k: None, "_save_revocations": lambda: None,
 }
-exec(compile(ast.fix_missing_locations(ast.Module(body=[_fn], type_ignores=[])),
+exec(compile(ast.fix_missing_locations(ast.Module(body=_helfer + [_fn], type_ignores=[])),
              "main.py", "exec"), _ns)
 _auth = _ns["authenticate_linux_user"]
 

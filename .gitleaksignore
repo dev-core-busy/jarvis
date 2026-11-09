@@ -58,3 +58,5 @@ tests/test_conv_log_geheimnisse.py:curl-auth-user:79
 tests/test_conv_log_geheimnisse.py:curl-auth-user:81
 tests/test_mcp_umleitung.py:generic-api-key:80
 tests/test_sap_verbindungstest.py:generic-api-key:83
+tests/test_skills_liste_geheim.py:generic-api-key:46
+tests/test_skills_liste_geheim.py:generic-api-key:49

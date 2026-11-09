@@ -219,9 +219,19 @@ check(_bsz.get("CVE-2022-47111", {}).get("anderswo") == []
       "nirgends behoben, nichts eingeplant -> leere Angaben")
 check(len(_aus["brotli"]["CVE-2026-6"]["text"]) <= 240, "Beschreibung gekuerzt")
 
-KERNEL_PAKETE = [pk("linux-image-6.12.107+deb13-amd64", "linux", "6.12.107-1"),
-                 pk("linux-image-6.12.113+deb13-amd64", "linux", "6.12.113-1"),
-                 pk("linux-image-amd64", "linux-signed-amd64", "6.12.113+1")]
+def kpk(paket, version, qv):
+    """Kernel-Image in der ECHTEN Form (dpkg-query auf ECHT, 2026-11-09):
+    Quelle ``linux-signed-amd64``, Quellversion ``6.12.116+1``, Binaerversion
+    ``6.12.116-1``. Die fruehere Attrappe gab den Images die Quelle "linux" –
+    damit war der Test gruen, waehrend ECHT einen installierten, nicht
+    laufenden Kernel als "behebbar" fuehrte."""
+    return dict(pk(paket, "linux-signed-amd64", qv), version=version)
+
+
+KERNEL_PAKETE = [kpk("linux-image-6.12.107+deb13-amd64", "6.12.107-1", "6.12.107+1"),
+                 kpk("linux-image-6.12.113+deb13-amd64", "6.12.113-1", "6.12.113+1"),
+                 kpk("linux-image-amd64", "6.12.113-1", "6.12.113+1"),
+                 pk("linux-libc-dev", "linux", "6.12.107-1")]
 K_AUSZUG = {"linux": {"CVE-2026-9": eintrag("resolved", "6.12.111-1"),
                       "CVE-2026-8": eintrag("resolved", "6.12.120-1"),
                       "CVE-2026-7": eintrag("resolved", "6.12.100-1")}}
@@ -235,6 +245,27 @@ kb2 = cve_pruefung.debian_bewerten(KERNEL_PAKETE, K_AUSZUG, "trixie", "6.12.113-
 check(sorted(b["cve"] for b in kb2) == ["CVE-2026-8"],
       "Kernel: massgeblich ist der LAUFENDE Kernel, nicht das aelteste installierte Image",
       str([b["cve"] for b in kb2]))
+# Der Fall von ECHT (2026-11-09): neuer Kernel installiert, laeuft noch nicht,
+# linux-libc-dev (Quelle "linux") steht noch auf dem alten Stand.
+_echt = [kpk("linux-image-6.12.115+deb13.1-amd64", "6.12.115-2", "6.12.115+2"),
+         kpk("linux-image-6.12.116+deb13-amd64", "6.12.116-1", "6.12.116+1"),
+         kpk("linux-image-amd64", "6.12.116-1", "6.12.116+1"),
+         pk("linux-libc-dev", "linux", "6.12.115-2")]
+_kbe = {b["cve"]: b for b in cve_pruefung.debian_bewerten(
+    _echt, {"linux": {"CVE-2026-100080": eintrag("resolved", "6.12.116-1")}}, "trixie", "6.12.115-2")}
+check(_kbe.get("CVE-2026-100080", {}).get("klasse") == "neustart",
+      "Kernel: signiertes Image mit Behebung installiert -> Neustart, nicht Update",
+      str(_kbe.get("CVE-2026-100080")))
+check(_kbe.get("CVE-2026-100080", {}).get("pakete") == ["linux-image-6.12.116+deb13-amd64"],
+      "Kernel: Neustart nennt das installierte Image",
+      str(_kbe.get("CVE-2026-100080", {}).get("pakete")))
+# Ohne jedes Paket der Quelle "linux" muessen Kernel-Luecken trotzdem erscheinen.
+_ohne = [p for p in _echt if p["paket"] != "linux-libc-dev"]
+_kbo = {b["cve"]: b for b in cve_pruefung.debian_bewerten(
+    _ohne, {"linux": {"CVE-2026-100081": eintrag("resolved", "6.12.117-1")}}, "trixie", "6.12.115-2")}
+check(_kbo.get("CVE-2026-100081", {}).get("klasse") == "fix",
+      "Kernel: ohne linux-libc-dev wird die Luecke trotzdem bewertet",
+      str(_kbo.get("CVE-2026-100081")))
 
 FH = cve_pruefung.fremde_herkunft
 check(FH({"installiert": "24.22.2-1nodesource1",

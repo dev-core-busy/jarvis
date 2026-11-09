@@ -128,6 +128,7 @@ KLASSEN = ("behebbar", "neustart", "nicht_im_index", "zurueckgehalten", "lock",
            "nicht_in_lock", "offen", "ausgenommen")
 _META_KERNEL = re.compile(r"^linux-(image|headers)-(?!\d)[a-z0-9-]+$")
 _KERNEL_VERSIONIERT = re.compile(r"^linux-(image|headers|modules|kbuild)-\d")
+_KERNEL_IMAGE = re.compile(r"^linux-image-\d")
 
 _sperre = threading.Lock()
 _status = {"laeuft": False, "seit": 0.0, "schritt": "", "ausloeser": ""}
@@ -283,6 +284,18 @@ def debian_bewerten(pakete: list[dict], auszug: dict, rel: str, kernel: str = ""
     gruppen: dict[str, list[dict]] = {}
     for p in pakete:
         gruppen.setdefault(p["quelle"], []).append(p)
+    # Installierte Kernel-Images, gleich aus welchem Quellpaket: die signierten
+    # (``linux-image-6.12.116+deb13-amd64``) kommen aus ``linux-signed-amd64``
+    # mit Quellversion ``6.12.116+1`` und liegen deshalb NICHT in der Gruppe
+    # "linux". Verglichen wird ihre BINAERversion (``6.12.116-1``), die der
+    # Versionsform des Trackers entspricht. Bis 2026-11-09 zaehlte hier nur
+    # die Gruppe "linux" (auf ECHT nur ``linux-libc-dev``) – ein installierter,
+    # nicht laufender Kernel galt als "behebbar", der Knopf fand nichts zu tun.
+    kernel_images = [p for p in pakete if _KERNEL_IMAGE.match(p["paket"])]
+    # Ohne ein Paket der Quelle "linux" (``linux-libc-dev`` ist nur zufaellig
+    # installiert) gaebe es die Gruppe gar nicht – Kernel-Luecken fehlten still.
+    if kernel and kernel_images:
+        gruppen.setdefault("linux", list(kernel_images))
     befunde = []
     for quelle in sorted(gruppen):
         bins = gruppen[quelle]
@@ -316,7 +329,7 @@ def debian_bewerten(pakete: list[dict], auszug: dict, rel: str, kernel: str = ""
                 if ist_kernel:
                     if cve_apt.vergleiche(kernel, fv) >= 0:
                         continue
-                    neu = [p for p in bins if cve_apt.vergleiche(p["quell_version"], fv) >= 0]
+                    neu = [p for p in kernel_images if cve_apt.vergleiche(p["version"], fv) >= 0]
                     b["pakete"] = sorted({p["paket"] for p in neu}) or ["linux"]
                     b["version"] = kernel
                     b["klasse"] = "neustart" if neu else "fix"
@@ -482,6 +495,10 @@ def _debian_lauf() -> dict:
         info["grund"] = tr["hinweis"]
         return {"info": info, "befunde": []}
     quellen = {p["quelle"] for p in pakete}
+    if any(_KERNEL_IMAGE.match(p["paket"]) for p in pakete):
+        # Kernel-Luecken fuehrt der Tracker unter "linux", die signierten
+        # Images stammen aber aus "linux-signed-amd64" (debian_bewerten).
+        quellen.add("linux")
     info["quellen"] = len(quellen)
     auszug = tracker_auszug(quellen, rel)
     befunde = debian_bewerten(pakete, auszug, rel, info["kernel"])

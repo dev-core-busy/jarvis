@@ -617,10 +617,13 @@
             [[window.t('mcp.cert_host'), `${z.host || ''}:${z.port || ''}`],
              [window.t('mcp.cert_subject'), z.subject || ''],
              [window.t('mcp.cert_issuer'), z.issuer || ''],
-             [window.t('mcp.cert_valid'), `${z.gueltig_von || ''} – ${z.gueltig_bis || ''}`],
+             [window.t('mcp.cert_issued'), z.gueltig_von || ''],
+             [window.t('mcp.cert_valid_until'), z.gueltig_bis || ''],
+             [window.t('mcp.cert_key'), z.schluessel || ''],
              [window.t('mcp.cert_names'), (z.dns_namen || []).join(', ')
                  || window.t('mcp.cert_names_none')],
-            ].forEach(([k, v]) => {
+            ].filter(([, v]) => v).forEach(([k, v]) => {
+                // Leere Angaben (z. B. unbekannte Schluesselart) gar nicht zeigen.
                 const dt = document.createElement('dt'); dt.textContent = k;
                 const dd = document.createElement('dd'); dd.textContent = v;
                 dl.append(dt, dd);

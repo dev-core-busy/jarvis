@@ -151,15 +151,56 @@ def _verify_grund(e: Exception) -> str:
     return t
 
 
+def schluessel_info(zert) -> dict:
+    """Schluesselart und -laenge des oeffentlichen Schluessels.
+
+    Rueckgabe ``{"schluessel_typ", "schluessel_bits", "schluessel"}`` – das
+    letzte Feld ist die fertige Anzeige ("RSA 3072 Bit", "EC P-256 (256 Bit)").
+    Leer, wenn sich nichts lesen laesst: eine unbekannte Schluesselart ist
+    kein Grund, die ganze Auskunft scheitern zu lassen. ``schluessel_bits``
+    ist dann ``None`` (nicht 0 – "unbekannt" ist eine eigene Stufe).
+    """
+    leer = {"schluessel_typ": "", "schluessel_bits": None, "schluessel": ""}
+    try:
+        from cryptography.hazmat.primitives.asymmetric import (
+            dsa, ec, ed448, ed25519, rsa)
+        k = zert.public_key()
+    except Exception:  # noqa: BLE001
+        return leer
+    typ, bits, zusatz = "", None, ""
+    if isinstance(k, rsa.RSAPublicKey):
+        typ, bits = "RSA", k.key_size
+    elif isinstance(k, ec.EllipticCurvePublicKey):
+        typ, bits = "EC", k.curve.key_size
+        # secp256r1 heisst in der Praxis P-256 – so steht es auch im Browser.
+        kurve = {"secp256r1": "P-256", "secp384r1": "P-384",
+                 "secp521r1": "P-521"}.get(k.curve.name, k.curve.name)
+        zusatz = kurve
+    elif isinstance(k, dsa.DSAPublicKey):
+        typ, bits = "DSA", k.key_size
+    elif isinstance(k, ed25519.Ed25519PublicKey):
+        typ, bits = "Ed25519", 256
+    elif isinstance(k, ed448.Ed448PublicKey):
+        typ, bits = "Ed448", 456
+    else:
+        return leer
+    if zusatz:
+        anzeige = "%s %s (%d Bit)" % (typ, zusatz, bits)
+    else:
+        anzeige = "%s %d Bit" % (typ, bits)
+    return {"schluessel_typ": typ, "schluessel_bits": bits, "schluessel": anzeige}
+
+
 def _details(der: bytes) -> dict:
-    """Inhaber, Aussteller, Laufzeit, Namen – ueber ``cryptography``.
+    """Inhaber, Aussteller, Laufzeit, Namen, Schluessel – ueber ``cryptography``.
 
     Fehlt das Paket, gibt es Fingerabdruck und PEM trotzdem: eine
     Minimalauskunft ist besser als ein Fehler, und der Fingerabdruck allein
     genuegt fuer die bewusste Uebernahme.
     """
     leer = {"inhaber": "", "aussteller": "", "gueltig_von": "", "gueltig_bis": "",
-            "namen": [], "selbstsigniert": None, "details_da": False}
+            "namen": [], "selbstsigniert": None, "details_da": False,
+            "schluessel_typ": "", "schluessel_bits": None, "schluessel": ""}
     try:
         from cryptography import x509
         from cryptography.x509.oid import ExtensionOID, NameOID
@@ -206,7 +247,7 @@ def _details(der: bytes) -> dict:
                 continue
         return ""
 
-    return {
+    aus = {
         "inhaber": inhaber,
         "aussteller": _cn(zert.issuer),
         "gueltig_von": _zeit("not_valid_before_utc", "not_valid_before"),
@@ -215,6 +256,8 @@ def _details(der: bytes) -> dict:
         "selbstsigniert": zert.subject == zert.issuer,
         "details_da": True,
     }
+    aus.update(schluessel_info(zert))
+    return aus
 
 
 def fingerabdruck(der: bytes) -> str:

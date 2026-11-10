@@ -905,6 +905,9 @@ body.light .mcp-btn-danger:hover { color: color-mix(in srgb, var(--danger) 78%, 
 }
 .mcp-erklaerung summary { cursor: pointer; font-weight: 600; color: var(--text-primary); font-size: 0.88rem; }
 .mcp-erklaerung p { margin: 0.5rem 0 0; font-size: 0.84rem; line-height: 1.5; color: var(--text-secondary); }
+.cp-anleitung ol { margin: 0.5rem 0 0; padding-left: 1.3rem; font-size: 0.84rem; line-height: 1.5; color: var(--text-secondary); }
+.cp-anleitung li { margin: 0.35rem 0; }
+.cp-anleitung code { font-size: 0.8rem; }
 .mcp-tools-list {
     margin-top: 0.5rem;
     font-size: 0.8rem;

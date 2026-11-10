@@ -92,6 +92,14 @@
                 return;
             }
             box.innerHTML = this._markup(daten);
+            // Die Einrichtungsanleitung ist offen, solange nichts eingetragen ist;
+            // danach EINMAL zuklappen – spaeter nicht mehr, sonst klappt jeder
+            // Abruf eine Anleitung zu, die der Administrator gerade liest.
+            const anleitung = document.getElementById('copilot-anleitung');
+            if (anleitung && !this._anleitungGesetzt) {
+                this._anleitungGesetzt = true;
+                if (daten && daten.eingerichtet) anleitung.open = false;
+            }
         }
 
         _markup(d) {
@@ -108,7 +116,7 @@
                 teile.push(this._hinweis(
                     t('copilot.unkonfig_titel', 'Anwendung fehlt'),
                     t('copilot.unkonfig_text',
-                      'Mandanten-Kennung und Anwendungs-Kennung sind nicht hinterlegt. Ein Administrator trägt sie oben unter „Zugangsdaten" ein; die Anleitung dazu steht in docs/copilot.md.')));
+                      'Mandanten-Kennung und Anwendungs-Kennung sind nicht hinterlegt. Ein Administrator trägt sie oben unter „Entra-Anwendung" ein; wo es beide Kennungen gibt, steht im aufklappbaren Abschnitt darüber.')));
             }
             if (!d.internet_frei) {
                 teile.push(this._hinweis(

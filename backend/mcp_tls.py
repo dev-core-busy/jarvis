@@ -418,6 +418,9 @@ def zertifikat_abholen(url: str, frist: float = ABHOL_FRIST_S) -> dict:
     aus["gueltig_bis"] = bis.isoformat()
     aus["dns_namen"] = _san_liste(cert)
     aus["selbstsigniert"] = cert.subject == cert.issuer
+    # Schluesselart und -laenge aus derselben Quelle wie SAP/LDAP/E-Mail/LLM.
+    from backend import sap_cert
+    aus.update(sap_cert.schluessel_info(cert))
 
     befunde = []
     if aus["selbstsigniert"]:

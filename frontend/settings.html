@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=52">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=227">
+    <link rel="stylesheet" href="/static/css/style.css?v=228">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -4990,9 +4990,17 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      es nur delegiert, also verbindet jeder sein eigenes Konto. -->
                 <div id="settings-tab-copilot" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <p class="kb-hint" data-i18n-html="copilot.reiter_hinweis">Recherche über Microsoft 365 Copilot: der Agent stellt eine Frage, Copilot sucht im Internet (Bing) und im Bestand des Unternehmens und antwortet mit Quellen. <strong>Die Frage verlässt das Haus</strong> – sie geht an Microsoft und an die Bing-Suche, für die laut Microsoft weder der Datenschutz-Nachtrag noch die EU Data Boundary gelten. Jeder recherchierende Benutzer braucht eine eigene Microsoft-365-Copilot-Lizenz. Einrichtung: <code>docs/copilot.md</code>.</p>
+                        <p class="kb-hint" data-i18n-html="copilot.reiter_hinweis">Recherche über Microsoft 365 Copilot: der Agent stellt eine Frage, Copilot sucht im Internet (Bing) und im Bestand des Unternehmens und antwortet mit Quellen. <strong>Die Frage verlässt das Haus</strong> – sie geht an Microsoft und an die Bing-Suche, für die laut Microsoft weder der Datenschutz-Nachtrag noch die EU Data Boundary gelten. Jeder recherchierende Benutzer braucht eine eigene Microsoft-365-Copilot-Lizenz. Die Einrichtung steht im aufklappbaren Abschnitt unten.</p>
 
                         <h4 style="margin:16px 0 8px;" data-i18n="copilot.abschnitt_anwendung">Entra-Anwendung</h4>
+                        <!-- Die Einrichtungsschritte stehen HIER und nicht nur in docs/copilot.md:
+                             eine Repo-Datei erreicht der Administrator aus der Oberflaeche nicht
+                             (Meldung 2026-11-10: "ich finde die benoetigten Daten nicht").
+                             Offen, solange nichts eingetragen ist, sonst zu (copilot.js). -->
+                        <details class="mcp-erklaerung cp-anleitung" id="copilot-anleitung" open>
+                            <summary><span data-i18n="copilot.anleitung_titel">So kommst du an Mandanten- und Anwendungs-Kennung</span></summary>
+                            <div data-i18n-html="copilot.anleitung_text"><p>Beides entsteht im <strong>Microsoft Entra Admin Center</strong> (entra.microsoft.com) bei einer eigenen App-Registrierung. Wer dort keinen Zugang hat, gibt diese Schritte an die Microsoft-365-Administration weiter – zurück kommen nur die zwei Kennungen; ein Kennwort oder Geheimnis wird nicht gebraucht.</p><ol><li><strong>Registrierung anlegen:</strong> Entra Admin Center → <em>Identität</em> → <em>Anwendungen</em> → <em>App-Registrierungen</em> → <em>Neue Registrierung</em>. Name frei wählbar (z. B. „Copilot-Recherche“), Kontotyp <em>Nur Konten in diesem Organisationsverzeichnis</em>, <strong>keine</strong> Umleitungs-URI. Eine eigene Registrierung – nicht die des Outlook-Add-ins.</li><li><strong>Kennungen ablesen:</strong> auf der Seite <em>Übersicht</em> der neuen Registrierung stehen <em>Anwendungs-ID (Client)</em> → Feld „Anwendungs-Kennung“ und <em>Verzeichnis-ID (Mandant)</em> → Feld „Mandanten-Kennung“. Beides sind GUIDs der Form <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>.</li><li><strong>Gerätecode-Anmeldung erlauben:</strong> <em>Authentifizierung</em> → <em>Erweiterte Einstellungen</em> → <em>Öffentliche Clientflows zulassen</em> auf <strong>Ja</strong> und speichern. Ohne diesen Schalter scheitert „Microsoft-Konto verbinden“. <strong>Kein</strong> Clientgeheimnis anlegen.</li><li><strong>Berechtigungen:</strong> <em>API-Berechtigungen</em> → <em>Berechtigung hinzufügen</em> → <em>Microsoft Graph</em> → <em>Delegierte Berechtigungen</em>, alle sieben auswählen: <code>Sites.Read.All</code>, <code>Mail.Read</code>, <code>People.Read.All</code>, <code>OnlineMeetingTranscript.Read.All</code>, <code>Chat.Read</code>, <code>ChannelMessage.Read.All</code>, <code>ExternalItem.Read.All</code>. Microsoft verlangt alle sieben – fehlt eine, schlägt jede Recherche fehl.</li><li><strong>Zustimmung erteilen:</strong> auf derselben Seite <em>Administratorzustimmung für &lt;Mandant&gt; erteilen</em>. Dafür braucht es ein Konto mit entsprechender Rolle (z. B. Globaler Administrator oder Administrator für privilegierte Rollen).</li><li><strong>Lizenz prüfen:</strong> jeder recherchierende Benutzer braucht eine <em>Microsoft 365 Copilot</em>-Lizenz (Microsoft 365 Admin Center → <em>Abrechnung</em> → <em>Lizenzen</em>). Ohne sie antwortet Microsoft mit „Zugriff verweigert“.</li><li><strong>Hier eintragen und speichern</strong>, danach verbindet jeder Benutzer unten unter „Verbindung“ einmalig sein eigenes Microsoft-Konto. Er braucht außerdem die Internet-Freigabe (Einstellungen → Sicherheit → Berechtigungen).</li></ol></div>
+                        </details>
                         <div id="skcfg-copilot"></div>
 
                         <h4 style="margin:22px 0 8px;" data-i18n="skillcfg.section_connection">Verbindung</h4>
@@ -6190,7 +6198,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=455"></script>
+    <script src="/static/js/i18n.js?v=456"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6203,18 +6211,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/chatlib.js?v=27"></script>
     <script src="/static/js/skillcfg.js?v=15"></script>
     <script src="/static/js/google.js?v=16"></script>
-    <script src="/static/js/copilot.js?v=1"></script>
+    <script src="/static/js/copilot.js?v=2"></script>
     <script src="/static/js/whatsapp.js?v=20"></script>
     <script src="/static/js/knowledge.js?v=143"></script>
     <!-- knowledge_sync NACH knowledge.js: die Ordnerliste fragt beim Zeichnen
          window.KnowledgeSync.sharedFolders() fuer den Zustand des 🔗-Symbols. -->
     <script src="/static/js/knowledge_sync.js?v=6"></script>
-    <script src="/static/js/mcp.js?v=12"></script>
+    <script src="/static/js/mcp.js?v=13"></script>
     <script src="/static/js/vision.js?v=38"></script>
     <script src="/static/js/confluence.js?v=11"></script>
     <script src="/static/js/jira.js?v=32"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
-    <script src="/static/js/sapcert.js?v=3"></script>
+    <script src="/static/js/sapcert.js?v=4"></script>
     <script src="/static/js/sap.js?v=10"></script>
     <script src="/static/js/vemas.js?v=6"></script>
     <script src="/static/js/email.js?v=11"></script>
@@ -6245,7 +6253,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=241"></script>
+    <script src="/static/js/app.js?v=242"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

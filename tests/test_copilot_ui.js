@@ -187,6 +187,55 @@ async function zeichnen(w, status) {
     pruefe(/data-cp-aktion="verbinden"[^>]*disabled/.test(html),
            "ohne Internet-Freigabe ebenso");
 
+    console.log("3e. Die Einrichtungsanleitung steht IM Reiter");
+    {
+        // Die Scopes kommen aus dem Backend, nicht abgetippt – eine achte
+        // Berechtigung dort muss hier ohne Pflege auffallen.
+        const quelle = fs.readFileSync(path.join(ROOT, "backend", "copilot_client.py"), "utf8");
+        const block = (quelle.match(/\nSCOPES = \(([\s\S]*?)\)/) || [])[1] || "";
+        const scopes = (block.match(/"([A-Za-z.]+)"/g) || []).map((x) => x.slice(1, -1));
+        if (scopes.length < 7) abbruch("SCOPES aus copilot_client.py nicht lesbar (" + scopes.length + ")");
+
+        const { w } = aufbauen();
+        const reiter = w.document.getElementById("settings-tab-copilot");
+        const anl = w.document.getElementById("copilot-anleitung");
+        pruefe(!!anl && reiter.contains(anl), "die Anleitung liegt im Copilot-Reiter");
+        const felder = w.document.getElementById("skcfg-copilot");
+        pruefe(!!anl && !!felder
+               && (anl.compareDocumentPosition(felder) & w.Node.DOCUMENT_POSITION_FOLLOWING),
+               "…und steht VOR den Eingabefeldern");
+        const txt = anl ? anl.textContent : "";
+        pruefe(txt.includes("Verzeichnis-ID (Mandant)") && txt.includes("Anwendungs-ID (Client)"),
+               "sie nennt die Feldnamen, unter denen Entra die Kennungen zeigt");
+        pruefe(/ffentliche Clientflows zulassen/.test(txt), "…und den Schalter für die Gerätecode-Anmeldung");
+        const fehlt = scopes.filter((sc) => !txt.includes(sc));
+        pruefe(fehlt.length === 0, "…und alle Graph-Berechtigungen aus SCOPES", fehlt.join(", "));
+        pruefe(!reiter.textContent.includes("docs/copilot"),
+               "kein Verweis auf eine Repo-Datei, die der Administrator nicht erreicht");
+
+        // Offen ohne Einrichtung, EINMAL zu mit Einrichtung, danach nicht mehr.
+        anl.open = true;
+        await zeichnen(w, { eingerichtet: false, verbunden: false, konto: "",
+                            internet_frei: true, skill_aktiv: true });
+        pruefe(anl.open === true, "ohne Einrichtung bleibt die Anleitung offen");
+        const hinweis = w.document.getElementById("copilot-status-container").textContent;
+        pruefe(!hinweis.includes("docs/copilot") && hinweis.includes("Entra-Anwendung"),
+               "der Hinweis 'Anwendung fehlt' verweist auf den Abschnitt im Reiter");
+
+        const { w: w2 } = aufbauen();
+        const anl2 = w2.document.getElementById("copilot-anleitung");
+        await zeichnen(w2, { eingerichtet: true, verbunden: false, konto: "",
+                             internet_frei: true, skill_aktiv: true });
+        pruefe(anl2.open === false, "eingerichtet: die Anleitung ist zugeklappt");
+        anl2.open = true;
+        await zeichnen(w2, { eingerichtet: true, verbunden: false, konto: "",
+                             internet_frei: true, skill_aktiv: true });
+        pruefe(anl2.open === true, "…und ein erneutes Zeichnen klappt sie nicht wieder zu");
+        // Die folgenden Abschnitte arbeiten wieder auf der ersten Seite.
+        global.window = w0;
+        global.document = w0.document;
+    }
+
     console.log("4. Ein Ausfall der Auskunft behauptet KEINEN Zustand");
     mitAntworten(w0, { [STATUS]: { status: 500, daten: {} } });
     await w0.copilotVerbindung.init();

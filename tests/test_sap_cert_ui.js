@@ -42,6 +42,7 @@ const ZERT_SELBST = {
     inhaber: 's4.firma.de', aussteller: 'Firma Interne CA',
     gueltig_von: '2026-01-01 00:00 UTC', gueltig_bis: '2027-01-01 00:00 UTC',
     namen: ['s4.firma.de', 'sap.firma.de'], selbstsigniert: true,
+    schluessel_typ: 'RSA', schluessel_bits: 3072, schluessel: 'RSA 3072 Bit',
     system_ok: false, system_grund: 'selbst ausgestelltes Zertifikat',
     pin_ok: true, pin_grund: '', kanal: 'odata',
 };
@@ -195,6 +196,23 @@ function txt(dom, sel) {
               /Firma Interne CA/.test(kasten.textContent));
         check('Namen im Zertifikat werden genannt',
               /sap\.firma\.de/.test(kasten.textContent));
+        // Beschriftung UND Wert gehoeren zusammen: gemessen wird das Paar im
+        // Raster (Wert steht direkt hinter seiner Beschriftung), nicht ein
+        // Vorkommen irgendwo im Kasten.
+        const paar = (k) => {
+            const ks = Array.from(kasten.querySelectorAll('.sapcert-grid .sapcert-k'));
+            const hit = ks.find((e) => e.textContent === k);
+            const v = hit && hit.nextElementSibling;
+            return v ? v.textContent : null;
+        };
+        check('Ausstellungsdatum steht als eigene Zeile',
+              paar('Ausgestellt am') === ZERT_SELBST.gueltig_von,
+              String(paar('Ausgestellt am')));
+        check('Ablaufdatum steht als eigene Zeile',
+              paar('Gültig bis') === ZERT_SELBST.gueltig_bis,
+              String(paar('Gültig bis')));
+        check('Schluesselart und Bitzahl werden genannt',
+              paar('Schlüssel') === 'RSA 3072 Bit', String(paar('Schlüssel')));
         check('Urteil "verankerbar" ist eine Warnung',
               !!kasten.querySelector('.sapcert-verdict.is-warn'));
         check('Verankern-Knopf ist da',

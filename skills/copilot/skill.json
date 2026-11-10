@@ -15,14 +15,14 @@
         "copilot_tenant_id": {
             "type": "string",
             "label": "Mandanten-Kennung (Tenant-ID)",
-            "description": "Die Verzeichnis-Kennung des Microsoft-365-Mandanten (GUID, im Entra-Portal unter Übersicht). Ohne sie gibt es keine Verbindung.",
+            "description": "Im Entra Admin Center (entra.microsoft.com) auf der Seite „Übersicht“ der App-Registrierung als „Verzeichnis-ID (Mandant)“ – eine GUID der Form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. Die Schritt-für-Schritt-Anleitung steht im Reiter „Copilot“ direkt über diesen Feldern.",
             "default": "",
             "required": true
         },
         "copilot_client_id": {
             "type": "string",
             "label": "Anwendungs-Kennung (Client-ID)",
-            "description": "Die Kennung einer EIGENEN App-Registrierung in Entra ID – bewusst nicht die des Outlook-Add-ins: diese Anwendung braucht sieben Graph-Leseberechtigungen (darunter Mail.Read und Sites.Read.All), und diese Rechtefläche gehört nicht an einen Anmeldeweg. Die App muss als öffentlicher Client angelegt sein (Allow public client flows = Ja); ein Client-Geheimnis wird NICHT gebraucht und darf nicht hinterlegt werden.",
+            "description": "Auf derselben Übersichtsseite als „Anwendungs-ID (Client)“. Gemeint ist eine EIGENE App-Registrierung, nicht die des Outlook-Add-ins (sie braucht sieben Graph-Leseberechtigungen, darunter Mail.Read und Sites.Read.All). In der Registrierung muss „Öffentliche Clientflows zulassen“ auf Ja stehen; ein Clientgeheimnis wird NICHT gebraucht und darf nicht hinterlegt werden.",
             "default": "",
             "required": true
         }
@@ -46,6 +46,7 @@
             "Suche den aktuellen Stand der Norm und nenne die Quelle",
             "Was ist zu dieser Schwachstelle öffentlich bekannt?"
         ],
+        "setup": "1. Entra Admin Center (entra.microsoft.com) → Identität → Anwendungen → App-Registrierungen → Neue Registrierung: Name frei, nur eigenes Verzeichnis, keine Umleitungs-URI. 2. Auf der Übersichtsseite „Anwendungs-ID (Client)“ und „Verzeichnis-ID (Mandant)“ ablesen. 3. Authentifizierung → Erweiterte Einstellungen → „Öffentliche Clientflows zulassen“ = Ja; kein Clientgeheimnis anlegen. 4. API-Berechtigungen → Microsoft Graph → Delegierte Berechtigungen: Sites.Read.All, Mail.Read, People.Read.All, OnlineMeetingTranscript.Read.All, Chat.Read, ChannelMessage.Read.All, ExternalItem.Read.All (alle sieben). 5. „Administratorzustimmung erteilen“ (Rolle z. B. Globaler Administrator). 6. Skill aktivieren, im Reiter „Copilot“ beide Kennungen eintragen und speichern. 7. Jeder Benutzer verbindet dort einmalig sein Microsoft-Konto; er braucht eine Microsoft-365-Copilot-Lizenz und die Internet-Freigabe. Ohne Zugang zum Entra-Portal: diese Schritte an die Microsoft-365-Administration geben – zurück kommen nur die zwei Kennungen.",
         "notes": "SICHERHEIT: Die Frage VERLÄSST DAS HAUS. Copilot bildet aus ihr eine eigene Suchanfrage und sendet sie samt Client-IP an die Bing-Suche; für diese Suchanfragen gelten laut Microsoft weder der Datenschutz-Nachtrag (DPA) noch die EU Data Boundary. Es findet KEINE automatische Anonymisierung statt – wer Kundennamen in eine Frage schreibt, schickt sie an Microsoft. Das Werkzeug ist deshalb an die Internet-Freigabe des Benutzers gebunden (Einstellungen → Sicherheit → Berechtigungen, leer = niemand, kein Admin-Bypass) und arbeitet immer nur mit dem Microsoft-Konto des Auftraggebers; ein Lauf ohne angemeldeten Benutzer (Zeitplan, WhatsApp, Agenten-API) kann es nicht nutzen, weil Microsoft für diese Schnittstelle kein Dienstkonto zulässt. Copilot bekommt KEINE Jarvis-Werkzeuge und kann technisch nur Text zurückgeben – eine präparierte Webseite kann darüber also keine Aktion auslösen, höchstens den Antworttext beeinflussen. REIFEGRAD: Die Chat API steht bei Microsoft unter /beta; Microsoft schreibt dazu, die Nutzung in Produktivanwendungen werde nicht unterstützt. Für einen Erprobungsbetrieb geeignet, für den Produktivserver erst nach deren Freigabe."
     }
 }

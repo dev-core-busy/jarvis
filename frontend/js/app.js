@@ -2597,9 +2597,9 @@
             zeile(window.t('sapcert.server'), z.host + ':' + z.port);
             zeile(window.t('sapcert.subject'), z.inhaber);
             zeile(window.t('sapcert.issuer'), z.aussteller);
-            if (z.gueltig_von || z.gueltig_bis) {
-                zeile(window.t('sapcert.valid'), (z.gueltig_von || '?') + ' – ' + (z.gueltig_bis || '?'));
-            }
+            zeile(window.t('sapcert.issued'), z.gueltig_von);
+            zeile(window.t('sapcert.valid_until'), z.gueltig_bis);
+            zeile(window.t('sapcert.key'), z.schluessel);
             if (z.namen && z.namen.length) zeile(window.t('sapcert.names'), z.namen.join(', '));
             tab.appendChild(el('span', 'sapcert-k', window.t('sapcert.fp')));
             tab.appendChild(el('span', 'sapcert-v sapcert-fp', z.fingerprint || ''));

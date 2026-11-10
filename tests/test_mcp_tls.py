@@ -592,6 +592,12 @@ try:
           _erg.get("host") == "localhost" and _erg.get("port") == _port)
     check("die Laufzeit wird gemeldet",
           bool(_erg.get("gueltig_von")) and bool(_erg.get("gueltig_bis")))
+    check("Schluesselart und Bitzahl werden gemeldet",
+          _erg.get("schluessel_typ") in ("RSA", "EC")
+          and isinstance(_erg.get("schluessel_bits"), int)
+          and _erg.get("schluessel_bits") > 0
+          and str(_erg.get("schluessel_bits")) in (_erg.get("schluessel") or ""),
+          "%r" % (_erg.get("schluessel"),))
 
     # Und der Gegenfall: ein Zertifikat fuer einen ANDEREN Namen MUSS als
     # Namensbefund erscheinen. Ohne diesen Fall waere die Pruefung oben

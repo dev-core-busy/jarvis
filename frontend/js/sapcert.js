@@ -144,10 +144,11 @@
             zeileAdd(T('sapcert.server', 'Server'), z.host + ':' + z.port);
             zeileAdd(T('sapcert.subject', 'Inhaber'), z.inhaber);
             zeileAdd(T('sapcert.issuer', 'Aussteller'), z.aussteller);
-            if (z.gueltig_von || z.gueltig_bis) {
-                zeileAdd(T('sapcert.valid', 'Gültig'),
-                    (z.gueltig_von || '?') + ' – ' + (z.gueltig_bis || '?'));
-            }
+            // Ausstellungsdatum und Ablauf getrennt: "von – bis" las sich nicht
+            // als Ausstellungsdatum, danach wurde ausdruecklich gefragt.
+            zeileAdd(T('sapcert.issued', 'Ausgestellt am'), z.gueltig_von);
+            zeileAdd(T('sapcert.valid_until', 'Gültig bis'), z.gueltig_bis);
+            zeileAdd(T('sapcert.key', 'Schlüssel'), z.schluessel);
             if (z.namen && z.namen.length) {
                 zeileAdd(T('sapcert.names', 'Namen im Zertifikat'), z.namen.join(', '));
             }

@@ -233,6 +233,31 @@ check("Testhaus AG" in erg_a["aussteller"] or erg_a["aussteller"] == "localhost"
       "Aussteller gelesen", erg_a["aussteller"])
 check("localhost" in erg_a["namen"], "SAN-Namen gelesen", str(erg_a["namen"]))
 check(bool(erg_a["gueltig_bis"]), "Laufzeit gelesen", erg_a["gueltig_bis"])
+check(bool(erg_a["gueltig_von"]), "Ausstellungsdatum gelesen", erg_a["gueltig_von"])
+# Die Bitzahl kommt aus dem Schluessel des Testzertifikats (zertifikat_bauen:
+# key_size=2048) – gemessen, nicht abgetippt.
+check(erg_a.get("schluessel_typ") == "RSA" and erg_a.get("schluessel_bits") == 2048,
+      "Schluesselart und Bitzahl gelesen",
+      "%r %r" % (erg_a.get("schluessel_typ"), erg_a.get("schluessel_bits")))
+check(erg_a.get("schluessel") == "RSA 2048 Bit", "Schluessel-Anzeige",
+      repr(erg_a.get("schluessel")))
+
+# EC-Zweig: Kurve und Bitzahl, gemessen an einem echten P-384-Zertifikat.
+from cryptography.hazmat.primitives.asymmetric import ec as _ec   # noqa: E402
+_ek = _ec.generate_private_key(_ec.SECP384R1())
+_en = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "ec.beispiel.invalid")])
+_jetzt = datetime.datetime.now(datetime.timezone.utc)
+_ez = (x509.CertificateBuilder().subject_name(_en).issuer_name(_en)
+       .public_key(_ek.public_key()).serial_number(x509.random_serial_number())
+       .not_valid_before(_jetzt).not_valid_after(_jetzt + datetime.timedelta(days=1))
+       .sign(_ek, hashes.SHA256()))
+_ed = sc._details(_ez.public_bytes(serialization.Encoding.DER))
+check(_ed.get("schluessel") == "EC P-384 (384 Bit)" and _ed.get("schluessel_bits") == 384,
+      "EC-Schluessel: Kurve und Bitzahl", repr(_ed.get("schluessel")))
+# Unlesbares Zertifikat: "unbekannt" ist None, nicht 0.
+_kaputt = sc._details(b"kein zertifikat")
+check(_kaputt.get("schluessel_bits") is None and _kaputt.get("schluessel") == "",
+      "unlesbar: Bitzahl unbekannt (None), keine Anzeige", repr(_kaputt.get("schluessel_bits")))
 check(erg_a["pem"].startswith("-----BEGIN CERTIFICATE-----"), "PEM liegt bei")
 
 # Zertifikat auf einen FREMDEN Namen: verankern wuerde nichts nuetzen, weil der

@@ -277,6 +277,10 @@
            Token-Feld stand neben Benutzer/Kennwort). Gleiche Klassen-Falle wie
            bei `.input-group` und `.role-grid`. */
         .vm-row[hidden] { display: none; }
+        /* Dieselbe Falle an den Knoepfen: `.vm-hist-btn` setzt ebenfalls
+           `display: flex`. In Chrome gemessen (2026-11-10): "Von VEMAS
+           abmelden" trug `hidden` und stand trotzdem da. */
+        .vm-hist-btn[hidden] { display: none; }
         .vm-acc-group { display: none; }
         .vm-acc-group.is-on { display: block; }
         .vm-acc-group .vm-row { margin-bottom: 12px; }
@@ -558,7 +562,9 @@
                          vemas_portal.js aus icons.js in den leeren Slot – kein Emoji
                          und kein data-i18n am Knopf selbst, sonst ueberschriebe der
                          Sprachwechsel den textContent samt Symbol. -->
-                    <button class="vm-hist-btn" id="vm-acc-del" type="button"
+                    <!-- Vorbelegt verborgen: sichtbar macht ihn vemas_portal.js,
+                         sobald der Server meldet, dass etwas hinterlegt ist. -->
+                    <button class="vm-hist-btn" id="vm-acc-del" type="button" hidden
                             data-i18n-title="vemas.acc_remove" title="Eigenen Zugang entfernen">
                         <span id="vm-acc-del-ico"></span><span data-i18n="vemas.acc_remove">Eigenen Zugang entfernen</span>
                     </button>
@@ -618,7 +624,7 @@
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=19"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=458"></script>
+<script src="/static/js/i18n.js?v=459"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
@@ -633,7 +639,7 @@
 <script src="/static/js/vendor/chartjs-plugin-annotation.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=4"></script>
 <script src="/static/js/mermaid_blocks.js?v=2"></script>
-<script src="/static/js/vemas_portal.js?v=5"></script>
+<script src="/static/js/vemas_portal.js?v=6"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR

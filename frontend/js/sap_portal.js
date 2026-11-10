@@ -1018,6 +1018,16 @@
         }
     }
 
+    // "Eigenen Zugang entfernen" nur, wenn es etwas zu entfernen gibt – das
+    // sagt der Server (`gespeichert`, dieselbe Frage wie beim Loeschen selbst).
+    // FEHLT das Feld (aelterer Dienst hinter neuerer Seite), bleibt der Knopf
+    // sichtbar: "unbekannt" ist nicht "nein", und ein verborgener Knopf naehme
+    // eine Funktion weg.
+    function accEntfernbar() {
+        var b = $('sp-acc-del'); if (!b) return;
+        b.hidden = !_account || _account.gespeichert === false;
+    }
+
     function accRenderHosts() {
         var el = $('sp-acc-hosts'); if (!el || !_account) return;
         var hosts = _account.erlaubte_hosts || [];
@@ -1060,7 +1070,9 @@
                         return ((_account && _account.cert && _account.cert[kanal]) || {}).admin || {};
                     },
                     nachAenderung: function (d) {
-                        if (d && d.account) _account = d.account;
+                        // Ein verankertes Zertifikat legt den Datensatz
+                        // an – der Knopf folgt dem.
+                        if (d && d.account) { _account = d.account; accEntfernbar(); }
                         loadStatus();   // die Pille folgt der geaenderten Lage
                     }
                 });
@@ -1100,6 +1112,7 @@
                 // der Platzhalter sagt, dass leer "unveraendert" bedeutet.
                 accApplyType(a.connection_type || '');
                 accKachel(!!a.kachel_pflicht, !!a.angemeldet);
+                accEntfernbar();
                 accRenderHosts();
                 accRenderState();
                 accMountCert();
@@ -1537,13 +1550,24 @@
             + 'gemeinsamen Lesezugang.'))) return;
         fetch('/api/sap/account', { method: 'DELETE', headers: authHeaders() })
             .then(function (r) { return r.json(); })
-            .then(function () {
+            .then(function (d) {
+                // Die Antwort entscheidet, nicht der Klick: bei einem Fehler
+                // bleibt alles stehen, und "entfernt" steht nur da, wenn der
+                // Server wirklich etwas entfernt hat.
+                if (!d || !d.ok) {
+                    accNote('❌ ' + ((d && d.error) || T('sap.failed', 'Fehlgeschlagen.')), 'error');
+                    return;
+                }
                 accClearSecrets();
                 if ($('sp-acc-type')) $('sp-acc-type').value = '';
                 accApplyType('');
                 accResetTestInfo();
                 odVerwerfen();
-                accNote(T('sap.acc_removed', 'Eigener Zugang entfernt.'), 'ok');
+                if (d.removed === false) {
+                    accNote(T('sap.acc_none_stored', 'Es war kein eigener Zugang hinterlegt.'));
+                } else {
+                    accNote(T('sap.acc_removed', 'Eigener Zugang entfernt.'), 'ok');
+                }
                 loadAccount();
                 loadStatus();
             })

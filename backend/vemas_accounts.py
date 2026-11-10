@@ -467,7 +467,8 @@ def zugang_info(user: str) -> dict:
     ("****") wuerde die Laenge verraten, und ein leeres Feld heisst in der
     Oberflaeche "unveraendert" – dafuer braucht es nur ein Ja/Nein."""
     un = norm_user(user)
-    k = _laden().get(un) or _leer(un)
+    alle = _laden()
+    k = alle.get(un) or _leer(un)
     c = skill_config()
     pflicht = kachel_pflicht(c)
     sitzung = _sitzung_holen(un) if pflicht else {}
@@ -479,6 +480,12 @@ def zugang_info(user: str) -> dict:
 
     info = {
         "vorhanden": bool(_vollstaendig(k)),
+        # Liegt ueberhaupt ein Datensatz? Das ist NICHT ``vorhanden``: jenes
+        # heisst "reicht zum Verbinden", dieses "es gibt etwas zu entfernen" –
+        # dieselbe Frage, an der ``loeschen()`` haengt. Die Oberflaeche zeigt
+        # "Eigenen Zugang entfernen" nur damit; ueber ``vorhanden`` waere ein
+        # halb ausgefuellter Zugang nicht mehr entfernbar.
+        "gespeichert": un in alle,
         "auth_kind": (k.get("auth_kind") or "").strip().lower(),
         "aktiv": bool(k.get("aktiv", True)),
         "passwort_gesetzt": _gesetzt("password"),

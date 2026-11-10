@@ -641,6 +641,16 @@
             : T('vemas.acc_write_off', 'Es wird ausschließlich gelesen. Schreibzugriffe kann ein Administrator freigeben.');
     }
 
+    // "Eigenen Zugang entfernen" nur, wenn es etwas zu entfernen gibt – das
+    // sagt der Server (`gespeichert`, dieselbe Frage wie beim Loeschen selbst).
+    // FEHLT das Feld (aelterer Dienst hinter neuerer Seite), bleibt der Knopf
+    // sichtbar: "unbekannt" ist nicht "nein", und ein verborgener Knopf naehme
+    // eine Funktion weg.
+    function accEntfernbar() {
+        var b = $('vm-acc-del'); if (!b) return;
+        b.hidden = !_account || _account.gespeichert === false;
+    }
+
     function loadAccount() {
         fetch('/api/vemas/account', { headers: authHeaders() })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -655,6 +665,7 @@
                 // heraus); der Platzhalter sagt, dass leer "unveraendert" heisst.
                 accApplyAuth();
                 accKachel(!!a.kachel_pflicht, !!a.angemeldet);
+                accEntfernbar();
                 accRenderWrite();
                 accRenderState();
                 if (a.ausgesetzt) {
@@ -895,12 +906,23 @@
             'Eigenen VEMAS-Zugang entfernen? Danach laufen Auswertungen wieder über den gemeinsamen Zugang.'))) return;
         fetch('/api/vemas/account', { method: 'DELETE', headers: authHeaders() })
             .then(function (r) { return r.json(); })
-            .then(function () {
+            .then(function (d) {
+                // Die Antwort entscheidet, nicht der Klick: bei einem Fehler
+                // bleibt alles stehen, und "entfernt" steht nur da, wenn der
+                // Server wirklich etwas entfernt hat.
+                if (!d || !d.ok) {
+                    accNote('❌ ' + ((d && d.error) || T('vemas.failed', 'Fehlgeschlagen.')), 'error');
+                    return;
+                }
                 accClearSecrets();
                 if ($('vm-acc-auth')) $('vm-acc-auth').value = '';
                 if ($('vm-acc-user')) $('vm-acc-user').value = '';
                 accApplyAuth();
-                accNote(T('vemas.acc_removed', 'Eigener Zugang entfernt.'), 'ok');
+                if (d.removed === false) {
+                    accNote(T('vemas.acc_none_stored', 'Es war kein eigener Zugang hinterlegt.'));
+                } else {
+                    accNote(T('vemas.acc_removed', 'Eigener Zugang entfernt.'), 'ok');
+                }
                 loadAccount();
                 loadStatus();
             })

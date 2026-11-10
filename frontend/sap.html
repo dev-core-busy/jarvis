@@ -283,6 +283,10 @@
            Token-Feld stand neben Benutzer/Kennwort). Gleiche Klassen-Falle wie
            bei `.input-group` und `.role-grid`. */
         .sp-row[hidden] { display: none; }
+        /* Dieselbe Falle an den Knoepfen: `.sp-hist-btn` setzt ebenfalls
+           `display: flex`. In Chrome gemessen (2026-11-10): "Von SAP abmelden"
+           trug `hidden` und stand trotzdem da. */
+        .sp-hist-btn[hidden] { display: none; }
         .sp-acc-group { display: none; }
         .sp-acc-group.is-on { display: block; }
         .sp-acc-group .sp-row { margin-bottom: 12px; }
@@ -650,7 +654,9 @@
                     <button class="sp-btn" id="sp-acc-save" type="button" data-i18n="common.save">Speichern</button>
                     <button class="sp-hist-btn" id="sp-acc-test" type="button" data-i18n="profile.test">Verbindung testen</button>
                     <button class="sp-hist-btn" id="sp-acc-logout" type="button" data-i18n="sap.acc_logout" hidden>Von SAP abmelden</button>
-                    <button class="sp-hist-btn" id="sp-acc-del" type="button" data-i18n="sap.acc_remove">Eigenen Zugang entfernen</button>
+                    <!-- Vorbelegt verborgen: sichtbar macht ihn sap_portal.js, sobald
+                         der Server meldet, dass etwas hinterlegt ist. -->
+                    <button class="sp-hist-btn" id="sp-acc-del" type="button" data-i18n="sap.acc_remove" hidden>Eigenen Zugang entfernen</button>
                     <span class="sp-note" id="sp-acc-status"></span>
                 </div>
                 </form>
@@ -739,7 +745,7 @@
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=19"></script>
 <script src="/static/js/sysload.js?v=6"></script>
-<script src="/static/js/i18n.js?v=458"></script>
+<script src="/static/js/i18n.js?v=459"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
@@ -757,7 +763,7 @@
 <!-- sapcert.js VOR sap_portal.js: die Benutzerkachel haengt den Baustein
      beim Laden des Zugangs ein. -->
 <script src="/static/js/sapcert.js?v=4"></script>
-<script src="/static/js/sap_portal.js?v=18"></script>
+<script src="/static/js/sap_portal.js?v=19"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR

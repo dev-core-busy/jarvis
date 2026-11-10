@@ -681,7 +681,8 @@ def zugang_info(user: str) -> dict:
     (Den Klartext gibt ``klartext()`` heraus – ausdruecklich, einzeln und
     protokolliert.)"""
     un = norm_user(user)
-    k = _laden().get(un) or _leer(un)
+    alle = _laden()
+    k = alle.get(un) or _leer(un)
     erlaubt = hosts_erlaubt()
     hosts = _hosts_im_zugang(k)
     pflicht = kachel_pflicht()
@@ -696,6 +697,12 @@ def zugang_info(user: str) -> dict:
 
     info = {
         "vorhanden": bool(_vollstaendig(k)),
+        # Liegt ueberhaupt ein Datensatz? Das ist NICHT ``vorhanden``: jenes
+        # heisst "reicht zum Verbinden", dieses "es gibt etwas zu entfernen" –
+        # dieselbe Frage, an der ``loeschen()`` haengt. Die Oberflaeche zeigt
+        # "Eigenen Zugang entfernen" nur damit; ueber ``vorhanden`` waere ein
+        # halb ausgefuellter Zugang nicht mehr entfernbar.
+        "gespeichert": un in alle,
         "connection_type": (k.get("connection_type") or "").strip().lower(),
         "aktiv": bool(k.get("aktiv", True)),
         "hana_port": int(k.get("hana_port") or 443),

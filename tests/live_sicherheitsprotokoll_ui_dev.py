@@ -70,7 +70,11 @@ EINTRAEGE = [
     {"ts": 1792505000, "art": "anmeldung", "benutzer": "a.b", "benutzer_anzeige": "FIRMA\\a.b",
      "ip": "192.0.2.7", "ergebnis": "erfolg", "details": {"weg": "kennwort"}},
     {"ts": 1792504000, "art": "admin_aenderung", "benutzer": "jarvis", "ip": "192.0.2.8",
-     "ergebnis": "200", "details": {"methode": "POST", "pfad": "/api/settings/branding"}},
+     "ergebnis": "200", "details": {
+         "aktion": "Aktualisiert einen MCP-Server und verbindet bzw. trennt ihn",
+         "objekt": "server_id=51e28494-4807-4d22-a676-fc9fca1d009e",
+         "felder": "ad_allowed_group, ad_allowed_users, docs_retention_days, tts_voice",
+         "methode": "PUT", "pfad": "/api/mcp/servers/51e28494-4807-4d22-a676-fc9fca1d009e"}},
     {"ts": 1792503000, "art": "konto_gesperrt", "benutzer": "c.d", "ip": "192.0.2.66",
      "ergebnis": "gesperrt", "details": {"dauer_s": 900}},
     {"ts": 1792502000, "art": "dienst_start", "benutzer": "", "ip": "", "ergebnis": "",
@@ -259,6 +263,8 @@ with connect(ws, open_timeout=20, max_size=60_000_000) as sock:
                      ("Markierung Erfolg", "#sprot-tbody .sprot-art-ok"),
                      ("Markierung neutral", "#sprot-tbody .sprot-art-neutral"),
                      ("Details-Text", "#sprot-tbody .audit-arg-val"),
+                     ("Aktion (Satz)", "#sprot-tbody .sprot-aktion"),
+                     ("Beleg (Methode/Pfad)", "#sprot-tbody .sprot-beleg .audit-arg-val"),
                      ("Kettenzeile", "#sprot-kette > div")]
             for name, sel in ziele:
                 k, info = bild_kontrast(sock, sel)
@@ -280,11 +286,39 @@ with connect(ws, open_timeout=20, max_size=60_000_000) as sock:
             klasse = js(sock, "document.getElementById('sprot-kette').className")
             check("Kettenzustand an der Klasse", ("sprot-kette-bruch" if zustand == "bruch" else "sprot-kette-ok")
                   in (klasse or ""), klasse)
+            # Detailspalte: der Satz steht UEBER den Feldern, der Beleg darunter, nichts ragt heraus
+            lage = js(sock, "(function(){var z=document.querySelector('#sprot-tbody .sprot-aktion');"
+                            "if(!z)return null;var td=z.closest('td'),t=td.getBoundingClientRect();"
+                            "var f=td.querySelector(':scope > .sprot-det').getBoundingClientRect();"
+                            "var b=td.querySelector('.sprot-beleg').getBoundingClientRect();"
+                            "var a=z.getBoundingClientRect();return {a:Math.round(a.bottom),f:Math.round(f.top),"
+                            "fb:Math.round(f.bottom),b:Math.round(b.top),"
+                            "raus:Math.round(Math.max(a.right,f.right,b.right)-t.right)};})()")
+            check("Detailspalte: Aktion ueber den Feldern, Beleg darunter, nichts ragt aus der Zelle",
+                  lage and lage["a"] <= lage["f"] + 1 and lage["fb"] <= lage["b"] + 1 and lage["raus"] <= 0,
+                  json.dumps(lage))
+            # Die Aktion ist ein SATZ, kein Rohwert: Schrift der Tabelle, nicht die
+            # Festbreitenschrift der Detailzelle (erster Lauf: `inherit` erbte genau die)
+            fam = js(sock, "(function(){function f(s){var e=document.querySelector(s);"
+                           "return e?getComputedStyle(e).fontFamily:'';}"
+                           "return {a:f('#sprot-tbody .sprot-aktion'),u:f('#sprot-tbody .audit-user'),"
+                           "v:f('#sprot-tbody .audit-arg-val')};})()")
+            check("Aktion in der Schrift der Tabelle, Rohwerte in Festbreite",
+                  fam and fam["a"] and fam["a"] == fam["u"] and fam["a"] != fam["v"], json.dumps(fam))
             ue = js(sock, "document.documentElement.scrollWidth - document.documentElement.clientWidth")
             check("kein waagerechter Ueberlauf der Seite", (ue or 0) <= 0, f"{ue} px")
             js(sock, "(function(){var e=document.querySelector('[data-klick=\"sprot-klappen\"]');"
                      "if(e)window.scrollTo(0, e.getBoundingClientRect().top + window.scrollY - 20);})()")
             time.sleep(0.4)
+            # Tabelle UND Einstellungsfenster rollen je in ihrem eigenen Kasten: die Zeile mit
+            # der Aktion durch alle rollbaren Vorfahren ins Bild holen, sonst zeigt der
+            # Screenshot die Detailspalte nur angeschnitten
+            js(sock, "(function(){var z=document.querySelector('#sprot-tbody .sprot-aktion');if(!z)return;"
+                     "var tr=z.closest('tr');"
+                     "for(var c=tr.parentElement;c&&c!==document.body;c=c.parentElement){"
+                     "if(c.scrollHeight>c.clientHeight+1&&/auto|scroll/.test(getComputedStyle(c).overflowY))"
+                     "c.scrollTop+=tr.getBoundingClientRect().top-c.getBoundingClientRect().top-90;}})()")
+            time.sleep(0.3)
             r = cdp(sock, "Page.captureScreenshot", format="png")
             if r.get("data"):
                 p = BILDER / f"sprot-{zustand}-{thema}.png"

@@ -240,6 +240,62 @@ window.sicherheitsProtokoll = (function () {
         return td;
     }
 
+    // Technischer Beleg: steht hinten und gedaempft, sobald es eine lesbare Aktion gibt
+    var BELEG = { methode: 1, pfad: 1 };
+
+    function paar(ziel, k, v, klasse) {
+        var a = document.createElement('span');
+        a.className = 'audit-arg-key';
+        a.textContent = T('sprot.det.' + k, k);
+        var b = document.createElement('span');
+        b.className = 'audit-arg-val';
+        v = typeof v === 'string' ? v : JSON.stringify(v);
+        b.textContent = v.length > 160 ? v.slice(0, 160) + '…' : v;
+        b.title = v;
+        var s = document.createElement('span');
+        s.className = 'sprot-det' + (klasse ? ' ' + klasse : '');
+        s.appendChild(a);
+        s.appendChild(document.createTextNode(': '));
+        s.appendChild(b);
+        ziel.appendChild(s);
+    }
+
+    /** Detailspalte: WAS (Aktion als Satz), WORAN (Objekt, Konto, Felder …),
+     *  zuletzt Methode und Pfad als Beleg. Alles per textContent. */
+    function details(det) {
+        var tdD = document.createElement('td');
+        tdD.className = 'audit-args';
+        var schl = Object.keys(det);
+        if (!schl.length) {
+            tdD.textContent = '—';
+            return tdD;
+        }
+        var aktion = typeof det.aktion === 'string' ? det.aktion : '';
+        if (aktion) {
+            var kopf = document.createElement('div');
+            kopf.className = 'sprot-aktion';
+            kopf.textContent = aktion;
+            tdD.appendChild(kopf);
+        }
+        var rest = schl.filter(function (k) { return k !== 'aktion' || !aktion; });
+        var inhalt = rest.filter(function (k) { return !(aktion && BELEG[k]); });
+        var beleg = rest.filter(function (k) { return aktion && BELEG[k]; });
+        inhalt.forEach(function (k, i) {
+            if (i) tdD.appendChild(document.createTextNode(' '));
+            paar(tdD, k, det[k]);
+        });
+        if (beleg.length) {
+            var b = document.createElement('div');
+            b.className = 'sprot-beleg';
+            beleg.forEach(function (k, i) {
+                if (i) b.appendChild(document.createTextNode(' '));
+                paar(b, k, det[k]);
+            });
+            tdD.appendChild(b);
+        }
+        return tdD;
+    }
+
     function tabelle(liste) {
         var tbody = $('sprot-tbody');
         if (!tbody) return;
@@ -266,30 +322,7 @@ window.sicherheitsProtokoll = (function () {
             zelle(tr, e.benutzer_anzeige || e.benutzer || '—', 'audit-user');
             zelle(tr, e.ip || '—', 'audit-ts');
             zelle(tr, e.ergebnis || '—', 'audit-res');
-            var tdD = document.createElement('td');
-            tdD.className = 'audit-args';
-            var det = e.details || {};
-            var schl = Object.keys(det);
-            if (!schl.length) {
-                tdD.textContent = '—';
-            } else {
-                schl.forEach(function (k, i) {
-                    if (i) tdD.appendChild(document.createTextNode(' '));
-                    var a = document.createElement('span');
-                    a.className = 'audit-arg-key';
-                    a.textContent = k;
-                    var b = document.createElement('span');
-                    b.className = 'audit-arg-val';
-                    var v = det[k];
-                    v = typeof v === 'string' ? v : JSON.stringify(v);
-                    b.textContent = v.length > 160 ? v.slice(0, 160) + '…' : v;
-                    b.title = v;
-                    tdD.appendChild(a);
-                    tdD.appendChild(document.createTextNode('='));
-                    tdD.appendChild(b);
-                });
-            }
-            tr.appendChild(tdD);
+            tr.appendChild(details(e.details || {}));
             if (stufe(e) === 'warn') tr.className = 'sprot-zeile-warn';
             tbody.appendChild(tr);
         });

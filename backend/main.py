@@ -1404,6 +1404,113 @@ class _AnfragePfadMiddleware:
             _sitzung.ANFRAGE_PFAD.reset(marke)
 
 
+def _sprot_keine_aenderung(fn):
+    """Kennzeichnet einen Endpunkt, der keine Admin-Aenderung ist, obwohl er per
+    POST kommt und intern ``_user_is_admin`` fragt: eine Abfrage mit
+    Anfragekoerper (Kennwoerter und Suchbegriffe gehoeren nicht in die Adresse)
+    oder ein Weg mit eigenem Ereignis (Anmeldung). Er erscheint nicht als
+    ``admin_aenderung`` – auf DEV waren das 2026-11-10 drei Viertel aller
+    Eintraege (396 Gruppen-Mitgliederabfragen, 342 Token-Pruefungen, 84
+    Anmeldungen). Eine VERWEIGERTE Anfrage (403) bleibt protokolliert."""
+    fn._sprot_keine_aenderung = True
+    return fn
+
+
+def _sprot_angaben(**angaben) -> None:
+    """Am Endpunkt benennen, WORAN sich eine Aenderung richtet (Zielkonto,
+    Feldnamen, Schalterstellung) – fuer den Eintrag im Sicherheitsprotokoll.
+
+    Nur Namen und Kennungen, NIE Werte von Geheimnissen oder ganze Anfragekoerper.
+    Wirkt nur innerhalb einer protokollierten Anfrage; sonst still ohne Wirkung."""
+    halter = _admin_anfrage.get()
+    if not isinstance(halter, dict):
+        return
+    ziel = halter.setdefault("angaben", {})
+    for k, v in angaben.items():
+        if v is None or v == "" or v == [] or v == {}:
+            continue
+        ziel[k] = v
+
+
+# Abkuerzungen, nach denen ein Punkt KEIN Satzende ist ("bzw.", "ggf.", "z. B.")
+_SPROT_ABKUERZUNG = re.compile(
+    r"(?:\b(?:bzw|ggf|inkl|evtl|ca|usw|vgl|Nr|etc|max|min)|\b[A-Za-z])\.$")
+
+
+def _sprot_aktion(fn) -> str:
+    """Lesbare Beschreibung eines Endpunkts: der erste Satz seines Docstrings,
+    ohne Markup und ohne den Rechte-Hinweis "(Admin)". '' ohne Docstring.
+
+    Die Beschreibung wird beim SCHREIBEN festgehalten – ein spaeter
+    umformulierter Docstring aendert alte Eintraege nicht."""
+    import inspect
+    doc = inspect.cleandoc(getattr(fn, "__doc__", None) or "")
+    absatz = " ".join(doc.split("\n\n", 1)[0].split()).replace("``", "")
+    satz = absatz
+    for m in re.finditer(r"[.!?](?=\s|$)", absatz):
+        kopf = absatz[:m.end()]
+        if _SPROT_ABKUERZUNG.search(kopf):
+            continue
+        satz = kopf
+        break
+    satz = satz.split(" – ", 1)[0]
+    satz = re.sub(r"\s*\((?:nur\s+)?(?:Admin|Administratoren)\b[^)]*\)", "", satz)
+    if len(satz) > 110:
+        # Aufzaehlung hinter dem Doppelpunkt ist Erlaeuterung, nicht die Aktion
+        satz = satz.split(": ", 1)[0]
+    satz = satz.strip().rstrip(".:;").strip()
+    return satz[:200]
+
+
+def _sprot_route(scope) -> tuple:
+    """(Endpunkt, Pfadparameter) der Anfrage – SELBST ermittelt.
+
+    Der scope dieser Middleware erfaehrt nicht, welche Route lief:
+    ``SitzungCookieMiddleware`` liegt weiter innen und KOPIERT den scope (der
+    Kopfsatz wird ersetzt), das Routing traegt ``endpoint`` also in die Kopie
+    ein – bei jeder Cookie-Sitzung, d. h. bei jeder Anfrage aus dem Browser.
+    Match wird ueber den Namen verglichen (FULL), damit der Waechter ohne
+    Starlette laufen kann."""
+    for r in getattr(app, "router", app).routes:
+        try:
+            treffer, teil = r.matches(scope)
+        except Exception:  # noqa: BLE001
+            continue
+        if getattr(treffer, "name", "") == "FULL":
+            return getattr(r, "endpoint", None), dict((teil or {}).get("path_params") or {})
+    return None, {}
+
+
+def _sprot_wert(v, n: int = 300) -> str:
+    """Ein Angabe-Wert als kurzer Text (Liste -> kommagetrennt)."""
+    if isinstance(v, bool):
+        v = "ja" if v else "nein"
+    elif isinstance(v, (list, tuple, set)):
+        v = ", ".join(str(x) for x in v)
+    v = str(v)
+    return v if len(v) <= n else v[:n] + "…"
+
+
+def _sprot_details(halter: dict, endpunkt, params: dict, methode: str, pfad: str) -> dict:
+    """Detailfelder eines Eintrags, in der Reihenfolge, in der sie gelesen werden:
+    WAS (aktion), WORAN (objekt, Angaben des Endpunkts, Vorgaenge aus dem
+    Aktivitaetsprotokoll), zuletzt der technische Beleg (Methode, Pfad)."""
+    d: dict = {}
+    if endpunkt is not None:
+        d["aktion"] = _sprot_aktion(endpunkt)
+    if params:
+        d["objekt"] = ", ".join(f"{k}={_sprot_wert(v, 120)}" for k, v in params.items())
+    for k, v in (halter.get("angaben") or {}).items():
+        if k not in d and k not in ("methode", "pfad"):
+            d[k] = _sprot_wert(v)
+    vorgaenge = halter.get("vorgaenge") or []
+    if vorgaenge:
+        d["vorgang"] = _sprot_wert(vorgaenge, 400)
+    d["methode"] = methode
+    d["pfad"] = pfad
+    return d
+
+
 @app.middleware("http")
 async def _sicherheits_protokoll_mw(request: Request, call_next):
     if request.method not in _AENDERNDE_METHODEN or not _routing_pfad(request).startswith("/api/"):
@@ -1419,19 +1526,24 @@ async def _sicherheits_protokoll_mw(request: Request, call_next):
         pfad = _routing_pfad(request)
         ip = request.client.host if request.client else ""
         status = response.status_code
+        art, benutzer = "", ""
         if "admin" in halter:
             if halter["admin"]:
-                _sicherheits_log.ereignis("admin_aenderung", benutzer=halter.get("benutzer", ""),
-                                          ip=ip, ergebnis=str(status),
-                                          methode=request.method, pfad=pfad)
+                art = "admin_aenderung"
             elif status == 403:
-                _sicherheits_log.ereignis("admin_verweigert", benutzer=halter.get("benutzer", ""),
-                                          ip=ip, ergebnis=str(status),
-                                          methode=request.method, pfad=pfad)
+                art = "admin_verweigert"
+            benutzer = halter.get("benutzer", "")
         elif pfad.startswith(_KONTO_PFADE):
-            _sicherheits_log.ereignis("konto_aenderung", benutzer=halter.get("sitzung", ""),
-                                      ip=ip, ergebnis=str(status),
-                                      methode=request.method, pfad=pfad)
+            art, benutzer = "konto_aenderung", halter.get("sitzung", "")
+        if art:
+            endpunkt, params = _sprot_route(request.scope)
+            # Reine Abfragen sind keine Aenderung – eine verweigerte schon ein Ereignis
+            if art == "admin_aenderung" and getattr(endpunkt, "_sprot_keine_aenderung", False):
+                art = ""
+        if art:
+            _sicherheits_log.ereignis(art, benutzer=benutzer, ip=ip, ergebnis=str(status),
+                                      **_sprot_details(halter, endpunkt, params,
+                                                       request.method, pfad))
     except Exception as e:  # noqa: BLE001
         print(f"[Sicherheit] Admin-Aenderung nicht protokollierbar: {e}", flush=True)
     return response
@@ -1458,6 +1570,11 @@ def _aktivitaet(user: str, bereich: str, aktion: str, objekt: str = "", *,
     """
     halter = _admin_anfrage.get()
     ip = (halter or {}).get("ip", "") if isinstance(halter, dict) else ""
+    if isinstance(halter, dict):
+        # Fuer den Eintrag im Sicherheitsprotokoll: der Endpunkt kennt den
+        # benannten Gegenstand, die Middleware nur den Pfad
+        halter.setdefault("vorgaenge", []).append(
+            f"{bereich}/{aktion}" + (f": {str(objekt)[:120]}" if objekt else ""))
     try:
         from backend import aktivitaet
         aktivitaet.eintragen(user, bereich, aktion, objekt, ip=ip,
@@ -4985,6 +5102,7 @@ async def api_local_only_update(request: Request, user: str = Depends(require_lo
     key = (body.get("key") or "").strip()
     local_only = bool(body.get("local_only"))
     confirm = bool(body.get("confirm"))
+    _sprot_angaben(endpunkt=key[:200], nur_lokal=local_only)
     if not key or " " not in key or not key.split(" ", 1)[1].startswith("/"):
         return JSONResponse({"error": "Ungueltiger Endpunkt-Schluessel"}, status_code=400)
     if key in _API_LOCAL_ONLY_EXEMPT:
@@ -5523,6 +5641,7 @@ async def _anmeldung_protokollieren(request: Request, resp, weg: str):
 
 
 @app.post("/api/login")
+@_sprot_keine_aenderung
 async def login(request: Request):
     """Multi-User Login via Linux PAM → Token + Desktop-Session-Wechsel.
 
@@ -6516,6 +6635,7 @@ async def totp_admin_reset(request: Request, user: str = Depends(require_local_a
         return JSONResponse({"ok": False, "error": "Kein Benutzer angegeben."}, status_code=400)
     # Eine Person = ein Schluessel (auch im Audit), egal wie das Ziel geschrieben ist
     ziel = _auth_schluessel(ziel)
+    _sprot_angaben(konto=ziel)
     if _norm_login(ziel) == _norm_login(user):
         return JSONResponse({"ok": False, "error": "SELF",
                              "detail": "Die eigene Zwei-Faktor-Anmeldung schaltest du unter "
@@ -6566,7 +6686,9 @@ async def anmeldeschutz_status(user: str = Depends(require_local_auth)):
 
 @app.post("/api/admin/anmeldeschutz")
 async def anmeldeschutz_setzen(request: Request, user: str = Depends(require_local_auth)):
-    """Body ``{admin_2fa_pflicht: bool}``. Nur ein echtes bool wird angenommen."""
+    """Zwei-Faktor-Pflicht fuer Administratoren ein- oder ausschalten.
+
+    Body ``{admin_2fa_pflicht: bool}``. Nur ein echtes bool wird angenommen."""
     _note_activity(user, request)
     try:
         body = await request.json()
@@ -6576,6 +6698,7 @@ async def anmeldeschutz_setzen(request: Request, user: str = Depends(require_loc
     if not isinstance(wert, bool):
         return JSONResponse({"ok": False, "error": "admin_2fa_pflicht (true/false) erwartet."},
                             status_code=400)
+    _sprot_angaben(admin_2fa_pflicht=wert)
     config.save_setting("admin_2fa_pflicht", wert)
     print(f"[AUTH] 2FA-Pflicht fuer Administratoren {'EIN' if wert else 'AUS'} (durch {user})",
           flush=True)
@@ -6593,6 +6716,7 @@ async def anmeldeschutz_aufheben(request: Request, user: str = Depends(require_l
     konto = _norm_login(str((body or {}).get("konto") or "")) if isinstance(body, dict) else ""
     if not konto:
         return JSONResponse({"ok": False, "error": "Kein Konto angegeben."}, status_code=400)
+    _sprot_angaben(konto=konto)
     if not _anmelde_schutz.aufheben(konto):
         return JSONResponse({"ok": False, "error": "Für dieses Konto besteht keine Sperre."},
                             status_code=404)
@@ -8380,6 +8504,7 @@ async def _fehleranalyse_dossier(request: Request, user: str, aktion: str) -> di
 
 
 @app.post("/api/fehleranalyse/dossier")
+@_sprot_keine_aenderung
 async def fehleranalyse_dossier(request: Request, user: str = Depends(require_local_auth)):
     """Nur das Dossier – ohne Modell, deterministisch, zum Kopieren."""
     erg = await _fehleranalyse_dossier(request, user, "dossier")
@@ -8389,6 +8514,7 @@ async def fehleranalyse_dossier(request: Request, user: str = Depends(require_lo
 
 
 @app.post("/api/fehleranalyse/analyse")
+@_sprot_keine_aenderung
 async def fehleranalyse_analyse(request: Request, user: str = Depends(require_local_auth)):
     """Dossier + Deutung durch das Modell im Profil des angemeldeten Administrators."""
     from backend import fehleranalyse as fa
@@ -9401,6 +9527,7 @@ async def security_incidents_block(request: Request, user: str = Depends(require
     body = await _json_objekt(request)
     target = (body.get("user") or "").strip()
     grund = (body.get("reason") or "").strip()
+    _sprot_angaben(konto=target, grund=grund[:200])
     if not target:
         return JSONResponse({"ok": False, "error": "Kein Benutzer angegeben."}, status_code=400)
     if _norm_login(target) == _norm_login(user):
@@ -9425,6 +9552,7 @@ async def security_incidents_unblock(request: Request, user: str = Depends(requi
     target = (body.get("user") or "").strip()
     if not target:
         return JSONResponse({"ok": False, "error": "Kein Benutzer angegeben."}, status_code=400)
+    _sprot_angaben(konto=target)
     ok = security_guard.unblock(target)
     return JSONResponse({"ok": ok})
 
@@ -10040,6 +10168,7 @@ async def _ldap_dir_search(request: Request, kind: str, admin_user: str):
 
 
 @app.post("/api/ldap/users")
+@_sprot_keine_aenderung
 async def ldap_search_users(request: Request, user: str = Depends(require_local_auth)):
     """Sucht AD-Benutzer für den User-Picker (Admin). Body: {q, [password], [bind_user]}.
     Nutzt das Service-Konto falls konfiguriert; sonst On-Demand-Bind. Read-only.
@@ -10048,6 +10177,7 @@ async def ldap_search_users(request: Request, user: str = Depends(require_local_
 
 
 @app.post("/api/ldap/groups")
+@_sprot_keine_aenderung
 async def ldap_search_groups(request: Request, user: str = Depends(require_local_auth)):
     """Sucht AD-Gruppen für den Gruppen-Picker (Admin). Body: {q, [password], [bind_user]}.
     Antwort: {groups:[{cn,dn,desc}], count} oder 428 NO_CREDENTIALS / 401 BIND_FAILED."""
@@ -10055,6 +10185,7 @@ async def ldap_search_groups(request: Request, user: str = Depends(require_local
 
 
 @app.post("/api/ldap/group_members")
+@_sprot_keine_aenderung
 async def ldap_group_members(request: Request, user: str = Depends(require_local_auth)):
     """Listet die DIREKTEN Mitglieder einer AD-Gruppe (Admin) – für die
     Mitglieder-Ansicht im Gruppen-Picker.
@@ -10086,6 +10217,7 @@ async def ldap_group_members(request: Request, user: str = Depends(require_local
 
 
 @app.post("/api/ldap/user_groups")
+@_sprot_keine_aenderung
 async def ldap_user_groups(request: Request, user: str = Depends(require_local_auth)):
     """Ort (OU-Pfad) und Gruppenmitgliedschaften EINES AD-Benutzers (Admin) – das
     Gegenstueck zur Mitglieder-Ansicht einer Gruppe.
@@ -11083,6 +11215,8 @@ async def get_settings(user: str = Depends(require_auth)):
 async def save_settings(request: Request, user: str = Depends(require_local_auth)):
     """Speichert globale Einstellungen (TTS, Desktop, AD-Config etc.)."""
     body = await _json_objekt(request)
+    # Nur die NAMEN der Felder ins Sicherheitsprotokoll – Werte koennen Kennwoerter sein
+    _sprot_angaben(felder=sorted(str(k)[:60] for k in body)[:60] if isinstance(body, dict) else None)
     config.save_global_settings(body)
     # AD-Konfiguration separat persistieren
     if any(k in body for k in ("ad_server", "ad_domain", "ad_bind_user", "ad_bind_password")):
@@ -11181,6 +11315,7 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
 
 
 @app.post("/api/auth/ad_test")
+@_sprot_keine_aenderung
 async def test_ad_connection(request: Request, _username: str = Depends(require_local_auth)):
     """Prüft ob der Domain-Controller erreichbar ist (reiner Verbindungstest, kein Bind)."""
     body = await _json_objekt(request)
@@ -11228,6 +11363,7 @@ async def _ad_tls_ziel(request: Request) -> str:
 
 
 @app.post("/api/auth/ad_tls/probe")
+@_sprot_keine_aenderung
 async def ad_tls_probe_api(request: Request, user: str = Depends(require_local_auth)):
     """Zertifikat des Domain-Controllers holen und beurteilen (BSI H5; Baustein
     sapcert.js). Rumpf: {server?}. Rueckgabe: {ok, zert, gebunden}."""
@@ -11616,6 +11752,7 @@ async def _profil_anker(body: dict, api_url: str, bisher: dict | None):
 
 
 @app.post("/api/profiles/zertifikat/probe")
+@_sprot_keine_aenderung
 async def profile_zertifikat_probe(request: Request, user: str = Depends(require_local_auth)):
     """Serverzertifikat der Formular-Adresse holen und beurteilen (vor dem
     Speichern, wie bei SAP). Rumpf: {api_url}. Antwort ohne PEM."""
@@ -12152,6 +12289,7 @@ async def _probe_llm_connection(provider: str, api_url: str, api_key: str,
 
 
 @app.post("/api/profiles/test")
+@_sprot_keine_aenderung
 async def test_profile_connection(request: Request, user: str = Depends(require_local_auth)):
     """Testet die Verbindung mit den aktuellen Formularwerten (nicht gespeicherten)."""
     body = await _json_objekt(request)
@@ -12295,6 +12433,7 @@ def _caps_session(body: dict) -> str:
 
 
 @app.post("/api/profiles/capabilities")
+@_sprot_keine_aenderung
 async def profile_capabilities(request: Request, user: str = Depends(require_local_auth)):
     """Faehigkeiten des eingestellten Modells – aus den Metadaten des Anbieters.
 
@@ -12321,6 +12460,7 @@ async def profile_capabilities(request: Request, user: str = Depends(require_loc
 
 
 @app.post("/api/profiles/capabilities/probe")
+@_sprot_keine_aenderung
 async def profile_capabilities_probe(request: Request, user: str = Depends(require_local_auth)):
     """Echte Mini-Anfragen, wo die Metadaten schweigen (Vision, Werkzeuge).
 
@@ -12344,6 +12484,7 @@ async def profile_capabilities_probe(request: Request, user: str = Depends(requi
 
 
 @app.post("/api/profiles/models")
+@_sprot_keine_aenderung
 async def list_profile_models(request: Request, user: str = Depends(require_local_auth)):
     """Liefert verfuegbare Modelle fuer die aktuellen Formularwerte (Discover-Button)."""
     body = await _json_objekt(request)
@@ -12770,6 +12911,7 @@ async def health(request: Request):
 
 
 @app.post("/api/verify-token")
+@_sprot_keine_aenderung
 async def verify_token_endpoint(request: Request):
     """Prüft ob ein Token noch gültig ist. Gibt verbleibende Sekunden zurueck."""
     body = await _json_objekt(request)
@@ -14819,6 +14961,7 @@ def _sap_cert_admin_setzen(kanal: str, eintrag: dict | None) -> None:
 
 
 @app.post("/api/sap/admin/cert/probe")
+@_sprot_keine_aenderung
 async def sap_cert_admin_probe(request: Request, user: str = Depends(require_local_auth)):
     """Zertifikat des SAP-Servers holen und beurteilen (Sammelzugang)."""
     from backend import sap_cert
@@ -17270,7 +17413,9 @@ async def email_admin_serverzugriff_get(user: str = Depends(require_local_auth))
 @app.post("/api/email/admin/serverzugriff")
 async def email_admin_serverzugriff_set(request: Request,
                                         user: str = Depends(require_local_auth)):
-    """Auswahl speichern. Jeder Eintrag MUSS die E-Mail-Berechtigung haben –
+    """Serverzugriff auf Postfaecher speichern.
+
+    Jeder Eintrag MUSS die E-Mail-Berechtigung haben –
     abgelehnt wird mit Namen, nicht still verworfen."""
     from backend import mail_accounts
     try:
@@ -17365,6 +17510,7 @@ def _email_zert_ziel(body: dict):
 
 
 @app.post("/api/email/admin/zertifikat/probe")
+@_sprot_keine_aenderung
 async def email_zertifikat_probe_api(request: Request, user: str = Depends(require_local_auth)):
     """Serverzertifikat eines Mail-Kanals holen und beurteilen. Rumpf:
     {kanal, url? | host?, port?, ssl?, starttls?} – Formularfelder vor dem
@@ -17566,6 +17712,7 @@ async def sql_status(user: str = Depends(require_schema_access)):
 
 
 @app.post("/api/sql/frage")
+@_sprot_keine_aenderung
 async def sql_frage(request: Request, user: str = Depends(require_schema_access)):
     """Frage -> SQL. Eine Frage je Benutzer zugleich (jede kostet Modellzeit)."""
     from backend import llm as _llm
@@ -17942,6 +18089,7 @@ async def sql_admin_index_start(_user: str = Depends(require_local_auth)):
 
 @app.post("/api/sql/admin/index/abbrechen")
 async def sql_admin_index_abbrechen(_user: str = Depends(require_local_auth)):
+    """Laufende Erfassung des SQL-Schemas abbrechen."""
     from backend import schema_graph_index as _sgi
     if not _sgi.laeuft_hier():
         # Ein Lauf von der Kommandozeile ist ein anderer Prozess – den haelt
@@ -20762,6 +20910,7 @@ async def _json_rumpf(request: Request) -> dict:
 
 
 @app.post("/api/kundenverwaltung/zertifikat/probe")
+@_sprot_keine_aenderung
 async def kv_zertifikat_probe_api(request: Request, user: str = Depends(require_local_auth)):
     """Serverzertifikat der Kundenverwaltungs-API holen und beurteilen
     (BSI-Abgleich H14; Baustein sapcert.js). Rumpf: {url?} – ohne URL die
@@ -22261,7 +22410,9 @@ async def wissensgraph_einstellungen_lesen(user: str = Depends(require_local_aut
 @app.post("/api/wissensgraph/einstellungen")
 async def wissensgraph_einstellungen_schreiben(request: Request,
                                                user: str = Depends(require_local_auth)):
-    """Teilweise aendern; unbekannte Felder werden mit 400 abgewiesen."""
+    """Einstellungen des Wissensgraphen aendern.
+
+    Teilweise; unbekannte Felder werden mit 400 abgewiesen."""
     from backend import wissensgraph_extraktion as wgx
     try:
         body = await request.json()
@@ -22335,6 +22486,7 @@ async def wissensgraph_neuaufbau(request: Request, user: str = Depends(require_l
 
 @app.post("/api/wissensgraph/abbrechen")
 async def wissensgraph_abbrechen(user: str = Depends(require_local_auth)):
+    """Laufenden Aufbau des Wissensgraphen abbrechen."""
     from backend import wissensgraph_extraktion as wgx
     erg = await asyncio.to_thread(wgx.abbrechen)
     _aktivitaet(user, "wissensgraph", "lauf_abgebrochen", "Wissensgraph")
@@ -24589,7 +24741,9 @@ async def kb_sync_overview(user: str = Depends(require_local_auth)):
 
 @app.post("/api/knowledge/sync/site")
 async def kb_sync_site_name(request: Request, user: str = Depends(require_local_auth)):
-    """Name DIESES Standorts. Er geht als Kennung an den Geber (der zeigt damit,
+    """Namen dieses Standorts fuer den Wissensabgleich setzen.
+
+    Er geht als Kennung an den Geber (der zeigt damit,
     wer gezogen hat) und belegt den Zielordner vor."""
     from backend import knowledge_sync as ks
     data = await _json_objekt(request)
@@ -24599,6 +24753,7 @@ async def kb_sync_site_name(request: Request, user: str = Depends(require_local_
 
 
 @app.post("/api/knowledge/sync/probe")
+@_sprot_keine_aenderung
 async def kb_sync_probe(request: Request, user: str = Depends(require_local_auth)):
     """Standort testen, BEVOR er gespeichert wird.
 
@@ -28190,6 +28345,7 @@ async def cleanup_scan(user: str = Depends(require_local_auth)):
 
 
 @app.post("/api/knowledge/cleanup/analyse")
+@_sprot_keine_aenderung
 async def cleanup_analyse(request: Request, user: str = Depends(require_local_auth)):
     """Vorschlaege erzeugen - schreibt NICHTS.
 
@@ -28240,6 +28396,7 @@ async def cleanup_analyse(request: Request, user: str = Depends(require_local_au
 
 
 @app.post("/api/knowledge/cleanup/prompt")
+@_sprot_keine_aenderung
 async def cleanup_prompt(request: Request, user: str = Depends(require_local_auth)):
     """Was bei EINER Anfrage tatsaechlich an das Modell geht – vorher/nachher.
 
@@ -28267,6 +28424,7 @@ async def cleanup_quellen(user: str = Depends(require_local_auth)):
 
 
 @app.post("/api/knowledge/cleanup/regeln")
+@_sprot_keine_aenderung
 async def cleanup_regeln(request: Request, user: str = Depends(require_local_auth)):
     """Stufe 1: die wirksamen Regeln EINER Handvoll Quellen ableiten.
 
@@ -28284,6 +28442,7 @@ async def cleanup_regeln(request: Request, user: str = Depends(require_local_aut
 
 
 @app.post("/api/knowledge/cleanup/abgleich")
+@_sprot_keine_aenderung
 async def cleanup_abgleich(request: Request, user: str = Depends(require_local_auth)):
     """Stufe 2: die gesammelten Regeln in EINEM Lauf auf Konflikte pruefen."""
     from backend import wissen_aufraeumen as _wa
@@ -28293,6 +28452,7 @@ async def cleanup_abgleich(request: Request, user: str = Depends(require_local_a
 
 
 @app.post("/api/knowledge/cleanup/konflikte")
+@_sprot_keine_aenderung
 async def cleanup_konflikte(user: str = Depends(require_local_auth)):
     """Widersprueche ZWISCHEN allen Anweisungen (inkl. Basis-Prompt als Referenz).
 
@@ -28306,6 +28466,7 @@ async def cleanup_konflikte(user: str = Depends(require_local_auth)):
 
 
 @app.post("/api/knowledge/cleanup/behebbar")
+@_sprot_keine_aenderung
 async def cleanup_behebbar(request: Request, user: str = Depends(require_local_auth)):
     """Welche Dateien liessen sich zu diesen Konflikten anfassen – und was nicht?
 

@@ -6365,6 +6365,14 @@ body.light .kb-cl-spanne { color: #5b6678; }
 .sprot-art-neutral { background: rgba(var(--fg-rgb), 0.07); }
 .sprot-zeile-warn td:first-child { box-shadow: inset 3px 0 0 rgba(var(--danger-rgb), 0.7); }
 .sprot-veraltet { font-weight: 600; }
+/* Detailspalte: Aktion als Satz, Belege (Methode/Pfad) gedaempft darunter */
+#sprot-tbody .audit-args { max-width: 420px; }
+.sprot-aktion { font-family: var(--font-body); font-size: 0.8rem; color: var(--text-primary); margin-bottom: 2px; }
+.sprot-det { white-space: normal; }
+/* Mit Aktion: je Angabe eine Zeile (Objekt, Konto, Felder liefen sonst ineinander) */
+.sprot-aktion ~ .sprot-det { display: block; }
+.sprot-beleg { color: var(--text-secondary); font-size: 0.7rem; margin-top: 2px; }
+.sprot-beleg .audit-arg-val { color: var(--text-secondary); }
 /* Weitere Protokolle (protokolle.js) */
 .plog-status { color: var(--text-secondary); font-size: 0.78rem; margin: 0 0 8px; }
 .plog-status:empty { display: none; }

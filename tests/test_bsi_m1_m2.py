@@ -14,6 +14,7 @@ import copy
 import importlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -282,10 +283,15 @@ NS = {
                                              sprueh_neu_melden=lambda: SPRUEH.pop(0) if SPRUEH else None,
                                              SPRUEH_FENSTER_S=600, SPRUEH_ABSTAND_S=2.0),
     "time": time,
+    # Die Middleware ermittelt Endpunkt und Pfadparameter selbst (_sprot_route).
+    # Hier ohne Routen: der Eintrag traegt dann nur den Beleg (Methode, Pfad) –
+    # Aktion/Objekt misst tests/test_sprot_aussagekraft.py.
+    "re": re, "app": types.SimpleNamespace(router=types.SimpleNamespace(routes=[])),
 }
 exec(_ausfuehrbar("_antwort_json", "_anmeldung_protokollieren", "_record_login_attempt",
                   "_admin_pruefung_merken", "_sicherheits_protokoll_mw", "_routing_pfad",
-                  zuweisungen=("_AENDERNDE_METHODEN", "_KONTO_PFADE")), NS)
+                  "_sprot_route", "_sprot_aktion", "_sprot_wert", "_sprot_details",
+                  zuweisungen=("_AENDERNDE_METHODEN", "_KONTO_PFADE", "_SPROT_ABKUERZUNG")), NS)
 prot = NS["_anmeldung_protokollieren"]
 
 # Anmeldung: jeder entschiedene Ausgang, mit IP

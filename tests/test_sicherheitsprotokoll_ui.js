@@ -52,7 +52,8 @@ const EINTRAEGE = [
     { ts: 1792505000, art: 'anmeldung', benutzer: 'a.b', benutzer_anzeige: 'FIRMA\\a.b',
       ip: '192.0.2.7', ergebnis: 'erfolg', details: { weg: 'kennwort' } },
     { ts: 1792504000, art: 'admin_aenderung', benutzer: 'jarvis', ip: '192.0.2.8',
-      ergebnis: '200', details: {} },
+      ergebnis: '200', details: { aktion: 'Aktualisiert einen <b>MCP-Server</b>', objekt: 'server_id=abc-123',
+                                  methode: 'PUT', pfad: '/api/mcp/servers/abc-123' } },
     // Je EIN Markierungsweg: nur ueber die Art (Ergebnis kein Status) bzw. nur
     // ueber den Status (Art an sich unauffaellig). Der erste Eintrag oben ist
     // ueber BEIDE markiert und kann deshalb keinen der Wege allein belegen.
@@ -143,6 +144,20 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 60));
     pruefe(zeilen[3].classList.contains('sprot-zeile-warn'), 'markiert allein ueber die Art (Sprühangriff)');
     pruefe(zeilen[4].classList.contains('sprot-zeile-warn'), 'markiert allein ueber den Status (403)');
     pruefe(!zeilen[2].classList.contains('sprot-zeile-warn'), 'Status 200 ist keine Markierung');
+    // Detailspalte: WAS als Satz, WORAN mit Beschriftung, Methode/Pfad als Beleg dahinter
+    const akt = zeilen[2].querySelector('.sprot-aktion');
+    pruefe(akt && akt.textContent === 'Aktualisiert einen <b>MCP-Server</b>' && !akt.querySelector('b'),
+           'Aktion steht als Satz da (Markup bleibt Text)', akt && akt.textContent);
+    pruefe(!/aktion/.test(zeilen[2].querySelector('.audit-args').textContent),
+           'der Feldname "aktion" erscheint nicht zusaetzlich');
+    const bel = zeilen[2].querySelector('.sprot-beleg');
+    pruefe(bel && /Methode: PUT/.test(bel.textContent) && /Pfad: \/api\/mcp\/servers\/abc-123/.test(bel.textContent),
+           'Methode und Pfad stehen als Beleg im eigenen Block', bel && bel.textContent);
+    const freie = Array.from(zeilen[2].querySelectorAll('.audit-args > .sprot-det')).map((x) => x.textContent);
+    pruefe(freie.length === 1 && freie[0] === 'Objekt: server_id=abc-123',
+           'Objekt mit lesbarer Beschriftung, vor dem Beleg', freie.join(' | '));
+    pruefe(!zeilen[0].querySelector('.sprot-beleg') && /weg: windows/.test(zeilen[0].textContent),
+           'Eintrag ohne Aktion (Altbestand): Felder bleiben in einer Reihe, unbekannter Name unveraendert');
     // Eingeschleustes HTML aus einem Fremdfeld bleibt Text
     pruefe(!d.querySelector('#sprot-tbody img') && !w.__xss, 'HTML in den Details wird NICHT ausgefuehrt');
     pruefe(zeilen[0].textContent.includes('<img src=x'), 'und steht als lesbarer Text da');
@@ -181,6 +196,8 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 60));
     await warte(30);
     pruefe(d.querySelector('#sprot-tbody tr').textContent.includes('Sign-in failed'), 'Arten auf Englisch neu gezeichnet');
     pruefe(/intact/.test(d.getElementById('sprot-kette').textContent), 'Kettenaussage auf Englisch');
+    pruefe(/Object: server_id=abc-123/.test(d.querySelectorAll('#sprot-tbody tr')[2].textContent),
+           'Feldbeschriftung der Details auf Englisch');
     w.close();
 
     abschnitt('6. Gebrochene Kette');

@@ -946,6 +946,43 @@ function loadScript(dom, rel) {
         await schliessen(r);
     }
     {
+        // V4-Katalog (2026-11-10): V4-Dienste stehen als "v4:<pfad>" in derselben
+        // Liste, tragen "OData V4" in der Beschriftung, und der Hinweis nennt je
+        // Katalog die Zahl – oder den Grund, warum einer fehlt.
+        const SVC = { ok: true, genau: true, ausgelassen: 0, count: 2, services: [
+            { service: 'sap/ZA_SRV', title: 'A-Service' },
+            { service: 'v4:sap/zgrp/srvd_a2x/sap/zv4/0001', title: 'V4-Dienst' },
+        ], v2: { ok: true, count: 1, genau: true, ausgelassen: 0 },
+           v4: { ok: true, count: 1, genau: true, ausgelassen: 0 } };
+        const r = await konsole(SVC, (svc) => ({ data: SETS16[svc] || SETS16[''] }));
+        const { doc } = r;
+        check('V4: Kennung unveraendert als Wert in der Liste',
+              JSON.stringify(werte(doc, 'sp-od-service-list')) === JSON.stringify(['sap/ZA_SRV', 'v4:sap/zgrp/srvd_a2x/sap/zv4/0001']),
+              JSON.stringify(werte(doc, 'sp-od-service-list')));
+        const o4 = doc.querySelector('#sp-od-service-list option[value="v4:sap/zgrp/srvd_a2x/sap/zv4/0001"]');
+        const o2 = doc.querySelector('#sp-od-service-list option[value="sap/ZA_SRV"]');
+        check('V4: Beschriftung nennt "OData V4" und den Titel',
+              !!o4 && o4.getAttribute('label') === 'OData V4 · V4-Dienst', o4 && o4.getAttribute('label'));
+        check('V2: Beschriftung bleibt der blosse Titel', !!o2 && o2.getAttribute('label') === 'A-Service',
+              o2 && o2.getAttribute('label'));
+        const sh = doc.getElementById('sp-od-svc-hint').textContent;
+        check('Hinweis nennt beide Kataloge mit Zahl', /V2: 1/.test(sh) && /V4: 1/.test(sh), sh);
+        await schliessen(r);
+    }
+    {
+        // Ein Katalog fehlt: die Liste des anderen bleibt, der Grund steht da.
+        const SVC = { ok: true, genau: true, ausgelassen: 0, count: 1, services: [
+            { service: 'sap/ZA_SRV', title: 'A-Service' },
+        ], v2: { ok: true, count: 1, genau: true, ausgelassen: 0 },
+           v4: { ok: false, count: 0, status: 403, kein_katalog: false, error: 'Keine Berechtigung' } };
+        const r = await konsole(SVC, (svc) => ({ data: SETS16[svc] || SETS16[''] }));
+        const sh = r.doc.getElementById('sp-od-svc-hint').textContent;
+        check('V4 fehlt: Grund im Hinweis', /V4: nicht abrufbar \(Keine Berechtigung\)/.test(sh), sh);
+        check('V4 fehlt: kein Fehlerzustand fuer die ganze Liste',
+              !r.doc.getElementById('sp-od-svc-hint').classList.contains('is-error'));
+        await schliessen(r);
+    }
+    {
         // Geladen wird erst, wenn die OData-Konsole SICHTBAR ist.
         const calls = [];
         const d = build('sap.html', { username: 'anna', is_admin: true, permissions: { sap: true } },

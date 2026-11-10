@@ -14494,20 +14494,54 @@ async def sap_odata_entity_sets_api(service: str = "", user: str = Depends(requi
 
 @app.get("/api/sap/odata/services")
 async def sap_odata_services_api(user: str = Depends(require_sap_access)):
-    """Services aus dem Gateway-Katalog, als Pfade relativ zur Basis-URL –
-    Auswahlliste fuer das Service-Feld der Abfrage-Konsole in /sap."""
+    """Services aus beiden Gateway-Katalogen – V2 als Pfade relativ zur
+    Basis-URL, V4 als ``v4:<Pfad>`` – als Auswahlliste fuer das Service-Feld der
+    Abfrage-Konsole in /sap.
+
+    Beide Kataloge werden unabhaengig gefragt: fehlt einer (kein Recht, nicht
+    aktiv), bleibt der andere nutzbar, und ``v2``/``v4`` sagen je Katalog, was
+    geschah. Die Felder der obersten Ebene behalten ihre Bedeutung (``ok``,
+    sobald einer antwortet; ``kein_katalog`` nur, wenn BEIDE 404 melden)."""
     from backend.sap_client import SapError
     c = _sap_client(user)
     if not c.odata.configured:
         return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
-    try:
-        res = await asyncio.to_thread(c.odata.catalog_service_pfade)
-    except SapError as e:
-        return JSONResponse({"ok": False, "status": e.status, "kein_katalog": e.status == 404,
-                             "error": str(e)})
-    return JSONResponse({"ok": True, "services": res["services"],
-                         "count": len(res["services"]),
-                         "ausgelassen": res["ausgelassen"], "genau": res["genau"]})
+
+    async def frage(fn) -> dict:
+        try:
+            res = await asyncio.to_thread(fn)
+        except SapError as e:
+            return {"ok": False, "status": e.status, "kein_katalog": e.status == 404,
+                    "error": str(e), "services": [], "ausgelassen": 0, "genau": True}
+        return {"ok": True, **res}
+
+    v2 = await frage(c.odata.catalog_service_pfade)
+    if v2.get("status") == 401:
+        # Abgelehnter Logon: mit denselben Daten nicht noch einmal fragen –
+        # jeder Versuch zaehlt auf der SAP-Seite gegen login/fails_to_user_lock.
+        return JSONResponse({"ok": False, "status": 401, "kein_katalog": False,
+                             "error": v2["error"]})
+    v4 = await frage(c.odata.catalog_v4_service_pfade)
+    teile = [k for k in (v2, v4) if k["ok"]]
+
+    def kurz(k: dict) -> dict:
+        aus = {"ok": k["ok"], "count": len(k["services"])}
+        if k["ok"]:
+            aus.update(ausgelassen=k["ausgelassen"], genau=k["genau"])
+        else:
+            aus.update(status=k["status"], kein_katalog=k["kein_katalog"], error=k["error"])
+        return aus
+
+    if not teile:
+        return JSONResponse({"ok": False, "status": v2["status"],
+                             "kein_katalog": v2["kein_katalog"] and v4["kein_katalog"],
+                             "error": "V2: %s · V4: %s" % (v2["error"], v4["error"]),
+                             "v2": kurz(v2), "v4": kurz(v4)})
+    services = [x for k in teile for x in k["services"]]
+    return JSONResponse({"ok": True, "services": services, "count": len(services),
+                         "ausgelassen": sum(k["ausgelassen"] for k in teile),
+                         "genau": all(k["genau"] for k in teile),
+                         "v2": kurz(v2), "v4": kurz(v4)})
 
 
 @app.post("/api/sap/sql")

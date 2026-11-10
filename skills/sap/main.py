@@ -214,8 +214,9 @@ class SapOdataServicesTool(_Base):
 
     @property
     def description(self):
-        return ("Listet verfuegbare OData-Services ueber den SAP-Gateway-Katalog. "
-                "Nur im OData-Modus sinnvoll.")
+        return ("Listet verfuegbare OData-Services ueber die SAP-Gateway-Kataloge "
+                "(V2 und V4). V4-Services erscheinen als 'v4:<pfad>' und werden genau "
+                "so als 'service' weitergegeben. Nur im OData-Modus sinnvoll.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
@@ -230,15 +231,49 @@ class SapOdataServicesTool(_Base):
             limit = max(1, min(int(kwargs.get("limit") or 100), 2000))
         except (TypeError, ValueError):
             limit = 100
+        # V2 und V4 getrennt fragen: fehlt ein Katalog (kein Recht, nicht
+        # aktiv), bleibt der andere nutzbar, und der Grund steht im Ergebnis.
+        lines: list[str] = []
+        fehler2 = fehler4 = None
         try:
             svcs = await _to_thread(c.odata.catalog_services, limit)
         except SapError as e:
-            return _fmt_err(e)
-        if not svcs:
-            return "Keine Services gefunden (Katalog leer oder nicht erreichbar)."
-        lines = ["%d Service(s):" % len(svcs)]
-        for s in svcs:
-            lines.append("- %s — %s" % (s.get("id") or "?", s.get("title") or ""))
+            svcs, fehler2 = [], e
+        # Nach einem 401 NICHT weiterfragen: jeder abgelehnte Logon zaehlt auf
+        # der SAP-Seite gegen login/fails_to_user_lock, ein zweiter Versuch mit
+        # denselben Daten bringt die Sperre nur naeher.
+        if fehler2 is not None and fehler2.status == 401:
+            return _fmt_err(fehler2)
+        try:
+            v4 = await _to_thread(c.odata.catalog_v4_service_pfade, limit)
+        except SapError as e:
+            v4, fehler4 = None, e
+        if fehler2 is not None and fehler4 is not None:
+            return _fmt_err(fehler2) + "\nOData V4: " + _fmt_err(fehler4)
+        if fehler2 is not None:
+            lines.append("OData-V2-Katalog nicht abrufbar: " + _fmt_err(fehler2))
+        elif svcs:
+            lines.append("%d OData-V2-Service(s):" % len(svcs))
+            for s in svcs:
+                lines.append("- %s — %s" % (s.get("id") or "?", s.get("title") or ""))
+        else:
+            lines.append("OData-V2-Katalog: keine Services.")
+        if fehler4 is not None:
+            lines.append("OData-V4-Katalog nicht abrufbar: " + _fmt_err(fehler4))
+        else:
+            dienste = v4.get("services") or []
+            if dienste:
+                lines.append("%s%d OData-V4-Service(s) – den Wert vor dem Gedankenstrich "
+                             "unveraendert als 'service' an sap_odata_entity_sets/"
+                             "sap_odata_query uebergeben:"
+                             % ("" if v4.get("genau") else "mindestens ", len(dienste)))
+                for s in dienste:
+                    lines.append("- %s — %s" % (s.get("service"), s.get("title") or ""))
+            else:
+                lines.append("OData-V4-Katalog: keine Services.")
+            if v4.get("ausgelassen"):
+                lines.append("(%d V4-Service(s) liegen nicht unter der V4-Wurzel und fehlen.)"
+                             % v4["ausgelassen"])
         return "\n".join(lines)
 
 

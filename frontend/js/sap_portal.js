@@ -678,7 +678,24 @@
             msg += ' ' + T('sap.od_svc_skipped', '({n} weitere liegen nicht unter der Basis-URL und fehlen in der Liste.)')
                 .replace('{n}', d.ausgelassen);
         }
+        // Aufteilung nach Katalog: V2 und V4 werden getrennt gefragt, und ein
+        // fehlender Katalog (kein Recht, nicht aktiv) soll benannt sein statt
+        // als "es gibt keine V4-Dienste" gelesen zu werden.
+        if (d.v2 && d.v4) {
+            msg += ' ' + odKatalogTeil('V2', d.v2) + ' · ' + odKatalogTeil('V4', d.v4);
+        }
         return msg;
+    }
+    function odKatalogTeil(name, k) {
+        if (k.ok) return T('sap.od_svc_part', '{k}: {n}').replace('{k}', name).replace('{n}', k.count);
+        return T('sap.od_svc_part_failed', '{k}: nicht abrufbar ({e})').replace('{k}', name)
+            .replace('{e}', k.error || ('HTTP ' + (k.status || '?')));
+    }
+    // V4-Dienste tragen die Kennung "v4:" im Pfad – in der Auswahl steht
+    // zusaetzlich "OData V4" vor dem Titel, damit man sie ohne Pfadkunde erkennt.
+    function odSvcLabel(x) {
+        var v4 = /^v4:/i.test(x.service || '');
+        return v4 ? T('sap.od_svc_v4_label', 'OData V4') + (x.title ? ' · ' + x.title : '') : x.title;
     }
 
     // Die Liste kommt vom Zugang, der gerade GILT. Ins Feld "Standard-Service"
@@ -693,7 +710,7 @@
         var d = _odSvcAntwort;
         if (!d) return;
         var werte = (d.ok && Array.isArray(d.services)) ? d.services.map(function (x) {
-            return { value: x.service, label: x.title };
+            return { value: x.service, label: odSvcLabel(x) };
         }) : [];
         var art = d.ok ? '' : 'error';
         odFill('sp-od-service-list', werte);

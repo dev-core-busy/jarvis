@@ -31,7 +31,7 @@ from __future__ import annotations
 import re
 import time
 import xml.etree.ElementTree as ET
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urljoin, urlsplit, urlunsplit
 
 import requests
 
@@ -40,6 +40,22 @@ _HTTP_TIMEOUT = 30
 
 # Gateway-Katalog (V2), relativ zur OData-Basis-URL (…/sap/opu/odata).
 KATALOG_PFAD = "iwfnd/catalogservice;v=2/ServiceCollection"
+# Gateway-Katalog (V4), relativ zur V4-Wurzel (…/sap/opu/odata4). Die Gruppen
+# tragen ihre Services unter DefaultSystem – ohne $expand kommen nur Gruppen.
+KATALOG_V4_PFAD = "iwfnd/config/default/iwfnd/catalog/0002/"
+KATALOG_V4_GRUPPEN = "ServiceGroups"
+KATALOG_V4_EXPAND = "DefaultSystem($expand=Services)"
+# Kennung eines V4-Service im Service-Feld: "v4:<Pfad relativ zur V4-Wurzel>".
+# Die V4-Dienste liegen NEBEN der konfigurierten Basis (…/odata4 statt
+# …/odata), also nicht darunter. Statt die Basis-URL je Dienst zu tauschen,
+# traegt der Service-Pfad die Wurzel als Kennung – Host, Port, Anmeldung und
+# verankertes Zertifikat bleiben dieselben, und alle Wege (EntitySets, $metadata,
+# Abfrage) laufen unveraendert ueber ``_url``. Eine Kennung mit Doppelpunkt
+# ueberlebt das ``strip("/")`` der Aufrufer, ein fuehrender Schraegstrich nicht.
+V4_PRAEFIX = "v4:"
+# Hoechstzahl der Folgeseiten (@odata.nextLink) – Schutz gegen einen Server,
+# der immer wieder auf sich selbst verweist.
+KATALOG_V4_MAX_SEITEN = 50
 # Obergrenze fuer das Durchzaehlen, wenn der Server keinen $inlinecount liefert.
 # Gleich der Kappung in ``catalog_services`` – darueber waere die Zahl ohnehin
 # nicht mehr genau, und der Bericht sagt dann "mindestens".
@@ -311,10 +327,38 @@ class _ODataClient:
         except Exception:  # noqa: BLE001
             return url
 
+    @property
+    def v4_base(self) -> str:
+        """V4-Wurzel neben der Basis-URL: ``…/sap/opu/odata`` → ``…/sap/opu/odata4``
+        (gleicher Host und Port). Leer, wenn die Basis nicht auf ``/odata``
+        endet – dann ist die Wurzel nicht ableitbar, und geraten wird nicht."""
+        teile = urlsplit(self.base)
+        pfad = teile.path.rstrip("/")
+        if not pfad.lower().endswith("/odata"):
+            return ""
+        return urlunsplit((teile.scheme, teile.netloc, pfad + "4", "", ""))
+
     def _url(self, path: str) -> str:
+        """Pfad → Adresse, IMMER unter der Basis-URL (bzw. der V4-Wurzel daneben).
+
+        Eine vollstaendige Adresse im Service-Feld (``http://…``) wird abgelehnt
+        (2026-11-10): sie ging vorher unveraendert hinaus – samt Anmeldung, an
+        jeden beliebigen Host, ueber ``http`` im Klartext. Das verankerte
+        Zertifikat haette nur den ``https``-Fall gebremst. Kein Aufrufer im
+        Code uebergibt absolute Adressen; nur die Konsole und das Modell
+        koennten es, und genau die sollen es nicht."""
         path = (path or "").strip()
-        if path.lower().startswith(("http://", "https://")):
-            return path
+        if re.match(r"[a-z][a-z0-9+.\-]*://", path, re.I):
+            raise SapError(0, "Als Service ist nur ein Pfad unter der Basis-URL erlaubt "
+                              "(z. B. sap/API_SALES_ORDER_SRV oder v4:…), keine "
+                              "vollstaendige Adresse.")
+        if path.lower().startswith(V4_PRAEFIX):
+            v4 = self.v4_base
+            if not v4:
+                raise SapError(0, "OData-V4-Dienst, aber die Basis-URL endet nicht auf "
+                                  "\"/odata\" – die V4-Wurzel (…/odata4) laesst sich daraus "
+                                  "nicht ableiten.")
+            return v4 + "/" + path[len(V4_PRAEFIX):].strip().lstrip("/")
         return self.base + "/" + path.lstrip("/")
 
     def get(self, path: str, params: dict | None = None) -> dict:
@@ -587,6 +631,84 @@ class _ODataClient:
                 "ausgelassen": ausgelassen,
                 "genau": len(svcs) < max(1, min(int(limit or KATALOG_ZAEHL_MAX),
                                                 KATALOG_ZAEHL_MAX))}
+
+    def catalog_v4_service_pfade(self, limit: int = KATALOG_ZAEHL_MAX) -> dict:
+        """Services des V4-Katalogs (``/IWFND/CONFIG``, Service-Gruppen) als
+        Service-Kennungen ``v4:<Pfad relativ zur V4-Wurzel>`` – dieselbe Form,
+        die ``query``/``entity_sets`` als ``service`` annehmen.
+
+        Wie bei V2 zaehlt nur der PFAD der ``ServiceUrl`` (aufgeloest gegen die
+        Katalogadresse, sie darf relativ sein): liegt er nicht unter der
+        V4-Wurzel, wird der Service ausgelassen und gezaehlt, statt die Anmeldung
+        an einen Host aus den Katalogdaten zu schicken. Folgeseiten
+        (``@odata.nextLink``) werden nur unter derselben Wurzel verfolgt.
+
+        Rueckgabe ``{services: [{service, title, version}], ausgelassen, genau}``."""
+        v4 = self.v4_base
+        if not v4:
+            raise SapError(0, "Die Basis-URL endet nicht auf \"/odata\" – die V4-Wurzel "
+                              "(…/odata4) laesst sich daraus nicht ableiten.")
+        wurzel = urlsplit(v4).path.rstrip("/")
+        katalog = v4 + "/" + KATALOG_V4_PFAD
+        grenze = max(1, min(int(limit or KATALOG_ZAEHL_MAX), KATALOG_ZAEHL_MAX))
+
+        def relativ(adresse: str) -> str:
+            """Pfad unter der V4-Wurzel oder '' (dann nicht erreichbar).
+
+            Eine LEERE Adresse ist keine relative: ``urljoin`` machte daraus die
+            Katalogadresse selbst, und der Katalog stuende als Dienst in der Liste."""
+            if not (adresse or "").strip():
+                return ""
+            pfad = unquote(urlsplit(urljoin(katalog, adresse)).path).rstrip("/")
+            if not pfad.lower().startswith(wurzel.lower() + "/"):
+                return ""
+            return pfad[len(wurzel):].strip("/")
+
+        gesehen: dict[str, dict] = {}
+        ausgelassen = gezaehlt = 0
+        gekappt = False
+        pfad = V4_PRAEFIX + KATALOG_V4_PFAD + KATALOG_V4_GRUPPEN
+        params: dict | None = {"$expand": KATALOG_V4_EXPAND}
+        for _ in range(KATALOG_V4_MAX_SEITEN):
+            data = self.get(pfad, params)
+            for gruppe in self.rows_from(data):
+                system = gruppe.get("DefaultSystem") if isinstance(gruppe, dict) else None
+                dienste = system.get("Services") if isinstance(system, dict) else None
+                for s in dienste if isinstance(dienste, list) else []:
+                    if not isinstance(s, dict):
+                        continue
+                    if gezaehlt >= grenze:
+                        gekappt = True
+                        break
+                    gezaehlt += 1
+                    rel = relativ(s.get("ServiceUrl") or "")
+                    if not rel:
+                        ausgelassen += 1
+                        continue
+                    kennung = V4_PRAEFIX + rel
+                    if kennung not in gesehen:
+                        gesehen[kennung] = {
+                            "service": kennung,
+                            "title": (s.get("Description") or gruppe.get("Description")
+                                      or s.get("ServiceId") or ""),
+                            "version": s.get("ServiceVersion") or ""}
+                if gekappt:
+                    break
+            weiter = data.get("@odata.nextLink") if isinstance(data, dict) else None
+            if gekappt or not weiter:
+                break
+            teile = urlsplit(urljoin(katalog, weiter))
+            rel = unquote(teile.path).rstrip("/")
+            if not rel.lower().startswith(wurzel.lower() + "/"):
+                break   # Folgeseite ausserhalb der Wurzel: nicht verfolgen
+            pfad = V4_PRAEFIX + rel[len(wurzel):].strip("/")
+            # Als Dict: ein $format aus der Folgeadresse kann damit nicht doppelt
+            # gehen (``get`` setzt es per setdefault).
+            params = dict(parse_qsl(teile.query, keep_blank_values=True))
+        else:
+            gekappt = True   # Seitenzahl ausgeschoepft: die Liste ist nicht vollstaendig
+        return {"services": [gesehen[k] for k in sorted(gesehen, key=str.lower)],
+                "ausgelassen": ausgelassen, "genau": not gekappt}
 
 
 # ── HANA SQL (hdbcli) ────────────────────────────────────────────────

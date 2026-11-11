@@ -304,7 +304,7 @@ PROBEN = [
      "        if ungerade * 2 >= paare and gerade * 20 <= paare:", "        if False:"),
     ("Kodierung: UTF-16-BE ohne Marke nicht erkannt", PA,
      "        if gerade * 2 >= paare and ungerade * 20 <= paare:", "        if False:"),
-    ("Parser-Fassung nicht hochgezaehlt", PA, "FASSUNG = 6\n", "FASSUNG = 5\n"),
+    ("Parser-Fassung nicht hochgezaehlt", PA, "FASSUNG = 7\n", "FASSUNG = 5\n"),
     # Trenner
     ("GO am Fensteranfang wird ueberlesen", PA,
      '                    if not (pos > 0 and puf[pos - 1] == "\\n" and _GO_ZEILE.match(puf, pos, grenze)):',

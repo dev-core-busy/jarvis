@@ -202,12 +202,22 @@ def ohne_struktur(con, finder) -> dict:
     ⚠ WARUM (ECHT 2026-11-11): ein Skriptexport mit 1796 Anweisungen und 0
     erkannten Strukturen stand als "ok" im Bestand, die Erfassung meldete
     "unveraendert" – nirgends ein Wort davon, dass die Datei nichts brachte.
+
+    Bewusst uebergangene Objekte zaehlen NICHT als "ohne Struktur": ein
+    YAML-Objektexport legt je SEQUENCE/PACKAGE/FUNCTION/PROCEDURE eine eigene
+    Datei an, und der Parser ueberspringt sie absichtlich
+    (``objekt_uebersprungen``), ebenso Verzeichnisdateien (``verzeichnis``).
+    Auf ECHT standen nach dem Neulesen 2183 solcher Dateien als Hinweis da –
+    jede davon richtig gelesen.
     """
     aus: dict = {}
     for p, roh in con.execute("SELECT pfad, stat FROM dateien WHERE stand='ok' AND fakten=0 ORDER BY pfad"):
         try:
             s = json.loads(roh or "{}")
-            n = int(s.get("anweisungen") or 0) if isinstance(s, dict) else 0
+            n = 0
+            if isinstance(s, dict):
+                n = (int(s.get("anweisungen") or 0) - int(s.get("objekt_uebersprungen") or 0)
+                     - int(s.get("verzeichnis") or 0))
         except (TypeError, ValueError):
             n = 0
         if n > 0:

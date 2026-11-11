@@ -185,9 +185,9 @@ def roh_entfernen(con: sqlite3.Connection, pfad: str) -> None:
 
 _GRAPH_SCHEMA = """
     CREATE TABLE objekt(
-        id INTEGER PRIMARY KEY, schluessel TEXT UNIQUE, schema TEXT, name TEXT,
+        id INTEGER PRIMARY KEY, schluessel TEXT, schema TEXT, name TEXT,
         name_l TEXT, art TEXT, kommentar TEXT, datei TEXT, spalten_n INTEGER,
-        pk TEXT, bereich INTEGER, quelle TEXT);
+        pk TEXT, bereich INTEGER, quelle TEXT, UNIQUE(quelle, schluessel));
     CREATE TABLE spalte(
         objekt_id INTEGER, pos INTEGER, name TEXT, name_l TEXT, typ TEXT,
         pk INTEGER, nullable INTEGER, kommentar TEXT);
@@ -218,31 +218,47 @@ class _Aufloeser:
     Reihenfolge: exakter Schluessel; dann gleicher Name im Schema des
     VERWEISENDEN Objekts; dann ein im ganzen Bestand EINDEUTIGER Name.
     Mehrdeutiges wird nicht geraten, sondern gezaehlt.
+
+    "Bestand" heisst dabei: die SCHEMA-QUELLE des Verweisenden. Jeder Schluessel
+    traegt seine Quelle, aufgeloest wird nur innerhalb derselben.
+
+    ⚠ WARUM (ECHT 2026-11-11): zwei Schemata beschrieben dieselbe Datenbank
+    (SQL-Export und HTML-Dokumentation, beide mit ``dbo.<Tabelle>``). Der
+    Schluessel war global – die 249 Objekte des zweiten Schemas galten als
+    "doppelt" und wurden verworfen, das Schema stand ohne eine Tabelle da
+    ("Zu den Begriffen der Frage wurde keine Tabelle gefunden"). Ebenso haetten
+    Fremdschluessel und abgeleitete Beziehungen ueber Schemagrenzen gezeigt.
     """
 
     def __init__(self):
-        self.genau: dict[str, int] = {}
-        self.nach_name: dict[str, list[int]] = defaultdict(list)
+        self.genau: dict[tuple[str, str], int] = {}
+        self.nach_name: dict[tuple[str, str], list[int]] = defaultdict(list)
         self.schema_von: dict[int, str] = {}
+        self.quelle_von: dict[int, str] = {}
         self.mehrdeutig = 0
         self.unbekannt = 0
 
-    def dazu(self, oid: int, schl: str, schema: str) -> None:
-        self.genau[schl] = oid
-        self.nach_name[letzter_teil(schl)].append(oid)
+    def dazu(self, oid: int, schl: str, schema: str, quelle: str = "") -> None:
+        self.genau[(quelle, schl)] = oid
+        self.nach_name[(quelle, letzter_teil(schl))].append(oid)
         self.schema_von[oid] = schema
+        self.quelle_von[oid] = quelle
 
-    def finde(self, ziel: str, schema_hinweis: str = "") -> int | None:
+    def namensgleiche(self, name: str, quelle: str) -> list[int]:
+        """Objekte dieses (letzten) Namens in DIESER Quelle."""
+        return self.nach_name.get((quelle, name)) or []
+
+    def finde(self, ziel: str, schema_hinweis: str = "", quelle: str = "") -> int | None:
         s = schluessel(ziel)
-        if s in self.genau:
-            return self.genau[s]
+        if (quelle, s) in self.genau:
+            return self.genau[(quelle, s)]
         name = letzter_teil(s)
-        kand = self.nach_name.get(name) or []
+        kand = self.namensgleiche(name, quelle)
         if not kand:
             # db.schema.tabelle gegen schema.tabelle (oder umgekehrt)
             for k in (s.split(".", 1)[-1],):
-                if k in self.genau:
-                    return self.genau[k]
+                if (quelle, k) in self.genau:
+                    return self.genau[(quelle, k)]
             self.unbekannt += 1
             return None
         if len(kand) == 1:
@@ -348,11 +364,14 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
             schl = schluessel(name)
             if not schl:
                 continue
-            if schl in auf.genau:
-                # Dieselbe Tabelle in zwei Dateien: die erste gilt, Spalten aus
-                # der zweiten nur, wenn die erste keine hatte (CREATE … AS).
+            q = quelle_von(datei) or ""
+            if (q, schl) in auf.genau:
+                # Dieselbe Tabelle in zwei Dateien DESSELBEN Schemas: die erste
+                # gilt, Spalten aus der zweiten nur, wenn die erste keine hatte
+                # (CREATE … AS). Gleichnamige in einem anderen Schema sind ein
+                # eigenes Objekt (siehe _Aufloeser).
                 z["doppelt"] += 1
-                oid = auf.genau[schl]
+                oid = auf.genau[(q, schl)]
                 hat = g.execute("SELECT spalten_n FROM objekt WHERE id=?", (oid,)).fetchone()[0]
                 if hat or not f.get("spalten"):
                     continue
@@ -361,7 +380,6 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
             oid = naechste_id
             naechste_id += 1
             schema, kurz = _schema_und_name(name)
-            q = quelle_von(datei) or ""
             g.execute("INSERT INTO objekt(id, schluessel, schema, name, name_l, art, kommentar, datei, "
                       "spalten_n, pk, bereich, quelle) VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?)",
                       (oid, schl, schema, kurz, kurz.lower(), art, f.get("kommentar") or "", datei,
@@ -369,7 +387,7 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
             je_quelle[q][art] += 1
             je_quelle[q]["spalten"] += len(f.get("spalten") or [])
             _spalten_schreiben(g, oid, f)
-            auf.dazu(oid, schl, schluessel(schema))
+            auf.dazu(oid, schl, schluessel(schema), q)
             z[art] += 1
             z["spalten"] += len(f.get("spalten") or [])
             for fk in f.get("fks") or []:
@@ -386,13 +404,13 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
             z["dokument_teile"] += len(teile)
             je_quelle[q]["dokumente"] += 1
         elif art == "alter":
-            nach_alter.append((f.get("name") or "", f))
+            nach_alter.append((f.get("name") or "", f, quelle_von(datei) or ""))
         elif art == "kommentar":
-            kommentare.append(f)
+            kommentare.append((f, quelle_von(datei) or ""))
 
     melde("ALTER TABLE und Kommentare zuordnen")
-    for name, f in nach_alter:
-        oid = auf.finde(name)
+    for name, f, q in nach_alter:
+        oid = auf.finde(name, quelle=q)
         if oid is None:
             z["alter_ohne_tabelle"] += 1
             continue
@@ -402,11 +420,11 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
             g.execute("UPDATE objekt SET pk=? WHERE id=?", (json.dumps(f["pk"]), oid))
             g.executemany("UPDATE spalte SET pk=1 WHERE objekt_id=? AND name_l=?",
                           ((oid, s.lower()) for s in f["pk"]))
-    for k in kommentare:
+    for k, q in kommentare:
         ziel_t = k.get("ziel") or ""
         if k.get("ziel_art") == "spalte":
             tab, _, sp = ziel_t.rpartition(".")
-            oid = auf.finde(tab) if tab else None
+            oid = auf.finde(tab, quelle=q) if tab else None
             if oid is None:
                 z["kommentar_ohne_ziel"] += 1
                 continue
@@ -414,7 +432,7 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
                             (k.get("text") or "", oid, sp.lower()))
             z["kommentar_spalte"] += cur.rowcount
         else:
-            oid = auf.finde(ziel_t)
+            oid = auf.finde(ziel_t, quelle=q)
             if oid is None:
                 z["kommentar_ohne_ziel"] += 1
                 continue
@@ -425,7 +443,7 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
     fk_spalten: set[tuple[int, str]] = set()
     kanten = []
     for oid, von, ziel_t, nach in fks_roh:
-        zid = auf.finde(ziel_t, auf.schema_von.get(oid, ""))
+        zid = auf.finde(ziel_t, auf.schema_von.get(oid, ""), auf.quelle_von.get(oid, ""))
         if zid is None:
             z["fk_unaufgeloest"] += 1
             continue
@@ -441,7 +459,7 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
     for oid, nutzt, hk in sicht_roh:
         aufgeloest: dict[str, int | None] = {}
         for t in nutzt:
-            zid = auf.finde(t, auf.schema_von.get(oid, ""))
+            zid = auf.finde(t, auf.schema_von.get(oid, ""), auf.quelle_von.get(oid, ""))
             aufgeloest[schluessel(t)] = zid
             if zid is not None and zid != oid:
                 kanten.append((oid, zid, "sicht", "[]", "[]"))
@@ -534,7 +552,7 @@ def _ableiten_aus_namen(g, auf: _Aufloeser, fk_spalten: set, kanten: list, nur_o
         treffer = None
         for kand in (stamm, stamm + "s", stamm + "n", stamm + "en", stamm + "e",
                      "tbl_" + stamm, "t_" + stamm):
-            for zid in auf.nach_name.get(kand, []):
+            for zid in auf.namensgleiche(kand, auf.quelle_von.get(oid, "")):
                 if zid == oid or zid not in pk_ein:
                     continue
                 if treffer is None or (auf.schema_von.get(zid) == schema
@@ -575,10 +593,12 @@ def _ableiten_gleicher_pk(g, auf: _Aufloeser, fk_spalten: set, kanten: list, pk_
     von einem richtigen zu unterscheiden; also lieber 222 echte verpassen.
     Kantenart ``abgeleitet`` – das Modell sieht sie als "vermutet".
     """
-    nach_pk: dict[str, list[int]] = defaultdict(list)
+    # je Schema-Quelle: ein gleichnamiger Schluessel in einem ANDEREN Schema ist
+    # kein Kandidat (und macht den eigenen nicht mehrdeutig)
+    nach_pk: dict[tuple[str, str], list[int]] = defaultdict(list)
     for oid, pk in pk_ein.items():
         if _PK_ZUSAMMENGESETZT.fullmatch(pk.lower()):
-            nach_pk[pk.lower()].append(oid)
+            nach_pk[(auf.quelle_von.get(oid, ""), pk.lower())].append(oid)
     if not nach_pk:
         return 0
     n = 0
@@ -587,7 +607,7 @@ def _ableiten_gleicher_pk(g, auf: _Aufloeser, fk_spalten: set, kanten: list, pk_
     for oid, name, name_l, ist_pk in g.execute(
             "SELECT s.objekt_id, s.name, s.name_l, s.pk FROM spalte s JOIN objekt o ON o.id = s.objekt_id "
             "WHERE o.art = 'tabelle'").fetchall():
-        ziele = nach_pk.get(name_l)
+        ziele = nach_pk.get((auf.quelle_von.get(oid, ""), name_l))
         if not ziele or (oid, name_l) in fk_spalten or (nur_oids is not None and oid not in nur_oids):
             continue
         # Der eigene einspaltige Primaerschluessel verweist nicht auf sich selbst

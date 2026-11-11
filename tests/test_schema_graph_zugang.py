@@ -41,6 +41,7 @@ import io
 import os
 import re
 import shutil
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -227,6 +228,28 @@ if g is None:
 def oid(n):
     r = g.execute("SELECT id FROM objekt WHERE schluessel=?", (n,)).fetchone()
     return r[0] if r else -1
+
+
+# Seit 2026-11-11 loest der Graph Verweise nur INNERHALB eines Schemas auf
+# (test_schema_graph_quellen.py) – die Verweise von b nach a oben werden also
+# zu Recht KEINE Kanten. Der Filter in der Suche bleibt die zweite Schranke;
+# um IHN zu messen, werden die Kanten ueber die Grenze hier von Hand gelegt
+# (so saehe ein Graph aus einem Stand davor aus).
+check("Lauf selbst legt keine Kante ueber die Schemagrenze", g.execute(
+    "SELECT count(*) FROM kante k JOIN objekt v ON v.id=k.von JOIN objekt n ON n.id=k.nach "
+    "WHERE v.quelle <> n.quelle").fetchone()[0] == 0)
+_ids = (oid("hr.gehalt"), oid("erp.kunde"), oid("erp.lager"), oid("erp.v_kunde"))
+g.close()
+if min(_ids) < 0:
+    abbruch(f"Objekte fuer die Grenzkanten fehlen: {_ids}")
+_w = sqlite3.connect(str(S.graph_pfad()))
+_w.executemany("INSERT INTO kante VALUES (?,?,?,?,?)", [
+    (_ids[0], _ids[1], "fk", '["kunde_id"]', '["id"]'),
+    (_ids[0], _ids[2], "fk", '["lager_id"]', '["id"]'),
+    (_ids[3], _ids[0], "sicht", "[]", "[]")])
+_w.commit()
+_w.close()
+g = S.graph_lesen()
 
 
 A, AB = {"a"}, {"a", "b"}

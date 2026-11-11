@@ -668,8 +668,15 @@ check("govulncheck laeuft mit der Toolchain aus go.mod",
 check("go.mod legt die Toolchain fest",
       re.search(r"(?m)^toolchain go\d+\.\d+\.\d+\s*$", GOMOD.read_text(encoding="utf-8")) is not None)
 pa = job_mit(r"pip-audit\b")
-check("pip-audit liest die Ausnahmeliste",
-      bool(pa) and any("pip_audit_ausnahmen.py" in (s.get("run") or "") for s in schritte(pa[1])))
+# Gemessen an JEDEM Schritt, der pip-audit AUSFUEHRT (Aufruf ueber einen Pfad,
+# nicht die Installation per pip): seit der Skill-Lock-Schritt die Liste
+# ebenfalls liest, haette "irgendein Schritt" eine Sabotage am anderen verdeckt
+# (Gegenprobe 2026-11-11, gleiche Falle wie bei govulncheck).
+pa_schritte = [s for s in schritte(pa[1]) if re.search(r"/pip-audit\b", s.get("run") or "")] \
+    if pa else []
+check("pip-audit liest die Ausnahmeliste – in jedem Schritt, der es ausfuehrt",
+      bool(pa_schritte) and all("pip_audit_ausnahmen.py" in (s.get("run") or "") for s in pa_schritte),
+      [s.get("name") for s in pa_schritte])
 na = job_mit(r"npm audit\b")
 check("npm audit mit --audit-level",
       bool(na) and any(re.search(r"npm audit\b.*--audit-level=(low|moderate|high)", s.get("run") or "")

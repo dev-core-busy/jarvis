@@ -35,6 +35,9 @@ GOMOD = "windows-app-go/go.mod"
 AGR = "android/app/build.gradle.kts"
 GWP = "android/gradle/wrapper/gradle-wrapper.properties"
 
+_mcp = re.search(r"(?m)^mcp>=[^\n]*\n", (ROOT / REQ).read_text(encoding="utf-8"))
+_MCP_ZEILE = _mcp.group(0) if _mcp else "mcp>=<nicht gefunden>\n"
+
 PROBEN = [
     # ── M7: ssh_haertung.sh ──
     ("Kennwort-Anmeldung bleibt an", SSH,
@@ -150,8 +153,18 @@ PROBEN = [
     ("gitleaks nur auf dem letzten Commit", WF,
      '          fetch-depth: 0\n      - name: gitleaks holen und pruefen\n',
      '          fetch-depth: 1\n      - name: gitleaks holen und pruefen\n'),
+    # Zwei Schritte fuehren pip-audit aus – je Schritt eine Probe, der Anker
+    # traegt die Zeile davor mit, sonst ist er nicht eindeutig.
     ("pip-audit ohne Ausnahmeliste", WF,
-     '          ARGS=$(python3 deploy/security/pip_audit_ausnahmen.py --argumente)\n', '          ARGS=""\n'),
+     '          # Ausnahmen: "ID  JJJJ-MM-TT  # Grund"; abgelaufen oder ohne Grund -> rot\n'
+     '          ARGS=$(python3 deploy/security/pip_audit_ausnahmen.py --argumente)\n',
+     '          # Ausnahmen: "ID  JJJJ-MM-TT  # Grund"; abgelaufen oder ohne Grund -> rot\n'
+     '          ARGS=""\n'),
+    ("pip-audit der Skill-Locks ohne Ausnahmeliste", WF,
+     '          venv/bin/pip check\n'
+     '          ARGS=$(python3 deploy/security/pip_audit_ausnahmen.py --argumente)\n',
+     '          venv/bin/pip check\n'
+     '          ARGS=""\n'),
     ("npm audit entfernt", WF,
      '        run: npm audit --omit=dev --audit-level=moderate\n', '        run: "true"\n'),
     ("Waechter-Lauf entfernt", WF,
@@ -194,7 +207,9 @@ PROBEN = [
     ("python-dotenv wieder 1.0.1", REQ,
      'python-dotenv>=1.2.2   # Sicherheits-Untergrenze',
      'python-dotenv==1.0.1   # Sicherheits-Untergrenze'),
-    ("mcp ohne Untergrenze", REQ, 'mcp>=1.28.1,<2\n', 'mcp>=1.5.0,<2\n'),
+    # Anker aus der Datei gelesen, nicht fest: die Untergrenze wandert mit jedem
+    # Paket-Update, und ein veralteter Anker liess die Probe still ausfallen.
+    ("mcp ohne Untergrenze", REQ, _MCP_ZEILE, 'mcp>=1.5.0,<2\n'),
 ]
 
 DATEIEN = [SSH, FW, HI, NODE, SJR, DF, BDF, INST, WF, DB, PA, CI, REQ, GOMOD, AGR, GWP, "backend/main.py", "tests/test_bsi_m6_m7.py"]

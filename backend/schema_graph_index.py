@@ -191,6 +191,30 @@ def _nur_vereinen(a, b):
     return set(a) | set(b)
 
 
+def ohne_struktur(con, finder) -> dict:
+    """``quellen-id -> [pfad]`` der Dateien, die gelesen wurden, Anweisungen
+    enthielten und trotzdem NICHTS zum Bestand beitragen.
+
+    Aus dem Bestand gelesen, nicht aus dem Lauf gezaehlt: eine unveraenderte
+    Datei wird beim naechsten Lauf nicht mehr angefasst, der Hinweis muss aber
+    stehen bleiben, solange sie so daliegt.
+
+    ⚠ WARUM (ECHT 2026-11-11): ein Skriptexport mit 1796 Anweisungen und 0
+    erkannten Strukturen stand als "ok" im Bestand, die Erfassung meldete
+    "unveraendert" – nirgends ein Wort davon, dass die Datei nichts brachte.
+    """
+    aus: dict = {}
+    for p, roh in con.execute("SELECT pfad, stat FROM dateien WHERE stand='ok' AND fakten=0 ORDER BY pfad"):
+        try:
+            s = json.loads(roh or "{}")
+            n = int(s.get("anweisungen") or 0) if isinstance(s, dict) else 0
+        except (TypeError, ValueError):
+            n = 0
+        if n > 0:
+            aus.setdefault(finder(p), []).append(p)
+    return aus
+
+
 def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
          fk_ableiten: bool = True, abbruch: threading.Event | None = None,
          nur_ableiten: bool = False, quellen: list[dict] | None = None,
@@ -234,7 +258,7 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
     st = {"laeuft": True, "phase": "Dateien suchen", "begonnen": time.strftime("%Y-%m-%d %H:%M:%S"),
           "ordner": list(ordner), "dateien_gesamt": 0, "dateien_neu": 0, "dateien_fertig": 0,
           "bytes_gesamt": 0, "bytes_neu": 0, "bytes_fertig": 0, "entfernt": 0,
-          "fehler": [], "ausgelassen": [], "graph": None, "ende": None, "ergebnis": "",
+          "fehler": [], "ausgelassen": [], "ohne_struktur": [], "graph": None, "ende": None, "ergebnis": "",
           "schemata": [], "je_schema": {k: v for k, v in (vorher if isinstance(vorher, dict) else {}).items()
                                         if k in kennungen and isinstance(v, dict)}}
     try:
@@ -267,7 +291,8 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
         st["schemata"] = [k for k in kennungen if aktiv is None or k in aktiv]
         for k in st["schemata"]:
             st["je_schema"][k] = {"begonnen": st["begonnen"], "ende": None, "ergebnis": "",
-                                  **{z: 0 for z in _JE_ZAEHLER}, "fehler": [], "ausgelassen": []}
+                                  **{z: 0 for z in _JE_ZAEHLER}, "fehler": [], "ausgelassen": [],
+                                  "ohne_struktur": []}
         je = st["je_schema"]
         # Ordner der Quellen, die dieser Lauf NICHT erfasst: ihr Bestand ruht.
         ruhend = tuple(os.path.normpath(o).rstrip("/") + "/" for o, _ml, qid in plan
@@ -330,6 +355,11 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
         if abbruch.is_set():
             st["ergebnis"] = "abgebrochen"
             return st
+        leer = ohne_struktur(con, finder)
+        st["ohne_struktur"] = [p for k in sorted(leer) for p in leer[k]
+                               if not quellen or k in st["schemata"]]
+        for k in st["schemata"]:
+            je[k]["ohne_struktur"] = leer.get(k, [])
         if not nur_ableiten and store.roh_fassung(con) != parser.FASSUNG:
             # Erst NACH vollstaendigem Lesen: ein abgebrochener Lauf liest beim
             # naechsten Mal wieder alles (teurer, aber nie ein halber Bestand).

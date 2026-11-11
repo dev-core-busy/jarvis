@@ -230,6 +230,9 @@ PROBEN = [
      "var st2 = teil('sqadm-up-status'), fe2 = teil('sqadm-up-fehler');",
      "var st2 = teil('sqladm-up-status'), fe2 = teil('sqladm-up-fehler');"),
     ("Kuerzung der Dateiliste nicht beziffert", SA, W_ADM, "var hinweis = d.gekappt ?", "var hinweis = false ?"),
+    ("Dateien ohne Struktur nicht angezeigt", SA, W_ADM, "                    if (leer.length) {", "                    if (false) {"),
+    ("Dateien ohne Struktur mit Serverpfad", SA, W_ADM,
+     "leer.slice(0, 5).map(function (x) { return String(x).split('/').pop(); }).join(', ')", "leer.slice(0, 5).join(', ')"),
     # ── Begleitdokumente, Netzfehler, Pfade, Anzeige (2026-11-08)
     ("Upload ohne Begleitdokumente", MA, W_ZUG, "    endungen = _sge.upload_endungen(_sge.schema_von(cfg, sid))",
      "    endungen = _sge.endungen(_sge.schema_von(cfg, sid))"),

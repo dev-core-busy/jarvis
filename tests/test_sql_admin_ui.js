@@ -112,7 +112,10 @@ async function seite(opt) {
     // ``wartet``: Kennungen mit vorgemerktem Nachlauf; ``fertig``: zuletzt erfasst
     const zustand = { cfg: cfg0(), lauf: null, wartet: null, fertig: null, polls: 0, puts: 0, pollsBisEnde: 2 };
     function erfStand() {
-        return zustand.lauf ? imLauf(zustand.lauf, zustand.polls ? 2 : 0) : zustand.fertig ? nachLauf(zustand.fertig) : ruhe();
+        const st = zustand.lauf ? imLauf(zustand.lauf, zustand.polls ? 2 : 0) : zustand.fertig ? nachLauf(zustand.fertig) : ruhe();
+        // ``ohneStruktur``: Dateien von erp, die gelesen wurden und nichts brachten
+        if (opt.ohneStruktur && st.je_schema.erp) st.je_schema.erp.ohne_struktur = opt.ohneStruktur.slice();
+        return st;
     }
     function vorgemerkt() { return zustand.wartet ? { nur: zustand.wartet.slice() } : null; }
     win.confirm = function (t) { fragen.push(t); return opt.bestaetigen !== false; };
@@ -503,6 +506,27 @@ async function warteBis(fn, ms) {
           && karte(s, 'hr').querySelector('.sqadm-maxtab').value === '33',
           [karte(s, 'hr').querySelector('.sqadm-name').value, karte(s, 'hr').querySelector('.sqadm-maxtab').value]);
     s.win.close();
+
+
+    // Gelesen, aber nichts uebernommen (ECHT 2026-11-11: ein Export mit 1796
+    // Anweisungen und 0 Tabellen stand kommentarlos als "unveraendert" da).
+    function hinweise(seiteX, sid) {
+        return Array.prototype.map.call(karte(seiteX, sid).querySelectorAll('.sqadm-erf-fehler li'),
+                                        function (li) { return li.textContent; });
+    }
+    const sOhne = await seite();
+    if (!karte(sOhne, 'erp') || !karte(sOhne, 'hr')) abbruch('Schema-Karten fehlen – die Hinweis-Pruefungen waeren trivial');
+    check('Positivkontrolle: ohne solche Dateien steht am Schema kein Hinweis', hinweise(sOhne, 'erp').length === 0, hinweise(sOhne, 'erp'));
+    const sLeer = await seite({ ohneStruktur: ['/srv/ablage/erp/export_gesamt.sql', '/srv/ablage/erp/unter/zwei.sql'] });
+    const hErp = hinweise(sLeer, 'erp');
+    check('Dateien ohne erkannte Tabelle/Sicht sind am Schema benannt, mit Anzahl',
+          hErp.length === 1 && /^2 Dateien gelesen, aber keine Tabelle oder Sicht/.test(hErp[0])
+          && /export_gesamt\.sql, zwei\.sql$/.test(hErp[0]), hErp);
+    check('... nur mit dem Dateinamen, ohne den Ablageort auf dem Server', hErp.length === 1 && hErp[0].indexOf('/srv/') < 0, hErp);
+    check('... als Hinweis, nicht als Fehler der Erfassung (Ergebniszeile bleibt unmarkiert)',
+          !karte(sLeer, 'erp').querySelector('.sqadm-erf-stand').classList.contains('is-fehler')
+          && /Letzte Erfassung: fertig/.test(karte(sLeer, 'erp').querySelector('.sqadm-erf-stand').textContent));
+    check('... und nur an DIESEM Schema', hinweise(sLeer, 'hr').length === 0, hinweise(sLeer, 'hr'));
 
     abschnitt('9. Schema als Container, Einstellungen darin');
     s = await seite();

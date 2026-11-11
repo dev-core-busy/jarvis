@@ -43,8 +43,9 @@ import re
 # dem Einbau des YAML-Wegs nie wieder gelesen worden (Graph blieb leer).
 # 1 = SQL-DDL, 2 = dazu YAML-Objektexporte, 3 = dazu Begleitdokumente,
 # 4 = dazu Herkunft der Sichtspalten (Join-Pruefung ueber Sichten),
-# 5 = dazu Texterkennung in Bildern der Begleitdokumente.
-FASSUNG = 5
+# 5 = dazu Texterkennung in Bildern der Begleitdokumente,
+# 6 = dazu UTF-16-Dateien (Skriptexport des SQL Server Management Studio).
+FASSUNG = 6
 
 BLOCK = 4 * 1024 * 1024
 # Obergrenze fuer EINE Struktur-Anweisung. Ein CREATE TABLE ueber 64 MB gibt
@@ -95,9 +96,49 @@ _LEX = re.compile(
 # damit ein Abbruch nicht zurueckverfolgt (Python >= 3.11).
 _UEBERLESEN = re.compile(
     r"""(?:[^'"`;\-/$\n]++|\n(?![ \t]*GO\b)|'[^']*+(?:''[^']*+)*+'|"[^"]*+(?:""[^"]*+)*+"
-       |`[^`]*+`|--[^\n]*+\n|/\*.*?\*/|-(?!-)|/(?!\*))*+""",
+       |`[^`]*+`|--[^\n]*+\n(?![ \t]*GO\b)|/\*.*?\*/|-(?!-)|/(?!\*))*+""",
     re.X | re.S | re.I)
 _COPY_ENDE = re.compile(r"(?m)^\\\.[ \t]*\r?(?:\n|\Z)")
+# Eine vollstaendige GO-Zeile AB der Suchposition (der Aufrufer prueft, dass
+# davor ein Zeilenumbruch steht).
+_GO_ZEILE = re.compile(r"[ \t]*GO[ \t]*\r?\n", re.I)
+
+
+# So viele Bytes vom Dateianfang entscheiden ueber die Kodierung.
+_KODIERUNG_PROBE = 4096
+
+
+def kodierung(pfad) -> str:
+    """Kodierung einer Textdatei: ``utf-16`` / ``utf-8-sig`` nach der Marke am
+    Dateianfang, ``utf-16-le`` / ``utf-16-be`` ohne Marke am Muster der
+    Nullbytes, sonst ``utf-8``.
+
+    ⚠ WARUM (ECHT 2026-11-11): das SQL Server Management Studio speichert
+    seinen Skriptexport als UTF-16. Fest als UTF-8 gelesen stand zwischen allen
+    Buchstaben ein Nullzeichen – kein ``CREATE`` und keine ``GO``-Zeile wurde
+    erkannt, die Datei galt mit 1796 Anweisungen und 0 Strukturen als "ok".
+    """
+    try:
+        with open(pfad, "rb") as f:
+            kopf = f.read(_KODIERUNG_PROBE)
+    except OSError:
+        return "utf-8"
+    if kopf.startswith(codecs.BOM_UTF8):
+        return "utf-8-sig"
+    if kopf.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return "utf-16"
+    # Ohne Marke: in UTF-16 ist bei lateinischem Text jedes ZWEITE Byte null,
+    # und zwar immer an derselben Stelle des Paars. In UTF-8 kommt ein Nullbyte
+    # in einer Textdatei gar nicht vor.
+    paare = len(kopf) // 2
+    if paare >= 8:
+        gerade = kopf[0:2 * paare:2].count(0)
+        ungerade = kopf[1:2 * paare:2].count(0)
+        if ungerade * 2 >= paare and gerade * 20 <= paare:
+            return "utf-16-le"
+        if gerade * 2 >= paare and ungerade * 20 <= paare:
+            return "utf-16-be"
+    return "utf-8"
 
 
 class Statistik(dict):
@@ -127,11 +168,20 @@ class _Laufend:
         self.kopf = ""
         self.zu_lang = False
 
-    def dazu(self, teil: str) -> None:
+    def dazu(self, teil: str, kommentar: bool = False) -> None:
         if not teil:
             return
         if len(self.kopf) < self.KOPF:
-            self.kopf += teil[:self.KOPF - len(self.kopf)]
+            # Ein VOLLSTAENDIGER Kommentar zaehlt im Kopf als ein Leerzeichen:
+            # sonst fuellte ein langer Vorspann (Lizenztext, Kopf eines
+            # Exports) den Kopf allein, die Anweisung dahinter kam nie in
+            # Sicht und galt als "unbekannt" – ihr CREATE ging verloren.
+            # Fuehrender Leerraum zaehlt gar nicht (viele kurze Kommentare
+            # hintereinander fuellten ihn sonst genauso).
+            stueck = " " if kommentar else teil
+            if not self.kopf:
+                stueck = stueck.lstrip()
+            self.kopf += stueck[:self.KOPF - len(self.kopf)]
         if self.modus == "x":
             return
         self.teile.append(teil)
@@ -170,7 +220,7 @@ def anweisungen(pfad, stat: Statistik | None = None, block: int = BLOCK):
     die Trennung werden sie aber erkannt (ein ``;`` im Kommentar trennt nicht).
     """
     stat = stat if stat is not None else Statistik()
-    dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    dec = codecs.getincrementaldecoder(kodierung(pfad))(errors="replace")
     puf = ""
     anw = _Laufend()
     im_copy = False
@@ -188,7 +238,9 @@ def anweisungen(pfad, stat: Statistik | None = None, block: int = BLOCK):
         elif a.kopf.strip():
             stat["unverstanden"] += 1
         else:
-            stat["anweisungen"] -= 1   # nur Leerraum/Kommentar: keine Anweisung
+            # Nur Leerraum/Kommentar: keine Anweisung (Kommentare stehen im
+            # Kopf nur als Leerzeichen, siehe ``_Laufend.dazu``).
+            stat["anweisungen"] -= 1
         return None
 
     # ``start``: ab hier ist ``puf`` noch nicht verarbeitet. Das Zeichen davor
@@ -230,16 +282,25 @@ def anweisungen(pfad, stat: Statistik | None = None, block: int = BLOCK):
                     im_copy = False
                     continue
                 if anw.modus == "x":
-                    sm = _UEBERLESEN.match(puf, pos, grenze)
-                    if sm.end() > pos:
-                        # Ueber ``dazu`` und nicht an ihm vorbei: die Zusage
-                        # "im Modus x wird nicht gepuffert" steht dann an EINER
-                        # Stelle (zwei Schranken fuer dieselbe Frage machten
-                        # jede Gegenprobe darauf stumm – gemessen).
-                        anw.dazu(puf[pos:sm.end()])
-                        pos = sm.end()
-                        if pos >= grenze:
-                            break
+                    # ⚠ Der Schnellweg erkennt eine GO-Zeile nur am
+                    # Zeilenumbruch DAVOR. Steht er schon hinter dem Umbruch
+                    # (Fensteranfang: der Umbruch war das Ende des vorigen
+                    # Fensters; oder direkt hinter einem Zeilenkommentar),
+                    # verschluckte er "GO" als Klartext – und die folgende
+                    # Anweisung (im Skriptexport: das CREATE hinter
+                    # "SET QUOTED_IDENTIFIER ON / GO") ging in der ueberlesenen
+                    # auf. Dann entscheidet der Lexer.
+                    if not (pos > 0 and puf[pos - 1] == "\n" and _GO_ZEILE.match(puf, pos, grenze)):
+                        sm = _UEBERLESEN.match(puf, pos, grenze)
+                        if sm.end() > pos:
+                            # Ueber ``dazu`` und nicht an ihm vorbei: die Zusage
+                            # "im Modus x wird nicht gepuffert" steht dann an EINER
+                            # Stelle (zwei Schranken fuer dieselbe Frage machten
+                            # jede Gegenprobe darauf stumm – gemessen).
+                            anw.dazu(puf[pos:sm.end()])
+                            pos = sm.end()
+                            if pos >= grenze:
+                                break
                 m = _LEX.search(puf, pos, grenze)
                 if m is None:
                     anw.dazu(puf[pos:grenze])
@@ -251,7 +312,8 @@ def anweisungen(pfad, stat: Statistik | None = None, block: int = BLOCK):
                     pos = m.start()
                     break
                 if art in ("kom", "str", "offen"):
-                    anw.dazu(puf[pos:m.end()])
+                    anw.dazu(puf[pos:m.start()])
+                    anw.dazu(puf[m.start():m.end()], kommentar=art == "kom")
                     pos = m.end()
                     continue
                 # Trenner (; oder GO)
@@ -894,7 +956,7 @@ def yaml_zerlegen(pfad: str, stat: Statistik) -> list[dict]:
     stat["bytes"] = groesse
     if groesse > YAML_MAX:
         raise ValueError(f"YAML-Datei groesser als {YAML_MAX // 1024 // 1024} MB – nicht gelesen")
-    with open(pfad, encoding="utf-8", errors="replace") as f:
+    with open(pfad, encoding=kodierung(pfad), errors="replace") as f:
         text = f.read()
     fakten = []
     for dok in _yaml_laden(text):
@@ -1098,7 +1160,7 @@ def _dok_absaetze(pfad: str, stat=None) -> list[tuple[str, str]]:
         # Zeilenweise: eine Ueberschrift steht meist DIREKT vor ihrem Text, ohne
         # Leerzeile (eine Absatz-Zerlegung erkannte sie dann nicht – Waechter).
         # In einem Codeblock ist "# x" ein Kommentar, keine Ueberschrift.
-        with open(pfad, encoding="utf-8", errors="replace") as f:
+        with open(pfad, encoding=kodierung(pfad), errors="replace") as f:
             zeilen = f.read().splitlines()
         absatz: list[str] = []
         im_code = False

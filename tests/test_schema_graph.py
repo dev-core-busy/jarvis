@@ -1384,6 +1384,184 @@ mp = [n for n in ast.walk(baum) if isinstance(n, (ast.Import, ast.ImportFrom)) a
 check("Regel: Indexlauf ohne multiprocessing (spawn laedt run_jarvis.py)", not mp,
       [ast.dump(n) for n in mp])
 
+# ─── 8. Kodierung und Dateien ohne Struktur ─────────────────────────────────
+# ECHT 2026-11-11: ein Skriptexport des SQL Server Management Studio (UTF-16)
+# wurde fest als UTF-8 gelesen – 1796 Anweisungen, 0 Strukturen, Stand "ok",
+# und jede weitere Erfassung meldete "unveraendert", ohne ein Wort dazu.
+print("8. Kodierung / ohne Struktur")
+import codecs as _codecs
+
+S.ORDNER = TMP / "ablage_kodierung"     # eigener Bestand: die Abschnitte davor bleiben unberuehrt
+if not str(S.ordner()).startswith(str(TMP)):
+    abbruch("Ablage (Kodierung) zeigt aus dem Sandkasten heraus")
+
+# Die Form des echten Exports: CRLF, GO-Zeilen, eckige Klammern, ein Umlaut.
+_TSQL = ("USE [Probe]\r\nGO\r\n/****** Object:  Table [dbo].[Befund] ******/\r\n"
+         "CREATE TABLE [dbo].[Befund](\r\n\t[BefundID] [int] NOT NULL,\r\n\t[Text] [nvarchar](max) NULL,\r\n"
+         " CONSTRAINT [PK_Befund] PRIMARY KEY CLUSTERED ([BefundID] ASC)\r\n) ON [PRIMARY]\r\nGO\r\n"
+         "CREATE TABLE [dbo].[Material]([MaterialID] [int] NOT NULL, [BefundID] [int] NULL)\r\nGO\r\n"
+         "EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Befundübersicht' , "
+         "@level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'Befund'\r\nGO\r\n")
+_FORMEN = {
+    "utf-8": _TSQL.encode("utf-8"),
+    "utf-8 mit Marke": _codecs.BOM_UTF8 + _TSQL.encode("utf-8"),
+    "utf-16-le mit Marke": _codecs.BOM_UTF16_LE + _TSQL.encode("utf-16-le"),
+    "utf-16-be mit Marke": _codecs.BOM_UTF16_BE + _TSQL.encode("utf-16-be"),
+    "utf-16-le ohne Marke": _TSQL.encode("utf-16-le"),
+    "utf-16-be ohne Marke": _TSQL.encode("utf-16-be"),
+}
+KD = TMP / "kodierung"
+KD.mkdir()
+
+
+def _kod_lesen(name, roh, endung=".sql"):
+    f = KD / (name.replace(" ", "_") + endung)
+    f.write_bytes(roh)
+    return P.datei_zerlegen(str(f)), f
+
+
+def _kern(erg):
+    """Fakten ohne den Pfad – zwei Kodierungen derselben Datei muessen GLEICH sein."""
+    return json.dumps(erg.get("fakten"), ensure_ascii=False, sort_keys=True)
+
+
+_basis, _ = _kod_lesen("utf-8", _FORMEN["utf-8"])
+_namen8 = {f.get("name") for f in _basis["fakten"] if f.get("art") == "tabelle"}
+# Positivkontrolle: das Material selbst traegt, und UTF-16 ist wirklich UTF-16.
+if _namen8 != {"dbo.Befund", "dbo.Material"} or "Befundübersicht" not in _kern(_basis):
+    abbruch(f"Probematerial (T-SQL, UTF-8) liefert nicht das Erwartete: {_namen8} {_basis.get('fehler')}")
+if _FORMEN["utf-16-le ohne Marke"].count(0) < len(_TSQL) // 2:
+    abbruch("Probematerial ist kein UTF-16 (keine Nullbytes)")
+for _form, _roh in _FORMEN.items():
+    if _form == "utf-8":
+        continue
+    _erg, _f = _kod_lesen(_form, _roh)
+    check(f"{_form}: dieselben Fakten wie UTF-8", _erg["ok"] and _kern(_erg) == _kern(_basis),
+          (_erg.get("fehler"), _erg.get("stat")))
+    check(f"{_form}: dieselbe Zahl Anweisungen (GO-Zeilen trennen)",
+          _erg["stat"].get("anweisungen") == _basis["stat"].get("anweisungen"),
+          (_erg["stat"], _basis["stat"]))
+# Die Marke gehoert nicht zum Text: steht sie vor dem ersten Wort, ist das
+# sonst kein CREATE mehr (traf vorher auch UTF-8 mit Marke).
+_ERSTE = "CREATE TABLE erste (id int);\n"
+for _form, _roh in (("utf-8", _codecs.BOM_UTF8 + _ERSTE.encode("utf-8")),
+                    ("utf-16-le", _codecs.BOM_UTF16_LE + _ERSTE.encode("utf-16-le")),
+                    ("utf-16-be", _codecs.BOM_UTF16_BE + _ERSTE.encode("utf-16-be"))):
+    _erg, _ = _kod_lesen("marke " + _form, _roh)
+    check(f"Marke {_form} direkt vor CREATE: Tabelle erkannt",
+          [f.get("name") for f in _erg["fakten"]] == ["erste"], (_erg.get("fakten"), _erg.get("stat")))
+# Blockgrenze mitten im Zwei-Byte-Zeichen und mitten in der Marke
+_f16 = KD / "utf-16-le_mit_Marke.sql"
+_soll = list(P.anweisungen(str(_f16)))
+_ab = [n for n in range(1, 40) if list(P.anweisungen(str(_f16), block=n)) != _soll]
+check("UTF-16: dieselben Anweisungen bei jeder Blockgroesse 1..39", bool(_soll) and not _ab, _ab[:10])
+# Gegenrichtung: UTF-8 bleibt UTF-8 – auch mit Umlauten, auch sehr kurz
+(KD / "umlaut.sql").write_bytes("-- Größe, Maß, Übersicht äöü\nCREATE TABLE t (id int);\n".encode("utf-8"))
+(KD / "kurz.sql").write_bytes(b"a;")
+(KD / "fehlt-nicht.sql").write_bytes(b"")
+check("UTF-8 mit Umlauten bleibt UTF-8", P.kodierung(str(KD / "umlaut.sql")) == "utf-8",
+      P.kodierung(str(KD / "umlaut.sql")))
+check("Kurze und leere Datei: UTF-8, kein Wurf",
+      P.kodierung(str(KD / "kurz.sql")) == "utf-8" and P.kodierung(str(KD / "fehlt-nicht.sql")) == "utf-8"
+      and P.kodierung(str(KD / "gibt-es-nicht.sql")) == "utf-8")
+# Derselbe Weg fuer YAML und Markdown
+_YAML = ("name: BEFUND\nobject_type: TABLE\nschema: PATHO\ncomment: Befundübersicht\ncolumns:\n"
+         "- {name: BEFUND_ID, type: NUMBER}\nconstraints:\n- {name: PK_B, type: PRIMARY_KEY, columns: [BEFUND_ID]}\n")
+_y8, _ = _kod_lesen("y8", _YAML.encode("utf-8"), ".yaml")
+_y16, _ = _kod_lesen("y16", _codecs.BOM_UTF16_LE + _YAML.encode("utf-16-le"), ".yaml")
+check("YAML in UTF-16: dieselben Fakten wie UTF-8",
+      bool(_y8["fakten"]) and _y16["ok"] and _kern(_y16) == _kern(_y8), (_y16.get("fehler"), _kern(_y16)[:200]))
+_MD = "# Befunde\nDie Tabelle Befund hält die Befundübersicht.\n\n## Material\nJe Befund mehrere Materialien.\n"
+_m8, _ = _kod_lesen("m", _MD.encode("utf-8"), ".md")
+_k8 = json.dumps([f.get("teile") for f in _m8["fakten"]], ensure_ascii=False)
+_m16, _ = _kod_lesen("m", _codecs.BOM_UTF16_LE + _MD.encode("utf-16-le"), ".md")
+_k16 = json.dumps([f.get("teile") for f in _m16["fakten"]], ensure_ascii=False)
+check("Markdown in UTF-16: dieselben Textteile wie UTF-8", "Befundübersicht" in _k8 and _k16 == _k8, _k16[:200])
+
+# Drei Altfehler des Trenners, gefunden beim Nachstellen des Vorfalls. Jeder
+# verlor still ein CREATE; gemessen wird die ZAHL der Struktur-Anweisungen und
+# ihre Gleichheit bei jeder Blockgroesse (der Betrieb liest in 4-MB-Bloecken,
+# die Grenze faellt irgendwohin).
+_TRENNER = {
+    # "GO" am Fensteranfang im Ueberlese-Modus (der Umbruch davor war das Fensterende)
+    "GO-Zeile hinter ueberlesener Anweisung": (
+        "SET ANSI_NULLS ON\r\nGO\r\nSET QUOTED_IDENTIFIER ON\r\n  GO  \r\nCREATE TABLE b(id int)\r\nGO\r\n"
+        "USE x\r\ngo\r\nCREATE TABLE c(id int)\r\nGO", 2),
+    # Zeilenkommentar am Ende der ueberlesenen Anweisung, GO in der naechsten Zeile
+    "GO-Zeile hinter Zeilenkommentar": (
+        "USE x -- Kommentar\nGO\nCREATE TABLE b(id int)\nGO\nSET y /* k */\nGO\nCREATE TABLE c(id int)\nGO\n", 2),
+    # Vorspann, der laenger ist als der festgehaltene Kopf
+    "Langer Blockkommentar vor CREATE": ("/* " + "x" * 900 + " */\nCREATE TABLE b(id int);\n", 1),
+    "Viele kurze Kommentare vor CREATE": (
+        "".join(f"-- Zeile {i}\n" for i in range(300)) + "USE x\nGO\n" + "/* k */\n" * 200
+        + "CREATE TABLE b(id int)\nGO\n", 1),
+    "Kommentar zwischen den Kopfwoertern": ("ALTER/* k */TABLE b ADD x int;\nCREATE -- c\n TABLE c(id int);\n", 2),
+    # Gegenrichtung: was wie GO beginnt, trennt nicht; GO in einer Zeichenkette auch nicht
+    "GOTO/GOLD und GO in der Zeichenkette trennen nicht": (
+        "SELECT 1\nGOTO_irgendwas_ziemlich_lang x;\nCREATE TABLE b(id int);\nUSE y\nGOLD int;\n"
+        "INSERT INTO t VALUES ('a\nGO\nCREATE TABLE falsch(x int)');\nCREATE TABLE c(id int);\n", 2),
+}
+for _name, (_text, _erwartet) in _TRENNER.items():
+    _f = KD / "trenner.sql"
+    _f.write_bytes(_text.encode("utf-8"))
+    _soll = list(P.anweisungen(str(_f)))
+    _ab = [n for n in list(range(1, 80)) + [97, 199, 401] if list(P.anweisungen(str(_f), block=n)) != _soll]
+    check(f"{_name}: {_erwartet} Struktur-Anweisungen, bei jeder Blockgroesse",
+          len(_soll) == _erwartet and not _ab, (len(_soll), _ab[:10]))
+_f = KD / "trenner.sql"
+_f.write_bytes(b"\n\n-- a\n\n/* b */\n;\n;\n-- " + b"x" * 900 + b"\n")
+_st = P.Statistik()
+list(P.anweisungen(str(_f), _st))
+check("Nur Kommentar und Leerraum: keine einzige Anweisung gezaehlt",
+      _st["anweisungen"] == 0 and _st["unverstanden"] == 0, dict(_st))
+
+# Indexlauf: gelesen, Anweisungen darin, nichts uebernommen -> je Schema benannt
+KA, KB = TMP / "kq_a", TMP / "kq_b"
+KA.mkdir()
+KB.mkdir()
+(KA / "export.sql").write_bytes(_FORMEN["utf-16-le mit Marke"])
+(KA / "daten.sql").write_text("INSERT INTO dbo.Befund VALUES (1, 'x');\nINSERT INTO dbo.Befund VALUES (2, 'y');\n")
+(KA / "nur_kommentar.sql").write_text("-- hier steht nichts\n/* gar nichts */\n")
+(KB / "lager.sql").write_text("CREATE TABLE lager (id int primary key);\n")
+_KQ = [{"id": "a", "ordner": [str(KA)]}, {"id": "b", "ordner": [str(KB)]}]
+
+
+def _klauf(**kw):
+    return I.lauf([], quellen=_KQ, ordner_schutz=False, prozesse=1, **kw)
+
+
+def _leer(st, sid):
+    return [os.path.basename(x) for x in ((st.get("je_schema") or {}).get(sid) or {}).get("ohne_struktur", ["?"])]
+
+
+k1 = _klauf()
+check("Lauf ueber zwei Schemata fertig, ohne Fehler", k1["ergebnis"] == "fertig" and not k1["fehler"],
+      (k1["ergebnis"], k1["fehler"]))
+_kg = S.graph_lesen()
+_kobj = {r[0] for r in _kg.execute("SELECT name FROM objekt")} if _kg is not None else set()
+if _kg is not None:
+    _kg.close()
+check("Tabellen aus der UTF-16-Datei stehen im Graphen", {"Befund", "Material"} <= _kobj, sorted(_kobj))
+check("Datei mit Anweisungen, aber ohne Struktur ist an IHREM Schema benannt",
+      _leer(k1, "a") == ["daten.sql"], _leer(k1, "a"))
+check("Nur Kommentar (keine Anweisung) ist kein Hinweis; Schema b bleibt frei",
+      "nur_kommentar.sql" not in _leer(k1, "a") and _leer(k1, "b") == [], (_leer(k1, "a"), _leer(k1, "b")))
+k2 = _klauf()
+check("Zweiter Lauf 'unveraendert' nennt die Datei WEITER",
+      k2["ergebnis"] == "unveraendert" and k2["dateien_neu"] == 0 and _leer(k2, "a") == ["daten.sql"],
+      (k2["ergebnis"], k2["dateien_neu"], _leer(k2, "a")))
+k3 = _klauf(nur={"b"})
+check("Ein Lauf nur ueber Schema b laesst den Hinweis an Schema a stehen",
+      _leer(k3, "a") == ["daten.sql"] and _leer(k3, "b") == [], (_leer(k3, "a"), _leer(k3, "b")))
+check("Gesamtliste des Laufs nennt nur die erfassten Schemata",
+      [os.path.basename(x) for x in k2.get("ohne_struktur", ["?"])] == ["daten.sql"]
+      and k3.get("ohne_struktur", ["?"]) == [], (k2.get("ohne_struktur"), k3.get("ohne_struktur")))
+(KA / "daten.sql").write_text("CREATE TABLE nachgereicht (id int primary key, befund_id int);\n")
+k4 = _klauf()
+check("Bringt die Datei nach einer Aenderung Struktur, ist der Hinweis weg",
+      k4["dateien_neu"] == 1 and _leer(k4, "a") == [], (k4["dateien_neu"], _leer(k4, "a")))
+check("Parser-Fassung >= 6 (UTF-16: vorhandene Bestaende werden neu gelesen)", P.FASSUNG >= 6, P.FASSUNG)
+
 shutil.rmtree(TMP, ignore_errors=True)
 print(f"\nBilanz: {OK} OK, {FAIL} FAIL")
 sys.exit(1 if FAIL else 0)

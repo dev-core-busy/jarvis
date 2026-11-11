@@ -644,6 +644,15 @@
                     // Ein Fehler des ganzen Laufs (z. B. beim Ableiten des Graphen)
                     // steht nicht bei einer Datei – er gehoert trotzdem hierher.
                     if (L.je.ergebnis === 'fehler' && !fehler.length) fehler = (L.st.fehler || []).slice(-3);
+                    // Gelesen, aber nichts uebernommen: NACH dem Lauf-Fehler
+                    // angehaengt (ein Hinweis ist kein Fehler und darf dessen
+                    // Rueckfall oben nicht verdraengen). Nur der Dateiname –
+                    // der Ablageort auf dem Server sagt dem Leser nichts.
+                    var leer = L.je.ohne_struktur || [];
+                    if (leer.length) {
+                        fehler.push(t('sqladm.no_structure', '{n} Dateien gelesen, aber keine Tabelle oder Sicht darin erkannt – sie tragen nichts zum Schema bei: {l}',
+                            { n: leer.length, l: leer.slice(0, 5).map(function (x) { return String(x).split('/').pop(); }).join(', ') }));
+                    }
                 }
                 // Kein letzter Lauf bekannt: nichts behaupten (Register).
                 status(stand, txt, fehlerArt);

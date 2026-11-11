@@ -44,8 +44,9 @@ import re
 # 1 = SQL-DDL, 2 = dazu YAML-Objektexporte, 3 = dazu Begleitdokumente,
 # 4 = dazu Herkunft der Sichtspalten (Join-Pruefung ueber Sichten),
 # 5 = dazu Texterkennung in Bildern der Begleitdokumente,
-# 6 = dazu UTF-16-Dateien (Skriptexport des SQL Server Management Studio).
-FASSUNG = 6
+# 6 = dazu UTF-16-Dateien (Skriptexport des SQL Server Management Studio),
+# 7 = dazu HTML-Dokumentation aus DbSchema.
+FASSUNG = 7
 
 BLOCK = 4 * 1024 * 1024
 # Obergrenze fuer EINE Struktur-Anweisung. Ein CREATE TABLE ueber 64 MB gibt
@@ -966,6 +967,154 @@ def yaml_zerlegen(pfad: str, stat: Statistik) -> list[dict]:
     return fakten
 
 
+# ─── HTML-Dokumentation aus DbSchema ────────────────────────────────────────
+#
+# Anlass (ECHT 2026-11-11): ein Schema bekam statt eines SQL-Exports die
+# HTML-Dokumentation des Werkzeugs DbSchema (eine Seite mit 234 Tabellen, eine
+# zweite mit 15 Sichten). Ohne eigenen Weg gingen beide Dateien in den
+# SQL-Parser und standen als "ohne Struktur" da. Der Inhalt ist reicher als ein
+# Skriptexport: zu 3130 von 3954 Spalten eine deutsche Beschreibung.
+#
+# Aufbau (gemessen an beiden Dateien): je Objekt eine Karte
+#   <a name='dbo.X' …><h5 …>Table dbo.X</h5></a>   (Sicht: "View X", ohne Schema –
+#   deshalb gilt der Ankername, nicht die Ueberschrift)
+#   <p class="text-muted">Beschreibung der Tabelle</p>   (optional)
+#   <table> mit Zeilen Idx | Column Name | Definition | Description, darin
+#   Zwischenkoepfe <th colspan>: "Indexes", "Foreign Key",
+#   "Referring Foreign Key", "Triggers".
+# - Idx-Zelle "*" = Pflichtfeld (NOT NULL); daneben stehen nur Symbole (SVG).
+# - Index-Zeile: "Primary Key ON a, b" / "Unique Key ON …" / "Index ON …".
+# - Foreign Key: "Spalte <Pfeil nach oben rechts, U+2197> <Kaestchen> dbo.Ziel(Spalte)".
+#   "Referring Foreign Key" ist dieselbe Kante aus Sicht des ZIELS (Pfeil
+#   U+2199) – sie steht schon beim Ausgangspunkt und wird NICHT gelesen, sonst
+#   stuende jede Kante zweimal und verdreht. Zweifach gehalten: Abschnitt UND
+#   Pfeil in ``_HTML_FK``.
+# - Sichten tragen KEIN SQL – nur Spalten und Typen. Herkunft der Sichtspalten
+#   und benutzte Tabellen bleiben daher leer (ehrlich "ungeprueft").
+# Eine HTML-Seite ohne diesen Aufbau liefert NICHTS und wird als eine
+# Anweisung gezaehlt – dann steht sie am Schema als "ohne Struktur", statt
+# geraten zu werden.
+
+HTML_ENDUNGEN = (".html", ".htm")
+HTML_MAX = 64 * 1024 * 1024
+# Was gar nicht gelesen wird: Diagramme, Skripte, Stile (die Diagramme machen
+# mehr als die Haelfte der Detailseite aus).
+_HTML_WEG = re.compile(r"<(svg|script|style)\b.*?</\1\s*>", re.I | re.S)
+# Kopf einer Objektkarte: Anker, dann (ohne weiteres Element dazwischen ausser
+# dem Ueberschrifts-Tag) "Table …" bzw. "View …".
+_HTML_KARTE = re.compile(
+    r"<a\s+name\s*=\s*(?P<q>['\"])(?P<anker>[^'\"]+)(?P=q)[^>]*>\s*"
+    r"<h\d[^>]*>\s*(?P<art>Table|View)\s+(?P<titel>[^<]+?)\s*</h\d>",
+    re.I)
+_HTML_ZEILE = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.I | re.S)
+_HTML_TH = re.compile(r"<th\b[^>]*>(.*?)</th>", re.I | re.S)
+_HTML_TD = re.compile(r"<td\b[^>]*>(.*?)</td>", re.I | re.S)
+_HTML_SPALTE = re.compile(r"<a\s+name\s*=\s*['\"][^'\"]*['\"][^>]*>(.*?)</a>", re.I | re.S)
+_HTML_BESCHR = re.compile(r"\A\s*(?:</a>\s*)?<p\b[^>]*>(.*?)</p>", re.I | re.S)
+_HTML_INDEX = re.compile(r"^(?P<art>Primary\s+Key|Unique\s+Key|Unique\s+Index|Index)\s+ON\s+(?P<sp>.+)$", re.I)
+# Die Zielspalte in Klammern fehlt bei manchen Kanten (3 von 394 im echten
+# Bestand) – dann bleibt "nach" leer wie bei ``REFERENCES x`` ohne Spaltenliste.
+_HTML_FK = re.compile(r"^(?P<von>.+?)\s*\u2197\s*\u274f?\s*(?P<ziel>[^()]+?)\s*(?:\((?P<nach>[^()]*)\))?\s*$")
+# Was in der Spalte "Definition" hinter dem Typ steht.
+_HTML_TYP_ENDE = re.compile(r"\s(?:COLLATE|DEFAULT|IDENTITY|NOT\s+NULL|NULL|CHECK|AS)\b", re.I)
+
+
+def _html_text(roh: str) -> str:
+    """Zelleninhalt als Text: ``<br>`` wird Zeilenumbruch, Tags fallen weg,
+    Entities werden aufgeloest, Leerraum je Zeile zusammengezogen."""
+    import html  # noqa: PLC0415
+    s = re.sub(r"<br\s*/?>", "\n", roh or "", flags=re.I)
+    s = html.unescape(re.sub(r"<[^>]*>", "", s))
+    zeilen = [" ".join(z.split()) for z in s.replace("\xa0", " ").split("\n")]
+    return "\n".join(z for z in zeilen if z)
+
+
+def _html_namen(text: str) -> list[str]:
+    return [bezeichner(t) for t in text.split(",") if bezeichner(t)]
+
+
+def html_karte(art: str, name: str, rumpf: str) -> dict:
+    """EINE Objektkarte (Rumpf bis zur naechsten Karte) -> ein Fakt in derselben
+    Form wie ``zerlege``/``yaml_objekt``."""
+    kommentar = ""
+    bm = _HTML_BESCHR.match(rumpf)
+    if bm:
+        kommentar = _html_text(bm.group(1))
+    spalten, pk, fks = [], [], []
+    abschnitt = "spalten"
+    for zm in _HTML_ZEILE.finditer(rumpf):
+        zeile = zm.group(1)
+        th = _HTML_TH.findall(zeile)
+        if th:
+            kopf = _html_text(th[0]).lower()
+            if len(th) == 1:          # Zwischenkopf ueber die ganze Breite
+                abschnitt = kopf
+            continue                  # Spaltenkoepfe (Idx | Column Name | …)
+        zellen = _HTML_TD.findall(zeile)
+        if abschnitt == "spalten":
+            if len(zellen) < 3:
+                continue
+            sm = _HTML_SPALTE.search(zellen[1])
+            sname = _html_text(sm.group(1) if sm else zellen[1])
+            if not sname:
+                continue
+            definition = _html_text(zellen[2]).replace("\n", " ")
+            te = _HTML_TYP_ENDE.search(" " + definition)
+            typ = (definition[:te.start()] if te else definition).strip()[:80]
+            spalten.append({"name": sname, "typ": typ, "pk": False,
+                            "null": "*" not in _html_text(zellen[0]),
+                            "kommentar": _html_text(zellen[3]) if len(zellen) > 3 else ""})
+        # Index und FK stehen in der DRITTEN Zelle (Symbol | Name | Inhalt); im
+        # Layout mit Beschreibungsspalte folgt noch eine leere vierte.
+        elif abschnitt == "indexes":
+            im = _HTML_INDEX.match(_html_text(zellen[2]).replace("\n", " ") if len(zellen) > 2 else "")
+            if im and im.group("art").lower().startswith("primary"):
+                pk = _html_namen(im.group("sp"))
+        elif abschnitt == "foreign key":
+            fm = _HTML_FK.match(_html_text(zellen[2]).replace("\n", " ") if len(zellen) > 2 else "")
+            if fm:
+                fks.append({"von": _html_namen(fm.group("von")), "ziel": bezeichner(fm.group("ziel")),
+                            "nach": _html_namen(fm.group("nach") or "")})
+        # "referring foreign key", "triggers", Unbekanntes: nicht gelesen
+    pk_l = {p.lower() for p in pk}
+    for s in spalten:
+        s["pk"] = s["name"].lower() in pk_l
+    if art == "view":
+        return {"art": "sicht", "name": name, "kommentar": kommentar, "nutzt": [], "pk": [], "fks": [],
+                "spalten": spalten, "herkunft": {"spalten": {}, "stern": []}}
+    return {"art": "tabelle", "name": name, "spalten": spalten, "pk": pk, "fks": fks,
+            "kommentar": kommentar, "nutzt": []}
+
+
+def html_zerlegen(pfad: str, stat: Statistik) -> list[dict]:
+    import os  # noqa: PLC0415
+    groesse = os.path.getsize(pfad)
+    stat["bytes"] = groesse
+    if groesse > HTML_MAX:
+        raise ValueError(f"HTML-Datei groesser als {HTML_MAX // 1024 // 1024} MB – nicht gelesen")
+    with open(pfad, encoding=kodierung(pfad), errors="replace") as f:
+        text = _HTML_WEG.sub(" ", f.read())
+    karten = list(_HTML_KARTE.finditer(text))
+    if not karten:
+        # Gelesen, aber kein bekannter Aufbau: als EINE Anweisung ohne Struktur
+        # zaehlen, damit die Datei am Schema als "ohne Struktur" erscheint.
+        stat["anweisungen"] += 1
+        stat["unverstanden"] += 1
+        return []
+    import html  # noqa: PLC0415
+    fakten = []
+    for i, k in enumerate(karten):
+        stat["anweisungen"] += 1
+        ende = karten[i + 1].start() if i + 1 < len(karten) else len(text)
+        name = bezeichner(html.unescape(k.group("anker"))) or bezeichner(html.unescape(k.group("titel")))
+        if not name:
+            stat["unverstanden"] += 1
+            continue
+        fakten.append(html_karte(k.group("art").lower(), name, text[k.end():ende]))
+        stat["struktur"] += 1
+    return fakten
+
+
 # ─── Begleitdokumente (Konventionen, SQL-Beispiele, Best Practices) ─────────
 #
 # Anlass (2026-11-07): zum YAML-Bestand gehoeren Dokumente des Hauses (Schema-
@@ -1320,6 +1469,13 @@ def datei_zerlegen(pfad: str) -> dict:
         except ImportError as e:
             return {"pfad": pfad, "ok": False, "fakten": [], "stat": dict(stat),
                     "fehler": f"Lesebibliothek fehlt ({e.name}) – Dokument nicht lesbar"}
+        except Exception as e:  # noqa: BLE001
+            return {"pfad": pfad, "ok": False, "fakten": [], "stat": dict(stat),
+                    "fehler": f"{type(e).__name__}: {e}"[:500]}
+    if str(pfad).lower().endswith(HTML_ENDUNGEN):
+        try:
+            fakten = html_zerlegen(pfad, stat)
+            return {"pfad": pfad, "ok": True, "fakten": fakten, "stat": dict(stat), "fehler": ""}
         except Exception as e:  # noqa: BLE001
             return {"pfad": pfad, "ok": False, "fakten": [], "stat": dict(stat),
                     "fehler": f"{type(e).__name__}: {e}"[:500]}

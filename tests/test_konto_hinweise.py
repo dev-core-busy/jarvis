@@ -155,6 +155,7 @@ sys.modules["backend"].audit_log = audit
 _abh = {n: object() for n in set(re.findall(r"\bDepends\((require_[a-z_]+)\)", QUELLE))}
 ns = {**_abh, "JSONResponse": JSONResponse, "Request": Anfrage, "Depends": lambda f: None,
       "asyncio": asyncio, "time": time, "re": re, "_totp_schutz": _TS,
+      "_sprot_angaben": lambda **angaben: None,
       "_load_auth_state": _load_auth_state, "_set_user_auth_state": _set_user_auth_state,
       "_get_user_auth_state": lambda u: copy.deepcopy((ZUSTAND.get("users") or {}).get(u, {})),
       "authenticate_linux_user": lambda u, p, details=None: (u, p) == ("jarvis", "admin-geheim"),

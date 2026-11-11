@@ -549,7 +549,7 @@ main = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 
 
 def dependency(pfad: str, methode: str = "post") -> str:
-    m = re.search(r'@app\.%s\("%s"\)\s*\nasync def [a-z_]+\(([^)]*)\)'
+    m = re.search(r'@app\.%s\("%s"\)\s*\n(?:@[\w.]+[^\n]*\n)*async def [a-z_]+\(([^)]*)\)'
                   % (methode, re.escape(pfad)), main)
     return m.group(1) if m else ""
 

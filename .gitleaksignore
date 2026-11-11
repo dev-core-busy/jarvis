@@ -60,3 +60,6 @@ tests/test_mcp_umleitung.py:generic-api-key:80
 tests/test_sap_verbindungstest.py:generic-api-key:83
 tests/test_skills_liste_geheim.py:generic-api-key:53
 tests/test_skills_liste_geheim.py:generic-api-key:49
+# SQL-DDL im Test ("PRIMARY KEY, <spalte>") – kein Geheimnis; Fundstelle lokal
+# nachgerechnet, nicht mit gitleaks selbst bestaetigt (2026-11-11).
+tests/test_schema_graph_zugang.py:generic-api-key:449

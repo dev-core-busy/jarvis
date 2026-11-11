@@ -387,6 +387,7 @@ check("der Endpunkt /analyse nimmt Konflikte an",
 check("er reicht sie an analysiere durch",
       re.search(r"analysiere\([^)]*konflikte=", Q_MAIN) is not None)
 m_beh = re.search(r'@app\.post\("/api/knowledge/cleanup/behebbar"\)\s*\n'
+                  r'(?:@[\w.]+[^\n]*\n)*'
                   r'async def cleanup_behebbar\(([^)]*)\)', Q_MAIN)
 check("Endpunkt /behebbar vorhanden", m_beh is not None)
 check("und Administratoren vorbehalten",

@@ -156,6 +156,7 @@ sys.modules["backend"].audit_log = audit
 _abh = {n: object() for n in set(re.findall(r"\bDepends\((require_[a-z_]+)\)", QUELLE))}
 ns = {**_abh, "JSONResponse": JSONResponse, "Request": Anfrage, "Depends": lambda f: None,
       "require_local_auth": object(), "asyncio": asyncio, "re": re, "time": time,
+      "_sprot_angaben": lambda **angaben: None,
       "_load_auth_state": _load_auth_state, "_set_user_auth_state": _set_user_auth_state,
       "authenticate_linux_user": authenticate_linux_user,
       "_display_name": lambda u: "Anzeige:" + u,

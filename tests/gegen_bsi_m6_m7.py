@@ -174,7 +174,7 @@ PROBEN = [
      '    includeConfigs.set(listOf("releaseRuntimeClasspath"))\n', ''),
     ("Gradle-Distribution ohne Pruefsumme", GWP,
      'distributionSha256Sum=f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6\n', ''),
-    ("go.mod ohne toolchain-Zeile", GOMOD, '\ntoolchain go1.27.3\n', '\n'),
+    ("go.mod ohne toolchain-Zeile", GOMOD, '\ntoolchain go1.27.4\n', '\n'),
     ("kein Pull-Request-Ausloeser", WF,
      '  pull_request:\n    branches: [master]\n', ''),
     ("Dependabot ohne numpy-Grenze", DB,

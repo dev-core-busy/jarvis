@@ -360,7 +360,7 @@ pruefe(mc.jarvis_hinweise({"text": True, "tools": True}, "google") == [],
 abschnitt("7. Endpunkte, Rechte, Schluessel")
 
 for pfad in ("/api/profiles/capabilities", "/api/profiles/capabilities/probe"):
-    m = re.search(r'@app\.post\("' + re.escape(pfad) + r'"\)\s*\nasync def (\w+)'
+    m = re.search(r'@app\.post\("' + re.escape(pfad) + r'"\)\s*\n(?:@[\w.]+[^\n]*\n)*async def (\w+)'
                   r'\([^)]*\)', MAIN_SRC)
     pruefe(m is not None, f"{pfad} ist registriert")
     if m:

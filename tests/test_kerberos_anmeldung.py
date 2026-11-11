@@ -423,11 +423,15 @@ pruefe(re.search(r"if \(WindowsKontoPasst\(_settings\) &&\s*await _client\.Windo
                  r"return true;", sicher) is not None,
        "gelungene Windows-Anmeldung merkt das Token und endet OHNE Maske")
 start = _methode(T, "Task StartAnmeldungAsync(")
-pruefe(re.search(r"if \(!WindowsKontoPasst\(_settings\) \|\|\s*!await _client\.WindowsAnmeldenAsync"
-                 r"\(cts\.Token\)\.ConfigureAwait\(true\)\)\s*\{\s*return;\s*\}\s*"
-                 r"ConfigStore\.SaveToken\(_client\.Token\);", start) is not None,
-       "beim Start still per Windows anmelden (kein Dialog), Token wird gemerkt")
-pruefe("FrageAnmeldung(" not in start, "der Start zeigt weiterhin keine Kennwortmaske")
+# ⚠ VORGABE 2026-11-11: ohne gueltige Sitzung meldet sich der Start ueber
+# DENSELBEN Weg an wie der erste Rahmen – Windows still zuerst, die Maske als
+# Rueckfall. Das Windows-zuerst selbst prueft der Block zu `sicher` oben; hier
+# zaehlt, dass der Start genau diesen Weg nimmt und keinen eigenen.
+pruefe(re.search(r"_startAnmeldung\s*=\s*SicherstellenAngemeldetAsync\(", start) is not None,
+       "ohne Sitzung meldet sich der Start ueber SicherstellenAngemeldetAsync an "
+       "(Windows zuerst, Maske als Rueckfall)")
+pruefe("FrageAnmeldung(" not in start and "WindowsAnmeldenAsync" not in start,
+       "der Start baut keinen eigenen Anmeldeweg neben dem geprueften")
 
 # ═══ 4. Die Keytab ist fuer Agent und Shell gesperrt ════════════════════════
 abschnitt("4. Keytab gesperrt (sonst: Anmeldung als beliebiger Benutzer)")

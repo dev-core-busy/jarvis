@@ -1,4 +1,5 @@
 using AiMouse.Configuration;
+using AiMouse.Interop;
 using AiMouse.Localization;
 
 namespace AiMouse.Ui;
@@ -133,14 +134,27 @@ internal sealed class LoginWindow : Form
         // bekanntem Benutzer ist das Kennwort gemeint, beim Nachfragen des
         // Einmal-Codes dieser.
         _benutzer.Text = benutzer.Length > 0 ? benutzer : settings.Benutzer;
-        if (totpNoetig)
+        Control eingabe = totpNoetig ? _totp
+                        : _benutzer.Text.Length > 0 ? _kennwort
+                        : _benutzer;
+        ActiveControl = eingabe;
+
+        // ⚠ BEIM START STEHT DIE MASKE SONST HINTER ALLEM (Vorgabe 2026-11-11:
+        // „Fokus auf dem Eingabefeld"). Die Anwendung hat dann kein sichtbares
+        // Fenster im Vordergrund – Windows laesst ein neues Fenster eines
+        // Hintergrundprozesses nur in der Taskleiste blinken, und die
+        // Tastatur bleibt beim vorigen Programm. `ActiveControl` allein setzt
+        // den Fokus nur INNERHALB des Fensters. Deshalb nach dem Anzeigen:
+        // kurz TopMost (holt es sichtbar nach vorn), aktivieren, in den
+        // Vordergrund bitten und den Fokus ausdruecklich ins Feld setzen.
+        Shown += (_, _) =>
         {
-            ActiveControl = _totp;
-        }
-        else if (_benutzer.Text.Length > 0)
-        {
-            ActiveControl = _kennwort;
-        }
+            TopMost = true;
+            Activate();
+            NativeMethods.SetForegroundWindow(Handle);
+            TopMost = false;
+            eingabe.Focus();
+        };
     }
 
 

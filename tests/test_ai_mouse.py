@@ -865,8 +865,11 @@ if start:
     # Ohne Serveradresse waere die Anmeldemaske eine Sackgasse.
     check("ohne Einrichtung fuehrt der Weg in die Einstellungen",
           "ConfigStore.Eingerichtet()" in start and "ShowSettings()" in start)
-    # Ein Fehlerfenster beim Windows-Start waere Stoerung, kein Dienst.
-    check("ein Fehlschlag ist still", "catch (Exception)" in start)
+    # Vorgabe 2026-11-11: bis zur Maske still, aber was aus der Anmeldung mit
+    # EINGEGEBENEM Kennwort kommt (falsches Kennwort), wird gemeldet – der
+    # Benutzer hat gerade getippt und muss wissen, ob es stimmte.
+    check("ein Fehlschlag nach der Maske wird gemeldet",
+          re.search(r"catch \(Exception \w+\)\s*\{[^}]*ShowTrayError\(", start) is not None)
 
 # Der Aufruf im Konstruktor ist die eigentliche Zusage – ohne ihn ist die
 # Methode toter Code, und "beim Start" waere unerfuellt.
@@ -1160,10 +1163,47 @@ start3_code = "\n".join(z for z in start3.split("\n") if not z.lstrip().startswi
 check("Kommentar-Filter greift (Positivkontrolle)",
       "ConfigStore.Eingerichtet()" in start3_code
       and "Anmeldefenster" not in start3_code)
-check("der Start meldet sich NICHT selbst an",
-      "SicherstellenAngemeldetAsync" not in start3_code)
-check("er holt nur die Fragen – und nur mit gemerkter Sitzung",
-      "_client.Angemeldet" in start3 and "FragenNachladenAsync" in start3)
+# ⚠ ABGELOEST DURCH DIE VORGABE 2026-11-11: „wenn keine automatische (SPN)
+# Anmeldung moeglich ist, Anmeldebildschirm anzeigen, Fokus auf dem
+# Eingabefeld". Bis dahin galt hier „der Start meldet sich NICHT selbst an" –
+# das stammte aus der Zeit vor der Windows-Anmeldung, als JEDER Start gefragt
+# haette. Jetzt fragt er nur, wenn Sitzung UND Windows-Anmeldung fehlen.
+_i_hol = start3_code.find("await FragenNachladenAsync()")
+_i_noch = start3_code.find("if (_client.Angemeldet)", _i_hol + 1) if _i_hol >= 0 else -1
+_i_anm = start3_code.find("SicherstellenAngemeldetAsync(")
+check("mit gemerkter Sitzung werden nur die Fragen geholt, und gilt sie danach "
+      "noch, endet der Start dort",
+      0 <= _i_hol < _i_noch < _i_anm
+      and re.search(r"if \(_client\.Angemeldet\)\s*\{\s*return;\s*\}",
+                    start3_code[_i_noch:_i_anm]) is not None)
+check("ohne (gueltige) Sitzung meldet sich der Start an – Windows zuerst, "
+      "sonst die Maske",
+      re.search(r"_startAnmeldung\s*=\s*SicherstellenAngemeldetAsync\(CancellationToken\.None\)",
+                start3_code) is not None)
+# Kein Zeitlimit-Token: es liefe ab, waehrend der Benutzer in der Maske tippt.
+check("die Start-Anmeldung hat kein Zeitlimit, das waehrend der Maske ablaeuft",
+      "CancellationTokenSource" not in start3_code)
+# Ein Rahmen waehrend offener Start-Maske wartet auf sie, statt eine zweite zu
+# oeffnen – und zwar VOR jedem eigenen Anmeldeversuch.
+_sich_code = "\n".join(z for z in sich3.split("\n") if not z.lstrip().startswith("//"))
+_i_warte = _sich_code.find("_startAnmeldung is { IsCompleted: false }")
+_i_win2 = _sich_code.find("WindowsAnmeldenAsync")
+check("ein Rahmen waehrend der Start-Maske wartet auf sie (keine zweite Maske)",
+      0 <= _i_warte < _i_win2
+      and re.search(r"_startAnmeldung is \{ IsCompleted: false \} (\w+)\)\s*\{\s*"
+                    r"return await \1", _sich_code) is not None)
+# Fokus: ActiveControl allein setzt ihn nur INNERHALB des Fensters – beim
+# Start steht die Maske ohne Vordergrund hinter dem vorigen Programm.
+_lw = cs_nackt(cs_login2) if "cs_nackt" in globals() else cs_login2
+_shown = re.search(r"Shown \+= \(_, _\) =>\s*\{(.*?)\};", _lw, re.S)
+check("die Maske holt sich beim Anzeigen den Vordergrund und setzt den Fokus ins Feld",
+      _shown is not None
+      and "SetForegroundWindow(Handle)" in _shown.group(1)
+      and "Activate()" in _shown.group(1)
+      and "eingabe.Focus()" in _shown.group(1))
+check("das Fokusfeld ist Kennwort bei bekanntem Benutzer, sonst Benutzer",
+      re.search(r"Control eingabe = totpNoetig \? _totp\s*:\s*_benutzer\.Text\.Length > 0 \? "
+                r"_kennwort\s*:\s*_benutzer;", _lw) is not None)
 # Ohne Einrichtung bleibt der Weg in die Einstellungen: sonst kann der
 # Benutzer gar nichts tun.
 check("uneingerichtet fuehrt es weiterhin in die Einstellungen",

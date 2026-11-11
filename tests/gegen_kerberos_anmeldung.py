@@ -89,9 +89,16 @@ PROBEN = [
      '                  ".keytab"}', "                  }", T1),
     ("Keytab fuer die Shell lesbar", SB,
      "    r'\\.keytab\\b|/kerberos/http\\b|'\n", "", T1),
-    ("Start merkt das Windows-Token nicht", TR,
-     "                ConfigStore.SaveToken(_client.Token);\n            }\n            await FragenNachladenAsync()",
-     "            }\n            await FragenNachladenAsync()", T1),
+    # Vorgabe 2026-11-11: der Start meldet sich ueber den geprueften Weg an.
+    ("Start versucht ohne Sitzung keine Anmeldung", TR,
+     "            _startAnmeldung = SicherstellenAngemeldetAsync(CancellationToken.None);\n"
+     "            await _startAnmeldung.ConfigureAwait(true);",
+     "            await Task.CompletedTask.ConfigureAwait(true);", T1),
+    ("Start baut einen eigenen Windows-Weg", TR,
+     "            _startAnmeldung = SicherstellenAngemeldetAsync(CancellationToken.None);",
+     "            _startAnmeldung = SicherstellenAngemeldetAsync(CancellationToken.None);\n"
+     "            await _client.WindowsAnmeldenAsync(CancellationToken.None).ConfigureAwait(true);",
+     T1),
 ]
 
 # REGEL statt gepflegter Liste: jede Datei, die eine Probe anfasst, wird gesichert.

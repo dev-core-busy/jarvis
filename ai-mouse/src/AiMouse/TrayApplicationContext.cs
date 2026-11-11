@@ -363,38 +363,53 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 return;
             }
 
-            // ⚠ BEIM START WIRD NICHT NACH DEM KENNWORT GEFRAGT (2026-09-09
-            // gemeldet: „direkt nach dem Start noch so ein Anmeldefenster").
-            // Wer die Anwendung startet, will sie im Infobereich haben – nicht
-            // ungefragt einen Dialog. Die Anmeldung passiert dort, wo sie
-            // gebraucht wird: beim ersten Rahmen.
-            //
-            // Ist eine Sitzung gemerkt, werden hier nur die Fragen geholt.
-            // Ist sie abgelaufen, faellt das beim ersten echten Aufruf auf und
-            // `SicherstellenAngemeldetAsync` fragt DANN.
-            //
-            // Ohne gemerkte Sitzung wird STILL die Windows-Anmeldung versucht
-            // (2026-10-20) – das ist kein Dialog, also kein Widerspruch zur
-            // Vorgabe oben. Scheitert sie, bleibt alles wie bisher.
-            if (!_client.Angemeldet)
+            // Ist eine Sitzung gemerkt, werden nur die Fragen geholt. Ein 401
+            // dabei leert das Token im Client (`FragenAsync`) – dann gilt die
+            // Sitzung als abgelaufen und es geht unten weiter wie ohne.
+            if (_client.Angemeldet)
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                if (!WindowsKontoPasst(_settings) ||
-                    !await _client.WindowsAnmeldenAsync(cts.Token).ConfigureAwait(true))
+                await FragenNachladenAsync().ConfigureAwait(true);
+                if (_client.Angemeldet)
                 {
                     return;
                 }
-                ConfigStore.SaveToken(_client.Token);
             }
-            await FragenNachladenAsync().ConfigureAwait(true);
+
+            // ⚠ OHNE GUELTIGE SITZUNG ERSCHEINT DIE ANMELDEMASKE SCHON BEIM
+            // START (Vorgabe 2026-11-11: „wenn keine automatische (SPN)
+            // Anmeldung moeglich ist, Anmeldebildschirm anzeigen, Fokus auf
+            // dem Eingabefeld"). Das loest die Vorgabe vom 2026-09-09 ab
+            // („direkt nach dem Start noch so ein Anmeldefenster") – die galt
+            // vor der Windows-Anmeldung: damals haette JEDER Start gefragt.
+            // Heute erscheint die Maske nur noch, wenn die stille
+            // Windows-Anmeldung scheitert oder fuer ein fremdes Konto nicht
+            // versucht wird.
+            //
+            // DERSELBE Weg wie beim ersten Rahmen: zuerst still Kerberos, dann
+            // die Maske, Einmal-Code, Benutzer und Sitzung merken, Fragen
+            // holen. Kein Zeitlimit-Token: es liefe weiter, waehrend der
+            // Benutzer tippt; die HTTP-Aufrufe haben ihr eigenes Zeitlimit.
+            //
+            // Die laufende Aufgabe wird gemerkt, damit ein Rahmen, der
+            // waehrend der offenen Maske aufgezogen wird, auf SIE wartet statt
+            // eine zweite Maske zu oeffnen (`SicherstellenAngemeldetAsync`).
+            _startAnmeldung = SicherstellenAngemeldetAsync(CancellationToken.None);
+            await _startAnmeldung.ConfigureAwait(true);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Bewusst still: ein Fehlerfenster beim Windows-Start waere
-            // Stoerung. Der naechste Rahmen fragt erneut und zeigt dann den
-            // Grund.
+            // Bis zur Maske bleibt es still (Netz, Kerberos – ein
+            // Fehlerfenster beim Windows-Start waere Stoerung). Was HIER
+            // ankommt, stammt aus der Anmeldung mit eingegebenem Kennwort: der
+            // Benutzer muss erfahren, ob es stimmte. Der naechste Rahmen
+            // fragt erneut.
+            ShowTrayError(ex.Message);
         }
     }
+
+    /// <summary>Die Anmeldung, die <see cref="StartAnmeldungAsync"/> angestossen
+    /// hat – solange sie laeuft (Maske offen), wartet ein Rahmen auf sie.</summary>
+    private Task<bool>? _startAnmeldung;
 
     private ContextMenuStrip BuildTrayMenu()
     {
@@ -980,6 +995,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_client.Angemeldet)
         {
             return true;
+        }
+
+        // ⚠ STEHT NOCH DIE MASKE VOM START OFFEN, wird auf sie gewartet – eine
+        // zweite Maske daneben waere dieselbe Frage zweimal. Keine
+        // Selbstblockade: der Start setzt das Feld erst, NACHDEM dieser Aufruf
+        // seine Aufgabe zurueckgegeben hat.
+        if (_startAnmeldung is { IsCompleted: false } laufend)
+        {
+            return await laufend.ConfigureAwait(true);
         }
 
         // ⚠ IST NOCH GAR NICHTS EINGERICHTET, gehoert der Benutzer in die

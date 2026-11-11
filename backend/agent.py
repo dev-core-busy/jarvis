@@ -369,7 +369,10 @@ def lauf_limit() -> int:
 
 
 def _lauf_limit_schluessel(benutzer: str) -> str:
-    return (benutzer or "").split("@")[0].split("\\")[-1].strip().lower()
+    # EINE Normierung fuer Deckel, Geraete-Zuordnung und Anmeldung –
+    # sonst zaehlt dieselbe Person unter zwei Schluesseln.
+    from backend.benutzername import norm_login  # noqa: PLC0415
+    return norm_login(benutzer)
 
 
 def _lauf_limit_ausgenommen(benutzer: str, privilegiert: bool) -> bool:
@@ -382,10 +385,32 @@ def _lauf_limit_ausgenommen(benutzer: str, privilegiert: bool) -> bool:
         return False
 
 
+# Marke der Abweisung – eine KONSTANTE, keine nachgetippte Prosa: die Runner
+# erkennen den Fall daran (ist_lauf_abgewiesen), nicht am Wortlaut.
+LAUF_LIMIT_MARKE = "Aufträge gleichzeitig laufen – das ist die Obergrenze je Benutzer"
+
+
 def lauf_limit_meldung(grenze: int) -> str:
-    return (f"⚠️ Du hast bereits {grenze} Aufträge gleichzeitig laufen – das ist die "
-            "Obergrenze je Benutzer. Dieser Auftrag wurde NICHT gestartet. Bitte warte, "
+    return (f"⚠️ Du hast bereits {grenze} {LAUF_LIMIT_MARKE}. "
+            "Dieser Auftrag wurde NICHT gestartet. Bitte warte, "
             "bis einer fertig ist (oder stoppe einen), und sende ihn dann erneut.")
+
+
+def lauf_abgewiesen_text(meldung: str) -> str:
+    """Die Abweisung fuer einen Lauf OHNE Oberflaeche (Cron, Short Tracks,
+    Mail-Regeln, Agent-API).
+
+    Dort liest niemand den Text als Chat-Antwort: das Cron-Protokoll erkennt
+    einen Fehlschlag am Praefix ``Fehler`` (cron_log.ist_fehler), die Runner
+    fragen ``ist_lauf_abgewiesen``. Ohne das Praefix stand ein nie gestarteter
+    Auftrag als erfolgreicher Lauf im Protokoll (Review 2026-11-10).
+    """
+    return "Fehler: " + meldung
+
+
+def ist_lauf_abgewiesen(text) -> bool:
+    """Ob ein Ergebnistext die Abweisung durch den Lauf-Deckel ist."""
+    return LAUF_LIMIT_MARKE in str(text or "")
 
 
 def _lauf_platz_belegen(benutzer: str, privilegiert: bool):
@@ -4340,7 +4365,9 @@ KRITISCH – Ausfuehrungs-Regeln:
                 _freigeben, _meldung = _lauf_platz_belegen(
                     str(actor.get("user") or _ANON_ACTOR), bool(actor.get("privileged")))
                 if _meldung:
-                    return _meldung
+                    # Kein Chat: der Text muss als FEHLSCHLAG lesbar sein,
+                    # sonst verbucht Cron den Lauf als Erfolg.
+                    return lauf_abgewiesen_text(_meldung)
                 try:
                     with self.actor_scope(
                             str(actor.get("user") or _ANON_ACTOR),

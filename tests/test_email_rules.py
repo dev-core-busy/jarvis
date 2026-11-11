@@ -432,6 +432,39 @@ check(_mrun._kein_ergebnis("") is True, "leere Antwort = kein Ergebnis")
 check(_mrun._kein_ergebnis("   ") is True, "nur Leerzeichen = kein Ergebnis")
 check(_mrun._kein_ergebnis("Entwurf gespeichert.") is False,
       "eine echte Antwort ist ein Ergebnis")
+# Review 2026-11-10: die Abweisung durch den Lauf-Deckel je Benutzer ist ein
+# Fehlschlag – der Regel-Lauf wirft (Nachricht wird NICHT abgehakt, kein
+# Neuversuch in dieselbe Grenze), der Antwortvorschlag zeigt sie nicht als
+# Vorschlag. Am Syntaxbaum gemessen, VOR der Pruefung auf 'kein Ergebnis'.
+import ast as _ast
+
+
+def _wurf_vor_neuversuch(quelle, fn_name):
+    fn = next((n for n in _ast.walk(_ast.parse(quelle))
+               if isinstance(n, (_ast.AsyncFunctionDef, _ast.FunctionDef)) and n.name == fn_name), None)
+    if fn is None:
+        return None
+    wurf = kein = None
+    for n in _ast.walk(fn):
+        if not isinstance(n, _ast.If) or not isinstance(n.test, _ast.Call):
+            continue
+        name = getattr(n.test.func, "id", "")
+        if name == "_lauf_abgewiesen" and any(isinstance(x, _ast.Raise) for x in _ast.walk(n)):
+            wurf = n.lineno if wurf is None else min(wurf, n.lineno)
+        if name == "_kein_ergebnis":
+            kein = n.lineno if kein is None else min(kein, n.lineno)
+    return wurf, kein
+
+
+_mr_src = (ROOT / "backend/mail_runner.py").read_text(encoding="utf-8")
+for _fn in ("_lauf_fuer_nachricht", "antwort_vorschlag"):
+    _wk = _wurf_vor_neuversuch(_mr_src, _fn)
+    check(_wk is not None and None not in _wk and _wk[0] < _wk[1],
+          "%s wirft bei Abweisung durch den Lauf-Deckel, VOR dem Neuversuch" % _fn, _wk)
+check(any(isinstance(n, _ast.ImportFrom) and n.module == "backend.agent"
+          and any(a.name == "ist_lauf_abgewiesen" for a in n.names)
+          for n in _ast.walk(_ast.parse(_mr_src))),
+      "_lauf_abgewiesen fragt agent.ist_lauf_abgewiesen (die Marke ist EINE Konstante)")
 check(_mrun._kein_ergebnis("HINWEIS_AN_NUTZER: geht nicht") is True,
       "die HINWEIS_AN_NUTZER-Konvention zaehlt als kein Ergebnis")
 try:

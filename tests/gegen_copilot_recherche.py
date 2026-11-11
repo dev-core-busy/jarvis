@@ -115,6 +115,13 @@ PROBEN: list[tuple[str, str, str, str, str]] = [
      "        _sichere(benutzer, {})\n        return True",
      "der getrennte Eintrag ist ENTFERNT, nicht geleert"),
 
+    ("_antwort_lesen nimmt die eigene Frage als Antwort",
+     CLIENT,
+     "        if eigene and t.strip() == eigene:\n"
+     "            continue\n",
+     "",
+     "Antwort ohne Text: Meldung, nicht die Frage als Ergebnis"),
+
     ("_antwort_lesen greift die letzte Nachricht per Index",
      CLIENT,
      "    for m in nachrichten:\n"

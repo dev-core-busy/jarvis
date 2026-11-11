@@ -966,6 +966,39 @@ check(lauf.count("run_task_headless") == 2, "genau ein Neuversuch, keine Schleif
 check("_clean_doc_refs" in lauf, "Pfade werden aus dem Anzeigetext entfernt")
 check("JarvisAgent(" in lauf, "eigener Agent je Auftrag (nicht der Hauptagent)")
 
+# Review 2026-11-10: die Abweisung durch den Lauf-Deckel je Benutzer ist ein
+# Fehlschlag mit Grund – geworfen VOR dem Neuversuch, nicht "fertig" mit der
+# Warnung als Antwort. Am Syntaxbaum gemessen (ein Teilstring ist keine Identitaet).
+import ast as _ast
+
+
+def _wurf_vor_neuversuch(quelle, fn_name, abweis_name, kein_name):
+    """(Zeile des Wurfs bei Abweisung, Zeile der ersten _kein_ergebnis-Pruefung) oder None."""
+    fn = next((n for n in _ast.walk(_ast.parse(quelle))
+               if isinstance(n, (_ast.AsyncFunctionDef, _ast.FunctionDef)) and n.name == fn_name), None)
+    if fn is None:
+        return None
+    wurf = kein = None
+    for n in _ast.walk(fn):
+        if not isinstance(n, _ast.If) or not isinstance(n.test, _ast.Call):
+            continue
+        f = n.test.func
+        name = f.id if isinstance(f, _ast.Name) else getattr(f, "attr", "")
+        if name == abweis_name and any(isinstance(x, _ast.Raise) for x in _ast.walk(n)):
+            wurf = n.lineno if wurf is None else min(wurf, n.lineno)
+        if name == kein_name:
+            kein = n.lineno if kein is None else min(kein, n.lineno)
+    return wurf, kein
+
+
+# Den ROHEN Quelltext parsen – CODE_RUN ist fuer die Textpruefungen bereinigt.
+_wk = _wurf_vor_neuversuch((ROOT / "backend" / "short_tracks_runner.py").read_text(encoding="utf-8"),
+                           "_lauf", "_ist_lauf_abgewiesen", "_kein_ergebnis")
+check(_wk is not None and _wk[0] is not None,
+      "_lauf wirft bei Abweisung durch den Lauf-Deckel (ist_lauf_abgewiesen -> raise)", _wk)
+check(_wk is not None and None not in _wk and _wk[0] < _wk[1],
+      "…und zwar VOR der Pruefung auf 'kein Ergebnis' (kein Neuversuch in dieselbe Grenze)", _wk)
+
 # Der Beobachter-Hook in agent.py
 AGENT = (ROOT / "backend" / "agent.py").read_text(encoding="utf-8")
 hook = abschnitt(AGENT, "_hook = getattr(self, \"_schritt_hook\"", "span = tracer.start_span")

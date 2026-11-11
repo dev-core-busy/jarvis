@@ -357,6 +357,18 @@ ANTWORTEN["/chat"] = _Antwort(200, {"messages": [
 ]})
 pruefe("Das ist die Antwort." in _lauf(), "die Antwort wird gelesen")
 
+print("8c. Die eigene Frage ist nie die Antwort (Review 2026-11-10)")
+# Die Antwort traegt keinen Text (nur Anhaenge): ohne die Schranke bekaeme das
+# Modell seine eigene, zurueckgespiegelte Frage als Rechercheergebnis.
+ANTWORTEN["/chat"] = _Antwort(200, {"messages": [
+    {"text": "Sondenfrage 4711?"},
+    {"text": "", "attributions": [{"seeMoreWebUrl": "https://beispiel.de/q",
+                                   "providerDisplayName": "Q"}]},
+]})
+_erg = _lauf(frage="Sondenfrage 4711?")
+pruefe("fehlgeschlagen" in _erg.lower() and "Sondenfrage 4711?" not in _erg,
+       f"Antwort ohne Text: Meldung, nicht die Frage als Ergebnis ({_erg[:60]!r})")
+
 # ─── 9. Fehlergruende nennen den naechsten Schritt ─────────────────────────
 # Ein 403 ohne Hinweis schickt die Suche in die Rechteverwaltung, waehrend die
 # fehlende Lizenz die haeufigere Ursache ist (Register: ein Fehlergrund, der

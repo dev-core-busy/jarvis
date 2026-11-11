@@ -573,6 +573,9 @@ function loadScript(dom, rel) {
         s.window.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
         s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
         s.window.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
+        // Das ECHTE skillcfg.js vor sap.js (wie in settings.html): die Zugangsliste
+        // nimmt den Kennwort-/Anmeldezustand aus SkillCfg.kennwortZustand.
+        s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8'));
         s.window.eval(fs.readFileSync(SAP_JS, 'utf8'));
 
         check('Abschnitt im Markup vorhanden', sd.getElementById('sap-vis-list') !== null);
@@ -1477,6 +1480,7 @@ function loadScript(dom, rel) {
         s.window.eval(sitzung);
         s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8'));
         s.window.eval(sitzung);
+        s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8'));
         s.window.eval(fs.readFileSync(SAP_JS, 'utf8'));
         s.window.SapManager.onShow();
         await sleep(150);

@@ -492,6 +492,10 @@ def _lauf_mit_nachlauf(ordner, **kw):
                 # Sperre: warten statt verwerfen, sonst ginge der Upload verloren.
                 versuche += 1
                 if versuche > 120 or _abbruch.is_set():
+                    _o = auftrag.get("ordner")
+                    print(f"[SchemaGraph] Erfassung von '{_o}' aufgegeben: Sperre "
+                          f"eines anderen Prozesses nach {versuche * 30} s nicht "
+                          "frei – bitte von Hand erfassen", flush=True)
                     return
                 time.sleep(30)
                 with _nachlauf_sperre:
@@ -512,6 +516,15 @@ def _lauf_mit_nachlauf(ordner, **kw):
     finally:
         with _nachlauf_sperre:
             _auto_aktiv = False
+            if _nachlauf is not None:
+                # Der Thread endet mit vorgemerktem Auftrag (fremde Sperre nicht
+                # frei oder Abbruch). NICHT liegen lassen: der naechste, fremde
+                # Lauf fuehrte ihn sonst mit veralteten Einstellungen ein zweites
+                # Mal aus (Review 2026-11-10). Laut melden statt still verwerfen.
+                _o = _nachlauf.get("ordner")
+                print(f"[SchemaGraph] Vorgemerkte Erfassung von '{_o}' verworfen "
+                      "– bitte von Hand erfassen", flush=True)
+                _nachlauf = None
 
 
 def laeuft_hier() -> bool:

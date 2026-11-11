@@ -1376,6 +1376,7 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
     Problem, das ``actor_scope`` fuer den geteilten Agenten loest).
     """
     from backend.agent import JarvisAgent  # noqa: PLC0415
+    from backend.agent import ist_lauf_abgewiesen as _ist_lauf_abgewiesen  # noqa: PLC0415
 
     j_teile = j_teile or []
     actor = _actor_fuer(job.get("owner_roh") or job.get("owner") or "")
@@ -1431,6 +1432,12 @@ async def _lauf(job: dict, dump: dict, auftrag: str,
 
     effort = dump.get("reasoning_effort") or None
     antwort = await agent.run_task_headless(auftrag, reasoning_effort=effort, actor=actor)
+    if _ist_lauf_abgewiesen(antwort):
+        # Der Lauf-Deckel je Benutzer hat den Auftrag gar nicht gestartet: ein
+        # Fehlschlag mit Grund – kein Ergebnis, und kein Fall fuer den
+        # Neuversuch (der liefe in dieselbe Grenze). Vorher stand der Job
+        # "fertig" mit der Warnung als Antwort (Review 2026-11-10).
+        raise RuntimeError(antwort)
     if _kein_ergebnis(antwort):
         # EINMALIGER Neuversuch mit knapper Denktiefe. Beobachtet am 2026-08-12:
         # das Modell verbrauchte das ganze Token-Budget im Reasoning und lieferte

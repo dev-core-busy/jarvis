@@ -190,6 +190,10 @@ async function portal(opts) {
             },
         });
         s.window.eval(SITZUNG); s.window.eval(I18N); s.window.eval(SITZUNG);
+        // Das ECHTE skillcfg.js, keine Attrappe: die Zugangsliste nimmt den
+        // Kennwort-/Anmeldezustand aus SkillCfg.kennwortZustand (seit 2026-11-10
+        // EINE Fassung fuer SAP und VEMAS) – in settings.html steht es vor vemas.js.
+        s.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/skillcfg.js'), 'utf8'));
         s.window.eval(fs.readFileSync(VEMAS_JS, 'utf8'));
         s.window.VemasManager.onShow();
         await sleep(150);

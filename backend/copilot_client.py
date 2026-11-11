@@ -475,7 +475,7 @@ async def recherche(benutzer: str, frage: str, web: bool = True) -> dict:
     if not r.is_success:
         raise CopilotFehler(_hinweis_zu(r, _fehlertext(r, "Copilot-Anfrage")),
                             _grund_zu(r))
-    return _antwort_lesen(r.json() or {})
+    return _antwort_lesen(r.json() or {}, frage)
 
 
 def _grund_zu(r: httpx.Response) -> str:
@@ -510,16 +510,20 @@ def _hinweis_zu(r: httpx.Response, text: str) -> str:
     return text
 
 
-def _antwort_lesen(d: dict) -> dict:
+def _antwort_lesen(d: dict, frage: str = "") -> dict:
     """Text und Quellen aus der ``copilotConversation``-Antwort.
 
     Gelesen wird die LETZTE Nachricht, die Text traegt – die Antwort enthaelt
-    auch die eigene Frage. Kein ``[-1]`` und kein ``.index()``: beides wirft,
-    statt einen Grund zu nennen, und ein Wurf in einem Werkzeug ist von
-    "nicht gelaufen" nicht zu unterscheiden (Register).
+    auch die eigene Frage. Die wird ausdruecklich uebersprungen: traegt die
+    Antwort keinen Text, bekaeme das Modell sonst seine eigene Frage als
+    Rechercheergebnis statt des Fehlers (Review 2026-11-10). Kein ``[-1]``
+    und kein ``.index()``: beides wirft, statt einen Grund zu nennen, und
+    ein Wurf in einem Werkzeug ist von "nicht gelaufen" nicht zu
+    unterscheiden (Register).
     """
     text = ""
     quellen: list[dict] = []
+    eigene = (frage or "").strip()
     nachrichten = d.get("messages")
     if not isinstance(nachrichten, list):
         nachrichten = []
@@ -528,6 +532,8 @@ def _antwort_lesen(d: dict) -> dict:
             continue
         t = m.get("text")
         if not isinstance(t, str) or not t.strip():
+            continue
+        if eigene and t.strip() == eigene:
             continue
         text = t
         quellen = []

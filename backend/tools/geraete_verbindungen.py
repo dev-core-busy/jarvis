@@ -26,10 +26,12 @@ from __future__ import annotations
 import asyncio
 import uuid
 
+from backend.benutzername import norm_login as _norm_login
+
 
 def norm_benutzer(name: str) -> str:
-    """Gleiche Normalisierung wie ``main._norm_login`` (Domaene/UPN weg, klein)."""
-    return (name or "").split("@")[0].split("\\")[-1].strip().lower()
+    """Dieselbe Normierung wie ``main._norm_login`` – aus EINER Quelle."""
+    return _norm_login(name)
 
 
 class GeraeteVerbindungen:

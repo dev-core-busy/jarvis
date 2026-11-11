@@ -1266,6 +1266,12 @@ def _anmelde_reservierung(request: Request, ip: str, username: str):
                 f"Bitte warte {minuten} Minute{'n' if minuten != 1 else ''}.")
     elif grund == "laeuft":
         text = "Für dieses Konto läuft bereits eine Anmeldung. Bitte kurz warten."
+        if warte > _anmelde_schutz.PRUEFUNG_HOECHSTENS_S:
+            # Die laufende Pruefung antwortet nicht mehr (Verzeichnisdienst
+            # haengt): dann die WAHRE Frist nennen, nicht "kurz".
+            text = ("Für dieses Konto läuft bereits eine Anmeldung, die nicht "
+                    f"antwortet. Spätestens in {warte} Sekunden ist das Konto "
+                    "wieder frei.")
     else:
         text = "Zu viele Login-Versuche. Bitte warte 5 Minuten."
     return JSONResponse({"success": False, "error": text, "retry_after": warte},
@@ -1805,7 +1811,17 @@ def _norm_login(name: str) -> str:
     lowercased. WICHTIG: muss auf BEIDE Seiten (eingeloggter User UND konfigurierte
     Allowlist-Eintraege) angewandt werden, sonst matcht 'firma\\m.mustermann' aus
     der Liste nie gegen den eingeloggten 'm.mustermann'."""
-    return (name or "").split("@")[0].split("\\")[-1].strip().lower()
+    # Die Regel lebt in backend/benutzername.py – EINE Quelle fuer Anmeldung,
+    # Geraete-Zuordnung und Lauf-Deckel (Review 2026-11-10). Import IN der
+    # Funktion, weil Pruefstaende sie aus dem Syntaxbaum schneiden; steht dort
+    # kein Paket ``backend``, gilt der Ausdruck im except-Zweig. Dass er mit
+    # benutzername.norm_login uebereinstimmt, prueft test_pentest_anmeldung am
+    # Syntaxbaum – er ist ein Rueckfall fuer Pruefstaende, keine zweite Regel.
+    try:
+        from backend.benutzername import norm_login  # noqa: PLC0415
+    except ImportError:
+        return (name or "").split("@")[0].split("\\")[-1].strip().lower()
+    return norm_login(name)
 
 
 def _login_still_allowed(username: str) -> bool:
@@ -3034,10 +3050,24 @@ def _claudesub_user_aus_key(request: Request) -> str | None:
     if security_guard.is_blocked(user) or not _login_still_allowed(user):
         return None
     try:
-        erstellt = int((_cs.schluessel_info(user) or {}).get("erstellt") or 0)
-    except Exception:  # noqa: BLE001
-        erstellt = 0
-    if _epoche_widerrufen(user, erstellt):
+        erstellt = (_cs.schluessel_info(user) or {}).get("erstellt")
+    except Exception as _e:  # noqa: BLE001
+        print(f"[AUTH] Delegations-Schluessel von '{user}' nicht lesbar ({_e})",
+              flush=True)
+        erstellt = None
+    if not isinstance(erstellt, (int, float)) or isinstance(erstellt, bool) \
+            or erstellt <= 0:
+        # EINE Schranke fuer Altbestand ohne Feld UND Lesefehler (zwei Schranken
+        # fuer dieselbe Frage machen jede Gegenprobe stumm – Register).
+        # Fail-closed: ohne Ausstellungszeit kein Altersbeweis, also abgewiesen;
+        # der Benutzer erzeugt unter /claude einen neuen. Aber NICHT geloescht –
+        # ein voruebergehender Lesefehler darf keinen Schluessel vernichten.
+        # Geloescht wird nur, was NACHWEISLICH vor einer Epoche liegt
+        # (Review 2026-11-10; vorher erstellt=0 -> jede Epoche traf -> geloescht).
+        print(f"[AUTH] Delegations-Schluessel von '{user}' ohne Ausstellungszeit "
+              "– abgewiesen, nicht geloescht", flush=True)
+        return None
+    if _epoche_widerrufen(user, int(erstellt)):
         # Endgueltig loeschen: Epochen werden nach der Sitzungslaufzeit
         # aufgeraeumt (_save_revocations) – ohne das Loeschen lebte ein
         # widerrufener Schluessel nach 12 h wieder auf.

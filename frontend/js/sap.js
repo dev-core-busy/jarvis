@@ -360,18 +360,9 @@
 
         // Zusatz je Benutzer: liegt ein Kennwort auf der Platte, ist er angemeldet?
         _kennwortZustand: function (a, kachel) {
-            if (a.kennwort_gespeichert) {
-                // Mit Kachel-Anmeldung darf das nicht vorkommen – dann laut.
-                return kachel
-                    ? ' – <span style="color:var(--danger);">' + esc(T('sap.adm_pw_rest', 'Kennwort noch gespeichert')) + '</span>'
-                    : ' – ' + esc(T('sap.adm_pw_ja', 'Kennwort gespeichert'));
-            }
-            if (!kachel) return ' – ' + esc(T('sap.adm_pw_nein', 'kein Kennwort gespeichert'));
-            var zustand = (a.angemeldet && a.sitzung_bis)
-                ? T('sap.adm_angemeldet_bis', 'angemeldet bis') + ' '
-                    + new Date(a.sitzung_bis * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : T('sap.adm_nicht_angemeldet', 'nicht angemeldet');
-            return ' – ' + esc(T('sap.adm_pw_nein', 'kein Kennwort gespeichert')) + ' · ' + esc(zustand);
+            // Gemeinsame Fassung mit dem VEMAS-Reiter (skillcfg.js) – eine
+            // Kopie hier liefe beim naechsten Umbau auseinander.
+            return window.SkillCfg.kennwortZustand(a, kachel);
         },
 
         test: function () {

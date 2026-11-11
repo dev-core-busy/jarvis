@@ -423,6 +423,25 @@
                 setStatus('✗ ' + tr('skillcfg.save_failed', 'Speichern fehlgeschlagen'), 'error');
             }
         },
+
+        // Zusatz je Benutzer in einer Zugangsliste (SAP, VEMAS): liegt ein
+        // Kennwort auf der Platte, ist er ueber die Kachel angemeldet? EINE
+        // Fassung fuer beide Reiter – bis 2026-11-10 stand sie woertlich in
+        // sap.js UND vemas.js, mit den sap.*-Texten in der VEMAS-Liste.
+        kennwortZustand: function (a, kachel) {
+            if (a.kennwort_gespeichert) {
+                // Mit Kachel-Anmeldung darf das nicht vorkommen – dann laut.
+                return kachel
+                    ? ' – <span style="color:var(--danger);">' + esc(tr('zugang.adm_pw_rest', 'Kennwort noch gespeichert')) + '</span>'
+                    : ' – ' + esc(tr('zugang.adm_pw_ja', 'Kennwort gespeichert'));
+            }
+            if (!kachel) return ' – ' + esc(tr('zugang.adm_pw_nein', 'kein Kennwort gespeichert'));
+            var zustand = (a.angemeldet && a.sitzung_bis)
+                ? tr('zugang.adm_angemeldet_bis', 'angemeldet bis') + ' '
+                    + new Date(a.sitzung_bis * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : tr('zugang.adm_nicht_angemeldet', 'nicht angemeldet');
+            return ' – ' + esc(tr('zugang.adm_pw_nein', 'kein Kennwort gespeichert')) + ' · ' + esc(zustand);
+        },
     };
 
     window.SkillCfg = Manager;

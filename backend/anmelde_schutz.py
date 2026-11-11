@@ -118,6 +118,12 @@ BREMSE_WARTEND_GESAMT = 200
 # Reservierung (A1): verfaellt nach dieser Zeit von selbst – eine Pruefung,
 # die abstuerzt, ohne freizugeben, sperrt das Konto sonst fuer immer.
 RESERVIERUNG_MAX_S = 120
+# Laenger dauert eine Pruefung nicht, wenn der Verzeichnisdienst antwortet
+# (Verbindungs- und Antwort-Timeout je 6 s, wenige Runden). Eine aeltere
+# Belegung HAENGT – dann nennt "laeuft" die Frist, bis die Belegung
+# spaetestens verfaellt, statt 2 s zu versprechen und bis zu 120 s zu
+# sperren (Review 2026-11-10).
+PRUEFUNG_HOECHSTENS_S = 30
 # Deckel gegen eine Datei, die ein Angreifer mit erfundenen Namen fuellt.
 # Bei Ueberlauf fliegen die aeltesten Eintraege – nie eine laufende Sperre.
 MAX_EINTRAEGE = 20000
@@ -253,6 +259,17 @@ def _res_aufraeumen_unlocked(jetzt: float) -> None:
         del _res_konto[k]
 
 
+def _laeuft_wartezeit(seit: float, jetzt: float) -> int:
+    """Wie lange ein Konto mit laufender Pruefung noch belegt bleibt.
+
+    Eine frische Belegung endet gleich (2 s); eine, die aelter ist als jede
+    antwortende Pruefung, verfaellt erst mit ``RESERVIERUNG_MAX_S``."""
+    alter = max(0.0, jetzt - float(seit or 0.0))
+    if alter < PRUEFUNG_HOECHSTENS_S:
+        return 2
+    return max(2, int(RESERVIERUNG_MAX_S - alter) + 1)
+
+
 def reservieren(ip: str, konto: str, jetzt: float | None = None) -> tuple:
     """Einen Pruefversuch VOR der Kennwort-/Codepruefung atomar belegen.
 
@@ -275,7 +292,7 @@ def reservieren(ip: str, konto: str, jetzt: float | None = None) -> tuple:
             if bis > jetzt:
                 return None, "konto", max(1, int(bis - jetzt) + 1)
             if konto in _res_konto:
-                return None, "laeuft", 2
+                return None, "laeuft", _laeuft_wartezeit(_res_konto[konto][1], jetzt)
         if schluessel:
             gebucht = sorted(t for t in _ip.get(schluessel, []) if jetzt - t < IP_FENSTER_S)
             laufend = len(_res_ip.get(schluessel, {}))

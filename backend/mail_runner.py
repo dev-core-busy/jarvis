@@ -709,6 +709,15 @@ async def _injektion_pruefen(regel: dict, n) -> None:
         print("[Mail] Injektionspruefung nicht moeglich: %s" % e, flush=True)
 
 
+def _lauf_abgewiesen(antwort: str) -> bool:
+    """Hat der Lauf-Deckel je Benutzer den Lauf gar nicht gestartet?"""
+    try:
+        from backend.agent import ist_lauf_abgewiesen  # noqa: PLC0415
+        return ist_lauf_abgewiesen(antwort)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _kein_ergebnis(antwort: str) -> bool:
     """True, wenn der Lauf formal endete, aber KEIN Ergebnis geliefert hat.
 
@@ -790,6 +799,11 @@ async def _lauf_fuer_nachricht(regel: dict, n, konto, werkzeuge, actor: dict) ->
             regel.get("aussenwirkung") is True))
         try:
             antwort = await _agent.run_task_headless(auftrag, actor=actor)
+            if _lauf_abgewiesen(antwort):
+                # Lauf-Deckel je Benutzer: nicht gestartet. Als Fehlschlag
+                # werfen, damit die Nachricht NICHT abgehakt wird und kein
+                # Neuversuch in dieselbe Grenze laeuft (Review 2026-11-10).
+                raise RuntimeError(antwort)
             if _kein_ergebnis(antwort):
                 # EINMALIGER Neuversuch mit knapper Denktiefe. Beobachtet am
                 # 2026-08-12 mit Qwen3.6-35B: das Modell verbrauchte die 8192
@@ -1218,6 +1232,9 @@ async def antwort_vorschlag(user: str, msg_id: str = "", ordner: str = "",
         marke = mail_accounts.current_mail_user.set(actor["user"])
         try:
             antwort = await _agent.run_task_headless(auftrag, actor=actor)
+            if _lauf_abgewiesen(antwort):
+                # Die Warnung des Lauf-Deckels ist kein Antwortvorschlag.
+                raise MailFehler(antwort, "llm")
             if _kein_ergebnis(antwort):
                 # Gleiche Beobachtung wie beim Regel-Lauf: das Modell verbraucht
                 # sein Budget im Reasoning. Eine Antwort zu formulieren ist eine

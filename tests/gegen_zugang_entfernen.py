@@ -41,7 +41,7 @@ DATEIEN = {
 }
 
 FELD = '        "gespeichert": un in alle,\n'
-REGEL = "        b.hidden = !_account || _account.gespeichert === false;\n"
+REGEL = "        b.hidden = !_account || _account.gespeichert === false || !!_account.kachel_pflicht;\n"
 FEHLERZWEIG = "                // Server wirklich etwas entfernt hat.\n                if (!d || !d.ok) {\n"
 OHNE_FEHLERZWEIG = "                // Server wirklich etwas entfernt hat.\n                if (false) {\n"
 
@@ -69,6 +69,8 @@ PROBEN = [
     ("/sap: Knopf haengt an vorhanden statt an gespeichert", "sapportal", REGEL,
      "        b.hidden = !_account || !_account.vorhanden;\n"),
     ("/sap: Knopf ist immer sichtbar", "sapportal", REGEL, "        b.hidden = false;\n"),
+    ("/sap: Knopf steht trotz Kachel-Anmeldung da", "sapportal", REGEL,
+     "        b.hidden = !_account || _account.gespeichert === false;\n"),
     ("/sap: verankertes Zertifikat zieht den Knopf nicht nach", "sapportal",
      "if (d && d.account) { _account = d.account; accEntfernbar(); }",
      "if (d && d.account) { _account = d.account; }"),
@@ -85,6 +87,8 @@ PROBEN = [
     ("/vemas: Knopf haengt an vorhanden statt an gespeichert", "vemasportal", REGEL,
      "        b.hidden = !_account || !_account.vorhanden;\n"),
     ("/vemas: Knopf ist immer sichtbar", "vemasportal", REGEL, "        b.hidden = false;\n"),
+    ("/vemas: Knopf steht trotz Kachel-Anmeldung da", "vemasportal", REGEL,
+     "        b.hidden = !_account || _account.gespeichert === false;\n"),
     ("/vemas: removed:false meldet 'entfernt'", "vemasportal",
      "                if (d.removed === false) {\n                    accNote(T('vemas.acc_none_stored'",
      "                if (false) {\n                    accNote(T('vemas.acc_none_stored'"),

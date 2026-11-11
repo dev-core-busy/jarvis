@@ -1023,9 +1023,13 @@
     // FEHLT das Feld (aelterer Dienst hinter neuerer Seite), bleibt der Knopf
     // sichtbar: "unbekannt" ist nicht "nein", und ein verborgener Knopf naehme
     // eine Funktion weg.
+    // Bei Anmeldung ueber die Portal-Kachel liegt KEIN Kennwort auf der Platte –
+    // fuer den Benutzer ist dann kein eigener Zugang gespeichert, auch wenn
+    // Server und SAP-Benutzer als Datensatz stehen. Der Knopf bleibt verborgen
+    // (gemeldet 2026-11-11: er stand da, obwohl nichts hinterlegt war).
     function accEntfernbar() {
         var b = $('sp-acc-del'); if (!b) return;
-        b.hidden = !_account || _account.gespeichert === false;
+        b.hidden = !_account || _account.gespeichert === false || !!_account.kachel_pflicht;
     }
 
     function accRenderHosts() {

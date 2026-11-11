@@ -159,6 +159,14 @@ async function portal(name) {
              mit({ vorhanden: false, gespeichert: true }), false],
             ['`vorhanden` allein macht ihn nicht sichtbar', mit({ vorhanden: true, gespeichert: false }), true],
             ['Feld fehlt (aelterer Dienst) -> sichtbar, nicht weggenommen', mit({}), false],
+            // Kachel-Anmeldung: Datensatz steht, aber kein Kennwort auf der Platte –
+            // fuer den Benutzer ist nichts gespeichert (gemeldet 2026-11-11).
+            ['Kachel-Anmeldung, Datensatz vorhanden -> verborgen',
+             mit({ gespeichert: true, kachel_pflicht: true, angemeldet: false }), true],
+            ['Kachel-Anmeldung, angemeldet -> verborgen',
+             mit({ gespeichert: true, kachel_pflicht: true, angemeldet: true }), true],
+            ['ohne Kachel-Anmeldung (kachel_pflicht false) -> sichtbar',
+             mit({ gespeichert: true, kachel_pflicht: false }), false],
         ];
         for (const [text, konto, verborgen] of faelle) {
             const s = await seite(p, { konto });

@@ -91,6 +91,21 @@ Aus der Sicherheitsprüfung vor dem Pentest (2026-11-08):
 - [ ] **CSP erzwingen** (BSI H4, Rest) – von „melden“ auf „erzwingen“
       umstellen und die verbliebenen Inline-Stile entfernen.
 
+## SQL-Assistent
+
+Seit 2026-11-11 hängen Einstellungen und Erfassung am Schema (je Schema ein
+Container im Reiter). Offen:
+
+- [ ] **Gleichnamige Tabellen in zwei Schemata** – steht dieselbe Tabelle
+      (Datenbankschema.Name, z. B. `erp.kunde`) in zwei Schemata, bleibt im
+      Graphen nur die des ersten Schemas stehen; im zweiten fehlt sie, der Lauf
+      zählt sie lediglich als „doppelt“. Im Sandkasten gemessen (2026-11-11).
+      Trifft z. B. Test- und Produktivstand derselben Datenbank als zwei
+      Schemata. Kern des Umbaus: Namen je Schema auflösen statt über den ganzen
+      Bestand (`schema_graph_store.ableiten`, `_Aufloeser`) – und festlegen, wie
+      Suche, Prüfung und Join-Pfade einen Namen auflösen, wenn beide Schemata
+      gewählt sind (`schema_graph_rag.py`, `schema_graph_dienst.py`).
+
 ## Ausbau
 
 - [ ] **Lösungsarchiv: erster echter Lauf auf DEV** – erst, wenn der laufende

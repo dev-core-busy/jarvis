@@ -22,6 +22,16 @@
  *   9. Schema-Praefix: Auswahl nur bei mehreren Datenbankschemata der
  *      GEWAEHLTEN Ablagen, POST traegt sie, gemerkt; Mischhinweis mit
  *      "nur X fragen", Zusammengelegtes genannt – alles maskiert
+ *  10. Syntax: "nicht verfuegbar" ist eine eigene Stufe (keine gruene Pille),
+ *      ein Syntaxfehler kippt die Pille, ein Dialekt ohne eigenen Pruefer
+ *      zeigt Hinweise statt Fehler – alles maskiert
+ *  11. Bearbeiten kippt die Anzeige auf "geaendert"; "Syntax pruefen" schickt
+ *      GENAU den Feldinhalt mit Dialekt und Auswahl; "Eigenes SQL pruefen"
+ *      leert das Feld, Knopf gesperrt MIT Grund
+ *  12. Verlauf (je Benutzer im Browser): Eintrag nach einer Frage mit Frage,
+ *      Dialekt, Schemata, Praefix und SQL; Klick stellt alles wieder her und
+ *      prueft automatisch neu (ohne Modell); Muelleimer loescht GENAU einen;
+ *      fehlende Schemata werden benannt
  */
 'use strict';
 require('./lib/bilanz')();
@@ -54,6 +64,10 @@ const JS = { sitzung: lies('frontend/js/sitzung.js'), icons: lies('frontend/js/i
              i18n: lies('frontend/js/i18n.js'), sql: lies('frontend/js/sql.js') };
 
 const BOESE = '<img src=x onerror="window.__xss=1">';
+// Antwortform von main._sql_pruefung_antwort
+const SYN_OK = { verfuegbar: true, ok: true, fehler: [], hinweise: [], ersatz: false, dialekt: 'mysql' };
+const PR_OK = { ok: true, fehler: [], tabellen: ['erp.kunde'], spalten_geprueft: 2, unbelegte_joins: [], joins_belegt: 0,
+                syntax: SYN_OK };
 function schlaf(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 async function seite(cfg) {
@@ -68,6 +82,7 @@ async function seite(cfg) {
     win.localStorage.setItem('jarvis_user', 'anna');
     if (cfg.gemerkt !== undefined) win.localStorage.setItem('jarvis_sql_schemata_anna', JSON.stringify(cfg.gemerkt));
     if (cfg.praefixGemerkt !== undefined) win.localStorage.setItem('jarvis_sql_praefix_anna', cfg.praefixGemerkt);
+    if (cfg.verlauf !== undefined) win.localStorage.setItem('jarvis_sql_verlauf_anna', JSON.stringify(cfg.verlauf));
     win.matchMedia = win.matchMedia || function () {
         return { matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} };
     };
@@ -87,6 +102,7 @@ async function seite(cfg) {
             frage_max: 2000, erfassung_laeuft: false }, cfg.status || {}));
         if (p === '/api/sql/frage' && cfg.netzweg) return Promise.reject(new TypeError('Failed to fetch'));
         if (p === '/api/sql/frage') return antwort(cfg.frage || {}, cfg.frageStatus);
+        if (p === '/api/sql/pruefen') return antwort(cfg.pruefen || { ok: true, dialekt: 'mysql', pruefung: PR_OK });
         if (p === '/api/sql/suche') return antwort({ ok: true, treffer: [
             { name: 'erp.kunde', art: 'tabelle', spalten_n: 3, bereich: 'kunde', kommentar: 'Stamm ' + BOESE }] });
         if (p === '/api/sql/tabelle') return antwort(cfg.tabelle || { ok: true, tabelle: {
@@ -211,7 +227,7 @@ function klick(s, el) {
     abschnitt('4. Geprueftes Ergebnis');
     s = await seite({ frage: { ok: true, dialekt: 'mysql', sql: 'SELECT 1 FROM erp.kunde -- ' + BOESE,
         erklaerung: 'Erkl ' + BOESE, annahmen: 'keine',
-        pruefung: { ok: true, fehler: [], tabellen: ['erp.kunde'], spalten_geprueft: 2 },
+        pruefung: { ok: true, fehler: [], tabellen: ['erp.kunde'], spalten_geprueft: 2, syntax: SYN_OK },
         tabellen_kontext: ['erp.kunde', 'erp.glied' + BOESE], verbinder: ['erp.glied' + BOESE], unverbunden: [], runden: 1 } });
     s.doc.getElementById('sq-dialekt').value = 'mysql';
     s.doc.getElementById('sq-dialekt').dispatchEvent(new s.win.Event('change', { bubbles: true }));
@@ -229,8 +245,10 @@ function klick(s, el) {
     check('Pruefstatus ist das ERSTE Element', erstes && erstes.id === 'sq-pill', erstes && erstes.id);
     const pill = s.doc.getElementById('sq-pill');
     check('Gruene Pille mit Text', pill.classList.contains('is-ok') && /Geprüft/.test(pill.textContent), pill.textContent);
-    check('SQL als Text (maskiert)', s.doc.getElementById('sq-sql').textContent.indexOf('SELECT 1') === 0
+    check('SQL im Feld (als Wert, nicht als Markup)', s.doc.getElementById('sq-sql').value.indexOf('SELECT 1') === 0
           && !s.doc.querySelector('#sq-sql img'));
+    check('Syntaxzeile nennt den Dialekt', /Syntax in Ordnung \(mysql\)/.test(s.doc.getElementById('sq-syntax').textContent),
+          s.doc.getElementById('sq-syntax').textContent);
     check('Befunde verborgen', s.doc.getElementById('sq-befunde').classList.contains('hidden'));
     check('Annahmen "keine" nicht angezeigt', s.doc.getElementById('sq-annahmen').textContent === '');
     check('Kein Element aus Servertext entstanden', !s.doc.querySelector('#sq-ergebnis img') && !s.win.__xss);
@@ -427,6 +445,181 @@ function klick(s, el) {
     const schritte = s.doc.querySelectorAll('#sq-pfad .sq-treffer');
     check('Zwei Schritte, der vermutete gekennzeichnet', schritte.length === 2 && /vermutet/.test(schritte[1].textContent)
           && !/vermutet/.test(schritte[0].textContent), schritte.length);
+    s.win.close();
+
+    abschnitt('10. Syntax-Anzeige');
+    const FR = function (pr) {
+        return { frage: { ok: true, dialekt: 'hana', sql: 'SELECT 1 FROM erp.kunde', erklaerung: '', annahmen: '',
+            pruefung: pr, tabellen_kontext: ['erp.kunde'], verbinder: [], unverbunden: [], runden: 1 } };
+    };
+    // (a) Pruefer fehlt: eigene Stufe, NICHT gruen
+    s = await seite(FR(Object.assign({}, PR_OK, { syntax: { verfuegbar: false, ok: null, fehler: [], hinweise: [], ersatz: false, dialekt: 'hana' } })));
+    tippe(s, 'sq-frage', 'x');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    let pl = s.doc.getElementById('sq-pill');
+    check('Ohne Syntaxpruefer: KEINE gruene Pille, Text sagt es', !pl.classList.contains('is-ok') && pl.classList.contains('is-warn')
+          && /Syntax nicht geprüft/.test(pl.textContent), pl.className + ' ' + pl.textContent);
+    check('Ohne Syntaxpruefer: Syntaxzeile nennt den Grund', /nicht installiert/.test(s.doc.getElementById('sq-syntax').textContent));
+    s.win.close();
+    // (b) Syntaxfehler: rote Pille, Befund maskiert sichtbar
+    s = await seite(FR({ ok: false, fehler: ['Syntax – Zeile 1, Spalte 9: Überzähliges Komma vor FROM ' + BOESE + '.'],
+        tabellen: [], spalten_geprueft: 0, unbelegte_joins: [], joins_belegt: 0,
+        syntax: { verfuegbar: true, ok: false, fehler: [{ text: 'Überzähliges Komma vor FROM', zeile: 1, spalte: 9, stelle: 'FROM' }],
+                  hinweise: [], ersatz: false, dialekt: 'postgresql' } }));
+    tippe(s, 'sq-frage', 'x');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    pl = s.doc.getElementById('sq-pill');
+    check('Syntaxfehler: rote Pille', pl.classList.contains('is-bad') && /nicht bestanden/.test(pl.textContent), pl.textContent);
+    check('Syntaxfehler: Zeile mit ✗ und Dialekt', /✗ Syntaxfehler \(postgresql\)/.test(s.doc.getElementById('sq-syntax').textContent),
+          s.doc.getElementById('sq-syntax').textContent);
+    const bf = s.doc.getElementById('sq-befunde');
+    check('Syntaxfehler: Befund sichtbar und maskiert', !bf.classList.contains('hidden') && /Überzähliges Komma/.test(bf.textContent)
+          && !bf.querySelector('img') && !s.win.__xss);
+    s.win.close();
+    // (c) Dialekt ohne eigenen Pruefer: gueltig, Hinweis statt Fehler
+    s = await seite(FR(Object.assign({}, PR_OK, { syntax: { verfuegbar: true, ok: true, fehler: [], ersatz: true, dialekt: 'hana',
+        hinweise: [{ text: 'Unerwartetes Wort ' + BOESE, zeile: 2, spalte: 5, stelle: 'TOP' }] } })));
+    tippe(s, 'sq-frage', 'x');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    pl = s.doc.getElementById('sq-pill');
+    check('Ersatz-Pruefer: Pille gruen', pl.classList.contains('is-ok'), pl.className);
+    check('Ersatz-Pruefer: Zeile sagt "als Standard-SQL"', /Standard-SQL geprüft – für hana/.test(s.doc.getElementById('sq-syntax').textContent),
+          s.doc.getElementById('sq-syntax').textContent);
+    const bf2 = s.doc.getElementById('sq-befunde');
+    check('Ersatz-Pruefer: Hinweis mit Ort sichtbar, maskiert', !bf2.classList.contains('hidden') && /Hinweis des Standard-SQL-Prüfers/.test(bf2.textContent)
+          && /2:5/.test(bf2.textContent) && !bf2.querySelector('img') && !s.win.__xss, bf2.textContent);
+    s.win.close();
+
+    abschnitt('11. Bearbeiten und "Syntax pruefen"');
+    s = await seite({ frage: { ok: true, dialekt: 'mysql', sql: 'SELECT 1 FROM erp.kunde', erklaerung: '', annahmen: '',
+        pruefung: PR_OK, tabellen_kontext: ['erp.kunde'], verbinder: [], unverbunden: [], runden: 1 },
+        pruefen: { ok: true, dialekt: 'mysql', pruefung: { ok: false, fehler: ['Syntax – Zeile 1: Schließende Klammer fehlt.'],
+            tabellen: [], spalten_geprueft: 0, unbelegte_joins: [], joins_belegt: 0,
+            syntax: { verfuegbar: true, ok: false, fehler: [{ text: 'Schließende Klammer fehlt', zeile: 1, spalte: 20, stelle: '' }],
+                      hinweise: [], ersatz: false, dialekt: 'mysql' } } } });
+    s.doc.getElementById('sq-dialekt').value = 'mysql';
+    s.doc.getElementById('sq-dialekt').dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    tippe(s, 'sq-frage', 'Kunden');
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    check('Positivkontrolle: gepruefte Pille', s.doc.getElementById('sq-pill').classList.contains('is-ok'));
+    tippe(s, 'sq-sql', 'SELECT (1 FROM erp.kunde');
+    pl = s.doc.getElementById('sq-pill');
+    check('Bearbeitet: Pille neutral "Geändert – noch nicht geprüft"', !/is-(ok|bad|warn)/.test(pl.className)
+          && /Geändert – noch nicht geprüft/.test(pl.textContent), pl.className + ' ' + pl.textContent);
+    check('Bearbeitet: Syntaxzeile leer', s.doc.getElementById('sq-syntax').textContent === '');
+    const pk = s.doc.getElementById('sq-pruefen');
+    check('Pruefknopf frei', !pk.disabled, pk.title);
+    klick(s, pk);
+    await schlaf(40);
+    const pp = s.gerufen.filter(function (g) { return g.pfad === '/api/sql/pruefen'; });
+    let prRumpf = null;
+    try { prRumpf = JSON.parse(pp[0].opt.body); } catch (e) { prRumpf = null; }
+    check('POST /api/sql/pruefen mit GENAU dem Feldinhalt, Dialekt und Auswahl', pp.length === 1 && prRumpf
+          && prRumpf.sql === 'SELECT (1 FROM erp.kunde' && prRumpf.dialekt === 'mysql' && JSON.stringify(prRumpf.schemata) === '["erp","hr"]',
+          pp.length + ' ' + (pp[0] && pp[0].opt.body));
+    pl = s.doc.getElementById('sq-pill');
+    check('Nach der Pruefung: rote Pille', pl.classList.contains('is-bad'), pl.className);
+    // Rueckweg ohne erneute Pruefung: zurueck auf den gepruefte Text zeigt KEIN "geaendert"
+    tippe(s, 'sq-sql', 'SELECT (1 FROM erp.kunde');
+    check('Unveraenderter Text bleibt "geprueft"', s.doc.getElementById('sq-pill').classList.contains('is-bad'));
+    // Dialektwechsel macht die Anzeige ungueltig
+    s.doc.getElementById('sq-dialekt').value = 'oracle';
+    s.doc.getElementById('sq-dialekt').dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    check('Dialektwechsel: Anzeige "geaendert"', /Geändert/.test(s.doc.getElementById('sq-pill').textContent));
+    // Eigenes SQL: Feld leer, Knopf gesperrt MIT Grund, nach Tippen frei
+    klick(s, s.doc.getElementById('sq-eigenes'));
+    check('Eigenes SQL: Feld leer, Ergebnis sichtbar', s.doc.getElementById('sq-sql').value === ''
+          && !s.doc.getElementById('sq-ergebnis').classList.contains('hidden'));
+    check('Eigenes SQL: keine alte Grundlage', s.doc.getElementById('sq-basis').innerHTML === '');
+    check('Eigenes SQL: Pruefknopf gesperrt MIT Grund', pk.disabled && /SQL eingeben/.test(pk.title), pk.title);
+    check('Eigenes SQL: Pille "Noch nicht geprüft"', /Noch nicht geprüft/.test(s.doc.getElementById('sq-pill').textContent));
+    tippe(s, 'sq-sql', 'SELECT 2 FROM erp.kunde');
+    check('Eigenes SQL: nach Tippen frei', !pk.disabled);
+    s.win.close();
+
+    abschnitt('12. Verlauf');
+    s = await seite({ frage: { ok: true, dialekt: 'mysql', sql: 'SELECT 1 FROM erp.kunde', erklaerung: 'E', annahmen: '',
+        pruefung: PR_OK, tabellen_kontext: ['erp.kunde'], verbinder: [], unverbunden: [], runden: 1 } });
+    s.doc.getElementById('sq-dialekt').value = 'mysql';
+    s.doc.getElementById('sq-dialekt').dispatchEvent(new s.win.Event('change', { bubbles: true }));
+    tippe(s, 'sq-frage', 'Umsatz ' + BOESE);
+    klick(s, s.doc.getElementById('sq-los'));
+    await schlaf(40);
+    let vl = [];
+    try { vl = JSON.parse(s.win.localStorage.getItem('jarvis_sql_verlauf_anna') || '[]'); } catch (e) { vl = []; }
+    const e0 = vl[0] || {};
+    check('Eintrag je Benutzer mit Frage, Dialekt, Schemata, SQL und Pruefung', vl.length === 1 && e0.q === 'Umsatz ' + BOESE
+          && e0.dialekt === 'mysql' && JSON.stringify(e0.schemata) === '["erp","hr"]' && e0.erg && e0.erg.sql === 'SELECT 1 FROM erp.kunde'
+          && e0.erg.pruefung && e0.erg.pruefung.ok === true, JSON.stringify(e0).slice(0, 200));
+    check('Schemanamen gemerkt', e0.schemata_namen && e0.schemata_namen[1] === 'Personal');
+    check('Keine Laufzeiten/Rundenverlauf im Speicher', e0.erg && !('zeiten' in e0.erg) && !('verlauf' in e0.erg));
+    klick(s, s.doc.getElementById('sq-hist-btn'));
+    const panel = s.doc.getElementById('sq-hist-panel');
+    check('Verlaufsfeld oeffnet', !panel.classList.contains('hidden'));
+    const it = s.doc.querySelectorAll('#sq-hist-list .sq-hist-item');
+    check('Eintrag gezeichnet, maskiert, mit Muelleimer', it.length === 1 && /Umsatz/.test(it[0].textContent)
+          && !s.doc.querySelector('#sq-hist-list img') && !s.win.__xss && it[0].querySelector('.sq-hist-del svg'), it.length);
+    // Bearbeitet + geprueft -> der Eintrag haelt den Arbeitsstand
+    klick(s, s.doc.body);
+    tippe(s, 'sq-sql', 'SELECT 3 FROM erp.kunde');
+    klick(s, s.doc.getElementById('sq-pruefen'));
+    await schlaf(40);
+    try { vl = JSON.parse(s.win.localStorage.getItem('jarvis_sql_verlauf_anna') || '[]'); } catch (e) { vl = []; }
+    check('Gepruefte Bearbeitung ersetzt das SQL des Eintrags (kein neuer)', vl.length === 1 && vl[0].erg.sql === 'SELECT 3 FROM erp.kunde'
+          && vl[0].bearbeitet === true, JSON.stringify(vl).slice(0, 200));
+    s.win.close();
+
+    // Wiederherstellen in einer frischen Seite: zwei Eintraege, einer mit verschwundenem Schema
+    const VERLAUF = [
+        { ts: 2000, q: 'Zweite Frage', dialekt: 'oracle', schemata: ['hr', 'weg'], schemata_namen: ['Personal', 'Altbestand'],
+          praefix: '', bearbeitet: false, erg: { sql: 'SELECT 9 FROM hr.x', dialekt: 'oracle', pruefung: PR_OK,
+          erklaerung: '', annahmen: '', hauswissen: [], tabellen_kontext: ['hr.x'], verbinder: [] } },
+        { ts: 1000, q: 'Erste Frage', dialekt: 'mssql', schemata: ['erp'], schemata_namen: ['ERP'], praefix: '',
+          bearbeitet: false, erg: { sql: 'SELECT 8 FROM erp.kunde', dialekt: 'mssql', pruefung: PR_OK, erklaerung: 'Alt',
+          annahmen: '', hauswissen: [], tabellen_kontext: ['erp.kunde'], verbinder: [] } }];
+    s = await seite({ verlauf: VERLAUF });
+    klick(s, s.doc.getElementById('sq-hist-btn'));
+    let items = s.doc.querySelectorAll('#sq-hist-list .sq-hist-item');
+    check('Positivkontrolle: zwei Eintraege gezeichnet', items.length === 2, items.length);
+    klick(s, items[1]);
+    await schlaf(40);
+    check('Klick: Frage zurueck', s.doc.getElementById('sq-frage').value === 'Erste Frage');
+    check('Klick: Dialekt zurueck', s.doc.getElementById('sq-dialekt').value === 'mssql', s.doc.getElementById('sq-dialekt').value);
+    check('Klick: Auswahl zurueck und gemerkt', JSON.stringify(s.win.jarvisSql._gewaehlt()) === '["erp"]'
+          && s.win.localStorage.getItem('jarvis_sql_schemata_anna') === '["erp"]', JSON.stringify(s.win.jarvisSql._gewaehlt()));
+    check('Klick: SQL und Erklaerung zurueck', s.doc.getElementById('sq-sql').value === 'SELECT 8 FROM erp.kunde'
+          && /Alt/.test(s.doc.getElementById('sq-erklaerung').textContent));
+    check('Klick: Verlaufsfeld schliesst', s.doc.getElementById('sq-hist-panel').classList.contains('hidden'));
+    const auto = s.gerufen.filter(function (g) { return g.pfad === '/api/sql/pruefen'; });
+    let ab = null;
+    try { ab = JSON.parse(auto[0].opt.body); } catch (e) { ab = null; }
+    check('Klick: automatische Neupruefung gegen heute (ohne Modell)', auto.length === 1 && ab && ab.sql === 'SELECT 8 FROM erp.kunde'
+          && ab.dialekt === 'mssql' && JSON.stringify(ab.schemata) === '["erp"]', auto.length);
+    check('Klick: KEINE neue Frage an das Modell', !s.gerufen.some(function (g) { return g.pfad === '/api/sql/frage'; }));
+    check('Klick: Hinweis nennt den Verlauf', /Aus dem Verlauf/.test(s.doc.getElementById('sq-frage-status').textContent));
+    klick(s, s.doc.getElementById('sq-hist-btn'));
+    items = s.doc.querySelectorAll('#sq-hist-list .sq-hist-item');
+    klick(s, items[0]);
+    await schlaf(40);
+    const fst = s.doc.getElementById('sq-frage-status');
+    check('Verschwundenes Schema wird BENANNT, vorhandenes gewaehlt', /Altbestand/.test(fst.textContent) && fst.classList.contains('is-fehler')
+          && JSON.stringify(s.win.jarvisSql._gewaehlt()) === '["hr"]', fst.textContent);
+    // Muelleimer loescht GENAU den angeklickten Eintrag und uebernimmt nichts
+    klick(s, s.doc.getElementById('sq-hist-btn'));
+    const vorFrage = s.doc.getElementById('sq-frage').value;
+    const del = s.doc.querySelector('#sq-hist-list .sq-hist-del[data-ts="1000"]');
+    klick(s, del);
+    try { vl = JSON.parse(s.win.localStorage.getItem('jarvis_sql_verlauf_anna') || '[]'); } catch (e) { vl = []; }
+    check('Muelleimer: genau dieser Eintrag weg', vl.length === 1 && vl[0].ts === 2000, JSON.stringify(vl.map(function (x) { return x.ts; })));
+    check('Muelleimer: nichts uebernommen, Feld bleibt offen', s.doc.getElementById('sq-frage').value === vorFrage
+          && !s.doc.getElementById('sq-hist-panel').classList.contains('hidden'));
+    klick(s, s.doc.getElementById('sq-hist-clear'));
+    check('Leeren: Verlauf leer', !s.win.localStorage.getItem('jarvis_sql_verlauf_anna')
+          && /Noch keine Fragen/.test(s.doc.getElementById('sq-hist-list').textContent));
     s.win.close();
 
     bilanz = true;

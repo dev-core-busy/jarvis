@@ -53,6 +53,11 @@ requests               # jira_client, sap_client, google_auth, web_extractor, ib
 httpx                  # knowledge_sync (Standort-Sync), model_caps, file_watcher, web_extractor
 packaging              # abhaengigkeiten (Grenzen/Versionen pruefen); ohnehin Beigabe vieler Pakete
 PyYAML                 # schema_graph_parser: YAML-Objektexporte (SQL-Assistent); bis 2026-11-07 nur Beigabe
+# sqlglot (2026-11-11): Syntaxpruefung des SQL-Assistenten (backend/sql_syntax.py),
+# reines Python ohne Abhaengigkeiten. FEST genagelt, weil der Parser je Fassung
+# nachsichtiger oder strenger wird und die eigenen Strukturregeln daneben an
+# 30.25.0 gemessen sind. Fehlt das Paket, meldet die Seite "nicht verfuegbar".
+sqlglot==30.25.0
 # cryptography traegt als EINZIGES aus diesem Block eine Untergrenze – die
 # Sicherheitslage vom 2026-10-01 geht dem Vorsatz oben vor. ⚠ Die Warnung dieses
 # Blocks hat sich dabei bestaetigt: ein nacktes `>=46.0.7` holte 50.0.2, also vier

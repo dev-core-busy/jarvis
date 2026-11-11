@@ -1914,6 +1914,7 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/tracks/admin/.*",                 "Short Tracks · Verwaltung"),
     # SQL-Assistent
     ("POST",   r"/api/sql/frage",                       "SQL-Assistent · Frage gestellt"),
+    ("POST",   r"/api/sql/pruefen",                     "SQL-Assistent · SQL geprüft"),
     ("POST",   rf"/api/sql/admin/schema/{_ID}/index",   "SQL-Assistent · Erfassung gestartet"),
     ("POST",   r"/api/sql/admin/index/abbrechen",       "SQL-Assistent · Erfassung abgebrochen"),
     ("PUT",    r"/api/sql/admin",                       "SQL-Assistent · Einstellungen gespeichert"),
@@ -17806,12 +17807,7 @@ async def sql_frage(request: Request, user: str = Depends(require_schema_access)
     return JSONResponse({
         "ok": True, "dialekt": dialekt, "sql": erg.get("sql") or "",
         "erklaerung": erg.get("erklaerung") or "", "annahmen": erg.get("annahmen") or "",
-        "pruefung": {"ok": bool(pr.get("ok")), "fehler": list(pr.get("fehler") or []),
-                     "tabellen": list(pr.get("tabellen") or []),
-                     "spalten_geprueft": int(pr.get("spalten_geprueft") or 0),
-                     # Gueltig, aber verbunden ueber eine Bedingung ohne Beleg im Schema
-                     "unbelegte_joins": [str(u.get("bedingung") or "") for u in pr.get("unbelegte_joins") or []],
-                     "joins_belegt": int(pr.get("joins_belegt") or 0)},
+        "pruefung": _sql_pruefung_antwort(pr),
         "tabellen_kontext": erg.get("tabellen_kontext") or [], "verbinder": erg.get("verbinder") or [],
         "unverbunden": erg.get("unverbunden") or [], "runden": erg.get("runden") or 1,
         "hauswissen": [{"titel": str(h.get("titel") or ""), "nr": int(h.get("nr") or 0)}
@@ -17827,6 +17823,55 @@ async def sql_frage(request: Request, user: str = Depends(require_schema_access)
         # Tabellen, die nicht eigens im Ausschnitt standen, weil ihre Sicht dieselben Spalten zeigt
         "gleichwertig": [{"sicht": str(g.get("sicht") or ""), "tabelle": str(g.get("tabelle") or "")}
                          for g in erg.get("gleichwertig") or []]})
+
+
+def _sql_pruefung_antwort(pr: dict) -> dict:
+    """EINE Antwortform der Pruefung fuer /api/sql/frage und /api/sql/pruefen –
+    zwei handgebaute Formen liefen auseinander, und die Seite zeichnet beide
+    mit derselben Funktion."""
+    syn = pr.get("syntax") or {}
+
+    def _befunde(liste):
+        return [{"text": str(b.get("text") or ""), "zeile": b.get("zeile"), "spalte": b.get("spalte"),
+                 "stelle": str(b.get("stelle") or "")} for b in liste or []]
+    return {"ok": bool(pr.get("ok")), "fehler": [str(f) for f in pr.get("fehler") or []],
+            "tabellen": list(pr.get("tabellen") or []),
+            "spalten_geprueft": int(pr.get("spalten_geprueft") or 0),
+            # Gueltig, aber verbunden ueber eine Bedingung ohne Beleg im Schema
+            "unbelegte_joins": [str(u.get("bedingung") or "") for u in pr.get("unbelegte_joins") or []],
+            "joins_belegt": int(pr.get("joins_belegt") or 0),
+            # Syntax: verfuegbar=False heisst "nicht geprueft", NICHT "in Ordnung"
+            "syntax": {"verfuegbar": bool(syn.get("verfuegbar")),
+                       "ok": syn.get("ok") if isinstance(syn.get("ok"), bool) else None,
+                       "fehler": _befunde(syn.get("fehler")), "hinweise": _befunde(syn.get("hinweise")),
+                       "ersatz": bool(syn.get("ersatz")), "dialekt": str(syn.get("dialekt") or "")}}
+
+
+@app.post("/api/sql/pruefen")
+@_sprot_keine_aenderung
+async def sql_pruefen_api(request: Request, user: str = Depends(require_schema_access)):
+    """Prueft ein SQL (bearbeitet oder selbst eingefuegt) auf Syntax und gegen
+    die GEWAEHLTEN Schemata – ohne Modell und ohne es auszufuehren."""
+    from backend import schema_graph_rag as _sgr
+    from backend import sql_syntax as _sqs
+    body = await _json_objekt(request)
+    sql = body.get("sql")
+    if not isinstance(sql, str) or not sql.strip():
+        return JSONResponse({"error": "Kein SQL angegeben."}, status_code=400)
+    # Abgewiesen, nicht gekuerzt (wie die Frage): ein gekuerztes SQL waere ein anderes.
+    if len(sql) > _sqs.MAX_SQL:
+        return JSONResponse({"error": f"Das SQL ist länger als {_sqs.MAX_SQL} Zeichen."}, status_code=400)
+    dialekt = body.get("dialekt") or "allgemein"
+    if not isinstance(dialekt, str) or dialekt.strip().lower() not in _sgr.DIALEKTE:
+        return JSONResponse({"error": "Unbekannter SQL-Dialekt."}, status_code=400)
+    dialekt = dialekt.strip().lower()
+    erlaubt = await asyncio.to_thread(_sql_auswahl, body.get("schemata"))
+    if not erlaubt:
+        return JSONResponse({"error": _SQL_KEINE_AUSWAHL}, status_code=400)
+    pr = await asyncio.to_thread(_sql_mit_graph, lambda c: _sgr.pruefen_gesamt(c, sql, erlaubt, dialekt))
+    if pr is None:
+        return JSONResponse({"error": "Es gibt noch keinen Schema-Graphen."}, status_code=409)
+    return JSONResponse({"ok": True, "dialekt": dialekt, "pruefung": _sql_pruefung_antwort(pr)})
 
 
 def _sql_mit_graph(fn):

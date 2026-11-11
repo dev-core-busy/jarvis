@@ -772,6 +772,24 @@ def pruefen(con, sql: str, erlaubt=None) -> dict:
     return erg
 
 
+def pruefen_gesamt(con, sql: str, erlaubt=None, dialekt: str = "allgemein") -> dict:
+    """Schema-Pruefung (``pruefen``) plus Syntax (``backend.sql_syntax``).
+
+    Syntaxfehler stehen VORN in ``fehler`` und kippen ``ok`` – damit laufen
+    sie in dieselbe Reparaturrunde wie eine unbekannte Spalte. Das ganze
+    Syntax-Ergebnis steht unter ``syntax`` (auch ``verfuegbar`` und die
+    Hinweise bei Dialekten ohne eigenen Parser).
+    """
+    from backend import sql_syntax  # noqa: PLC0415
+    pr = pruefen(con, sql, erlaubt)
+    syn = sql_syntax.pruefen(sql, dialekt)
+    pr["syntax"] = syn
+    if syn["fehler"]:
+        pr["fehler"] = [sql_syntax.befund_text(b) for b in syn["fehler"]] + pr["fehler"]
+        pr["ok"] = False
+    return pr
+
+
 def _spalte_aus(tok: str, aliase: dict) -> tuple[int, str] | None:
     """``alias.spalte`` -> (Objekt-ID, spalte_klein) oder None."""
     if "." not in tok or tok.endswith(".*"):
@@ -1241,7 +1259,7 @@ async def sql_erzeugen(frage: str, dialekt: str = "allgemein", max_tabellen: int
                            + "Schreibe die Abfrage mit dem Ausschnitt im verlangten Format und nenne "
                              "eine Lücke unter ANNAHMEN.")
                 continue
-            pr = await asyncio.to_thread(pruefen, con, a["sql"], erlaubt)
+            pr = await asyncio.to_thread(pruefen_gesamt, con, a["sql"], erlaubt, dialekt)
             verlauf[-1]["befunde"] = list(pr["fehler"])
             ergebnis = {**a, "pruefung": pr}
             if pr["ok"] and pr["unbelegte_joins"] and not join_runde:

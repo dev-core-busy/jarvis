@@ -202,11 +202,13 @@ try:
     check(code == 200 and (me.get("permissions") or {}).get("schema") is True, "Mit Freigabe: Kachel-Recht", me.get("permissions"))
 
     print("2. Schemata anlegen und hochladen")
-    gut = dict(VOR_CFG, schemata=list(VOR_CFG.get("schemata") or []) + [{"name": "ERP-Probe-Q9"}, {"name": "Geheim-Probe-Q9"}],
-               dialekt="postgresql",
-               # Eigenes Muster: das vorgefundene (auf DEV 2026-11-07: *.yaml)
-               # wuerde .sql zu Recht abweisen. Zurueckgestellt wird im finally.
-               dateimuster="*.sql,*.ddl")
+    # Dialekt und Dateimuster stehen JE SCHEMA (seit 2026-11-10): die Probe
+    # stellt sie nur an ihren eigenen zwei Schemata ein und laesst die
+    # vorgefundenen unberuehrt (vorher verstellte sie das Muster fuer ALLE –
+    # auf DEV wurde dabei der echte Bestand neu erfasst).
+    PROBE_FELDER = {"dialekt": "postgresql", "dateimuster": "*.sql,*.ddl"}
+    gut = dict(VOR_CFG, schemata=list(VOR_CFG.get("schemata") or []) + [
+        dict(PROBE_FELDER, name="ERP-Probe-Q9"), dict(PROBE_FELDER, name="Geheim-Probe-Q9")])
     code, d = ruf("/api/sql/admin", TA, "PUT", {"cfg": gut})
     ids = {s["name"]: s["id"] for s in (d.get("cfg") or {}).get("schemata") or []}
     S_ERP, S_GEH = ids.get("ERP-Probe-Q9"), ids.get("Geheim-Probe-Q9")
@@ -300,7 +302,7 @@ try:
     st = erfassung_abwarten()
     code, d = ruf(f"/api/sql/tabelle?name=hr.zz_geheim_q9&schemata={S_GEH}", TU)
     check(code == 404, "Nach der automatischen Erfassung ist die Tabelle weg", (code, st.get("ergebnis")))
-    weg = dict(VOR_CFG, schemata=list(VOR_CFG.get("schemata") or []) + [{"id": S_ERP, "name": "ERP-Probe-Q9"}])
+    weg = dict(VOR_CFG, schemata=list(VOR_CFG.get("schemata") or []) + [dict(PROBE_FELDER, id=S_ERP, name="ERP-Probe-Q9")])
     code, d = ruf("/api/sql/admin", TA, "PUT", {"cfg": weg})
     check(code == 409 and [s["id"] for s in d.get("zu_loeschen") or []] == [S_GEH] and (BASIS_DIR / S_GEH).exists(),
           "Schema entfernen ohne Bestaetigung: 409, nichts geloescht", (code, d))

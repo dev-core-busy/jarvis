@@ -120,28 +120,82 @@ _, fehler, _ = E.normieren({"schemata": [{"id": "../etc", "name": "X"}]})
 check("Kennung mit Weg hinaus = Fehler", any("Kennung" in f for f in fehler), fehler)
 _, fehler, _ = E.normieren({"schemata": [{"id": "a", "name": "A"}, {"id": "a", "name": "B"}]})
 check("Doppelte Kennung = Fehler", any("Kennung" in f for f in fehler), fehler)
-_, fehler, _ = E.normieren({"schemata": [{"name": ""}], "max_tabellen": 999, "dialekt": "cobol",
-                            "dateimuster": "*.sql;rm -rf", "fk_ableiten": "ja"})
+_, fehler, _ = E.normieren({"schemata": [{"name": ""}, {"name": "Lager", "max_tabellen": 999, "dialekt": "cobol",
+                                                          "dateimuster": "*.sql;rm -rf", "fk_ableiten": "ja"}]})
 check("Name fehlt/Grenzen/Dialekt/Muster/Typ abgewiesen", len(fehler) == 5, fehler)
+check("Jeder Fehler an einer Schema-Einstellung nennt DAS SCHEMA",
+      sum("Schema „Lager“" in f for f in fehler) == 4, fehler)
 for muster in ("*", "foo*.sql", "*.sql,*", "../*.sql"):
-    _, fehler, _ = E.normieren({"dateimuster": muster})
+    _, fehler, _ = E.normieren({"schemata": [{"name": "X", "dateimuster": muster}]})
     check(f"Muster nur als *.endung: {muster!r} abgewiesen", any("dateimuster" in f for f in fehler), fehler)
-cfg3, _, _ = E.normieren({"dateimuster": "*.SQL, *.ddl,*.sql"})
-check("Muster klein, ohne Dubletten", cfg3["dateimuster"] == "*.sql,*.ddl", cfg3["dateimuster"])
-check("Endungen fuer den Upload", E.endungen(cfg3) == {".sql", ".ddl"}, E.endungen(cfg3))
+cfg3, _, _ = E.normieren({"schemata": [{"name": "X", "dateimuster": "*.SQL, *.ddl,*.sql"}]})
+s3 = cfg3["schemata"][0]
+check("Muster klein, ohne Dubletten", s3["dateimuster"] == "*.sql,*.ddl", s3["dateimuster"])
+check("Endungen fuer den Upload", E.endungen(s3) == {".sql", ".ddl"}, E.endungen(s3))
 alt = E.aus_zustand({"quellen": [{"id": "erp", "name": "ERP", "ordner": ["/mnt/x"], "gruppen": ["g1"]}]})
 check("Altfassung -> Schema gleicher Kennung, OHNE Ordner und Gruppen",
-      alt["schemata"] == [{"id": "erp", "name": "ERP"}] and "quellen" not in alt, alt)
+      alt["schemata"] == [{"id": "erp", "name": "ERP", **E.SCHEMA_VORGABEN}] and "quellen" not in alt, alt)
 check("Vorgabe: keine Schemata, Muster ohne *.txt", E.VORGABEN["schemata"] == []
-      and "txt" not in E.VORGABEN["dateimuster"] and I.STANDARD_MUSTER == E.VORGABEN["dateimuster"])
+      and "txt" not in E.SCHEMA_VORGABEN["dateimuster"] and I.STANDARD_MUSTER == E.SCHEMA_VORGABEN["dateimuster"])
+
+# Einstellungen stehen AM SCHEMA (Vorgabe 2026-11-10)
+SCHEMA_FELDER = ("dialekt", "dateimuster", "fk_ableiten", "max_tabellen", "max_spalten")
+check("Positivkontrolle: die fuenf Schema-Felder sind die Schema-Vorgaben", tuple(E.SCHEMA_VORGABEN) == SCHEMA_FELDER,
+      tuple(E.SCHEMA_VORGABEN))
+check("Fuer alle gemeinsam NUR: schemata, prozesse, index_aus_chat",
+      set(E.VORGABEN) == {"schemata", "prozesse", "index_aus_chat"}, set(E.VORGABEN))
+zwei = {"schemata": [
+    {"id": "erp", "name": "ERP", "dialekt": "oracle", "dateimuster": "*.sql", "fk_ableiten": False,
+     "max_tabellen": 8, "max_spalten": 30},
+    {"id": "hr", "name": "Personal", "dialekt": "mssql", "dateimuster": "*.yaml", "fk_ableiten": True,
+     "max_tabellen": 25, "max_spalten": 90}], "prozesse": 4, "index_aus_chat": True}
+cfgz, fehler, _ = E.normieren(zwei)
+check("Zwei Schemata mit in JEDEM Punkt anderen Einstellungen: unveraendert uebernommen",
+      not fehler and cfgz == zwei, (fehler, cfgz))
+check("Oberste Ebene traegt KEIN Schema-Feld", not (set(cfgz) & set(SCHEMA_FELDER)), sorted(cfgz))
+neu1, fehler, _ = E.normieren({"schemata": [{"name": "Neu"}]})
+check("Neues Schema ohne Angaben bekommt die Vorgaben", not fehler
+      and {k: neu1["schemata"][0][k] for k in SCHEMA_FELDER} == E.SCHEMA_VORGABEN, (fehler, neu1))
+# Ein noch offener Reiter mit dem ALTEN Skript schickt die Felder oben
+_, fehler, _ = E.normieren({"schemata": [{"id": "erp", "name": "ERP"}], "dialekt": "oracle", "max_tabellen": 20})
+check("Schema-Feld auf oberster Ebene = FEHLER mit Weg (nicht still verworfen)",
+      len(fehler) == 1 and "dialekt" in fehler[0] and "max_tabellen" in fehler[0] and "neu laden" in fehler[0], fehler)
+# Gespeicherter Zustand der Altfassung: der bisherige Wert geht in jedes Schema
+altz = E.aus_zustand({"schemata": [{"id": "erp", "name": "ERP"}, {"id": "hr", "name": "Personal", "dialekt": "mssql"}],
+                      "dialekt": "oracle", "dateimuster": "*.sql", "fk_ableiten": False, "max_tabellen": 20,
+                      "max_spalten": 50, "prozesse": 3, "index_aus_chat": True})
+check("Altfassung (einmal fuer alle): der bisherige Wert steht danach in JEDEM Schema",
+      altz["schemata"][0] == {"id": "erp", "name": "ERP", "dialekt": "oracle", "dateimuster": "*.sql",
+                              "fk_ableiten": False, "max_tabellen": 20, "max_spalten": 50}, altz["schemata"][0])
+check("... ein Feld, das das Schema schon selbst traegt, gewinnt", altz["schemata"][1]["dialekt"] == "mssql"
+      and altz["schemata"][1]["max_tabellen"] == 20, altz["schemata"][1])
+check("... und die gemeinsamen Werte bleiben", altz["prozesse"] == 3 and altz["index_aus_chat"] is True
+      and not (set(altz) & set(SCHEMA_FELDER)), sorted(altz))
+check("... das Ergebnis laesst sich SPEICHERN (normieren ohne Fehler)", E.normieren(altz)[1] == [], E.normieren(altz)[1])
+# Vorgaben einer Frage aus den GEWAEHLTEN Schemata
+check("Frage ueber ein Schema: SEIN Dialekt, SEINE Hoechstzahlen",
+      E.fuer_frage(cfgz, {"hr"}) == {"dialekt": "mssql", "max_tabellen": 25, "max_spalten": 90}, E.fuer_frage(cfgz, {"hr"}))
+check("Frage ueber beide: Dialekt des ersten in der Reihenfolge der EINSTELLUNGEN, groesste Hoechstzahlen",
+      E.fuer_frage(cfgz, ["hr", "erp"]) == {"dialekt": "oracle", "max_tabellen": 25, "max_spalten": 90},
+      E.fuer_frage(cfgz, ["hr", "erp"]))
+check("Frage ohne (bekannte) Auswahl: die Vorgaben", E.fuer_frage(cfgz, {"fremd"})
+      == {k: E.SCHEMA_VORGABEN[k] for k in ("dialekt", "max_tabellen", "max_spalten")}, E.fuer_frage(cfgz, {"fremd"}))
+qz = E.quellen(cfgz)
+check("Quellen des Indexlaufs: je Schema SEIN Ordner, SEIN Muster (mit Begleitdokumenten), SEIN Ableiten",
+      [(q["id"], q["ordner"], q["muster"], q["fk_ableiten"]) for q in qz]
+      == [("erp", [str(E.ordner_fuer("erp"))], "*.sql,*.md,*.docx,*.pdf", False),
+          ("hr", [str(E.ordner_fuer("hr"))], "*.yaml,*.md,*.docx,*.pdf", True)], qz)
+check("schema_von: bekannt und unbekannt", (E.schema_von(cfgz, "hr") or {}).get("dialekt") == "mssql"
+      and E.schema_von(cfgz, "x") is None, E.schema_von(cfgz, "hr"))
 check("Auswahl: Liste und Zeichenkette, Unbekanntes faellt weg",
       E.auswahl(cfg, ["erp", "fremd", 7, None]) == {"erp"} and E.auswahl(cfg, "erp, groesse,x") == {"erp", "groesse"},
       (E.auswahl(cfg, ["erp", "fremd", 7, None]), E.auswahl(cfg, "erp, groesse,x")))
 check("Auswahl: nichts / falscher Typ = leer", E.auswahl(cfg, None) == set() and E.auswahl(cfg, {"erp": 1}) == set()
       and E.auswahl(cfg, []) == set())
-gi0 = D.graph_info(None, [{"id": "a", "name": "ERP"}])
-check("Ohne Graph: Schemata mit Nullen (frisch angelegt waehlbar)", gi0["vorhanden"] is False
-      and gi0["schemata"] == [{"id": "a", "name": "ERP", "tabellen": 0, "sichten": 0, "spalten": 0, "dokumente": 0}], gi0)
+gi0 = D.graph_info(None, [{"id": "a", "name": "ERP", "dialekt": "oracle"}])
+check("Ohne Graph: Schemata mit Nullen (frisch angelegt waehlbar), mit IHREM Dialekt", gi0["vorhanden"] is False
+      and gi0["schemata"] == [{"id": "a", "name": "ERP", "tabellen": 0, "sichten": 0, "spalten": 0, "dokumente": 0,
+                               "dialekt": "oracle"}], gi0)
 
 # ─── 2. Sichtbarkeit im Graphen ─────────────────────────────────────────────
 print("2. Sichtbarkeit")
@@ -210,7 +264,10 @@ check("Sicht-Grundlage ohne B", "hr.gehalt" not in kt and "erp.kunde" in kt, kt)
 gi = D.graph_info(A, [{"id": "a", "name": "ERP"}, {"id": "b", "name": "Personal"}])
 check("Status nur gewaehlte Schemata", [q["name"] for q in gi["schemata"]] == ["ERP"]
       and gi["schemata"][0]["tabellen"] == 3, gi)
-gi = D.graph_info(None, [{"id": "a", "name": "ERP"}, {"id": "b", "name": "Personal"}])
+gi = D.graph_info(None, [{"id": "a", "name": "ERP", "dialekt": "oracle"}, {"id": "b", "name": "Personal", "dialekt": "mssql"}])
+check("Auskunft nennt je Schema SEINEN Dialekt (die Seite schlaegt ihn fuer die Auswahl vor)",
+      [(q["id"], q.get("dialekt")) for q in gi["schemata"]] == [("a", "oracle"), ("b", "mssql")],
+      [(q["id"], q.get("dialekt")) for q in gi["schemata"]])
 check("Status ohne Filter: alle Schemata (zum Auswaehlen)", [q["name"] for q in gi["schemata"]] == ["ERP", "Personal"], gi)
 g.close()
 
@@ -333,6 +390,185 @@ finally:
     I.lauf = _echt
 check("Scheitert ein Lauf, wird der vorgemerkte Nachlauf trotzdem gefahren",
       [q[0]["id"] for q in _laeufe] == ["x", "y"], [q[0]["id"] for q in _laeufe])
+
+# Vormerkungen fuer VERSCHIEDENE Schemata: der Nachlauf erfasst beide
+_nur_laeufe = []
+_vm = []
+
+
+def _langsam_nur(ordner, **kw):
+    _nur_laeufe.append(kw.get("nur"))
+    time.sleep(0.3)
+    return {"ergebnis": "fertig"}
+
+
+def _dreimal(n2, n3):
+    _nur_laeufe.clear()
+    _vm.clear()
+    I.lauf = _langsam_nur
+    try:
+        I.anstossen([], quellen=[], nur={"a"})
+        time.sleep(0.05)
+        I.anstossen([], quellen=[], nur=n2)
+        _vm.append(I.vorgemerkt())
+        I.anstossen([], quellen=[], nur=n3)
+        _vm.append(I.vorgemerkt())
+        for _ in range(50):
+            if not I._auto_aktiv:
+                break
+            time.sleep(0.05)
+    finally:
+        I.lauf = _echt
+    return list(_nur_laeufe)
+
+
+erg = _dreimal({"b"}, {"c"})
+check("Zwei Vormerkungen fuer verschiedene Schemata: EIN Nachlauf ueber beide (keines verdraengt)",
+      erg == [{"a"}, {"b", "c"}], erg)
+check("vorgemerkt() nennt, was wartet", _vm == [{"nur": ["b"]}, {"nur": ["b", "c"]}], _vm)
+check("... und danach nichts mehr", I.vorgemerkt() is None, I.vorgemerkt())
+erg = _dreimal({"b"}, None)
+check("Vormerkung fuer ALLE (None) gewinnt gegen eine einzelne", erg == [{"a"}, None] and _vm[1] == {"nur": None}, (erg, _vm))
+erg = _dreimal(None, {"c"})
+check("... auch in der anderen Reihenfolge", erg == [{"a"}, None], erg)
+
+# ─── 3b. Erfassung je Schema ────────────────────────────────────────────────
+print("3b. Erfassung je Schema")
+QC, QD = TMP / "schema_c", TMP / "schema_d"
+QC.mkdir()
+QD.mkdir()
+# Je Schema BEIDE Ableitungsregeln, jede ueber genau eine Tabelle erreichbar:
+#   Regel 1  kunde2_id -> kunde2            (auftrag2 / person2)
+#   Regel 2  Spalte heisst wie der Primaerschluessel einer anderen Tabelle (ort2 / rang2)
+(QC / "c.sql").write_text("CREATE TABLE erp.kunde2 (id int PRIMARY KEY);\n"
+                          "CREATE TABLE erp.auftrag2 (id int PRIMARY KEY, kunde2_id int);\n"
+                          "CREATE TABLE erp.land2 (lnd_code varchar(3) PRIMARY KEY);\n"
+                          "CREATE TABLE erp.ort2 (id int PRIMARY KEY, lnd_code varchar(3));\n")
+(QC / "c.ddl").write_text("CREATE TABLE erp.nur_ddl (id int PRIMARY KEY);\n")
+(QD / "d.sql").write_text("CREATE TABLE hr.abteilung2 (id int PRIMARY KEY);\n"
+                          "CREATE TABLE hr.person2 (id int PRIMARY KEY, abteilung2_id int);\n"
+                          "CREATE TABLE hr.stufe2 (stf_code varchar(3) PRIMARY KEY);\n"
+                          "CREATE TABLE hr.rang2 (id int PRIMARY KEY, stf_code varchar(3));\n")
+(QD / "d.ddl").write_text("CREATE TABLE hr.nur_ddl2 (id int PRIMARY KEY);\n")
+NUR_SQL_C = {"erp.kunde2", "erp.auftrag2", "erp.land2", "erp.ort2"}
+ALLE_CD = NUR_SQL_C | {"erp.nur_ddl", "hr.abteilung2", "hr.person2", "hr.stufe2", "hr.rang2", "hr.nur_ddl2"}
+VERMUTET_C, VERMUTET_D = {"erp.auftrag2", "erp.ort2"}, {"hr.person2", "hr.rang2"}
+
+
+def qcd(muster_c="*.sql,*.ddl", muster_d="*.sql,*.ddl", fk_c=True, fk_d=True):
+    return [{"id": "c", "ordner": [str(QC)], "muster": muster_c, "fk_ableiten": fk_c},
+            {"id": "d", "ordner": [str(QD)], "muster": muster_d, "fk_ableiten": fk_d}]
+
+
+def objekte():
+    gg = S.graph_lesen()
+    try:
+        return {r[0] for r in gg.execute("SELECT schluessel FROM objekt")}
+    finally:
+        gg.close()
+
+
+def vermutet():
+    """Tabellen, von denen eine aus Spaltennamen ABGELEITETE Beziehung ausgeht."""
+    gg = S.graph_lesen()
+    try:
+        return {r[0] for r in gg.execute("SELECT o.schluessel FROM kante k JOIN objekt o ON o.id = k.von "
+                                         "WHERE k.art = 'abgeleitet'")}
+    finally:
+        gg.close()
+
+
+def je(stand, kennung, feld=None):
+    """Eintrag eines Schemas im Status – wirft nicht, wenn er fehlt (eine
+    Sabotage soll als FAIL sichtbar werden, nicht als Absturz ohne Bilanz)."""
+    e = (stand.get("je_schema") or {}).get(kennung) or {}
+    return e if feld is None else e.get(feld)
+
+
+def _abschnitt_je_schema():
+    st = I.lauf([], quellen=qcd(), prozesse=1, ordner_schutz=False)
+    # Als PRUEFUNG, nicht als Abbruch: scheitert der Aufbau, weil der Lauf selbst
+    # kaputt ist (etwa: Geloeschtes wird nicht ausgetragen), ist das ein Befund –
+    # die Folgepruefungen entfallen dann, die Bilanz bleibt.
+    aufbau = st.get("ergebnis") == "fertig" and objekte() == ALLE_CD and vermutet() == VERMUTET_C | VERMUTET_D
+    check("Positivkontrolle: beide Schemata ganz erfasst (und nichts sonst), in beiden je eine vermutete Beziehung "
+          "aus JEDER der zwei Regeln", aufbau, (st.get("ergebnis"), sorted(objekte() ^ ALLE_CD), sorted(vermutet())))
+    if not aufbau:
+        return
+    check("Status fuehrt JE SCHEMA Zaehler und Ergebnis", st["schemata"] == ["c", "d"]
+          and {k: (je(st, k, "dateien_gesamt"), je(st, k, "dateien_neu"), je(st, k, "dateien_fertig"), je(st, k, "ergebnis"))
+               for k in ("c", "d")} == {"c": (2, 2, 2, "fertig"), "d": (2, 2, 2, "fertig")}
+          and all(je(st, k, "ende") == st["ende"] for k in ("c", "d")), st.get("je_schema"))
+    check("... und steht so im Status auf der Platte", bool(st.get("je_schema")) and I.status().get("je_schema") == st.get("je_schema")
+          and I.status().get("laeuft") is False)
+    # Dateimuster je Schema
+    st = I.lauf([], quellen=qcd(muster_c="*.sql", muster_d="*.ddl"), prozesse=1, ordner_schutz=False)
+    check("Dateimuster JE SCHEMA: c nur .sql, d nur .ddl – im selben Lauf",
+          objekte() == NUR_SQL_C | {"hr.nur_ddl2"}, sorted(objekte()))
+    check("... was nicht mehr passt, wird im jeweiligen Schema ausgetragen",
+          (je(st, "c", "entfernt"), je(st, "d", "entfernt"), st["entfernt"]) == (1, 1, 2)
+          and (je(st, "c", "dateien_gesamt"), je(st, "d", "dateien_gesamt")) == (1, 1), st.get("je_schema"))
+    st = I.lauf([], quellen=qcd(), prozesse=1, ordner_schutz=False)
+    # Ableiten aus Spaltennamen je Schema
+    st = I.lauf([], quellen=qcd(fk_c=True, fk_d=False), prozesse=1, ordner_schutz=False)
+    check("Ableiten JE SCHEMA: nur der Schalter geaendert -> trotzdem neu abgeleitet (keine Datei neu)",
+          st["ergebnis"] == "fertig" and st["dateien_neu"] == 0, (st["ergebnis"], st["dateien_neu"]))
+    check("... c leitet ab, d nicht (beide Regeln)", vermutet() == VERMUTET_C, sorted(vermutet()))
+    st = I.lauf([], quellen=qcd(fk_c=False, fk_d=True), prozesse=1, ordner_schutz=False)
+    check("... umgekehrt: d leitet ab, c nicht (beide Regeln)", vermutet() == VERMUTET_D, sorted(vermutet()))
+    st = I.lauf([], quellen=qcd(fk_c=False, fk_d=False), prozesse=1, ordner_schutz=False)
+    check("... beide aus: keine vermutete Beziehung", vermutet() == set(), sorted(vermutet()))
+    st = I.lauf([], quellen=qcd(fk_c=False, fk_d=False), prozesse=1, ordner_schutz=False)
+    check("Gleicher Schalterstand, nichts geaendert: unveraendert (kein Dauer-Ableiten)", st["ergebnis"] == "unveraendert",
+          st["ergebnis"])
+    I.lauf([], quellen=qcd(), prozesse=1, ordner_schutz=False)
+    # Lauf NUR ueber ein Schema
+    ende_d = je(I.status(), "d", "ende")
+    time.sleep(1.1)        # der Zeitstempel hat Sekundenaufloesung – sonst waere "anderer Lauf" nicht messbar
+    with (QC / "c.sql").open("a") as fh:
+        fh.write("CREATE TABLE erp.neu_c (id int PRIMARY KEY);\n")
+    with (QD / "d.sql").open("a") as fh:
+        fh.write("CREATE TABLE hr.neu_d (id int PRIMARY KEY);\n")
+    (QD / "d.ddl").unlink()
+    st = I.lauf([], quellen=qcd(), prozesse=1, ordner_schutz=False, nur={"c"})
+    check("nur={c}: der Lauf nennt und erfasst NUR c", st["schemata"] == ["c"] and st["dateien_neu"] == 1
+          and st["dateien_gesamt"] == 2 and je(st, "c", "dateien_neu") == 1, (st["schemata"], st["dateien_neu"], st["dateien_gesamt"]))
+    check("... die Aenderung in c ist im Graphen, die in d NICHT", "erp.neu_c" in objekte() and "hr.neu_d" not in objekte(),
+          sorted(objekte()))
+    check("... in d wird auch nichts AUSGETRAGEN (dort wurde nicht nachgesehen)", "hr.nur_ddl2" in objekte()
+          and bestand(QD) == 2 and st["entfernt"] == 0, (sorted(objekte()), bestand(QD), st["entfernt"]))
+    check("... und das letzte Ergebnis von d bleibt stehen (anderer Lauf, anderer Zeitpunkt)",
+          ende_d is not None and je(st, "d", "ende") == ende_d and je(st, "d", "ergebnis") == "fertig"
+          and je(st, "c", "ende") == st["ende"] != ende_d, (je(st, "d"), ende_d, st["ende"]))
+    st = I.lauf([], quellen=qcd(), prozesse=1, ordner_schutz=False, nur={"d"})
+    check("nur={d}: jetzt kommen die Aenderungen von d (neu gelesen UND ausgetragen)",
+          "hr.neu_d" in objekte() and "hr.nur_ddl2" not in objekte() and st["schemata"] == ["d"]
+          and (je(st, "d", "dateien_neu"), je(st, "d", "entfernt")) == (1, 1), (sorted(objekte()), je(st, "d")))
+    # Entferntes Schema: jeder Lauf traegt es aus, auch einer ohne ein einziges Schema
+    with (QC / "c.sql").open("a") as fh:
+        fh.write("CREATE TABLE erp.noch_nicht (id int PRIMARY KEY);\n")
+    st = I.lauf([], quellen=qcd()[:1], prozesse=1, ordner_schutz=False, nur=set())
+    check("nur=leer nach dem Entfernen von d: d ist ausgetragen, c wurde NICHT angefasst",
+          bestand(QD) == 0 and not any(o.startswith("hr.") for o in objekte()) and "erp.noch_nicht" not in objekte()
+          and "erp.neu_c" in objekte() and st["schemata"] == [] and st["dateien_gesamt"] == 0,
+          (bestand(QD), sorted(objekte()), st["schemata"], st["dateien_gesamt"]))
+    check("... und der Status vergisst das entfernte Schema", set(st.get("je_schema") or {}) == {"c"}, set(st.get("je_schema") or {}))
+    # Neue Parser-Fassung: gilt fuer den GANZEN Bestand – ein beschraenkter Lauf liest trotzdem alles
+    I.lauf([], quellen=qcd(), prozesse=1, ordner_schutz=False)
+    con = S.roh_oeffnen()
+    S.roh_fassung_setzen(con, I.parser.FASSUNG - 1)
+    con.commit()
+    con.close()
+    st = I.lauf([], quellen=qcd(), prozesse=1, ordner_schutz=False, nur={"c"})
+    con = S.roh_oeffnen()
+    fassung = S.roh_fassung(con)
+    con.close()
+    check("Alte Parser-Fassung + nur={c}: ALLE Schemata neu gelesen (sonst bliebe d fuer immer alt)",
+          st["schemata"] == ["c", "d"] and st["dateien_neu"] == st["dateien_gesamt"] == 3 and fassung == I.parser.FASSUNG,
+          (st["schemata"], st["dateien_neu"], st["dateien_gesamt"], fassung))
+
+
+_abschnitt_je_schema()
 
 # ─── 4. Kette ───────────────────────────────────────────────────────────────
 print("4. Kette")
@@ -611,12 +847,58 @@ check("Speichern: normiert, loescht entfernte Schemata NUR mit Bestaetigung",
       and any(isinstance(n, ast.Constant) and n.value == "loeschen_bestaetigt" for n in ast.walk(fn)))
 check("Upload nimmt Begleitdokumente an (upload_endungen, nicht nur das Dateimuster)",
       nennt(FUNK.get("sql_admin_upload"), "upload_endungen"))
-check("Erfassung schliesst Begleitdokumente ein (erfassungs_muster)",
-      nennt(FUNK.get("_sql_erfassen_anstossen"), "erfassungs_muster"))
+check("Erfassung nimmt ihre Quellen aus der EINEN Stelle (einstellungen.quellen – Muster und Ableiten je Schema)",
+      ruft(FUNK.get("_sql_erfassen_anstossen"), "_schema_quellen") and ruft(FUNK.get("_schema_quellen"), "quellen")
+      and not nennt(FUNK.get("_sql_erfassen_anstossen"), "erfassungs_muster"))
 check("Verwaltung meldet die Upload-Endungen an den Reiter", nennt(FUNK.get("sql_admin_lesen"), "upload_endungen"))
-cfgx, _f, _h = E.normieren({"dateimuster": "*.yaml"})
+cfgx = E.normieren({"schemata": [{"name": "X", "dateimuster": "*.yaml"}]})[0]["schemata"][0]
 check("Begleitdokumente: Upload und Erfassung ausgefuehrt", E.upload_endungen(cfgx) == {".yaml", ".md", ".docx", ".pdf"}
       and E.erfassungs_muster(cfgx) == "*.yaml,*.md,*.docx,*.pdf", (E.upload_endungen(cfgx), E.erfassungs_muster(cfgx)))
+
+# Erfassung und Einstellungen sind an das SCHEMA gebunden (Vorgabe 2026-11-10)
+check("Kein Start der Erfassung ohne Schema in der Adresse (POST /api/sql/admin/index gibt es nicht mehr)",
+      ("post", "/api/sql/admin/index") not in sql_routen and ("post", "/api/sql/admin/schema/{sid}/index") in sql_routen,
+      sorted(k for k in sql_routen if "index" in k[1]))
+
+
+def anstoss_nur_sid(fn):
+    """Jeder Anstoss in ``fn`` beschraenkt auf ``{sid}`` (zweites Argument) – am Syntaxbaum."""
+    # Direkt gerufen ODER ueber asyncio.to_thread(_sql_erfassen_anstossen, cfg, {sid})
+    argumente = []
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Call):
+            continue
+        if getattr(n.func, "id", "") == "_sql_erfassen_anstossen":
+            argumente.append(n.args)
+        elif getattr(n.func, "attr", "") == "to_thread" and n.args and getattr(n.args[0], "id", "") == "_sql_erfassen_anstossen":
+            argumente.append(n.args[1:])
+    return bool(argumente) and all(len(a) == 2 and isinstance(a[1], ast.Set) and len(a[1].elts) == 1
+                                   and getattr(a[1].elts[0], "id", "") == "sid" for a in argumente)
+
+
+for name in ("sql_admin_upload", "sql_admin_datei_loeschen", "sql_admin_index_start"):
+    check(f"{name}: erfasst NUR das Schema aus der Adresse", FUNK.get(name) is not None and anstoss_nur_sid(FUNK[name]))
+fn = FUNK.get("_sql_erfassen_anstossen")
+kw_namen = {k.arg for n in ast.walk(fn) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "anstossen"
+            for k in n.keywords} if fn else set()
+check("_sql_erfassen_anstossen reicht die Beschraenkung durch (nur=) und setzt KEIN gemeinsames Muster/Ableiten",
+      "nur" in kw_namen and not ({"muster", "fk_ableiten"} & kw_namen), kw_namen)
+check("Upload prueft gegen das Dateimuster DIESES Schemas", ruft(FUNK.get("sql_admin_upload"), "schema_von"))
+check("Frage (Seite): Dialekt und Hoechstzahlen aus den gewaehlten Schemata", ruft(FUNK.get("sql_frage"), "fuer_frage"))
+schema_zugriffe = [(fn.name, n.slice.value) for fn in FUNK.values() if fn.name.startswith(("sql_", "_sql_"))
+                   for n in ast.walk(fn) if isinstance(n, ast.Subscript) and getattr(n.value, "id", "") in ("cfg", "alt")
+                   and isinstance(n.slice, ast.Constant) and n.slice.value in SCHEMA_FELDER]
+check("Kein Endpunkt liest ein Schema-Feld von der obersten Ebene (cfg[\"dialekt\"] usw.)", not schema_zugriffe,
+      schema_zugriffe)
+SKILL = ast.parse((ROOT / "skills/schema_graph/main.py").read_text(encoding="utf-8"))
+skill_zugriffe = [n.slice.value for n in ast.walk(SKILL) if isinstance(n, ast.Subscript)
+                  and getattr(n.value, "id", "") == "cfg"
+                  and isinstance(n.slice, ast.Constant) and n.slice.value in SCHEMA_FELDER]
+skill_get = [n.args[0].value for n in ast.walk(SKILL) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "get"
+             and getattr(n.func.value, "id", "") == "cfg"
+             and n.args and isinstance(n.args[0], ast.Constant) and n.args[0].value in SCHEMA_FELDER]
+check("Chat-Werkzeug: ebenso (fuer_frage statt cfg[...])", not skill_zugriffe and not skill_get
+      and any(isinstance(n, ast.Attribute) and n.attr == "fuer_frage" for n in ast.walk(SKILL)), (skill_zugriffe, skill_get))
 fn = FUNK.get("_sql_erfassen_anstossen")
 kws = {k.arg: getattr(k.value, "value", None) for n in ast.walk(fn) if isinstance(n, ast.Call)
        and getattr(n.func, "attr", "") == "anstossen" for k in n.keywords} if fn else {}
@@ -667,8 +949,11 @@ check("schema_zugang: nicht freigegeben -> nichts", z["darf"] is False and z["er
 ns2["_AKTIV"][0] = False
 z = ns2["schema_zugang"]("bert")
 check("schema_zugang: Skill aus -> nichts", z["darf"] is False and z["erlaubt"] == set(), z)
-q = ns2["_schema_quellen"]({"schemata": [{"id": "erp", "name": "ERP"}]})
-check("_schema_quellen: je Schema GENAU der feste Ordner", q == [{"id": "erp", "ordner": [str(E.ordner_fuer("erp"))]}], q)
+q = ns2["_schema_quellen"](E.normieren({"schemata": [{"id": "erp", "name": "ERP", "dateimuster": "*.ddl",
+                                                           "fk_ableiten": False}]})[0])
+check("_schema_quellen: je Schema GENAU der feste Ordner, mit SEINEM Muster und SEINEM Ableiten",
+      q == [{"id": "erp", "ordner": [str(E.ordner_fuer("erp"))], "muster": "*.ddl,*.md,*.docx,*.pdf",
+             "fk_ableiten": False}], q)
 
 # ─── 7. Agent und Chat ──────────────────────────────────────────────────────
 print("7. Agent und Chat")
@@ -761,6 +1046,10 @@ check("chat.js schickt sql_schemata nur bei Auswahl und speichert sie je Sitzung
 panel = settings[settings.find('id="settings-tab-sql"'):settings.find('id="settings-tab-tracks"')]
 check("Reiter: keine Ordner- und Gruppenfelder mehr", "sqadm-ordner" not in panel and "sqadm-grp" not in panel
       and "sqladm.groups" not in panel and 'id="sqadm-schemata"' in panel)
+feste_felder = sorted(set(re.findall(r'<(?:input|select|textarea)\b[^>]*\bid="([\w-]+)"', panel)))
+check("Reiter: fest im Markup stehen NUR die beiden gemeinsamen Felder – alles andere zeichnet das Schema",
+      feste_felder == ["sqadm-chat", "sqadm-prozesse"], feste_felder)
+check("Reiter: kein gemeinsamer Erfassungs-Abschnitt mehr", "sq-sect-erf" not in panel and 'id="sqadm-start"' not in panel)
 
 I18N = (F / "js/i18n.js").read_text(encoding="utf-8")
 grenze = I18N.find("\n    en: {")

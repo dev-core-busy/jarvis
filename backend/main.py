@@ -1914,7 +1914,7 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/tracks/admin/.*",                 "Short Tracks · Verwaltung"),
     # SQL-Assistent
     ("POST",   r"/api/sql/frage",                       "SQL-Assistent · Frage gestellt"),
-    ("POST",   r"/api/sql/admin/index",                 "SQL-Assistent · Erfassung gestartet"),
+    ("POST",   rf"/api/sql/admin/schema/{_ID}/index",   "SQL-Assistent · Erfassung gestartet"),
     ("POST",   r"/api/sql/admin/index/abbrechen",       "SQL-Assistent · Erfassung abgebrochen"),
     ("PUT",    r"/api/sql/admin",                       "SQL-Assistent · Einstellungen gespeichert"),
     ("POST",   rf"/api/sql/admin/schema/{_ID}/upload",  "SQL-Assistent · Schema-Dateien hochgeladen"),
@@ -2721,9 +2721,10 @@ def _schema_cfg() -> dict:
 
 
 def _schema_quellen(cfg: dict) -> list:
-    """Schemata als Quellen des Indexlaufs – je Schema der FESTE Ordner."""
+    """Schemata als Quellen des Indexlaufs – je Schema der FESTE Ordner, sein
+    Dateimuster und sein Ableiten aus Spaltennamen."""
     from backend import schema_graph_einstellungen as _sge
-    return [{"id": s["id"], "ordner": [str(_sge.ordner_fuer(s["id"]))]} for s in cfg["schemata"]]
+    return _sge.quellen(cfg)
 
 
 def schema_zugang(user: str) -> dict:
@@ -17736,8 +17737,9 @@ async def sql_status(user: str = Depends(require_schema_access)):
     from backend import schema_graph_dienst as _sgd
     from backend import schema_graph_index as _sgi
     cfg = await asyncio.to_thread(_schema_cfg)
+    # Der Dialekt steht je Schema in ``schemata`` (er gehoert zur Datenbank).
     info = await asyncio.to_thread(_sgd.graph_info, None, cfg["schemata"])
-    return JSONResponse({"ok": True, **info, "dialekt": cfg["dialekt"], "frage_max": SQL_FRAGE_MAX,
+    return JSONResponse({"ok": True, **info, "frage_max": SQL_FRAGE_MAX,
                          "erfassung_laeuft": bool(_sgi.status().get("laeuft"))})
 
 
@@ -17761,7 +17763,10 @@ async def sql_frage(request: Request, user: str = Depends(require_schema_access)
     erlaubt = await asyncio.to_thread(_sql_auswahl, body.get("schemata"))
     if not erlaubt:
         return JSONResponse({"error": _SQL_KEINE_AUSWAHL}, status_code=400)
-    dialekt = body.get("dialekt") or cfg["dialekt"]
+    # Dialekt und Hoechstzahlen kommen aus den GEWAEHLTEN Schemata.
+    from backend import schema_graph_einstellungen as _sge
+    vorgabe = _sge.fuer_frage(cfg, erlaubt)
+    dialekt = body.get("dialekt") or vorgabe["dialekt"]
     if not isinstance(dialekt, str) or dialekt.strip().lower() not in _sgr.DIALEKTE:
         return JSONResponse({"error": "Unbekannter SQL-Dialekt."}, status_code=400)
     dialekt = dialekt.strip().lower()
@@ -17785,8 +17790,8 @@ async def sql_frage(request: Request, user: str = Depends(require_schema_access)
                                           "lädt Schema-Dateien unter Einstellungen → SQL-Assistent hoch."},
                                 status_code=409)
         erg = await _sgr.sql_erzeugen(frage, dialekt=dialekt, con=con, erlaubt=erlaubt,
-                                      max_tabellen=cfg["max_tabellen"], max_spalten=cfg["max_spalten"],
-                                      praefixe=praefixe)
+                                      max_tabellen=vorgabe["max_tabellen"],
+                                      max_spalten=vorgabe["max_spalten"], praefixe=praefixe)
     except Exception as e:  # noqa: BLE001
         from backend.llm import scrub_secrets
         return JSONResponse({"error": scrub_secrets(str(e))}, status_code=500)
@@ -17897,13 +17902,18 @@ async def sql_verbindung(von: str = "", nach: str = "", schemata: str = "",
 SQL_UPLOAD_MIN_FREI = 2 * 1024 ** 3
 
 
-def _sql_erfassen_anstossen(cfg: dict | None = None) -> str:
-    """Automatische Erfassung nach jeder Aenderung (Vorgabe 2026-11-07)."""
+def _sql_erfassen_anstossen(cfg: dict | None = None, nur=None) -> str:
+    """Erfassung anstossen (automatisch nach jeder Aenderung, Vorgabe 2026-11-07).
+
+    ``nur``: Kennungen der Schemata, die erfasst werden – die Erfassung ist an
+    das Schema gebunden (Vorgabe 2026-11-10). ``None`` = alle (Start nach einem
+    Update). Muster und Ableiten bringt jede Quelle selbst mit
+    (``schema_graph_einstellungen.quellen``).
+    """
     from backend import schema_graph_index as _sgi
     cfg = cfg or _schema_cfg()
-    from backend import schema_graph_einstellungen as _sge
-    return _sgi.anstossen([], quellen=_schema_quellen(cfg), muster=_sge.erfassungs_muster(cfg),
-                          prozesse=cfg["prozesse"], fk_ableiten=cfg["fk_ableiten"], ordner_schutz=False)
+    return _sgi.anstossen([], quellen=_schema_quellen(cfg), prozesse=cfg["prozesse"],
+                          ordner_schutz=False, nur=None if nur is None else set(nur))
 
 
 def _sql_fassung_veraltet() -> bool:
@@ -17970,8 +17980,12 @@ async def sql_admin_lesen(_user: str = Depends(require_local_auth)):
     dateien = await asyncio.to_thread(_dateien)
     from backend import schema_graph_einstellungen as _sge
     return JSONResponse({"ok": True, "cfg": cfg, "graph": graph, "dateien": dateien,
-                         "upload_endungen": sorted(_sge.upload_endungen(cfg)),
-                         "erfassung": _sgi.status(), "skill_aktiv": _skill_active(_SCHEMA_SKILL)})
+                         # Je Schema: was SEIN Dateimuster (plus Begleitdokumente) annimmt
+                         "upload_endungen": {s["id"]: sorted(_sge.upload_endungen(s)) for s in cfg["schemata"]},
+                         # Vorgaben fuer ein neu angelegtes Schema (der Reiter fuehrt keine eigenen)
+                         "schema_vorgaben": dict(_sge.SCHEMA_VORGABEN),
+                         "erfassung": _sgi.status(), "vorgemerkt": _sgi.vorgemerkt(),
+                         "skill_aktiv": _skill_active(_SCHEMA_SKILL)})
 
 
 @app.put("/api/sql/admin")
@@ -18012,10 +18026,16 @@ async def sql_admin_speichern(request: Request, _user: str = Depends(require_loc
             # Gespeichert ist die Liste trotzdem – der Ordner entsteht beim
             # ersten Upload erneut; der Grund muss aber SICHTBAR sein.
             hinweise.append(f"Ablage für „{s['name']}“ nicht angelegt: {e}")
-    erfassung = _sql_erfassen_anstossen(cfg) if (weg or alt.get("dateimuster") != cfg["dateimuster"]
-                                                 or alt.get("fk_ableiten") != cfg["fk_ableiten"]) else None
+    # Neu erfasst werden die Schemata, deren Dateimuster oder Ableiten sich
+    # geaendert hat – nur sie. Ein entferntes Schema traegt jeder Lauf aus
+    # (auch einer ohne ein einziges Schema in ``nur``).
+    vorher = {s["id"]: s for s in alt["schemata"]}
+    betroffen = {s["id"] for s in cfg["schemata"] if s["id"] in vorher and (
+        vorher[s["id"]].get("dateimuster") != s["dateimuster"]
+        or vorher[s["id"]].get("fk_ableiten") != s["fk_ableiten"])}
+    erfassung = _sql_erfassen_anstossen(cfg, betroffen) if (weg or betroffen) else None
     return JSONResponse({"ok": True, "cfg": cfg, "hinweise": hinweise, "geloescht": geloescht,
-                         "erfassung": erfassung})
+                         "erfassung": erfassung, "erfasst": sorted(betroffen)})
 
 
 @app.get("/api/sql/admin/schema/{sid}/dateien")
@@ -18050,7 +18070,8 @@ async def sql_admin_upload(sid: str, files: list[UploadFile] = File(...), pfade:
         return JSONResponse({"error": "pfade: keine gültige Liste."}, status_code=400)
     if not isinstance(rel_liste, list):
         rel_liste = []
-    endungen = _sge.upload_endungen(cfg)
+    # Angenommen wird, was das Dateimuster DIESES Schemas zulaesst.
+    endungen = _sge.upload_endungen(_sge.schema_von(cfg, sid))
     try:
         basis = await asyncio.to_thread(_sgf.ordner_anlegen, sid)
     except _sgf.DateiFehler as e:
@@ -18082,7 +18103,7 @@ async def sql_admin_upload(sid: str, files: list[UploadFile] = File(...), pfade:
             gespeichert.append(erg)
         except _sgf.DateiFehler as e:
             abgelehnt.append({"name": rel, "grund": str(e)})
-    erfassung = _sql_erfassen_anstossen() if gespeichert else None
+    erfassung = _sql_erfassen_anstossen(cfg, {sid}) if gespeichert else None
     return JSONResponse({"ok": True, "gespeichert": gespeichert, "abgelehnt": abgelehnt,
                          "erfassung": erfassung})
 
@@ -18091,30 +18112,34 @@ async def sql_admin_upload(sid: str, files: list[UploadFile] = File(...), pfade:
 async def sql_admin_datei_loeschen(sid: str, pfad: str = "", _user: str = Depends(require_local_auth)):
     """Datei oder Ordner im Schema loeschen; danach Erfassung (traegt aus)."""
     from backend import schema_graph_dateien as _sgf
-    if await asyncio.to_thread(_sql_schema_pruefen, sid) is None:
+    cfg = await asyncio.to_thread(_sql_schema_pruefen, sid)
+    if cfg is None:
         return JSONResponse({"error": "Unbekanntes Schema."}, status_code=404)
     try:
         erg = await asyncio.to_thread(_sgf.loeschen, sid, pfad)
     except _sgf.DateiFehler as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse({"ok": True, **erg, "erfassung": _sql_erfassen_anstossen()})
+    return JSONResponse({"ok": True, **erg, "erfassung": _sql_erfassen_anstossen(cfg, {sid})})
 
 
 @app.get("/api/sql/admin/index")
 async def sql_admin_index_status(_user: str = Depends(require_local_auth)):
     from backend import schema_graph_index as _sgi
-    return JSONResponse({"ok": True, "erfassung": _sgi.status(), "hier": _sgi.laeuft_hier()})
+    return JSONResponse({"ok": True, "erfassung": _sgi.status(), "hier": _sgi.laeuft_hier(),
+                         "vorgemerkt": _sgi.vorgemerkt()})
 
 
-@app.post("/api/sql/admin/index")
-async def sql_admin_index_start(_user: str = Depends(require_local_auth)):
-    """Erfassung von Hand (z. B. nach Aenderung von Dateien direkt auf dem Server)."""
-    cfg = await asyncio.to_thread(_schema_cfg)
-    if not cfg["schemata"]:
-        return JSONResponse({"error": "Noch kein Schema angelegt."}, status_code=400)
-    antwort = await asyncio.to_thread(_sql_erfassen_anstossen, cfg)
+@app.post("/api/sql/admin/schema/{sid}/index")
+async def sql_admin_index_start(sid: str, _user: str = Depends(require_local_auth)):
+    """Erfassung DIESES Schemas von Hand (z. B. nach Aenderung von Dateien
+    direkt auf dem Server). Laeuft schon eine Erfassung, wird sie vorgemerkt."""
+    cfg = await asyncio.to_thread(_sql_schema_pruefen, sid)
+    if cfg is None:
+        return JSONResponse({"error": "Unbekanntes Schema."}, status_code=404)
+    antwort = await asyncio.to_thread(_sql_erfassen_anstossen, cfg, {sid})
     from backend import schema_graph_index as _sgi
-    return JSONResponse({"ok": True, "antwort": antwort, "erfassung": _sgi.status()})
+    return JSONResponse({"ok": True, "antwort": antwort, "erfassung": _sgi.status(),
+                         "vorgemerkt": _sgi.vorgemerkt()})
 
 
 @app.post("/api/sql/admin/index/abbrechen")

@@ -9624,12 +9624,32 @@ body.light .cp-karte .kb-btn-danger { color: color-mix(in srgb, var(--danger) 78
 .cp-knopf:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Einstellungen → SQL-Assistent (sql_admin.js) ──
-   Eine Karte je Schema mit Ablagefeld (Bauform wie die Ablage in /wissen) und
-   aufklappbarer Dateiliste. `min-width: 0` an Namensfeld und Dateiname, damit
-   ein langer Name den Muelleimer nicht aus der Zeile schiebt. */
-.sqadm-schema { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
-    margin-bottom: 10px; background: rgba(var(--fg-rgb), 0.02); display: flex;
-    flex-direction: column; gap: 8px; }
+   Je Schema EIN Container (Bauform `.kb-section` mit Klapp-Kopfzeile wie die
+   uebrigen Abschnitte der Einstellungen): Name, Dateien (Ablagefeld wie in
+   /wissen, aufklappbare Dateiliste), Einstellungen und Erfassung. `min-width: 0`
+   an Namensfeld, Titel und Dateiname, damit ein langer Name nichts aus der
+   Zeile schiebt. */
+.sqadm-schema { margin-bottom: 1rem; }
+.sqadm-schema > .kb-collapse-header { gap: 12px; }
+.sqadm-titel { min-width: 0; overflow-wrap: anywhere; }
+.sqadm-kopf-re { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.sqadm-kopfinfo { font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap; }
+.sqadm-koerper { display: flex; flex-direction: column; gap: 8px; }
+/* Teile eines Containers: Dateien, Einstellungen, Erfassung */
+.sqadm-teil { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border);
+    padding-top: 12px; margin-top: 6px; }
+.sqadm-teil-h { margin: 0; font-size: 0.86rem; font-weight: 600; color: var(--text-primary); }
+.sqadm-teil > .kb-hint, .sqadm-teil > .form-group { margin: 0; }
+/* Das Kaestchen behaelt seine Groesse neben einer langen Beschriftung (sonst
+   staucht die Flex-Zeile es zusammen). */
+.sqadm-teil .checkbox-group input { flex: 0 0 auto; }
+/* .btn-* sind 100 % breit – in der Knopfzeile nur so breit wie ihr Text */
+.sqadm-aktionen { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sqadm-aktionen > button { flex: 0 0 auto; width: auto; }
+.sqadm-fuss { margin: 2px 0 4px; }
+.sqadm-einst-status, .sqadm-erf-status, .sqadm-erf-stand { font-size: 0.85rem; }
+.sqadm-erf-stand:empty, .sqadm-erf-status:empty, .sqadm-einst-status:empty { display: none; }
+#sq-sect-allg { margin-top: 1rem; }
 .sqadm-kopf { display: flex; align-items: center; gap: 8px; }
 .sqadm-kopf .sqadm-name { flex: 1 1 auto; min-width: 0; }
 .sqadm-kopf .am-vorg-act { flex: 0 0 auto; }

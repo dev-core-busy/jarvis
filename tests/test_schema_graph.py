@@ -1223,14 +1223,20 @@ _ag = types.ModuleType("backend.agent")
 _ag._actor_cv = contextvars.ContextVar("jarvis_actor", default=None)
 sys.modules["backend.agent"] = _ag
 _ZUGANG = {"darf": True, "erlaubt": {""}, "admin": True}
-_CFG = {"schemata": [{"id": "", "name": "Probe"}],
-        "dialekt": "postgresql", "dateimuster": "*.sql,*.ddl", "prozesse": 1, "fk_ableiten": True,
-        "max_tabellen": 12, "max_spalten": 40, "index_aus_chat": False}
+# Form wie schema_graph_einstellungen.normieren: Dialekt, Muster, Ableiten und
+# Hoechstzahlen stehen JE SCHEMA (seit 2026-11-10), gemeinsam nur prozesse und
+# index_aus_chat. Zwei Schemata, die sich in jedem Punkt unterscheiden.
+_CFG = {"schemata": [{"id": "", "name": "Probe", "dialekt": "postgresql", "dateimuster": "*.sql,*.ddl",
+                      "fk_ableiten": True, "max_tabellen": 12, "max_spalten": 40},
+                     {"id": "fremd", "name": "Fremd", "dialekt": "oracle", "dateimuster": "*.yaml",
+                      "fk_ableiten": False, "max_tabellen": 30, "max_spalten": 25}],
+        "prozesse": 1, "index_aus_chat": False}
 _mm = types.ModuleType("backend.main")
 _mm.schema_zugang = lambda user: dict(_ZUGANG)
 _mm._schema_cfg = lambda: dict(_CFG)
 _ANGESTOSSEN = []
-_mm._sql_erfassen_anstossen = lambda cfg=None: (_ANGESTOSSEN.append(cfg), "gestartet")[1]
+# ECHTE Signatur: _sql_erfassen_anstossen(cfg=None, nur=None)
+_mm._sql_erfassen_anstossen = lambda cfg=None, nur=None: (_ANGESTOSSEN.append(nur), "gestartet")[1]
 sys.modules["backend.main"] = _mm
 
 spec = importlib.util.spec_from_file_location("skills.schema_graph.main", ROOT / "skills/schema_graph/main.py")
@@ -1297,6 +1303,40 @@ _ZUGANG["admin"] = True
 antwort = asyncio.run(_als("probe", lambda: t_idx.execute(aktion="starten", _sql_schemata=[""])))
 check("Erfassen aus dem Chat: Admin + Schalter stoesst die EINE Erfassung an",
       "gestartet" in antwort and len(_ANGESTOSSEN) == 1, (antwort, _ANGESTOSSEN))
+check("... und zwar NUR fuer das im Chat gewaehlte Schema, das die Antwort beim Namen nennt",
+      _ANGESTOSSEN == [{""}] and "Probe" in antwort and "Fremd" not in antwort, (antwort, _ANGESTOSSEN))
+_ZUGANG["erlaubt"] = {"", "fremd"}
+antwort = asyncio.run(_als("probe", lambda: t_idx.execute(aktion="starten", _sql_schemata=["fremd"])))
+check("... ein anderes gewaehltes Schema -> dieses", _ANGESTOSSEN[1:] == [{"fremd"}] and "Fremd" in antwort
+      and "Probe" not in antwort, (antwort, _ANGESTOSSEN))
+antwort = asyncio.run(_als("probe", lambda: t_idx.execute(aktion="starten", _sql_schemata=[])))
+check("... OHNE Auswahl wird nichts erfasst (kein stiller Lauf ueber alle), mit Grund und Weg",
+      len(_ANGESTOSSEN) == 2 and "Kein SQL-Schema gewählt" in antwort and "SQL-Schema" in antwort, (antwort, _ANGESTOSSEN))
+# Frage aus dem Chat: Dialekt und Hoechstzahlen kommen aus den GEWAEHLTEN Schemata
+_gefragt = []
+_echt_erzeugen = R.sql_erzeugen
+
+
+async def _erzeugen_attrappe(frage, dialekt="allgemein", max_tabellen=12, max_spalten=40, con=None, modell=None,
+                             erlaubt=None, praefixe=None):
+    _gefragt.append((dialekt, max_tabellen, max_spalten, sorted(erlaubt or [])))
+    return {"fehler": "Probe"}
+
+R.sql_erzeugen = _erzeugen_attrappe
+try:
+    for _ausw in ([""], ["fremd"], ["fremd", ""]):
+        asyncio.run(_als("probe", lambda: t_sql.execute(frage="x", _sql_schemata=_ausw)))
+    asyncio.run(_als("probe", lambda: t_sql.execute(frage="x", dialekt="mysql", _sql_schemata=["fremd"])))
+finally:
+    R.sql_erzeugen = _echt_erzeugen
+if len(_gefragt) != 4:
+    abbruch(f"Positivkontrolle: die Frage erreichte die Erzeugung nicht ({_gefragt})")
+check("Frage ueber ein Schema: SEIN Dialekt und SEINE Hoechstzahlen",
+      _gefragt[0] == ("postgresql", 12, 40, [""]) and _gefragt[1] == ("oracle", 30, 25, ["fremd"]), _gefragt[:2])
+check("Frage ueber beide: Dialekt des ersten der Einstellungen, je die groessere Hoechstzahl",
+      _gefragt[2] == ("postgresql", 30, 40, ["", "fremd"]), _gefragt[2])
+check("Ein ausdruecklich genannter Dialekt gewinnt", _gefragt[3][0] == "mysql", _gefragt[3])
+_ZUGANG["erlaubt"] = {""}
 _CFG["index_aus_chat"] = False
 antwort = asyncio.run(_als("probe", lambda: t_idx.execute(aktion="status", _sql_schemata=[""])))
 check("Status nennt die sichtbare Quelle mit Zahlen", "Probe:" in antwort and "Tabellen" in antwort, antwort)

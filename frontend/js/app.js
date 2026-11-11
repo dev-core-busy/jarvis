@@ -809,9 +809,9 @@
 
         function _initSqlCollapse() {
             _collapseInit([
-                { hdr: 'sq-sect-quellen-hdr', body: 'sq-sect-quellen-body', tog: 'sq-sect-quellen-tog' },
+                // Die Container je Schema zeichnet und klappt sql_admin.js selbst
+                // (sie entstehen erst mit den Daten).
                 { hdr: 'sq-sect-allg-hdr',    body: 'sq-sect-allg-body',    tog: 'sq-sect-allg-tog'    },
-                { hdr: 'sq-sect-erf-hdr',     body: 'sq-sect-erf-body',     tog: 'sq-sect-erf-tog'     },
             ]);
         }
 

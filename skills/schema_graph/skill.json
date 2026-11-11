@@ -45,7 +45,7 @@
       {
         "name": "schema_index",
         "label": "Erfassung",
-        "desc": "Zeigt den Stand der Erfassung; Administratoren starten oder stoppen sie, wenn das aus dem Chat erlaubt ist."
+        "desc": "Zeigt den Stand der Erfassung je Schema; Administratoren starten sie für die im Chat gewählten Schemata oder stoppen sie, wenn das aus dem Chat erlaubt ist."
       }
     ],
     "use_cases": [
@@ -54,6 +54,6 @@
       "Wie hängen Auftrag und Lager zusammen?",
       "Wie weit ist die Erfassung des Schemas?"
     ],
-    "notes": "Schema-Quellen, Dialekt und das Erfassen (Start, Fortschritt, Abbruch) stehen im Reiter „SQL-Assistent“ der Einstellungen. Auf dem Server lässt sich das Erfassen auch als root im Programmverzeichnis starten: `bash deploy/als_dienst.sh venv/bin/python -m backend.schema_graph_index`. Die Güte hängt am Schema: deklarierte Fremdschlüssel und Kommentare verbessern die Treffer deutlich; abgeleitete Beziehungen sind Vermutungen und werden als solche ausgewiesen. Der Graph liegt in data/schema_graph auf dem Server."
+    "notes": "Im Reiter „SQL-Assistent“ der Einstellungen ist jedes Schema ein eigener Container: darin stehen seine Dateien, seine Einstellungen (Dialekt, Dateimuster, Ableiten von Beziehungen, Höchstzahlen je Frage) und seine Erfassung (Start, Fortschritt, Abbruch). Für alle Schemata gemeinsam gelten nur die Zahl der Leseprozesse und die Erlaubnis, aus dem Chat zu erfassen. Auf dem Server lässt sich das Erfassen auch als root im Programmverzeichnis starten: `bash deploy/als_dienst.sh venv/bin/python -m backend.schema_graph_index` (mit `--schema <Kennung>` nur ein Schema). Die Güte hängt am Schema: deklarierte Fremdschlüssel und Kommentare verbessern die Treffer deutlich; abgeleitete Beziehungen sind Vermutungen und werden als solche ausgewiesen. Der Graph liegt in data/schema_graph auf dem Server."
   }
 }

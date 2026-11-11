@@ -294,7 +294,7 @@ def _schema_und_name(schl_original: str) -> tuple[str, str]:
 
 def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
              fk_ableiten: bool = True, melde=None, abbruch=None,
-             quelle_von=None) -> dict:
+             quelle_von=None, fk_quellen=None) -> dict:
     """Baut ``graph.sqlite`` aus allen Rohfakten neu (in eine Nebendatei, dann
     atomarer Tausch). Rueckgabe: Zaehler des Laufs.
 
@@ -305,6 +305,11 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
     der Quelle (= dem Schema) haengt die Sichtbarkeit (Auswahl, ``schema_graph_rag``).
     Eine Datei ohne Quelle bekommt ``""`` – und ist damit fuer niemanden
     sichtbar (fail-closed), nur fuer Aufrufer ohne Filter (Tests, Kommandozeile).
+
+    ``fk_quellen``: Quellen, fuer deren Objekte Beziehungen aus Spaltennamen
+    abgeleitet werden (None = fuer alle, sofern ``fk_ableiten``). Entschieden
+    wird an der Tabelle, die die Spalte TRAEGT – das Ableiten ist eine
+    Einstellung des Schemas, aus dem sie stammt.
     """
     quelle_von = quelle_von or (lambda _d: "")
     melde = melde or (lambda _t: None)
@@ -446,7 +451,12 @@ def ableiten(roh_con: sqlite3.Connection, ziel: Path | None = None,
 
     if fk_ableiten:
         melde("Beziehungen aus Spaltennamen ableiten")
-        z["abgeleitet"] = _ableiten_aus_namen(g, auf, fk_spalten, kanten)
+        nur_oids = None
+        if fk_quellen is not None:
+            erlaubt_q = {str(q) for q in fk_quellen}
+            nur_oids = {oid for oid, q in g.execute("SELECT id, COALESCE(quelle,'') FROM objekt")
+                        if q in erlaubt_q}
+        z["abgeleitet"] = _ableiten_aus_namen(g, auf, fk_spalten, kanten, nur_oids)
 
     g.executemany("INSERT INTO kante VALUES (?,?,?,?,?)", kanten)
     z["mehrdeutig"] = auf.mehrdeutig
@@ -488,9 +498,12 @@ def _spalten_schreiben(g: sqlite3.Connection, oid: int, f: dict) -> None:
 _ID_ENDUNG = re.compile(r"^(?P<stamm>.+?)_?(?:id|nr|no|key|code|schluessel)$", re.I)
 
 
-def _ableiten_aus_namen(g, auf: _Aufloeser, fk_spalten: set, kanten: list) -> int:
+def _ableiten_aus_namen(g, auf: _Aufloeser, fk_spalten: set, kanten: list, nur_oids=None) -> int:
     """``kunde_id`` -> Tabelle ``kunde`` (auch ``kunden``/``kundes``/``tbl_kunde``)
     mit EINSPALTIGEM Primaerschluessel. Nur Spalten ohne deklarierten FK.
+
+    ``nur_oids``: nur Spalten DIESER Objekte (None = alle) – das Ableiten laesst
+    sich je Schema abschalten (``ableiten``, ``fk_quellen``).
 
     Bewusst eng: ein falsch erschlossener Join ist im SQL nicht von einem
     richtigen zu unterscheiden. Deshalb eigene Kantenart, die der Kontext fuer
@@ -509,7 +522,7 @@ def _ableiten_aus_namen(g, auf: _Aufloeser, fk_spalten: set, kanten: list) -> in
             "SELECT objekt_id, name, name_l FROM spalte WHERE pk=0 AND "
             "(name_l LIKE '%id' OR name_l LIKE '%nr' OR name_l LIKE '%no' OR name_l LIKE '%key' "
             "OR name_l LIKE '%code' OR name_l LIKE '%schluessel')").fetchall():
-        if (oid, name_l) in fk_spalten:
+        if (oid, name_l) in fk_spalten or (nur_oids is not None and oid not in nur_oids):
             continue
         m = _ID_ENDUNG.match(name_l)
         if not m:
@@ -533,7 +546,7 @@ def _ableiten_aus_namen(g, auf: _Aufloeser, fk_spalten: set, kanten: list) -> in
                        json.dumps([pk_ein[treffer]])))
         fk_spalten.add((oid, name_l))
         n += 1
-    return n + _ableiten_gleicher_pk(g, auf, fk_spalten, kanten, pk_ein)
+    return n + _ableiten_gleicher_pk(g, auf, fk_spalten, kanten, pk_ein, nur_oids)
 
 
 # Primaerschluessel-Namen, die die zweite Regel benutzt: zusammengesetzt
@@ -542,7 +555,8 @@ def _ableiten_aus_namen(g, auf: _Aufloeser, fk_spalten: set, kanten: list) -> in
 _PK_ZUSAMMENGESETZT = re.compile(r"[a-z0-9]{3,}_[a-z0-9_]+")
 
 
-def _ableiten_gleicher_pk(g, auf: _Aufloeser, fk_spalten: set, kanten: list, pk_ein: dict) -> int:
+def _ableiten_gleicher_pk(g, auf: _Aufloeser, fk_spalten: set, kanten: list, pk_ein: dict,
+                          nur_oids=None) -> int:
     """Zweite Regel: eine Spalte, die GENAU SO heisst wie der einspaltige
     Primaerschluessel GENAU EINER anderen Tabelle (bei mehreren: genau einer im
     eigenen Schema), verweist auf diese.
@@ -574,7 +588,7 @@ def _ableiten_gleicher_pk(g, auf: _Aufloeser, fk_spalten: set, kanten: list, pk_
             "SELECT s.objekt_id, s.name, s.name_l, s.pk FROM spalte s JOIN objekt o ON o.id = s.objekt_id "
             "WHERE o.art = 'tabelle'").fetchall():
         ziele = nach_pk.get(name_l)
-        if not ziele or (oid, name_l) in fk_spalten:
+        if not ziele or (oid, name_l) in fk_spalten or (nur_oids is not None and oid not in nur_oids):
             continue
         # Der eigene einspaltige Primaerschluessel verweist nicht auf sich selbst
         if ist_pk and pk_ein.get(oid, "").lower() == name_l:

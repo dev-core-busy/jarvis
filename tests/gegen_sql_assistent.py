@@ -14,6 +14,10 @@ Gruener Basislauf in der Kopie zuerst – ohne gruene Basis ist keine
 Gegenprobe deutbar. Ohne Bytecode (eine gleich grosse Sabotage in derselben
 Sekunde liesse sonst eine veraltete .pyc laden).
 Exit 0 = alle Proben beissen, 1 = mindestens eine nicht, 2 = konnte nicht laufen.
+
+Teillauf: ``--teil 2/6`` faehrt jede sechste Probe ab der zweiten – so lassen
+sich mehrere Teile nebeneinander fahren (jeder im eigenen Wegwerf-Baum). Die
+Bilanz nennt dann den Teil; "alle beissen" gilt erst, wenn JEDER Teil lief.
 """
 from __future__ import annotations
 
@@ -40,6 +44,7 @@ EI = "backend/schema_graph_einstellungen.py"
 IX = "backend/schema_graph_index.py"
 DI = "backend/schema_graph_dienst.py"
 MA = "backend/main.py"
+ST = "backend/schema_graph_store.py"
 AG = "backend/agent.py"
 SK = "skills/schema_graph/main.py"
 SJ = "frontend/js/sql.js"
@@ -108,7 +113,7 @@ PROBEN = [
     ("Parser-Fassung nie vermerkt (liest jedes Mal alles)", IX, W_ZUG,
      "            store.roh_fassung_setzen(con, parser.FASSUNG)", "            pass"),
     ("Anstoss waehrend eines Laufs verworfen", IX, W_ZUG,
-     '            _nachlauf = {"ordner": ordner, **kw}\n            return "vorgemerkt"', '            return "vorgemerkt"'),
+     '            _nachlauf = neu\n            return "vorgemerkt"', '            return "vorgemerkt"'),
     ("Fehlschlag verliert den Nachlauf", IX, W_ZUG,
      '                print(f"[SchemaGraph] Erfassung fehlgeschlagen: {e}", flush=True)', "                return"),
     # ── Werkzeuge
@@ -140,8 +145,8 @@ PROBEN = [
      "                gesp, abgl = await asyncio.to_thread(_sgf.zip_entpacken, sid, ordner_rel, f.file,",
      "                gesp, abgl = await asyncio.to_thread(_kb_unpack_zip, sid, ordner_rel, f.file,"),
     ("Feste Ordner mit Ordnerschutz erfasst", MA, W_ZUG,
-     '                          prozesse=cfg["prozesse"], fk_ableiten=cfg["fk_ableiten"], ordner_schutz=False)',
-     '                          prozesse=cfg["prozesse"], fk_ableiten=cfg["fk_ableiten"], ordner_schutz=True)'),
+     "                          ordner_schutz=False, nur=None if nur is None else set(nur))",
+     "                          ordner_schutz=True, nur=None if nur is None else set(nur))"),
     ("Schema samt Dateien ohne Bestaetigung geloescht", MA, W_ZUG,
      '    if weg and body.get("loeschen_bestaetigt") is not True:', "    if False:"),
     ("WebSocket reicht die Auswahl nicht weiter", MA, W_ZUG, "                        sql_schemata=sql_schemata,\n", ""),
@@ -226,8 +231,10 @@ PROBEN = [
      "var st2 = teil('sqladm-up-status'), fe2 = teil('sqladm-up-fehler');"),
     ("Kuerzung der Dateiliste nicht beziffert", SA, W_ADM, "var hinweis = d.gekappt ?", "var hinweis = false ?"),
     # ── Begleitdokumente, Netzfehler, Pfade, Anzeige (2026-11-08)
-    ("Upload ohne Begleitdokumente", MA, W_ZUG, "    endungen = _sge.upload_endungen(cfg)", "    endungen = _sge.endungen(cfg)"),
-    ("Erfassung ohne Begleitdokumente", MA, W_ZUG, "muster=_sge.erfassungs_muster(cfg),", 'muster=cfg["dateimuster"],'),
+    ("Upload ohne Begleitdokumente", MA, W_ZUG, "    endungen = _sge.upload_endungen(_sge.schema_von(cfg, sid))",
+     "    endungen = _sge.endungen(_sge.schema_von(cfg, sid))"),
+    ("Erfassung ohne Begleitdokumente", EI, W_ZUG, '             "muster": erfassungs_muster(s), "fk_ableiten": s["fk_ableiten"]}',
+     '             "muster": s["dateimuster"], "fk_ableiten": s["fk_ableiten"]}'),
     ("Erfassungsmuster ohne Dokumente", EI, W_ZUG, '        if "*" + e not in teile:\n            teile.append("*" + e)', "        pass"),
     ("Leerzeichen am Ende abgeschnitten", FD, W_ZUG, '    s = str(rel or "").replace("\\\\", "/")\n', '    s = str(rel or "").replace("\\\\", "/").strip()\n'),
     ("Leerraum-Pfadteil zugelassen", FD, W_ZUG, '        if not x.strip() or x.strip() in (".", "..") or x.startswith(".") or len(x) > MAX_TEIL:',
@@ -238,7 +245,7 @@ PROBEN = [
     ("Vorbehalt sieht gruen aus", SJ, W_UI, "            pill.className = 'sq-pill is-warn';", "            pill.className = 'sq-pill is-ok';"),
     ("Hauswissen unmaskiert", SJ, W_UI, "+ hw.map(function (h) { return esc(h.titel) + ' ('", "+ hw.map(function (h) { return h.titel + ' ('"),
     ("Reiter filtert mit dem Dateimuster statt mit den Server-Endungen", SA, W_ADM,
-     "            if (Array.isArray(this._uploadEndungen) && this._uploadEndungen.length) return this._uploadEndungen.slice();\n", ""),
+     "            if (Array.isArray(vom) && vom.length) return vom.slice();\n", ""),
     # ── Chat-Auswahl
     ("Chat-Auswahl: Vorgabe alle statt keins", SF, W_SF,
      "            if (_gewuenscht) { _an = new Set(_gewuenscht); _gewuenscht = null; }",
@@ -259,6 +266,94 @@ PROBEN = [
     ("Bestand: Heilung folgt Verknuepfungen", FD, W_ZUG,
      "                if stat.S_ISLNK(st.st_mode) or st.st_uid != ich", "                if st.st_uid != ich"),
     ("Altbestand-Ordner nicht nachgezogen", FD, W_ZUG, "            os.chmod(p, DIR_MODUS)   # auch einen Altbestand nachziehen\n", "            pass\n"),
+    # ── Einstellungen und Erfassung AM SCHEMA (Vorgabe 2026-11-10)
+    ("Schema-Feld auf oberster Ebene still verworfen", EI, W_ZUG, "    if veraltet:\n        fehler.append(", "    if False:\n        fehler.append("),
+    ("Altfassung: Wert geht nicht in die Schemata", EI, W_ZUG,
+     '    if alt and isinstance(roh.get("schemata"), list):', "    if False:"),
+    ("Altfassung ueberschreibt das eigene Feld des Schemas", EI, W_ZUG,
+     "[{**alt, **s} if isinstance(s, dict) else s", "[{**s, **alt} if isinstance(s, dict) else s"),
+    ("Frage: kleinste statt groesste Hoechstzahl", EI, W_ZUG,
+     '            "max_tabellen": max(s["max_tabellen"] for s in gewaehlt),', '            "max_tabellen": min(s["max_tabellen"] for s in gewaehlt),'),
+    ("Frage: Dialekt des letzten statt des ersten Schemas", EI, W_ZUG,
+     '    return {"dialekt": gewaehlt[0]["dialekt"],', '    return {"dialekt": gewaehlt[-1]["dialekt"],'),
+    ("Frage: Auswahl ignoriert (alle Schemata zaehlen)", EI, W_ZUG,
+     '    gewaehlt = [s for s in cfg.get("schemata") or [] if s.get("id") in ids]', '    gewaehlt = [s for s in cfg.get("schemata") or []]'),
+    ("Lauf: EIN Muster fuer alle Quellen", IX, W_ZUG,
+     '        plan = [(o, muster_liste(q.get("muster") or muster), str(q.get("id") or ""))',
+     '        plan = [(o, muster_liste(muster), str(q.get("id") or ""))'),
+    ("Lauf: Beschraenkung auf ein Schema wirkungslos", IX, W_ZUG,
+     "    aktiv = None if (nur is None or not quellen) else {str(x) for x in nur}", "    aktiv = None"),
+    ("Lauf: ruhendes Schema wird ausgetragen", IX, W_ZUG,
+     "\n                   and not (ruhend and os.path.normpath(p).startswith(ruhend))]", "]"),
+    ("Lauf: Ableiten-Schalter fehlt in der Signatur", IX, W_ZUG,
+     '                              bool(q.get("fk_ableiten", fk_ableiten)))', "                              True)"),
+    ("Lauf: Ableiten fuer alle statt je Quelle", IX, W_ZUG, "fk_quellen=fk_quellen)", "fk_quellen=None)"),
+    ("Lauf: neue Parser-Fassung bleibt auf ein Schema beschraenkt", IX, W_ZUG,
+     "            aktiv = None\n        # Nach der Entscheidung", "            pass\n        # Nach der Entscheidung"),
+    ("Lauf: Ergebnis des anderen Schemas vergessen", IX, W_ZUG,
+     '"je_schema": {k: v for k, v in (vorher if isinstance(vorher, dict) else {}).items()\n'
+     '                                        if k in kennungen and isinstance(v, dict)}}', '"je_schema": {}}'),
+    ("Lauf: Ergebnis steht nicht je Schema", IX, W_ZUG,
+     '                zs["ergebnis"] = st["ergebnis"]\n', ""),
+    ("Nachlauf: zweite Vormerkung verdraengt die erste", IX, W_ZUG,
+     '                neu["nur"] = _nur_vereinen(_nachlauf.get("nur"), neu.get("nur"))', "                pass"),
+    ("Ableiten Regel 1 (kunde_id) fuer alle Schemata", ST, W_ZUG,
+     "        if (oid, name_l) in fk_spalten or (nur_oids is not None and oid not in nur_oids):\n            continue\n        m = _ID_ENDUNG",
+     "        if (oid, name_l) in fk_spalten:\n            continue\n        m = _ID_ENDUNG"),
+    ("Ableiten Regel 2 (gleicher Schluesselname) fuer alle Schemata", ST, W_ZUG,
+     "        if not ziele or (oid, name_l) in fk_spalten or (nur_oids is not None and oid not in nur_oids):",
+     "        if not ziele or (oid, name_l) in fk_spalten:"),
+    ("Upload erfasst alle Schemata", MA, W_ZUG,
+     "    erfassung = _sql_erfassen_anstossen(cfg, {sid}) if gespeichert else None",
+     "    erfassung = _sql_erfassen_anstossen(cfg) if gespeichert else None"),
+    ("Start am Schema erfasst alle", MA, W_ZUG,
+     "    antwort = await asyncio.to_thread(_sql_erfassen_anstossen, cfg, {sid})",
+     "    antwort = await asyncio.to_thread(_sql_erfassen_anstossen, cfg)"),
+    ("Beschraenkung wird nicht durchgereicht", MA, W_ZUG,
+     "                          ordner_schutz=False, nur=None if nur is None else set(nur))", "                          ordner_schutz=False)"),
+    ("Frage (Seite) mit den Vorgaben statt mit dem Schema", MA, W_ZUG,
+     "    vorgabe = _sge.fuer_frage(cfg, erlaubt)", "    vorgabe = dict(_sge.SCHEMA_VORGABEN)"),
+    ("Chat: Start ohne Auswahl erfasst trotzdem", SK, W_GR,
+     '            if not z["erlaubt"]:\n                return ("Kein SQL-Schema gewählt – erfasst wird je Schema.',
+     '            if False:\n                return ("Kein SQL-Schema gewählt – erfasst wird je Schema.'),
+    ("Chat: Start erfasst alle statt der gewaehlten", SK, W_GR,
+     'asyncio.to_thread(_m._sql_erfassen_anstossen, cfg, set(z["erlaubt"]))', "asyncio.to_thread(_m._sql_erfassen_anstossen, cfg)"),
+    ("Chat: Frage mit den Vorgaben statt mit dem Schema", SK, W_GR,
+     '        vorgabe = sge.fuer_frage(cfg, z["erlaubt"])', "        vorgabe = dict(sge.SCHEMA_VORGABEN)"),
+    ("Reiter: ein Lauf erscheint in JEDEM Schema", SA, W_ADM,
+     "            var laeuft = !!st.laeuft && (!Array.isArray(st.schemata) || st.schemata.indexOf(sid) >= 0);",
+     "            var laeuft = !!st.laeuft;"),
+    ("Reiter: Start ohne Schema in der Adresse", SA, W_ADM,
+     "            return holen('/api/sql/admin/schema/' + encodeURIComponent(sid) + '/index', { method: 'POST', headers: kopf() })",
+     "            return holen('/api/sql/admin/index', { method: 'POST', headers: kopf() })"),
+    ("Reiter: Vormerkung nicht gezeigt", SA, W_ADM,
+     "            var wartet = !laeuft && !!vm && (vm.nur == null || vm.nur.indexOf(sid) >= 0);", "            var wartet = false;"),
+    ("Reiter: Nachladen verwirft ungespeicherte Eingaben", SA, W_ADM,
+     "                if (!halten) self._schemata = kopie(d.cfg.schemata || []);", "                self._schemata = kopie(d.cfg.schemata || []);"),
+    ("Reiter: der Takt zeichnet die Container neu", SA, W_ADM,
+     "                    self._zeichneErfassung();\n                    // Zum Ende Graph",
+     "                    self._zeichneSchemata();\n                    // Zum Ende Graph"),
+    ("Reiter: Dialekt des Schemas wird nicht gesammelt", SA, W_ADM,
+     "                           dialekt: feld('sqadm-dialekt').value,\n", ""),
+    ("Reiter: Hoechstzahl des Schemas wird nicht gesammelt", SA, W_ADM,
+     "                           max_spalten: Number(feld('sqadm-maxsp').value),\n", ""),
+    ("Reiter: Speichern-Meldung im alten (weggezeichneten) Element", SA, W_ADM,
+     "            function melde(msg, art) { status(self._statusEl(ziel), msg, art); }",
+     "            var fest = self._statusEl(ziel);\n            function melde(msg, art) { status(fest, msg, art); }"),
+    ("Reiter: Klappzustand wird nicht gemerkt", SA, W_ADM,
+     "            try { window.localStorage.setItem(klappSchluessel(sid), zu ? '1' : '0'); } catch (e) { /* nur Komfort */ }", ""),
+    ("Reiter: neues Schema ohne die Vorgaben des Servers", SA, W_ADM,
+     "                self._schemata.push(Object.assign({ id: '', name: '' }, kopie(self._vorgaben || {})));",
+     "                self._schemata.push({ id: '', name: '' });"),
+    ("Reiter: Speichern zeichnet nicht sofort (laufendes Nachladen stellt das alte Formular zurueck)", SA, W_ADM,
+     "                self._zeichne(false);\n                // Zahlen und Graph neu holen", "                // Zahlen und Graph neu holen"),
+    ("Reiter: Ergebniswort roh aus dem Status (ohne Umlaut)", SA, W_ADM,
+     "{ e: ergebnisWort(L.je.ergebnis), d: L.je.ende || '?',", "{ e: L.je.ergebnis, d: L.je.ende || '?',"),
+    ("Seite: Dialekt-Vorgabe nicht aus dem gewaehlten Schema", SJ, W_UI,
+     "        return (gew[0] && gew[0].dialekt) || 'allgemein';", "        return 'allgemein';"),
+    ("Seite: Dialekt-Vorgabe folgt der Auswahl nicht", SJ, W_UI,
+     "                zeichneQuellen();\n                zeichneDialekte();\n                zeichnePraefixe();",
+     "                zeichneQuellen();\n                zeichnePraefixe();"),
 ]
 
 KOPIEREN = ["backend", "frontend", "tests", "skills"]
@@ -274,7 +369,20 @@ def lauf(baum: Path, w) -> tuple[int, int]:
     return (int(m.group(2)) if m and r.returncode != 2 else -1), r.returncode
 
 
+def teil_auswahl(argv) -> tuple[list, str]:
+    """``--teil i/n`` -> (Proben dieses Teils, Beschriftung). Ohne Angabe alle."""
+    if "--teil" not in argv:
+        return list(PROBEN), ""
+    m = re.fullmatch(r"(\d+)/(\d+)", argv[argv.index("--teil") + 1] if argv.index("--teil") + 1 < len(argv) else "")
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        print("ABBRUCH: --teil erwartet i/n mit 1 <= i <= n")
+        raise SystemExit(2)
+    i, n = int(m.group(1)), int(m.group(2))
+    return [p for k, p in enumerate(PROBEN) if k % n == i - 1], " (Teil %d/%d)" % (i, n)
+
+
 def main() -> int:
+    proben, teil = teil_auswahl(sys.argv[1:])
     fehlt = {p[1] for p in PROBEN} - {p[1] for p in PROBEN if (ROOT / p[1]).exists()}
     if fehlt:
         print("ABBRUCH: Dateien fehlen: %s" % sorted(fehlt))
@@ -289,13 +397,13 @@ def main() -> int:
             if f != 0:
                 print(f"ABBRUCH: Basislauf {w[1]} nicht gruen (FAIL={f}, rc={rc})")
                 return 2
-        print("Basislauf gruen (%d Waechter, im Wegwerf-Baum).\n" % len(WAECHTER))
+        print("Basislauf gruen (%d Waechter, im Wegwerf-Baum).\n" % len(WAECHTER), flush=True)
         beissen = 0
-        for name, datei, w, alt, neu in PROBEN:
+        for name, datei, w, alt, neu in proben:
             p = baum / datei
             t = p.read_text(encoding="utf-8")
             if t.count(alt) != 1:
-                print("  ???  %-48s Anker %dx gefunden" % (name, t.count(alt)))
+                print("  ???  %-48s Anker %dx gefunden" % (name, t.count(alt)), flush=True)
                 continue
             p.write_text(t.replace(alt, neu), encoding="utf-8")
             try:
@@ -309,8 +417,9 @@ def main() -> int:
                 print("  ABBR %-48s rc=%s (kein Biss: ohne Bilanz)" % (name, rc))
             else:
                 print("  ZAHN %-48s 0 FAIL – beisst NICHT" % name)
-        print("\n%d/%d Proben beissen (Arbeitsbaum unberuehrt)" % (beissen, len(PROBEN)))
-        return 0 if beissen == len(PROBEN) else 1
+            sys.stdout.flush()
+        print("\n%d/%d Proben beissen%s (Arbeitsbaum unberuehrt)" % (beissen, len(proben), teil))
+        return 0 if beissen == len(proben) else 1
     finally:
         shutil.rmtree(baum, ignore_errors=True)
 

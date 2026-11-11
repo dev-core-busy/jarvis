@@ -114,7 +114,10 @@ class SchemaSqlTool(BaseTool):
         if not z.get("darf") or not z.get("erlaubt"):
             return _abgewiesen(z)
         cfg = await asyncio.to_thread(_cfg)
-        d = (dialekt or cfg.get("dialekt") or "allgemein").strip().lower()
+        # Dialekt und Hoechstzahlen gehoeren zum Schema: aus den GEWAEHLTEN.
+        from backend import schema_graph_einstellungen as sge  # noqa: PLC0415
+        vorgabe = sge.fuer_frage(cfg, z["erlaubt"])
+        d = (dialekt or vorgabe["dialekt"] or "allgemein").strip().lower()
         if d not in rag.DIALEKTE:
             d = "allgemein"
         con = await asyncio.to_thread(_oeffnen)
@@ -122,8 +125,8 @@ class SchemaSqlTool(BaseTool):
             return _ohne_graph()
         try:
             erg = await rag.sql_erzeugen(frage, dialekt=d, con=con, erlaubt=z["erlaubt"],
-                                         max_tabellen=cfg["max_tabellen"], max_spalten=cfg["max_spalten"],
-                                         praefixe=praefixe)
+                                         max_tabellen=vorgabe["max_tabellen"],
+                                         max_spalten=vorgabe["max_spalten"], praefixe=praefixe)
         finally:
             con.close()
         return ausgabe(erg, d)
@@ -376,7 +379,8 @@ class SchemaIndexTool(BaseTool):
     @property
     def description(self):
         return ("Stand der Erfassung des Datenbankschemas (Aktion 'status'). 'starten'/'abbrechen' nur für "
-                "Administratoren und nur, wenn das Erfassen aus dem Chat in den Einstellungen erlaubt ist.")
+                "Administratoren und nur, wenn das Erfassen aus dem Chat in den Einstellungen erlaubt ist. "
+                "'starten' erfasst die im Chat gewählten SQL-Schemata.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
@@ -406,8 +410,14 @@ class SchemaIndexTool(BaseTool):
             from backend import main as _m  # noqa: PLC0415
             if not cfg["schemata"]:
                 return "Noch kein Schema angelegt (Einstellungen → SQL-Assistent)."
-            antwort = await asyncio.to_thread(_m._sql_erfassen_anstossen, cfg)
-            return "Erfassung: " + antwort
+            # Die Erfassung ist an das Schema gebunden: erfasst wird, was im
+            # Chat GEWAEHLT ist – ohne Auswahl nichts (kein stiller Lauf ueber alle).
+            if not z["erlaubt"]:
+                return ("Kein SQL-Schema gewählt – erfasst wird je Schema. Der Benutzer wählt es im Chat "
+                        "neben den Wissensgruppen aus (Auswahl „SQL-Schema“).")
+            antwort = await asyncio.to_thread(_m._sql_erfassen_anstossen, cfg, set(z["erlaubt"]))
+            namen = ", ".join(s["name"] for s in cfg["schemata"] if s["id"] in z["erlaubt"])
+            return f"Erfassung von {namen}: {antwort}"
         if aktion != "status":
             return f"Unbekannte Aktion '{aktion}' (erlaubt: status, starten, abbrechen)."
         return await asyncio.to_thread(_status_text, z["erlaubt"], cfg)
@@ -419,6 +429,7 @@ def _status_text(erlaubt, cfg) -> str:
     from backend import schema_graph_dienst as dienst  # noqa: PLC0415
     from backend import schema_graph_index as idx  # noqa: PLC0415
     info = dienst.graph_info(erlaubt, cfg["schemata"])
+    st = idx.status()
     z = []
     if not info["vorhanden"]:
         z.append("Noch kein Schema-Graph vorhanden.")
@@ -426,15 +437,20 @@ def _status_text(erlaubt, cfg) -> str:
         z.append(f"Schema-Graph vom {info['stand']}; kein SQL-Schema gewählt.")
     else:
         z.append(f"Schema-Graph vom {info['stand']}:")
+        je = st.get("je_schema") if isinstance(st.get("je_schema"), dict) else {}
         for q in info["schemata"]:
-            z.append(f"- {q['name']}: {q['tabellen']} Tabellen, {q['sichten']} Sichten, {q['spalten']} Spalten")
-    st = idx.status()
+            zeile = f"- {q['name']}: {q['tabellen']} Tabellen, {q['sichten']} Sichten, {q['spalten']} Spalten"
+            e = je.get(q["id"]) or {}
+            # Je Schema, wann ES zuletzt erfasst wurde – nur wenn bekannt.
+            if e.get("ergebnis") and e.get("ende"):
+                zeile += f" – zuletzt erfasst: {e['ergebnis']} am {e['ende']}"
+            z.append(zeile)
     if st.get("laeuft"):
         z.append(f"Erfassung läuft seit {st.get('begonnen')}: {st.get('dateien_fertig', 0)} von "
                  f"{st.get('dateien_neu', 0)} Dateien"
                  + (f", noch etwa {int(st['rest_s'] // 60)} min" if st.get("rest_s") else "") + ".")
     elif st:
-        z.append(f"Letzte Erfassung: {st.get('ergebnis') or '?'} am {st.get('ende') or '?'}.")
+        z.append(f"Letzter Erfassungslauf: {st.get('ergebnis') or '?'} am {st.get('ende') or '?'}.")
     return "\n".join(z)
 
 

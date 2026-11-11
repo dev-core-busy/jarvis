@@ -81,9 +81,10 @@ async function seite(cfg) {
         gerufen.push({ pfad: p, url: voll, opt: o || {} });
         if (p === '/api/me') return antwort({ username: 'anna', permissions: cfg.perm === false ? {} : { schema: true } });
         if (p === '/api/sql/status') return antwort(Object.assign({ ok: true, vorhanden: true, stand: '2026-11-07 10:00:00',
-            schemata: [{ id: 'erp', name: 'ERP ' + BOESE, tabellen: 12, sichten: 1, spalten: 99 },
-                       { id: 'hr', name: 'Personal', tabellen: 3, sichten: 0, spalten: 9 }],
-            dialekt: 'postgresql', frage_max: 2000, erfassung_laeuft: false }, cfg.status || {}));
+            // Der Dialekt steht JE SCHEMA (seit 2026-11-10), nicht mehr einmal fuer alle
+            schemata: [{ id: 'erp', name: 'ERP ' + BOESE, tabellen: 12, sichten: 1, spalten: 99, dialekt: 'postgresql' },
+                       { id: 'hr', name: 'Personal', tabellen: 3, sichten: 0, spalten: 9, dialekt: 'mssql' }],
+            frage_max: 2000, erfassung_laeuft: false }, cfg.status || {}));
         if (p === '/api/sql/frage' && cfg.netzweg) return Promise.reject(new TypeError('Failed to fetch'));
         if (p === '/api/sql/frage') return antwort(cfg.frage || {}, cfg.frageStatus);
         if (p === '/api/sql/suche') return antwort({ ok: true, treffer: [
@@ -144,8 +145,28 @@ function klick(s, el) {
     check('Ohne gemerkte Auswahl: auf /sql alle gewaehlt', Array.prototype.every.call(kaesten, function (k) { return k.checked; }));
     check('Zustand auch als Klasse am Etikett (nicht nur der Haken)',
           s.doc.querySelectorAll('#sq-schemata .sq-schema.is-an').length === 2);
-    check('Dialekt-Vorgabe vom Server', s.doc.getElementById('sq-dialekt').value === 'postgresql',
+    check('Dialekt-Vorgabe: der des ersten GEWAEHLTEN Schemas', s.doc.getElementById('sq-dialekt').value === 'postgresql',
           s.doc.getElementById('sq-dialekt').value);
+    // Der Dialekt gehoert zum Schema: die Vorgabe folgt der Auswahl (eigene Seite,
+    // damit die Abwahl die folgenden Abschnitte nicht verstellt)
+    const sd = await seite();
+    const selD = sd.doc.getElementById('sq-dialekt');
+    function schalte(id, an) {
+        const cb = sd.doc.querySelector('#sq-schemata input[data-schema="' + id + '"]');
+        if (!cb) abbruch('Kaestchen fuer ' + id + ' fehlt');
+        cb.checked = an;
+        cb.dispatchEvent(new sd.win.Event('change', { bubbles: true }));
+    }
+    schalte('erp', false);
+    check('Erstes Schema abgewaehlt: Vorgabe wechselt auf den Dialekt des verbleibenden (mssql)', selD.value === 'mssql', selD.value);
+    schalte('hr', false);
+    check('Nichts gewaehlt: allgemein', selD.value === 'allgemein', selD.value);
+    schalte('hr', true);
+    selD.value = 'mysql';
+    selD.dispatchEvent(new sd.win.Event('change', { bubbles: true }));
+    schalte('erp', true);
+    check('Selbst gewaehlter Dialekt bleibt, auch wenn sich die Auswahl aendert', selD.value === 'mysql', selD.value);
+    sd.win.close();
 
     abschnitt('3. Knopf-Zustand');
     const los = s.doc.getElementById('sq-los');

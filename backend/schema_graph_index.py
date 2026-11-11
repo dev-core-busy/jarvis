@@ -4,6 +4,14 @@ Ablauf: Dateien finden -> mit ``roh.sqlite`` vergleichen (Groesse + mtime_ns)
 -> nur neue/geaenderte im Prozess-Pool zerlegen -> verschwundene austragen
 -> Graph ableiten (``schema_graph_store.ableiten``).
 
+**Die Erfassung ist an das Schema gebunden** (Vorgabe des Betreibers
+2026-11-10): jede Quelle bringt IHR Dateimuster und IHRE Entscheidung ueber das
+Ableiten aus Spaltennamen mit, ``nur`` beschraenkt einen Lauf auf einzelne
+Schemata (die uebrigen bleiben unangetastet), und der Status fuehrt je Schema
+Fortschritt und Ergebnis (``je_schema``). Gemeinsam bleibt, was technisch EINS
+ist: der Graph (er wird nach jeder Aenderung im Ganzen neu abgeleitet) und die
+Sperre – es laeuft ein Lauf zugleich.
+
 Drei Eigenschaften, die bei zweistelligen GB tragen muessen:
 
 * **Wiederaufnahme ist der Normalfall.** Eine Datei gilt erst als erledigt,
@@ -72,6 +80,10 @@ _thread: threading.Thread | None = None
 _nachlauf: dict | None = None
 _nachlauf_sperre = threading.Lock()
 _auto_aktiv = False
+
+# Felder eines Schemas im Status (``je_schema``), die ein Lauf zaehlt.
+_JE_ZAEHLER = ("dateien_gesamt", "bytes_gesamt", "dateien_neu", "bytes_neu", "dateien_fertig",
+               "bytes_fertig", "entfernt")
 
 
 def status_pfad() -> Path:
@@ -160,21 +172,43 @@ def quelle_finder(quellen: list[dict]):
     return finde
 
 
-def _zuordnung_signatur(quellen) -> str:
-    return json.dumps(sorted((str(q.get("id") or ""), sorted(map(str, q.get("ordner") or [])))
+def _zuordnung_signatur(quellen, fk_ableiten: bool = True) -> str:
+    """Wovon der abgeleitete Graph ausser den Dateien abhaengt: welcher Ordner
+    zu welcher Quelle gehoert UND fuer welche Quelle aus Spaltennamen abgeleitet
+    wird. Aendert sich nur der Schalter, hat sich keine Datei geaendert – ohne
+    ihn in der Signatur meldete der Lauf "unveraendert" und der Graph behielt
+    die alten Vermutungen."""
+    return json.dumps(sorted((str(q.get("id") or ""), sorted(map(str, q.get("ordner") or [])),
+                              bool(q.get("fk_ableiten", fk_ableiten)))
                              for q in quellen or []), ensure_ascii=False)
+
+
+def _nur_vereinen(a, b):
+    """Zwei Beschraenkungen zusammenlegen: ``None`` heisst "alle Schemata" und
+    gewinnt, sonst die Vereinigung."""
+    if a is None or b is None:
+        return None
+    return set(a) | set(b)
 
 
 def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
          fk_ableiten: bool = True, abbruch: threading.Event | None = None,
          nur_ableiten: bool = False, quellen: list[dict] | None = None,
-         ordner_schutz: bool = True) -> dict:
+         ordner_schutz: bool = True, nur=None) -> dict:
     """Ein vollstaendiger (inkrementeller) Lauf. Blockiert bis zum Ende.
 
-    ``quellen``: ``[{"id", "ordner": [...]}]`` – sind sie angegeben, sind ihre
-    Ordner die Ordnerliste, und jedes Objekt traegt seine Quelle (daran haengt
-    die Sichtbarkeit). Ohne ``quellen`` (Tests, Kommandozeile mit ``--ordner``)
-    tragen alle Objekte die Quelle ``""``.
+    ``quellen``: ``[{"id", "ordner": [...], "muster", "fk_ableiten"}]`` – sind
+    sie angegeben, sind ihre Ordner die Ordnerliste, und jedes Objekt traegt
+    seine Quelle (daran haengt die Sichtbarkeit). ``muster`` und
+    ``fk_ableiten`` einer Quelle gelten fuer IHRE Dateien bzw. Objekte; fehlen
+    sie, gelten die gleichnamigen Argumente. Ohne ``quellen`` (Tests,
+    Kommandozeile mit ``--ordner``) tragen alle Objekte die Quelle ``""``.
+
+    ``nur``: Kennungen der Quellen, die dieser Lauf erfasst (None = alle). Die
+    Dateien der UEBRIGEN Quellen werden weder gelesen noch ausgetragen – ihr
+    Bestand bleibt, wie er ist. Dateien, die zu KEINER Quelle mehr gehoeren
+    (Schema entfernt), traegt jeder Lauf aus, auch ein beschraenkter und einer
+    mit leerem ``nur``. Der Graph wird danach im Ganzen neu abgeleitet.
 
     ``ordner_schutz``: ein nicht erreichbarer oder leerer Ordner traegt seinen
     Bestand NICHT aus (fuer Freigaben, die getrennt sein koennen). Fuer die
@@ -183,14 +217,26 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
     ein Schema, in das noch nichts hochgeladen wurde – beides ohne Fehler.
     """
     abbruch = abbruch or threading.Event()
+    # Suchplan: (Ordner, Musterliste, Quelle). Je Quelle IHR Muster.
     if quellen:
         ordner = list(dict.fromkeys(o for q in quellen for o in (q.get("ordner") or [])))
+        plan = [(o, muster_liste(q.get("muster") or muster), str(q.get("id") or ""))
+                for q in quellen for o in (q.get("ordner") or [])]
+    else:
+        plan = [(o, muster_liste(muster), "") for o in ordner]
+    aktiv = None if (nur is None or not quellen) else {str(x) for x in nur}
     finder = quelle_finder(quellen or [])
     fd = _sperre_nehmen()
+    # Ergebnisse frueherer Laeufe je Schema mitnehmen: ein Lauf ueber Schema A
+    # darf nicht vergessen machen, wann Schema B zuletzt erfasst wurde.
+    vorher = status().get("je_schema")
+    kennungen = [str(q.get("id") or "") for q in quellen or []]
     st = {"laeuft": True, "phase": "Dateien suchen", "begonnen": time.strftime("%Y-%m-%d %H:%M:%S"),
           "ordner": list(ordner), "dateien_gesamt": 0, "dateien_neu": 0, "dateien_fertig": 0,
           "bytes_gesamt": 0, "bytes_neu": 0, "bytes_fertig": 0, "entfernt": 0,
-          "fehler": [], "ausgelassen": [], "graph": None, "ende": None, "ergebnis": ""}
+          "fehler": [], "ausgelassen": [], "graph": None, "ende": None, "ergebnis": "",
+          "schemata": [], "je_schema": {k: v for k, v in (vorher if isinstance(vorher, dict) else {}).items()
+                                        if k in kennungen and isinstance(v, dict)}}
     try:
         _status_schreiben(st)
         # ⚠ EIN NICHT ERREICHBARER ORDNER IST KEIN GELEERTER (Register: ein
@@ -213,19 +259,46 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
         if neu_lesen:
             st["hinweis"] = (f"Neue Parser-Fassung {parser.FASSUNG} – alle {len(bekannt)} bekannten "
                              "Dateien werden neu gelesen.")
+            # Die Fassung gilt fuer den GANZEN Bestand und wird am Ende als
+            # erreicht vermerkt – ein auf ein Schema beschraenkter Lauf liesse
+            # die uebrigen fuer immer auf dem alten Stand. Also alle.
+            aktiv = None
+        # Nach der Entscheidung ueber ``aktiv``: was dieser Lauf erfasst.
+        st["schemata"] = [k for k in kennungen if aktiv is None or k in aktiv]
+        for k in st["schemata"]:
+            st["je_schema"][k] = {"begonnen": st["begonnen"], "ende": None, "ergebnis": "",
+                                  **{z: 0 for z in _JE_ZAEHLER}, "fehler": [], "ausgelassen": []}
+        je = st["je_schema"]
+        # Ordner der Quellen, die dieser Lauf NICHT erfasst: ihr Bestand ruht.
+        ruhend = tuple(os.path.normpath(o).rstrip("/") + "/" for o, _ml, qid in plan
+                       if aktiv is not None and qid not in aktiv)
         if not nur_ableiten:
-            erreichbar = [o for o in ordner if o not in fehlend]
-            for p, g, m in dateien_finden(erreichbar, muster_liste(muster)):
-                gesehen.add(p)
-                st["dateien_gesamt"] += 1
-                st["bytes_gesamt"] += g
-                alt = bekannt.get(p)
-                if alt and alt[0] == g and alt[1] == m and alt[2] in ("ok", "fehler") and not neu_lesen:
-                    continue
-                if alt and alt[0] == g and alt[1] == m and (alt[3] or 0) >= MAX_VERSUCHE:
-                    st["ausgelassen"].append(p)
-                    continue
-                todo.append((p, g, m))
+            suchen = [(o, ml) for o, ml, qid in plan
+                      if o not in fehlend and (aktiv is None or qid in aktiv)]
+            erreichbar = [o for o, _ml in suchen]
+            for o, ml in suchen:
+                for p, g, m in dateien_finden([o], ml):
+                    if p in gesehen:
+                        continue
+                    gesehen.add(p)
+                    zs = je.get(finder(p))
+                    st["dateien_gesamt"] += 1
+                    st["bytes_gesamt"] += g
+                    if zs is not None:
+                        zs["dateien_gesamt"] += 1
+                        zs["bytes_gesamt"] += g
+                    alt = bekannt.get(p)
+                    if alt and alt[0] == g and alt[1] == m and alt[2] in ("ok", "fehler") and not neu_lesen:
+                        continue
+                    if alt and alt[0] == g and alt[1] == m and (alt[3] or 0) >= MAX_VERSUCHE:
+                        st["ausgelassen"].append(p)
+                        if zs is not None:
+                            zs["ausgelassen"].append(p)
+                        continue
+                    todo.append((p, g, m))
+                    if zs is not None:
+                        zs["dateien_neu"] += 1
+                        zs["bytes_neu"] += g
             # Ein erreichbarer Ordner OHNE eine einzige gefundene Datei, zu dem
             # der Bestand aber Dateien kennt, gilt ebenfalls als nicht
             # erreichbar (leerer Einhaengepunkt) – gemeldet, nicht ausgetragen.
@@ -236,10 +309,16 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
                     st["fehler"].append(f"Ordner ist leer, der Bestand kennt aber Dateien daraus – "
                                         f"nicht ausgetragen (Freigabe getrennt?): {o}")
             schutz = tuple(o.rstrip("/") + "/" for o in fehlend) if ordner_schutz else ()
-            # Verschwundene Dateien (und solche ausserhalb der Ordnerliste)
-            weg = [p for p in bekannt if p not in gesehen and not (schutz and p.startswith(schutz))]
+            # Verschwundene Dateien (und solche ausserhalb der Ordnerliste) –
+            # aber nichts aus den Ordnern der Quellen, die dieser Lauf nicht
+            # erfasst: dort wurde gar nicht nachgesehen.
+            weg = [p for p in bekannt if p not in gesehen and not (schutz and p.startswith(schutz))
+                   and not (ruhend and os.path.normpath(p).startswith(ruhend))]
             for p in weg:
                 store.roh_entfernen(con, p)
+                zs = je.get(finder(p))
+                if zs is not None:
+                    zs["entfernt"] += 1
             con.commit()
             st["entfernt"] = len(weg)
         st["dateien_neu"] = len(todo)
@@ -247,7 +326,7 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
         st["phase"] = "Dateien zerlegen"
         _status_schreiben(st)
         if todo:
-            _zerlegen(con, todo, anzahl_prozesse(prozesse), abbruch, st)
+            _zerlegen(con, todo, anzahl_prozesse(prozesse), abbruch, st, finder)
         if abbruch.is_set():
             st["ergebnis"] = "abgebrochen"
             return st
@@ -259,7 +338,7 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
         # Auch eine geaenderte ZUORDNUNG (Ordner einer anderen Quelle zugeschlagen)
         # verlangt ein neues Ableiten, obwohl sich keine Datei geaendert hat –
         # sonst truege ein Objekt weiter die Quelle, aus der es entfernt wurde.
-        sig = _zuordnung_signatur(quellen)
+        sig = _zuordnung_signatur(quellen, fk_ableiten)
         sig_pfad = store.ordner() / "zuordnung.json"
         try:
             sig_alt = sig_pfad.read_text(encoding="utf-8")
@@ -274,8 +353,13 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
             def melde(t):
                 st["phase"] = "Graph ableiten: " + t
                 _status_schreiben(st)
-            st["graph"] = store.ableiten(con, fk_ableiten=fk_ableiten, melde=melde,
-                                         abbruch=abbruch.is_set, quelle_von=finder)
+            # Mit Quellen entscheidet JEDE fuer ihre Objekte, ob aus Spaltennamen
+            # abgeleitet wird; ohne Quellen gilt das Argument fuer alles.
+            fk_quellen = ({str(q.get("id") or "") for q in quellen if q.get("fk_ableiten", fk_ableiten)}
+                          if quellen else None)
+            st["graph"] = store.ableiten(con, fk_ableiten=bool(fk_quellen) if quellen else fk_ableiten,
+                                         melde=melde, abbruch=abbruch.is_set, quelle_von=finder,
+                                         fk_quellen=fk_quellen)
             if st["graph"].get("abgebrochen"):
                 st["ergebnis"] = "abgebrochen"
                 return st
@@ -297,6 +381,12 @@ def lauf(ordner: list[str], muster: str = STANDARD_MUSTER, prozesse=0,
         st["ende"] = time.strftime("%Y-%m-%d %H:%M:%S")
         if st.get("phase", "").startswith("Graph ableiten") and st["ergebnis"] == "fertig":
             st["phase"] = "fertig"
+        # Das Ergebnis des Laufs gilt fuer jedes Schema, das er erfasst hat.
+        for k in st.get("schemata") or []:
+            zs = st["je_schema"].get(k)
+            if zs is not None:
+                zs["ergebnis"] = st["ergebnis"]
+                zs["ende"] = st["ende"]
         _status_schreiben(st)
         os.close(fd)
 
@@ -342,7 +432,9 @@ class _Arbeiter:
                 pass
 
 
-def _zerlegen(con, todo: list, n_proz: int, abbruch: threading.Event, st: dict) -> None:
+def _zerlegen(con, todo: list, n_proz: int, abbruch: threading.Event, st: dict, finder=None) -> None:
+    je = st.get("je_schema") or {}
+    finder = finder or (lambda _p: "")
     # Grosse Dateien zuerst: sonst wartet am Ende ein einzelner Prozess auf
     # die 5-GB-Datei, waehrend die anderen nichts mehr zu tun haben.
     todo.sort(key=lambda t: -t[1])
@@ -406,8 +498,14 @@ def _zerlegen(con, todo: list, n_proz: int, abbruch: threading.Event, st: dict) 
                     store.roh_ersetzen(con, erg, g, m)
                 st["dateien_fertig"] += 1
                 st["bytes_fertig"] += g
+                zs = je.get(finder(p))
+                if zs is not None:
+                    zs["dateien_fertig"] += 1
+                    zs["bytes_fertig"] += g
                 if not erg.get("ok"):
                     st["fehler"] = (st["fehler"] + [f"{p}: {erg.get('fehler')}"])[-MAX_FEHLER_LISTE:]
+                    if zs is not None:
+                        zs["fehler"] = (zs["fehler"] + [f"{p}: {erg.get('fehler')}"])[-MAX_FEHLER_LISTE:]
             jetzt = time.time()
             if jetzt - letzter_commit >= COMMIT_ALLE_S:
                 con.commit()
@@ -468,7 +566,12 @@ def anstossen(ordner: list[str], **kw) -> str:
     global _nachlauf, _thread, _auto_aktiv
     with _nachlauf_sperre:
         if _auto_aktiv:
-            _nachlauf = {"ordner": ordner, **kw}
+            neu = {"ordner": ordner, **kw}
+            if _nachlauf is not None:
+                # Zwei Vormerkungen fuer verschiedene Schemata: der Nachlauf
+                # erfasst BEIDE – sonst verdraengte der zweite Upload den ersten.
+                neu["nur"] = _nur_vereinen(_nachlauf.get("nur"), neu.get("nur"))
+            _nachlauf = neu
             return "vorgemerkt"
         _auto_aktiv = True
         _abbruch.clear()
@@ -527,6 +630,16 @@ def _lauf_mit_nachlauf(ordner, **kw):
                 _nachlauf = None
 
 
+def vorgemerkt():
+    """Wartet ein Nachlauf? ``None`` = nein, sonst ``{"nur": [Kennungen] | None}``
+    (``None`` darin = alle Schemata). Nur fuer die Anzeige."""
+    with _nachlauf_sperre:
+        if _nachlauf is None:
+            return None
+        nur = _nachlauf.get("nur")
+        return {"nur": None if nur is None else sorted(str(x) for x in nur)}
+
+
 def laeuft_hier() -> bool:
     """Laeuft ein Lauf in DIESEM Prozess (nur der laesst sich hier abbrechen)?"""
     return _thread is not None and _thread.is_alive()
@@ -550,6 +663,8 @@ def _main(argv=None) -> int:
     ap.add_argument("--prozesse", type=int, default=None)
     ap.add_argument("--ohne-ableiten-aus-namen", action="store_true")
     ap.add_argument("--nur-ableiten", action="store_true", help="nur den Graphen neu ableiten")
+    ap.add_argument("--schema", action="append", help="nur dieses Schema erfassen (Kennung, mehrfach "
+                    "moeglich); ohne Angabe alle")
     a = ap.parse_args(argv)
     cfg = {}
     if not a.ordner or a.muster is None or a.prozesse is None:
@@ -561,22 +676,37 @@ def _main(argv=None) -> int:
     else:
         from backend import schema_graph_einstellungen as _sge  # noqa: PLC0415
         voll = _sge.aus_zustand(cfg)
-        # Je Schema der FESTE Ordner data/sql_schema_graph/<id> (seit 2026-11-07).
-        quellen = [{"id": q["id"], "ordner": [str(_sge.ordner_fuer(q["id"]))]} for q in voll["schemata"]]
+        # Je Schema der FESTE Ordner data/sql_schema_graph/<id> (seit 2026-11-07)
+        # mit SEINEM Muster und SEINEM Ableiten – wie der Dienst.
+        quellen = _sge.quellen(voll)
+        # Eine Angabe auf der Kommandozeile gilt fuer alle erfassten Schemata.
+        for q in quellen:
+            if a.muster:
+                q["muster"] = a.muster
+            if a.ohne_ableiten_aus_namen:
+                q["fk_ableiten"] = False
         ordner = [o for q in quellen for o in q["ordner"]]
         cfg = voll
     if not ordner:
         print("Kein Schema angegeben/konfiguriert.")
         return 2
+    nur = None
+    if a.schema:
+        if quellen is None:
+            print("--schema gilt nur ohne --ordner (Schemata aus den Einstellungen).")
+            return 2
+        unbekannt = sorted(set(a.schema) - {q["id"] for q in quellen})
+        if unbekannt:
+            print("Unbekanntes Schema: " + ", ".join(unbekannt) + " (bekannt: "
+                  + ", ".join(q["id"] for q in quellen) + ")")
+            return 2
+        nur = set(a.schema)
     t0 = time.time()
     try:
-        if quellen is not None and not a.muster:
-            from backend import schema_graph_einstellungen as _sge  # noqa: PLC0415
-            a.muster = _sge.erfassungs_muster(cfg)   # wie der Dienst: mit Begleitdokumenten
-        st = lauf(ordner, muster=a.muster or cfg.get("dateimuster") or STANDARD_MUSTER,
+        st = lauf(ordner, muster=a.muster or STANDARD_MUSTER,
                   prozesse=a.prozesse if a.prozesse is not None else cfg.get("prozesse") or 0,
-                  fk_ableiten=not a.ohne_ableiten_aus_namen and cfg.get("fk_ableiten", True) is not False,
-                  nur_ableiten=a.nur_ableiten, quellen=quellen,
+                  fk_ableiten=not a.ohne_ableiten_aus_namen,
+                  nur_ableiten=a.nur_ableiten, quellen=quellen, nur=nur,
                   # Feste lokale Ordner: leer heisst geloescht (siehe lauf()).
                   ordner_schutz=quellen is None)
     except LaeuftSchon as e:

@@ -13,6 +13,10 @@ Hintergruende der Vorfahren werden bis zur ersten deckenden Flaeche
 zusammengesetzt (ein durchscheinendes rgba ist kein Hintergrund, Register).
 Chrome meldet color-mix als ``color(srgb 0..1)`` – beide Formen werden gelesen.
 
+Im Reiter seit 2026-11-10: je Schema EIN Container (Kopfzeile, Dateien,
+Einstellungen, Erfassung) – gemessen wird, dass alles IM Container liegt, die
+Kopfzeile nichts ueberlappt und ein Lauf nur in SEINEM Schema erscheint.
+
 Aufruf auf DEV (Chrome vorhanden):  venv/bin/python tests/live_sql_ui_dev.py
 Bilder landen in ~/sql_ui_*.png (HOME, nicht ein fester /tmp-Pfad – Register).
 """
@@ -57,11 +61,16 @@ STUB = """
 localStorage.setItem('jarvis_token','T');
 (function(){
   var B = %s;
+  var ERF = {laeuft:true, phase:'Dateien zerlegen', schemata:['erp'], dateien_fertig:3100, dateien_neu:8000,
+             bytes_fertig:40e9, bytes_neu:90e9, mb_pro_s:212.4, rest_s:1500, fehler:['Datei unlesbar: erp/archiv/kaputt.sql'],
+             je_schema:{erp:{ergebnis:'', ende:null, dateien_gesamt:8000, dateien_neu:8000, dateien_fertig:3100, bytes_neu:90e9,
+                             bytes_fertig:40e9, fehler:['Datei unlesbar: erp/archiv/kaputt.sql'], ausgelassen:[]},
+                        hr:{ergebnis:'unveraendert', ende:'2026-11-09 18:30:00', dateien_gesamt:95, dateien_neu:0, fehler:[], ausgelassen:[]}}};
   var ANT = {
     '/api/me': {username:'m.mustermann', is_admin:true, permissions:{schema:true}},
-    '/api/sql/status': {ok:true, vorhanden:true, stand:'2026-11-07 10:00:00', dialekt:'postgresql', frage_max:2000,
-      schemata:[{id:'erp', name:'ERP-Datenbank mit einem recht langen Namen', tabellen:1234, sichten:12, spalten:45678},
-               {id:'lager', name:'Lager', tabellen:88, sichten:0, spalten:900}]},
+    '/api/sql/status': {ok:true, vorhanden:true, stand:'2026-11-07 10:00:00', frage_max:2000,
+      schemata:[{id:'erp', name:'ERP-Datenbank mit einem recht langen Namen', tabellen:1234, sichten:12, spalten:45678, dialekt:'postgresql'},
+               {id:'lager', name:'Lager', tabellen:88, sichten:0, spalten:900, dialekt:'mssql'}]},
     '/api/sql/frage': {ok:true, dialekt:'postgresql',
       sql:'SELECT l.lndbez AS land, SUM(p.netwr) AS nettoumsatz\\nFROM vk.vbpos p\\nJOIN vk.vbkopf k ON k.vbeln = p.vbeln\\nJOIN stm.kdst c ON c.kdnr = k.kdnr\\nJOIN stm.lnd l ON l.lnd = c.lnd\\nWHERE k.audat >= DATE \\'2025-01-01\\' AND k.audat < DATE \\'2026-01-01\\'\\nGROUP BY l.lndbez\\nORDER BY nettoumsatz DESC;',
       erklaerung:'Summiert den Nettowert aller Auftragspositionen des Jahres 2025 je Land des Kunden.',
@@ -77,17 +86,24 @@ localStorage.setItem('jarvis_token','T');
         {name:'lnd', typ:'char(2)', pk:false, nullable:true, kommentar:'Laenderschluessel ISO'}],
       raus_gesamt:1, raus:[{ziel:'stm.lnd', art:'fk', paare:[['lnd','lnd']]}], rein_gesamt:1, rein:[{quelle:'vk.vbkopf', art:'fk', paare:[['kdnr','kdnr']]}]}},
     '/api/sql/admin': {ok:true, skill_aktiv:true,
-      cfg:{schemata:[{id:'erp', name:'ERP-Datenbank mit einem recht langen Namen fuer die Kopfzeile'}, {id:'hr', name:'Personal'}],
-           dialekt:'postgresql', dateimuster:'*.sql,*.ddl', prozesse:0, fk_ableiten:true, max_tabellen:12, max_spalten:40, index_aus_chat:false},
-      graph:{vorhanden:true, stand:'2026-11-07 10:00:00', schemata:[{id:'erp', name:'ERP', tabellen:1234, sichten:12, spalten:45678}]},
-      dateien:{erp:{dateien:8000, ordner:120, bytes:90e9}, hr:{dateien:0, ordner:0, bytes:0}},
-      erfassung:{laeuft:true, phase:'Dateien zerlegen', dateien_fertig:3100, dateien_neu:8000, bytes_fertig:40e9, bytes_neu:90e9, mb_pro_s:212.4, rest_s:1500,
-                 fehler:['Datei unlesbar: erp/archiv/kaputt.sql']}},
+      // Je Schema EIN Container mit SEINEN Einstellungen (seit 2026-11-10);
+      // erp wird gerade erfasst, hr hat einen abgeschlossenen Lauf.
+      cfg:{schemata:[{id:'erp', name:'ERP-Datenbank mit einem recht langen Namen fuer die Kopfzeile des Containers, der umbrechen muss',
+                      dialekt:'postgresql', dateimuster:'*.sql,*.ddl', fk_ableiten:true, max_tabellen:12, max_spalten:40},
+                     {id:'hr', name:'Personal', dialekt:'mssql', dateimuster:'*.yaml,*.yml', fk_ableiten:false, max_tabellen:20, max_spalten:60}],
+           prozesse:0, index_aus_chat:false},
+      schema_vorgaben:{dialekt:'allgemein', dateimuster:'*.sql,*.ddl,*.yaml,*.yml', fk_ableiten:true, max_tabellen:12, max_spalten:40},
+      upload_endungen:{erp:['.ddl','.docx','.md','.pdf','.sql'], hr:['.docx','.md','.pdf','.yaml','.yml']},
+      graph:{vorhanden:true, stand:'2026-11-07 10:00:00', schemata:[{id:'erp', name:'ERP', tabellen:1234, sichten:12, spalten:45678},
+                                                                     {id:'hr', name:'Personal', tabellen:88, sichten:0, spalten:900}]},
+      dateien:{erp:{dateien:8000, ordner:120, bytes:90e9}, hr:{dateien:95, ordner:3, bytes:4e6}},
+      vorgemerkt:null,
+      erfassung:ERF},
     '/api/sql/admin/schema/erp/dateien': {ok:true, gekappt:true, gesamt:8120, dateien:8000, ordner:120, bytes:90e9, eintraege:[
       {pfad:'archiv', art:'ordner', groesse:0},
       {pfad:'archiv/2019_bis_2024_ein_sehr_langer_dateiname_ohne_jede_moeglichkeit_zum_umbrechen_der_zeile_schema_dump.sql', art:'datei', groesse:4.2e9},
       {pfad:'stamm', art:'ordner', groesse:0}, {pfad:'stamm/kunde.sql', art:'datei', groesse:12000}]},
-    '/api/sql/admin/index': {ok:true, hier:true, erfassung:{laeuft:true, phase:'Dateien zerlegen', dateien_fertig:3100, dateien_neu:8000, bytes_fertig:40e9, bytes_neu:90e9}}
+    '/api/sql/admin/index': {ok:true, hier:true, vorgemerkt:null, erfassung:ERF}
   };
   window.fetch = function(u, o){
     var p = String(u).split('?')[0], d = ANT[p] || {ok:true};
@@ -117,7 +133,10 @@ kopf = settings[:settings.find("</head>")]
 links = "\n".join(z for z in kopf.splitlines() if 'rel="stylesheet"' in z)
 reiter = ("<!DOCTYPE html><html lang=\"de\"><head><meta charset=\"UTF-8\">" + links + STUB
           + "</head><body><script src=\"/static/js/theme_frueh.js?v=1\"></script>"
-          + "<div class=\"modal-card\" style=\"max-width:980px;margin:20px auto;padding:20px;\">" + panel + "</div>"
+          # Breite und Hoehe frei: `.modal-card` ist sonst 520 px breit und schneidet
+          # bei 90vh ab – das Bild zeigte dann nur den Anfang des ersten Containers.
+          + "<div class=\"modal-card\" style=\"width:auto;max-width:980px;max-height:none;overflow:visible;"
+          + "margin:20px auto;padding:20px;\">" + panel + "</div>"
           + "<script src=\"/static/js/sitzung.js?v=3\"></script><script src=\"/static/js/icons.js?v=11\"></script>"
           + "<script src=\"/static/js/i18n.js?v=" + I18N_V + "\"></script><script src=\"/static/js/sql_admin.js?v=1\"></script>"
           + "<script>setTimeout(function(){ window.SqlAdmin.onShow(); }, 300);</script></body></html>")
@@ -319,7 +338,9 @@ try:
     bild("seite_schmal")
 
     # ── Reiter ───────────────────────────────────────────────────────────
-    breite(1280)
+    # Hohes Fenster: zwei Container mit Dateien, Einstellungen und Erfassung
+    # sind laenger als 900 px, und das Bild soll sie GANZ zeigen.
+    breite(1280, 3600)
     lade("reiter.html", "document.querySelectorAll('#sqadm-schemata .sqadm-schema').length === 2", 8.0)
     check(js("document.querySelectorAll('#sqadm-schemata .sqadm-schema').length") == 2,
           "Positivkontrolle: Reiter aufgebaut (2 Schemata)")
@@ -338,40 +359,97 @@ try:
         js("document.body.classList.%s('light')" % ("add" if thema == "hell" else "remove"))
         time.sleep(0.4)
         m = js("""(function(){
-            var out=[], dz=[];
-            document.querySelectorAll('.sqadm-schema').forEach(function(r){ var b=r.querySelector('[data-akt="del-schema"]').getBoundingClientRect(),
-                k=r.getBoundingClientRect(); out.push(b.right <= k.right+1 && b.width > 10); });
+            var out=[], dz=[], kopf=[], felder=[], knoepfe=[];
+            function in_(b, k){ return b.left >= k.left-1 && b.right <= k.right+1 && b.width > 10; }
+            document.querySelectorAll('.sqadm-schema').forEach(function(r){
+                var k=r.getBoundingClientRect();
+                out.push(in_(r.querySelector('[data-akt="del-schema"]').getBoundingClientRect(), k));
+                // Kopfzeile: Titel links, Stand + Pfeil rechts, nichts ueberlappt, alles im Container
+                var h=r.querySelector('.sqadm-titel').getBoundingClientRect(), re=r.querySelector('.sqadm-kopf-re').getBoundingClientRect();
+                kopf.push(in_(h, k) && in_(re, k) && h.right <= re.left + 1 && h.height > 10);
+                // Einstellungen und Knoepfe liegen IM Container
+                r.querySelectorAll('.sqadm-einst .config-input, .sqadm-einst .checkbox-group').forEach(function(f){
+                    felder.push(in_(f.getBoundingClientRect(), k)); });
+                r.querySelectorAll('.sqadm-aktionen > button').forEach(function(bn){
+                    var b=bn.getBoundingClientRect();
+                    if (b.width) knoepfe.push(in_(b, k) && b.width < k.width * 0.5); });
+            });
             document.querySelectorAll('.sqadm-datei').forEach(function(z){ var b=z.querySelector('[data-akt="del-datei"]').getBoundingClientRect(),
                 k=z.getBoundingClientRect(); dz.push(b.right <= k.right+1 && b.width > 10 && b.top >= k.top-1 && b.bottom <= k.bottom+1); });
             var d=document.querySelector('.sqadm-drop'), db=d.getBoundingClientRect(), ob=d.querySelector('.sqadm-dirbtn').getBoundingClientRect();
-            return {del:out, zeilen:dz, ueber:document.documentElement.scrollWidth>innerWidth,
-                    drop: db.height > 60 && ob.width < db.width * 0.8,
-                    fort:!document.getElementById('sqadm-fortschritt').hidden,
-                    stop:getComputedStyle(document.getElementById('sqadm-stop')).display!=='none'}; })()""")
-        check(all(m.get("del") or [False]), "[%s] Muelleimer je Schema im Kasten" % thema, m.get("del"))
+            function erf(sid){ var e=document.querySelector('.sqadm-erf[data-sid="'+sid+'"]');
+                return {fort: getComputedStyle(e.querySelector('.sqadm-erf-fort')).display!=='none' && e.querySelector('.sqadm-erf-fort').getBoundingClientRect().height > 4,
+                        stop: getComputedStyle(e.querySelector('.sqadm-erf-stop')).display!=='none',
+                        gesperrt: e.querySelector('.sqadm-erf-start').disabled, stand: e.querySelector('.sqadm-erf-stand').textContent}; }
+            var cs=getComputedStyle(document.querySelector('.sqadm-schema'));
+            return {del:out, zeilen:dz, kopf:kopf, felder:felder, knoepfe:knoepfe, ueber:document.documentElement.scrollWidth>innerWidth,
+                    drop: db.height > 60 && ob.width < db.width * 0.8, erp:erf('erp'), hr:erf('hr'),
+                    rahmen: parseFloat(cs.borderTopWidth) >= 1 && parseFloat(cs.paddingTop) >= 10,
+                    abstand: document.querySelectorAll('.sqadm-schema')[1].getBoundingClientRect().top
+                             - document.querySelectorAll('.sqadm-schema')[0].getBoundingClientRect().bottom}; })()""")
+        check(all(m.get("del") or [False]), "[%s] Muelleimer je Schema im Container" % thema, m.get("del"))
         check(len(m.get("zeilen") or []) == 4 and all(m.get("zeilen")), "[%s] Muelleimer je Datei in ihrer Zeile (auch beim langen Namen)" % thema, m.get("zeilen"))
         check(m.get("drop"), "[%s] Ablagefeld sichtbar, 'Ordner wählen' nicht zeilenbreit" % thema, m)
         check(not m.get("ueber"), "[%s] kein waagerechter Ueberlauf" % thema)
-        check(m.get("fort") and m.get("stop"), "[%s] Fortschritt und Abbrechen sichtbar" % thema, m)
+        check(m.get("rahmen") and (m.get("abstand") or 0) >= 8, "[%s] Jedes Schema ein eigener Kasten mit Rahmen, mit Abstand zum naechsten" % thema,
+              (m.get("rahmen"), m.get("abstand")))
+        check(len(m.get("kopf") or []) == 2 and all(m.get("kopf")),
+              "[%s] Kopfzeile: Titel (auch der lange) neben Stand und Pfeil, ohne Ueberlappung" % thema, m.get("kopf"))
+        check(len(m.get("felder") or []) == 10 and all(m.get("felder")),
+              "[%s] Einstellungen (5 je Schema) liegen IM Container des Schemas" % thema, m.get("felder"))
+        check(len(m.get("knoepfe") or []) >= 4 and all(m.get("knoepfe")),
+              "[%s] Knoepfe im Container sind nicht zeilenbreit" % thema, m.get("knoepfe"))
+        check(m["erp"]["fort"] and m["erp"]["stop"] and m["erp"]["gesperrt"],
+              "[%s] Erfassung laeuft in erp: Fortschritt und Abbrechen DORT sichtbar" % thema, m.get("erp"))
+        check(not m["hr"]["fort"] and not m["hr"]["stop"] and not m["hr"]["gesperrt"] and "unverändert" in m["hr"]["stand"],
+              "[%s] ... und in hr NICHT: dort steht sein letzter Lauf, Start frei" % thema, m.get("hr"))
         js("var st=document.getElementById('sqadm-status'); st.textContent='Nicht gespeichert.'; st.className='sqadm-st is-fehler';"
            "var s2=document.getElementById('sqadm-status2'); s2.textContent='Gespeichert.'; s2.className='sqadm-st is-ok';"
            "var u=document.querySelector('.sqadm-up-status'); u.textContent='3 Dateien übernommen, 1 abgelehnt.'; u.className='sqadm-up-status sqadm-st is-fehler';"
-           # Der Erfassungs-Takt (alle 2 s) zeichnet die Fehlerliste neu – den
-           # Eintrag deshalb unmittelbar vor der Messung setzen (sonst misst der
-           # zweite Durchgang eine leere Liste).
-           "document.getElementById('sqadm-fehler').innerHTML='<li>Datei unlesbar: erp/archiv/kaputt.sql</li>';")
+           "var e1=document.querySelector('.sqadm-schema[data-id=\"erp\"] .sqadm-einst-status'); e1.textContent='Nicht gespeichert: dateimuster'; e1.className='sqadm-einst-status sqadm-st is-fehler';"
+           "var e2=document.querySelector('.sqadm-schema[data-id=\"hr\"] .sqadm-einst-status'); e2.textContent='Gespeichert.'; e2.className='sqadm-einst-status sqadm-st is-ok';")
         for sel, name in (("#sqadm-status", "Fehlermeldung"), ("#sqadm-status2", "Erfolgsmeldung"),
                           (".sqadm-up-status", "Upload-Ergebnis"), (".sqadm-drop", "Ablagefeld"),
                           (".sqadm-drop-sub", "Ablage-Zusatz"), (".sqadm-dname", "Dateiname"), (".sqadm-dgr", "Dateigroesse"),
-                          (".vis-progress-text", "Fortschrittstext"), ("#sqadm-fehler li", "Fehlerliste"),
-                          (".sqadm-zahlen", "Zahlen je Schema"), (".sqadm-baum .kb-hint", "Kuerzungshinweis")):
+                          (".sqadm-erf-fort .vis-progress-text", "Fortschrittstext"), (".sqadm-erf-fehler li", "Fehlerliste der Erfassung"),
+                          (".sqadm-zahlen", "Zahlen je Schema"), (".sqadm-baum .kb-hint", "Kuerzungshinweis"),
+                          (".sqadm-titel", "Titel des Containers"), (".sqadm-kopfinfo", "Stand in der Kopfzeile"),
+                          (".sqadm-teil-h", "Zwischenueberschrift"), (".sqadm-einst .kb-hint", "Hinweis an der Einstellung"),
+                          # NICHT gemessen: `.form-group label` – die Hausregel ALLER Einstellungs-Reiter
+                          # (--text-muted, hier 3,7:1 gemessen 2026-11-10); sie zu aendern traefe jede Seite der
+                          # Einstellungen und ist nicht Gegenstand dieses Reiters. Benannt, nicht geprueft.
+                          (".sqadm-einst .checkbox-group span", "Kaestchen-Beschriftung"),
+                          (".sqadm-schema[data-id=\"hr\"] .sqadm-erf-stand", "Letzte Erfassung"),
+                          (".sqadm-schema[data-id=\"erp\"] .sqadm-einst-status", "Fehler am Speichern-Knopf des Schemas"),
+                          (".sqadm-schema[data-id=\"hr\"] .sqadm-einst-status", "Erfolg am Speichern-Knopf des Schemas")):
             k = js("kontrast(%s)" % json.dumps(sel))
             check(isinstance(k, (int, float)) and k >= 4.5, "[%s] Kontrast %s %s:1" % (thema, name, k), k)
         bild("reiter_%s" % thema)
-    breite(520)
+    # Zuklappen ueber die echte Kopfzeile: der Container schrumpft auf seine Kopfzeile
+    h_vor = js("document.querySelector('.sqadm-schema[data-id=\"hr\"]').getBoundingClientRect().height")
+    js("document.querySelector('.sqadm-schema[data-id=\"hr\"] > .kb-collapse-header').click()")
+    time.sleep(0.4)
+    m = js("""(function(){ var r=document.querySelector('.sqadm-schema[data-id="hr"]'), k=r.getBoundingClientRect(),
+              h=r.querySelector('.kb-collapse-header');
+              return {hoehe:k.height, exp:h.getAttribute('aria-expanded'), info:r.querySelector('.sqadm-kopfinfo').textContent,
+                      rumpf:getComputedStyle(r.querySelector('.kb-collapse-body')).display}; })()""")
+    check(m.get("rumpf") == "none" and m.get("exp") == "false" and m.get("hoehe", 999) < 90 < h_vor,
+          "Container zugeklappt: nur noch die Kopfzeile (%s px statt %s px)" % (m.get("hoehe"), h_vor), m)
+    check("95" in (m.get("info") or ""), "... und sie nennt weiter den Stand (Dateizahl)", m.get("info"))
+    bild("reiter_zugeklappt")
+    js("document.querySelector('.sqadm-schema[data-id=\"hr\"] > .kb-collapse-header').click()")
+    time.sleep(0.3)
+    breite(520, 4600)
     time.sleep(0.6)
     m = js("({ueber: document.documentElement.scrollWidth > innerWidth, sw: document.documentElement.scrollWidth})")
     check(not m.get("ueber"), "Reiter: kein waagerechter Ueberlauf bei 520 px", m)
+    m = js("""(function(){ var ok=[]; document.querySelectorAll('.sqadm-schema').forEach(function(r){
+              var k=r.getBoundingClientRect(), h=r.querySelector('.sqadm-titel').getBoundingClientRect(),
+                  re=r.querySelector('.sqadm-kopf-re').getBoundingClientRect();
+              ok.push(k.right <= innerWidth + 1 && h.right <= re.left + 1 && re.right <= k.right + 1);
+              r.querySelectorAll('.sqadm-einst .config-input').forEach(function(f){ ok.push(f.getBoundingClientRect().right <= k.right + 1); }); });
+              return ok; })()""")
+    check(len(m or []) >= 10 and all(m), "Reiter bei 520 px: Kopfzeilen und Einstellungen bleiben im Container", m)
     bild("reiter_schmal")
 
     # ── Chat-Auswahl ─────────────────────────────────────────────────────

@@ -104,7 +104,7 @@ def graph_info(erlaubt, schemata_cfg: list[dict]) -> dict:
     if con is None:
         return {"vorhanden": False, "stand": None,
                 "schemata": [{"id": q["id"], "name": q["name"], "tabellen": 0, "sichten": 0, "spalten": 0,
-                              "dokumente": 0}
+                              "dokumente": 0, "dialekt": q.get("dialekt") or "allgemein"}
                              for q in schemata_cfg or [] if erlaubt is None or q["id"] in erlaubt]}
     try:
         meta = {k: v for k, v in con.execute("SELECT k, v FROM meta")}
@@ -128,5 +128,7 @@ def graph_info(erlaubt, schemata_cfg: list[dict]) -> dict:
         z = je.get(q["id"]) or {}
         out.append({"id": q["id"], "name": q["name"], "tabellen": int(z.get("tabelle", 0)),
                     "sichten": int(z.get("sicht", 0)), "spalten": int(z.get("spalten", 0)),
-                    "dokumente": int(z.get("dokumente", 0)), "praefixe": praefixe.get(q["id"], [])})
+                    "dokumente": int(z.get("dokumente", 0)), "praefixe": praefixe.get(q["id"], []),
+                    # Der Dialekt gehoert zum Schema: die Seite schlaegt ihn fuer die Auswahl vor
+                    "dialekt": q.get("dialekt") or "allgemein"})
     return {"vorhanden": True, "stand": meta.get("stand"), "schemata": out}

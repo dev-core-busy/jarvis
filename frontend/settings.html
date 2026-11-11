@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=52">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=229">
+    <link rel="stylesheet" href="/static/css/style.css?v=230">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -4737,81 +4737,37 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      TAB_BUTTONS und NICHT in TARGETS von skillcfg.js – wie
                      newsfeed. Daten ueber /api/sql/admin* (nur Admins). -->
                 <div id="settings-tab-sql" class="settings-tab-content" style="display:none;">
-                    <p class="kb-hint" data-i18n-html="sqladm.intro">Der <b>SQL-Assistent</b> wandelt Fragen in Alltagssprache in geprüfte SQL-Abfragen um. Grundlage sind die <b>Schemata</b>: je Schema ein Name und die hochgeladenen Schema-Dateien (SQL-DDL wie CREATE TABLE … oder YAML-Exporte mit einer Tabelle bzw. Sicht je Datei), die der Server in einem festen Ordner ablegt. <b>Wer</b> den Assistenten benutzen darf, steht unter <b>Sicherheit → Berechtigungen</b>, Spalte „SQL-Assistent“ (leer = niemand). <b>Welches</b> Schema eine Frage betrifft, wählt der Benutzer selbst – im Chat neben den Wissensgruppen, auf der Seite „SQL-Assistent“ oben.</p>
+                    <p class="kb-hint" data-i18n-html="sqladm.intro">Der <b>SQL-Assistent</b> wandelt Fragen in Alltagssprache in geprüfte SQL-Abfragen um. Grundlage sind die <b>Schemata</b>: je Datenbank ein Schema – ein eigener Container mit seinem Namen, seinen Schema-Dateien (SQL-DDL wie CREATE TABLE … oder YAML-Exporte mit einer Tabelle bzw. Sicht je Datei), seinen <b>Einstellungen</b> (Dialekt, Dateimuster, Beziehungen, Höchstzahlen) und seiner <b>Erfassung</b>. <b>Wer</b> den Assistenten benutzen darf, steht unter <b>Sicherheit → Berechtigungen</b>, Spalte „SQL-Assistent“ (leer = niemand). <b>Welches</b> Schema eine Frage betrifft, wählt der Benutzer selbst – im Chat neben den Wissensgruppen, auf der Seite „SQL-Assistent“ oben.</p>
+                    <p class="kb-hint" data-i18n="sqladm.schemas_hint">Lege je Datenbank ein Schema an und speichere. Danach nimmt die Ablage in seinem Container Dateien, ganze Ordner (die Ordnerstruktur bleibt erhalten) oder ZIP-Archive an. Nach jedem Hochladen und Löschen wird dieses Schema automatisch neu erfasst. Ein Schema zu entfernen löscht auch seine Dateien.</p>
 
-                    <div class="kb-section" id="sq-sect-quellen">
-                        <div class="kb-section-header kb-collapse-header" id="sq-sect-quellen-hdr">
-                            <h3 data-i18n="sqladm.schemas_h">Schemata</h3>
-                            <span class="sk-openclaw-toggle" id="sq-sect-quellen-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="sq-sect-quellen-body">
-                            <p class="kb-hint" data-i18n="sqladm.schemas_hint">Lege je Datenbank ein Schema an und speichere. Danach nimmt die Ablage darunter Dateien, ganze Ordner (die Ordnerstruktur bleibt erhalten) oder ZIP-Archive an. Nach jedem Hochladen und Löschen wird automatisch neu erfasst. Ein Schema zu entfernen löscht auch seine Dateien.</p>
-                            <div id="sqadm-schemata"></div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
-                                <button class="btn-secondary" id="sqadm-neu" type="button" data-i18n="sqladm.add" style="flex:0 0 auto;">+ Schema</button>
-                                <button class="btn-primary" id="sqadm-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
-                                <span id="sqadm-status" style="font-size:0.9em;"></span>
-                            </div>
-                            <ul class="sqadm-hinweise" id="sqadm-hinweise"></ul>
-                        </div>
+                    <!-- Je Schema EIN Container (sql_admin.js zeichnet sie): Name,
+                         Dateien, Einstellungen und Erfassung gehoeren zum Schema
+                         (Vorgabe des Betreibers 2026-11-10). -->
+                    <div id="sqadm-schemata"></div>
+                    <div class="sqadm-aktionen sqadm-fuss">
+                        <button class="btn-secondary" id="sqadm-neu" type="button" data-i18n="sqladm.add">+ Schema</button>
+                        <button class="btn-primary" id="sqadm-save" type="button" data-i18n="common.save">Speichern</button>
+                        <span id="sqadm-status" style="font-size:0.9em;"></span>
                     </div>
+                    <ul class="sqadm-hinweise" id="sqadm-hinweise"></ul>
 
                     <div class="kb-section" id="sq-sect-allg">
                         <div class="kb-section-header kb-collapse-header" id="sq-sect-allg-hdr">
-                            <h3 data-i18n="sqladm.general_h">Allgemein</h3>
+                            <h3 data-i18n="sqladm.general_h">Für alle Schemata</h3>
                             <span class="sk-openclaw-toggle" id="sq-sect-allg-tog">▼</span>
                         </div>
                         <div class="kb-collapse-body" id="sq-sect-allg-body">
-                            <div class="form-group">
-                                <label for="sqadm-dialekt" data-i18n="sqladm.dialect">SQL-Dialekt der Zieldatenbank</label>
-                                <select id="sqadm-dialekt" class="config-input"></select>
-                                <span class="kb-hint" data-i18n="sqladm.dialect_hint">In diesem Dialekt schreibt der Assistent die Abfragen (Funktionen, LIMIT/TOP, Datumsrechnung). Auf der Seite lässt er sich je Frage ändern.</span>
-                            </div>
-                            <div class="form-group">
-                                <label for="sqadm-muster" data-i18n="sqladm.pattern">Dateimuster</label>
-                                <input type="text" id="sqadm-muster" class="config-input" autocomplete="off">
-                                <span class="kb-hint" data-i18n="sqladm.pattern_hint">Kommagetrennte Endungen, z. B. *.sql,*.ddl,*.yaml. Nur diese Dateien (und ZIP-Archive) werden hochgeladen und erfasst. .sql/.ddl werden als SQL-DDL gelesen, .yaml/.yml als Objektexport (eine Tabelle oder Sicht je Datei).</span>
-                            </div>
+                            <p class="kb-hint" data-i18n="sqladm.general_hint">Diese beiden Vorgaben gelten für den ganzen Server. Dialekt, Dateimuster, Beziehungen und Höchstzahlen stellst du je Schema ein – in seinem Container oben.</p>
                             <div class="form-group">
                                 <label for="sqadm-prozesse" data-i18n="sqladm.procs">Parallele Leseprozesse beim Erfassen</label>
                                 <input type="number" id="sqadm-prozesse" class="config-input" min="0" max="32" step="1">
                                 <span class="kb-hint" data-i18n="sqladm.procs_hint">0 = automatisch (alle Kerne außer zwei).</span>
                             </div>
-                            <div class="form-group">
-                                <label for="sqadm-maxtab" data-i18n="sqladm.maxtab">Höchstzahl Tabellen je Frage</label>
-                                <input type="number" id="sqadm-maxtab" class="config-input" min="3" max="40" step="1">
-                            </div>
-                            <div class="form-group">
-                                <label for="sqadm-maxsp" data-i18n="sqladm.maxcol">Höchstzahl Spalten je Tabelle im Ausschnitt</label>
-                                <input type="number" id="sqadm-maxsp" class="config-input" min="10" max="200" step="1">
-                            </div>
-                            <label class="checkbox-group"><input type="checkbox" id="sqadm-fk"><span data-i18n="sqladm.fk">Beziehungen aus Spaltennamen ableiten (z. B. kunde_id → kunde.id, oder eine Spalte, die genau wie der Primärschlüssel einer anderen Tabelle heißt; dem Modell als „vermutet“ gezeigt)</span></label>
-                            <label class="checkbox-group" style="margin-top:6px;"><input type="checkbox" id="sqadm-chat"><span data-i18n="sqladm.chat">Erfassen aus dem Chat erlauben (nur Administratoren)</span></label>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;">
-                                <button class="btn-primary" id="sqadm-save2" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                            <label class="checkbox-group"><input type="checkbox" id="sqadm-chat"><span data-i18n="sqladm.chat">Erfassen aus dem Chat erlauben (nur Administratoren; erfasst werden die im Chat gewählten Schemata)</span></label>
+                            <div class="sqadm-aktionen" style="margin-top:12px;">
+                                <button class="btn-primary" id="sqadm-save2" type="button" data-i18n="common.save">Speichern</button>
                                 <span id="sqadm-status2" style="font-size:0.9em;"></span>
                             </div>
-                        </div>
-                    </div>
-
-                    <div class="kb-section" id="sq-sect-erf">
-                        <div class="kb-section-header kb-collapse-header" id="sq-sect-erf-hdr">
-                            <h3 data-i18n="sqladm.index_h">Erfassung</h3>
-                            <span class="sk-openclaw-toggle" id="sq-sect-erf-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="sq-sect-erf-body">
-                            <p class="kb-hint" data-i18n="sqladm.index_hint">Liest die Schema-Dateien aller Schemata und baut daraus den Graphen. Das geschieht nach jedem Hochladen und Löschen von selbst und liest nur neue und geänderte Dateien. Von Hand neu erfassen braucht es nur, wenn Dateien direkt auf dem Server geändert wurden.</p>
-                            <div id="sqadm-graph"></div>
-                            <div class="vis-progress-wrap" id="sqadm-fortschritt" hidden>
-                                <div class="vis-progress-bar"><div class="vis-progress-fill" id="sqadm-balken" style="width:0%"></div></div>
-                                <span class="vis-progress-text" id="sqadm-fortschritt-text"></span>
-                            </div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
-                                <button class="btn-primary" id="sqadm-start" type="button" data-i18n="sqladm.start" style="flex:0 0 auto;">Neu erfassen</button>
-                                <button class="btn-secondary" id="sqadm-stop" type="button" data-i18n="sqladm.stop" style="flex:0 0 auto;display:none;">Abbrechen</button>
-                                <span id="sqadm-erf-status" style="font-size:0.9em;"></span>
-                            </div>
-                            <ul class="sqadm-hinweise" id="sqadm-fehler"></ul>
                         </div>
                     </div>
                 </div>
@@ -6198,7 +6154,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=460"></script>
+    <script src="/static/js/i18n.js?v=461"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6231,7 +6187,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/feedback_admin.js?v=7"></script>
     <script src="/static/js/newsfeed.js?v=4"></script>
     <script src="/static/js/newsfeed_admin.js?v=3"></script>
-    <script src="/static/js/sql_admin.js?v=5"></script>
+    <script src="/static/js/sql_admin.js?v=6"></script>
     <script src="/static/js/kundenverwaltung.js?v=10"></script>
     <script src="/static/js/support_admin.js?v=13"></script>
     <script src="/static/js/telemetry.js?v=14"></script>
@@ -6253,7 +6209,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=242"></script>
+    <script src="/static/js/app.js?v=243"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

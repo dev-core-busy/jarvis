@@ -23,7 +23,13 @@
  *   6. Schema entfernen: 409 -> Rueckfrage mit Name und Dateizahl -> erneut mit
  *      Bestaetigung; abgelehnt -> nichts geloescht, Grund steht da
  *   7. Speichern: 400 -> Fehlerliste maskiert, bleibt stehen
- *   8. Erfassung: Start -> Fortschritt, Abbrechen-Knopf; Ende -> Neuladen
+ *   8. Erfassung JE SCHEMA: Start am Schema -> Fortschritt und Abbrechen nur
+ *      DORT, das andere Schema bleibt frei; Vormerkung; Ende -> Neuladen, ohne
+ *      eine ungespeicherte Eingabe zu verlieren
+ *   9. Seit 2026-11-10: je Schema EIN CONTAINER (Klapp-Kopfzeile wie die
+ *      uebrigen Abschnitte), und Dialekt, Dateimuster, Beziehungen und
+ *      Hoechstzahlen stehen DARIN – gespeichert je Schema, nie auf oberster
+ *      Ebene; fuer alle gemeinsam nur Leseprozesse und Chat-Erlaubnis
  */
 'use strict';
 require('./lib/bilanz')();
@@ -62,10 +68,37 @@ const JS = { sitzung: lies('frontend/js/sitzung.js'), icons: lies('frontend/js/i
 const BOESE = '<img src=x onerror="window.__xss=1">';
 function schlaf(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
+// Zwei Schemata, die sich in JEDER Einstellung unterscheiden – sonst waere
+// "je Schema" von "fuer alle" nicht zu unterscheiden.
 function cfg0() {
-    return { schemata: [{ id: 'erp', name: 'ERP ' + BOESE }, { id: 'hr', name: 'Personal' }],
-        dialekt: 'oracle', dateimuster: '*.sql,*.ddl', prozesse: 0, fk_ableiten: true,
-        max_tabellen: 12, max_spalten: 40, index_aus_chat: false };
+    return { schemata: [
+        { id: 'erp', name: 'ERP ' + BOESE, dialekt: 'oracle', dateimuster: '*.sql,*.ddl', fk_ableiten: true,
+          max_tabellen: 12, max_spalten: 40 },
+        { id: 'hr', name: 'Personal', dialekt: 'mssql', dateimuster: '*.yaml', fk_ableiten: false,
+          max_tabellen: 20, max_spalten: 60 }],
+        prozesse: 3, index_aus_chat: false };
+}
+const VORGABEN = { dialekt: 'allgemein', dateimuster: '*.sql,*.ddl,*.yaml,*.yml', fk_ableiten: true,
+                   max_tabellen: 12, max_spalten: 40 };
+// Letzter Lauf: NUR fuer erp bekannt – ueber hr weiss der Status nichts.
+function ruhe() {
+    return { laeuft: false, ergebnis: 'fertig', ende: '2026-11-07', dateien_gesamt: 3, dateien_neu: 1, schemata: ['erp'],
+             je_schema: { erp: { ergebnis: 'fertig', ende: '2026-11-07 10:00:00', dateien_gesamt: 3, dateien_neu: 1,
+                                 fehler: [], ausgelassen: [] } } };
+}
+function imLauf(sid, fertig) {
+    const je = ruhe().je_schema;
+    je[sid] = { ergebnis: '', ende: null, dateien_gesamt: 9, dateien_neu: 4, dateien_fertig: fertig, bytes_neu: 100,
+                bytes_fertig: 25 * fertig, fehler: [], ausgelassen: [] };
+    return { laeuft: true, phase: 'Dateien zerlegen', schemata: [sid], dateien_fertig: fertig, dateien_neu: 4,
+             bytes_fertig: 25 * fertig, bytes_neu: 100, mb_pro_s: 12.5, je_schema: je };
+}
+function nachLauf(sid) {
+    const st = ruhe();
+    st.schemata = [sid];
+    st.je_schema[sid] = { ergebnis: 'unveraendert', ende: '2026-11-10 09:00:00', dateien_gesamt: 9, dateien_neu: 4,
+                          fehler: [], ausgelassen: [] };
+    return st;
 }
 
 async function seite(opt) {
@@ -75,7 +108,13 @@ async function seite(opt) {
     const win = dom.window;
     win.localStorage.setItem('jarvis_token', 'test-token');
     const gerufen = [], hoch = [], fragen = [];
-    const zustand = { cfg: cfg0(), laeuft: false, polls: 0, puts: 0 };
+    // ``lauf``: Kennung des Schemas, das gerade erfasst wird (oder null);
+    // ``wartet``: Kennungen mit vorgemerktem Nachlauf; ``fertig``: zuletzt erfasst
+    const zustand = { cfg: cfg0(), lauf: null, wartet: null, fertig: null, polls: 0, puts: 0, pollsBisEnde: 2 };
+    function erfStand() {
+        return zustand.lauf ? imLauf(zustand.lauf, zustand.polls ? 2 : 0) : zustand.fertig ? nachLauf(zustand.fertig) : ruhe();
+    }
+    function vorgemerkt() { return zustand.wartet ? { nur: zustand.wartet.slice() } : null; }
     win.confirm = function (t) { fragen.push(t); return opt.bestaetigen !== false; };
     function antwort(k, st) {
         st = st || 200;
@@ -86,11 +125,18 @@ async function seite(opt) {
         o = o || {};
         gerufen.push({ pfad: p, url: voll, methode: o.method || 'GET', body: o.body });
         if (p === '/api/sql/admin' && (o.method || 'GET') === 'GET') {
+            // ``getLangsam``: die Antwort kommt erst nach 60 ms (ein Nachladen,
+            // das von einem Speichern ueberholt wird) – mit dem Stand von DANN.
+            if (zustand.getLangsam) {
+                zustand.getLangsam = false;
+                return new Promise(function (fertig) { setTimeout(function () { fertig(attrappe(url, o)); }, 60); });
+            }
             return antwort({ ok: true, cfg: JSON.parse(JSON.stringify(zustand.cfg)),
                 graph: { vorhanden: true, stand: '2026-11-07', schemata: [{ id: 'erp', name: 'ERP', tabellen: 5, sichten: 1, spalten: 30, dokumente: 2 }] },
-                upload_endungen: ['.ddl', '.docx', '.md', '.pdf', '.sql'],
+                upload_endungen: { erp: ['.ddl', '.docx', '.md', '.pdf', '.sql'], hr: ['.docx', '.md', '.pdf', '.yaml'] },
+                schema_vorgaben: JSON.parse(JSON.stringify(VORGABEN)),
                 dateien: { erp: { dateien: 3, ordner: 1, bytes: 2 * 1024 * 1024 }, hr: { dateien: 0, ordner: 0, bytes: 0 } },
-                erfassung: zustand.laeuft ? { laeuft: true } : { laeuft: false, ergebnis: 'fertig', ende: '2026-11-07', dateien_gesamt: 3, dateien_neu: 1 },
+                erfassung: erfStand(), vorgemerkt: vorgemerkt(),
                 skill_aktiv: true });
         }
         if (p === '/api/sql/admin' && o.method === 'PUT' && opt.netzweg) return Promise.reject(new TypeError('Failed to fetch'));
@@ -104,8 +150,14 @@ async function seite(opt) {
                 return antwort({ error: 'bitte bestätigen', zu_loeschen: weg }, 409);
             }
             neu.schemata.forEach(function (s, i) { if (!s.id) s.id = 'neu' + i; });
+            // Wie der Server: neu erfasst wird, wessen Dateimuster sich aendert
+            const erfasst = neu.schemata.filter(function (n) {
+                const a = zustand.cfg.schemata.filter(function (x) { return x.id === n.id; })[0];
+                return a && (a.dateimuster !== n.dateimuster || a.fk_ableiten !== n.fk_ableiten);
+            }).map(function (n) { return n.id; });
             zustand.cfg = neu;
-            return antwort({ ok: true, cfg: neu, hinweise: ['Hinweis A'] });
+            if (erfasst.length) zustand.lauf = erfasst[0];
+            return antwort({ ok: true, cfg: neu, hinweise: ['Hinweis A'], erfasst: erfasst });
         }
         if (/^\/api\/sql\/admin\/schema\/[^/]+\/dateien$/.test(p)) {
             return antwort({ ok: true, gekappt: true, gesamt: 9000, dateien: 2, ordner: 1, bytes: 30, eintraege: [
@@ -116,17 +168,19 @@ async function seite(opt) {
         if (/^\/api\/sql\/admin\/schema\/[^/]+\/datei$/.test(p) && o.method === 'DELETE') {
             return antwort({ ok: true, art: 'datei', dateien: 1, erfassung: 'gestartet' });
         }
-        if (p === '/api/sql/admin/index' && o.method === 'POST') {
-            zustand.laeuft = true;
-            return antwort({ ok: true, erfassung: { laeuft: true, phase: 'Dateien zerlegen', dateien_fertig: 0, dateien_neu: 4,
-                                                     bytes_fertig: 0, bytes_neu: 100 } });
+        const mi = /^\/api\/sql\/admin\/schema\/([^/]+)\/index$/.exec(p);
+        if (mi && o.method === 'POST') {
+            // Wie der Server: laeuft schon ein Lauf, wird vorgemerkt
+            let wie = 'gestartet';
+            if (zustand.lauf) { zustand.wartet = (zustand.wartet || []).concat([mi[1]]); wie = 'vorgemerkt'; }
+            else zustand.lauf = mi[1];
+            return antwort({ ok: true, antwort: wie, erfassung: erfStand(), vorgemerkt: vorgemerkt() });
         }
+        if (p === '/api/sql/admin/index/abbrechen' && o.method === 'POST') return antwort({ ok: true, antwort: 'Abbruch angefordert' });
         if (p === '/api/sql/admin/index') {
             zustand.polls++;
-            if (zustand.polls >= 2) zustand.laeuft = false;
-            return antwort({ ok: true, hier: true, erfassung: zustand.laeuft
-                ? { laeuft: true, phase: 'Dateien zerlegen', dateien_fertig: 2, dateien_neu: 4, bytes_fertig: 50, bytes_neu: 100, mb_pro_s: 12.5 }
-                : { laeuft: false, ergebnis: 'fertig', ende: 'jetzt', dateien_gesamt: 4, dateien_neu: 4 } });
+            if (zustand.polls >= zustand.pollsBisEnde && zustand.lauf) { zustand.fertig = zustand.lauf; zustand.lauf = null; }
+            return antwort({ ok: true, hier: true, erfassung: erfStand(), vorgemerkt: vorgemerkt() });
         }
         return antwort({ ok: true });
     };
@@ -193,12 +247,22 @@ async function warteBis(fn, ms) {
     check('Ablagefeld je gespeichertem Schema, nennt die Endungen', k[0].querySelector('.sqadm-drop')
           && /\.sql\b/.test(k[0].querySelector('.sqadm-drop').textContent) && /\.zip\b/.test(k[0].querySelector('.sqadm-drop').textContent));
     check('Keine Ordner- oder Gruppenfelder mehr', !s.doc.querySelector('.sqadm-ordner, .sqadm-grp'));
-    check('Dialekt aus der Konfiguration', s.doc.getElementById('sqadm-dialekt').value === 'oracle');
+    check('Dialekt steht am SCHEMA: jedes hat seinen eigenen', k[0].querySelector('.sqadm-dialekt').value === 'oracle'
+          && k[1].querySelector('.sqadm-dialekt').value === 'mssql',
+          [k[0].querySelector('.sqadm-dialekt').value, k[1].querySelector('.sqadm-dialekt').value]);
+    check('Ablagefeld nennt die Endungen DIESES Schemas (hr: .yaml, nicht .sql)',
+          /\.yaml\b/.test(k[1].querySelector('.sqadm-drop').textContent) && !/\.sql\b/.test(k[1].querySelector('.sqadm-drop').textContent),
+          k[1].querySelector('.sqadm-drop-sub').textContent);
     klick(s, s.doc.getElementById('sqadm-neu'));
     await schlaf(5);
     k = karten(s);
     check('Neues Schema: KEIN Ablagefeld, Hinweis "erst speichern"', k.length === 3 && !k[2].querySelector('.sqadm-drop')
           && /Erst speichern/.test(k[2].textContent));
+    check('Neues Schema: Einstellungen schon da, mit den Vorgaben des SERVERS; keine Erfassung',
+          k[2].querySelector('.sqadm-dialekt').value === VORGABEN.dialekt
+          && k[2].querySelector('.sqadm-muster').value === VORGABEN.dateimuster
+          && k[2].querySelector('.sqadm-maxtab').value === String(VORGABEN.max_tabellen)
+          && k[2].querySelector('.sqadm-fk').checked === true && !k[2].querySelector('.sqadm-erf'));
     s.win.close();
 
     abschnitt('2. Upload ueber das Dateifeld');
@@ -240,6 +304,12 @@ async function warteBis(fn, ms) {
     await warteBis(function () { return s.hoch.length > n0 && !s.win.SqlAdmin._hochladen.erp; });
     check('Ordner-Auswahl: relativer Pfad bleibt, versteckter Ordner faellt weg',
           s.hoch.length === n0 + 1 && s.hoch[n0].pfade.join('|') === 'dump/sub/t.sql', s.hoch[n0] && s.hoch[n0].pfade);
+    const n1 = s.hoch.length;
+    waehle(s, karte(s, 'hr').parentNode.querySelector('input.sqadm-fin[data-sid="hr"]'), [datei(s, 'a.sql'), datei(s, 'kunde.yaml')]);
+    await warteBis(function () { return s.hoch.length > n1 && !s.win.SqlAdmin._hochladen.hr; });
+    check('Gefiltert nach dem Dateimuster DES SCHEMAS: hr nimmt .yaml, kein .sql',
+          s.hoch.length === n1 + 1 && s.hoch[n1].namen.join('|') === 'kunde.yaml' && /\/schema\/hr\/upload$/.test(s.hoch[n1].url),
+          s.hoch[n1] && s.hoch[n1].namen);
     s.win.close();
 
     abschnitt('3. Ordner per Ziehen');
@@ -259,11 +329,11 @@ async function warteBis(fn, ms) {
     const ev = new s.win.Event('drop', { bubbles: true, cancelable: true });
     Object.defineProperty(ev, 'dataTransfer', { value: { items: [{ kind: 'file', webkitGetAsEntry: function () { return baumE; } }],
                                                           files: [] } });
-    karte(s, 'hr').querySelector('.sqadm-drop').dispatchEvent(ev);
-    await warteBis(function () { return s.hoch.length && !s.win.SqlAdmin._hochladen.hr; });
+    karte(s, 'erp').querySelector('.sqadm-drop').dispatchEvent(ev);
+    await warteBis(function () { return s.hoch.length && !s.win.SqlAdmin._hochladen.erp; });
     const hz = s.hoch[0];
     check('Ziehen: alle Stuecke, rekursiv, mit Ordnerstruktur', hz && hz.pfade.slice().sort().join('|')
-          === 'schema/a.sql|schema/c.sql|schema/unter/b.ddl' && /\/schema\/hr\/upload$/.test(hz.url), hz && hz.pfade);
+          === 'schema/a.sql|schema/c.sql|schema/unter/b.ddl' && /\/schema\/erp\/upload$/.test(hz.url), hz && hz.pfade);
     check('Ziehen verhindert das Standardverhalten (Browser oeffnet die Datei nicht)', ev.defaultPrevented);
     s.win.close();
 
@@ -367,20 +437,175 @@ async function warteBis(fn, ms) {
     check('Regel: kein nacktes fetch( im Modul ausser in holen()', (JS.adm.match(/(^|[^.\w])fetch\(/g) || []).length === 1);
     s.win.close();
 
-    abschnitt('8. Erfassung');
+    abschnitt('8. Erfassung je Schema');
     s = await seite();
-    check('Knopf heisst "Neu erfassen"', /Neu erfassen/.test(s.doc.getElementById('sqadm-start').textContent));
-    klick(s, s.doc.getElementById('sqadm-start'));
+    function erf(sid) { return karte(s, sid).querySelector('.sqadm-erf'); }
+    function laeuftIn(sid) { return !erf(sid).querySelector('.sqadm-erf-fort').hidden; }
+    check('Positivkontrolle: in JEDEM gespeicherten Schema ein eigener Erfassungs-Teil mit Knopf "Neu erfassen"',
+          erf('erp') && erf('hr') && /Neu erfassen/.test(erf('erp').querySelector('.sqadm-erf-start').textContent)
+          && /Neu erfassen/.test(erf('hr').querySelector('.sqadm-erf-start').textContent));
+    if (!erf('erp') || !erf('hr')) abbruch('Erfassungs-Teil je Schema fehlt – die Folgepruefungen waeren trivial');
+    check('Keine Erfassung ausserhalb der Schemata (kein gemeinsamer Knopf mehr)',
+          !s.doc.getElementById('sqadm-start') && !s.doc.getElementById('sq-sect-erf')
+          && s.doc.querySelectorAll('[data-akt="erfassen"]').length === 2);
+    check('Letzte Erfassung steht je Schema: erp bekannt (mit Umlaut-freiem Ergebniswort aus den Texten)',
+          /Letzte Erfassung: fertig am 2026-11-07 10:00:00/.test(erf('erp').querySelector('.sqadm-erf-stand').textContent),
+          erf('erp').querySelector('.sqadm-erf-stand').textContent);
+    check('... und fuer hr wird NICHTS behauptet (kein Lauf bekannt)', erf('hr').querySelector('.sqadm-erf-stand').textContent === '',
+          erf('hr').querySelector('.sqadm-erf-stand').textContent);
+    // Eine ungespeicherte Eingabe in hr – sie muss Takt und Laufende ueberleben
+    const hrName = karte(s, 'hr').querySelector('.sqadm-name');
+    hrName.value = 'Personal NEU';
+    hrName.dispatchEvent(new s.win.Event('input', { bubbles: true }));
+    karte(s, 'hr').querySelector('.sqadm-maxtab').value = '33';
+    check('Titel des Containers folgt dem Namensfeld', karte(s, 'hr').querySelector('.sqadm-titel').textContent === 'Personal NEU');
+    klick(s, erf('erp').querySelector('.sqadm-erf-start'));
     await schlaf(30);
-    check('Start ruft die Erfassung', s.gerufen.some(function (g) { return g.pfad === '/api/sql/admin/index' && g.methode === 'POST'; }));
-    check('Fortschritt sichtbar, Abbrechen-Knopf da', !s.doc.getElementById('sqadm-fortschritt').hidden
-          && s.doc.getElementById('sqadm-stop').style.display !== 'none');
-    check('Start-Knopf gesperrt waehrend des Laufs', s.doc.getElementById('sqadm-start').disabled);
-    await schlaf(4600);
-    check('Ende erkannt: neu geladen, Fortschritt weg', s.doc.getElementById('sqadm-fortschritt').hidden
-          && s.gerufen.filter(function (g) { return g.pfad === '/api/sql/admin' && g.methode === 'GET'; }).length >= 2,
-          s.zustand.polls);
+    check('Start ruft die Erfassung DIESES Schemas', s.gerufen.some(function (g) {
+        return g.pfad === '/api/sql/admin/schema/erp/index' && g.methode === 'POST'; })
+        && !s.gerufen.some(function (g) { return g.pfad === '/api/sql/admin/index' && g.methode === 'POST'; }));
+    check('Fortschritt und Abbrechen im erfassten Schema', laeuftIn('erp')
+          && erf('erp').querySelector('.sqadm-erf-stop').style.display !== 'none'
+          && erf('erp').querySelector('.sqadm-erf-start').disabled);
+    check('Das ANDERE Schema laeuft nicht: kein Fortschritt, kein Abbrechen, Start frei', !laeuftIn('hr')
+          && erf('hr').querySelector('.sqadm-erf-stop').style.display === 'none'
+          && !erf('hr').querySelector('.sqadm-erf-start').disabled);
+    check('Kopfzeile sagt es als TEXT (nicht nur der Balken)', /Erfassung läuft/.test(karte(s, 'erp').querySelector('.sqadm-kopfinfo').textContent)
+          && !/läuft/.test(karte(s, 'hr').querySelector('.sqadm-kopfinfo').textContent));
+    // Waehrend erp laeuft: hr von Hand -> vorgemerkt
+    klick(s, erf('hr').querySelector('.sqadm-erf-start'));
+    await schlaf(30);
+    check('Zweites Schema waehrend des Laufs: VORGEMERKT, als Text und mit gesperrtem Knopf',
+          /Vorgemerkt/.test(erf('hr').querySelector('.sqadm-erf-stand').textContent)
+          && erf('hr').querySelector('.sqadm-erf-start').disabled && !laeuftIn('hr')
+          && /vorgemerkt/.test(karte(s, 'hr').querySelector('.sqadm-kopfinfo').textContent),
+          erf('hr').querySelector('.sqadm-erf-stand').textContent);
+    const erpKarteVor = karte(s, 'erp');
+    await schlaf(2300);
+    check('Takt: Zaehler DIESES Schemas (2 von 4 Dateien, 50 %)', /2 von 4 Dateien/.test(erf('erp').querySelector('.vis-progress-text').textContent)
+          && erf('erp').querySelector('.vis-progress-fill').style.width === '50%',
+          erf('erp').querySelector('.vis-progress-text').textContent);
+    check('Takt zeichnet die Container NICHT neu (dasselbe Element, Eingabe steht noch)', karte(s, 'erp') === erpKarteVor
+          && karte(s, 'hr').querySelector('.sqadm-name').value === 'Personal NEU');
+    klick(s, erf('erp').querySelector('.sqadm-erf-stop'));
+    await schlaf(20);
+    check('Abbrechen ruft den Abbruch, Rueckmeldung am Knopf', s.gerufen.some(function (g) {
+        return g.pfad === '/api/sql/admin/index/abbrechen' && g.methode === 'POST'; })
+        && /Abbruch angefordert/.test(erf('erp').querySelector('.sqadm-erf-status').textContent));
+    s.zustand.wartet = null;      // der Nachlauf ist abgeholt – sonst endet der Takt nie
+    await schlaf(2600);
+    check('Ende erkannt: neu geladen, Fortschritt weg, Ergebnis DIESES Laufs am Schema', !laeuftIn('erp')
+          && s.gerufen.filter(function (g) { return g.pfad === '/api/sql/admin' && g.methode === 'GET'; }).length >= 2
+          && /Letzte Erfassung: unverändert am 2026-11-10 09:00:00 – 9 Dateien, davon 4 neu/.test(erf('erp').querySelector('.sqadm-erf-stand').textContent),
+          erf('erp').querySelector('.sqadm-erf-stand').textContent + ' / polls ' + s.zustand.polls);
+    check('Nachladen am Laufende behaelt die UNGESPEICHERTEN Eingaben (Name und Hoechstzahl in hr)',
+          karte(s, 'hr').querySelector('.sqadm-name').value === 'Personal NEU'
+          && karte(s, 'hr').querySelector('.sqadm-maxtab').value === '33',
+          [karte(s, 'hr').querySelector('.sqadm-name').value, karte(s, 'hr').querySelector('.sqadm-maxtab').value]);
     s.win.close();
+
+    abschnitt('9. Schema als Container, Einstellungen darin');
+    s = await seite();
+    k = karten(s);
+    const kopfE = k[0].querySelector(':scope > .kb-collapse-header');
+    check('Jedes Schema ist ein Container in der Bauform der Abschnitte (.kb-section, Klapp-Kopfzeile, Titel als h3)',
+          Array.prototype.every.call(k, function (x) {
+              return x.classList.contains('kb-section') && x.querySelector(':scope > .kb-collapse-header > h3')
+                  && x.querySelector(':scope > .kb-collapse-body'); }));
+    check('Titel = Name des Schemas, maskiert', kopfE && /ERP <img/.test(kopfE.querySelector('h3').textContent)
+          && !kopfE.querySelector('img'));
+    // Das Suchfeld der Einstellungen findet Abschnitt und Rumpf ueber <x>-hdr / <x>-body
+    check('Kopfzeile und Rumpf tragen das Kennungspaar der Abschnitte (<x>-hdr / <x>-body), je Schema eindeutig',
+          Array.prototype.every.call(k, function (x) {
+              const h = x.querySelector(':scope > .kb-collapse-header'), r = x.querySelector(':scope > .kb-collapse-body');
+              return /-hdr$/.test(h.id) && r.id === h.id.replace(/-hdr$/, '-body') && s.doc.querySelectorAll('#' + h.id).length === 1; })
+          && k[0].querySelector('.kb-collapse-header').id !== k[1].querySelector('.kb-collapse-header').id,
+          Array.prototype.map.call(k, function (x) { return x.querySelector('.kb-collapse-header').id; }));
+    ['sqadm-dialekt', 'sqadm-muster', 'sqadm-maxtab', 'sqadm-maxsp', 'sqadm-fk'].forEach(function (kl) {
+        check('Einstellung .' + kl + ' steht IN jedem Schema-Container und nirgends ausserhalb',
+              Array.prototype.every.call(k, function (x) { return x.querySelectorAll('.kb-collapse-body .' + kl).length === 1; })
+              && s.doc.querySelectorAll('.' + kl).length === k.length && !s.doc.getElementById(kl));
+    });
+    check('Werte je Schema: Muster, Hoechstzahlen und Ableiten', k[0].querySelector('.sqadm-muster').value === '*.sql,*.ddl'
+          && k[1].querySelector('.sqadm-muster').value === '*.yaml' && k[1].querySelector('.sqadm-maxtab').value === '20'
+          && k[1].querySelector('.sqadm-maxsp').value === '60' && k[0].querySelector('.sqadm-fk').checked
+          && !k[1].querySelector('.sqadm-fk').checked);
+    check('Beschriftung haengt am Feld (label for)', Array.prototype.every.call(k[1].querySelectorAll('.sqadm-einst .form-group'), function (g) {
+        const l = g.querySelector('label'), f = g.querySelector('select, input');
+        return l && f && f.id && l.getAttribute('for') === f.id && s.doc.querySelectorAll('#' + f.id).length === 1; }));
+    check('Fuer alle Schemata bleibt NUR: Leseprozesse und Chat-Erlaubnis',
+          s.doc.getElementById('sqadm-prozesse').value === '3' && s.doc.getElementById('sqadm-chat')
+          && s.doc.querySelectorAll('#sq-sect-allg input, #sq-sect-allg select').length === 2);
+    // Zuklappen
+    klick(s, kopfE);
+    const rumpfE = k[0].querySelector(':scope > .kb-collapse-body');
+    check('Klick auf die Kopfzeile klappt zu (Rumpf weg, aria-expanded, Pfeil)', rumpfE.style.display === 'none'
+          && kopfE.getAttribute('aria-expanded') === 'false' && kopfE.classList.contains('is-collapsed')
+          && /▶/.test(kopfE.textContent));
+    check('... und merkt es sich je Schema', s.win.localStorage.getItem('jarvis_sect_collapse_sqadm-erp') === '1'
+          && s.win.localStorage.getItem('jarvis_sect_collapse_sqadm-hr') === null);
+    check('Der andere Container bleibt offen', k[1].querySelector(':scope > .kb-collapse-body').style.display !== 'none');
+    // Speichern aus einem Container: je Schema, nichts auf oberster Ebene
+    k[1].querySelector('.sqadm-dialekt').value = 'postgresql';
+    k[1].querySelector('.sqadm-maxsp').value = '77';
+    klick(s, k[1].querySelector('[data-akt="speichern"]'));
+    await schlaf(60);
+    const put = s.gerufen.filter(function (g) { return g.methode === 'PUT'; })[0];
+    let pb = null;
+    try { pb = JSON.parse(put.body); } catch (e) { pb = null; }
+    check('PUT traegt GENAU: schemata, prozesse, index_aus_chat – kein Schema-Feld auf oberster Ebene',
+          pb && Object.keys(pb.cfg).sort().join() === 'index_aus_chat,prozesse,schemata', pb && Object.keys(pb.cfg));
+    check('... die Aenderung steht im RICHTIGEN Schema, das andere ist unveraendert',
+          pb && pb.cfg.schemata[1].id === 'hr' && pb.cfg.schemata[1].dialekt === 'postgresql' && pb.cfg.schemata[1].max_spalten === 77
+          && pb.cfg.schemata[0].dialekt === 'oracle' && pb.cfg.schemata[0].max_spalten === 40, pb && pb.cfg.schemata);
+    check('... auch die Werte des ZUGEKLAPPTEN Containers sind vollstaendig dabei',
+          pb && JSON.stringify(Object.keys(pb.cfg.schemata[0]).sort()) === JSON.stringify(
+              ['dateimuster', 'dialekt', 'fk_ableiten', 'id', 'max_spalten', 'max_tabellen', 'name'])
+          && pb.cfg.schemata[0].dateimuster === '*.sql,*.ddl' && pb.cfg.schemata[0].fk_ableiten === true);
+    check('Ergebnis steht AM Knopf im Container (nach dem Neuzeichnen)',
+          /Gespeichert/.test(karte(s, 'hr').querySelector('.sqadm-einst-status').textContent),
+          karte(s, 'hr').querySelector('.sqadm-einst-status').textContent);
+    check('Zugeklappt bleibt zugeklappt ueber das Neuzeichnen', karte(s, 'erp').querySelector(':scope > .kb-collapse-body').style.display === 'none');
+    s.win.close();
+    // Dateimuster geaendert -> dieses Schema wird neu erfasst, und das steht da
+    s = await seite();
+    karte(s, 'hr').querySelector('.sqadm-muster').value = '*.yaml,*.yml';
+    klick(s, karte(s, 'hr').querySelector('[data-akt="speichern"]'));
+    await schlaf(60);
+    check('Geaendertes Dateimuster: Meldung nennt das neu erfasste Schema, sein Container zeigt den Lauf',
+          /neu erfasst wird: „Personal“/.test(karte(s, 'hr').querySelector('.sqadm-einst-status').textContent)
+          && !karte(s, 'hr').querySelector('.sqadm-erf-fort').hidden && karte(s, 'erp').querySelector('.sqadm-erf-fort').hidden,
+          karte(s, 'hr').querySelector('.sqadm-einst-status').textContent);
+    s.win.close();
+    // Fehler beim Speichern aus dem Container: der Grund steht am Knopf
+    s = await seite({ speichernFehler: true });
+    klick(s, karte(s, 'hr').querySelector('[data-akt="speichern"]'));
+    await schlaf(30);
+    const fe = karte(s, 'hr').querySelector('.sqadm-einst-status');
+    check('Fehler: am Knopf im Container, mit dem ersten Grund, maskiert', /Nicht gespeichert: Schema „X“/.test(fe.textContent)
+          && fe.classList.contains('is-fehler') && !fe.querySelector('img') && !s.win.__xss, fe.textContent);
+    s.win.close();
+    // Ein Nachladen ist unterwegs, waehrend gespeichert wird: das eben
+    // gespeicherte neue Schema darf danach nicht wieder als ungespeichert dastehen
+    s = await seite();
+    klick(s, s.doc.getElementById('sqadm-neu'));
+    await schlaf(5);
+    const neuN = karten(s)[2].querySelector('.sqadm-name');
+    neuN.value = 'Lager';
+    s.zustand.getLangsam = true;
+    const unterwegs = s.win.SqlAdmin.laden(true);
+    klick(s, s.doc.getElementById('sqadm-save'));
+    await unterwegs;
+    await schlaf(80);
+    const k3 = karten(s)[2];
+    check('Positivkontrolle: gespeichert, waehrend ein Nachladen unterwegs war', s.zustand.puts === 1
+          && s.zustand.cfg.schemata.length === 3 && s.zustand.cfg.schemata[2].id === 'neu2', s.zustand.cfg.schemata.map(function (x) { return x.id; }));
+    check('... das neue Schema traegt danach SEINE Kennung und hat Ablage und Erfassung (nicht "erst speichern")',
+          k3 && k3.getAttribute('data-id') === 'neu2' && k3.querySelector('.sqadm-drop') && k3.querySelector('.sqadm-erf')
+          && !/Erst speichern/.test(k3.textContent), k3 && k3.getAttribute('data-id'));
+    s.win.close();
+    check('Regel: das Modul schickt kein Schema-Feld auf oberster Ebene (kein cfg.dialekt usw.)',
+          !/cfg\.(dialekt|dateimuster|fk_ableiten|max_tabellen|max_spalten)\b/.test(JS.adm));
 
     bilanz = true;
     console.log('\nErgebnis: ' + ok + ' OK, ' + fail + ' FAIL');

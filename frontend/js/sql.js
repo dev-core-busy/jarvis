@@ -206,16 +206,24 @@
                 if (cb.checked) _auswahl.add(id); else _auswahl.delete(id);
                 auswahlMerken();
                 zeichneQuellen();
+                zeichneDialekte();
                 zeichnePraefixe();
                 knopfZustand();
             });
         });
     }
 
+    // Der Dialekt gehoert zum SCHEMA (Einstellungen → SQL-Assistent, im
+    // Container des Schemas): vorgeschlagen wird der des ersten gewaehlten –
+    // bis der Benutzer selbst einen waehlt.
+    function dialektVorgabe() {
+        var gew = ((_status && _status.schemata) || []).filter(function (x) { return _auswahl && _auswahl.has(x.id); });
+        return (gew[0] && gew[0].dialekt) || 'allgemein';
+    }
     function zeichneDialekte() {
         var sel = $('sq-dialekt');
         if (!sel) return;
-        var vorgabe = (_status && _status.dialekt) || 'allgemein';
+        var vorgabe = dialektVorgabe();
         var akt = _dialektGewaehlt ? sel.value : vorgabe;
         sel.innerHTML = DIALEKTE.map(function (d) {
             var name = d === 'allgemein' ? T('sql.dialect_generic', 'allgemein (Standard-SQL)') : d;

@@ -830,6 +830,16 @@ class Config:
                         elif key in ("api_key", "session_key", "api_url", "model"):
                             val = _clean_profile_str(val)   # siehe create_profile
                         p[key] = val
+                # Loeschen eines Schluessels: "leer = unveraendert" (oben) laesst
+                # sich nicht von "bitte entfernen" unterscheiden. Das Formular
+                # schickt deshalb ``<feld>_entfernen: true``, wenn der Benutzer das
+                # Feld sichtbar GELEERT hat (getippt oder per Auge geholt, dann
+                # geleert) – gleicher Weg wie beim STT-Token (2026-11-12). Nur ein
+                # echtes ``True`` zaehlt, und ein mitgeschickter neuer Wert gewinnt.
+                for feld in ("api_key", "session_key"):
+                    if data.get(feld + "_entfernen") is True \
+                            and not str(data.get(feld) or "").strip():
+                        p[feld] = ""
                 self._save_to_file()
                 return p
         return None

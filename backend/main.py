@@ -11883,6 +11883,10 @@ def _profil_umleitung(profile_id: str, body: dict) -> bool:
         wert = body.get(feld)
         behalten = feld not in body or (isinstance(wert, str)
                                         and (not wert.strip() or wert.startswith("***")))
+        # Ein ausdruecklich entfernter Schluessel geht nirgends hin – dieselbe
+        # Bedingung wie in config.update_profile (nur echtes True).
+        if body.get(feld + "_entfernen") is True:
+            behalten = False
         if behalten and str(prof.get(feld) or ""):
             return True
     return False

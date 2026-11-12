@@ -2432,6 +2432,37 @@
         }
 
         // ── Editor öffnen ──
+        // Schluesselfelder des Profils: "leer = unveraendert" gilt NUR fuer ein
+        // nie angefasstes Feld (Sterne als Platzhalter). Hatte das Feld seit dem
+        // Oeffnen einen Inhalt – getippt oder ueber das Auge geholt – und ist es
+        // beim Speichern leer, hat der Benutzer es sichtbar GELEERT: das heisst
+        // loeschen (``<feld>_entfernen``). Gemeldet 2026-11-12, derselbe Fehler
+        // wie am Morgen beim STT-Token: ein leeres Feld speicherte still den
+        // alten Schluessel weiter.
+        const _profilKeyGesetzt = { api_key: false, session_key: false };
+        function _profilKeyAngefasst(el) {
+            if (el && !el._jvAngefasstWired) {
+                el._jvAngefasstWired = true;
+                el.addEventListener('input', () => { if (el.value) el._jvAngefasst = true; });
+            }
+        }
+        _profilKeyAngefasst(inputKey);
+        _profilKeyAngefasst(inputSessionKey);
+        function _profilKeyGeleert(el, feld) {
+            return !!el && _profilKeyGesetzt[feld] && !!el._jvAngefasst && !el.value.trim();
+        }
+
+        // Profil-Kennung fuer Test/Modellsuche: ueber sie springt der gespeicherte
+        // Schluessel ein. Ist das zustaendige Feld sichtbar geleert, waere das ein
+        // Test mit einem Schluessel, der beim Speichern geloescht wird.
+        function _profilKeyIdFuerProbe() {
+            if (!editingProfileId) return '';
+            const session = radioSession && radioSession.checked;
+            const geleert = session ? _profilKeyGeleert(inputSessionKey, 'session_key')
+                                    : _profilKeyGeleert(inputKey, 'api_key');
+            return geleert ? '' : editingProfileId;
+        }
+
         function openEditView(id) {
             editingProfileId = id || null;
             // Fuer model_caps.js sichtbar machen: die Faehigkeits-Abfrage braucht
@@ -2446,6 +2477,10 @@
             inputUrl.value = profile ? profile.api_url : '';
             inputKey.value = '';
             if (inputSessionKey) inputSessionKey.value = '';
+            inputKey._jvAngefasst = false;
+            if (inputSessionKey) inputSessionKey._jvAngefasst = false;
+            _profilKeyGesetzt.api_key = !!(profile && profile.api_key);
+            _profilKeyGesetzt.session_key = !!(profile && profile.session_key);
 
             // Eye-Icons zurücksetzen (Auge-auf = verborgen)
             inputKey.type = 'password';
@@ -2710,6 +2745,14 @@
                 // verankert nur bei gleichem Fingerabdruck (llm_tls.anker_bauen).
                 cert_fingerprint: _certFeldWert(),
             };
+            // Sichtbar geleert = loeschen. Nur MITSCHICKEN, wenn es gilt – sonst
+            // stuende das Feld bei jedem Speichern im Aktivitaetsprotokoll.
+            if (editingProfileId && !isSession && _profilKeyGeleert(inputKey, 'api_key')) {
+                profileData.api_key_entfernen = true;
+            }
+            if (editingProfileId && isSession && _profilKeyGeleert(inputSessionKey, 'session_key')) {
+                profileData.session_key_entfernen = true;
+            }
 
             btnSaveProfile.textContent = window.t('common.saving');
             btnSaveProfile.disabled = true;
@@ -2779,8 +2822,9 @@
                         model: inputModel.value.trim() || '',
                         auth_method: (radioSession && radioSession.checked) ? 'session' : 'api_key',
                         session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
-                        // leeres Schluesselfeld → Server nimmt den gespeicherten (BSI M5)
-                        profile_id: editingProfileId || '',
+                        // leeres Schluesselfeld → Server nimmt den gespeicherten (BSI M5) –
+                        // ausser der Benutzer hat ihn sichtbar geleert: dann ohne Schluessel.
+                        profile_id: _profilKeyIdFuerProbe(),
                         // noch nicht gespeicherter Fingerabdruck gilt fuer den Test mit
                         cert_fingerprint: _certFeldWert(),
                     };
@@ -2896,7 +2940,7 @@
                         api_key: inputKey.value.trim(),
                         auth_method: (radioSession && radioSession.checked) ? 'session' : 'api_key',
                         session_key: inputSessionKey ? inputSessionKey.value.trim() : '',
-                        profile_id: editingProfileId || '',
+                        profile_id: _profilKeyIdFuerProbe(),
                         cert_fingerprint: _certFeldWert(),
                     };
                     const res = await fetch('/api/profiles/models', {
@@ -3342,7 +3386,8 @@
             btnEl.innerHTML = isHidden ? SVG_EYE_CLOSED : SVG_EYE_OPEN;
             if (!isHidden || inputEl.value || !holen) return;
             holen().then(wert => {
-                if (wert) { inputEl.value = wert; return; }
+                // Geholt zaehlt als angefasst: wer den Wert danach leert, loescht.
+                if (wert) { inputEl.value = wert; inputEl._jvAngefasst = true; return; }
                 inputEl.type = 'password';
                 btnEl.innerHTML = SVG_EYE_OPEN;
             });

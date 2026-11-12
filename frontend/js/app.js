@@ -3238,20 +3238,31 @@
                 listEl.innerHTML = '';
                 keys.forEach(k => {
                     const row = document.createElement('div');
-                    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px;';
+                    // flex-wrap: die Fehlerzeile (.ak-fehler) bricht unter die Felder um.
+                    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px;';
                     row.dataset.id = k.id;
                     // Code-Review 2026-10-18: Knopf-Titel uebersetzt (waren fest deutsch),
                     // Neu-generieren mit Symbol aus icons.js statt Emoji.
                     const _tt = (k, d) => (window.t && window.t(k) !== k ? window.t(k) : d);
                     row.innerHTML =
-                        '<input class="ak-name" value="' + esc(k.name) + '" title="' + esc(_tt('app.key_name', 'Name')) + '" style="width:130px;">' +
+                        '<input class="ak-name" value="' + esc(k.name) + '" title="' + esc(_tt('app.key_name', 'Name')) + '" style="width:260px;">' +
                         // BSI M5: die Liste traegt den Schluessel nicht mehr – nur die
                         // letzten Zeichen zum Wiedererkennen. Auge/Kopieren holen ihn.
-                        '<input class="ak-key" type="password" value="" readonly placeholder="' + esc(k.key_gesetzt ? ('••••••••' + (k.key_ende || '')) : '') + '" style="flex:1;font-family:monospace;font-size:.78rem;">' +
-                        '<button class="btn-icon btn-small ak-show" title="' + esc(_tt('app.key_show', 'Anzeigen/Verbergen')) + '">' + EYE + '</button>' +
+                        // Editierbar (Vorgabe Betreiber 2026-11-12): ein eigener Key wird
+                        // beim Verlassen des Feldes gespeichert. autocomplete verhindert,
+                        // dass der Browser ein gespeichertes Kennwort hineinschreibt.
+                        '<input class="ak-key" type="password" value="" autocomplete="new-password" spellcheck="false" title="' + esc(_tt('app.key_edit_hint', 'Eigenen Key eintragen – wird beim Verlassen des Feldes gespeichert.')) + '" placeholder="' + esc(k.key_gesetzt ? ('••••••••' + (k.key_ende || '')) : '') + '" style="flex:1;min-width:0;font-family:monospace;font-size:.78rem;">' +
+                        // ⚠ Klasse ak-eye: pwreveal.js erkennt ein handverdrahtetes Auge
+                        // nur an eye|auge|toggle in id/Klasse. Mit nur `ak-show` setzte es
+                        // ein ZWEITES Auge ins Feld und packte das Feld in einen Wrapper,
+                        // der flex:1 aushebelte (Feld schmal, gemeldet 2026-11-12).
+                        '<button class="btn-icon btn-small ak-show ak-eye" title="' + esc(_tt('app.key_show', 'Anzeigen/Verbergen')) + '">' + EYE + '</button>' +
                         '<button class="btn-icon btn-small ak-copy" title="' + esc(_tt('common.copy', 'Kopieren')) + '">' + COPY + '</button>' +
                         '<button class="btn-icon btn-small ak-regen" title="' + esc(_tt('app.key_regen', 'Neu generieren')) + '">' + JarvisIcons.refresh() + '</button>' +
-                        '<button class="btn-icon btn-small ak-del" title="' + esc(_tt('common.delete', 'Löschen')) + '">' + JarvisIcons.trash() + '</button>';
+                        '<button class="btn-icon btn-small ak-del" title="' + esc(_tt('common.delete', 'Löschen')) + '">' + JarvisIcons.trash() + '</button>' +
+                        // Fehler bleibt stehen, bis die naechste Eingabe gelingt (ein
+                        // Fehler darf nicht von selbst verschwinden).
+                        '<div class="ak-fehler" role="alert"></div>';
                     listEl.appendChild(row);
                 });
             }
@@ -3292,18 +3303,26 @@
                 loadOnce();
             };
 
+            // Gespeicherter Klartext je Key, sobald er per Auge/Kopieren geholt
+            // wurde. Getrennt vom Feldinhalt: der kann seit dem Editieren eine
+            // noch NICHT gespeicherte Eingabe sein – Kopieren liefert den
+            // gespeicherten Key, und "unveraendert" wird gegen ihn geprueft.
+            const klar = new Map();
             listEl.addEventListener('click', e => {
                 const row = e.target.closest('[data-id]'); if (!row) return;
                 const id = row.dataset.id, keyInput = row.querySelector('.ak-key');
                 // Klartext nur auf Klick, ueber den Bestaetigungsweg (BSI M5)
-                const holen = () => keyInput.value ? Promise.resolve(keyInput.value)
+                const holen = () => klar.has(id) ? Promise.resolve(klar.get(id))
                     : _geheimHolen('/api/secret/reveal', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ bereich: 'agentkey', kennung: id }) }, 'wert')
-                      .then(w => { if (w) keyInput.value = w; return w; });
+                      .then(w => { if (w) { klar.set(id, w); if (!keyInput.value) keyInput.value = w; } return w; });
                 if (e.target.closest('.ak-show')) {
                     if (keyInput.type === 'password') {
-                        holen().then(w => { if (w) keyInput.type = 'text'; });
+                        // Steht schon eine Eingabe im Feld, zeigt das Auge DIESE –
+                        // ohne Abruf und ohne sie zu ueberschreiben.
+                        (keyInput.value ? Promise.resolve(keyInput.value) : holen())
+                            .then(w => { if (w) keyInput.type = 'text'; });
                     } else {
                         keyInput.type = 'password';
                     }
@@ -3326,6 +3345,25 @@
                 if (e.target.classList.contains('ak-name')) {
                     const row = e.target.closest('[data-id]');
                     api('/api/agent/keys/' + row.dataset.id, { method: 'PUT', body: JSON.stringify({ name: e.target.value }) });
+                } else if (e.target.classList.contains('ak-key')) {
+                    // Eigener Key: gespeichert wird nur eine echte Aenderung –
+                    // ein per Auge eingeblendeter, unveraenderter Key nicht.
+                    const row = e.target.closest('[data-id]');
+                    const id = row.dataset.id, wert = e.target.value.trim();
+                    const fehlerEl = row.querySelector('.ak-fehler');
+                    const _tt2 = (k, d) => (window.t && window.t(k) !== k ? window.t(k) : d);
+                    if (!wert || wert === klar.get(id)) return;
+                    api('/api/agent/keys/' + id, { method: 'PUT', body: JSON.stringify({ key: wert }) })
+                        .then(r => r.json().catch(() => ({})).then(d => ({ ok: r.ok, d: d || {} })))
+                        .then(({ ok, d }) => {
+                            if (!ok || d.ok === false) {
+                                if (fehlerEl) fehlerEl.textContent = d.error || _tt2('app.key_save_error', 'Speichern fehlgeschlagen.');
+                                return;
+                            }
+                            klar.delete(id);
+                            load();
+                        })
+                        .catch(() => { if (fehlerEl) fehlerEl.textContent = _tt2('app.key_save_error', 'Speichern fehlgeschlagen.'); });
                 }
             });
             if (addBtn) addBtn.addEventListener('click', () => {

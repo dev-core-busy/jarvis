@@ -12145,9 +12145,43 @@ async def agent_keys_create(request: Request, user: str = Depends(require_local_
     return JSONResponse({"ok": True, "key": entry})
 
 
+AGENT_KEY_MIN_LAENGE = 16
+AGENT_KEY_MAX_LAENGE = 256
+
+
+def _agent_key_eigener_fehler(wert, keys: list, kid: str) -> str:
+    """Prueft einen selbst gewaehlten Agent-API-Key; leer = in Ordnung.
+
+    Der Key wird als ``X-API-Key``-Kopfzeile geschickt: dort sind nur
+    druckbare ASCII-Zeichen ohne Leerraum verlaesslich uebertragbar. Die
+    Mindestlaenge haelt einen erratbaren Schluessel fern – der Key oeffnet
+    ``POST /api/agent/task``, also Agentenlaeufe ohne Anmeldung. Ein Key,
+    den schon ein ANDERER Eintrag (oder der Legacy-Key) traegt, wird
+    abgelehnt: sonst waere nicht mehr unterscheidbar, welcher Eintrag
+    einen Aufruf erlaubt hat, und Loeschen des einen liesse den anderen
+    weiter gelten."""
+    if not isinstance(wert, str):
+        return "Der Key muss ein Text sein."
+    if len(wert) < AGENT_KEY_MIN_LAENGE:
+        return f"Der Key muss mindestens {AGENT_KEY_MIN_LAENGE} Zeichen lang sein."
+    if len(wert) > AGENT_KEY_MAX_LAENGE:
+        return f"Der Key darf hoechstens {AGENT_KEY_MAX_LAENGE} Zeichen lang sein."
+    if not all(33 <= ord(c) <= 126 for c in wert):
+        return ("Der Key darf nur Buchstaben, Ziffern und Satzzeichen ohne "
+                "Leerzeichen und Umlaute enthalten.")
+    andere = [str(k.get("key") or "") for k in keys if k.get("id") != kid]
+    andere.append(str(config.AGENT_API_KEY or ""))
+    roh = wert.encode("ascii")
+    if any(a and hmac.compare_digest(roh, a.encode("utf-8", "surrogatepass"))
+           for a in andere):
+        return "Dieser Key ist bereits einem anderen Eintrag zugeordnet."
+    return ""
+
+
 @app.put("/api/agent/keys/{kid}")
 async def agent_keys_update(kid: str, request: Request, user: str = Depends(require_local_auth)):
-    """Benennt einen Key um bzw. generiert ihn neu (body: name und/oder regenerate)."""
+    """Benennt einen Key um, generiert ihn neu oder setzt einen selbst
+    gewaehlten (body: ``name`` und/oder ``regenerate`` bzw. ``key``)."""
     import secrets
     body = await _json_objekt(request)
     keys = _load_agent_keys()
@@ -12159,7 +12193,13 @@ async def agent_keys_update(kid: str, request: Request, user: str = Depends(requ
             if body.get("regenerate"):
                 k["key"] = secrets.token_urlsafe(32)
             elif body.get("key"):
-                k["key"] = str(body["key"]).strip()
+                eigen = body["key"].strip() if isinstance(body["key"], str) else body["key"]
+                fehler = _agent_key_eigener_fehler(eigen, keys, kid)
+                if fehler:
+                    return JSONResponse({"ok": False, "error": fehler}, status_code=400)
+                k["key"] = eigen
+                print(f"[SECURITY] Agent-API-Key '{k.get('name', kid)}' durch {user} "
+                      f"auf eigenen Wert gesetzt", flush=True)
             found = k
             break
     if not found:

@@ -1442,6 +1442,11 @@ html.jv-sitzung-pruefen #login-screen { visibility: hidden; }
 .frg-fehler { color: var(--danger); font-size: 0.85rem; white-space: pre-wrap; }
 .frg-fehler:empty { display: none; }
 body.light .frg-fehler { color: color-mix(in srgb, var(--danger) 78%, #000); }
+/* Fehler beim Speichern eines eigenen Agent-API-Keys (app.js, initAgentKeys):
+   eigene Zeile unter den Feldern der Key-Zeile. */
+.ak-fehler { flex-basis: 100%; color: var(--danger); font-size: 0.78rem; }
+.ak-fehler:empty { display: none; }
+body.light .ak-fehler { color: color-mix(in srgb, var(--danger) 78%, #000); }
 .frg-knoepfe { display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; }
 
 /* ═══ Container-Kopfzeilen: Titel beim Ueberfahren in der Akzentfarbe ═══════

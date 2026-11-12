@@ -49,6 +49,89 @@
             : art === 'error' ? 'var(--danger)' : 'var(--text-secondary)';
     }
 
+    /* ── Ordner-Weg der Bereitstellung im Netz ─────────────────────────────
+       Vorbild: Einstellungen → E-Mail → Outlook-Add-in Bereitstellung
+       (email.js::schreibeInOrdner); die Begruendung der Grenze steht im Kopf
+       von excel_admin.js.
+
+       ⚠ DER EINGETRAGENE PFAD IST KEIN ZIEL. Es gibt keine Browser-API, die in
+       einen als TEXT genannten Ordner schreibt; showDirectoryPicker liefert ein
+       Handle aus einem Dialog. Der Zielordner wird deshalb EINMAL im Dialog
+       gewaehlt und das Handle in IndexedDB gemerkt (localStorage kann es
+       nicht – dort landet nur "[object FileSystemDirectoryHandle]").
+
+       EIGENER Schluessel neben Outlook- und Excel-Add-in: die drei Dateien
+       gehoeren in verschiedene Ordner, ein geteiltes Handle schriebe die
+       Anwendung in den Add-in-Katalog. DB-Name, Version und Store muessen
+       dagegen GLEICH sein wie dort – sonst scheitert `open` an einer
+       Versionskollision derselben Datenbank. */
+    var _FS_DB = 'jarvis-fs', _FS_STORE = 'handles', _FS_KEY = 'ai-mouse-ordner';
+    var _ordner = null;            // FileSystemDirectoryHandle oder null
+
+    function fsDb() {
+        return new Promise(function (res, rej) {
+            if (!window.indexedDB) { rej(new Error('IndexedDB fehlt')); return; }
+            var a = indexedDB.open(_FS_DB, 1);
+            a.onupgradeneeded = function () {
+                if (!a.result.objectStoreNames.contains(_FS_STORE)) { a.result.createObjectStore(_FS_STORE); }
+            };
+            a.onsuccess = function () { res(a.result); };
+            a.onerror = function () { rej(a.error || new Error('IndexedDB')); };
+        });
+    }
+
+    function handleLesen() {
+        return fsDb().then(function (d) {
+            return new Promise(function (res) {
+                var r = d.transaction(_FS_STORE, 'readonly').objectStore(_FS_STORE).get(_FS_KEY);
+                r.onsuccess = function () { res(r.result || null); };
+                r.onerror = function () { res(null); };
+            });
+        }).catch(function () { return null; });
+    }
+
+    function handleSchreiben(h) {
+        return fsDb().then(function (d) {
+            return new Promise(function (res, rej) {
+                var tr = d.transaction(_FS_STORE, 'readwrite');
+                tr.objectStore(_FS_STORE).put(h, _FS_KEY);
+                tr.oncomplete = function () { res(true); };
+                tr.onerror = function () { rej(tr.error); };
+            });
+        });
+    }
+
+    /* Schreibrecht fuer das Handle. Nach einem Browser-Neustart faellt es
+       regelmaessig auf "prompt" zurueck – das ist KEIN Fehler. `fragen=true`
+       braucht eine Nutzergeste. */
+    function darfSchreiben(h, fragen) {
+        if (!h || !h.queryPermission) { return Promise.resolve(false); }
+        return h.queryPermission({ mode: 'readwrite' }).then(function (z) {
+            if (z === 'granted') { return true; }
+            if (!fragen || !h.requestPermission) { return false; }
+            return h.requestPermission({ mode: 'readwrite' })
+                .then(function (z2) { return z2 === 'granted'; });
+        }).catch(function () { return false; });
+    }
+
+    /* Chrome/Edge im sicheren Kontext – Firefox und Safari haben die API nicht. */
+    function kannSchreiben() {
+        return typeof window.showDirectoryPicker === 'function';
+    }
+
+    /* Der Dateiname auf der Freigabe: der letzte Teil des EINGETRAGENEN Pfads,
+       wenn er auf .exe endet – die Kachel zeigt den Benutzern genau diesen
+       Pfad, eine Datei unter anderem Namen waere fuer sie nicht da. Sonst
+       (Pfad nennt nur den Ordner) der Name, den der Server liefert.
+       Es ist ein NAME, kein Ziel: getFileHandle lehnt Pfadtrenner ohnehin ab,
+       und geschrieben wird nur in den im Dialog gewaehlten Ordner. */
+    function zielName(pfad, vorgabe) {
+        var teile = String(pfad || '').trim().split(/[\\/]/);
+        var letzter = (teile[teile.length - 1] || '').trim();
+        if (/\.exe$/i.test(letzter) && !/[<>:"|?*\x00-\x1f]/.test(letzter)) { return letzter; }
+        return vorgabe || 'AiMouse.exe';
+    }
+
     var Admin = {
         _bereiche: null,
         _gebunden: false,
@@ -74,6 +157,20 @@
             if (shSave) { shSave.addEventListener('click', this.saveShare.bind(this)); }
             var shDl = $('amshare-dl');
             if (shDl) { shDl.addEventListener('click', this.holePaket.bind(this)); }
+            var shUp = $('amshare-up');
+            if (shUp) { shUp.addEventListener('click', this.schreibeInOrdner.bind(this)); }
+            // MASSGEBLICH IST DER FELDINHALT, nicht der gespeicherte Wert: wer
+            // den Pfad eintippt, sieht den Knopf sofort, wer ihn leert, verliert
+            // ihn sofort (im Excel-Reiter war genau das der gemeldete Fehler).
+            var shPfad = $('amshare-pfad');
+            if (shPfad) { shPfad.addEventListener('input', this.ordnerKnopf.bind(this)); }
+            // Ein frueher gewaehlter Ordner wird gemerkt – der Knopf nennt ihn.
+            if (kannSchreiben()) {
+                handleLesen().then(function (h) {
+                    if (h) { _ordner = h; }
+                    Admin.ordnerKnopf();
+                });
+            }
             var sgSave = $('amsign-save');
             if (sgSave) { sgSave.addEventListener('click', this.saveSignatur.bind(this)); }
             var sgDel = $('amsign-del');
@@ -117,6 +214,8 @@
                     if (sp && document.activeElement !== sp) {
                         sp.value = d.freigabe_pfad || '';
                     }
+                    // VOR jedem fruehen Ausstieg: der Knopf haengt am Feld.
+                    self.ordnerKnopf();
                 })
                 .catch(function (e) {
                     // Ein Fehlschlag bleibt STEHEN. Ein leerer Container wäre
@@ -169,7 +268,7 @@
             var alt = knopf.textContent;
             knopf.disabled = true;
             knopf.textContent = t('amshare.dl_running', 'Wird zusammengestellt…');
-            if (hinweis) { hinweis.textContent = ''; }
+            if (hinweis) { hinweis.textContent = ''; hinweis.style.color = ''; }
 
             fetch('/api/ai-mouse/paket', { headers: authHeaders() })
                 .then(function (r) {
@@ -211,6 +310,129 @@
                     knopf.disabled = false;
                     knopf.textContent = alt;
                 });
+        },
+
+        /** Ordner-Knopf zeigen/verbergen und beschriften. Nur in Chrome/Edge
+         *  UND mit eingetragenem Pfad – einer ohne Zielpfad hat kein Ziel. */
+        ordnerKnopf: function () {
+            var ub = $('amshare-up');
+            if (!ub || ub.disabled) { return; }
+            var feld = $('amshare-pfad');
+            var geht = !!(feld && feld.value.trim()) && kannSchreiben();
+            ub.style.display = geht ? '' : 'none';
+            if (geht) {
+                ub.textContent = _ordner
+                    ? t('amshare.up_named', 'In Ordner „{n}“ schreiben').replace('{n}', _ordner.name || '?')
+                    : t('amshare.up', 'Ordner wählen und hineinschreiben');
+            }
+        },
+
+        /** Zielordner besorgen – gemerkter zuerst, sonst EINMAL fragen.
+         *  MUSS synchron in der Klick-Geste laufen: showDirectoryPicker
+         *  verlangt eine frische Benutzergeste, und die ist nach dem
+         *  66-MB-Abruf laengst verbraucht. Deshalb steht dieser Schritt VOR
+         *  dem Netz-Abruf. */
+        ordnerBesorgen: function () {
+            var self = this;
+            if (_ordner) {
+                // Ein gemerkter Ordner kann nach einem Browser-Neustart wieder
+                // nachfragen – auch das braucht die Geste, also hier.
+                return darfSchreiben(_ordner, true).then(function (ok) {
+                    if (!ok) {
+                        throw new Error(t('amshare.up_noperm',
+                            'Schreibrecht für den Ordner wurde nicht erteilt.'));
+                    }
+                    return _ordner;
+                });
+            }
+            if (!kannSchreiben()) { return Promise.resolve(null); }
+            return window.showDirectoryPicker({ id: 'jarvis-ai-mouse', mode: 'readwrite',
+                                                startIn: 'documents' })
+                .then(function (h) {
+                    return darfSchreiben(h, true).then(function (ok) {
+                        if (!ok) {
+                            throw new Error(t('amshare.up_noperm',
+                                'Schreibrecht für den Ordner wurde nicht erteilt.'));
+                        }
+                        _ordner = h;
+                        // Das Merken darf den Vorgang nicht kippen: scheitert
+                        // IndexedDB (privates Fenster), wird naechstes Mal
+                        // eben noch einmal gefragt.
+                        handleSchreiben(h).catch(function () { });
+                        self.ordnerKnopf();
+                        return h;
+                    });
+                });
+        },
+
+        /** Die Anwendung (EXE, nicht ZIP) in den gewaehlten Ordner schreiben. */
+        schreibeInOrdner: function () {
+            var self = this;
+            var knopf = $('amshare-up');
+            var hinweis = $('amshare-dl-hint');
+            if (!knopf || knopf.disabled) { return; }
+            var feld = $('amshare-pfad');
+            var pfad = feld ? feld.value : '';
+            var alt = knopf.textContent;
+            knopf.disabled = true;
+            if (hinweis) { hinweis.textContent = ''; hinweis.style.color = ''; }
+            // ZUERST der Ordner (Benutzergeste!), dann die Anwendung holen.
+            this.ordnerBesorgen().then(function (h) {
+                if (!h) {
+                    throw new Error(t('amshare.up_nofs',
+                        'Dieser Browser kann nicht in einen Ordner schreiben – bitte herunterladen.'));
+                }
+                knopf.textContent = t('amshare.up_writing', 'schreibt …');
+                return fetch('/api/ai-mouse/paket?form=exe', { headers: authHeaders() })
+                    .then(function (r) {
+                        if (!r.ok) {
+                            return r.json().catch(function () { return null; })
+                                .then(function (d) {
+                                    throw new Error((d && (d.error || d.detail))
+                                                    || ('HTTP ' + r.status));
+                                });
+                        }
+                        var vorgabe = '';
+                        var m = (r.headers.get('Content-Disposition') || '')
+                            .match(/filename="([^"]+)"/);
+                        if (m) { vorgabe = m[1]; }
+                        return r.blob().then(function (b) { return [zielName(pfad, vorgabe), b]; });
+                    })
+                    .then(function (paar) {
+                        return h.getFileHandle(paar[0], { create: true })
+                            .then(function (fh) { return fh.createWritable(); })
+                            .then(function (w) {
+                                // createWritable schreibt in eine Schattendatei
+                                // und tauscht erst bei close() – eine halb
+                                // geschriebene EXE liegt also nie auf der
+                                // Freigabe. Scheitert der Tausch (Datei gerade
+                                // gestartet und gesperrt), kommt der Fehler hier.
+                                return w.write(paar[1]).then(function () { return w.close(); });
+                            })
+                            .then(function () { return paar[0]; });
+                    });
+            }).then(function (name) {
+                if (hinweis) {
+                    hinweis.textContent = t('amshare.up_ok', '✓ „{n}“ in Ordner „{o}“ geschrieben.')
+                        .replace('{n}', name).replace('{o}', (_ordner && _ordner.name) || '?');
+                    hinweis.style.color = 'var(--success)';
+                }
+            }).catch(function (e) {
+                // Ein abgebrochener Dialog ist KEIN Fehler – der Benutzer hat
+                // sich entschieden. Alles andere BLEIBT stehen.
+                if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) {
+                    if (hinweis) { hinweis.textContent = ''; }
+                    return;
+                }
+                if (hinweis) {
+                    hinweis.textContent = t('amshare.up_err', 'Fehler: ') + ((e && e.message) || e);
+                    hinweis.style.color = 'var(--danger)';
+                }
+            }).then(function () {
+                knopf.disabled = false;
+                knopf.textContent = alt;
+                self.ordnerKnopf();
+            });
         },
 
         saveShare: function () {

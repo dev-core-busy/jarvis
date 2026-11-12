@@ -1331,6 +1331,39 @@ def vorgaben_cs(basis: str, marke: str, akzent: str, sprache: str = "de") -> str
            "en" if str(sprache).lower().startswith("en") else "de"))
 
 
+def _exe_bereit(basis: str, marke: str, akzent: str):
+    """Hauswerte sicherstellen und den Pfad der fertigen EXE liefern.
+
+    EINE Stelle fuer ZIP und rohe EXE – zwei Fassungen der Vorbereitung
+    liefen beim naechsten Hauswert auseinander, und dann luede der
+    Ordner-Knopf eine andere Anwendung auf die Freigabe als der Download.
+    Wirft ``MausFehler``, wenn nichts bereitliegt.
+    """
+    marke = marke or MARKE_STANDARD
+    _vorgaben_sicherstellen(basis, marke, akzent)
+    p = exe_pfad()
+    if not paket_vorhanden():
+        fehler = bau_zustand().get("fehler") or ""
+        raise MausFehler(
+            "Die Anwendung liegt noch nicht bereit. Sie wird automatisch "
+            "gebaut – bitte in einer Minute erneut versuchen.%s"
+            % ("\n\nLetzter Fehlschlag: " + fehler if fehler else ""))
+    return p
+
+
+def exe_holen(basis: str = "", marke: str = "", akzent: str = "") -> tuple:
+    """``(dateiname, exe_bytes)`` – dieselbe Anwendung wie im Paket, OHNE ZIP.
+
+    Fuer den Ordner-Knopf der *Bereitstellung im Netz*: auf die Freigabe
+    gehoert die EXE selbst (das Pfadfeld nennt ``…\\AiMouse.exe``), und ein
+    ZIP im Browser zu entpacken waere ein eigener Zip-Leser im Frontend fuer
+    eine Datei, die der Server ohnehin einzeln vorliegen hat.
+    Wirft ``MausFehler`` wie ``paket_bauen``.
+    """
+    p = _exe_bereit(basis, marke, akzent)
+    return (EXE_NAME, p.read_bytes())
+
+
 def paket_bauen(basis: str = "", marke: str = "", akzent: str = "") -> tuple:
     """``(dateiname, zip_bytes)`` – die fertige Anwendung, gebrandet.
 
@@ -1355,15 +1388,7 @@ def paket_bauen(basis: str = "", marke: str = "", akzent: str = "") -> tuple:
     import zipfile  # noqa: PLC0415
 
     marke = marke or MARKE_STANDARD
-    _vorgaben_sicherstellen(basis, marke, akzent)
-    p = exe_pfad()
-    if not paket_vorhanden():
-        fehler = bau_zustand().get("fehler") or ""
-        raise MausFehler(
-            "Die Anwendung liegt noch nicht bereit. Sie wird automatisch "
-            "gebaut – bitte in einer Minute erneut versuchen.%s"
-            % ("\n\nLetzter Fehlschlag: " + fehler if fehler else ""))
-
+    p = _exe_bereit(basis, marke, akzent)
     puffer = io.BytesIO()
     with zipfile.ZipFile(puffer, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(p, EXE_NAME)

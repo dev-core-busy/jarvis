@@ -76,6 +76,29 @@ check("…und es ist wirklich ein ZIP (PK-Signatur, > 1 MB)",
       roh[:2] == b"PK" and len(roh) > 1_000_000)
 print("     (%.1f MB, %s)" % (len(roh) / 1e6, hd.get("Content-Disposition")))
 
+# ?form=exe – der Ordner-Knopf der Bereitstellung im Netz holt die EXE OHNE
+# ZIP. Sie muss byte-gleich mit der Datei IM ZIP sein, sonst landete auf der
+# Freigabe eine andere Anwendung als im Download.
+import io  # noqa: E402
+import zipfile  # noqa: E402
+st_e, hd_e, roh_e = hole("/api/ai-mouse/paket?form=exe", tok)
+check("?form=exe: HTTP 200", st_e == 200)
+check("…als octet-stream, nicht als ZIP",
+      "octet-stream" in (hd_e.get("Content-Type") or "").lower())
+check("…Dateiname AiMouse.exe im Kopf",
+      'filename="AiMouse.exe"' in (hd_e.get("Content-Disposition") or ""))
+check("…und es ist wirklich eine Windows-EXE (MZ-Signatur)", roh_e[:2] == b"MZ")
+try:
+    with zipfile.ZipFile(io.BytesIO(roh)) as _z:
+        _im_zip = _z.read("AiMouse.exe")
+except Exception as _f:  # noqa: BLE001
+    _im_zip = b""
+    print("     (ZIP nicht lesbar: %s)" % _f)
+check("…byte-gleich mit der EXE im ZIP (%d / %d Bytes)" % (len(roh_e), len(_im_zip)),
+      bool(_im_zip) and roh_e == _im_zip)
+st_e2, _, _ = hole("/api/ai-mouse/paket?form=exe")
+check("?form=exe ohne Token 401", st_e2 == 401)
+
 st2, _, _ = hole("/api/ai-mouse/paket")
 check("ohne Token 401", st2 == 401)
 st3, _, _ = hole("/api/ai-mouse/paket", "muell")

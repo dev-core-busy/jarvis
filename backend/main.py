@@ -20129,14 +20129,23 @@ async def ai_mouse_paket(request: Request,
                           "eine halbe Minute. Bitte gleich noch einmal "
                           "herunterladen."},
                 status_code=409)
+    # `?form=exe` liefert die EXE OHNE ZIP – fuer den Ordner-Knopf der
+    # Bereitstellung im Netz (Einstellungen → AI-Maus), der sie direkt auf die
+    # Freigabe schreibt. Jeder andere Wert bleibt beim ZIP (fail-safe zum
+    # bisherigen Verhalten, kein Fehler fuer einen alten Client).
+    als_exe = (request.query_params.get("form") or "").strip().lower() == "exe"
     try:
-        name, rohdaten = ai_mouse.paket_bauen(
-            basis=addin.basis_url(request), marke=marke, akzent=akzent)
+        if als_exe:
+            name, rohdaten = ai_mouse.exe_holen(
+                basis=addin.basis_url(request), marke=marke, akzent=akzent)
+        else:
+            name, rohdaten = ai_mouse.paket_bauen(
+                basis=addin.basis_url(request), marke=marke, akzent=akzent)
     except ai_mouse.MausFehler as f:
         return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
     return Response(
         content=rohdaten,
-        media_type="application/zip",
+        media_type="application/octet-stream" if als_exe else "application/zip",
         headers={
             "Content-Disposition": 'attachment; filename="%s"' % name,
             "Cache-Control": "no-store",

@@ -1072,6 +1072,9 @@ button.jv-pkg-cve { cursor: pointer; }
 .jv-pkg-cve-liste { list-style: none; margin: 0 0 6px; padding: 0; }
 .jv-pkg-cve-liste li { padding: 4px 0; border-bottom: 1px solid rgba(var(--fg-rgb, 148,163,184), .10); }
 .jv-pkg-cve-liste li.ist-gesehen { opacity: .75; }
+/* Suchtreffer ueber die Kennung: Balken UND fette Kennung (nicht nur Farbe). */
+.jv-pkg-cve-liste li.ist-treffer { box-shadow: inset 3px 0 0 var(--accent); padding-left: 8px; }
+.jv-pkg-cve-liste li.ist-treffer .jv-pkg-cve-id { font-weight: 700; }
 .jv-pkg-cve-id { font-family: var(--font-mono, monospace); color: var(--text-primary); }
 .jv-pkg-cve-id a { color: inherit; text-decoration: underline; }
 .jv-pkg-cve-e, .jv-pkg-cve-z, .jv-pkg-cve-t { color: var(--text-secondary); }

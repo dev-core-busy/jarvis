@@ -38,7 +38,7 @@ let rang = null;
 
 const NOETIG = ['esc', 'klasseText', 'einstufungText', 'trackerLink', 'befundLink', 'nodsaText', 'anderswoText',
                 'befundZeilen', 'inPaketliste', 'einzelKnopf', 'quittierbareIds', 'paketGezeigt',
-                'andereGezeigt', 'zeichnen', 'cveBlock'];
+                'andereGezeigt', 'befundTrifft', 'paketTreffer', 'andereTrifft', 'zeichnen', 'cveBlock'];
 const fehlt = NOETIG.filter(function (n) { return !funktionen[n]; });
 if (fehlt.length || !rang) {
     console.log('ABBRUCH: nicht gefunden: ' + fehlt.concat(rang ? [] : ['CVE_RANG']).join(', '));
@@ -54,6 +54,7 @@ const AUSFUEHREN = NOETIG.filter(function (n) { return n !== 'zeichnen' && n !==
 const api = new Function(prolog + AUSFUEHREN.map(function (n) { return funktionen[n]; }).join('\n')
     + '\nreturn { befundZeilen: befundZeilen, inPaketliste: inPaketliste, einzelKnopf: einzelKnopf,'
     + ' paketGezeigt: paketGezeigt, andereGezeigt: andereGezeigt,'
+    + ' befundTrifft: befundTrifft, paketTreffer: paketTreffer, andereTrifft: andereTrifft,'
     + ' setze: function (o) { _nurLuecken = !!o.l; _nurUngesehen = !!o.u; _gesehen = o.g || {}; } };')();
 
 function zeile(b) {
@@ -172,6 +173,52 @@ check(ruft('zeichnen', 'paketGezeigt'), 'zeichnen() filtert die Paketliste ueber
 check(ruft('cveBlock', 'andereGezeigt'), 'cveBlock() filtert die Befunde ohne Paket ueber andereGezeigt');
 check(/id="jv-pkg-nurungesehen"/.test(funktionen.cveBlock) && /pkg\.cve_filter_neu/.test(funktionen.cveBlock),
       'cveBlock() bietet das Haekchen an');
+
+console.log('\n6. Suche nach einer Kennung');
+// Wunsch 2026-11-12: im Fenster nach "CVE-2026-111497" suchen koennen. Die
+// Kennung haengt am Befund, nicht am Paket – die Suche muss durch die
+// Befunde des Pakets gehen.
+const nodePaket = { package: 'nodejs', version: '24.22.0-1nodesource1', summary: 'Node.js event-based server-side javascript engine' };
+const nodeInfo = { befunde: [nodeB] };
+// Positivkontrolle: ohne Suchtext ist jedes Paket ein Treffer.
+check(api.paketTreffer(nodePaket, nodeInfo, '') === 'paket', 'ohne Suchtext: Treffer');
+check(api.paketTreffer(nodePaket, nodeInfo, 'cve-2026-111497') === 'kennung',
+      'CVE-Kennung findet das betroffene Paket (als Treffer ueber die Kennung)',
+      api.paketTreffer(nodePaket, nodeInfo, 'cve-2026-111497'));
+check(api.paketTreffer(nodePaket, nodeInfo, '111497') === 'kennung', 'auch ein Teil der Kennung trifft');
+check(api.paketTreffer(nodePaket, nodeInfo, 'nodejs') === 'paket', 'Paketname bleibt ein Paket-Treffer');
+check(api.paketTreffer(nodePaket, nodeInfo, 'cve-2026-999999') === '', 'fremde Kennung: kein Treffer');
+check(api.paketTreffer(nodePaket, undefined, 'cve-2026-111497') === '', 'Paket ohne Befunde: kein Treffer ueber eine Kennung');
+const ghsa = { bereich: 'python', quelle: 'requests', cve: 'GHSA-abcd-1234-wxyz', aliase: ['CVE-2026-4242', 'GHSA-abcd-1234-wxyz'] };
+check(api.befundTrifft(ghsa, 'cve-2026-4242'), 'die CVE als ALIAS eines GHSA-Befunds wird gefunden');
+check(api.andereTrifft(ghsa, 'cve-2026-4242') && api.andereTrifft(ghsa, 'requests')
+      && !api.andereTrifft(ghsa, 'openssl'),
+      'Befunde ohne Paketzeile: Kennung, Alias und Paketname treffen, Fremdes nicht');
+check(/class="[^"]*ist-treffer/.test(api.befundZeilen([nodeB], 'cve-2026-111497'))
+      && !/ist-treffer/.test(api.befundZeilen([nodeB], 'cve-2026-999999'))
+      && !/ist-treffer/.test(api.befundZeilen([nodeB])),
+      'die gesuchte Kennung ist in der Detailzeile markiert – nur sie');
+// Nicht nur DASS, sondern MIT den Befunden des Pakets – ohne sie gibt es
+// nichts, wogegen eine Kennung verglichen werden koennte.
+function aufrufe(fn, name) {
+    const l = [];
+    (function lauf(k) {
+        if (!k || typeof k.type !== 'string') return;
+        if (k.type === 'CallExpression' && k.callee && k.callee.name === name) l.push(k);
+        for (const w of Object.values(k)) {
+            if (Array.isArray(w)) w.forEach(lauf);
+            else if (w && typeof w.type === 'string') lauf(w);
+        }
+    })(acorn.parse(funktionen[fn], { ecmaVersion: 'latest' }));
+    return l;
+}
+const ptA = aufrufe('zeichnen', 'paketTreffer');
+check(ptA.length > 0 && ptA.every(function (c) {
+          const a = c.arguments[1];
+          return a && a.type === 'MemberExpression' && a.object.type === 'Identifier' && a.object.name === 'jePaket';
+      }),
+      'zeichnen() sucht ueber paketTreffer – mit den Befunden des Pakets (jePaket[…])');
+check(ruft('cveBlock', 'andereTrifft'), 'cveBlock() filtert die Befunde ohne Paket auch nach dem Suchtext');
 
 fertig();
 console.log('\n' + ok + ' OK, ' + fail + ' FAIL');

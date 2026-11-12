@@ -89,7 +89,8 @@
     var _cvePoll = null;
     var _nurLuecken = false;  // Filter "nur betroffene Pakete"
     var _nurUngesehen = false; // Filter "nur noch nicht gesehene"
-    var _cveOffen = {};       // aufgeklappte Detailzeilen je Paket
+    var _cveOffen = {};       // ausdruecklich auf-/zugeklappte Detailzeilen je Paket
+    var _suche = '';          // Suchtext (klein), gesetzt in zeichnen(), gelesen von cveBlock()
     var _cveMeldung = '';     // Ergebnis/Fehler am Knopf (bleibt stehen)
     /* BADGE AM ⓘ-KNOPF (Vorgabe 2026-10-29: nicht am Zahnrad). Die Zahl kommt
      * aus `/api/me` (`cve_badge`, nur fuer Admins) – derselbe Abruf, der den
@@ -376,6 +377,7 @@
         if (!_bericht) return;
         var suchfeld = document.getElementById('jv-pkg-suche');
         var q = (suchfeld ? suchfeld.value : '').trim().toLowerCase();
+        _suche = q;
         var jePaket = cveJePaket();
         var alle = (_bericht.pakete || []).map(function (p) {
             // Sortierschluessel fuer die Spalte „Lücken" (Kopie, der Bericht bleibt roh).
@@ -383,11 +385,19 @@
             return Object.assign({}, p, { cve: i ? i.rang : 99 });
         });
         alle = alle.filter(function (p) { return paketGezeigt(jePaket[p.package]); });
-        var treffer = !q ? alle : alle.filter(function (p) {
-            return (p.package || '').toLowerCase().indexOf(q) >= 0
-                || (p.summary || '').toLowerCase().indexOf(q) >= 0
-                || (p.version || '').toLowerCase().indexOf(q) >= 0;
+        // Pakete, die NUR ueber eine Kennung gefunden wurden, zeigen ihre
+        // Detailzeile gleich offen – sonst stuende der Treffer zugeklappt da,
+        // und man saehe nicht, welche Luecke gemeint ist.
+        var ueberKennung = {};
+        var treffer = alle.filter(function (p) {
+            var art = paketTreffer(p, jePaket[p.package], q);
+            if (art === 'kennung') ueberKennung[p.package] = true;
+            return !!art;
         });
+        // Ein Klick auf den Chip gilt vor dem Suchtreffer (auch zum Zuklappen).
+        var offen = function (n) {
+            return Object.prototype.hasOwnProperty.call(_cveOffen, n) ? !!_cveOffen[n] : !!ueberKennung[n];
+        };
         var zeigen = sortiert(treffer).slice(0, ZEILEN_MAX);
         var rest = treffer.length - zeigen.length;
 
@@ -413,9 +423,9 @@
                 + '<td class="jv-pkg-d">' + esc((p.update_date || '').slice(0, 10)) + '</td>'
                 + '<td class="jv-pkg-l">' + cveChip(p.package, jePaket[p.package]) + '</td>'
                 + '<td class="jv-pkg-s">' + esc(p.summary) + '</td></tr>'
-                + (_cveOffen[p.package] && jePaket[p.package]
+                + (offen(p.package) && jePaket[p.package]
                     ? '<tr class="jv-pkg-cve-zeile"><td colspan="6"><ul class="jv-pkg-cve-liste">'
-                      + befundZeilen(jePaket[p.package].befunde) + '</ul>'
+                      + befundZeilen(jePaket[p.package].befunde, q) + '</ul>'
                       + einzelKnopf(jePaket[p.package].befunde)
                       + (quittierbareIds(jePaket[p.package].befunde).length
                           ? '<button type="button" class="jv-pkg-cve-btn" data-cve-aktion="gesehen" data-cve-paket="'
@@ -436,7 +446,7 @@
             + '<div class="jv-pkg-meta">' + meta + '</div>'
             + cveBlock()
             + '<input type="search" id="jv-pkg-suche" class="jv-pkg-suche" autocomplete="off"'
-            + ' placeholder="' + esc(T('pkg.search', 'Paket, Version oder Beschreibung suchen …'))
+            + ' placeholder="' + esc(T('pkg.search', 'Paket, Version, Beschreibung oder CVE suchen …'))
             + '" value="' + esc(q) + '">'
             + '<div class="jv-pkg-scroll"><table class="jv-pkg-tab"><thead><tr>'
             + th('package', T('pkg.col_name', 'Paket'))
@@ -500,7 +510,7 @@
         Array.prototype.forEach.call(box.querySelectorAll('button.jv-pkg-cve[data-cve-paket]'), function (c) {
             c.addEventListener('click', function () {
                 var n = c.getAttribute('data-cve-paket');
-                _cveOffen[n] = !_cveOffen[n];
+                _cveOffen[n] = !offen(n);
                 zeichnen();
             });
         });
@@ -606,6 +616,36 @@
      * nodejs-Zeile samt Einzel-Update, nicht in einer Sammelliste daneben. */
     function inPaketliste(b) {
         return b.bereich === 'debian' || (b.bereich === 'node' && (b.pakete || []).length > 0);
+    }
+
+    /* SUCHE UEBER KENNUNGEN. Gemeldet wird eine Luecke als Kennung
+     * (CVE-2026-…, GHSA-…), nicht als Paketname – die Suche muss sie also
+     * finden. Verglichen werden die Kennung und ihre Aliase (ein Python-Befund
+     * kann unter GHSA laufen und die CVE nur als Alias tragen). */
+    function befundTrifft(b, q) {
+        if (!q) return true;
+        return [b.cve].concat(b.aliase || []).some(function (k) {
+            return String(k || '').toLowerCase().indexOf(q) >= 0;
+        });
+    }
+
+    /** Paketzeile gegen den Suchtext: 'paket' (Name, Version, Beschreibung),
+     *  'kennung' (nur ueber eine Luecke des Pakets) oder '' (kein Treffer). */
+    function paketTreffer(p, info, q) {
+        if (!q) return 'paket';
+        var eigen = [p.package, p.summary, p.version].some(function (t) {
+            return String(t || '').toLowerCase().indexOf(q) >= 0;
+        });
+        if (eigen) return 'paket';
+        if (info && (info.befunde || []).some(function (b) { return befundTrifft(b, q); })) return 'kennung';
+        return '';
+    }
+
+    /** Befund ohne Paketzeile (Python, npm, Node.js) gegen den Suchtext:
+     *  Kennung/Aliase oder der Name des betroffenen Pakets. */
+    function andereTrifft(b, q) {
+        if (!q) return true;
+        return befundTrifft(b, q) || String(b.quelle || '').toLowerCase().indexOf(q) >= 0;
     }
 
     /** Binaerpaket -> {rang, klasse, befunde[]} (Debian und Node.js als Paket). */
@@ -721,7 +761,7 @@
             }).join(' · ');
     }
 
-    function befundZeilen(befunde) {
+    function befundZeilen(befunde, q) {
         var gesehen = cveGesehen();
         var rang = function (b) { return CVE_RANG[b.klasse] != null ? CVE_RANG[b.klasse] : 9; };
         return befunde.slice().sort(function (a, b) {
@@ -760,7 +800,9 @@
             if (nd) zusatz.push(nd);
             var aw = anderswoText(b.anderswo);
             if (aw) zusatz.push(aw);
-            return '<li class="' + (gesehen[b.id] ? 'ist-gesehen' : '') + '">'
+            var kl = (gesehen[b.id] ? ['ist-gesehen'] : [])
+                .concat(q && befundTrifft(b, q) ? ['ist-treffer'] : []);
+            return '<li class="' + kl.join(' ') + '">'
                 + '<span class="jv-pkg-cve-id">' + befundLink(b) + '</span> '
                 + '<span class="jv-pkg-cve jv-pkg-cve-' + esc(b.klasse) + ' ist-klein">'
                 + esc(klasseText(b.klasse)) + '</span> '
@@ -895,18 +937,19 @@
                 + esc(T('pkg.cve_filter_neu', 'Nur noch nicht gesehene')) + '</label>';
         }
         // Python-, npm- und Node.js-Befunde ohne Paket haben keine Zeile in der Liste.
-        var andere = andereGezeigt(cveBefunde().filter(function (b) { return !inPaketliste(b); }));
+        var andere = andereGezeigt(cveBefunde().filter(function (b) { return !inPaketliste(b); }))
+            .filter(function (b) { return andereTrifft(b, _suche); });
         // Bewertete Funde (pip_audit_ausnahmen.txt) gesondert nennen – sonst
         // sieht eine abgeschlossene Bewertung aus wie ein offener Alarm.
         var bewertet = andere.filter(function (b) { return b.klasse === 'ausgenommen'; }).length;
         var andereBlock = andere.length
-            // Unter dem Filter aufgeklappt: sonst saehe man eine leere
+            // Unter dem Filter und waehrend einer Suche aufgeklappt: sonst saehe man eine leere
             // Tabelle, waehrend die Treffer zugeklappt darunter liegen.
-            ? '<details class="jv-pkg-cve-andere"' + (_nurUngesehen ? ' open' : '') + '><summary>'
+            ? '<details class="jv-pkg-cve-andere"' + (_nurUngesehen || _suche ? ' open' : '') + '><summary>'
               + esc(T('pkg.cve_andere', 'Python, npm und Node.js: {n} Lücken').replace('{n}', String(andere.length))
                     + (bewertet ? ' ' + T('pkg.cve_andere_bew', '(davon {b} bewertet)').replace('{b}', String(bewertet)) : ''))
               + '</summary><ul class="jv-pkg-cve-liste">' + andere.map(function (b) {
-                  return befundZeilen([b]).replace('<li', '<li data-quelle="' + esc(b.bereich + ':' + b.quelle) + '"')
+                  return befundZeilen([b], _suche).replace('<li', '<li data-quelle="' + esc(b.bereich + ':' + b.quelle) + '"')
                       .replace('<span class="jv-pkg-cve-id">', '<span class="jv-pkg-cve-id">'
                                + esc(bereichText(b.bereich) + ' ' + b.quelle + ' ' + b.version) + ' – ');
               }).join('') + '</ul></details>'

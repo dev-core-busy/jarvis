@@ -3139,7 +3139,6 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
     background: rgba(var(--fg-rgb), 0.03);
     border: 1px solid rgba(var(--fg-rgb), 0.08);
     border-radius: var(--radius-md, 8px);
-    cursor: pointer;
     transition: all 0.2s ease;
 }
 
@@ -3319,6 +3318,14 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
 
 .profile-actions .btn-icon:hover {
     opacity: 1;
+}
+
+/* Stern = Standardprofil: Rand-Stern zum Setzen, gefuellter Stern am aktiven
+   Profil (immer voll sichtbar, nicht nur beim Ueberfahren). */
+.profile-actions .btn-default-profile.is-gesetzt {
+    opacity: 1;
+    color: var(--accent);
+    cursor: default;
 }
 
 .btn-add-profile {

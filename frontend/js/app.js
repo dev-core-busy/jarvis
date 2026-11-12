@@ -2231,7 +2231,8 @@
             profilesContainer.innerHTML = '';
             profiles.forEach(p => {
                 const card = document.createElement('div');
-                card.className = 'profile-card' + (p.id === activeProfileId ? ' active' : '');
+                const istAktiv = (p.id === activeProfileId);
+                card.className = 'profile-card' + (istAktiv ? ' active' : '');
                 card.innerHTML = `
                     <div class="profile-info" data-id="${p.id}">
                         <span class="profile-name-row">
@@ -2241,6 +2242,7 @@
                         <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}${_profRestrictionSummary(p)}</span>
                     </div>
                     <div class="profile-actions">
+                        <button class="btn-icon btn-small btn-default-profile${istAktiv ? ' is-gesetzt' : ''}" data-id="${p.id}" title="${escapeHtml(window.t(istAktiv ? 'profile.default_is' : 'profile.default_set'))}" aria-label="${escapeHtml(window.t(istAktiv ? 'profile.default_is' : 'profile.default_set'))}" aria-pressed="${istAktiv ? 'true' : 'false'}">${JarvisIcons.star(istAktiv)}</button>
                         <button class="btn-icon btn-small btn-caps-profile mc-info-btn" data-id="${p.id}" title="${window.t('caps.btn_title')}" aria-label="${window.t('caps.btn_title')}">ⓘ</button>
                         <button class="btn-icon btn-small btn-perms-profile" data-id="${p.id}" title="${window.t('profile.perm_label')}">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -2253,10 +2255,15 @@
                         </button>
                     </div>
                 `;
-                // Klick auf Info-Bereich = Profil aktivieren
-                card.querySelector('.profile-info').addEventListener('click', () => activateProfile(p.id));
-                // ⓘ = Faehigkeiten des Modells (model_caps.js). stopPropagation ist
-                // Pflicht: ein Klick auf die Karte AKTIVIERT sonst das Profil.
+                // Standardprofil nur ueber den Stern setzen – frueher aktivierte
+                // schon ein Klick auf die Karte das Profil, und ein versehentlicher
+                // Klick stellte damit das LLM fuer alle Benutzer um.
+                card.querySelector('.btn-default-profile').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (!istAktiv) activateProfile(p.id);
+                });
+                // ⓘ = Faehigkeiten des Modells (model_caps.js). stopPropagation haelt
+                // den Klick in der Karte (dort haengt sonst die Bubbling-Kette).
                 const capsBtn = card.querySelector('.btn-caps-profile');
                 if (capsBtn) capsBtn.addEventListener('click', (e) => {
                     e.stopPropagation();

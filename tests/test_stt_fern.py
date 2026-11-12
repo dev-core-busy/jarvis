@@ -17,6 +17,14 @@ mit endOfUtterance, final, stop/stopped).
     main.py geschnitten und mit Attrappen ausgefuehrt – bei "fern" antwortet der
     Dienst und das lokale Modell wird NICHT geladen; scheitert der Dienst, rechnet
     das lokale Modell; bei "lokal" wird der Dienst nicht gefragt.
+ D  Zugangstoken (2026-11-12, der wss-Dienst verlangt eines): es geht als
+    ``Authorization: Bearer`` an WebSocket UND /health, aber NUR ueber wss;
+    ``_transcribe_audio`` reicht das gespeicherte Token durch; die Endpunkte
+    (per AST geschnitten) geben den Wert nie heraus, lehnen ein Token mit ws://
+    ab, behalten es bei leerem Feld nur fuer DASSELBE Ziel (sonst liesse es
+    sich per Adressaenderung an einen fremden Host schicken), entfernen es auf
+    Wunsch und schreiben es nicht ins Sicherheitsprotokoll. Der Tresor
+    verpackt ``stt_fern_token``.
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 """
@@ -93,11 +101,14 @@ class Dienst:
     def __init__(self):
         self.art = "gut"
         self.nachrichten = []
+        self.koepfe = []
         self.loop = asyncio.new_event_loop()
         self.port = None
         bereit = threading.Event()
 
         async def behandeln(ws):
+            req = getattr(ws, "request", None)
+            self.koepfe.append(dict(req.headers) if req is not None else {})
             puffer = b""
             async for roh in ws:
                 m = json.loads(roh)
@@ -276,6 +287,221 @@ dienst.art = "gut"
 check(t == "lokal erkannt", "fern meldet Fehler: das lokale Modell springt ein", t)
 t, m, g = lauf({"stt_quelle": "unsinn", "stt_fern_url": dienst.url})
 check(t == "lokal erkannt", "unbekannte Quelle gilt als lokal", t)
+
+# ── D: Zugangstoken ─────────────────────────────────────────────────────────
+print("\nD  Zugangstoken")
+TOK = "probe" + "ab12" * 8
+WSS = f"wss://127.0.0.1:{dienst.port}/ws/stt"
+
+
+def _auth_zuletzt():
+    """Authorization-Kopfsatz der letzten Verbindung zur Attrappe (None = keiner)."""
+    k = dienst.koepfe[-1] if dienst.koepfe else {}
+    return {a.lower(): b for a, b in k.items()}.get("authorization")
+
+
+# Der echte Aufrufweg: websockets.connect bekommt die wss-Adresse und die
+# Kopfsaetze; die Attrappe spricht nur ws, also wird NUR das Schema getauscht.
+_echt_connect = websockets.connect
+connect_aufrufe = []
+
+
+def _connect_mitschnitt(url, *a, **kw):
+    connect_aufrufe.append((url, dict(kw.get("additional_headers") or {})))
+    return _echt_connect(url.replace("wss://", "ws://", 1), *a, **kw)
+
+
+websockets.connect = _connect_mitschnitt
+try:
+    dienst.koepfe.clear()
+    t = stt_fern.transkribieren(aufnahme, WSS, "de", TOK)
+    check(t == f"erkannt {erwartet_bytes} bytes" and dienst.koepfe,
+          "(Positivkontrolle) wss-Lauf ueber den Mitschnitt gelingt", t)
+    check(_auth_zuletzt() == "Bearer " + TOK, "wss: Token kommt als Bearer-Kopfsatz beim Dienst an", _auth_zuletzt())
+    check(bool(connect_aufrufe) and TOK not in connect_aufrufe[-1][0], "Token steht nicht in der Adresse")
+    dienst.koepfe.clear()
+    stt_fern.transkribieren(aufnahme, dienst.url, "de", TOK)
+    check(bool(dienst.koepfe) and _auth_zuletzt() is None, "ws: das Token geht NICHT im Klartext hinaus",
+          _auth_zuletzt())
+    dienst.koepfe.clear()
+    stt_fern.transkribieren(aufnahme, WSS, "de", "")
+    check(bool(dienst.koepfe) and _auth_zuletzt() is None, "ohne Token kein Authorization-Kopfsatz",
+          _auth_zuletzt())
+
+    # _transcribe_audio reicht das gespeicherte Token durch
+    dienst.koepfe.clear()
+    t, m, g = lauf({"stt_quelle": "fern", "stt_fern_url": WSS, "stt_fern_token": TOK})
+    check(t == f"erkannt {erwartet_bytes} bytes" and _auth_zuletzt() == "Bearer " + TOK,
+          "_transcribe_audio: gespeichertes Token erreicht den Dienst", (t, _auth_zuletzt()))
+finally:
+    websockets.connect = _echt_connect
+
+# /health: Kopfsatz ueber den echten gesundheit()-Weg (Opener abgefangen)
+_echt_opener = stt_fern.urllib.request.build_opener
+anfragen = []
+
+
+class _Antwort:
+    def read(self, n=-1):
+        return json.dumps({"status": "ok", "modelPath": "/m/large-v3", "device": "cuda"}).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _Opener:
+    def open(self, anfrage, timeout=None):
+        anfragen.append(anfrage)
+        return _Antwort()
+
+
+def _kopf_zuletzt():
+    h = anfragen[-1] if anfragen else None
+    if h is None or not hasattr(h, "get_header"):
+        return "<keine Request-Instanz>"
+    return h.get_header("Authorization")
+
+
+stt_fern.urllib.request.build_opener = lambda *a, **k: _Opener()
+try:
+    g1 = stt_fern.gesundheit("wss://stt.beispiel.de/ws/stt", 1.0, TOK)
+    check(g1.get("ok") and _kopf_zuletzt() == "Bearer " + TOK, "/health ueber wss traegt den Bearer-Kopfsatz",
+          (g1, _kopf_zuletzt()))
+    g2 = stt_fern.gesundheit("ws://stt.beispiel.de/ws/stt", 1.0, TOK)
+    check(g2.get("ok") and _kopf_zuletzt() is None, "/health ueber ws: kein Token", _kopf_zuletzt())
+finally:
+    stt_fern.urllib.request.build_opener = _echt_opener
+
+# Token-Pruefung und Zielvergleich
+for schlecht, grund in (("a b", "Leerzeichen"), ("a\r\nX-Evil: 1", "Zeilenumbruch"), ("a\tb", "Tab"),
+                        ("x" * (stt_fern.TOKEN_MAX + 1), "ueberlang")):
+    try:
+        stt_fern.token_pruefen(schlecht)
+        check(False, f"Token abgewiesen: {grund}")
+    except ValueError:
+        check(True, f"Token abgewiesen: {grund}")
+check(stt_fern.token_pruefen("  " + TOK + " ") == TOK, "Token wird getrimmt angenommen")
+check(stt_fern.gleiches_ziel("wss://a.beispiel.de/ws/stt", "wss://A.beispiel.de:443/anders"),
+      "gleiches Ziel: Host gross/klein und Standardport")
+check(not stt_fern.gleiches_ziel("wss://a.beispiel.de/ws/stt", "wss://b.beispiel.de/ws/stt"),
+      "anderer Host ist anderes Ziel")
+check(not stt_fern.gleiches_ziel("wss://a.beispiel.de/ws/stt", "wss://a.beispiel.de:8443/ws/stt"),
+      "anderer Port ist anderes Ziel")
+check(not stt_fern.gleiches_ziel("", ""), "leere Adressen sind kein gleiches Ziel")
+
+# Tresor verpackt das Feld
+try:
+    from backend import geheimnis_tresor as _tresor
+    check(_tresor.ist_geheimer_name("stt_fern_token"), "Tresor verpackt stt_fern_token (BSI M5)")
+except Exception as e:  # noqa: BLE001
+    check(False, "Tresor importierbar", repr(e))
+
+# Endpunkte: per AST geschnitten, Dekoratoren entfernt, mit Attrappen ausgefuehrt
+ep = {n.name: n for n in baum.body if isinstance(n, ast.AsyncFunctionDef)
+      and n.name in ("stt_einstellung_lesen", "stt_einstellung_setzen")}
+if len(ep) != 2:
+    print("ABBRUCH (Exit 2): STT-Endpunkte nicht gefunden")
+    sys.exit(2)
+for n in ep.values():
+    n.decorator_list = []
+ep_code = compile(ast.fix_missing_locations(ast.Module(body=list(ep.values()), type_ignores=[])),
+                  "main.stt_endpunkte", "exec")
+
+
+class SpeicherCfg(Cfg):
+    def save_setting(self, k, v):
+        self.werte[k] = v
+
+
+class JR:
+    def __init__(self, inhalt, status_code=200):
+        self.inhalt, self.status_code = inhalt, status_code
+
+
+class Anfrage:
+    def __init__(self, body):
+        self.body = body
+
+    async def json(self):
+        return self.body
+
+
+protokoll = []
+gesund_token = []
+
+
+class _Log:
+    @staticmethod
+    def ereignis(art, **kw):
+        protokoll.append((art, kw))
+
+
+def _ns(werte):
+    ns = {"config": SpeicherCfg(werte), "_stt_fern": stt_fern, "JSONResponse": JR, "Request": object,
+          "Depends": lambda f: None, "require_local_auth": None, "asyncio": asyncio, "_sicherheits_log": _Log}
+    exec(ep_code, ns)
+    return ns
+
+
+def _gesundheit_attrappe(url, frist_s=3.0, token=""):
+    gesund_token.append(token)
+    return {"ok": True, "detail": "ok", "modell": "", "geraet": ""}
+
+
+def setzen(werte, body):
+    ns = _ns(werte)
+    r = asyncio.run(ns["stt_einstellung_setzen"](Anfrage(body), user="admin"))
+    return r, ns["config"].werte
+
+
+_echt_gesundheit = stt_fern.gesundheit
+stt_fern.gesundheit = _gesundheit_attrappe
+try:
+    A = "wss://stt.beispiel.de/ws/stt"
+    r, w = setzen({}, {"quelle": "fern", "url": A, "token": TOK})
+    check(r.status_code == 200 and w.get("stt_fern_token") == TOK, "(Positivkontrolle) Token wird gespeichert",
+          (r.status_code, r.inhalt))
+    check(bool(gesund_token) and gesund_token[-1] == TOK, "Erreichbarkeitspruefung benutzt das neue Token")
+    check(TOK not in json.dumps(r.inhalt) and r.inhalt.get("token_gesetzt") is True,
+          "Antwort meldet 'gesetzt', nicht den Wert", r.inhalt)
+    check(bool(protokoll) and not any(TOK in json.dumps(kw, default=str) for _a, kw in protokoll),
+          "Sicherheitsprotokoll enthaelt das Token nicht")
+    ns = _ns({"stt_quelle": "fern", "stt_fern_url": A, "stt_fern_token": TOK})
+    g = asyncio.run(ns["stt_einstellung_lesen"](user="admin")).inhalt
+    check(g.get("token_gesetzt") is True and TOK not in json.dumps(g), "GET liefert nur 'gesetzt', nie den Wert", g)
+    ns = _ns({"stt_quelle": "fern", "stt_fern_url": A})
+    g = asyncio.run(ns["stt_einstellung_lesen"](user="admin")).inhalt
+    check(g.get("token_gesetzt") is False, "GET ohne Token: 'nicht gesetzt'", g)
+
+    r, w = setzen({"stt_quelle": "fern", "stt_fern_url": A, "stt_fern_token": TOK},
+                  {"quelle": "fern", "url": A + "?x=1", "token": ""})
+    check(w.get("stt_fern_token") == TOK and not r.inhalt.get("token_verworfen"),
+          "leeres Feld, gleiches Ziel: Token bleibt", (w.get("stt_fern_token"), r.inhalt))
+    r, w = setzen({"stt_quelle": "fern", "stt_fern_url": A, "stt_fern_token": TOK},
+                  {"quelle": "fern", "url": "wss://fremd.beispiel.de/ws/stt", "token": ""})
+    check(w.get("stt_fern_token") == "" and r.inhalt.get("token_verworfen") is True,
+          "leeres Feld, anderer Host: Token wird verworfen (geht nicht mit)", (w.get("stt_fern_token"), r.inhalt))
+    check(gesund_token[-1] == "", "fremder Host bekommt bei der Pruefung kein Token", gesund_token[-1])
+    r, w = setzen({"stt_quelle": "fern", "stt_fern_url": A, "stt_fern_token": TOK},
+                  {"quelle": "fern", "url": A, "token_entfernen": True})
+    check(w.get("stt_fern_token") == "" and not r.inhalt.get("token_verworfen"),
+          "token_entfernen loescht das Token", (w.get("stt_fern_token"), r.inhalt))
+    r, w = setzen({}, {"quelle": "fern", "url": "ws://stt.beispiel.de:8090/ws/stt", "token": TOK})
+    check(r.status_code == 400 and "stt_fern_token" not in w, "Token mit ws:// wird abgelehnt", (r.status_code, w))
+    r, w = setzen({"stt_quelle": "fern", "stt_fern_url": A, "stt_fern_token": TOK},
+                  {"quelle": "fern", "url": "ws://stt.beispiel.de/ws/stt", "token": ""})
+    check(r.status_code == 200 and w.get("stt_fern_token") == "",
+          "Wechsel auf ws:// (gleicher Host, anderer Port): Token geht nicht mit", (r.status_code, w))
+    r, w = setzen({}, {"quelle": "fern", "url": A, "token": "a\nb"})
+    check(r.status_code == 400 and "stt_fern_token" not in w, "Token mit Zeilenumbruch wird abgelehnt")
+    r, w = setzen({}, {"quelle": "fern", "url": "ws://stt.beispiel.de:8090/ws/stt"})
+    check(r.status_code == 200 and r.inhalt.get("verschluesselt") is False,
+          "ws ohne Token: erlaubt, als unverschluesselt gemeldet", r.inhalt)
+finally:
+    stt_fern.gesundheit = _echt_gesundheit
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(f"\nErgebnis: {_ok} OK, {_fail} FAIL")

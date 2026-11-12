@@ -196,14 +196,37 @@ section('5. REGEL: das Modul liegt auf JEDER Seite');
     }
     check('Positivkontrolle: es wurden Seiten gefunden', seiten.length >= 15,
           String(seiten.length));
+    // ⚠ GEMESSEN WIRD DIE EINBINDUNG (<script src=…>), NICHT DAS WORT. Bis
+    // 2026-11-12 stand hier `indexOf('pwreveal.js')` ueber den ganzen Text –
+    // ein HTML-Kommentar, der das Modul NENNT (Spracheingabe in settings.html),
+    // lag vor icons.js und meldete eine falsche Reihenfolge, die es nicht gab;
+    // umgekehrt haette ein Kommentar eine fehlende Einbindung verdeckt.
+    const tagPos = (t, modul) => {
+        const m = new RegExp('<script\\b[^>]*\\bsrc="[^"]*/' + modul.replace('.', '\\.')
+                             + '(?:\\?[^"]*)?"').exec(t);
+        return m ? m.index : -1;
+    };
+    // Positivkontrollen der Sonde: ein Kommentar zaehlt NICHT, ein Tag schon.
+    const probe = '<!-- pwreveal.js --><script src="/static/js/icons.js?v=1"></script>'
+                + '<script src="/static/js/pwreveal.js?v=1"></script>';
+    const probeFalsch = '<script src="/static/js/pwreveal.js?v=1"></script>'
+                      + '<script src="/static/js/icons.js?v=1"></script>';
+    const sondeOk = tagPos(probe, 'pwreveal.js') > tagPos(probe, 'icons.js')
+        && tagPos('<!-- pwreveal.js -->', 'pwreveal.js') === -1
+        && tagPos(probeFalsch, 'pwreveal.js') < tagPos(probeFalsch, 'icons.js')
+        && tagPos(probeFalsch, 'pwreveal.js') >= 0;
+    if (!sondeOk) {
+        console.log('ABBRUCH (Exit 2): die Sonde fuer <script src> misst falsch');
+        process.exit(2);
+    }
     const ohne = seiten.filter((s) =>
-        !fs.readFileSync(path.join(ROOT, s), 'utf8').includes('pwreveal.js'));
+        tagPos(fs.readFileSync(path.join(ROOT, s), 'utf8'), 'pwreveal.js') < 0);
     check('⚠ jede Seite bindet pwreveal.js ein (auch kuenftige Felder)',
           ohne.length === 0, ohne.join(', '));
     // Es nutzt JarvisIcons – icons.js muss davor stehen.
     const falsch = seiten.filter((s) => {
         const t = fs.readFileSync(path.join(ROOT, s), 'utf8');
-        const i = t.indexOf('icons.js'), pw = t.indexOf('pwreveal.js');
+        const i = tagPos(t, 'icons.js'), pw = tagPos(t, 'pwreveal.js');
         return i >= 0 && pw >= 0 && pw < i;
     });
     check('… und zwar NACH icons.js (es benutzt JarvisIcons)',

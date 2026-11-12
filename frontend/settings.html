@@ -1856,8 +1856,19 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                         <option value="fern" data-i18n="profile.stt_quelle_fern">Spracherkennungs-Dienst im Netzwerk</option>
                                                     </select>
                                                     <input type="text" id="setting-stt-url" class="systab-feld systab-url" spellcheck="false" autocomplete="off"
-                                                           placeholder="ws://stt-dienst.firma.local:8090/ws/stt" data-i18n-placeholder="profile.stt_url_ph"
+                                                           placeholder="wss://stt-dienst.firma.local/ws/stt" data-i18n-placeholder="profile.stt_url_ph"
                                                            title="Adresse des Spracherkennungs-Dienstes" data-i18n-title="profile.stt_url_label" hidden>
+                                                    <!-- Zugangstoken: GET liefert nur "gesetzt"; das Auge holt den
+                                                         Wert ueber /api/secret/reveal (pwreveal.js, erneute Anmeldung,
+                                                         protokolliert). Ein- und ausgeblendet wird der CONTAINER:
+                                                         pwreveal.js legt einen Wrapper samt Auge um das Feld, ein
+                                                         hidden am Feld allein liesse das Auge stehen. -->
+                                                    <div id="stt-token-feld" hidden>
+                                                        <input type="password" id="setting-stt-token" class="systab-feld systab-url" spellcheck="false" autocomplete="new-password"
+                                                               placeholder="Zugangstoken (optional)" data-i18n-placeholder="profile.stt_token_ph"
+                                                               aria-label="Zugangstoken des Spracherkennungs-Dienstes" data-i18n-aria="profile.stt_token_label"
+                                                               data-pw-quelle="einstellung" data-pw-kennung="stt_fern_token">
+                                                    </div>
                                                 </td>
                                                 <td>
                                                     <span data-i18n="profile.systab_stt_wirkung">Wo gesprochene Eingaben in Text umgewandelt werden – im Chat, im Windows-Client und bei Sprachnachrichten.</span>
@@ -6163,7 +6174,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=465"></script>
+    <script src="/static/js/i18n.js?v=469"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6218,7 +6229,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=243"></script>
+    <script src="/static/js/app.js?v=247"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

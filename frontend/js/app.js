@@ -2968,9 +2968,62 @@
         // bleibt stehen (man muss ihn lesen koennen), ein Erfolg verschwindet.
         const selectSttQuelle = document.getElementById('setting-stt-quelle');
         const inputSttUrl = document.getElementById('setting-stt-url');
+        // Zugangstoken: GET liefert nur "ist gesetzt"; den Wert holt das Auge
+        // (pwreveal.js, POST /api/secret/reveal, erneute Anmeldung) – derselbe
+        // Weg wie an jedem anderen Geheimfeld. Ein eigenes "entfernen" gibt es
+        // nicht; geloescht wird, indem man den Inhalt LEERT.
+        // ⚠ "Leer = unveraendert" gilt NUR fuer ein nie angefasstes Feld (Sterne
+        // als Platzhalter). Hatte das Feld seit dem Laden einen Inhalt – getippt
+        // oder ueber das Auge geholt (pwreveal feuert dabei `input`) – und ist
+        // beim Speichern leer, hat der Benutzer es sichtbar geleert: das heisst
+        // loeschen. Gemeldet 2026-11-12, die erste Fassung speicherte dann
+        // stillschweigend das alte Token weiter.
+        const inputSttToken = document.getElementById('setting-stt-token');
+        const sttTokenFeld = document.getElementById('stt-token-feld');
         const sttStatus = document.getElementById('stt-status');
+        let _sttTokenGesetzt = false;
+        let _sttTokenAngefasst = false;
+        if (inputSttToken && !inputSttToken._sttWired) {
+            inputSttToken._sttWired = true;
+            inputSttToken.addEventListener('input', () => {
+                if (inputSttToken.value) _sttTokenAngefasst = true;
+            });
+        }
         function _sttFeldZeigen() {
-            if (inputSttUrl && selectSttQuelle) inputSttUrl.hidden = selectSttQuelle.value !== 'fern';
+            const fern = !!selectSttQuelle && selectSttQuelle.value === 'fern';
+            if (inputSttUrl) inputSttUrl.hidden = !fern;
+            // Den CONTAINER schalten: pwreveal.js setzt das Auge neben das Feld,
+            // ein hidden nur am Feld liesse es stehen.
+            if (sttTokenFeld) sttTokenFeld.hidden = !fern;
+        }
+        function _sttTokenAnzeigen(gesetzt) {
+            const T = (k, f) => (window.t ? window.t(k) : f);
+            _sttTokenGesetzt = !!gesetzt;
+            _sttTokenAngefasst = false;
+            if (inputSttToken) {
+                // Steht das Feld nach einem Abruf im Klartext, zuerst ueber das
+                // Auge zurueckschalten – sonst zeigte es "verbergen" ueber einem
+                // geleerten Feld (Symbol und Zustand liefen auseinander).
+                const auge = inputSttToken.parentElement
+                    && inputSttToken.parentElement.querySelector(':scope > .jv-pw-eye');
+                if (inputSttToken.type !== 'password' && auge) auge.click();
+                if (window.JarvisPwEye && window.JarvisPwEye.geheim) {
+                    // Hausweg: Wert leer, Sterne als Platzhalter, Quelle fuers Auge,
+                    // "leer lassen = unveraendert" im Titel.
+                    window.JarvisPwEye.geheim(inputSttToken, 'einstellung', 'stt_fern_token', _sttTokenGesetzt);
+                } else {
+                    inputSttToken.value = '';
+                }
+                // Gespeichert: Sterne, und applyLang darf sie nicht ueberschreiben.
+                // Nicht gespeichert: der erklaerende Platzhalter, mit Sprachwechsel.
+                if (_sttTokenGesetzt) {
+                    inputSttToken.removeAttribute('data-i18n-placeholder');
+                } else {
+                    inputSttToken.setAttribute('data-i18n-placeholder', 'profile.stt_token_ph');
+                    inputSttToken.placeholder = T('profile.stt_token_ph', 'Zugangstoken (optional)');
+                }
+            }
+            _sttFeldZeigen();
         }
         function _sttMelden(text, bleibt) {
             if (!sttStatus) return;
@@ -2986,7 +3039,7 @@
                 const d = await r.json();
                 selectSttQuelle.value = d.quelle === 'fern' ? 'fern' : 'lokal';
                 if (inputSttUrl) inputSttUrl.value = d.url || '';
-                _sttFeldZeigen();
+                _sttTokenAnzeigen(d.token_gesetzt);
             } catch (e) { /* Zeile bleibt auf der Vorgabe */ }
         }
         if (selectSttQuelle && !selectSttQuelle._wired) {
@@ -3000,6 +3053,9 @@
                 const T = (k, f) => (window.t ? window.t(k) : f);
                 const quelle = selectSttQuelle ? selectSttQuelle.value : 'lokal';
                 const url = inputSttUrl ? inputSttUrl.value.trim() : '';
+                const sttToken = inputSttToken ? inputSttToken.value.trim() : '';
+                // Sichtbar geleert (siehe oben) = loeschen; nie angefasst = unveraendert.
+                const tokenGeleert = _sttTokenGesetzt && _sttTokenAngefasst && !sttToken;
                 if (quelle === 'fern' && !url) {
                     _sttMelden(T('profile.stt_url_fehlt', 'Bitte die Adresse des Dienstes eintragen.'), true);
                     return;
@@ -3009,13 +3065,28 @@
                     const r = await fetch('/api/settings/stt', {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ quelle, url })
+                        body: JSON.stringify({ quelle, url, token: sttToken, token_entfernen: tokenGeleert })
                     });
                     const d = await r.json().catch(() => ({}));
                     if (!r.ok) { _sttMelden('✗ ' + (d.error || r.status), true); return; }
-                    if (quelle === 'fern' && !(d.erreichbar && d.erreichbar.ok)) {
+                    _sttTokenAnzeigen(d.token_gesetzt);
+                    // Hinweise, die stehen bleiben muessen: verworfenes Token und
+                    // unverschluesselte Adresse gehen dem Ergebnis voran.
+                    const vorab = [];
+                    if (tokenGeleert && !d.token_gesetzt) vorab.push(T('profile.stt_token_geloescht', 'Das Token wurde gelöscht.'));
+                    if (d.token_verworfen) vorab.push(T('profile.stt_token_verworfen', 'Das gespeicherte Token wurde entfernt.'));
+                    if (quelle === 'fern' && d.verschluesselt === false) vorab.push(T('profile.stt_unverschluesselt', 'Achtung: Verbindung unverschlüsselt (ws://).'));
+                    if (vorab.length && quelle === 'fern' && d.erreichbar && d.erreichbar.ok) {
+                        const e = d.erreichbar;
+                        _sttMelden(T('profile.stt_erreichbar', '✓ gespeichert · Dienst antwortet')
+                                   + (e.modell ? ' · ' + e.modell + (e.geraet ? ' (' + e.geraet + ')' : '') : '')
+                                   + ' – ' + vorab.join(' '), true);
+                    } else if (vorab.length && quelle !== 'fern') {
+                        _sttMelden('✓ ' + vorab.join(' '), true);
+                    } else if (quelle === 'fern' && !(d.erreichbar && d.erreichbar.ok)) {
                         _sttMelden(T('profile.stt_nicht_erreichbar', 'Gespeichert, aber der Dienst antwortet nicht.')
-                                   + (d.erreichbar && d.erreichbar.detail ? ' (' + d.erreichbar.detail + ')' : ''), true);
+                                   + (d.erreichbar && d.erreichbar.detail ? ' (' + d.erreichbar.detail + ')' : '')
+                                   + (vorab.length ? ' – ' + vorab.join(' ') : ''), true);
                     } else if (quelle === 'fern') {
                         const e = d.erreichbar;
                         _sttMelden(T('profile.stt_erreichbar', '✓ gespeichert · Dienst antwortet')

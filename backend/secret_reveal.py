@@ -452,6 +452,9 @@ EINSTELLUNG_ERLAUBT = (
     "webdav_password",
     "smtp_password",
     "imap_password",
+    # Zugangstoken des Spracherkennungs-Dienstes (2026-11-12, Anweisung des
+    # Betreibers: "wie an allen anderen Stellen auch sichtbar machen").
+    "stt_fern_token",
 )
 
 

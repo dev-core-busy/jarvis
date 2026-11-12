@@ -20,6 +20,16 @@ Ein leeres Stueck mit der Markierung verwirft der Dienst (``pcmBase64`` fehlt),
 die Aeusserung wuerde nie transkribiert; das letzte Stueck ist darum nie leer.
 
 Die Adresse steht NUR in den Einstellungen (settings.json), nie im Code.
+
+Zugangstoken (2026-11-12): der Dienst hinter ``wss://`` verlangt eines und
+weist ohne mit HTTP 403 ab. Gemessen am echten Dienst: angenommen werden
+``Authorization: Bearer <token>`` und ``X-Api-Key``, NICHT ein Token in der
+Adresse (``?token=`` → 403). Gesendet wird der Bearer-Kopfsatz – damit landet
+das Token in keinem Zugriffsprotokoll und keiner Prozessliste. Abgelegt ist es
+als ``stt_fern_token`` in settings.json; die Endung ``_token`` laesst den
+Tresor es verpacken (BSI M5). Es geht NUR ueber ``wss://`` hinaus: ueber
+``ws://`` laege es im Klartext auf der Leitung, und ein Token, das jeder
+Mitleser kennt, schuetzt nichts mehr.
 """
 import asyncio
 import base64
@@ -42,6 +52,9 @@ VERBINDEN_S = 5
 # Audio-Anhang darf laenger rechnen als ein Satz aus dem Chat.
 FRIST_GRUND_S = 20
 STOP_FRIST_S = 5
+
+
+TOKEN_MAX = 500
 
 
 def einstellung(cfg) -> tuple[str, str]:
@@ -68,6 +81,54 @@ def url_pruefen(url: str) -> str:
     return url
 
 
+def token_lesen(cfg) -> str:
+    """Gespeichertes Zugangstoken ("" = keines)."""
+    return str(cfg.get_setting("stt_fern_token", "") or "").strip()
+
+
+def token_pruefen(token: str) -> str:
+    """Getrimmtes Token oder ValueError. Kein Leer- und kein Steuerzeichen:
+    das Token wird ein Kopfsatz, ein Zeilenumbruch darin waere ein zweiter."""
+    token = (token or "").strip()
+    if len(token) > TOKEN_MAX:
+        raise ValueError("Token zu lang")
+    if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in token):
+        raise ValueError("Token darf keine Leer- oder Steuerzeichen enthalten")
+    return token
+
+
+def verschluesselt(url: str) -> bool:
+    """True bei wss:// – nur dann geht ein Token hinaus."""
+    return urllib.parse.urlsplit(url or "").scheme == "wss"
+
+
+def gleiches_ziel(a: str, b: str) -> bool:
+    """Gleicher Host UND Port (Schema-Standardport eingerechnet).
+
+    Ein gespeichertes Token gilt nur fuer das Ziel, fuer das es eingetragen
+    wurde: wer nur die Adresse auf einen anderen Host aendert, darf es nicht
+    dorthin mitnehmen (das waere ein Weg, das nie angezeigte Token
+    abzugreifen)."""
+    def ziel(u):
+        t = urllib.parse.urlsplit(u or "")
+        try:
+            port = t.port
+        except ValueError:
+            return None
+        if port is None:
+            port = {"ws": 80, "wss": 443}.get(t.scheme)
+        return ((t.hostname or "").lower(), port)
+    za, zb = ziel(a), ziel(b)
+    return za is not None and za == zb and bool(za[0])
+
+
+def _kopf(url: str, token: str) -> dict:
+    """Kopfsaetze fuer Dienst und /health – das Token nur ueber wss."""
+    if token and verschluesselt(url):
+        return {"Authorization": "Bearer " + token}
+    return {}
+
+
 def health_url(url: str) -> str:
     """HTTP-Adresse von ``/health`` zur WebSocket-Adresse (Pfad ab /ws/ entfaellt)."""
     teile = urllib.parse.urlsplit(url)
@@ -78,7 +139,7 @@ def health_url(url: str) -> str:
     return urllib.parse.urlunsplit((schema, teile.netloc, pfad.rstrip("/") + "/health", "", ""))
 
 
-def gesundheit(url: str, frist_s: float = 3.0) -> dict:
+def gesundheit(url: str, frist_s: float = 3.0, token: str = "") -> dict:
     """Erreichbarkeit des Dienstes: {"ok", "detail", "modell", "geraet"}.
 
     Ohne System-Proxy: der Dienst ist ein interner Host, den ein Firmen-Proxy
@@ -86,7 +147,8 @@ def gesundheit(url: str, frist_s: float = 3.0) -> dict:
     unerreichbar, waehrend der WebSocket ging)."""
     oeffner = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with oeffner.open(health_url(url), timeout=frist_s) as antwort:
+        anfrage = urllib.request.Request(health_url(url), headers=_kopf(url, token))
+        with oeffner.open(anfrage, timeout=frist_s) as antwort:
             daten = json.loads(antwort.read(65536).decode("utf-8", "replace") or "{}")
     except Exception as e:  # noqa: BLE001 – jeder Grund ist "nicht erreichbar"
         return {"ok": False, "detail": str(e)[:200], "modell": "", "geraet": ""}
@@ -106,7 +168,7 @@ def pcm_aus_datei(pfad: str) -> bytes:
     return erg.stdout
 
 
-async def _erkennen(pcm: bytes, url: str, sprache: str) -> str:
+async def _erkennen(pcm: bytes, url: str, sprache: str, token: str = "") -> str:
     import websockets
     sitzung = "jarvis-" + uuid.uuid4().hex[:12]
     frist = FRIST_GRUND_S + len(pcm) / BYTES_JE_SEKUNDE
@@ -122,7 +184,8 @@ async def _erkennen(pcm: bytes, url: str, sprache: str) -> str:
         return m
 
     async with websockets.connect(url, open_timeout=VERBINDEN_S, max_size=2 ** 22,
-                                  ping_interval=None) as ws:
+                                  ping_interval=None,
+                                  additional_headers=_kopf(url, token)) as ws:
         ende = time.monotonic() + frist
         await ws.send(json.dumps({"type": "start", "sessionId": sitzung, "language": sprache,
                                   "sampleRate": ABTASTRATE, "channels": 1, "format": "pcm_s16le"}))
@@ -157,7 +220,7 @@ async def _erkennen(pcm: bytes, url: str, sprache: str) -> str:
     return " ".join(t for t in texte if t).strip()
 
 
-def transkribieren(pfad: str, url: str, sprache: str | None = None) -> str:
+def transkribieren(pfad: str, url: str, sprache: str | None = None, token: str = "") -> str:
     """Datei ueber den Fern-Dienst erkennen. Synchron – laeuft in einem Thread
     (``_transcribe_audio`` wird ausschliesslich ueber to_thread/Executor gerufen).
     Wirft bei jedem Fehlschlag; ein leerer Text heisst "keine Sprache"."""
@@ -165,4 +228,4 @@ def transkribieren(pfad: str, url: str, sprache: str | None = None) -> str:
     pcm = pcm_aus_datei(pfad)
     if not pcm:
         return ""
-    return asyncio.run(_erkennen(pcm, url, sprache or "de"))
+    return asyncio.run(_erkennen(pcm, url, sprache or "de", token))

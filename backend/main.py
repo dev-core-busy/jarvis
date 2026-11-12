@@ -29629,15 +29629,26 @@ def _stt_quelle_fern() -> bool:
 
 @app.get("/api/settings/stt")
 async def stt_einstellung_lesen(user: str = Depends(require_local_auth)):
-    """Quelle der Spracherkennung (lokal | fern) und Adresse des Fern-Dienstes."""
+    """Quelle der Spracherkennung (lokal | fern) und Adresse des Fern-Dienstes.
+    Vom Zugangstoken nur, OB eines hinterlegt ist – der Wert verlaesst den
+    Server nie wieder (wie bei jedem anderen Geheimfeld)."""
     quelle, url = _stt_fern.einstellung(config)
-    return JSONResponse({"quelle": quelle, "url": url, "quellen": list(_stt_fern.QUELLEN)})
+    return JSONResponse({"quelle": quelle, "url": url, "quellen": list(_stt_fern.QUELLEN),
+                         "token_gesetzt": bool(_stt_fern.token_lesen(config))})
 
 
 @app.post("/api/settings/stt")
 async def stt_einstellung_setzen(request: Request, user: str = Depends(require_local_auth)):
-    """Quelle und Adresse speichern; danach die Erreichbarkeit pruefen und
-    zurueckmelden – wer umschaltet, soll sofort sehen, ob der Dienst antwortet."""
+    """Quelle, Adresse und Zugangstoken speichern; danach die Erreichbarkeit
+    pruefen und zurueckmelden – wer umschaltet, soll sofort sehen, ob der
+    Dienst antwortet.
+
+    Token: ``token`` leer = unveraendert, ``token_entfernen`` = loeschen. Ein
+    gespeichertes Token bleibt nur beim GLEICHEN Ziel (Host + Port) stehen;
+    wer die Adresse auf einen anderen Host aendert, ohne ein neues Token
+    einzutragen, verliert es (``token_verworfen``) – sonst liesse es sich
+    durch Umstellen der Adresse an einen beliebigen Server schicken. Mit
+    ``ws://`` wird gar kein Token angenommen: es liefe im Klartext."""
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -29653,13 +29664,35 @@ async def stt_einstellung_setzen(request: Request, user: str = Depends(require_l
             url = _stt_fern.url_pruefen(url)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+    try:
+        neu_token = _stt_fern.token_pruefen(str(body.get("token") or ""))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    entfernen = body.get("token_entfernen") is True
+    _alt_url = _stt_fern.einstellung(config)[1]
+    alt_token = _stt_fern.token_lesen(config)
+    if entfernen:
+        token = ""
+    elif neu_token:
+        token = neu_token
+    else:
+        token = alt_token if _stt_fern.gleiches_ziel(_alt_url, url) else ""
+    verworfen = bool(alt_token) and not token and not entfernen
+    if token and not _stt_fern.verschluesselt(url):
+        return JSONResponse({"error": "Ein Zugangstoken wird nur über eine verschlüsselte "
+                                      "Adresse (wss://) gesendet."}, status_code=400)
     config.save_setting("stt_fern_url", url)
     config.save_setting("stt_quelle", quelle)
+    config.save_setting("stt_fern_token", token)
     # Die Aufnahmen verlassen mit "fern" den Server – das gehoert ins
     # Sicherheitsprotokoll, wie jede andere Aenderung an einem Datenweg.
-    _sicherheits_log.ereignis("stt_quelle_geaendert", benutzer=user, quelle=quelle, url=url)
-    erreichbar = await asyncio.to_thread(_stt_fern.gesundheit, url) if url else None
-    return JSONResponse({"ok": True, "quelle": quelle, "url": url, "erreichbar": erreichbar})
+    # Vom Token nur, ob es sich geaendert hat, nie der Wert.
+    _sicherheits_log.ereignis("stt_quelle_geaendert", benutzer=user, quelle=quelle, url=url,
+                              token_gesetzt=bool(token), token_geaendert=token != alt_token)
+    erreichbar = await asyncio.to_thread(_stt_fern.gesundheit, url, 3.0, token) if url else None
+    return JSONResponse({"ok": True, "quelle": quelle, "url": url, "erreichbar": erreichbar,
+                         "token_gesetzt": bool(token), "token_verworfen": verworfen,
+                         "verschluesselt": _stt_fern.verschluesselt(url)})
 
 
 # Notbremse je einzelner Aufnahme (keine Aufbewahrungsregel): der Browser stoppt
@@ -29840,7 +29873,8 @@ def _transcribe_audio(filepath: str, language: str = "de", initial_prompt: str =
     if _quelle == _stt_fern.QUELLE_FERN:
         try:
             t0 = _time.time()
-            text = _stt_fern.transkribieren(filepath, _fern_url, language)
+            text = _stt_fern.transkribieren(filepath, _fern_url, language,
+                                            _stt_fern.token_lesen(config))
             duration = round(_time.time() - t0, 2)
             if text:
                 _tr_log("INFO", f"Fern-Transkription OK ({duration}s): {text[:100]}", source=source)

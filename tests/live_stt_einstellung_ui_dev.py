@@ -5,8 +5,15 @@
 Misst: die Zeile steht direkt vor "Sprachausgabe (TTS)"; der gespeicherte Stand
 (GET /api/settings/stt) wird geladen; das Adressfeld erscheint nur bei "fern",
 ist breit genug und bleibt in seiner Zelle (jsdom rechnet kein Layout);
-Speichern schickt quelle+url, und das Pruefergebnis steht AM Knopf; keine
-JS-Fehler. Screenshots je Thema unter ~/.jarvis-abnahme/.
+Speichern schickt quelle+url+token, und das Pruefergebnis steht AM Knopf; keine
+JS-Fehler. Zugangstoken (2026-11-12): das Feld erscheint nur bei "fern", ist es
+gespeichert, stehen Sterne darin und "leer lassen" im Titel; das Auge holt den
+Wert ueber /api/secret/reveal (wie an jedem Geheimfeld) und verschwindet bei
+"Auf diesem Server" mit dem Feld; ein "entfernen" gibt es nicht – ein
+sichtbar GELEERTES Feld loescht das Token, ein nie angefasstes leeres Feld
+laesst es unveraendert (gemeldet 2026-11-12);
+nach dem Speichern ist das Feld leer (der Wert kommt nie zurueck); ein vom
+Server verworfenes Token wird AM Knopf gemeldet und bleibt stehen. Screenshots je Thema unter ~/.jarvis-abnahme/.
 
 Angemeldet wird nicht: Token und fetch-Attrappe stehen VOR dem ersten Skript
 der Seite (Page.addScriptToEvaluateOnNewDocument). ⚠ Die Attrappe muss
@@ -70,13 +77,22 @@ try { localStorage.setItem('jarvis_token', 'probe'); localStorage.setItem('jarvi
     if (url === '/api/skills') return antwort({ skills: [] });
     if (url === '/api/verify-token') return antwort({ valid: true, username: 'jarvis', is_admin: true });
     if (url === '/api/settings') return antwort({ profiles: [], active_profile_id: '', defaults: {}, tts_voice: '', llm_timeout: 180 });
+    if (url === '/api/secret/reveal') {
+      window.__reveal = JSON.parse(init.body);
+      return antwort({ ok: true, wert: 'gespeichert-xyz789' });
+    }
     if (url === '/api/settings/stt') {
       if (init && init.method === 'POST') {
-        window.__posts.push(JSON.parse(init.body));
-        return antwort({ ok: true, quelle: 'fern', url: 'ws://stt-dienst.beispiel.de:8090/ws/stt',
+        var rumpf = JSON.parse(init.body);
+        window.__posts.push(rumpf);
+        var verworfen = window.__sttVerworfen === true;
+        return antwort({ ok: true, quelle: 'fern', url: 'wss://stt-dienst.beispiel.de/ws/stt',
+                         token_gesetzt: !verworfen && rumpf.token_entfernen !== true,
+                         token_verworfen: verworfen, verschluesselt: true,
                          erreichbar: { ok: true, detail: 'ok', modell: 'faster-whisper-large-v3', geraet: 'cuda' } });
       }
-      return antwort({ quelle: 'fern', url: 'ws://stt-dienst.beispiel.de:8090/ws/stt', quellen: ['lokal', 'fern'] });
+      return antwort({ quelle: 'fern', url: 'wss://stt-dienst.beispiel.de/ws/stt', quellen: ['lokal', 'fern'],
+                       token_gesetzt: true });
     }
     return antwort({ ok: true });
   };
@@ -206,21 +222,78 @@ with connect(ws, open_timeout=20, max_size=80_000_000) as sock:
         zelle = js(sock, "(function(){var r=document.getElementById('setting-stt-url').closest('td').getBoundingClientRect();return {x:Math.round(r.x),r:Math.round(r.right)};})()")
         check("Adressfeld sichtbar und breit genug", bool(feld) and feld["w"] >= 200 and feld["h"] > 15, json.dumps(feld))
         check("Adressfeld bleibt in seiner Zelle", bool(feld) and bool(zelle) and feld["r"] <= zelle["r"] + 1, f"{feld} {zelle}")
+        tf = rect(sock, "#setting-stt-token")
+        check("Tokenfeld sichtbar, breit genug, in seiner Zelle", bool(tf) and tf["w"] >= 200 and tf["h"] > 15
+              and bool(zelle) and tf["r"] <= zelle["r"] + 1, json.dumps(tf))
+        check("Tokenfeld ist ein Kennwortfeld", js(sock, "document.getElementById('setting-stt-token').type") == "password")
+        ph = js(sock, "document.getElementById('setting-stt-token').placeholder") or ""
+        ti = js(sock, "document.getElementById('setting-stt-token').title") or ""
+        check("gespeichert: Sterne als Platzhalter, „leer lassen“ im Titel",
+              ph.startswith("••••") and ("eer lassen" in ti or "eave empty" in ti), f"{ph!r} / {ti!r}")
+        auge = rect(sock, "#stt-token-feld .jv-pw-eye")
+        check("Auge sitzt im Tokenfeld (rechte Kante)", bool(auge) and bool(tf)
+              and tf["x"] < auge["x"] < tf["r"] and auge["r"] <= tf["r"], f"{auge} {tf}")
+        js(sock, "document.querySelector('#stt-token-feld .jv-pw-eye').click()")
+        time.sleep(0.8)
+        check("Auge holt den gespeicherten Wert (bereich einstellung, kennung stt_fern_token)",
+              js(sock, "document.getElementById('setting-stt-token').value") == "gespeichert-xyz789"
+              and js(sock, "JSON.stringify(window.__reveal)") == '{"bereich":"einstellung","kennung":"stt_fern_token"}',
+              js(sock, "JSON.stringify(window.__reveal)"))
+        check("… und zeigt ihn im Klartext", js(sock, "document.getElementById('setting-stt-token').type") == "text")
+        check("kein Kaestchen „Token entfernen“ (wie an den anderen Geheimfeldern)",
+              js(sock, "document.getElementById('stt-token-weg-zeile')") is None)
+        js(sock, "document.getElementById('setting-stt-token').value='neu-abc123'")
         z = js(sock, """(function(){var r=document.getElementById('setting-stt-quelle').closest('tr').getBoundingClientRect();
             return {x:Math.round(r.x),y:Math.round(r.y+window.scrollY),w:Math.round(r.width),h:Math.round(r.height)};})()""")
         js(sock, "document.getElementById('btn-save-stt').click()")
         time.sleep(0.8)
         status = js(sock, "document.getElementById('stt-status').textContent") or ""
-        check("Speichern schickt quelle+url", js(sock, "JSON.stringify(window.__posts)") ==
-              json.dumps([{"quelle": "fern", "url": "ws://stt-dienst.beispiel.de:8090/ws/stt"}], separators=(",", ":")),
+        check("Speichern schickt quelle+url+token", js(sock, "JSON.stringify(window.__posts)") ==
+              json.dumps([{"quelle": "fern", "url": "wss://stt-dienst.beispiel.de/ws/stt", "token": "neu-abc123",
+                           "token_entfernen": False}], separators=(",", ":")),
               js(sock, "JSON.stringify(window.__posts)"))
         check("Ergebnis steht am Knopf", "large-v3" in status, status)
+        check("nach dem Speichern ist das Tokenfeld leer und wieder verborgen",
+              js(sock, "document.getElementById('setting-stt-token').value") == ""
+              and js(sock, "document.getElementById('setting-stt-token').type") == "password")
         r = cdp(sock, "Page.captureScreenshot", format="png", clip={"x": 0, "y": max(0, z["y"] - 70), "width": 1400, "height": z["h"] + 140, "scale": 1})
         p = BILDER / f"stt_zeile_{thema}.png"; p.write_bytes(base64.b64decode(r["data"])); print("       Screenshot:", p)
+        # Nie angefasst, leer gespeichert: unveraendert (kein Loeschen)
+        js(sock, "window.__posts=[];document.getElementById('btn-save-stt').click()")
+        time.sleep(0.8)
+        p1 = js(sock, "JSON.stringify(window.__posts)") or ""
+        check("leeres, NIE angefasstes Feld: Token bleibt (token_entfernen false)",
+              '"token":""' in p1 and '"token_entfernen":false' in p1, p1)
+        # Ueber das Auge geholt, dann geleert: loeschen
+        js(sock, "document.querySelector('#stt-token-feld .jv-pw-eye').click()")
+        time.sleep(0.8)
+        js(sock, "(function(){var i=document.getElementById('setting-stt-token');i.value='';"
+                 "i.dispatchEvent(new Event('input',{bubbles:true}));return 1;})()")
+        js(sock, "window.__posts=[];document.getElementById('btn-save-stt').click()")
+        time.sleep(0.8)
+        p2 = js(sock, "JSON.stringify(window.__posts)") or ""
+        check("⚠ geholt und GELEERT: Speichern loescht (token_entfernen true)",
+              '"token":""' in p2 and '"token_entfernen":true' in p2, p2)
+        st = js(sock, "document.getElementById('stt-status').textContent") or ""
+        check("… und das Loeschen steht am Knopf", "gelöscht" in st or "deleted" in st, st)
+        # Server verwirft das Token (anderer Host): Hinweis am Knopf, bleibt stehen
+        js(sock, "window.__posts=[];window.__sttVerworfen=true;document.getElementById('btn-save-stt').click()")
+        time.sleep(6.0)
+        status = js(sock, "document.getElementById('stt-status').textContent") or ""
+        check("verworfenes Token: Hinweis steht nach 6 s noch am Knopf",
+              "Token" in status and ("entfernt" in status or "removed" in status), status)
+        ph = js(sock, "document.getElementById('setting-stt-token').placeholder") or ""
+        check("danach Platzhalter ohne Sterne", bool(ph) and not ph.startswith("••••"), ph)
+        js(sock, "window.__sttVerworfen=false")
         js(sock, "(function(){var s=document.getElementById('setting-stt-quelle');s.value='lokal';s.dispatchEvent(new Event('change'));return 1;})()")
         time.sleep(0.3)
         check("bei „Auf diesem Server“ verschwindet das Adressfeld",
               js(sock, "document.getElementById('setting-stt-url').hidden && document.getElementById('setting-stt-url').getBoundingClientRect().height===0"))
+        check("bei „Auf diesem Server“ verschwinden Tokenfeld UND Auge",
+              js(sock, "(function(){var a=document.getElementById('setting-stt-token').getBoundingClientRect(),"
+                       "e=document.querySelector('#stt-token-feld .jv-pw-eye');"
+                       "var b=e?e.getBoundingClientRect():{width:0,height:0};"
+                       "return a.height===0 && b.width===0 && b.height===0;})()"))
         fehler = js(sock, "window.__fehler") or ""
         check("keine JS-Fehler", not fehler, fehler[:300])
 print(f"\nErgebnis: {_ok} OK, {_fail} FAIL")

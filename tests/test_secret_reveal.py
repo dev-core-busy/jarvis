@@ -125,7 +125,7 @@ class _Cfg:
         # (get_setting), NICHT als Attribut. Die fruehere Attrappe setzte das
         # Attribut – und deckte damit zu, dass einstellung() im Betrieb IMMER
         # "nichts gespeichert" meldete (BSI M5, 2026-10-05).
-        self._extra = {"ad_bind_password": "BindGeheim",
+        self._extra = {"ad_bind_password": "BindGeheim", "stt_fern_token": "SttTok!9",
                        "agent_api_keys": [{"id": "k1", "name": "n", "key": "AgentNeu!8"}]}
         # ⚠ Das ist der Grund fuer die Erlaubnisliste: dieses Feld darf NIE
         # ueber den Endpunkt herauskommen.
@@ -241,6 +241,8 @@ check("⚠ skill: 'token' als TEIL eines Namens ist kein Geheimfeld",
 
 w, f = sr.einstellung("ad_bind_password")
 check("einstellung: ein freigegebenes Feld kommt heraus", w == "BindGeheim", "%r" % w)
+w, f = sr.einstellung("stt_fern_token")
+check("einstellung: das Token des Spracherkennungs-Dienstes kommt heraus", w == "SttTok!9", "%r" % w)
 w, f = sr.einstellung("jwt_secret")
 check("⚠⚠ DER SIGNIERSCHLUESSEL DER SITZUNGSTOKEN KOMMT NICHT HERAUS",
       not w and "nicht zum Ansehen freigegeben" in f, "%r/%r" % (w, f))

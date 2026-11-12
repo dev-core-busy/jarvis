@@ -33,7 +33,19 @@ Plan. Die Eingabe der Extraktion sind die Chunks des Vektorindex; deren
 Identitaet ist genau dessen mtime (der Index bettet bei jeder mtime-Aenderung
 neu ein). Eine Groesse braeuchte ein ``stat`` auf der CIFS-Freigabe und
 saehe nichts, was die mtime nicht schon sieht. Zusaetzlich steht in jeder
-Quelle die Pruefsumme des Eingabetexts (Diagnose).
+Quelle die Pruefsumme des Eingabetexts (``text_sha``).
+
+⚠ mtime IST NICHT INHALT (seit 2026-11-12). Eine neue mtime reiht die Datei
+ein – ein Modellaufruf folgt aber nur, wenn sich der EINGABETEXT der Extraktion
+geaendert hat (``text_sha``). Sonst wird die Quelle nur BESTAETIGT
+(``quelle_bestaetigen``): neue ``mtime``, alter ``stand``. ``stand`` ist die
+mtime der letzten Extraktion, die wirklich neuen Text gelesen hat; nach ihm
+richten sich Widerspruchs- und Wiki-Nachlauf (``inhalts_stand``). Anlass ECHT
+2026-11-12: das Loesungsarchiv schrieb nachts 3.073 Dateien neu, in den meisten
+nur Zaehler und Ticketliste – der Graph las jede komplett neu (~6.000
+Modellaufrufe), und der Nachlauf pruefte danach jeden betroffenen Begriff
+erneut, weil sich die mtime seiner Quellen geaendert hatte. Fehlt ``stand``
+(Altbestand), gilt die mtime – das Verhalten bleibt dort wie vorher.
 """
 from __future__ import annotations
 
@@ -65,7 +77,7 @@ _sperre = threading.RLock()
 _graph_cache: dict | None = None
 _graph_veraltet = True
 _queue_cache: dict | None = None
-# quellen_index(): (Ordner, Inode, mtime_ns) -> Index; siehe dort.
+# quellen_index()/inhalts_stand(): (Ordner, Inode, mtime_ns) -> beide Indizes.
 _index_cache: tuple | None = None
 _INDEX_FRISCH_S = 2.0
 
@@ -263,12 +275,38 @@ def quelle_schreiben(pfad, mtime: float, entitaeten: list, relationen: list,
     m = manifest_form(pfad)
     if not _erlaubt(m):
         return False
-    daten = {"pfad": m, "mtime": float(mtime), "modell": modell,
+    daten = {"pfad": m, "mtime": float(mtime), "stand": float(mtime), "modell": modell,
              "zeitpunkt": time.time(), "entitaeten": list(entitaeten or []),
              "relationen": list(relationen or []), **(info or {})}
     with _sperre:
         _json_schreiben(_quell_datei(m), daten)
         _veraltet_markieren()
+    return True
+
+
+def stand_von(q: dict) -> float:
+    """Inhaltsstand einer Quelle: mtime der letzten Extraktion, die neuen Text
+    gelesen hat. Altbestand ohne ``stand``: die mtime (Verhalten wie vorher)."""
+    return float(q.get("stand") or q.get("mtime") or 0)
+
+
+def quelle_bestaetigen(pfad, mtime: float) -> bool:
+    """Neue mtime, UNVERAENDERTER Eingabetext: die Quelle uebernimmt die mtime
+    (sonst reihte der Abgleich sie immer wieder ein), behaelt Entitaeten,
+    Relationen und ``stand``. Der Graph wird NICHT als veraltet markiert – er
+    liest aus einer Quelle nur Entitaeten, Relationen und ``stand``, und die
+    bleiben gleich. False: keine Quelle da (dann muss extrahiert werden)."""
+    m = manifest_form(pfad)
+    if not _erlaubt(m):
+        return False
+    with _sperre:
+        q = _json_lesen(_quell_datei(m), None)
+        if not isinstance(q, dict) or q.get("pfad") != m:
+            return False
+        q["stand"] = stand_von(q)
+        q["mtime"] = float(mtime)
+        q["bestaetigt"] = time.time()
+        _json_schreiben(_quell_datei(m), q)
     return True
 
 
@@ -308,19 +346,35 @@ def quellen_index() -> dict[str, float]:
     Die Zeitstempel des Dateisystems sind grob (ext4: ein Kernel-Takt), zwei
     Aenderungen im selben Takt waeren also nicht unterscheidbar: ein Ordner,
     der juenger als ``_INDEX_FRISCH_S`` ist, wird deshalb nie gecacht."""
+    return _indizes()[0]
+
+
+def inhalts_stand() -> dict[str, float]:
+    """``{manifest: stand}`` – fuer den NACHLAUF (Widersprueche, Wiki). Gleicher
+    Cache wie ``quellen_index``. Eine nur bestaetigte Quelle (neue mtime, Text
+    gleich) aendert hier nichts – sonst pruefte der Nachlauf jeden ihrer
+    Begriffe erneut, ohne dass sich an den Abschnitten etwas geaendert hat."""
+    return _indizes()[1]
+
+
+def _indizes() -> tuple[dict, dict]:
+    """``(quellen_index, inhalts_stand)`` aus EINEM Lesen der Quellen, gecacht
+    am Ordnerstand (siehe ``quellen_index``). Gibt immer Kopien heraus."""
     global _index_cache
     d = _o() / "quellen"
     with _sperre:
         try:
             s = d.stat()
         except OSError:
-            return {}
+            return {}, {}
         schluessel = (str(d), s.st_ino, s.st_mtime_ns)
         if _index_cache is not None and _index_cache[0] == schluessel:
-            return dict(_index_cache[1])
-        idx = {q["pfad"]: float(q.get("mtime") or 0) for q in quellen_alle()}
-        _index_cache = (schluessel, idx) if time.time() - s.st_mtime > _INDEX_FRISCH_S else None
-        return dict(idx)
+            return dict(_index_cache[1]), dict(_index_cache[2])
+        alle = quellen_alle()
+        idx = {q["pfad"]: float(q.get("mtime") or 0) for q in alle}
+        stand = {q["pfad"]: stand_von(q) for q in alle}
+        _index_cache = (schluessel, idx, stand) if time.time() - s.st_mtime > _INDEX_FRISCH_S else None
+        return dict(idx), dict(stand)
 
 
 def _entfernen_einzeln(m: str) -> bool:
@@ -447,8 +501,11 @@ def _queue_austragen(m: str) -> None:
     _queue().pop(m, None)
 
 
-def einreihen(pfad, mtime: float, sichern: bool = True) -> bool:
-    """Datei zur Extraktion vormerken. Nicht erlaubte Pfade: False, nichts geschieht."""
+def einreihen(pfad, mtime: float, sichern: bool = True, voll: bool = False) -> bool:
+    """Datei zur Extraktion vormerken. Nicht erlaubte Pfade: False, nichts geschieht.
+
+    ``voll``: auch bei unveraendertem Eingabetext extrahieren (Neuaufbau mit
+    "voll" – der Administrator will genau das, etwa nach einem Modellwechsel)."""
     m = manifest_form(pfad)
     if not _erlaubt(m):
         return False
@@ -456,8 +513,14 @@ def einreihen(pfad, mtime: float, sichern: bool = True) -> bool:
         wq = _queue()
         alt = wq.get(m)
         if alt and float(alt.get("mtime") or 0) == float(mtime):
+            if voll and not alt.get("voll"):
+                alt["voll"] = True
+                if sichern:
+                    _queue_sichern()
             return True
         wq[m] = {"mtime": float(mtime), "versuche": 0, "seit": time.time(), "fehler": ""}
+        if voll:
+            wq[m]["voll"] = True
         if sichern:
             _queue_sichern()
     return True
@@ -630,7 +693,7 @@ def ableiten(quellen: list[dict] | None = None) -> dict:
 
     # Widersprueche (Phase 6): Kante zwischen den beiden DOKUMENTknoten, nur
     # solange beide Quellen mit der gepruften mtime im Graphen stehen.
-    stand = {q["pfad"]: float(q.get("mtime") or 0) for q in quellen}
+    stand = {q["pfad"]: stand_von(q) for q in quellen}
     for b in _widersprueche_gueltig(stand):
         qa, qb = "q:" + b["a"], "q:" + b["b"]
         if qa in knoten and qb in knoten:
@@ -1191,7 +1254,7 @@ def _widersprueche_gueltig(stand: dict) -> list[dict]:
 
 
 def widersprueche_gueltig() -> list[dict]:
-    return _widersprueche_gueltig(quellen_index())
+    return _widersprueche_gueltig(inhalts_stand())
 
 
 def wiki_index_lesen() -> dict:

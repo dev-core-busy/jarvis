@@ -73,7 +73,7 @@ def _knoten(kid: str) -> dict | None:
 
 
 def _stand(k: dict) -> dict:
-    stand = wg.quellen_index()
+    stand = wg.inhalts_stand()
     return {m: stand[m] for m in k["sources"] if m in stand}
 
 
@@ -118,7 +118,7 @@ def offene_begriffe(gruppen=None) -> list[tuple[str, dict]]:
     """Begriffe mit mindestens zwei Quellen im Umfang (bis zur Hub-Grenze),
     deren Seite fehlt oder veraltet ist – meistbelegte zuerst."""
     g = wg.graph()
-    stand = wg.quellen_index()
+    stand = wg.inhalts_stand()
     grenze = max(3, wg.HUB_ANTEIL * g["quellen"])
     wi = wg.wiki_index_lesen()
     umfang = wgx.im_umfang_menge(stand, gruppen or [])

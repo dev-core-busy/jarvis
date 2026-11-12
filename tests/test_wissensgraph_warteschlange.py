@@ -222,6 +222,10 @@ check("die Quelle traegt die mtime des Index und die Herkunft",
 
 wg.einreihen(D, 8.0)
 fk.vs.mt[wg.absolut(D)] = 8.0
+# Neue mtime MIT neuem Text: bei gleichem Text ruft der Arbeiter gar kein
+# Modell (``unveraendert``, siehe test_wissensgraph_unveraendert.py) – der
+# Fehlerweg waere dann nicht mehr erreichbar.
+fk.vs.c[wg.absolut(D)] = ["eins zwei vier"]
 for i in range(wgx.MAX_VERSUCHE):
     r = asyncio.run(schritt(FakeProvider(["kaputt", "kaputt"])))
 check("Fehlschlag: 'fehler', nach MAX_VERSUCHE im Negativ-Cache",

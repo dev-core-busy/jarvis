@@ -176,7 +176,7 @@ PROBEN = [
     ("Extraktion: Laufprofil wird nicht zurueckgesetzt", WGX,
      "            llm.current_agent_profile.reset(marke)\n", "            pass\n", EXT),
     ("Extraktion: Importer-Kopf geht ins Modell", WGX,
-     "    text = kopf_entfernen(text_aus_chunks(chunks))\n", "    text = text_aus_chunks(chunks)\n", EXT),
+     "    return kopf_entfernen(text_aus_chunks(chunks))\n", "    return text_aus_chunks(chunks)\n", EXT),
     ("Extraktion: Kopf wird ueberall gesucht, nicht nur am Anfang", WGX,
      "    m = _CONFLUENCE_KOPF.search(text[:800])\n", "    m = _CONFLUENCE_KOPF.search(text)\n", EXT),
     ("Ableitung: Kantenart nicht vereinheitlicht", WG,

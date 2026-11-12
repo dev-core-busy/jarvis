@@ -201,7 +201,7 @@ def offene_begriffe(gruppen=None) -> list[tuple[str, dict]]:
     nach ``MAX_VERSUCHE`` Fehlversuchen ruht ein Begriff, bis sich seine
     Quellen aendern."""
     g = wg.graph()
-    stand = wg.quellen_index()
+    stand = wg.inhalts_stand()
     grenze = _grenze(g["quellen"])
     geprueft = wg.widersprueche_lesen()["geprueft"]
     umfang = wgx.im_umfang_menge(stand, gruppen or [])

@@ -189,10 +189,48 @@ _CONFLUENCE_KOPF = re.compile(
     r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}\s*")
 
 
+# Kopf und Ticketliste, die das Loesungsarchiv JEDER Datei mitgibt
+# (``loesungsarchiv.markdown``): "> Quelle: Lösungsarchiv · Jira-Bereich(e) …",
+# "> Vorkommen: N gleichartige Tickets", "> Stand: TT.MM.JJJJ hh:mm" und am
+# Ende "## Tickets" mit "- [KEY](link) · gelöst JJJJ-MM-TT". Beides ist
+# Verwaltung, kein Wissen – und es ist genau das, was sich bei jeder Zuordnung
+# eines weiteren Tickets aendert. Gemessen auf ECHT (2026-11-12, 6.431 Quellen):
+# 21.964 Ticketschluessel als Entitaeten, die groessten Knoten waren die
+# Bereichskennungen, "Lösungsarchiv", "Jira" und die Servicedesk-Adresse –
+# Scheinzusammenhaenge wie beim Confluence-Kopf. Und weil Zaehler und Liste
+# im Eingabetext standen, aenderte jede Zuordnung dessen Pruefsumme: der Graph
+# las die Datei komplett neu (3.073 Dateien in einer Nacht).
+_LOESUNGSARCHIV_KOPF = re.compile(
+    r"> Quelle: Lösungsarchiv · Jira-Bereiche?\s.{0,400}?> Vorkommen:\s+\d+\s+"
+    r"gleichartige\s+Tickets\s+> Stand:\s+\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}\s*",
+    re.S)
+# Nur Ticketzeilen bis zum Ende – steht danach noch etwas, bleibt alles stehen.
+_LOESUNGSARCHIV_TICKETS = re.compile(
+    r"\s*## Tickets(?:\s+- (?:\[[A-Z][A-Z0-9_]*-\d+\]\([^)\s]*\)|[A-Z][A-Z0-9_]*-\d+)"
+    r"(?: · gelöst \d{4}-\d{2}-\d{2})?)*\s*$")
+
+
 def kopf_entfernen(text: str) -> str:
-    """Den Metadaten-Kopf unseres eigenen Importers entfernen – nur am Anfang."""
+    """Den Metadaten-Kopf unserer eigenen Importer entfernen – nur am Anfang.
+    Beim Loesungsarchiv zusaetzlich die Ticketliste am Ende."""
     m = _CONFLUENCE_KOPF.search(text[:800])
-    return (text[:m.start()] + text[m.end():]).strip() if m else text
+    if m:
+        return (text[:m.start()] + text[m.end():]).strip()
+    m = _LOESUNGSARCHIV_KOPF.search(text[:800])
+    if m:
+        rest = text[:m.start()] + text[m.end():]
+        return _LOESUNGSARCHIV_TICKETS.sub("", rest).strip()
+    return text
+
+
+def eingabe_text(chunks: list[str]) -> str:
+    """Der Text, den die Extraktion liest – EINE Stelle fuer Extraktion und
+    Pruefsumme, damit "gleicher Text" genau "gleiche Eingabe" heisst."""
+    return kopf_entfernen(text_aus_chunks(chunks))
+
+
+def text_sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 def bloecke(text: str, woerter_je_block: int) -> list[str]:
@@ -463,7 +501,7 @@ async def extrahiere_datei(chunks: list[str], st: dict, provider, modell: str,
                            abbruch=lambda: False) -> dict:
     """Entitaeten und Relationen EINER Datei. Wirft ``ExtraktionsFehler``,
     wenn mehr als die Haelfte der Bloecke verworfen wurde."""
-    text = kopf_entfernen(text_aus_chunks(chunks))
+    text = eingabe_text(chunks)
     teile = bloecke(text, st["block_woerter"])
     gekappt = len(teile) > int(st["max_bloecke_je_datei"])
     teile = teile[:int(st["max_bloecke_je_datei"])]
@@ -529,7 +567,7 @@ async def extrahiere_datei(chunks: list[str], st: dict, provider, modell: str,
     return {"entitaeten": list(ents.values()), "relationen": list(rels.values()),
             "bloecke": len(teile), "bloecke_verworfen": verworfen_bloecke,
             "gekappt": gekappt,
-            "text_sha": hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]}
+            "text_sha": text_sha(text)}
 
 
 # ─── Umfang und Abgleich ────────────────────────────────────────────────────
@@ -623,7 +661,7 @@ def abgleich(gruppen=None, ordner: str = "", voll: bool = False) -> dict:
         if not voll and wg.unlesbar_trifft(m, mtime):
             erg["bekannt_unlesbar"] += 1
             continue
-        if wg.einreihen(m, mtime, sichern=False):
+        if wg.einreihen(m, mtime, sichern=False, voll=voll):
             erg["eingereiht"] += 1
     wg.warteschlange_sichern()
     return erg
@@ -748,7 +786,15 @@ def _status_sichern() -> None:
 
 async def eine_datei_bearbeiten(m: str, eintrag: dict, st: dict, provider, modell: str,
                                 kandidaten: Kandidaten) -> str:
-    """Ein Warteschlangen-Eintrag. Rueckgabe: 'ok', 'uebersprungen', 'fehler', 'spaeter'."""
+    """Ein Warteschlangen-Eintrag. Rueckgabe: 'ok', 'unveraendert', 'uebersprungen',
+    'fehler', 'spaeter'.
+
+    ⚠ GLEICHER EINGABETEXT = KEIN MODELLAUFRUF. Eine neue mtime sagt nur, dass
+    die Datei geschrieben wurde, nicht dass sich ihr Inhalt fuer den Graphen
+    geaendert hat (Loesungsarchiv: Zaehler und Ticketliste, die
+    ``kopf_entfernen`` ohnehin entfernt). Stimmt ``text_sha`` mit der
+    gespeicherten Quelle ueberein, wird sie nur bestaetigt. Ausnahme: ein
+    Neuaufbau mit "voll" (``eintrag["voll"]``)."""
     global _abbruch
     mtime = float(eintrag.get("mtime") or 0)
     if not im_umfang(m, st["gruppen"]):
@@ -770,6 +816,14 @@ async def eine_datei_bearbeiten(m: str, eintrag: dict, st: dict, provider, model
         wg.erledigt(m, mtime)
         wg.einreihen(m, idx_mtime)
         return "spaeter"
+    if not eintrag.get("voll"):
+        alt = await asyncio.to_thread(wg.quelle_lesen, m)
+        if alt and alt.get("text_sha") and alt.get("text_sha") == text_sha(eingabe_text(chunks)):
+            if await asyncio.to_thread(wg.quelle_bestaetigen, m, mtime):
+                wg.erledigt(m, mtime)
+                z = _zustand["zaehler"]
+                z["unveraendert"] = z.get("unveraendert", 0) + 1
+                return "unveraendert"
     _zustand["aktuell"] = m
     try:
         erg = await extrahiere_datei(chunks, st, provider, modell, kandidaten, _drossel,

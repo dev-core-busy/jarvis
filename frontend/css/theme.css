@@ -115,6 +115,11 @@ body {
     /* Gleiche Falle, am 2026-08-18 mitgemessen: der Schein blieb violett
        (`rgba(155, 89, 182, .4)`), obwohl `--accent-glow` auf body rot war. */
     --shadow-glow: 0 0 30px var(--accent-glow);
+    /* Seitengrund der Kachel-Seiten (/sql, /tracks, /email ...). Im Dunkel-Theme
+       identisch mit --bg-primary; das Hell-Theme setzt ihn unten etwas dunkler.
+       Auf <body> deklariert, damit eine Branding-Farbe (inline auf body)
+       eingerechnet wird - gleiche Falle wie --gradient darueber. */
+    --bg-flaeche: var(--bg-primary);
 }
 
 /* ─── Hell-Theme: kippt nur die Basis-Variablen, alles andere folgt ─── */
@@ -129,6 +134,10 @@ body.light {
     --bg-glass: rgba(255, 255, 255, 0.78);
     --bg-glass-heavy: rgba(255, 255, 255, 0.92);
     --bg-input: rgba(var(--fg-rgb), 0.06);
+    /* Kachel-Seiten: die Karten (--bg-glass, fast weiss) standen auf
+       #f4f5f7 - Weiss auf Weiss. Ein Hauch Vordergrund im Grund gibt ihnen
+       Kontur, wie in den Einstellungen (Rueckmeldung 2026-11-12). */
+    --bg-flaeche: color-mix(in srgb, var(--bg-primary), rgb(var(--fg-rgb)) 5%);
 
     --border: rgba(var(--fg-rgb), 0.12);
     --border-hover: rgba(var(--fg-rgb), 0.22);

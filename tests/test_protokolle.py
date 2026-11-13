@@ -275,8 +275,9 @@ for n in BAUM.body:
                 routen.append((d.func.attr, d.args[0].value, n))
 pfade = sorted(p for _, p, _ in routen)
 pruefe(pfade == ["/api/logs/abhaengigkeiten", "/api/logs/aktivitaet", "/api/logs/code_fixes",
-                 "/api/logs/journal", "/api/logs/ssh", "/api/logs/updates"],
-       "sechs Routen (aktivitaet seit 2026-11-04, eigener Waechter test_aktivitaet.py): %s" % pfade)
+                 "/api/logs/journal", "/api/logs/ssh", "/api/logs/token_verbrauch", "/api/logs/updates"],
+       "sieben Routen (aktivitaet seit 2026-11-04, eigener Waechter test_aktivitaet.py; "
+       "token_verbrauch seit 2026-11-13, eigener Waechter test_token_verbrauch.py): %s" % pfade)
 pruefe(all(m == "get" for m, _, _ in routen), "alle nur lesend (GET)")
 pruefe(all("require_local_auth" in ast.unparse(n.args) for _, _, n in routen), "alle nur fuer Administratoren")
 

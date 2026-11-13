@@ -9700,3 +9700,54 @@ body.light .sqadm-st.is-ok { color: color-mix(in srgb, var(--success) 60%, #000)
 .sqadm-hinweise:empty { display: none; }
 .sqadm-hinweise li { margin-bottom: 3px; }
 .sqadm-schema .am-vorg-act[data-akt^="del-"]:hover { color: var(--danger); }
+
+/* ─── Token-Verbrauch-Analyse (Einstellungen -> Protokolle, 2026-11-13) ─────
+   Logik: frontend/js/token_verbrauch.js. Die Reihenfarben sind die 12 Toene
+   des Wissensgraphen aus theme.css (hell/dunkel bereits abgestimmt); Rot
+   (--graph-c6) ist bewusst ausgelassen, es liest sich als Fehler. Die Reihen-
+   folge ist fest: groesste Gruppe = tv-f1. */
+.tv-f1 { --tv-farbe: var(--graph-c1); }
+.tv-f2 { --tv-farbe: var(--graph-c3); }
+.tv-f3 { --tv-farbe: var(--graph-c4); }
+.tv-f4 { --tv-farbe: var(--graph-c5); }
+.tv-f5 { --tv-farbe: var(--graph-c2); }
+.tv-f6 { --tv-farbe: var(--graph-c7); }
+.tv-f7 { --tv-farbe: var(--graph-c9); }
+.tv-f8 { --tv-farbe: var(--graph-c8); }
+.tv-f-rest { --tv-farbe: var(--graph-c12); }
+.tv-seg { fill: var(--tv-farbe); }
+.tv-punkt {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    background: var(--tv-farbe); margin-right: 6px; vertical-align: -1px; flex: 0 0 auto;
+}
+.tv-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: flex-end; }
+.tv-kennzahlen { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; }
+.tv-kachel {
+    flex: 1 1 120px; min-width: 0; padding: 8px 12px; border-radius: 8px;
+    background: var(--bg-input); border: 1px solid var(--border);
+}
+.tv-kachel-wert { font-size: 1.15rem; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.tv-kachel-name { font-size: 0.75rem; color: var(--text-secondary); }
+.tv-diagramm { position: relative; width: 100%; min-height: 60px; }
+.tv-svg { display: block; max-width: 100%; height: auto; }
+.tv-gitter { stroke: var(--border); stroke-width: 1; }
+.tv-achse { stroke: var(--text-muted); stroke-width: 1; }
+.tv-achsentext { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tv-treffer { fill: transparent; cursor: crosshair; }
+.tv-treffer:hover { fill: var(--border); }
+.tv-leer { margin: 12px 0; }
+.tv-tipp {
+    position: absolute; z-index: 5; pointer-events: none; min-width: 180px; max-width: 320px;
+    padding: 8px 10px; border-radius: 8px; font-size: 0.78rem;
+    background: var(--bg-secondary); color: var(--text-primary);
+    border: 1px solid var(--border); box-shadow: var(--shadow-md);
+}
+.tv-tipp-kopf { font-weight: 600; margin-bottom: 4px; }
+.tv-tipp-zeile { display: flex; align-items: center; gap: 4px; line-height: 1.5; }
+.tv-tipp-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-tipp-wert { font-variant-numeric: tabular-nums; margin-left: 8px; }
+.tv-tipp-fuss { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); color: var(--text-secondary); }
+.tv-legende { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 0.78rem; color: var(--text-secondary); }
+.tv-legende-eintrag { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.tv-tabelle .tv-zahl { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tv-ohne { color: var(--text-muted); font-size: 0.75rem; }

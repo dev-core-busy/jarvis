@@ -3193,6 +3193,10 @@ KRITISCH – Ausfuehrungs-Regeln:
                               else ((not self._current_username)
                                     or self._current_username in _LOCAL_PRIVILEGED_USERS))
         _actor_token = _actor_cv.set((self._current_username, _lauf_privilegiert))
+        # Token-Statistik: Kanal des AEUSSERSTEN Laufs; Unter-Laeufe erben ihn.
+        from backend import token_verbrauch as _tv
+        _tv_kanal_token = (None if _tv.kanal_cv.get()
+                           else _tv.kanal_cv.set(str(client_type or "browser")))
         _stats_token = _lauf_stats_cv.set([])
         # Pentest C6: Fremdtext-Marke dieses Auftrags (Unter-Laeufe erben).
         _fremd_token = _fremdtext_oeffnen("Anhang" if attachments else "")
@@ -4272,6 +4276,11 @@ KRITISCH – Ausfuehrungs-Regeln:
                 _actor_cv.reset(_actor_token)
             except Exception:
                 pass
+            if _tv_kanal_token is not None:
+                try:
+                    _tv.kanal_cv.reset(_tv_kanal_token)
+                except Exception:  # noqa: BLE001
+                    pass
             try:
                 _lauf_stats_cv.reset(_stats_token)
             except Exception:  # noqa: BLE001
@@ -5318,6 +5327,10 @@ KRITISCH – Ausfuehrungs-Regeln:
                     _p_token = _cvp.set(self._eff_profile or None)
                 except Exception:  # noqa: BLE001
                     _cvp = None
+                # Token-Statistik: ruft das Werkzeug selbst ein Modell (bild_text,
+                # reflection, delegate …), gehoert der Verbrauch diesem Werkzeug.
+                from backend import token_verbrauch as _tvw
+                _w_token = _tvw.werkzeug_cv.set(str(name or ""))
                 # Postfach-Inhaber fuer die email_*-Werkzeuge (E-Mail-Skill).
                 # BEWUSST NICHT ueber set_tool_user: der ist fuer privilegierte
                 # Benutzer absichtlich LEER ("keine Einschraenkung"). Ein
@@ -5403,6 +5416,10 @@ KRITISCH – Ausfuehrungs-Regeln:
                         result = _mcp_weggelassen_hinweis(_mcp_weggelassen) + result
                 finally:
                     _sbx_ctx.reset_tool_user(_u_token)
+                    try:
+                        _tvw.werkzeug_cv.reset(_w_token)
+                    except Exception:  # noqa: BLE001
+                        pass
                     if _p_token is not None and _cvp is not None:
                         try:
                             _cvp.reset(_p_token)

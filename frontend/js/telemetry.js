@@ -98,6 +98,7 @@ class JarvisTelemetryManager {
         const auftraege = [];
         if (offen('audit-section-body') && window.auditManager) auftraege.push(window.auditManager.init());
         if (offen('sprot-section-body') && window.sicherheitsProtokoll) auftraege.push(window.sicherheitsProtokoll.init());
+        if (offen('tv-section-body') && window.TokenVerbrauch) auftraege.push(window.TokenVerbrauch.laden());
         ['akt', 'journal', 'csp', 'updates', 'ssh', 'fixes', 'abh'].forEach((n) => {
             if (offen('plog-' + n + '-body') && window.Protokolle) auftraege.push(window.Protokolle.init(n));
         });

@@ -8433,6 +8433,45 @@ async def api_logs_retention_run(user: str = Depends(require_local_auth)):
     return JSONResponse(result)
 
 
+@app.get("/api/logs/token_verbrauch")
+async def api_logs_token_verbrauch(request: Request, user: str = Depends(require_local_auth)):
+    """Token-Verbrauch der Sprachmodelle über die Zeit (nur Administratoren).
+
+    Parameter: ``tage`` (Zeitraum, Vorgabe 7), ``gruppe`` (llm, benutzer,
+    dienst, werkzeug, kanal) und je Dimension ein Filter. Ein Filter mit
+    LEEREM Wert ist gültig („System" bzw. „Hintergrund" bzw. „ohne Werkzeug");
+    ein fehlender Parameter heißt „alle". Gelesen wird nur, was
+    ``backend/token_verbrauch.py`` je Aufruf ablegt – Zahlen, keine Inhalte.
+    """
+    from backend import token_verbrauch as _tv
+    q = request.query_params
+    try:
+        tage = float(q.get("tage") or 7)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="tage muss eine Zahl sein")
+    filt = {d: q.get(d) for d in _tv.DIMENSIONEN if d in q}
+    erg = await asyncio.to_thread(_tv.auswerten, tage, q.get("gruppe") or "llm", filt)
+    # Anzeigenamen der Benutzer (mit Domänen-Präfix, wie überall in den Protokollen).
+    namen = set(erg["optionen"].get("benutzer") or [])
+    if erg.get("gruppe") == "benutzer":
+        namen |= {z["schluessel"] for z in erg.get("tabelle") or []}
+    anzeige = {}
+    for n in namen:
+        if n:
+            try:
+                anzeige[n] = _display_name(n)
+            except Exception:  # noqa: BLE001
+                anzeige[n] = n
+    erg["anzeige_benutzer"] = anzeige
+    erg["aufbewahrung_tage"] = None
+    try:
+        from backend import log_retention as _lr
+        erg["aufbewahrung_tage"] = _lr.retention_days()
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse(erg)
+
+
 # ─── Konversations-Verlauf ────────────────────────────────────────────────────
 from backend.conv_log import (get_conversations, get_known_ips, get_known_users,
                               get_body as get_conv_body, clear as clear_conv_log)

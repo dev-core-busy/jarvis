@@ -422,6 +422,24 @@ class ImageGenNotSupported(Exception):
 class LLMProvider(ABC):
     # Label fuer Fehlermeldungen (z.B. "Das aktive Google-Profil")
     image_label: str = "Das aktive LLM-Profil"
+    # Kennung fuer die Token-Statistik (gleiche Namen wie in get_provider).
+    anbieter_kennung: str = ""
+
+    def __init_subclass__(cls, **kwargs):
+        """Token-Erfassung fuer JEDEN Modellaufruf (backend/token_verbrauch.py).
+
+        Umhuellt wird nur ein ``generate_response``, das die Klasse SELBST
+        definiert, und nur in diesem Modul: Attrappen in Tests leiten ebenfalls
+        von LLMProvider ab und duerfen den echten Bestand nicht fuellen.
+        """
+        super().__init_subclass__(**kwargs)
+        if cls.__module__ != __name__:
+            return
+        eigen = cls.__dict__.get("generate_response")
+        if eigen is None or getattr(eigen, "__token_erfassung__", False):
+            return
+        from backend import token_verbrauch
+        cls.generate_response = token_verbrauch.umhuellen(eigen)
 
     @abstractmethod
     async def generate_response(self, model: str, system_prompt: str, contents: list,
@@ -837,6 +855,7 @@ def _normalize_schema(schema: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════
 
 class GeminiProvider(LLMProvider):
+    anbieter_kennung = "google"
     image_label = "Das aktive Google-Profil"
 
     def __init__(self, api_key: str):
@@ -1081,6 +1100,7 @@ class OpenAICompatibleProvider(LLMProvider):
     die Antwort per Regex auf <tool_call>…</tool_call>-Blöcke geparst.
     Nützlich für Modelle die keine native Function-Calling-API unterstützen.
     """
+    anbieter_kennung = "openai_compatible"
 
     def __init__(self, api_key: str = "", base_url: str = "http://localhost:11434/v1/chat/completions",
                  prompt_tool_calling: bool = False):
@@ -1698,6 +1718,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
 class OpenRouterProvider(OpenAICompatibleProvider):
     """OpenRouter-Provider mit zusätzlichen Headern."""
+    anbieter_kennung = "openrouter"
 
     def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1/chat/completions"):
         super().__init__(api_key, base_url)
@@ -1733,6 +1754,7 @@ class OpenRouterProvider(OpenAICompatibleProvider):
 
 class AnthropicProvider(LLMProvider):
     """Direkter Anthropic Claude API Provider (mit API Key)."""
+    anbieter_kennung = "anthropic"
 
     def __init__(self, api_key: str):
         import anthropic
@@ -1970,6 +1992,7 @@ class AnthropicSessionProvider(LLMProvider):
 
     HINWEIS: Inoffiziell – kann bei API-Änderungen von Anthropic brechen.
     """
+    anbieter_kennung = "anthropic_session"
 
     BASE_URL = "https://claude.ai"
 

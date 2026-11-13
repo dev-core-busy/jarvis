@@ -84,6 +84,9 @@
         'tele-errors-klappen': function () {
             klappe(this, function () { if (window.telemetryManager) window.telemetryManager._loadErrors(); });
         },
+        'tv-klappen': function () {
+            klappe(this, function () { if (window.TokenVerbrauch) window.TokenVerbrauch.laden(); });
+        },
         'audit-klappen': function () {
             klappe(this, function () { if (window.auditManager) window.auditManager.init(); });
         },

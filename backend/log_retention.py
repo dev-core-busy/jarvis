@@ -120,7 +120,8 @@ def run_all() -> dict:
                      ("cron_log", _prune_cron_log),
                      ("csp_berichte", _prune_csp_berichte),
                      ("update_verlauf", _prune_update_verlauf),
-                     ("aktivitaet", _prune_aktivitaet)):
+                     ("aktivitaet", _prune_aktivitaet),
+                     ("token_verbrauch", _prune_token_verbrauch)):
         try:
             removed[name] = int(fn(cut) or 0)
         except Exception as e:  # noqa: BLE001
@@ -215,6 +216,11 @@ def _prune_update_verlauf(cut: float) -> int:
     dieselbe Frist, keine Stueckzahlgrenze."""
     from backend import update_protokoll
     return update_protokoll.prune_older_than(cut)
+
+
+def _prune_token_verbrauch(cut: float) -> int:
+    from backend import token_verbrauch
+    return token_verbrauch.prune_older_than(cut)
 
 
 def _prune_aktivitaet(cut: float) -> int:

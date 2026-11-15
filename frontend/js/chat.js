@@ -2846,7 +2846,16 @@
     async function _initSessions() {
         _sessions = await _csList();
         let want = null; try { want = localStorage.getItem(_sidKey()); } catch (e) {}
-        let active = _sessions.find(s => s.id === want) || _sessions[0] || null;
+        let active = null;
+        // Uebergabe einer anderen Seite (Wissensgraph → "Recherche starten"):
+        // eigenes Thema, also eine NEUE Konversation statt der zuletzt offenen
+        // (chat_vorlage.js, beantwortet genau einmal). Scheitert das Anlegen,
+        // gilt die gewohnte Wahl – der Auftrag steht trotzdem im Feld.
+        if (window.ChatVorlage && window.ChatVorlage.neueSitzung()) {
+            active = await _csCreate('');
+            if (active) _sessions.unshift(active);
+        }
+        if (!active) active = _sessions.find(s => s.id === want) || _sessions[0] || null;
         if (!active) { active = await _csCreate(''); if (active) _sessions.unshift(active); }
         _activeSid = active ? active.id : null;
         if (_activeSid) { try { localStorage.setItem(_sidKey(), _activeSid); } catch (e) {} }

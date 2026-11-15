@@ -44,6 +44,7 @@ WGCSS = "frontend/css/wissensgraph.css"
 THEME = "frontend/css/theme.css"
 PORTAL = "frontend/portal.html"
 CHATV = "frontend/js/chat_vorlage.js"
+CHATJS = "frontend/js/chat.js"
 ZR = "backend/zugang_regel.py"
 WW = "backend/wissensgraph_widerspruch.py"
 WIKI = "backend/wissensgraph_wiki.py"
@@ -51,7 +52,7 @@ PORTALJS = "frontend/js/portal_seite.js"
 UEB = "deploy/wissensgraph_uebernahme.py"
 WGST = "frontend/js/wissensgraph_steuerung.js"
 APPJS = "frontend/js/app.js"
-DATEIEN = [WG, WGX, VS, KN, LLM, MAIN, WGJS, WGHTML, WGCSS, THEME, PORTAL, CHATV, ZR, WW, WIKI, PORTALJS, UEB, WGST, APPJS]
+DATEIEN = [WG, WGX, VS, KN, LLM, MAIN, WGJS, WGHTML, WGCSS, THEME, PORTAL, CHATV, ZR, WW, WIKI, PORTALJS, UEB, WGST, APPJS, CHATJS]
 
 UMG = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 
@@ -270,6 +271,19 @@ PROBEN = [
      "            localStorage.removeItem(SCHLUESSEL);\n", "", UI),
     ("Chat-Vorlage: verfaellt nicht", CHATV,
      "        if (typeof v.zeit !== 'number' || Date.now() - v.zeit > GUELTIG_MS) { return null; }\n", "", UI),
+    ("Neue Konversation: Recherche traegt den Wunsch nicht", WGJS,
+     "zeit: Date.now(), neu: true });", "zeit: Date.now() });", UI),
+    ("Neue Konversation: _initSessions fragt nicht", CHATJS,
+     "        if (window.ChatVorlage && window.ChatVorlage.neueSitzung()) {\n",
+     "        if (false) {\n", UI),
+    ("Neue Konversation: Wunsch wird mehrfach beantwortet", CHATV,
+     "        if (_neuBeantwortet) { return false; }\n", "", UI),
+    ("Neue Konversation: vor dem Einsetzen nicht nachgesehen", CHATV,
+     "        try { v = pruefen(localStorage.getItem(SCHLUESSEL)); } catch (e) { return false; }\n", "", UI),
+    ("Neue Konversation: Wunsch nicht gemerkt", CHATV,
+     "        if (_neuGewuenscht === null) { _neuGewuenscht = !!(v && v.neu === true); }\n", "", UI),
+    ("Neue Konversation: kein Rueckfall bei gescheitertem Anlegen", CHATJS,
+     "        if (!active) active = _sessions.find(s => s.id === want) || _sessions[0] || null;\n", "", UI),
     ("Regel: Farbliteral im Seiten-CSS", WGCSS,
      "    background: var(--bg-primary);\n    overflow: hidden;", "    background: #0a0e17;\n    overflow: hidden;", UI),
     ("Regel: Graphfarbe fehlt im hellen Thema", THEME,

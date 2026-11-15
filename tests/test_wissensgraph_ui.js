@@ -19,7 +19,8 @@
  *   6. i18n: jeder benutzte Schluessel steht in DE UND EN.
  *   7. Projektregeln als REGEL: kein Inline-Skript/-Handler, Symbole aus
  *      icons.js (× schliesst, Muelleimer entfernt), keine Farbliterale.
- *   8. Chat-Vorlage: belegt das Feld vor, sendet nichts, verfaellt.
+ *   8. Chat-Vorlage: belegt das Feld vor, sendet nichts, verfaellt – und
+ *      oeffnet eine NEUE Konversation (neueSitzung + chat.js::_initSessions).
  *   9. Phase 6: Rueckkopplung beim Server und Aehnlichkeitsgewichtung,
  *      Widerspruchskarte, Wiki-Abschnitt im Detail (DOM statt innerHTML),
  *      Export als Datei, Schalter, Nachlauf im Status.
@@ -386,6 +387,7 @@ async function main() {
         ki.querySelector('.wg-recherche').click();
         const v = JSON.parse(s.w.localStorage.getItem('jarvis_chat_vorlage') || 'null');
         pruefe(!!v && /Einzelgaenger/.test(v.text) && typeof v.zeit === 'number', 'Recherche legt den Auftrag als Vorlage ab');
+        pruefe(!!v && v.neu === true, '... mit dem Wunsch nach einer NEUEN Konversation', v && JSON.stringify(v));
         pruefe(!!s.w.__geoeffnet && s.w.__geoeffnet[0] === '/chat', '... und oeffnet /chat');
     }
 
@@ -760,6 +762,91 @@ async function main() {
     c = chatSeite('{kaputt');
     await warte(30);
     pruefe(c.w.document.getElementById('msg-input').value === '', 'kaputte Vorlage: nichts, kein Absturz');
+
+
+    // ── neue Konversation: chat_vorlage.neueSitzung() ──
+    const jetzt = () => Date.now();
+    c = chatSeite(JSON.stringify({ text: 'Recherchiere Y', zeit: jetzt(), neu: true }));
+    await warte(30);
+    pruefe(c.w.document.getElementById('msg-input').value === 'Recherchiere Y', 'Positivkontrolle: Vorlage mit neu wurde eingesetzt');
+    pruefe(c.w.ChatVorlage.neueSitzung() === true, 'nach dem Einsetzen: neue Konversation gewuenscht (gemerkt, obwohl geloescht)');
+    pruefe(c.w.ChatVorlage.neueSitzung() === false, '... und genau EINMAL beantwortet');
+    c = chatSeite(JSON.stringify({ text: 'Recherchiere Z', zeit: jetzt() }));
+    await warte(30);
+    pruefe(c.w.ChatVorlage.neueSitzung() === false, 'Vorlage ohne neu: keine neue Konversation');
+    c = chatSeite(JSON.stringify({ text: 'alt', zeit: jetzt() - 6 * 60 * 1000, neu: true }));
+    await warte(30);
+    pruefe(c.w.ChatVorlage.neueSitzung() === false, 'verfallene Vorlage: keine neue Konversation');
+    c = chatSeite();
+    await warte(30);
+    pruefe(c.w.ChatVorlage.neueSitzung() === false, 'ohne Vorlage: keine neue Konversation');
+    // Reihenfolge umgekehrt: gefragt, BEVOR DOMContentLoaded die Vorlage liest.
+    c = chatSeite(JSON.stringify({ text: 'Recherchiere W', zeit: jetzt(), neu: true }));
+    const frueh = c.w.ChatVorlage.neueSitzung();
+    await warte(30);
+    pruefe(frueh === true, 'vor dem Einsetzen gefragt: neue Konversation gewuenscht (nachgesehen ohne zu loeschen)');
+    pruefe(c.w.document.getElementById('msg-input').value === 'Recherchiere W', '... und die Vorlage steht trotzdem im Feld');
+    pruefe(c.w.ChatVorlage.neueSitzung() === false, '... auch dann nur EINMAL');
+
+    // ── chat.js::_initSessions wirklich ausgefuehrt ──
+    const CHATJS = lies('frontend/js/chat.js');
+    function schneide(quelle, kopf) {
+        const a = quelle.indexOf(kopf);
+        if (a < 0) { return null; }
+        const b = quelle.indexOf('{', a);
+        let tiefe = 0;
+        for (let i = b; i < quelle.length; i++) {
+            if (quelle[i] === '{') { tiefe++; }
+            else if (quelle[i] === '}') { tiefe--; if (tiefe === 0) { return quelle.slice(a, i + 1); } }
+        }
+        return null;
+    }
+    const INIT = schneide(CHATJS, 'async function _initSessions()');
+    if (!INIT || !/_csList\(\)/.test(INIT)) {
+        console.log('ABBRUCH: _initSessions nicht aus chat.js zu schneiden');
+        process.exit(2);
+    }
+    // _sessions/_activeSid werden in der Funktion ERSETZT – deshalb als
+    // Closure-var im Prolog, nicht als Parameter (Register).
+    function initLauf(opt) {
+        const bau = new Function('window', 'localStorage', 'opt',
+            "var _sessions = [], _activeSid = null, erzeugt = 0;\n" +
+            "async function _csList() { return opt.liste.slice(); }\n" +
+            "async function _csCreate() { erzeugt++; return opt.anlegenScheitert ? null : { id: 'neu' + erzeugt }; }\n" +
+            "function _sidKey() { return 'sid'; }\n" +
+            "function _renderSidebar() {}\nasync function _restoreHistory() {}\nfunction _updateContextIndicator() {}\n" +
+            INIT + "\nreturn { lauf: _initSessions, zustand: () => ({ aktiv: _activeSid, erzeugt: erzeugt, liste: _sessions.map(x => x.id) }) };");
+        const speicher = { sid: 'b' };
+        const ls = { getItem: k => (k in speicher ? speicher[k] : null), setItem: (k, v) => { speicher[k] = String(v); } };
+        const h = bau(opt.window, ls, opt);
+        return { h, speicher };
+    }
+    const LISTE = [{ id: 'a' }, { id: 'b' }];
+    let r = initLauf({ window: { ChatVorlage: { neueSitzung: () => true } }, liste: LISTE });
+    await r.h.lauf();
+    let z = r.h.zustand();
+    pruefe(z.aktiv === 'neu1' && z.erzeugt === 1 && z.liste[0] === 'neu1', 'Recherche: _initSessions oeffnet eine NEUE Konversation', JSON.stringify(z));
+    pruefe(r.speicher.sid === 'neu1', '... und merkt sie als aktive', r.speicher.sid);
+    r = initLauf({ window: { ChatVorlage: { neueSitzung: () => false } }, liste: LISTE });
+    await r.h.lauf();
+    z = r.h.zustand();
+    pruefe(z.aktiv === 'b' && z.erzeugt === 0, 'ohne Wunsch: die zuletzt offene Konversation, nichts angelegt', JSON.stringify(z));
+    r = initLauf({ window: {}, liste: LISTE });
+    await r.h.lauf();
+    z = r.h.zustand();
+    pruefe(z.aktiv === 'b' && z.erzeugt === 0, 'ohne chat_vorlage.js: unveraendert die zuletzt offene', JSON.stringify(z));
+    r = initLauf({ window: { ChatVorlage: { neueSitzung: () => true } }, liste: LISTE, anlegenScheitert: true });
+    await r.h.lauf();
+    z = r.h.zustand();
+    pruefe(z.aktiv === 'b', 'Anlegen scheitert: Rueckfall auf die zuletzt offene', JSON.stringify(z));
+    // Zweiter Aufruf (_ensureSession) mit dem ECHTEN Modul: keine zweite neue.
+    c = chatSeite(JSON.stringify({ text: 'Recherchiere V', zeit: jetzt(), neu: true }));
+    await warte(30);
+    r = initLauf({ window: c.w, liste: LISTE });
+    await r.h.lauf();
+    await r.h.lauf();
+    z = r.h.zustand();
+    pruefe(z.erzeugt === 1, 'zweimal _initSessions mit echter Vorlage: genau EINE neue Konversation', JSON.stringify(z));
 
     console.log('\nErgebnis: ' + ok + ' ok, ' + fail + ' fehlgeschlagen');
     process.exit(fail ? 1 : 0);

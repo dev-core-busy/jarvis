@@ -1098,7 +1098,10 @@
     function rechercheStarten(auftrag) {
         // Uebergabe an /chat: das Eingabefeld wird VORBELEGT, nicht abgeschickt –
         // der Administrator sieht den Auftrag und entscheidet (chat_vorlage.js).
-        speicherSchreiben(VORLAGE_SPEICHER, { text: auftrag, zeit: Date.now() });
+        // `neu`: die Recherche ist ein eigenes Thema und landet in einer NEUEN
+        // Konversation – nicht in der zuletzt offenen, deren Verlauf dem Modell
+        // sonst als Kontext mitgegeben wuerde (chat.js::_initSessions).
+        speicherSchreiben(VORLAGE_SPEICHER, { text: auftrag, zeit: Date.now(), neu: true });
         window.open('/chat', '_blank');
     }
 

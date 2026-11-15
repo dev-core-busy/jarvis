@@ -220,6 +220,48 @@ check(ptA.length > 0 && ptA.every(function (c) {
       'zeichnen() sucht ueber paketTreffer – mit den Befunden des Pakets (jePaket[…])');
 check(ruft('cveBlock', 'andereTrifft'), 'cveBlock() filtert die Befunde ohne Paket auch nach dem Suchtext');
 
+// Tooltip am Zaehler im Kopfblock (2026-11-15): "Update nur ueber die
+// Lock-Datei: 1" muss das PAKET nennen, sonst sucht man es im zugeklappten
+// Block. Ausgefuehrt, nicht am Text geprueft; Deckel aus dem Quelltext gelesen.
+const titelMax = (function () {
+    let w = null;
+    (function lauf(k) {
+        if (!k || typeof k.type !== 'string') return;
+        if (k.type === 'VariableDeclarator' && k.id && k.id.name === 'TITEL_MAX_PAKETE' && k.init) w = k.init.value;
+        for (const x of Object.values(k)) {
+            if (Array.isArray(x)) x.forEach(lauf);
+            else if (x && typeof x.type === 'string') lauf(x);
+        }
+    })(baum);
+    return w;
+})();
+if (!funktionen.klassePaketeTitel || typeof titelMax !== 'number' || titelMax < 1) {
+    console.log('ABBRUCH: klassePaketeTitel/TITEL_MAX_PAKETE nicht gefunden');
+    process.exit(2);
+}
+const titelApi = new Function('function T(k, d) { return d; }\nvar _bef = [];\n'
+    + 'function cveBefunde() { return _bef; }\nvar TITEL_MAX_PAKETE = ' + titelMax + ';\n'
+    + funktionen.esc + '\n' + funktionen.klassePaketeTitel
+    + '\nreturn function (b, k) { _bef = b; return klassePaketeTitel(k); };')();
+const dns = { bereich: 'python', quelle: 'dnspython', pakete: ['dnspython'], version: '2.9.0',
+              fix: '2.9.2', cve: 'CVE-2026-128089', klasse: 'lock' };
+const tt = titelApi([dns, { bereich: 'debian', quelle: 'glibc', version: '2.41', cve: 'CVE-2026-2', klasse: 'offen' }], 'lock');
+check(/^ title="/.test(tt), 'Zaehler-Chip bekommt ein title-Attribut', tt);
+check(/dnspython 2\.9\.0 → 2\.9\.2 \(CVE-2026-128089\)/.test(tt), 'Tooltip nennt Paket, Version, Behebung und Kennung', tt);
+check(tt.indexOf('glibc') < 0, 'Tooltip nennt nur Pakete DIESER Klasse', tt);
+check(titelApi([dns], 'offen') === '', 'Klasse ohne Befund: kein title');
+const zwei = titelApi([dns, Object.assign({}, dns, { cve: 'CVE-2026-9' })], 'lock');
+check((zwei.match(/dnspython/g) || []).length === 1 && /CVE-2026-128089, CVE-2026-9/.test(zwei),
+      'zwei Kennungen desselben Pakets: eine Zeile mit beiden', zwei);
+const viele = [];
+for (let i = 0; i < titelMax + 3; i++) viele.push({ quelle: 'p' + i, version: '1', cve: 'CVE-' + i, klasse: 'offen' });
+const tv = titelApi(viele, 'offen');
+check((tv.match(/\n/g) || []).length === titelMax + 1 && /und 3 weitere Pakete/.test(tv),
+      'gedeckelt auf TITEL_MAX_PAKETE Zeilen, der Rest beziffert', tv.slice(-80));
+check(titelApi([Object.assign({}, dns, { quelle: 'a"b' })], 'lock').indexOf('a&quot;b') >= 0,
+      'Anfuehrungszeichen im Namen werden maskiert');
+check(ruft('cveBlock', 'klassePaketeTitel'), 'cveBlock() setzt den Tooltip ueber klassePaketeTitel');
+
 fertig();
 console.log('\n' + ok + ' OK, ' + fail + ' FAIL');
 process.exit(fail ? 1 : 0);

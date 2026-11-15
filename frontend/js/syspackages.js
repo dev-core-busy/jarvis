@@ -680,6 +680,41 @@
         return String(k || '');
     }
 
+    /* Tooltip am Zaehler im Kopfblock: WELCHE Pakete hinter der Zahl stehen.
+     * "Update nur ueber die Lock-Datei: 1" allein sagt nicht, was zu tun ist –
+     * ein Python-Befund hat keine Zeile in der Paketliste, man muesste ihn im
+     * zugeklappten Block darunter suchen. Gedeckelt, weil "offen" auf einem
+     * Debian-System leicht vierstellig wird; der Rest wird beziffert. */
+    var TITEL_MAX_PAKETE = 12;
+    function klassePaketeTitel(k) {
+        var je = {}, folge = [];
+        cveBefunde().forEach(function (b) {
+            if (b.klasse !== k) return;
+            var name = b.quelle || (b.pakete || [])[0] || '';
+            var s = name + ' ' + (b.version || '');
+            var e = je[s];
+            if (!e) {
+                e = je[s] = { name: name, version: b.version || '', fix: '', kennungen: [] };
+                folge.push(s);
+            }
+            if (b.fix && !e.fix) e.fix = b.fix;
+            if (b.cve) e.kennungen.push(b.cve);
+        });
+        if (!folge.length) return '';
+        var zeilen = folge.slice(0, TITEL_MAX_PAKETE).map(function (s) {
+            var e = je[s];
+            return e.name + (e.version ? ' ' + e.version : '')
+                + (e.fix ? ' → ' + e.fix : '')
+                + ' (' + e.kennungen.join(', ') + ')';
+        });
+        if (folge.length > TITEL_MAX_PAKETE) {
+            zeilen.push(T('pkg.cve_titel_weitere', '… und {n} weitere Pakete')
+                .replace('{n}', String(folge.length - TITEL_MAX_PAKETE)));
+        }
+        return ' title="' + esc(T('pkg.cve_titel_pakete', 'Betroffene Pakete') + ':\n'
+            + zeilen.join('\n')) + '"';
+    }
+
     function einstufungText(e) {
         switch (e) {
             case 'unimportant': return T('pkg.cve_e_unimportant', 'unwichtig');
@@ -862,7 +897,8 @@
             var unges = quittierbareIds(cveBefunde()).length;
             teile.push(esc(T('pkg.cve_stand', 'Geprüft {zeit}').replace('{zeit}', zeitpunkt(erg.erzeugt_am))));
             CVE_KLASSEN.forEach(function (k) {
-                if (z[k]) teile.push('<span class="jv-pkg-cve jv-pkg-cve-' + k + ' ist-klein">'
+                if (z[k]) teile.push('<span class="jv-pkg-cve jv-pkg-cve-' + k + ' ist-klein"'
+                    + klassePaketeTitel(k) + '>'
                     + esc(klasseText(k)) + ': ' + z[k] + '</span>');
             });
             if (!CVE_KLASSEN.some(function (k) { return z[k]; })) {

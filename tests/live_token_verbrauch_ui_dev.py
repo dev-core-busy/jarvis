@@ -4,7 +4,7 @@
 jsdom rechnet kein Layout – ob Diagramm, Achsen, Legende, Kacheln und Tooltip
 in BEIDEN Themen lesbar sind und nichts ueberlaeuft, zeigt nur die
 ausgelieferte Seite mit ihrem echten CSS. Gemessen ueber den echten Bedienweg
-(Reiter anklicken, dann den Abschnittskopf); `fetch` und `localStorage` stehen
+(Reiter anklicken, dann den Kopf, der das Fenster oeffnet); `fetch` und `localStorage` stehen
 VOR dem ersten Skript (`Page.addScriptToEvaluateOnNewDocument`), angemeldet
 wird nicht. Helfer (Chrome/CDP/Kontrast am Bild) wie in
 live_sicherheitsprotokoll_ui_dev.py.
@@ -261,10 +261,22 @@ with connect(ws, open_timeout=20, max_size=60_000_000) as sock:
             reiter = js(sock, "(function(){var b=document.querySelector('[data-settings-tab=\"telemetry\"]');"
                               "if(!b)return 'fehlt'; b.click(); return 'ok';})()")
             time.sleep(0.6)
-            kopf = js(sock, "(function(){var h=document.querySelector('[data-klick=\"tv-klappen\"]');"
+            kopf = js(sock, "(function(){var h=document.querySelector('[data-klick=\"tv-oeffnen\"]');"
                             "if(!h)return 'fehlt'; h.click(); return 'ok';})()")
             time.sleep(1.5)
-            check("Reiter und Abschnittskopf gefunden", reiter == "ok" and kopf == "ok", f"{reiter}/{kopf}")
+            check("Reiter und Kopf der Analyse gefunden", reiter == "ok" and kopf == "ok", f"{reiter}/{kopf}")
+            # Seit 2026-11-15 ein Fenster ueber der ganzen Seite (wie die
+            # Systemauslastung): es deckt den Viewport, der Kasten steht ganz im Bild.
+            lf = js(sock, "(function(){var o=document.getElementById('tv-overlay'),"
+                          "b=document.querySelector('#tv-overlay .jv-pkg-box');if(!o||!b)return null;"
+                          "var r=o.getBoundingClientRect(),q=b.getBoundingClientRect();"
+                          "return {ow:Math.round(r.width),oh:Math.round(r.height),vw:innerWidth,vh:innerHeight,"
+                          "bt:Math.round(q.top),bb:Math.round(q.bottom),bl:Math.round(q.left),br:Math.round(q.right),"
+                          "d:getComputedStyle(o).display};})()") or {}
+            check("Fenster liegt ueber der ganzen Seite",
+                  lf.get("d") == "flex" and lf.get("ow") == lf.get("vw") and lf.get("oh") == lf.get("vh"), str(lf))
+            check("Kasten steht ganz im Bild",
+                  bool(lf) and lf["bt"] >= 0 and lf["bl"] >= 0 and lf["bb"] <= lf["vh"] and lf["br"] <= lf["vw"], str(lf))
             flaeche = js(sock, "(function(){var e=document.querySelector('#tv-diagramm svg');if(!e)return 0;"
                                "var r=e.getBoundingClientRect();return Math.round(r.width*r.height);})()")
             maske = js(sock, "(function(){var m=document.getElementById('login-screen')||"

@@ -1,6 +1,13 @@
 /**
  * Token-Verbrauch-Analyse unter Einstellungen -> Protokolle (nur Administratoren).
  *
+ * Seit 2026-11-15 ein Fenster ueber der ganzen Seite (#tv-overlay) wie die
+ * Systemauslastung (sysload.js): der Kopf im Reiter oeffnet es
+ * (settings_bedienung.js 'tv-oeffnen'), × und Esc schliessen, ein Klick
+ * DANEBEN schliesst nicht (wer im Diagramm daneben klickt, verloere sonst
+ * seine Filter-Ansicht). Geladen wird erst NACH dem Sichtbarmachen: das SVG
+ * wird in Pixeln der Box gezeichnet, ein verstecktes Fenster ist 0 breit.
+ *
  * Daten: GET /api/logs/token_verbrauch (backend/token_verbrauch.py). Je
  * Modellaufruf erfasst der Server Anbieter, Modell, Benutzer, Dienst, Kanal,
  * Werkzeuge und Tokenzahlen – keine Inhalte.
@@ -25,6 +32,7 @@ window.TokenVerbrauch = (function () {
     var SVG_NS = 'http://www.w3.org/2000/svg';
 
     var gebunden = false;
+    var ausloeser = null;      // Element, das den Fokus nach dem Schliessen zurueckbekommt
     var daten = null;          // letzte Antwort des Servers
     var anfrageNr = 0;         // spaete Antworten einer ueberholten Anfrage verwerfen
 
@@ -513,13 +521,17 @@ window.TokenVerbrauch = (function () {
             DIMENSIONEN.forEach(function (d) { var s = $('tv-f-' + d); if (s) s.value = '*'; });
             laden();
         });
+        var zu = $('tv-schliessen');
+        if (zu) {
+            try { if (window.JarvisIcons) window.JarvisIcons.setClose(zu); } catch (e) { /* bleibt × */ }
+            zu.addEventListener('click', schliessen);
+        }
         // Breite folgt dem Fenster (das SVG wird in Pixeln der Box gezeichnet).
         var warte = null;
         window.addEventListener('resize', function () {
             clearTimeout(warte);
             warte = setTimeout(function () {
-                var body = $('tv-section-body');
-                if (daten && body && body.style.display !== 'none') diagramm(daten);
+                if (daten && offen()) diagramm(daten);
             }, 150);
         });
         // Sprachwechsel: Beschriftungen aus den Daten neu setzen.
@@ -528,5 +540,54 @@ window.TokenVerbrauch = (function () {
         });
     }
 
-    return { laden: laden, _name: name, _achsenteilung: achsenteilung };
+    // ── Fenster ueber der ganzen Seite ──────────────────────────────────────
+
+    function offen() {
+        var o = $('tv-overlay');
+        return !!(o && o.classList.contains('an'));
+    }
+
+    // Capture-Phase und stopPropagation: Esc schliesst NUR das oberste
+    // Fenster, nicht zusaetzlich etwas darunter (Suchfeld der Einstellungen).
+    function beiTaste(e) {
+        if (e.key === 'Escape' && offen()) { e.stopPropagation(); e.preventDefault(); schliessen(); }
+    }
+
+    function oeffnen(von) {
+        var o = $('tv-overlay');
+        if (!o || offen()) return;
+        ausloeser = von || document.activeElement || null;
+        binden();
+        var zu = $('tv-schliessen');
+        if (zu) zu.setAttribute('aria-label', T('common.close', 'Schließen'));
+        o.classList.add('an');
+        document.addEventListener('keydown', beiTaste, true);
+        if (zu && zu.focus) zu.focus();
+        laden();
+    }
+
+    function schliessen() {
+        var o = $('tv-overlay');
+        if (!o) return;
+        o.classList.remove('an');
+        document.removeEventListener('keydown', beiTaste, true);
+        tipp(null);
+        var a = ausloeser;
+        ausloeser = null;
+        if (a && a.focus) { try { a.focus(); } catch (e) { /* Element weg */ } }
+    }
+
+    // Tastatur am Kopf im Reiter (role="button", tabindex="0"): Enter und
+    // Leertaste oeffnen wie ein Klick. Als Delegation am Dokument, damit der
+    // Zeitpunkt des Ladens keine Rolle spielt.
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var k = e.target && e.target.closest && e.target.closest('[data-klick="tv-oeffnen"]');
+        if (!k) return;
+        e.preventDefault();
+        oeffnen(k);
+    });
+
+    return { laden: laden, oeffnen: oeffnen, schliessen: schliessen, offen: offen,
+             _name: name, _achsenteilung: achsenteilung };
 })();

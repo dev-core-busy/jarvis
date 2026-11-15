@@ -821,6 +821,23 @@
             ]);
         }
 
+        // ── Branding-Tab Collapse (2026-11-15) ─────────────────────────────
+        // Dieselbe Bauart wie Confluence/SAP/VEMAS. ⚠ JEDE .kb-section des
+        // Reiters gehoert hier hinein – eine vergessene laesst sich nicht
+        // klappen (test_branding_container_ui prueft das als REGEL).
+        function _initBrandingCollapse() {
+            _collapseInit([
+                { hdr: 'br-sect-name-hdr',     body: 'br-sect-name-body',     tog: 'br-sect-name-tog'     },
+                { hdr: 'br-sect-namelogo-hdr', body: 'br-sect-namelogo-body', tog: 'br-sect-namelogo-tog' },
+                { hdr: 'br-sect-logo-hdr',     body: 'br-sect-logo-body',     tog: 'br-sect-logo-tog'     },
+                { hdr: 'br-sect-farben-hdr',   body: 'br-sect-farben-body',   tog: 'br-sect-farben-tog'   },
+                { hdr: 'br-sect-portal-hdr',   body: 'br-sect-portal-body',   tog: 'br-sect-portal-tog'   },
+                { hdr: 'br-sect-pptx-hdr',     body: 'br-sect-pptx-body',     tog: 'br-sect-pptx-tog'     },
+                { hdr: 'br-sect-docx-hdr',     body: 'br-sect-docx-body',     tog: 'br-sect-docx-tog'     },
+                { hdr: 'br-sect-font-hdr',     body: 'br-sect-font-body',     tog: 'br-sect-font-tog'     },
+            ]);
+        }
+
         // ── AI-Maus-Tab Collapse ───────────────────────────────────────────
         // ⚠ JEDE .kb-section des Reiters gehoert hier hinein. Eine vergessene
         // bleibt zugeklappt und laesst sich nicht oeffnen – der Wächter prueft
@@ -1034,6 +1051,7 @@
                 } else if (target === 'branding' && tabBranding) {
                     tabBranding.style.display = '';
                     tabBranding.classList.add('active');
+                    _initBrandingCollapse();
                     if (window.brandingAdmin) window.brandingAdmin.init();
                 } else if (target === 'confluence' && tabConfluence) {
                     tabConfluence.style.display = '';

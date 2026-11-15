@@ -9786,3 +9786,13 @@ body.light .sqadm-st.is-ok { color: color-mix(in srgb, var(--success) 60%, #000)
 .tv-legende-eintrag { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .tv-tabelle .tv-zahl { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tv-ohne { color: var(--text-muted); font-size: 0.75rem; }
+/* Fenster ueber der ganzen Seite (2026-11-15): Rahmen, Kopf und × kommen von
+   der Systemauslastung (`.jv-pkg-overlay` / `.jv-pkg-box` in theme.css), hier
+   steht nur, was dazukommt. Der Koerper scrollt als Ganzes; `min-height: 0`
+   aus demselben Grund wie in `.jv-pkg-box` (sonst schrumpft er nicht und die
+   Unterkante wird aus dem Kasten gedrueckt). */
+.tv-box { width: min(1180px, 100%); }
+.tv-box .jv-pkg-head .tv-kopf-btn { margin-left: auto; }
+.tv-body { min-height: 0; overflow-y: auto; padding-top: 4px; }
+.tv-oeffner-hinweis { margin-left: auto; margin-right: 8px; font-size: 0.78rem; color: var(--text-secondary); }
+.tv-oeffner:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }

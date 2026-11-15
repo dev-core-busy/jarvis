@@ -81,8 +81,13 @@ const warte = () => new Promise((r) => setTimeout(r, 0));
             !!d.querySelector('[data-i18n="branding.font_heading"]'));
         check('Hinweistext nennt die Lizenz',
             /Lizenz/.test((d.querySelector('[data-i18n="branding.font_hint"]') || {}).textContent || ''));
-        const von = HTML.indexOf('branding.font_heading');
-        const block = HTML.slice(von, HTML.indexOf('branding.contact_heading', von));
+        // Gemessen am eigenen Klapp-Container, nicht an einem Textausschnitt
+        // bis zur naechsten Ueberschrift: seit die Container umsortiert sind
+        // (2026-11-15), steht "Kontakt & Info" VOR den Schriften – der alte
+        // Ausschnitt lief dann bis ans Dateiende.
+        const sect = d.getElementById('br-sect-font');
+        check('Schriften haben einen eigenen Container', !!sect && sect.contains(datei));
+        const block = sect ? sect.outerHTML : '';
         check('keine harten Farben im neuen Markup', !/#[0-9a-fA-F]{3,6}\b/.test(block),
             (block.match(/#[0-9a-fA-F]{3,6}\b/) || [''])[0]);
     }

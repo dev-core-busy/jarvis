@@ -84,8 +84,10 @@
         'tele-errors-klappen': function () {
             klappe(this, function () { if (window.telemetryManager) window.telemetryManager._loadErrors(); });
         },
-        'tv-klappen': function () {
-            klappe(this, function () { if (window.TokenVerbrauch) window.TokenVerbrauch.laden(); });
+        // Token-Verbrauch-Analyse: seit 2026-11-15 ein Fenster ueber der ganzen
+        // Seite statt eines Klappabschnitts (token_verbrauch.js).
+        'tv-oeffnen': function () {
+            if (window.TokenVerbrauch) window.TokenVerbrauch.oeffnen(this);
         },
         'audit-klappen': function () {
             klappe(this, function () { if (window.auditManager) window.auditManager.init(); });

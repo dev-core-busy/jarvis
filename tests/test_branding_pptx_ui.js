@@ -82,8 +82,13 @@ section('1. Markup im Branding-Reiter');
     check('Hinweistext ist i18n-verdrahtet',
         !!d.querySelector('[data-i18n="branding.pptx_hint"]'));
     // Keine harten Farben (Branding-/Theme-Regel des Projekts)
-    const block = HTML.slice(HTML.indexOf('branding.pptx_heading'),
-                            HTML.indexOf('branding.contact_heading'));
+    // Gemessen am eigenen Klapp-Container (seit 2026-11-15): der fruehere
+    // Ausschnitt bis "Kontakt & Info" waere nach dem Umsortieren LEER und
+    // damit trivial frei von harten Farben gewesen.
+    const sect = d.getElementById('br-sect-pptx');
+    check('PowerPoint-Vorlage hat einen eigenen Container',
+        !!sect && sect.contains(d.getElementById('br-pptx-file')));
+    const block = sect ? sect.outerHTML : '';
     check('keine harten Farben im neuen Markup', !/#[0-9a-fA-F]{6}/.test(block),
         (block.match(/#[0-9a-fA-F]{6}/) || [''])[0]);
 }

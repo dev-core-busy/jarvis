@@ -1,9 +1,11 @@
 /* UI-Test: Token-Verbrauch-Analyse im Reiter "Protokolle" (jsdom, echte
  * settings.html, echte i18n.js / settings_bedienung.js / token_verbrauch.js).
  *
- * Getrieben ueber den ECHTEN Klappkopf (data-klick="tv-klappen"), nicht ueber
- * einen direkten Modulaufruf – sonst bliebe eine fehlende Verdrahtung im
- * Klick-Verteiler unsichtbar.
+ * Getrieben ueber den ECHTEN Kopf im Reiter (data-klick="tv-oeffnen"), nicht
+ * ueber einen direkten Modulaufruf – sonst bliebe eine fehlende Verdrahtung im
+ * Klick-Verteiler unsichtbar. Seit 2026-11-15 oeffnet der Kopf ein Fenster
+ * ueber der ganzen Seite (#tv-overlay, Bauform der Systemauslastung); × und Esc
+ * schliessen, ein Klick daneben nicht, der Fokus kehrt zum Kopf zurueck.
  *
  * Gemessen werden Eigenschaften: Anfrage-Parameter (ein LEERER Filterwert ist
  * ein Filter, "*" ist keiner), Kennzahlen, Saeulen = Zahl der Werte ungleich 0,
@@ -48,6 +50,7 @@ const I18N = lies('frontend/js/i18n.js');
 const SITZUNG = lies('frontend/js/sitzung.js');
 const BEDIENUNG = lies('frontend/js/settings_bedienung.js');
 const MODUL = lies('frontend/js/token_verbrauch.js');
+const ICONS = lies('frontend/js/icons.js');
 
 const BOESE = '<img src=x onerror="window.__xss=1">';
 const T0 = 1794000000;
@@ -91,6 +94,7 @@ function baue(antwortFn) {
     };
     w.authToken = 'T';
     w.eval(SITZUNG);
+    w.eval(ICONS);
     w.eval(I18N);
     w.eval(BEDIENUNG);
     w.eval(MODUL);
@@ -111,19 +115,27 @@ function waehle(d, w, id, wert) {
 }
 
 (async () => {
-    abschnitt('0. Positivkontrolle: Abschnitt und Verdrahtung');
+    abschnitt('0. Positivkontrolle: Kopf, Fenster und Verdrahtung');
     let { w, d, rufe } = baue(() => [200, ANTWORT]);
-    const kopf = d.querySelector('[data-klick="tv-klappen"]');
+    const kopf = d.querySelector('[data-klick="tv-oeffnen"]');
+    const fenster = d.getElementById('tv-overlay');
     const rumpf = d.getElementById('tv-section-body');
-    pruefe(!!kopf && !!rumpf, 'Abschnitt steht in der echten settings.html');
-    if (!kopf || !rumpf) bilanz(2);
-    pruefe(!!kopf.closest('#settings-tab-telemetry'), 'liegt im Reiter Protokolle');
+    pruefe(!!kopf && !!fenster && !!rumpf && fenster.contains(rumpf),
+           'Kopf und Fenster (mit dem Inhalt) stehen in der echten settings.html');
+    if (!kopf || !fenster || !rumpf) bilanz(2);
+    pruefe(!!kopf.closest('#settings-tab-telemetry'), 'Kopf liegt im Reiter Protokolle');
+    pruefe(!fenster.closest('.settings-tab-content'),
+           'Fenster liegt ausserhalb jedes Reiters (die Einstellungssuche springt nicht in ein geschlossenes Fenster)');
+    pruefe(fenster.classList.contains('jv-pkg-overlay') && !!fenster.querySelector(':scope > .jv-pkg-box .jv-pkg-head .jv-pkg-close')
+           && fenster.getAttribute('role') === 'dialog' && fenster.getAttribute('aria-modal') === 'true',
+           'Bauform der Systemauslastung: Overlay, Kasten, Kopf mit ×, Dialog');
     pruefe(/\/static\/js\/token_verbrauch\.js\?v=\d+/.test(HTML), 'Modul ist in settings.html eingebunden');
-    pruefe(rumpf.style.display === 'none', 'zu Beginn zugeklappt');
+    pruefe(!fenster.classList.contains('an') && !rufe.some((u) => u.startsWith('/api/logs/token_verbrauch')),
+           'zu Beginn geschlossen, nichts geladen');
     kopf.click();
     await warte(80);
-    pruefe(rumpf.style.display !== 'none', 'Klick auf den Kopf klappt auf');
-    if (rumpf.style.display === 'none') bilanz(1);
+    pruefe(fenster.classList.contains('an') && w.TokenVerbrauch.offen(), 'Klick auf den Kopf oeffnet das Fenster');
+    if (!fenster.classList.contains('an')) bilanz(1);
     const erster = rufe.find((u) => u.startsWith('/api/logs/token_verbrauch'));
     const p0 = params(erster || '');
     pruefe(!!erster && p0.get('tage') === '7' && p0.get('gruppe') === 'llm',
@@ -249,7 +261,7 @@ function waehle(d, w, id, wert) {
     abschnitt('8b. Einzahl und Tausenderpunkt');
     ({ w, d, rufe } = baue(() => [200, Object.assign({}, ANTWORT, {
         summe: { aufrufe: 9, ein: 31273, aus: 1994, cache_lesen: 0, ohne_angabe: 1, fehler: 0 } })]));
-    d.querySelector('[data-klick="tv-klappen"]').click();
+    d.querySelector('[data-klick="tv-oeffnen"]').click();
     await warte(80);
     const z1 = d.getElementById('tv-zusatz').textContent;
     pruefe(/^1 Aufruf ohne Zählung/.test(z1), 'ein Aufruf ohne Zaehlung: Einzahl', z1);
@@ -259,17 +271,17 @@ function waehle(d, w, id, wert) {
     abschnitt('9. Leer- und Fehlerfaelle');
     ({ w, d, rufe } = baue(() => [200, Object.assign({}, ANTWORT, { reihen: [], tabelle: [], erfasst_seit: null,
         summe: { aufrufe: 0, ein: 0, aus: 0, cache_lesen: 0, ohne_angabe: 0, fehler: 0 } })]));
-    d.querySelector('[data-klick="tv-klappen"]').click();
+    d.querySelector('[data-klick="tv-oeffnen"]').click();
     await warte(80);
     pruefe(/noch keine Modellaufrufe erfasst/.test(d.getElementById('tv-diagramm').textContent),
            'nie etwas erfasst: sagt das ausdruecklich (statt eines leeren Diagramms)');
     ({ w, d, rufe } = baue(() => [200, Object.assign({}, ANTWORT, { reihen: [], tabelle: [] })]));
-    d.querySelector('[data-klick="tv-klappen"]').click();
+    d.querySelector('[data-klick="tv-oeffnen"]').click();
     await warte(80);
     pruefe(/mit diesen Filtern keine Modellaufrufe/.test(d.getElementById('tv-diagramm').textContent),
            'Zeitraum/Filter leer: andere Aussage als "nie erfasst"');
     ({ w, d, rufe } = baue(() => [500, { detail: 'kaputt' }]));
-    d.querySelector('[data-klick="tv-klappen"]').click();
+    d.querySelector('[data-klick="tv-oeffnen"]').click();
     await warte(80);
     const fe = d.getElementById('tv-fehler');
     pruefe(fe.style.display !== 'none' && /HTTP 500/.test(fe.textContent) && /kaputt/.test(fe.textContent),
@@ -278,8 +290,11 @@ function waehle(d, w, id, wert) {
     pruefe(fe.style.display !== 'none', 'und bleibt stehen');
 
     abschnitt('10. Uebersetzungen vollstaendig');
-    const sek = HTML.slice(HTML.indexOf('data-klick="tv-klappen"'), HTML.indexOf('data-klick="tele-convlog-klappen"'));
-    pruefe(sek.length > 1000, 'Positivkontrolle: Abschnitt im Markup geschnitten (' + sek.length + ' Zeichen)');
+    // Kopf im Reiter + Fenster, beide am DOM geschnitten (nicht ueber Textmarken).
+    const kopfSek = d.querySelector('[data-klick="tv-oeffnen"]');
+    const sek = (kopfSek ? kopfSek.outerHTML : '')
+        + ((d.getElementById('tv-overlay') || {}).outerHTML || '');
+    pruefe(sek.length > 1000 && !!kopfSek, 'Positivkontrolle: Kopf und Fenster im Markup gefunden (' + sek.length + ' Zeichen)');
     const schl = new Set();
     (sek.match(/data-i18n(?:-html|-title|-placeholder)?="([^"]+)"/g) || []).forEach((m) => schl.add(m.split('"')[1]));
     (MODUL.match(/T\('([a-z_.]+)'/g) || []).map((m) => m.slice(3, -1)).filter((k) => !k.endsWith('.') && !k.endsWith('_'))
@@ -319,6 +334,37 @@ function waehle(d, w, id, wert) {
     });
     pruefe(schl.size > 40, 'Positivkontrolle: Schluessel gesammelt (' + schl.size + ')');
     pruefe(!fehlt.length, 'alle in DE und EN', fehlt.join(', '));
+
+    abschnitt('11. Schliessen: ×, Esc, Klick daneben, Fokus');
+    ({ w, d, rufe } = baue(() => [200, ANTWORT]));
+    {
+        const k = d.querySelector('[data-klick="tv-oeffnen"]');
+        const o = d.getElementById('tv-overlay');
+        const zu = d.getElementById('tv-schliessen');
+        k.focus();
+        k.click();
+        await warte(80);
+        pruefe(o.classList.contains('an'), 'Positivkontrolle: Fenster offen');
+        pruefe(!!zu.querySelector('svg.jv-ico-close'), '× ist das Schliessen-Symbol aus icons.js');
+        pruefe(d.activeElement === zu, 'Fokus springt beim Oeffnen in das Fenster (×)');
+        o.click();
+        d.querySelector('#tv-overlay .jv-pkg-box').click();
+        pruefe(o.classList.contains('an'), 'Klick auf Hintergrund oder Kasten schliesst NICHT');
+        zu.click();
+        pruefe(!o.classList.contains('an') && !w.TokenVerbrauch.offen(), '× schliesst');
+        pruefe(d.activeElement === k, 'Fokus kehrt zum Kopf im Reiter zurueck');
+        k.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await warte(80);
+        pruefe(o.classList.contains('an'), 'Enter auf dem Kopf oeffnet (Tastatur)');
+        const vorEsc = rufe.length;
+        d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        pruefe(!o.classList.contains('an'), 'Esc schliesst');
+        d.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        pruefe(!o.classList.contains('an') && rufe.length === vorEsc, 'Esc bei geschlossenem Fenster tut nichts');
+        k.click();
+        await warte(80);
+        pruefe(o.classList.contains('an') && rufe.length > vorEsc, 'erneutes Oeffnen laedt frisch');
+    }
 
     w.close();
     bilanz();

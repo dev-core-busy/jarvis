@@ -20,10 +20,10 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=56">
+    <link rel="stylesheet" href="/static/css/theme.css?v=57">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
-    <link rel="stylesheet" href="/static/css/style.css?v=232">
+    <link rel="stylesheet" href="/static/css/style.css?v=233">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -2283,19 +2283,29 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                 <!-- ═══ Tab: Anweisungen ═══ -->
                 <div id="settings-tab-instructions" class="settings-tab-content" style="display:none;">
-                    <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:16px;line-height:1.5;">
-                        Dauerhafte Anweisungen, die bei <strong style="color:var(--text-primary);">jedem Gespräch</strong> automatisch geladen werden.
-                        Beispiele: Kommunikationsstil, bevorzugte Tools, Sicherheitsregeln oder projektspezifische Vorgaben.
-                        Gespeichert in <code>data/instructions/</code>.
-                    </p>
-                    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
-                        <input type="text" id="instr-new-name" data-i18n-placeholder="instructions.new_ph" placeholder="Name der neuen Instruktion"
-                               style="flex:1;max-width:300px;padding:8px 12px;background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:0.85rem;">
-                        <button id="btn-instr-new" class="btn-primary" data-i18n="instructions.new" style="padding:8px 16px;font-size:0.85rem;white-space:nowrap;">
-                            + Neue Instruktion
-                        </button>
+                    <div class="kb-container">
+                        <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:16px;line-height:1.5;">
+                            Dauerhafte Anweisungen, die bei <strong style="color:var(--text-primary);">jedem Gespräch</strong> automatisch geladen werden.
+                            Beispiele: Kommunikationsstil, bevorzugte Tools, Sicherheitsregeln oder projektspezifische Vorgaben.
+                            Gespeichert in <code>data/instructions/</code>.
+                        </p>
+                        <div class="kb-section" id="instr-sect">
+                            <div class="kb-section-header kb-collapse-header" id="instr-sect-hdr">
+                                <h3 data-i18n="instructions.sect">Anweisungen</h3>
+                                <span class="sk-openclaw-toggle" id="instr-sect-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="instr-sect-body">
+                        <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
+                            <input type="text" id="instr-new-name" data-i18n-placeholder="instructions.new_ph" placeholder="Name der neuen Instruktion"
+                                   style="flex:1;max-width:300px;padding:8px 12px;background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:0.85rem;">
+                            <button id="btn-instr-new" class="btn-primary" data-i18n="instructions.new" style="padding:8px 16px;font-size:0.85rem;white-space:nowrap;flex:0 0 auto;">
+                                + Neue Instruktion
+                            </button>
+                        </div>
+                        <div id="instr-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+                            </div>
+                        </div>
                     </div>
-                    <div id="instr-list" style="display:flex;flex-direction:column;gap:10px;"></div>
                 </div>
 
                 <!-- ═══ Tab: Skills ═══ -->
@@ -2739,6 +2749,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n="mcp.hint">MCP-Server verbinden externe Tools mit {marke} (Model Context Protocol).
                             Server werden als Subprozesse (stdio) oder über HTTP/SSE angebunden.</p>
+                        <div class="kb-section" id="mcp-sect">
+                        <div class="kb-section-header kb-collapse-header" id="mcp-sect-hdr">
+                            <h3 data-i18n="mcp.sect">MCP-Server</h3>
+                            <span class="sk-openclaw-toggle" id="mcp-sect-tog">▼</span>
+                        </div>
+                        <div class="kb-collapse-body" id="mcp-sect-body">
                         <!-- Erklaerung, WANN und WIE die Werkzeuge eines Servers benutzt
                              werden (Wunsch 2026-10-25, nach "nutze den MCP Server 'theben'"
                              griff das Modell zu VEMAS). Jeder Satz ist eine Zusage, die der
@@ -2749,10 +2765,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <summary><span data-i18n="mcp.explain_title">So verwendet {marke} MCP-Server</span></summary>
                             <p data-i18n="mcp.explain_text">{marke} lädt beim Start und nach jeder Änderung auf dieser Seite die Werkzeuge aller aktiven, verbundenen MCP-Server und bietet sie dem Sprachmodell zusammen mit den eingebauten Werkzeugen an. Ob ein MCP-Werkzeug benutzt wird, entscheidet das Modell anhand der Aufgabe und der Werkzeugbeschreibung, die der Server mitliefert – einen festen Auslöser gibt es nicht. Am zuverlässigsten wird ein Server benutzt, wenn du ihn in der Anfrage beim Namen nennst und sagst, was er liefern soll (z. B. „hole über theben die Befunde von Labor an1“). Damit das Modell Server und Werkzeuge sicher zuordnet, nennt {marke} ihm alle verbundenen Server mit ihren Werkzeugen und dazu eingetragene, aber gerade nicht erreichbare Server mit dem Grund. Ein inaktiver oder nicht verbundener Server stellt keine Werkzeuge bereit; den Grund zeigt die Serverzeile. Der Server arbeitet mit den hier hinterlegten Zugangsdaten (API-Schlüssel, Zertifikat) – die Rechte des anfragenden Benutzers im Zielsystem spielen dabei keine Rolle. Benutzen dürfen seine Werkzeuge deshalb nur die Benutzer und Gruppen, die du unter „Berechtigungen …“ einträgst – ist niemand eingetragen, darf niemand, auch kein Administrator. Zusätzlich gilt ein MCP-Server als externe Datenquelle: wer keinen Internet-Zugang hat, kann seine Werkzeuge nicht verwenden. Jeder Aufruf steht im Werkzeug-Protokoll.</p>
                         </details>
-                        <button class="kb-btn" id="mcp-add-btn" style="margin-bottom: 1rem;" data-i18n="mcp.add_btn">
+                        <button class="btn-secondary" id="mcp-add-btn" type="button" style="width:auto;margin:1rem 0;" data-i18n="mcp.add_btn">
                             + MCP-Server hinzufügen
                         </button>
                         <div id="mcp-server-list"></div>
+                        </div>
+                        </div>
                     </div>
                 </div>
 
@@ -3191,19 +3209,26 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <h4 style="margin:22px 0 8px;">Durchsuchen</h4>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                            <input type="text" id="cf-search-q" class="config-input" placeholder="Suchbegriff…" style="flex:1;min-width:180px;">
-                            <input type="text" id="cf-search-space" class="config-input" placeholder="Space-Key (optional)" style="width:170px;">
-                            <button class="btn-secondary" id="cf-search-btn" type="button" data-i18n="common.search">Suchen</button>
-                        </div>
-                        <div id="cf-results" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;"></div>
-                        <div id="cf-page-view" style="margin-top:12px;display:none;border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg-secondary);">
-                            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">
-                                <strong id="cf-page-title"></strong>
-                                <a id="cf-page-link" href="#" target="_blank" rel="noopener" class="kb-hint" style="white-space:nowrap;">In Confluence öffnen ↗</a>
+                        <div class="kb-section" id="cf-sect-search">
+                            <div class="kb-section-header kb-collapse-header" id="cf-sect-search-hdr">
+                                <h3 data-i18n="cf.sect_search">Durchsuchen</h3>
+                                <span class="sk-openclaw-toggle" id="cf-sect-search-tog">▼</span>
                             </div>
-                            <pre id="cf-page-text" style="white-space:pre-wrap;word-break:break-word;margin:0;font-family:var(--font-body);font-size:0.88rem;max-height:340px;overflow:auto;"></pre>
+                            <div class="kb-collapse-body" id="cf-sect-search-body">
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                    <input type="text" id="cf-search-q" class="config-input" placeholder="Suchbegriff…" style="flex:1;min-width:180px;">
+                                    <input type="text" id="cf-search-space" class="config-input" placeholder="Space-Key (optional)" style="width:170px;">
+                                    <button class="btn-secondary" id="cf-search-btn" type="button" data-i18n="common.search">Suchen</button>
+                                </div>
+                                <div id="cf-results" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;"></div>
+                                <div id="cf-page-view" style="margin-top:12px;display:none;border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg-secondary);">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">
+                                        <strong id="cf-page-title"></strong>
+                                        <a id="cf-page-link" href="#" target="_blank" rel="noopener" class="kb-hint" style="white-space:nowrap;">In Confluence öffnen ↗</a>
+                                    </div>
+                                    <pre id="cf-page-text" style="white-space:pre-wrap;word-break:break-word;margin:0;font-family:var(--font-body);font-size:0.88rem;max-height:340px;overflow:auto;"></pre>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -3443,40 +3468,55 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
 
 
-                        <!-- Datenzugriff: OData -->
-                        <div id="sap-data-odata" class="sap-data-group">
-                            <h4 style="margin:22px 0 8px;">OData lesen</h4>
-                            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                                <input type="text" id="sap-odata-entity" class="config-input" placeholder="EntitySet, z.B. A_SalesOrder" style="flex:1;min-width:180px;">
-                                <input type="text" id="sap-odata-qservice" class="config-input" placeholder="Service (optional)" style="width:200px;">
-                                <input type="number" id="sap-odata-top" class="config-input" placeholder="Top" value="20" style="width:90px;">
-                                <button class="btn-secondary" id="sap-odata-run" type="button" data-i18n="sap.query">Abfragen</button>
+                        <div class="kb-section" id="sap-sect-data">
+                            <div class="kb-section-header kb-collapse-header" id="sap-sect-data-hdr">
+                                <h3 data-i18n="sap.sect_data">Daten abfragen</h3>
+                                <span class="sk-openclaw-toggle" id="sap-sect-data-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="sap-sect-data-body">
+                                <!-- Datenzugriff: OData -->
+                                <div id="sap-data-odata" class="sap-data-group">
+                                    <h4 style="margin:0 0 8px;">OData lesen</h4>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                        <input type="text" id="sap-odata-entity" class="config-input" placeholder="EntitySet, z.B. A_SalesOrder" style="flex:1;min-width:180px;">
+                                        <input type="text" id="sap-odata-qservice" class="config-input" placeholder="Service (optional)" style="width:200px;">
+                                        <input type="number" id="sap-odata-top" class="config-input" placeholder="Top" value="20" style="width:90px;">
+                                        <button class="btn-secondary" id="sap-odata-run" type="button" data-i18n="sap.query">Abfragen</button>
+                                    </div>
+                                </div>
+
+                                <!-- Datenzugriff: HANA-SQL -->
+                                <div id="sap-data-hana" class="sap-data-group" style="display:none;">
+                                    <h4 style="margin:0 0 8px;">Direkte SQL-Abfrage (nur SELECT)</h4>
+                                    <textarea id="sap-sql" class="config-input" rows="4" placeholder="SELECT * FROM SAPHANADB.MARA LIMIT 20" style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:0.84rem;"></textarea>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+                                        <input type="number" id="sap-sql-max" class="config-input" placeholder="Max. Zeilen" value="200" style="width:130px;">
+                                        <button class="btn-secondary" id="sap-sql-run" type="button" data-i18n="sap.execute">Ausführen</button>
+                                        <span class="kb-hint">Schreibende Statements werden serverseitig abgelehnt.</span>
+                                    </div>
+                                </div>
+
+                                <!-- Datenzugriff: RFC-Hinweis -->
+                                <div id="sap-data-rfc" class="sap-data-group" style="display:none;">
+                                    <h4 style="margin:0 0 8px;">RFC-Tabellenzugriff</h4>
+                                    <p class="kb-hint">RFC-Abfragen laufen über das Agent-Tool <code>sap_rfc_read_table</code> (z.&nbsp;B. „Lies die ersten 50 Zeilen der Tabelle MARA per RFC"). Verbindung oben testen.</p>
+                                </div>
+
+                                <div id="sap-results" style="margin-top:12px;overflow:auto;"></div>
                             </div>
                         </div>
 
-                        <!-- Datenzugriff: HANA-SQL -->
-                        <div id="sap-data-hana" class="sap-data-group" style="display:none;">
-                            <h4 style="margin:22px 0 8px;">Direkte SQL-Abfrage (nur SELECT)</h4>
-                            <textarea id="sap-sql" class="config-input" rows="4" placeholder="SELECT * FROM SAPHANADB.MARA LIMIT 20" style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:0.84rem;"></textarea>
-                            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
-                                <input type="number" id="sap-sql-max" class="config-input" placeholder="Max. Zeilen" value="200" style="width:130px;">
-                                <button class="btn-secondary" id="sap-sql-run" type="button" data-i18n="sap.execute">Ausführen</button>
-                                <span class="kb-hint">Schreibende Statements werden serverseitig abgelehnt.</span>
+                        <div class="kb-section" id="sap-sect-rep">
+                            <div class="kb-section-header kb-collapse-header" id="sap-sect-rep-hdr">
+                                <h3 data-i18n="sap.sect_rep">Reporting-/BI-Anbindung</h3>
+                                <span class="sk-openclaw-toggle" id="sap-sect-rep-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="sap-sect-rep-body">
+                                <p class="kb-hint">Fertige Verbindungsangaben, mit denen Power&nbsp;BI, Tableau, Qlik &amp; Co. dasselbe SAP-System über die Standard-Schnittstellen (OData/SQL/BW) anbinden.</p>
+                                <button class="btn-secondary" id="sap-reporting-btn" type="button" data-i18n="sap.show_endpoints">Anbindungen anzeigen</button>
+                                <div id="sap-reporting" style="margin-top:10px;"></div>
                             </div>
                         </div>
-
-                        <!-- Datenzugriff: RFC-Hinweis -->
-                        <div id="sap-data-rfc" class="sap-data-group" style="display:none;">
-                            <h4 style="margin:22px 0 8px;">RFC-Tabellenzugriff</h4>
-                            <p class="kb-hint">RFC-Abfragen laufen über das Agent-Tool <code>sap_rfc_read_table</code> (z.&nbsp;B. „Lies die ersten 50 Zeilen der Tabelle MARA per RFC"). Verbindung oben testen.</p>
-                        </div>
-
-                        <div id="sap-results" style="margin-top:12px;overflow:auto;"></div>
-
-                        <h4 style="margin:22px 0 8px;">Reporting-/BI-Anbindung</h4>
-                        <p class="kb-hint">Fertige Verbindungsangaben, mit denen Power&nbsp;BI, Tableau, Qlik &amp; Co. dasselbe SAP-System über die Standard-Schnittstellen (OData/SQL/BW) anbinden.</p>
-                        <button class="btn-secondary" id="sap-reporting-btn" type="button" data-i18n="sap.show_endpoints">Anbindungen anzeigen</button>
-                        <div id="sap-reporting" style="margin-top:10px;"></div>
 
                         <!-- ══ Sichtbare Analysen im Bereich /sap ══════════════════
                              Steuert das Analyse-Pulldown unter /sap. Gespeichert wird
@@ -3484,16 +3524,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              SAP-Skill-Config) – leer heisst also "alles sichtbar".
                              Das ist Absicht: eine spaeter ergaenzte Analyse soll
                              erscheinen und nicht still fehlen. -->
-                        <h4 style="margin:22px 0 8px;" data-i18n="sap.vis_head">Sichtbare Analysen im Bereich /sap</h4>
-                        <p class="kb-hint" data-i18n-html="sap.vis_hint">Bestimmt, welche Analyse-Vorlagen die Anwender im Bereich <strong>/sap</strong> im Pulldown sehen. Abgewählte Vorlagen verschwinden dort und lassen sich auch nicht mehr über den Verlauf starten. Kategorien ohne sichtbare Vorlage werden ausgeblendet. Die freie Frage bleibt immer möglich.</p>
-                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-                            <button class="btn-secondary" id="sap-vis-all" type="button" data-i18n="sap.vis_all">Alle auswählen</button>
-                            <button class="btn-secondary" id="sap-vis-none" type="button" data-i18n="sap.vis_none">Alle abwählen</button>
-                            <button class="btn-primary" id="sap-vis-save" type="button" data-i18n="common.save">Speichern</button>
-                            <span id="sap-vis-count" class="kb-hint"></span>
-                            <span id="sap-vis-status" style="font-size:0.9em;"></span>
+                        <div class="kb-section" id="sap-sect-vis">
+                            <div class="kb-section-header kb-collapse-header" id="sap-sect-vis-hdr">
+                                <h3 data-i18n="sap.vis_head">Sichtbare Analysen im Bereich /sap</h3>
+                                <span class="sk-openclaw-toggle" id="sap-sect-vis-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="sap-sect-vis-body">
+                                <p class="kb-hint" data-i18n-html="sap.vis_hint">Bestimmt, welche Analyse-Vorlagen die Anwender im Bereich <strong>/sap</strong> im Pulldown sehen. Abgewählte Vorlagen verschwinden dort und lassen sich auch nicht mehr über den Verlauf starten. Kategorien ohne sichtbare Vorlage werden ausgeblendet. Die freie Frage bleibt immer möglich.</p>
+                                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                                    <button class="btn-secondary" id="sap-vis-all" type="button" data-i18n="sap.vis_all">Alle auswählen</button>
+                                    <button class="btn-secondary" id="sap-vis-none" type="button" data-i18n="sap.vis_none">Alle abwählen</button>
+                                    <button class="btn-primary" id="sap-vis-save" type="button" data-i18n="common.save">Speichern</button>
+                                    <span id="sap-vis-count" class="kb-hint"></span>
+                                    <span id="sap-vis-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <div id="sap-vis-list"></div>
+                            </div>
                         </div>
-                        <div id="sap-vis-list"></div>
                     </div>
                 </div>
 
@@ -3677,14 +3724,21 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
 
 
-                        <h4 style="margin:22px 0 8px;">Abfrage testen</h4>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                            <input type="text" id="vemas-q-resource" class="config-input" placeholder="Ressource, z.B. Projekte" style="flex:1;min-width:180px;">
-                            <input type="text" id="vemas-q-params" class="config-input" placeholder='Filter als JSON, z.B. {"jahr":2026}' style="flex:1;min-width:180px;">
-                            <input type="number" id="vemas-q-top" class="config-input" placeholder="Zeilen" value="20" style="width:90px;">
-                            <button class="btn-secondary" id="vemas-q-run" type="button" data-i18n="vemas.query">Abfragen</button>
+                        <div class="kb-section" id="vemas-sect-query">
+                            <div class="kb-section-header kb-collapse-header" id="vemas-sect-query-hdr">
+                                <h3 data-i18n="vemas.sect_query">Abfrage testen</h3>
+                                <span class="sk-openclaw-toggle" id="vemas-sect-query-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="vemas-sect-query-body">
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                    <input type="text" id="vemas-q-resource" class="config-input" placeholder="Ressource, z.B. Projekte" style="flex:1;min-width:180px;">
+                                    <input type="text" id="vemas-q-params" class="config-input" placeholder='Filter als JSON, z.B. {"jahr":2026}' style="flex:1;min-width:180px;">
+                                    <input type="number" id="vemas-q-top" class="config-input" placeholder="Zeilen" value="20" style="width:90px;">
+                                    <button class="btn-secondary" id="vemas-q-run" type="button" data-i18n="vemas.query">Abfragen</button>
+                                </div>
+                                <div id="vemas-results" style="margin-top:12px;overflow:auto;"></div>
+                            </div>
                         </div>
-                        <div id="vemas-results" style="margin-top:12px;overflow:auto;"></div>
 
                         <!-- ══ Sichtbare Abfragen im Bereich /vemas ══════════════════
                              Steuert das Pulldown unter /vemas. Gespeichert wird die
@@ -3692,16 +3746,23 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              VEMAS-Skill-Config) – leer heisst also "alles sichtbar".
                              Das ist Absicht: eine spaeter ergaenzte Abfrage soll
                              erscheinen und nicht still fehlen. -->
-                        <h4 style="margin:22px 0 8px;" data-i18n="vemas.vis_head">Sichtbare Abfragen im Bereich /vemas</h4>
-                        <p class="kb-hint" data-i18n-html="vemas.vis_hint">Bestimmt, welche Vorlagen die Anwender im Bereich <strong>/vemas</strong> im Pulldown sehen. Abgewählte Vorlagen verschwinden dort und lassen sich auch nicht mehr über den Verlauf starten. Kategorien ohne sichtbare Vorlage werden ausgeblendet. Die freie Frage bleibt immer möglich.</p>
-                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-                            <button class="btn-secondary" id="vemas-vis-all" type="button" data-i18n="sap.vis_all">Alle auswählen</button>
-                            <button class="btn-secondary" id="vemas-vis-none" type="button" data-i18n="sap.vis_none">Alle abwählen</button>
-                            <button class="btn-primary" id="vemas-vis-save" type="button" data-i18n="common.save">Speichern</button>
-                            <span id="vemas-vis-count" class="kb-hint"></span>
-                            <span id="vemas-vis-status" style="font-size:0.9em;"></span>
+                        <div class="kb-section" id="vemas-sect-vis">
+                            <div class="kb-section-header kb-collapse-header" id="vemas-sect-vis-hdr">
+                                <h3 data-i18n="vemas.vis_head">Sichtbare Abfragen im Bereich /vemas</h3>
+                                <span class="sk-openclaw-toggle" id="vemas-sect-vis-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="vemas-sect-vis-body">
+                                <p class="kb-hint" data-i18n-html="vemas.vis_hint">Bestimmt, welche Vorlagen die Anwender im Bereich <strong>/vemas</strong> im Pulldown sehen. Abgewählte Vorlagen verschwinden dort und lassen sich auch nicht mehr über den Verlauf starten. Kategorien ohne sichtbare Vorlage werden ausgeblendet. Die freie Frage bleibt immer möglich.</p>
+                                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                                    <button class="btn-secondary" id="vemas-vis-all" type="button" data-i18n="sap.vis_all">Alle auswählen</button>
+                                    <button class="btn-secondary" id="vemas-vis-none" type="button" data-i18n="sap.vis_none">Alle abwählen</button>
+                                    <button class="btn-primary" id="vemas-vis-save" type="button" data-i18n="common.save">Speichern</button>
+                                    <span id="vemas-vis-count" class="kb-hint"></span>
+                                    <span id="vemas-vis-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <div id="vemas-vis-list"></div>
+                            </div>
                         </div>
-                        <div id="vemas-vis-list"></div>
                     </div>
                 </div>
 
@@ -4496,211 +4557,213 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      (/api/ai-mouse/admin/areas), damit Text und Wirkung nicht
                      auseinanderlaufen. -->
                 <div id="settings-tab-aimouse" class="settings-tab-content" style="display:none;">
-                    <div class="kb-section" id="am-sect-tools">
-                        <div class="kb-section-header kb-collapse-header" id="am-sect-tools-hdr">
-                            <h3 data-i18n="amtool.h">Werkzeug-Bereiche freischalten</h3>
-                            <span class="sk-openclaw-toggle" id="am-sect-tools-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="am-sect-tools-body">
-                            <p class="kb-hint" data-i18n-html="amtool.intro">Ohne Freigabe ist jede Anfrage <b>genau ein Modellaufruf mit dem Bildausschnitt</b> – kein Agent, keine Werkzeuge. Das ist der Normalfall und für die meisten Häuser die richtige Einstellung. Was hier freigeschaltet ist, gilt für <b>jeden</b> Lauf; alle Bereiche sind <b>nur lesend</b> und arbeiten mit den Rechten des jeweiligen Benutzers.</p>
-                            <p class="kb-hint" data-i18n-html="amtool.warn">⚠ Der Bildinhalt ist <b>Fremdtext, der sich nicht entschärfen lässt</b>. Bei einem Ticket werden Markenzeilen gebrochen und die echten Abschnitte tragen eine Echtheitskennung – bei einem Bildschirmfoto geht das nicht: was darauf steht, sieht das Modell direkt. Ein Screenshot einer fremden Webseite kann damit eine Suche in echten Vorgängen auslösen. Im Zweifel nichts freischalten.</p>
-                            <div id="amtool-areas"></div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                                <button class="btn-primary" id="amtool-save" type="button" data-i18n="amtool.save" style="flex:0 0 auto;">Freigabe speichern</button>
-                                <span id="amtool-status" style="font-size:0.9em;"></span>
+                    <div class="kb-container">
+                        <div class="kb-section" id="am-sect-tools">
+                            <div class="kb-section-header kb-collapse-header" id="am-sect-tools-hdr">
+                                <h3 data-i18n="amtool.h">Werkzeug-Bereiche freischalten</h3>
+                                <span class="sk-openclaw-toggle" id="am-sect-tools-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="am-sect-tools-body">
+                                <p class="kb-hint" data-i18n-html="amtool.intro">Ohne Freigabe ist jede Anfrage <b>genau ein Modellaufruf mit dem Bildausschnitt</b> – kein Agent, keine Werkzeuge. Das ist der Normalfall und für die meisten Häuser die richtige Einstellung. Was hier freigeschaltet ist, gilt für <b>jeden</b> Lauf; alle Bereiche sind <b>nur lesend</b> und arbeiten mit den Rechten des jeweiligen Benutzers.</p>
+                                <p class="kb-hint" data-i18n-html="amtool.warn">⚠ Der Bildinhalt ist <b>Fremdtext, der sich nicht entschärfen lässt</b>. Bei einem Ticket werden Markenzeilen gebrochen und die echten Abschnitte tragen eine Echtheitskennung – bei einem Bildschirmfoto geht das nicht: was darauf steht, sieht das Modell direkt. Ein Screenshot einer fremden Webseite kann damit eine Suche in echten Vorgängen auslösen. Im Zweifel nichts freischalten.</p>
+                                <div id="amtool-areas"></div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button class="btn-primary" id="amtool-save" type="button" data-i18n="amtool.save" style="flex:0 0 auto;">Freigabe speichern</button>
+                                    <span id="amtool-status" style="font-size:0.9em;"></span>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Bereitstellung im Netz (A). ⚠ WOZU: eine ueber den
-                         BROWSER geladene Datei traegt die Zonen-Markierung von
-                         Windows und laeuft beim ersten Start in die
-                         SmartScreen-Warnung; eine von einer Intranet-Freigabe
-                         kopierte nicht. Das ist der einzige Weg, der die
-                         Warnung wirklich abstellt – ein Zertifikat kann das
-                         seit 2024 nicht mehr (Container darunter). -->
-                    <div class="kb-section" id="am-sect-share">
-                        <div class="kb-section-header kb-collapse-header" id="am-sect-share-hdr">
-                            <h3 data-i18n="amshare.h">Bereitstellung im Netz</h3>
-                            <span class="sk-openclaw-toggle" id="am-sect-share-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="am-sect-share-body">
-                            <p class="kb-hint" data-i18n-html="amshare.intro">Liegt hier ein Pfad, zeigt die Kachel <b>AI-Maus</b> ihn statt des Download-Knopfes an. Der Grund ist die Sicherheitswarnung beim ersten Start: Windows markiert jede über den <b>Browser</b> geladene Datei, und SmartScreen fragt dann nach. Eine von einer <b>Netzfreigabe</b> kopierte Datei trägt diese Markierung nicht – die Warnung bleibt aus.</p>
-                            <p class="kb-hint" data-i18n-html="amshare.warn">⚠ Die Datei kommt nicht von selbst dorthin. <b>Sie</b> holen sie mit dem Knopf unten und legen sie auf der Freigabe ab – <b>nach jedem Versionswechsel erneut</b>, sonst verteilt die Freigabe einen alten Stand. Leer lassen heißt: Download wie bisher.</p>
-                            <p class="kb-hint" data-i18n-html="amshare.up_note">In <b>Chrome oder Edge</b> geht es ohne Umweg über den Download-Ordner: „Ordner wählen und hineinschreiben“ fragt <i>einmal</i> nach dem Zielordner, merkt ihn sich und schreibt die Anwendung danach direkt hinein. Der eingetragene Pfad ist dabei nur eine Angabe für Menschen – eine Webseite darf nicht in einen Ordner schreiben, der ihr nur als Text genannt wurde.</p>
-                            <div class="form-group">
-                                <label data-i18n="amshare.lab">Pfad zur AiMouse.exe auf der Freigabe</label>
-                                <input type="text" id="amshare-pfad" class="input-field"
-                                       autocomplete="off" spellcheck="false"
-                                       placeholder="\\server\freigabe\tools\AiMouse.exe">
+                        <!-- Bereitstellung im Netz (A). ⚠ WOZU: eine ueber den
+                             BROWSER geladene Datei traegt die Zonen-Markierung von
+                             Windows und laeuft beim ersten Start in die
+                             SmartScreen-Warnung; eine von einer Intranet-Freigabe
+                             kopierte nicht. Das ist der einzige Weg, der die
+                             Warnung wirklich abstellt – ein Zertifikat kann das
+                             seit 2024 nicht mehr (Container darunter). -->
+                        <div class="kb-section" id="am-sect-share">
+                            <div class="kb-section-header kb-collapse-header" id="am-sect-share-hdr">
+                                <h3 data-i18n="amshare.h">Bereitstellung im Netz</h3>
+                                <span class="sk-openclaw-toggle" id="am-sect-share-tog">▼</span>
                             </div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                                <button class="btn-primary" id="amshare-save" type="button" data-i18n="amshare.save" style="flex:0 0 auto;">Pfad speichern</button>
-                                <span id="amshare-status" style="font-size:0.9em;"></span>
-                            </div>
-                            <!-- ⚠ DER DOWNLOAD GEHOERT HIERHER, NICHT IN DIE BENUTZER-KACHEL.
-                                 Dort sah ihn nur der Admin - dieselbe Seite fuer zwei Leute
-                                 verschieden, und er sah nicht, was seine Benutzer sehen. Hier
-                                 steht er neben dem Feld, in das der Pfad kommt; genau so machen
-                                 es das Outlook- und das Excel-Add-in.
+                            <div class="kb-collapse-body" id="am-sect-share-body">
+                                <p class="kb-hint" data-i18n-html="amshare.intro">Liegt hier ein Pfad, zeigt die Kachel <b>AI-Maus</b> ihn statt des Download-Knopfes an. Der Grund ist die Sicherheitswarnung beim ersten Start: Windows markiert jede über den <b>Browser</b> geladene Datei, und SmartScreen fragt dann nach. Eine von einer <b>Netzfreigabe</b> kopierte Datei trägt diese Markierung nicht – die Warnung bleibt aus.</p>
+                                <p class="kb-hint" data-i18n-html="amshare.warn">⚠ Die Datei kommt nicht von selbst dorthin. <b>Sie</b> holen sie mit dem Knopf unten und legen sie auf der Freigabe ab – <b>nach jedem Versionswechsel erneut</b>, sonst verteilt die Freigabe einen alten Stand. Leer lassen heißt: Download wie bisher.</p>
+                                <p class="kb-hint" data-i18n-html="amshare.up_note">In <b>Chrome oder Edge</b> geht es ohne Umweg über den Download-Ordner: „Ordner wählen und hineinschreiben“ fragt <i>einmal</i> nach dem Zielordner, merkt ihn sich und schreibt die Anwendung danach direkt hinein. Der eingetragene Pfad ist dabei nur eine Angabe für Menschen – eine Webseite darf nicht in einen Ordner schreiben, der ihr nur als Text genannt wurde.</p>
+                                <div class="form-group">
+                                    <label data-i18n="amshare.lab">Pfad zur AiMouse.exe auf der Freigabe</label>
+                                    <input type="text" id="amshare-pfad" class="input-field"
+                                           autocomplete="off" spellcheck="false"
+                                           placeholder="\\server\freigabe\tools\AiMouse.exe">
+                                </div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button class="btn-primary" id="amshare-save" type="button" data-i18n="amshare.save" style="flex:0 0 auto;">Pfad speichern</button>
+                                    <span id="amshare-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <!-- ⚠ DER DOWNLOAD GEHOERT HIERHER, NICHT IN DIE BENUTZER-KACHEL.
+                                     Dort sah ihn nur der Admin - dieselbe Seite fuer zwei Leute
+                                     verschieden, und er sah nicht, was seine Benutzer sehen. Hier
+                                     steht er neben dem Feld, in das der Pfad kommt; genau so machen
+                                     es das Outlook- und das Excel-Add-in.
 
-                                 ⚠ ABER EIN <button>, KEIN <a href> - anders als dort. Beim
-                                 Outlook-Add-in ist das Manifest eine winzige, ohnehin offene
-                                 Datei; hier sind es 66 MB hinter einer Freigabe, und ein Link
-                                 braeuchte den Token IN DER ADRESSE. Der stuende dann in der
-                                 Adresszeile, im Verlauf und in jedem Proxy-Log. Geladen wird
-                                 als Blob mit Authorization-Kopf - dieselbe Wahl wie in der
-                                 Kachel und beim Paket der Jira-Erweiterung. -->
-                            <!-- Welche Version liefert der Knopf darunter? Wer die Datei auf
-                                 die Freigabe legt, vergleicht sie damit. Befuellt aus
-                                 admin/areas (Version aus der EXE selbst gelesen). -->
-                            <p class="kb-hint" id="amshare-ver" style="margin:0 0 8px;"></p>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
-                                <button class="btn-secondary" id="amshare-dl" type="button"
-                                        style="flex:0 0 auto;"
-                                        data-i18n="amshare.dl">Paket herunterladen</button>
-                                <!-- Ordner-Weg (File System Access API), Vorbild
-                                     #em-addin-upload im E-Mail-Reiter: erscheint nur in
-                                     Chrome/Edge UND mit eingetragenem Pfad - ein Knopf,
-                                     der in Firefox nichts tut, ist schlimmer als keiner.
-                                     Geschrieben wird die EXE selbst, nicht das ZIP. -->
-                                <button class="btn-secondary" id="amshare-up" type="button"
-                                        style="flex:0 0 auto;display:none;"
-                                        data-i18n="amshare.up">Ordner wählen und hineinschreiben</button>
-                                <span id="amshare-dl-hint" class="kb-hint" style="margin:0;"></span>
+                                     ⚠ ABER EIN <button>, KEIN <a href> - anders als dort. Beim
+                                     Outlook-Add-in ist das Manifest eine winzige, ohnehin offene
+                                     Datei; hier sind es 66 MB hinter einer Freigabe, und ein Link
+                                     braeuchte den Token IN DER ADRESSE. Der stuende dann in der
+                                     Adresszeile, im Verlauf und in jedem Proxy-Log. Geladen wird
+                                     als Blob mit Authorization-Kopf - dieselbe Wahl wie in der
+                                     Kachel und beim Paket der Jira-Erweiterung. -->
+                                <!-- Welche Version liefert der Knopf darunter? Wer die Datei auf
+                                     die Freigabe legt, vergleicht sie damit. Befuellt aus
+                                     admin/areas (Version aus der EXE selbst gelesen). -->
+                                <p class="kb-hint" id="amshare-ver" style="margin:0 0 8px;"></p>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+                                    <button class="btn-secondary" id="amshare-dl" type="button"
+                                            style="flex:0 0 auto;"
+                                            data-i18n="amshare.dl">Paket herunterladen</button>
+                                    <!-- Ordner-Weg (File System Access API), Vorbild
+                                         #em-addin-upload im E-Mail-Reiter: erscheint nur in
+                                         Chrome/Edge UND mit eingetragenem Pfad - ein Knopf,
+                                         der in Firefox nichts tut, ist schlimmer als keiner.
+                                         Geschrieben wird die EXE selbst, nicht das ZIP. -->
+                                    <button class="btn-secondary" id="amshare-up" type="button"
+                                            style="flex:0 0 auto;display:none;"
+                                            data-i18n="amshare.up">Ordner wählen und hineinschreiben</button>
+                                    <span id="amshare-dl-hint" class="kb-hint" style="margin:0;"></span>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Code-Signatur (B). ⚠ SIE SCHALTET SmartScreen NICHT AB
-                         – das steht auch im Hinweistext, weil die Erwartung
-                         anders herum verbreitet ist. Was sie leistet: ein
-                         verifizierter Herausgebername und eine erkennbare
-                         Manipulation. Hochgeladen wird der PRIVATE
-                         Signierschluessel des Hauses; es gibt bewusst keinen
-                         Weg, ihn wieder herauszulesen. -->
-                    <div class="kb-section" id="am-sect-sign">
-                        <div class="kb-section-header kb-collapse-header" id="am-sect-sign-hdr">
-                            <h3 data-i18n="amsign.h">Code-Signatur</h3>
-                            <span class="sk-openclaw-toggle" id="am-sect-sign-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="am-sect-sign-body">
-                            <p class="kb-hint" data-i18n-html="amsign.intro">Ist hier ein Zertifikat hinterlegt, wird die Anwendung <b>nach jedem Bau</b> signiert. Damit sieht der Benutzer in den Dateieigenschaften, von wem sie stammt, und eine nachträgliche Veränderung fällt auf. Für ein Zertifikat der <b>Firmen-CA</b> ist das der übliche Weg – die Domänenrechner vertrauen ihr bereits.</p>
-                            <p class="kb-hint" data-i18n-html="amsign.warn">⚠ <b>Die Signatur schaltet SmartScreen nicht ab.</b> Microsoft hat die Sofort-Reputation für EV-Zertifikate 2024 entfernt; seither entsteht sie allein über das Download-Volumen, das ein Haus-Werkzeug nie erreicht. Wer die Warnung beim ersten Start loswerden will, nutzt die <b>Bereitstellung im Netz</b> darüber. Beides zusammen ist der vollständige Ausbau.</p>
-                            <div id="amsign-state" class="kb-hint"></div>
-                            <!-- Zwei Wege: Zertifikatsdatei (privater Schluessel liegt auf
-                                 dem Server) oder Azure Key Vault (Schluessel bleibt im Vault).
-                                 Die Auswahl zeigt nur die Felder; WIRKSAM wird sie beim
-                                 Speichern – sonst signierte ein Klick ohne Zugangsdaten. -->
-                            <div class="form-group">
-                                <label data-i18n="amsign.weg">Signierweg</label>
-                                <div>
-                                    <label class="checkbox-group" style="display:inline-flex;gap:6px;margin-right:18px;">
-                                        <input type="radio" name="amsign-weg" id="amsign-weg-pfx" value="pfx" checked><span data-i18n="amsign.weg_pfx">Zertifikatsdatei (.pfx / .p12)</span>
-                                    </label>
-                                    <label class="checkbox-group" style="display:inline-flex;gap:6px;">
-                                        <input type="radio" name="amsign-weg" id="amsign-weg-kv" value="keyvault"><span data-i18n="amsign.weg_kv">Azure Key Vault</span>
-                                    </label>
-                                </div>
+                        <!-- Code-Signatur (B). ⚠ SIE SCHALTET SmartScreen NICHT AB
+                             – das steht auch im Hinweistext, weil die Erwartung
+                             anders herum verbreitet ist. Was sie leistet: ein
+                             verifizierter Herausgebername und eine erkennbare
+                             Manipulation. Hochgeladen wird der PRIVATE
+                             Signierschluessel des Hauses; es gibt bewusst keinen
+                             Weg, ihn wieder herauszulesen. -->
+                        <div class="kb-section" id="am-sect-sign">
+                            <div class="kb-section-header kb-collapse-header" id="am-sect-sign-hdr">
+                                <h3 data-i18n="amsign.h">Code-Signatur</h3>
+                                <span class="sk-openclaw-toggle" id="am-sect-sign-tog">▼</span>
                             </div>
-                            <div id="amsign-pfx-box">
+                            <div class="kb-collapse-body" id="am-sect-sign-body">
+                                <p class="kb-hint" data-i18n-html="amsign.intro">Ist hier ein Zertifikat hinterlegt, wird die Anwendung <b>nach jedem Bau</b> signiert. Damit sieht der Benutzer in den Dateieigenschaften, von wem sie stammt, und eine nachträgliche Veränderung fällt auf. Für ein Zertifikat der <b>Firmen-CA</b> ist das der übliche Weg – die Domänenrechner vertrauen ihr bereits.</p>
+                                <p class="kb-hint" data-i18n-html="amsign.warn">⚠ <b>Die Signatur schaltet SmartScreen nicht ab.</b> Microsoft hat die Sofort-Reputation für EV-Zertifikate 2024 entfernt; seither entsteht sie allein über das Download-Volumen, das ein Haus-Werkzeug nie erreicht. Wer die Warnung beim ersten Start loswerden will, nutzt die <b>Bereitstellung im Netz</b> darüber. Beides zusammen ist der vollständige Ausbau.</p>
+                                <div id="amsign-state" class="kb-hint"></div>
+                                <!-- Zwei Wege: Zertifikatsdatei (privater Schluessel liegt auf
+                                     dem Server) oder Azure Key Vault (Schluessel bleibt im Vault).
+                                     Die Auswahl zeigt nur die Felder; WIRKSAM wird sie beim
+                                     Speichern – sonst signierte ein Klick ohne Zugangsdaten. -->
                                 <div class="form-group">
-                                    <label data-i18n="amsign.file">Zertifikat (.pfx / .p12, mit privatem Schlüssel)</label>
-                                    <input type="file" id="amsign-datei" class="input-field" accept=".pfx,.p12">
+                                    <label data-i18n="amsign.weg">Signierweg</label>
+                                    <div>
+                                        <label class="checkbox-group" style="display:inline-flex;gap:6px;margin-right:18px;">
+                                            <input type="radio" name="amsign-weg" id="amsign-weg-pfx" value="pfx" checked><span data-i18n="amsign.weg_pfx">Zertifikatsdatei (.pfx / .p12)</span>
+                                        </label>
+                                        <label class="checkbox-group" style="display:inline-flex;gap:6px;">
+                                            <input type="radio" name="amsign-weg" id="amsign-weg-kv" value="keyvault"><span data-i18n="amsign.weg_kv">Azure Key Vault</span>
+                                        </label>
+                                    </div>
                                 </div>
-                                <div class="form-group">
-                                    <label data-i18n="amsign.pw">Kennwort des Zertifikats</label>
-                                    <input type="password" id="amsign-pw" class="input-field"
-                                           autocomplete="new-password"
-                                           data-i18n-placeholder="amsign.pw_ph" placeholder="wird verschlüsselt gespeichert">
-                                </div>
-                            </div>
-                            <div id="amsign-kv-box" hidden>
-                                <p class="kb-hint" data-i18n-html="amsign.kv_intro">Der private Schlüssel bleibt im <b>Azure Key Vault</b>; der Server schickt nur die Prüfsumme der Anwendung zum Signieren dorthin. Beim Speichern meldet er sich an, liest das Zertifikat und lässt den Vault einmal probehalber signieren – erst dann wird gespeichert. ⚠ Der Vault nimmt nur Anfragen von <b>freigegebenen Netzadressen</b> an; steht dieser Server nicht darauf, sagt die Meldung das.</p>
-                                <div class="form-group">
-                                    <label data-i18n="amsign.kv_vault">Key Vault (Name oder Adresse)</label>
-                                    <input type="text" id="amsign-kv-vault" class="input-field" autocomplete="off" spellcheck="false"
-                                           placeholder="https://&lt;name&gt;.vault.azure.net">
-                                </div>
-                                <div class="form-group">
-                                    <label data-i18n="amsign.kv_tenant">Verzeichnis-ID (Tenant)</label>
-                                    <input type="text" id="amsign-kv-tenant" class="input-field" autocomplete="off" spellcheck="false"
-                                           placeholder="00000000-0000-0000-0000-000000000000">
-                                </div>
-                                <div class="form-group">
-                                    <label data-i18n="amsign.kv_client">Anwendungs-ID (Client)</label>
-                                    <input type="text" id="amsign-kv-client" class="input-field" autocomplete="off" spellcheck="false"
-                                           placeholder="00000000-0000-0000-0000-000000000000">
-                                </div>
-                                <div class="form-group">
-                                    <label data-i18n="amsign.kv_secret">Client-Secret</label>
-                                    <input type="password" id="amsign-kv-secret" class="input-field" autocomplete="new-password"
-                                           data-i18n-placeholder="amsign.pw_ph" placeholder="wird verschlüsselt gespeichert">
-                                </div>
-                                <div class="form-group">
-                                    <label data-i18n="amsign.kv_cert">Name des Zertifikats im Vault</label>
-                                    <input type="text" id="amsign-kv-cert" class="input-field" autocomplete="off" spellcheck="false">
-                                </div>
-                                <details style="margin:4px 0 10px;">
-                                    <summary data-i18n="amsign.kv_erweitert">Erweitert</summary>
+                                <div id="amsign-pfx-box">
                                     <div class="form-group">
-                                        <label data-i18n="amsign.kv_auth">Anmeldeadresse</label>
-                                        <input type="text" id="amsign-kv-auth" class="input-field" autocomplete="off" spellcheck="false">
-                                        <small class="form-hint" data-i18n="amsign.kv_auth_hint">Leer lassen = Vorgabe. Nur für eine andere Azure-Cloud ändern; dorthin geht das Client-Secret.</small>
+                                        <label data-i18n="amsign.file">Zertifikat (.pfx / .p12, mit privatem Schlüssel)</label>
+                                        <input type="file" id="amsign-datei" class="input-field" accept=".pfx,.p12">
                                     </div>
                                     <div class="form-group">
-                                        <label data-i18n="amsign.kv_jsign">Bezugsquelle des Signierprogramms (jsign)</label>
-                                        <input type="text" id="amsign-kv-jsign" class="input-field" autocomplete="off" spellcheck="false">
-                                        <small class="form-hint" data-i18n="amsign.kv_jsign_hint">Leer lassen = Vorgabe. Z.B. ein interner Spiegel – verwendet wird die Datei nur, wenn ihre Prüfsumme stimmt.</small>
+                                        <label data-i18n="amsign.pw">Kennwort des Zertifikats</label>
+                                        <input type="password" id="amsign-pw" class="input-field"
+                                               autocomplete="new-password"
+                                               data-i18n-placeholder="amsign.pw_ph" placeholder="wird verschlüsselt gespeichert">
                                     </div>
-                                </details>
-                            </div>
-                            <div class="form-group">
-                                <label data-i18n="amsign.tsa">Zeitstempel-Dienst (RFC 3161)</label>
-                                <input type="text" id="amsign-tsa" class="input-field"
-                                       autocomplete="off" spellcheck="false"
-                                       placeholder="http://timestamp.digicert.com">
-                                <small class="form-hint" data-i18n="amsign.tsa_hint">Ohne Zeitstempel wird die Signatur ungültig, sobald das Zertifikat abläuft – auch für längst verteilte Dateien. Leer lassen nur, wenn der Server keinen Weg nach außen hat.</small>
-                            </div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                                <button class="btn-primary" id="amsign-save" type="button" data-i18n="amsign.save" style="flex:0 0 auto;">Speichern</button>
-                                <button class="btn-secondary" id="amsign-del" type="button" data-i18n="amsign.del" style="flex:0 0 auto;">Zertifikat entfernen</button>
-                                <button class="btn-secondary" id="amsign-kv-del" type="button" data-i18n="amsign.kv_del" style="flex:0 0 auto;" hidden>Key-Vault-Zugang entfernen</button>
-                                <span id="amsign-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <div id="amsign-kv-box" hidden>
+                                    <p class="kb-hint" data-i18n-html="amsign.kv_intro">Der private Schlüssel bleibt im <b>Azure Key Vault</b>; der Server schickt nur die Prüfsumme der Anwendung zum Signieren dorthin. Beim Speichern meldet er sich an, liest das Zertifikat und lässt den Vault einmal probehalber signieren – erst dann wird gespeichert. ⚠ Der Vault nimmt nur Anfragen von <b>freigegebenen Netzadressen</b> an; steht dieser Server nicht darauf, sagt die Meldung das.</p>
+                                    <div class="form-group">
+                                        <label data-i18n="amsign.kv_vault">Key Vault (Name oder Adresse)</label>
+                                        <input type="text" id="amsign-kv-vault" class="input-field" autocomplete="off" spellcheck="false"
+                                               placeholder="https://&lt;name&gt;.vault.azure.net">
+                                    </div>
+                                    <div class="form-group">
+                                        <label data-i18n="amsign.kv_tenant">Verzeichnis-ID (Tenant)</label>
+                                        <input type="text" id="amsign-kv-tenant" class="input-field" autocomplete="off" spellcheck="false"
+                                               placeholder="00000000-0000-0000-0000-000000000000">
+                                    </div>
+                                    <div class="form-group">
+                                        <label data-i18n="amsign.kv_client">Anwendungs-ID (Client)</label>
+                                        <input type="text" id="amsign-kv-client" class="input-field" autocomplete="off" spellcheck="false"
+                                               placeholder="00000000-0000-0000-0000-000000000000">
+                                    </div>
+                                    <div class="form-group">
+                                        <label data-i18n="amsign.kv_secret">Client-Secret</label>
+                                        <input type="password" id="amsign-kv-secret" class="input-field" autocomplete="new-password"
+                                               data-i18n-placeholder="amsign.pw_ph" placeholder="wird verschlüsselt gespeichert">
+                                    </div>
+                                    <div class="form-group">
+                                        <label data-i18n="amsign.kv_cert">Name des Zertifikats im Vault</label>
+                                        <input type="text" id="amsign-kv-cert" class="input-field" autocomplete="off" spellcheck="false">
+                                    </div>
+                                    <details style="margin:4px 0 10px;">
+                                        <summary data-i18n="amsign.kv_erweitert">Erweitert</summary>
+                                        <div class="form-group">
+                                            <label data-i18n="amsign.kv_auth">Anmeldeadresse</label>
+                                            <input type="text" id="amsign-kv-auth" class="input-field" autocomplete="off" spellcheck="false">
+                                            <small class="form-hint" data-i18n="amsign.kv_auth_hint">Leer lassen = Vorgabe. Nur für eine andere Azure-Cloud ändern; dorthin geht das Client-Secret.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label data-i18n="amsign.kv_jsign">Bezugsquelle des Signierprogramms (jsign)</label>
+                                            <input type="text" id="amsign-kv-jsign" class="input-field" autocomplete="off" spellcheck="false">
+                                            <small class="form-hint" data-i18n="amsign.kv_jsign_hint">Leer lassen = Vorgabe. Z.B. ein interner Spiegel – verwendet wird die Datei nur, wenn ihre Prüfsumme stimmt.</small>
+                                        </div>
+                                    </details>
+                                </div>
+                                <div class="form-group">
+                                    <label data-i18n="amsign.tsa">Zeitstempel-Dienst (RFC 3161)</label>
+                                    <input type="text" id="amsign-tsa" class="input-field"
+                                           autocomplete="off" spellcheck="false"
+                                           placeholder="http://timestamp.digicert.com">
+                                    <small class="form-hint" data-i18n="amsign.tsa_hint">Ohne Zeitstempel wird die Signatur ungültig, sobald das Zertifikat abläuft – auch für längst verteilte Dateien. Leer lassen nur, wenn der Server keinen Weg nach außen hat.</small>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button class="btn-primary" id="amsign-save" type="button" data-i18n="amsign.save" style="flex:0 0 auto;">Speichern</button>
+                                    <button class="btn-secondary" id="amsign-del" type="button" data-i18n="amsign.del" style="flex:0 0 auto;">Zertifikat entfernen</button>
+                                    <button class="btn-secondary" id="amsign-kv-del" type="button" data-i18n="amsign.kv_del" style="flex:0 0 auto;" hidden>Key-Vault-Zugang entfernen</button>
+                                    <span id="amsign-status" style="font-size:0.9em;"></span>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Vorgabe-Fragen: die VORLAGE fuer neue Benutzer. Sie wird
-                         beim ERSTEN Start in die eigene Liste kopiert und
-                         gehoert danach dem Benutzer – anders als eine
-                         gemeinsame Frage, die nur ein Administrator aendern
-                         darf. Der Unterschied steht als Hinweis in der Box,
-                         sonst ist er von aussen nicht zu erraten. -->
-                    <div class="kb-section" id="am-sect-vorg">
-                        <div class="kb-section-header kb-collapse-header" id="am-sect-vorg-hdr">
-                            <h3 data-i18n="amvorg.h">Vorgabe-Fragen für neue Benutzer</h3>
-                            <span class="sk-openclaw-toggle" id="am-sect-vorg-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="am-sect-vorg-body">
-                            <p class="kb-hint" data-i18n-html="amvorg.intro">Diese Einträge bekommt ein Benutzer <b>beim ersten Start</b> von AI-Maus in sein Menü kopiert. Ab dann gehören sie ihm: er darf sie ändern, ergänzen und löschen – seine Fassung bleibt erhalten.</p>
-                            <p class="kb-hint" data-i18n-html="amvorg.warn">⚠ Eine Änderung hier wirkt nur für Benutzer, die AI-Maus <b>noch nie</b> benutzt haben. Wer die Vorgaben schon bekommen hat, behält seine eigenen – das ist der Sinn einer Vorgabe. Eine Frage, die <b>für alle verbindlich</b> gelten soll, wird stattdessen im Portal unter <b>AI-Maus → Meine Fragen</b> als „für alle" angelegt.</p>
-                            <div id="amvorg-liste"></div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                                <button class="btn-secondary" id="amvorg-neu" type="button" data-i18n="amvorg.new" style="flex:0 0 auto;">+ Vorgabe</button>
-                                <span id="amvorg-status" style="font-size:0.9em;"></span>
+                        <!-- Vorgabe-Fragen: die VORLAGE fuer neue Benutzer. Sie wird
+                             beim ERSTEN Start in die eigene Liste kopiert und
+                             gehoert danach dem Benutzer – anders als eine
+                             gemeinsame Frage, die nur ein Administrator aendern
+                             darf. Der Unterschied steht als Hinweis in der Box,
+                             sonst ist er von aussen nicht zu erraten. -->
+                        <div class="kb-section" id="am-sect-vorg">
+                            <div class="kb-section-header kb-collapse-header" id="am-sect-vorg-hdr">
+                                <h3 data-i18n="amvorg.h">Vorgabe-Fragen für neue Benutzer</h3>
+                                <span class="sk-openclaw-toggle" id="am-sect-vorg-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="am-sect-vorg-body">
+                                <p class="kb-hint" data-i18n-html="amvorg.intro">Diese Einträge bekommt ein Benutzer <b>beim ersten Start</b> von AI-Maus in sein Menü kopiert. Ab dann gehören sie ihm: er darf sie ändern, ergänzen und löschen – seine Fassung bleibt erhalten.</p>
+                                <p class="kb-hint" data-i18n-html="amvorg.warn">⚠ Eine Änderung hier wirkt nur für Benutzer, die AI-Maus <b>noch nie</b> benutzt haben. Wer die Vorgaben schon bekommen hat, behält seine eigenen – das ist der Sinn einer Vorgabe. Eine Frage, die <b>für alle verbindlich</b> gelten soll, wird stattdessen im Portal unter <b>AI-Maus → Meine Fragen</b> als „für alle" angelegt.</p>
+                                <div id="amvorg-liste"></div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button class="btn-secondary" id="amvorg-neu" type="button" data-i18n="amvorg.new" style="flex:0 0 auto;">+ Vorgabe</button>
+                                    <span id="amvorg-status" style="font-size:0.9em;"></span>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <div class="kb-section" id="am-sect-info">
-                        <div class="kb-section-header kb-collapse-header" id="am-sect-info-hdr">
-                            <h3 data-i18n="amtool.state_h">Zustand</h3>
-                            <span class="sk-openclaw-toggle" id="am-sect-info-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="am-sect-info-body">
-                            <div id="amtool-state"></div>
-                            <p class="kb-hint" data-i18n-html="amtool.state_hint">Wer AI-Maus benutzen darf, steht getrennt davon unter <b>Sicherheit → Berechtigungen, Spalte „AI-Maus“</b> („leer = niemand"). Die Anwendung selbst holen die Benutzer unter <b>Portal → AI-Maus</b>.</p>
+                        <div class="kb-section" id="am-sect-info">
+                            <div class="kb-section-header kb-collapse-header" id="am-sect-info-hdr">
+                                <h3 data-i18n="amtool.state_h">Zustand</h3>
+                                <span class="sk-openclaw-toggle" id="am-sect-info-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="am-sect-info-body">
+                                <div id="amtool-state"></div>
+                                <p class="kb-hint" data-i18n-html="amtool.state_hint">Wer AI-Maus benutzen darf, steht getrennt davon unter <b>Sicherheit → Berechtigungen, Spalte „AI-Maus“</b> („leer = niemand"). Die Anwendung selbst holen die Benutzer unter <b>Portal → AI-Maus</b>.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -4714,50 +4777,52 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      Karte je Eintrag, Ziehgriff fuer die Reihenfolge, und das
                      Bearbeiten-Formular klappt DIREKT unter der Zeile auf. -->
                 <div id="settings-tab-feedback" class="settings-tab-content" style="display:none;">
-                    <div class="kb-section" id="fb-sect-form">
-                        <div class="kb-section-header kb-collapse-header" id="fb-sect-form-hdr">
-                            <h3 data-i18n="fbadm.h">Formulare</h3>
-                            <span class="sk-openclaw-toggle" id="fb-sect-form-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="fb-sect-form-body">
-                            <p class="kb-hint" data-i18n-html="fbadm.intro">Ein Formular ist eine <b>Tabelle</b>: du legst die <b>Spalten</b> fest, der Benutzer legt beliebig viele <b>Zeilen</b> an und füllt sie aus. Zwei Spaltentypen stehen zur Wahl – ein <b>Textfeld</b> und eine <b>5-Sterne-Bewertung</b>.</p>
-                            <p class="kb-hint" data-i18n-html="fbadm.warn">Eine Abgabe wird <b>nur gespeichert</b> – es läuft kein Modell, es entstehen keine Kosten. Die Spalten lassen sich später ändern: bereits abgegebene Zeilen bleiben trotzdem richtig beschriftet, weil jede Abgabe ihre damaligen Spalten mitspeichert.</p>
-                            <div id="fbadm-liste"></div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
-                                <button class="btn-secondary" id="fbadm-neu" type="button" data-i18n="fbadm.new" style="flex:0 0 auto;">+ Formular</button>
-                                <span id="fbadm-status" style="font-size:0.9em;"></span>
+                    <div class="kb-container">
+                        <div class="kb-section" id="fb-sect-form">
+                            <div class="kb-section-header kb-collapse-header" id="fb-sect-form-hdr">
+                                <h3 data-i18n="fbadm.h">Formulare</h3>
+                                <span class="sk-openclaw-toggle" id="fb-sect-form-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="fb-sect-form-body">
+                                <p class="kb-hint" data-i18n-html="fbadm.intro">Ein Formular ist eine <b>Tabelle</b>: du legst die <b>Spalten</b> fest, der Benutzer legt beliebig viele <b>Zeilen</b> an und füllt sie aus. Zwei Spaltentypen stehen zur Wahl – ein <b>Textfeld</b> und eine <b>5-Sterne-Bewertung</b>.</p>
+                                <p class="kb-hint" data-i18n-html="fbadm.warn">Eine Abgabe wird <b>nur gespeichert</b> – es läuft kein Modell, es entstehen keine Kosten. Die Spalten lassen sich später ändern: bereits abgegebene Zeilen bleiben trotzdem richtig beschriftet, weil jede Abgabe ihre damaligen Spalten mitspeichert.</p>
+                                <div id="fbadm-liste"></div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
+                                    <button class="btn-secondary" id="fbadm-neu" type="button" data-i18n="fbadm.new" style="flex:0 0 auto;">+ Formular</button>
+                                    <span id="fbadm-status" style="font-size:0.9em;"></span>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Auswertung. Der CSV-Export geht ueber einen Blob, NICHT
-                         ueber einen Link mit ?token= – ein <a href> kann keinen
-                         Authorization-Header setzen, und das Token stuende dann
-                         im Browser-Verlauf (Register). -->
-                    <div class="kb-section" id="fb-sect-abg">
-                        <div class="kb-section-header kb-collapse-header" id="fb-sect-abg-hdr">
-                            <h3 data-i18n="fbadm.abg_h">Abgaben</h3>
-                            <span class="sk-openclaw-toggle" id="fb-sect-abg-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="fb-sect-abg-body">
-                            <p class="kb-hint" data-i18n-html="fbadm.abg_intro">Alle Abgaben zu einem Formular – neueste zuerst. Der Benutzer selbst sieht in seiner Kachel <b>nur die eigenen</b>.</p>
-                            <div class="fb-abg-kopf">
-                                <select id="fbadm-abg-sel" aria-label="Formular"></select>
-                                <button class="ja-btn" id="fbadm-export" type="button" data-i18n="fbadm.export">CSV herunterladen</button>
-                                <span id="fbadm-abg-status" style="font-size:0.9em;"></span>
+                        <!-- Auswertung. Der CSV-Export geht ueber einen Blob, NICHT
+                             ueber einen Link mit ?token= – ein <a href> kann keinen
+                             Authorization-Header setzen, und das Token stuende dann
+                             im Browser-Verlauf (Register). -->
+                        <div class="kb-section" id="fb-sect-abg">
+                            <div class="kb-section-header kb-collapse-header" id="fb-sect-abg-hdr">
+                                <h3 data-i18n="fbadm.abg_h">Abgaben</h3>
+                                <span class="sk-openclaw-toggle" id="fb-sect-abg-tog">▼</span>
                             </div>
-                            <div id="fbadm-abgaben"></div>
+                            <div class="kb-collapse-body" id="fb-sect-abg-body">
+                                <p class="kb-hint" data-i18n-html="fbadm.abg_intro">Alle Abgaben zu einem Formular – neueste zuerst. Der Benutzer selbst sieht in seiner Kachel <b>nur die eigenen</b>.</p>
+                                <div class="fb-abg-kopf">
+                                    <select id="fbadm-abg-sel" aria-label="Formular"></select>
+                                    <button class="ja-btn" id="fbadm-export" type="button" data-i18n="fbadm.export">CSV herunterladen</button>
+                                    <span id="fbadm-abg-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <div id="fbadm-abgaben"></div>
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="kb-section" id="fb-sect-info">
-                        <div class="kb-section-header kb-collapse-header" id="fb-sect-info-hdr">
-                            <h3 data-i18n="fbadm.state_h">Zustand</h3>
-                            <span class="sk-openclaw-toggle" id="fb-sect-info-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="fb-sect-info-body">
-                            <div id="fbadm-state"></div>
-                            <p class="kb-hint" data-i18n-html="fbadm.state_hint">Feedback abgeben darf, wer <b>Wissen bearbeiten</b> darf – dieselbe Gruppe, die auch die Kachel <b>Wissen</b> sieht: globale Wissens-Editoren und Editoren einzelner Wissensgruppen. Eine eigene Liste gibt es dafür nicht. Die Formulare füllen die Benutzer unter <b>Portal → Feedback</b> aus; <b>alle</b> Abgaben siehst nur du hier.</p>
+                        <div class="kb-section" id="fb-sect-info">
+                            <div class="kb-section-header kb-collapse-header" id="fb-sect-info-hdr">
+                                <h3 data-i18n="fbadm.state_h">Zustand</h3>
+                                <span class="sk-openclaw-toggle" id="fb-sect-info-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="fb-sect-info-body">
+                                <div id="fbadm-state"></div>
+                                <p class="kb-hint" data-i18n-html="fbadm.state_hint">Feedback abgeben darf, wer <b>Wissen bearbeiten</b> darf – dieselbe Gruppe, die auch die Kachel <b>Wissen</b> sieht: globale Wissens-Editoren und Editoren einzelner Wissensgruppen. Eine eigene Liste gibt es dafür nicht. Die Formulare füllen die Benutzer unter <b>Portal → Feedback</b> aus; <b>alle</b> Abgaben siehst nur du hier.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -4769,52 +4834,54 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      AI-Maus-Vorgaben (.am-vorg-*): Bearbeiten klappt DIREKT
                      unter der Zeile auf. -->
                 <div id="settings-tab-newsfeed" class="settings-tab-content" style="display:none;">
-                    <div class="kb-section" id="nf-sect-list">
-                        <div class="kb-section-header kb-collapse-header" id="nf-sect-list-hdr">
-                            <h3 data-i18n="nfadm.h">Meldungen</h3>
-                            <span class="sk-openclaw-toggle" id="nf-sect-list-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="nf-sect-list-body">
-                            <p class="kb-hint" data-i18n-html="nfadm.intro">Jede Meldung hat eine <b>Überschrift</b> und <b>ein bis drei Sätze</b> Text. Im Portal erscheinen die <b>neuesten aktiven</b> als Laufband – wie viele, legt <b>Anzeige</b> fest (Vorgabe: drei). <b>Bearbeiten gilt als Neuigkeit:</b> die Meldung rückt nach vorn und erscheint auch bei Benutzern wieder, die den Newsfeed ausgeblendet haben. Das Erstellungsdatum bleibt dabei stehen. <b>Deaktivieren</b> nimmt eine Meldung aus dem Portal; sichtbar wird sie erst nach dem nächsten Bearbeiten wieder.</p>
-                            <p class="kb-hint" id="nfadm-skill-aus" style="display:none;color:var(--warning);" data-i18n-html="nfadm.skill_off">Der Skill <b>Newsfeed</b> ist ausgeschaltet – Meldungen lassen sich schon anlegen, im Portal erscheinen sie erst nach dem Einschalten unter <b>Skills</b>.</p>
-                            <div id="nfadm-liste"></div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
-                                <button class="btn-secondary" id="nfadm-neu" type="button" data-i18n="nfadm.new" style="flex:0 0 auto;">+ Meldung</button>
-                                <span id="nfadm-status" style="font-size:0.9em;"></span>
+                    <div class="kb-container">
+                        <div class="kb-section" id="nf-sect-list">
+                            <div class="kb-section-header kb-collapse-header" id="nf-sect-list-hdr">
+                                <h3 data-i18n="nfadm.h">Meldungen</h3>
+                                <span class="sk-openclaw-toggle" id="nf-sect-list-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="nf-sect-list-body">
+                                <p class="kb-hint" data-i18n-html="nfadm.intro">Jede Meldung hat eine <b>Überschrift</b> und <b>ein bis drei Sätze</b> Text. Im Portal erscheinen die <b>neuesten aktiven</b> als Laufband – wie viele, legt <b>Anzeige</b> fest (Vorgabe: drei). <b>Bearbeiten gilt als Neuigkeit:</b> die Meldung rückt nach vorn und erscheint auch bei Benutzern wieder, die den Newsfeed ausgeblendet haben. Das Erstellungsdatum bleibt dabei stehen. <b>Deaktivieren</b> nimmt eine Meldung aus dem Portal; sichtbar wird sie erst nach dem nächsten Bearbeiten wieder.</p>
+                                <p class="kb-hint" id="nfadm-skill-aus" style="display:none;color:var(--warning);" data-i18n-html="nfadm.skill_off">Der Skill <b>Newsfeed</b> ist ausgeschaltet – Meldungen lassen sich schon anlegen, im Portal erscheinen sie erst nach dem Einschalten unter <b>Skills</b>.</p>
+                                <div id="nfadm-liste"></div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;">
+                                    <button class="btn-secondary" id="nfadm-neu" type="button" data-i18n="nfadm.new" style="flex:0 0 auto;">+ Meldung</button>
+                                    <span id="nfadm-status" style="font-size:0.9em;"></span>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <div class="kb-section" id="nf-sect-anz">
-                        <div class="kb-section-header kb-collapse-header" id="nf-sect-anz-hdr">
-                            <h3 data-i18n="nfadm.anz_h">Anzeige</h3>
-                            <span class="sk-openclaw-toggle" id="nf-sect-anz-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="nf-sect-anz-body">
-                            <div class="form-group">
-                                <label for="nfadm-anzahl" data-i18n="nfadm.anzahl">Anzahl der Meldungen im Portal</label>
-                                <input type="number" id="nfadm-anzahl" min="1" max="100" step="1">
-                                <label class="checkbox-group" style="margin-top:8px;"><input type="checkbox" id="nfadm-anzahl-alle"><span data-i18n="nfadm.anzahl_alle">Alle aktiven Meldungen zeigen</span></label>
-                                <span class="kb-hint" data-i18n="nfadm.anzahl_hint">Die neuesten aktiven Meldungen laufen nacheinander durch; bei einer einzigen steht die Kachel still. Vorgabe: 3.</span>
+                        <div class="kb-section" id="nf-sect-anz">
+                            <div class="kb-section-header kb-collapse-header" id="nf-sect-anz-hdr">
+                                <h3 data-i18n="nfadm.anz_h">Anzeige</h3>
+                                <span class="sk-openclaw-toggle" id="nf-sect-anz-tog">▼</span>
                             </div>
-                            <div class="form-group">
-                                <label for="nfadm-verweil" data-i18n="nfadm.verweil">Verweilzeit je Meldung (Sekunden)</label>
-                                <input type="number" id="nfadm-verweil" min="1" max="60" step="0.5">
-                                <span class="kb-hint" data-i18n="nfadm.verweil_hint">So lange bleibt eine Meldung stehen, bevor sie nach oben hinausrollt. Vorgabe: 3 Sekunden.</span>
+                            <div class="kb-collapse-body" id="nf-sect-anz-body">
+                                <div class="form-group">
+                                    <label for="nfadm-anzahl" data-i18n="nfadm.anzahl">Anzahl der Meldungen im Portal</label>
+                                    <input type="number" id="nfadm-anzahl" min="1" max="100" step="1">
+                                    <label class="checkbox-group" style="margin-top:8px;"><input type="checkbox" id="nfadm-anzahl-alle"><span data-i18n="nfadm.anzahl_alle">Alle aktiven Meldungen zeigen</span></label>
+                                    <span class="kb-hint" data-i18n="nfadm.anzahl_hint">Die neuesten aktiven Meldungen laufen nacheinander durch; bei einer einzigen steht die Kachel still. Vorgabe: 3.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="nfadm-verweil" data-i18n="nfadm.verweil">Verweilzeit je Meldung (Sekunden)</label>
+                                    <input type="number" id="nfadm-verweil" min="1" max="60" step="0.5">
+                                    <span class="kb-hint" data-i18n="nfadm.verweil_hint">So lange bleibt eine Meldung stehen, bevor sie nach oben hinausrollt. Vorgabe: 3 Sekunden.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="nfadm-scroll" data-i18n="nfadm.scroll">Scrollgeschwindigkeit – Dauer eines Wechsels (Sekunden)</label>
+                                    <input type="number" id="nfadm-scroll" min="0.2" max="5" step="0.1">
+                                    <span class="kb-hint" data-i18n="nfadm.scroll_hint">Kleiner = schneller. Vorgabe: 0,8 Sekunden.</span>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                                    <button class="btn-primary" id="nfadm-anz-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                                    <span id="nfadm-anz-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <h4 style="margin:18px 0 8px;" data-i18n="nfadm.preview">Vorschau</h4>
+                                <p class="kb-hint" data-i18n="nfadm.preview_hint">So sehen die Benutzer die Kachel – mit den Werten aus den Feldern oben, auch vor dem Speichern.</p>
+                                <section id="nfadm-vorschau" class="nf-kachel" hidden></section>
+                                <p class="kb-hint" id="nfadm-vorschau-leer" data-i18n="nfadm.preview_empty">Noch keine Meldung – die Kachel bleibt im Portal verborgen.</p>
                             </div>
-                            <div class="form-group">
-                                <label for="nfadm-scroll" data-i18n="nfadm.scroll">Scrollgeschwindigkeit – Dauer eines Wechsels (Sekunden)</label>
-                                <input type="number" id="nfadm-scroll" min="0.2" max="5" step="0.1">
-                                <span class="kb-hint" data-i18n="nfadm.scroll_hint">Kleiner = schneller. Vorgabe: 0,8 Sekunden.</span>
-                            </div>
-                            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                                <button class="btn-primary" id="nfadm-anz-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
-                                <span id="nfadm-anz-status" style="font-size:0.9em;"></span>
-                            </div>
-                            <h4 style="margin:18px 0 8px;" data-i18n="nfadm.preview">Vorschau</h4>
-                            <p class="kb-hint" data-i18n="nfadm.preview_hint">So sehen die Benutzer die Kachel – mit den Werten aus den Feldern oben, auch vor dem Speichern.</p>
-                            <section id="nfadm-vorschau" class="nf-kachel" hidden></section>
-                            <p class="kb-hint" id="nfadm-vorschau-leer" data-i18n="nfadm.preview_empty">Noch keine Meldung – die Kachel bleibt im Portal verborgen.</p>
                         </div>
                     </div>
                 </div>
@@ -4824,36 +4891,46 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                      TAB_BUTTONS und NICHT in TARGETS von skillcfg.js – wie
                      newsfeed. Daten ueber /api/sql/admin* (nur Admins). -->
                 <div id="settings-tab-sql" class="settings-tab-content" style="display:none;">
-                    <p class="kb-hint" data-i18n-html="sqladm.intro">Der <b>SQL-Assistent</b> wandelt Fragen in Alltagssprache in geprüfte SQL-Abfragen um. Grundlage sind die <b>Schemata</b>: je Datenbank ein Schema – ein eigener Container mit seinem Namen, seinen Schema-Dateien (SQL-DDL wie CREATE TABLE … oder YAML-Exporte mit einer Tabelle bzw. Sicht je Datei), seinen <b>Einstellungen</b> (Dialekt, Dateimuster, Beziehungen, Höchstzahlen) und seiner <b>Erfassung</b>. <b>Wer</b> den Assistenten benutzen darf, steht unter <b>Sicherheit → Berechtigungen</b>, Spalte „SQL-Assistent“ (leer = niemand). <b>Welches</b> Schema eine Frage betrifft, wählt der Benutzer selbst – im Chat neben den Wissensgruppen, auf der Seite „SQL-Assistent“ oben.</p>
-                    <p class="kb-hint" data-i18n="sqladm.schemas_hint">Lege je Datenbank ein Schema an und speichere. Danach nimmt die Ablage in seinem Container Dateien, ganze Ordner (die Ordnerstruktur bleibt erhalten) oder ZIP-Archive an. Nach jedem Hochladen und Löschen wird dieses Schema automatisch neu erfasst. Ein Schema zu entfernen löscht auch seine Dateien.</p>
-
-                    <!-- Je Schema EIN Container (sql_admin.js zeichnet sie): Name,
-                         Dateien, Einstellungen und Erfassung gehoeren zum Schema
-                         (Vorgabe des Betreibers 2026-11-10). -->
-                    <div id="sqadm-schemata"></div>
-                    <div class="sqadm-aktionen sqadm-fuss">
-                        <button class="btn-secondary" id="sqadm-neu" type="button" data-i18n="sqladm.add">+ Schema</button>
-                        <button class="btn-primary" id="sqadm-save" type="button" data-i18n="common.save">Speichern</button>
-                        <span id="sqadm-status" style="font-size:0.9em;"></span>
-                    </div>
-                    <ul class="sqadm-hinweise" id="sqadm-hinweise"></ul>
-
-                    <div class="kb-section" id="sq-sect-allg">
-                        <div class="kb-section-header kb-collapse-header" id="sq-sect-allg-hdr">
-                            <h3 data-i18n="sqladm.general_h">Für alle Schemata</h3>
-                            <span class="sk-openclaw-toggle" id="sq-sect-allg-tog">▼</span>
-                        </div>
-                        <div class="kb-collapse-body" id="sq-sect-allg-body">
-                            <p class="kb-hint" data-i18n="sqladm.general_hint">Diese beiden Vorgaben gelten für den ganzen Server. Dialekt, Dateimuster, Beziehungen und Höchstzahlen stellst du je Schema ein – in seinem Container oben.</p>
-                            <div class="form-group">
-                                <label for="sqadm-prozesse" data-i18n="sqladm.procs">Parallele Leseprozesse beim Erfassen</label>
-                                <input type="number" id="sqadm-prozesse" class="config-input" min="0" max="32" step="1">
-                                <span class="kb-hint" data-i18n="sqladm.procs_hint">0 = automatisch (alle Kerne außer zwei).</span>
+                    <div class="kb-container">
+                        <p class="kb-hint" data-i18n-html="sqladm.intro">Der <b>SQL-Assistent</b> wandelt Fragen in Alltagssprache in geprüfte SQL-Abfragen um. Grundlage sind die <b>Schemata</b>: je Datenbank ein Schema – ein eigener Container mit seinem Namen, seinen Schema-Dateien (SQL-DDL wie CREATE TABLE … oder YAML-Exporte mit einer Tabelle bzw. Sicht je Datei), seinen <b>Einstellungen</b> (Dialekt, Dateimuster, Beziehungen, Höchstzahlen) und seiner <b>Erfassung</b>. <b>Wer</b> den Assistenten benutzen darf, steht unter <b>Sicherheit → Berechtigungen</b>, Spalte „SQL-Assistent“ (leer = niemand). <b>Welches</b> Schema eine Frage betrifft, wählt der Benutzer selbst – im Chat neben den Wissensgruppen, auf der Seite „SQL-Assistent“ oben.</p>
+                        <div class="kb-section" id="sq-sect-schemata">
+                            <div class="kb-section-header kb-collapse-header" id="sq-sect-schemata-hdr">
+                                <h3 data-i18n="sqladm.schemas_h">Schemata</h3>
+                                <span class="sk-openclaw-toggle" id="sq-sect-schemata-tog">▼</span>
                             </div>
-                            <label class="checkbox-group"><input type="checkbox" id="sqadm-chat"><span data-i18n="sqladm.chat">Erfassen aus dem Chat erlauben (nur Administratoren; erfasst werden die im Chat gewählten Schemata)</span></label>
-                            <div class="sqadm-aktionen" style="margin-top:12px;">
-                                <button class="btn-primary" id="sqadm-save2" type="button" data-i18n="common.save">Speichern</button>
-                                <span id="sqadm-status2" style="font-size:0.9em;"></span>
+                            <div class="kb-collapse-body" id="sq-sect-schemata-body">
+                                <p class="kb-hint" data-i18n="sqladm.schemas_hint">Lege je Datenbank ein Schema an und speichere. Danach nimmt die Ablage in seinem Container Dateien, ganze Ordner (die Ordnerstruktur bleibt erhalten) oder ZIP-Archive an. Nach jedem Hochladen und Löschen wird dieses Schema automatisch neu erfasst. Ein Schema zu entfernen löscht auch seine Dateien.</p>
+
+                                <!-- Je Schema EIN Container (sql_admin.js zeichnet sie): Name,
+                                     Dateien, Einstellungen und Erfassung gehoeren zum Schema
+                                     (Vorgabe des Betreibers 2026-11-10). -->
+                                <div id="sqadm-schemata"></div>
+                                <div class="sqadm-aktionen sqadm-fuss">
+                                    <button class="btn-secondary" id="sqadm-neu" type="button" data-i18n="sqladm.add">+ Schema</button>
+                                    <button class="btn-primary" id="sqadm-save" type="button" data-i18n="common.save">Speichern</button>
+                                    <span id="sqadm-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <ul class="sqadm-hinweise" id="sqadm-hinweise"></ul>
+                            </div>
+                        </div>
+
+                        <div class="kb-section" id="sq-sect-allg">
+                            <div class="kb-section-header kb-collapse-header" id="sq-sect-allg-hdr">
+                                <h3 data-i18n="sqladm.general_h">Für alle Schemata</h3>
+                                <span class="sk-openclaw-toggle" id="sq-sect-allg-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="sq-sect-allg-body">
+                                <p class="kb-hint" data-i18n="sqladm.general_hint">Diese beiden Vorgaben gelten für den ganzen Server. Dialekt, Dateimuster, Beziehungen und Höchstzahlen stellst du je Schema ein – in seinem Container oben.</p>
+                                <div class="form-group">
+                                    <label for="sqadm-prozesse" data-i18n="sqladm.procs">Parallele Leseprozesse beim Erfassen</label>
+                                    <input type="number" id="sqadm-prozesse" class="config-input" min="0" max="32" step="1">
+                                    <span class="kb-hint" data-i18n="sqladm.procs_hint">0 = automatisch (alle Kerne außer zwei).</span>
+                                </div>
+                                <label class="checkbox-group"><input type="checkbox" id="sqadm-chat"><span data-i18n="sqladm.chat">Erfassen aus dem Chat erlauben (nur Administratoren; erfasst werden die im Chat gewählten Schemata)</span></label>
+                                <div class="sqadm-aktionen" style="margin-top:12px;">
+                                    <button class="btn-primary" id="sqadm-save2" type="button" data-i18n="common.save">Speichern</button>
+                                    <span id="sqadm-status2" style="font-size:0.9em;"></span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -4926,87 +5003,110 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n="kv.hint">Anbindung an die Kundenverwaltungs-API (IBS). Die Zugangsdaten schalten die Checkbox „IBS Tickets" in der Support-Suche frei und versorgen die Ticketsuche des Agenten über die Kundenverwaltung (API-Funktion „getMatchingEvents").</p>
 
-                        <h4 style="margin:16px 0 8px;" data-i18n="kv.section_ibs">Kundenverwaltung (IBS) API</h4>
-                        <!-- IBS/Kundenverwaltung: schaltet die Checkbox 'IBS Tickets' unter /support frei -->
-                        <div class="form-group">
-                            <label data-i18n="kv.url_label">URL Kundenverwaltung API</label>
-                            <input type="text" id="ibs-api-url" class="config-input" placeholder="https://kundenverwaltung.firma.de/api" style="width:100%;box-sizing:border-box;">
-                        </div>
-                        <div class="form-group">
-                            <label data-i18n="kv.key_label">API-Key Kundenverwaltung</label>
-                            <div style="display:flex;align-items:center;gap:4px;">
-                                <input type="password" id="ibs-api-key" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
-                                <button type="button" id="kv-key-toggle" title="Key anzeigen/verbergen" data-i18n-title="profile.show_hide" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                </button>
-                            </div>
-                            <p class="kb-hint" style="margin:4px 0 0;" data-i18n="kv.key_hint">Beide Felder zusammen aktivieren die Checkbox „IBS Tickets" in der Support-Suche.</p>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
-                            <button class="btn-primary" id="kv-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
-                            <button class="btn-secondary" id="kv-test" type="button" data-i18n="profile.test" style="flex:0 0 auto;">Verbindung testen</button>
-                            <span id="kv-status" style="font-size:0.9em;"></span>
-                        </div>
-                        <!-- Serverzertifikat: Baustein rendert sich selbst (js/sapcert.js) -->
-                        <div class="sapcert" id="kv-cert" style="margin-top:10px;"></div>
 
-                        <h4 style="margin:22px 0 8px;" data-i18n="kv.search_title">Tickets suchen</h4>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                            <input type="text" id="kv-search-buzzwords" class="config-input" data-i18n-placeholder="kv.search_ph" placeholder="Schlagworte, kommagetrennt (1–5)…" style="flex:1;min-width:180px;">
-                            <input type="text" id="kv-search-address" class="config-input" data-i18n-placeholder="kv.search_addr_ph" placeholder="Adress-ID (optional)" style="width:150px;">
-                            <input type="number" id="kv-search-limit" class="config-input" min="1" max="100" step="1" value="25" title="Max. Trefferzahl" style="width:90px;">
-                            <button class="btn-secondary" id="kv-search-btn" type="button" data-i18n="common.search">Suchen</button>
+                        <div class="kb-section" id="kv-sect-api">
+                            <div class="kb-section-header kb-collapse-header" id="kv-sect-api-hdr">
+                                <h3 data-i18n="kv.section_ibs">Kundenverwaltung (IBS) API</h3>
+                                <span class="sk-openclaw-toggle" id="kv-sect-api-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="kv-sect-api-body">
+                                <!-- IBS/Kundenverwaltung: schaltet die Checkbox 'IBS Tickets' unter /support frei -->
+                                <div class="form-group">
+                                    <label data-i18n="kv.url_label">URL Kundenverwaltung API</label>
+                                    <input type="text" id="ibs-api-url" class="config-input" placeholder="https://kundenverwaltung.firma.de/api" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <div class="form-group">
+                                    <label data-i18n="kv.key_label">API-Key Kundenverwaltung</label>
+                                    <div style="display:flex;align-items:center;gap:4px;">
+                                        <input type="password" id="ibs-api-key" class="config-input" placeholder="••••••••" autocomplete="new-password" style="flex:1;min-width:0;box-sizing:border-box;">
+                                        <button type="button" id="kv-key-toggle" title="Key anzeigen/verbergen" data-i18n-title="profile.show_hide" style="background:none;border:none;cursor:pointer;padding:0 6px;color:var(--text-muted,#888);display:flex;align-items:center;flex-shrink:0;">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                        </button>
+                                    </div>
+                                    <p class="kb-hint" style="margin:4px 0 0;" data-i18n="kv.key_hint">Beide Felder zusammen aktivieren die Checkbox „IBS Tickets" in der Support-Suche.</p>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
+                                    <button class="btn-primary" id="kv-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                                    <button class="btn-secondary" id="kv-test" type="button" data-i18n="profile.test" style="flex:0 0 auto;">Verbindung testen</button>
+                                    <span id="kv-status" style="font-size:0.9em;"></span>
+                                </div>
+                                <!-- Serverzertifikat: Baustein rendert sich selbst (js/sapcert.js) -->
+                                <div class="sapcert" id="kv-cert" style="margin-top:10px;"></div>
+                            </div>
                         </div>
-                        <div id="kv-search-results" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;"></div>
+
+                        <div class="kb-section" id="kv-sect-search">
+                            <div class="kb-section-header kb-collapse-header" id="kv-sect-search-hdr">
+                                <h3 data-i18n="kv.search_title">Tickets suchen</h3>
+                                <span class="sk-openclaw-toggle" id="kv-sect-search-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="kv-sect-search-body">
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                    <input type="text" id="kv-search-buzzwords" class="config-input" data-i18n-placeholder="kv.search_ph" placeholder="Schlagworte, kommagetrennt (1–5)…" style="flex:1;min-width:180px;">
+                                    <input type="text" id="kv-search-address" class="config-input" data-i18n-placeholder="kv.search_addr_ph" placeholder="Adress-ID (optional)" style="width:150px;">
+                                    <input type="number" id="kv-search-limit" class="config-input" min="1" max="100" step="1" value="25" title="Max. Trefferzahl" style="width:90px;">
+                                    <button class="btn-secondary" id="kv-search-btn" type="button" data-i18n="common.search">Suchen</button>
+                                </div>
+                                <div id="kv-search-results" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- ═══ Tab: Support-Assistent ═══ -->
                 <div id="settings-tab-support" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
-                        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
-                            <p class="kb-hint" style="margin:0;flex:1;">Konfiguration des Support-Assistenten. Die Oberfläche ist erreichbar unter <a href="/support" target="_blank" rel="noopener" style="color:var(--accent-hover);">/support</a> (nur bei aktivem Skill). Dort können Anfragen gestellt werden, die wahlweise die Wissensdatenbank (RAG) und Jira-Tickets durchsuchen.</p>
-                            <button type="button" id="support-api-help-btn" title="API-Zugriffe (REST) anzeigen" aria-label="API-Zugriffe anzeigen" style="flex:0 0 auto;width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:700;font-size:1rem;cursor:pointer;line-height:1;">?</button>
-                        </div>
+                        <p class="kb-hint">Konfiguration des Support-Assistenten. Die Oberfläche ist erreichbar unter <a href="/support" target="_blank" rel="noopener" style="color:var(--accent-hover);">/support</a> (nur bei aktivem Skill). Dort können Anfragen gestellt werden, die wahlweise die Wissensdatenbank (RAG) und Jira-Tickets durchsuchen.</p>
 
-                        <h4 style="margin:16px 0 8px;">Vorangestelltes Prompt (LLM-Instruktion)</h4>
-                        <p class="kb-hint">Dieser Text wird LLM-Anfragen des Support-Assistenten (z.&nbsp;B. der KI-Zusammenfassung) als Instruktion vorangestellt.</p>
-                        <textarea id="support-prompt" class="config-input" rows="8" data-tabfill placeholder="z.B. Du bist der Support-Assistent der Firma X. Antworte sachlich, kurz und auf Deutsch …" style="width:100%;box-sizing:border-box;font-family:var(--font-body);line-height:1.5;resize:vertical;"></textarea>
-
-                        <h4 style="margin:18px 0 8px;">Darstellung</h4>
-                        <p class="kb-hint">Diese Werte sind das <strong>Maximum</strong>. Benutzer können auf der Support-Oberfläche ihren eigenen Wert zwischen 2 und diesem Maximum wählen (sitzungsüberdauernd gespeichert).</p>
-                        <div style="display:grid;grid-template-columns:1fr 110px;gap:10px 16px;align-items:center;max-width:520px;">
-                            <label style="margin:0;">KI-Gesamtzusammenfassung – max. Länge (Sätze)</label>
-                            <input type="number" id="support-lines" class="config-input" min="2" max="50" step="1" value="5" style="width:100%;box-sizing:border-box;">
-                            <label style="margin:0;">Jira-Treffer (max.)</label>
-                            <input type="number" id="support-jira-limit" class="config-input" min="1" max="1000" step="1" value="12" style="width:100%;box-sizing:border-box;">
-                            <label style="margin:0;">Wissens-/RAG-Treffer (max.)</label>
-                            <input type="number" id="support-rag-results" class="config-input" min="1" max="50" step="1" value="8" style="width:100%;box-sizing:border-box;">
-                            <label style="margin:0;">Confluence-Treffer (max.)</label>
-                            <input type="number" id="support-confluence-results" class="config-input" min="1" max="50" step="1" value="6" style="width:100%;box-sizing:border-box;">
-                            <label style="margin:0;">KI-Überblick: einbezogene Top-Treffer (max.)</label>
-                            <input type="number" id="support-summary-sources" class="config-input" min="1" max="50" step="1" value="10" style="width:100%;box-sizing:border-box;">
-                        </div>
-                        <h4 style="margin:18px 0 8px;">Confluence-Eingrenzung</h4>
-                        <p class="kb-hint">Nur wirksam bei aktivem Confluence-Skill. <strong>Whitelist</strong> = nur die gewählten Bereiche durchsuchen; <strong>Blacklist</strong> = alle Bereiche außer den gewählten.</p>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="off" data-i18n="common.off">Aus</button>
-                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="whitelist" data-i18n="common.whitelist">Whitelist</button>
-                            <button type="button" class="btn-secondary sup-cf-mode" data-mode="blacklist" data-i18n="common.blacklist">Blacklist</button>
-                        </div>
-                        <div id="sup-cf-spaces-wrap" style="display:none;">
-                            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
-                                <input type="text" id="sup-cf-space-search" class="config-input" placeholder="Bereich suchen…" style="flex:1;min-width:180px;box-sizing:border-box;">
-                                <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="sup-cf-personal"> persönliche</label>
+                        <div class="kb-section" id="sup-sect-conf">
+                            <div class="kb-section-header kb-collapse-header" id="sup-sect-conf-hdr">
+                                <h3 data-i18n="support.sect_conf">Konfiguration</h3>
+                                <span style="display:flex;align-items:center;gap:10px;">
+                                    <button type="button" id="support-api-help-btn" title="API-Zugriffe (REST) anzeigen" aria-label="API-Zugriffe anzeigen" style="flex:0 0 auto;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:700;font-size:1rem;cursor:pointer;line-height:1;">?</button>
+                                    <span class="sk-openclaw-toggle" id="sup-sect-conf-tog">▼</span>
+                                </span>
                             </div>
-                            <div id="sup-cf-space-list" style="max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px;"></div>
-                            <div class="kb-hint" id="sup-cf-selected" style="margin-top:6px;"></div>
-                        </div>
+                            <div class="kb-collapse-body" id="sup-sect-conf-body">
+                                <h4 style="margin:0 0 8px;">Vorangestelltes Prompt (LLM-Instruktion)</h4>
+                                <p class="kb-hint">Dieser Text wird LLM-Anfragen des Support-Assistenten (z.&nbsp;B. der KI-Zusammenfassung) als Instruktion vorangestellt.</p>
+                                <textarea id="support-prompt" class="config-input" rows="8" data-tabfill placeholder="z.B. Du bist der Support-Assistent der Firma X. Antworte sachlich, kurz und auf Deutsch …" style="width:100%;box-sizing:border-box;font-family:var(--font-body);line-height:1.5;resize:vertical;"></textarea>
 
-                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
-                            <button class="btn-primary" id="support-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
-                            <a class="btn-secondary" href="/support" target="_blank" rel="noopener" style="flex:0 0 auto;text-decoration:none;">Support-Oberfläche öffnen ↗</a>
-                            <span id="support-status" style="font-size:0.9em;"></span>
+                                <h4 style="margin:18px 0 8px;">Darstellung</h4>
+                                <p class="kb-hint">Diese Werte sind das <strong>Maximum</strong>. Benutzer können auf der Support-Oberfläche ihren eigenen Wert zwischen 2 und diesem Maximum wählen (sitzungsüberdauernd gespeichert).</p>
+                                <div style="display:grid;grid-template-columns:1fr 110px;gap:10px 16px;align-items:center;max-width:520px;">
+                                    <label style="margin:0;">KI-Gesamtzusammenfassung – max. Länge (Sätze)</label>
+                                    <input type="number" id="support-lines" class="config-input" min="2" max="50" step="1" value="5" style="width:100%;box-sizing:border-box;">
+                                    <label style="margin:0;">Jira-Treffer (max.)</label>
+                                    <input type="number" id="support-jira-limit" class="config-input" min="1" max="1000" step="1" value="12" style="width:100%;box-sizing:border-box;">
+                                    <label style="margin:0;">Wissens-/RAG-Treffer (max.)</label>
+                                    <input type="number" id="support-rag-results" class="config-input" min="1" max="50" step="1" value="8" style="width:100%;box-sizing:border-box;">
+                                    <label style="margin:0;">Confluence-Treffer (max.)</label>
+                                    <input type="number" id="support-confluence-results" class="config-input" min="1" max="50" step="1" value="6" style="width:100%;box-sizing:border-box;">
+                                    <label style="margin:0;">KI-Überblick: einbezogene Top-Treffer (max.)</label>
+                                    <input type="number" id="support-summary-sources" class="config-input" min="1" max="50" step="1" value="10" style="width:100%;box-sizing:border-box;">
+                                </div>
+                                <h4 style="margin:18px 0 8px;">Confluence-Eingrenzung</h4>
+                                <p class="kb-hint">Nur wirksam bei aktivem Confluence-Skill. <strong>Whitelist</strong> = nur die gewählten Bereiche durchsuchen; <strong>Blacklist</strong> = alle Bereiche außer den gewählten.</p>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                                    <button type="button" class="btn-secondary sup-cf-mode" data-mode="off" data-i18n="common.off">Aus</button>
+                                    <button type="button" class="btn-secondary sup-cf-mode" data-mode="whitelist" data-i18n="common.whitelist">Whitelist</button>
+                                    <button type="button" class="btn-secondary sup-cf-mode" data-mode="blacklist" data-i18n="common.blacklist">Blacklist</button>
+                                </div>
+                                <div id="sup-cf-spaces-wrap" style="display:none;">
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+                                        <input type="text" id="sup-cf-space-search" class="config-input" placeholder="Bereich suchen…" style="flex:1;min-width:180px;box-sizing:border-box;">
+                                        <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;white-space:nowrap;cursor:pointer;"><input type="checkbox" id="sup-cf-personal"> persönliche</label>
+                                    </div>
+                                    <div id="sup-cf-space-list" style="max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px;"></div>
+                                    <div class="kb-hint" id="sup-cf-selected" style="margin-top:6px;"></div>
+                                </div>
+
+                                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;">
+                                    <button class="btn-primary" id="support-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
+                                    <a class="btn-secondary" href="/support" target="_blank" rel="noopener" style="flex:0 0 auto;text-decoration:none;">Support-Oberfläche öffnen ↗</a>
+                                    <span id="support-status" style="font-size:0.9em;"></span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -5018,11 +5118,25 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <div class="kb-container">
                         <p class="kb-hint">Google-Integration für Kalender, Drive und Gmail. Die OAuth-Zugangsdaten stammen aus der Google Cloud Console; sie werden zusätzlich in die <code>.env</code> geschrieben, damit der Agent sie beim Start findet.</p>
 
-                        <h4 style="margin:16px 0 8px;" data-i18n="skillcfg.section_credentials">OAuth-Zugangsdaten</h4>
-                        <div id="skcfg-google"></div>
+                        <div class="kb-section" id="skcfg-sect-google">
+                            <div class="kb-section-header kb-collapse-header" id="skcfg-sect-google-hdr">
+                                <h3 data-i18n="skillcfg.section_credentials">OAuth-Zugangsdaten</h3>
+                                <span class="sk-openclaw-toggle" id="skcfg-sect-google-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="skcfg-sect-google-body">
+                                <div id="skcfg-google"></div>
+                            </div>
+                        </div>
 
-                        <h4 style="margin:22px 0 8px;" data-i18n="skillcfg.section_connection">Verbindung</h4>
-                        <div id="google-status-container"></div>
+                        <div class="kb-section" id="google-sect-conn">
+                            <div class="kb-section-header kb-collapse-header" id="google-sect-conn-hdr">
+                                <h3 data-i18n="skillcfg.section_connection">Verbindung</h3>
+                                <span class="sk-openclaw-toggle" id="google-sect-conn-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="google-sect-conn-body">
+                                <div id="google-status-container"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -5035,19 +5149,33 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n-html="copilot.reiter_hinweis">Recherche über Microsoft 365 Copilot: der Agent stellt eine Frage, Copilot sucht im Internet (Bing) und im Bestand des Unternehmens und antwortet mit Quellen. <strong>Die Frage verlässt das Haus</strong> – sie geht an Microsoft und an die Bing-Suche, für die laut Microsoft weder der Datenschutz-Nachtrag noch die EU Data Boundary gelten. Jeder recherchierende Benutzer braucht eine eigene Microsoft-365-Copilot-Lizenz. Die Einrichtung steht im aufklappbaren Abschnitt unten.</p>
 
-                        <h4 style="margin:16px 0 8px;" data-i18n="copilot.abschnitt_anwendung">Entra-Anwendung</h4>
-                        <!-- Die Einrichtungsschritte stehen HIER und nicht nur in docs/copilot.md:
-                             eine Repo-Datei erreicht der Administrator aus der Oberflaeche nicht
-                             (Meldung 2026-11-10: "ich finde die benoetigten Daten nicht").
-                             Offen, solange nichts eingetragen ist, sonst zu (copilot.js). -->
-                        <details class="mcp-erklaerung cp-anleitung" id="copilot-anleitung" open>
-                            <summary><span data-i18n="copilot.anleitung_titel">So kommst du an Mandanten- und Anwendungs-Kennung</span></summary>
-                            <div data-i18n-html="copilot.anleitung_text"><p>Beides entsteht im <strong>Microsoft Entra Admin Center</strong> (entra.microsoft.com) bei einer eigenen App-Registrierung. Wer dort keinen Zugang hat, gibt diese Schritte an die Microsoft-365-Administration weiter – zurück kommen nur die zwei Kennungen; ein Kennwort oder Geheimnis wird nicht gebraucht.</p><ol><li><strong>Registrierung anlegen:</strong> Entra Admin Center → <em>Identität</em> → <em>Anwendungen</em> → <em>App-Registrierungen</em> → <em>Neue Registrierung</em>. Name frei wählbar (z. B. „Copilot-Recherche“), Kontotyp <em>Nur Konten in diesem Organisationsverzeichnis</em>, <strong>keine</strong> Umleitungs-URI. Eine eigene Registrierung – nicht die des Outlook-Add-ins.</li><li><strong>Kennungen ablesen:</strong> auf der Seite <em>Übersicht</em> der neuen Registrierung stehen <em>Anwendungs-ID (Client)</em> → Feld „Anwendungs-Kennung“ und <em>Verzeichnis-ID (Mandant)</em> → Feld „Mandanten-Kennung“. Beides sind GUIDs der Form <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>.</li><li><strong>Gerätecode-Anmeldung erlauben:</strong> <em>Authentifizierung</em> → <em>Erweiterte Einstellungen</em> → <em>Öffentliche Clientflows zulassen</em> auf <strong>Ja</strong> und speichern. Ohne diesen Schalter scheitert „Microsoft-Konto verbinden“. <strong>Kein</strong> Clientgeheimnis anlegen.</li><li><strong>Berechtigungen:</strong> <em>API-Berechtigungen</em> → <em>Berechtigung hinzufügen</em> → <em>Microsoft Graph</em> → <em>Delegierte Berechtigungen</em>, alle sieben auswählen: <code>Sites.Read.All</code>, <code>Mail.Read</code>, <code>People.Read.All</code>, <code>OnlineMeetingTranscript.Read.All</code>, <code>Chat.Read</code>, <code>ChannelMessage.Read.All</code>, <code>ExternalItem.Read.All</code>. Microsoft verlangt alle sieben – fehlt eine, schlägt jede Recherche fehl.</li><li><strong>Zustimmung erteilen:</strong> auf derselben Seite <em>Administratorzustimmung für &lt;Mandant&gt; erteilen</em>. Dafür braucht es ein Konto mit entsprechender Rolle (z. B. Globaler Administrator oder Administrator für privilegierte Rollen).</li><li><strong>Lizenz prüfen:</strong> jeder recherchierende Benutzer braucht eine <em>Microsoft 365 Copilot</em>-Lizenz (Microsoft 365 Admin Center → <em>Abrechnung</em> → <em>Lizenzen</em>). Ohne sie antwortet Microsoft mit „Zugriff verweigert“.</li><li><strong>Hier eintragen und speichern</strong>, danach verbindet jeder Benutzer unten unter „Verbindung“ einmalig sein eigenes Microsoft-Konto. Er braucht außerdem die Internet-Freigabe (Einstellungen → Sicherheit → Berechtigungen).</li></ol></div>
-                        </details>
-                        <div id="skcfg-copilot"></div>
+                        <div class="kb-section" id="skcfg-sect-copilot">
+                            <div class="kb-section-header kb-collapse-header" id="skcfg-sect-copilot-hdr">
+                                <h3 data-i18n="copilot.abschnitt_anwendung">Entra-Anwendung</h3>
+                                <span class="sk-openclaw-toggle" id="skcfg-sect-copilot-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="skcfg-sect-copilot-body">
+                                <!-- Die Einrichtungsschritte stehen HIER und nicht nur in docs/copilot.md:
+                                     eine Repo-Datei erreicht der Administrator aus der Oberflaeche nicht
+                                     (Meldung 2026-11-10: "ich finde die benoetigten Daten nicht").
+                                     Offen, solange nichts eingetragen ist, sonst zu (copilot.js). -->
+                                <details class="mcp-erklaerung cp-anleitung" id="copilot-anleitung" open>
+                                    <summary><span data-i18n="copilot.anleitung_titel">So kommst du an Mandanten- und Anwendungs-Kennung</span></summary>
+                                    <div data-i18n-html="copilot.anleitung_text"><p>Beides entsteht im <strong>Microsoft Entra Admin Center</strong> (entra.microsoft.com) bei einer eigenen App-Registrierung. Wer dort keinen Zugang hat, gibt diese Schritte an die Microsoft-365-Administration weiter – zurück kommen nur die zwei Kennungen; ein Kennwort oder Geheimnis wird nicht gebraucht.</p><ol><li><strong>Registrierung anlegen:</strong> Entra Admin Center → <em>Identität</em> → <em>Anwendungen</em> → <em>App-Registrierungen</em> → <em>Neue Registrierung</em>. Name frei wählbar (z. B. „Copilot-Recherche“), Kontotyp <em>Nur Konten in diesem Organisationsverzeichnis</em>, <strong>keine</strong> Umleitungs-URI. Eine eigene Registrierung – nicht die des Outlook-Add-ins.</li><li><strong>Kennungen ablesen:</strong> auf der Seite <em>Übersicht</em> der neuen Registrierung stehen <em>Anwendungs-ID (Client)</em> → Feld „Anwendungs-Kennung“ und <em>Verzeichnis-ID (Mandant)</em> → Feld „Mandanten-Kennung“. Beides sind GUIDs der Form <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>.</li><li><strong>Gerätecode-Anmeldung erlauben:</strong> <em>Authentifizierung</em> → <em>Erweiterte Einstellungen</em> → <em>Öffentliche Clientflows zulassen</em> auf <strong>Ja</strong> und speichern. Ohne diesen Schalter scheitert „Microsoft-Konto verbinden“. <strong>Kein</strong> Clientgeheimnis anlegen.</li><li><strong>Berechtigungen:</strong> <em>API-Berechtigungen</em> → <em>Berechtigung hinzufügen</em> → <em>Microsoft Graph</em> → <em>Delegierte Berechtigungen</em>, alle sieben auswählen: <code>Sites.Read.All</code>, <code>Mail.Read</code>, <code>People.Read.All</code>, <code>OnlineMeetingTranscript.Read.All</code>, <code>Chat.Read</code>, <code>ChannelMessage.Read.All</code>, <code>ExternalItem.Read.All</code>. Microsoft verlangt alle sieben – fehlt eine, schlägt jede Recherche fehl.</li><li><strong>Zustimmung erteilen:</strong> auf derselben Seite <em>Administratorzustimmung für &lt;Mandant&gt; erteilen</em>. Dafür braucht es ein Konto mit entsprechender Rolle (z. B. Globaler Administrator oder Administrator für privilegierte Rollen).</li><li><strong>Lizenz prüfen:</strong> jeder recherchierende Benutzer braucht eine <em>Microsoft 365 Copilot</em>-Lizenz (Microsoft 365 Admin Center → <em>Abrechnung</em> → <em>Lizenzen</em>). Ohne sie antwortet Microsoft mit „Zugriff verweigert“.</li><li><strong>Hier eintragen und speichern</strong>, danach verbindet jeder Benutzer unten unter „Verbindung“ einmalig sein eigenes Microsoft-Konto. Er braucht außerdem die Internet-Freigabe (Einstellungen → Sicherheit → Berechtigungen).</li></ol></div>
+                                </details>
+                                <div id="skcfg-copilot"></div>
+                            </div>
+                        </div>
 
-                        <h4 style="margin:22px 0 8px;" data-i18n="skillcfg.section_connection">Verbindung</h4>
-                        <div id="copilot-status-container"></div>
+                        <div class="kb-section" id="copilot-sect-conn">
+                            <div class="kb-section-header kb-collapse-header" id="copilot-sect-conn-hdr">
+                                <h3 data-i18n="skillcfg.section_connection">Verbindung</h3>
+                                <span class="sk-openclaw-toggle" id="copilot-sect-conn-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="copilot-sect-conn-body">
+                                <div id="copilot-status-container"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -5055,7 +5183,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <div id="settings-tab-telegram" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint">Telegram-Bot für Empfang und Antwort. Den Token gibt <strong>@BotFather</strong> aus; ohne erlaubte Chat-IDs darf jeder Chat den Bot ansprechen.</p>
-                        <div id="skcfg-telegram"></div>
+                        <div class="kb-section" id="skcfg-sect-telegram">
+                            <div class="kb-section-header kb-collapse-header" id="skcfg-sect-telegram-hdr">
+                                <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
+                                <span class="sk-openclaw-toggle" id="skcfg-sect-telegram-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="skcfg-sect-telegram-body">
+                                <div id="skcfg-telegram"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -5063,7 +5199,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <div id="settings-tab-browser_control" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint">Browser-Automation per xdotool und Chrome DevTools Protocol (CDP). Der CDP-Port muss zu dem Port passen, mit dem Chrome gestartet wird (<code>--remote-debugging-port</code>).</p>
-                        <div id="skcfg-browser_control"></div>
+                        <div class="kb-section" id="skcfg-sect-browser_control">
+                            <div class="kb-section-header kb-collapse-header" id="skcfg-sect-browser_control-hdr">
+                                <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
+                                <span class="sk-openclaw-toggle" id="skcfg-sect-browser_control-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="skcfg-sect-browser_control-body">
+                                <div id="skcfg-browser_control"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -5074,7 +5218,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <div class="kb-container">
                         <p class="kb-hint">Claude Code gibt eng umrissene Codeaufgaben an {marke} ab; {marke} arbeitet in einem Wegwerf-Klon unter <code>/tmp</code> und liefert einen <b>maschinell geprüften</b> Patch zurück. Wer den Bereich betreten darf, steht unter <b>Sicherheit → Berechtigungen, Spalte „Claude“</b> (leer = niemand). Die Anleitung für die Benutzer samt Token-Rechnung steht im Bereich <code>/claude</code>.</p>
                         <p class="kb-hint"><b>Zu den Werten:</b> Jeder Auftrag rechnet auf demselben Sprachmodell wie der Chat – eine hohe Zahl gleichzeitiger Läufe geht unmittelbar zu Lasten der Antwortzeiten aller anderen.</p>
-                        <div id="skcfg-claude_subagent"></div>
+                        <div class="kb-section" id="skcfg-sect-claude_subagent">
+                            <div class="kb-section-header kb-collapse-header" id="skcfg-sect-claude_subagent-hdr">
+                                <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
+                                <span class="sk-openclaw-toggle" id="skcfg-sect-claude_subagent-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="skcfg-sect-claude_subagent-body">
+                                <div id="skcfg-claude_subagent"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -5082,66 +5234,74 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <div id="settings-tab-agent_orchestrator" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n="roles.hint">Eine Rolle ist ein Agent mit eigenem Auftrag, eigenem Werkzeugsatz und optional eigenem LLM-Profil. Der Hauptagent erkennt anhand der Beschreibung, welche Rolle für eine Teilaufgabe zuständig ist, übergibt sie, wartet auf das Ergebnis und arbeitet damit weiter. Eine Rolle kann nie mehr als der Benutzer, der sie beauftragt – ihr Werkzeugsatz wird mit dessen Rechten geschnitten.</p>
-                        <div id="roles-skill-warn" style="display:none;font-size:.8rem;color:var(--warning);margin-bottom:10px;"></div>
-                        <div id="roles-list"><div style="opacity:.6;font-size:.8rem;">Lädt…</div></div>
-                        <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
-                            <button class="btn-secondary btn-small" id="btn-role-new" style="flex:0 0 auto;padding:4px 10px;font-size:0.75rem;" data-i18n="roles.new">+ Rolle anlegen</button>
-                            <span id="roles-count" style="font-size:0.78rem;color:var(--text-secondary);"></span>
-                        </div>
+                        <div class="kb-section" id="roles-sect">
+                            <div class="kb-section-header kb-collapse-header" id="roles-sect-hdr">
+                                <h3 data-i18n="roles.sect">Rollen</h3>
+                                <span class="sk-openclaw-toggle" id="roles-sect-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="roles-sect-body">
+                                <div id="roles-skill-warn" style="display:none;font-size:.8rem;color:var(--warning);margin-bottom:10px;"></div>
+                                <div id="roles-list"><div style="opacity:.6;font-size:.8rem;">Lädt…</div></div>
+                                <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
+                                    <button class="btn-secondary btn-small" id="btn-role-new" style="flex:0 0 auto;padding:4px 10px;font-size:0.75rem;" data-i18n="roles.new">+ Rolle anlegen</button>
+                                    <span id="roles-count" style="font-size:0.78rem;color:var(--text-secondary);"></span>
+                                </div>
 
-                        <!-- Formular. Wird von agent_roles.js unter die BEARBEITETE Zeile
-                             verschoben (und danach wieder hierher zurueckgeholt). -->
-                        <div id="role-edit" class="role-edit-box" style="display:none;">
-                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                                <strong id="role-edit-title" style="font-size:0.9rem;">Rolle</strong>
-                                <button class="btn-icon" id="btn-role-cancel" data-i18n-title="roles.cancel" data-i18n-aria="roles.cancel" title="Abbrechen" aria-label="Abbrechen">×</button>
-                            </div>
-                            <div class="role-grid role-grid-2">
-                                <div class="role-field">
-                                    <label data-i18n="roles.f_id">Kennung (unveränderlich)</label>
-                                    <input type="text" id="role-f-id" placeholder="image_builder" autocomplete="off">
+                                <!-- Formular. Wird von agent_roles.js unter die BEARBEITETE Zeile
+                                     verschoben (und danach wieder hierher zurueckgeholt). -->
+                                <div id="role-edit" class="role-edit-box" style="display:none;">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                        <strong id="role-edit-title" style="font-size:0.9rem;">Rolle</strong>
+                                        <button class="btn-icon" id="btn-role-cancel" data-i18n-title="roles.cancel" data-i18n-aria="roles.cancel" title="Abbrechen" aria-label="Abbrechen">×</button>
+                                    </div>
+                                    <div class="role-grid role-grid-2">
+                                        <div class="role-field">
+                                            <label data-i18n="roles.f_id">Kennung (unveränderlich)</label>
+                                            <input type="text" id="role-f-id" placeholder="image_builder" autocomplete="off">
+                                        </div>
+                                        <div class="role-field">
+                                            <label data-i18n="roles.f_name">Anzeigename</label>
+                                            <input type="text" id="role-f-name" placeholder="Bild-Erzeuger" autocomplete="off">
+                                        </div>
+                                    </div>
+                                    <div class="role-field">
+                                        <label data-i18n="roles.f_desc">Beschreibung – daran erkennt der Hauptagent die Zuständigkeit</label>
+                                        <input type="text" id="role-f-desc" placeholder="Erzeugt Bilder …" autocomplete="off">
+                                    </div>
+                                    <div class="role-field">
+                                        <label data-i18n="roles.f_prompt">Auftrag der Rolle (System-Prompt)</label>
+                                        <textarea id="role-f-prompt" rows="10"></textarea>
+                                    </div>
+                                    <div class="role-field">
+                                        <label data-i18n="roles.f_tools">Werkzeuge dieser Rolle</label>
+                                        <div id="role-f-tools" class="role-tools"></div>
+                                        <small style="opacity:.65;font-size:.72rem;display:block;margin-top:4px;" data-i18n="roles.f_tools_hint">Nur diese Werkzeuge stehen der Rolle zur Verfügung. Werkzeuge, die dem beauftragenden Benutzer verwehrt sind, entfallen zusätzlich.</small>
+                                    </div>
+                                    <div class="role-grid role-grid-3">
+                                        <div class="role-field">
+                                            <label data-i18n="roles.f_profile">LLM-Profil</label>
+                                            <select id="role-f-profile"></select>
+                                        </div>
+                                        <div class="role-field">
+                                            <label data-i18n="roles.f_effort">Denktiefe</label>
+                                            <select id="role-f-effort"></select>
+                                        </div>
+                                        <div class="role-field">
+                                            <label data-i18n="roles.f_steps">Max. Schritte (0 = Vorgabe)</label>
+                                            <input type="number" id="role-f-steps" min="0" max="50" step="1" value="0">
+                                        </div>
+                                    </div>
+                                    <small id="role-profile-note" style="display:none;font-size:.72rem;color:var(--warning);margin-bottom:8px;"></small>
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;margin:6px 0 12px;">
+                                        <input type="checkbox" id="role-f-enabled" checked>
+                                        <span data-i18n="roles.f_enabled">Aktiv (nur aktive Rollen kann der Hauptagent beauftragen)</span>
+                                    </label>
+                                    <div style="display:flex;gap:8px;align-items:center;">
+                                        <button class="btn-primary btn-small" id="btn-role-save" style="flex:0 0 auto;padding:5px 12px;font-size:0.78rem;" data-i18n="roles.save">Speichern</button>
+                                        <button class="btn-secondary btn-small" id="btn-role-cancel2" style="flex:0 0 auto;padding:5px 12px;font-size:0.78rem;" data-i18n="roles.cancel">Abbrechen</button>
+                                        <span id="role-save-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                                    </div>
                                 </div>
-                                <div class="role-field">
-                                    <label data-i18n="roles.f_name">Anzeigename</label>
-                                    <input type="text" id="role-f-name" placeholder="Bild-Erzeuger" autocomplete="off">
-                                </div>
-                            </div>
-                            <div class="role-field">
-                                <label data-i18n="roles.f_desc">Beschreibung – daran erkennt der Hauptagent die Zuständigkeit</label>
-                                <input type="text" id="role-f-desc" placeholder="Erzeugt Bilder …" autocomplete="off">
-                            </div>
-                            <div class="role-field">
-                                <label data-i18n="roles.f_prompt">Auftrag der Rolle (System-Prompt)</label>
-                                <textarea id="role-f-prompt" rows="10"></textarea>
-                            </div>
-                            <div class="role-field">
-                                <label data-i18n="roles.f_tools">Werkzeuge dieser Rolle</label>
-                                <div id="role-f-tools" class="role-tools"></div>
-                                <small style="opacity:.65;font-size:.72rem;display:block;margin-top:4px;" data-i18n="roles.f_tools_hint">Nur diese Werkzeuge stehen der Rolle zur Verfügung. Werkzeuge, die dem beauftragenden Benutzer verwehrt sind, entfallen zusätzlich.</small>
-                            </div>
-                            <div class="role-grid role-grid-3">
-                                <div class="role-field">
-                                    <label data-i18n="roles.f_profile">LLM-Profil</label>
-                                    <select id="role-f-profile"></select>
-                                </div>
-                                <div class="role-field">
-                                    <label data-i18n="roles.f_effort">Denktiefe</label>
-                                    <select id="role-f-effort"></select>
-                                </div>
-                                <div class="role-field">
-                                    <label data-i18n="roles.f_steps">Max. Schritte (0 = Vorgabe)</label>
-                                    <input type="number" id="role-f-steps" min="0" max="50" step="1" value="0">
-                                </div>
-                            </div>
-                            <small id="role-profile-note" style="display:none;font-size:.72rem;color:var(--warning);margin-bottom:8px;"></small>
-                            <label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;margin:6px 0 12px;">
-                                <input type="checkbox" id="role-f-enabled" checked>
-                                <span data-i18n="roles.f_enabled">Aktiv (nur aktive Rollen kann der Hauptagent beauftragen)</span>
-                            </label>
-                            <div style="display:flex;gap:8px;align-items:center;">
-                                <button class="btn-primary btn-small" id="btn-role-save" style="flex:0 0 auto;padding:5px 12px;font-size:0.78rem;" data-i18n="roles.save">Speichern</button>
-                                <button class="btn-secondary btn-small" id="btn-role-cancel2" style="flex:0 0 auto;padding:5px 12px;font-size:0.78rem;" data-i18n="roles.cancel">Abbrechen</button>
-                                <span id="role-save-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
                             </div>
                         </div>
                     </div>
@@ -5151,7 +5311,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <div id="settings-tab-agent_autonomy_kit" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint">Proaktives Aufgaben-Management: der Agent arbeitet die QUEUE.md ab und protokolliert seine Aktivität tageweise.</p>
-                        <div id="skcfg-agent_autonomy_kit"></div>
+                        <div class="kb-section" id="skcfg-sect-agent_autonomy_kit">
+                            <div class="kb-section-header kb-collapse-header" id="skcfg-sect-agent_autonomy_kit-hdr">
+                                <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
+                                <span class="sk-openclaw-toggle" id="skcfg-sect-agent_autonomy_kit-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="skcfg-sect-agent_autonomy_kit-body">
+                                <div id="skcfg-agent_autonomy_kit"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -5165,7 +5333,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <div id="settings-tab-avatar" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n="settings.avatar.hint">Zeigt eine sprechende Assistenten-Figur im Chat. Texteingabe wird als Text beantwortet, Mikrofon-Eingabe zusätzlich vorgelesen. Eigene Antworten werden ohne KI direkt ausgeliefert – je Zeile „Frage ||| Antwort“, mehrere gleichbedeutende Fragen mit | trennen.</p>
-                        <div id="skcfg-avatar"></div>
+                        <div class="kb-section" id="skcfg-sect-avatar">
+                            <div class="kb-section-header kb-collapse-header" id="skcfg-sect-avatar-hdr">
+                                <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
+                                <span class="sk-openclaw-toggle" id="skcfg-sect-avatar-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="skcfg-sect-avatar-body">
+                                <div id="skcfg-avatar"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -5176,27 +5352,35 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <div id="settings-tab-fehleranalyse" class="settings-tab-content" style="display:none;">
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n-html="fa.intro">Meldet ein Benutzer ein Problem, stellt dieser Reiter alles zu seinem Lauf zusammen: Aufgabe, jeden Werkzeugaufruf mit Argumenten und Ergebnis, die Meldungen des Dienstes im selben Zeitraum, Sicherheitsereignisse und die Stellen im Programm, die eine Fehlermeldung erzeugen. Daraus entsteht ein <b>Dossier</b> zum Kopieren; auf Wunsch deutet es ein Modell.</p>
-                        <div class="fa-zeile">
-                            <div class="form-group">
-                                <label for="fa-benutzer" data-i18n="fa.benutzer">Benutzer</label>
-                                <select id="fa-benutzer"><option value="" data-i18n="fa.benutzer_waehlen">– Benutzer wählen –</option></select>
+                        <div class="kb-section" id="fa-sect-lauf">
+                            <div class="kb-section-header kb-collapse-header" id="fa-sect-lauf-hdr">
+                                <h3 data-i18n="fa.sect_lauf">Gemeldeten Lauf auswählen</h3>
+                                <span class="sk-openclaw-toggle" id="fa-sect-lauf-tog">▼</span>
                             </div>
-                            <div class="form-group">
-                                <label for="fa-lauf" data-i18n="fa.lauf">Lauf</label>
-                                <select id="fa-lauf" disabled><option value="" data-i18n="fa.lauf_erst_benutzer">– zuerst Benutzer wählen –</option></select>
+                            <div class="kb-collapse-body" id="fa-sect-lauf-body">
+                                <div class="fa-zeile">
+                                    <div class="form-group">
+                                        <label for="fa-benutzer" data-i18n="fa.benutzer">Benutzer</label>
+                                        <select id="fa-benutzer"><option value="" data-i18n="fa.benutzer_waehlen">– Benutzer wählen –</option></select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="fa-lauf" data-i18n="fa.lauf">Lauf</label>
+                                        <select id="fa-lauf" disabled><option value="" data-i18n="fa.lauf_erst_benutzer">– zuerst Benutzer wählen –</option></select>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="fa-beschreibung" data-i18n="fa.beschreibung">Was wurde gemeldet? (optional)</label>
+                                    <textarea id="fa-beschreibung" class="fa-beschreibung" rows="6" cols="42" maxlength="2000" data-i18n-placeholder="fa.beschreibung_ph" placeholder="z. B. „bekommt beim CSV-Export ‚Zugriff verweigert‘“"></textarea>
+                                </div>
+                                <p id="fa-profil" class="kb-hint"></p>
+                                <div class="fa-knoepfe">
+                                    <button type="button" class="btn-secondary" id="fa-dossier-btn" disabled data-i18n="fa.dossier_btn">Dossier erstellen</button>
+                                    <button type="button" class="btn-primary" id="fa-analyse-btn" disabled data-i18n="fa.analyse_btn">Analysieren</button>
+                                    <span id="fa-status" class="kb-hint" aria-live="polite"></span>
+                                </div>
+                                <div id="fa-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="fa-beschreibung" data-i18n="fa.beschreibung">Was wurde gemeldet? (optional)</label>
-                            <textarea id="fa-beschreibung" class="fa-beschreibung" rows="6" cols="42" maxlength="2000" data-i18n-placeholder="fa.beschreibung_ph" placeholder="z. B. „bekommt beim CSV-Export ‚Zugriff verweigert‘“"></textarea>
-                        </div>
-                        <p id="fa-profil" class="kb-hint"></p>
-                        <div class="fa-knoepfe">
-                            <button type="button" class="btn-secondary" id="fa-dossier-btn" disabled data-i18n="fa.dossier_btn">Dossier erstellen</button>
-                            <button type="button" class="btn-primary" id="fa-analyse-btn" disabled data-i18n="fa.analyse_btn">Analysieren</button>
-                            <span id="fa-status" class="kb-hint" aria-live="polite"></span>
-                        </div>
-                        <div id="fa-fehler" class="sprot-fehler" role="alert" style="display:none;"></div>
                         <section id="fa-analyse-box" class="fa-box" hidden>
                             <div class="fa-box-kopf">
                                 <h3 data-i18n="fa.analyse_titel">Analyse</h3>
@@ -6346,7 +6530,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=477"></script>
+    <script src="/static/js/i18n.js?v=478"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6402,7 +6586,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=251"></script>
+    <script src="/static/js/app.js?v=252"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

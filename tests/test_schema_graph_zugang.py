@@ -1053,7 +1053,13 @@ check("Kachel im Portal", 'id="pt-card-sql" href="/sql"' in portal)
 check("Kachel an permissions.schema", "d.permissions.schema" in (F / "js/portal_seite.js").read_text())
 check("Reiter-Knopf an Skill (TAB_BUTTONS)", "schema_graph:       'settings-tab-btn-sql'" in (F / "js/skillcfg.js").read_text())
 appjs = (F / "js/app.js").read_text()
-check("Reiter in allSettingsTabs und Klick-Zweig", "tabSql, tabKundenverwaltung" in appjs and "target === 'sql' && tabSql" in appjs)
+# Seit 2026-11-15 kommt allSettingsTabs aus dem DOM (jedes .settings-tab-content):
+# die Zusage "das Panel wird beim Wechsel ausgeblendet" haengt damit an der
+# Klasse des Panels, nicht an einer Handliste (dort fehlte tabAimouse).
+check("Reiter in allSettingsTabs und Klick-Zweig",
+      "querySelectorAll('.settings-tab-content')" in appjs.split("const allSettingsTabs = ", 1)[-1][:400]
+      and 'id="settings-tab-sql" class="settings-tab-content"' in (F / "settings.html").read_text()
+      and "target === 'sql' && tabSql" in appjs)
 check("Matrix-Spalte nur bei aktivem Skill", "_rechteBereich('schema'" in appjs
       and "await updateSchemaSecVisibility();" in appjs)
 check("Matrix kennt die Spalte", "sub: 'schema',     users: 'schema-allowed-users'" in (F / "js/rechte_matrix.js").read_text())

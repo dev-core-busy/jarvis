@@ -791,18 +791,24 @@
             _collapseInit([
                 { hdr: 'cf-sect-conn-hdr', body: 'cf-sect-conn-body', tog: 'cf-sect-conn-tog' },
                 { hdr: 'cf-sect-acc-hdr',  body: 'cf-sect-acc-body',  tog: 'cf-sect-acc-tog'  },
+                { hdr: 'cf-sect-search-hdr', body: 'cf-sect-search-body', tog: 'cf-sect-search-tog' },
             ]);
         }
         function _initSapCollapse() {
             _collapseInit([
                 { hdr: 'sap-sect-conn-hdr', body: 'sap-sect-conn-body', tog: 'sap-sect-conn-tog' },
                 { hdr: 'sap-sect-acc-hdr',  body: 'sap-sect-acc-body',  tog: 'sap-sect-acc-tog'  },
+                { hdr: 'sap-sect-data-hdr', body: 'sap-sect-data-body', tog: 'sap-sect-data-tog' },
+                { hdr: 'sap-sect-rep-hdr',  body: 'sap-sect-rep-body',  tog: 'sap-sect-rep-tog'  },
+                { hdr: 'sap-sect-vis-hdr',  body: 'sap-sect-vis-body',  tog: 'sap-sect-vis-tog'  },
             ]);
         }
         function _initVemasCollapse() {
             _collapseInit([
                 { hdr: 'vemas-sect-conn-hdr', body: 'vemas-sect-conn-body', tog: 'vemas-sect-conn-tog' },
                 { hdr: 'vemas-sect-acc-hdr',  body: 'vemas-sect-acc-body',  tog: 'vemas-sect-acc-tog'  },
+                { hdr: 'vemas-sect-query-hdr', body: 'vemas-sect-query-body', tog: 'vemas-sect-query-tog' },
+                { hdr: 'vemas-sect-vis-hdr',   body: 'vemas-sect-vis-body',   tog: 'vemas-sect-vis-tog'   },
             ]);
         }
 
@@ -836,6 +842,7 @@
             _collapseInit([
                 // Die Container je Schema zeichnet und klappt sql_admin.js selbst
                 // (sie entstehen erst mit den Daten).
+                { hdr: 'sq-sect-schemata-hdr', body: 'sq-sect-schemata-body', tog: 'sq-sect-schemata-tog' },
                 { hdr: 'sq-sect-allg-hdr',    body: 'sq-sect-allg-body',    tog: 'sq-sect-allg-tog'    },
             ]);
         }
@@ -898,7 +905,41 @@
         const tabEmail   = document.getElementById('settings-tab-email');
         const tabTracks  = document.getElementById('settings-tab-tracks');
         const tabExcel   = document.getElementById('settings-tab-excel');
-        const allSettingsTabs = [tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle, tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail, tabTracks, tabExcel, tabFeedback, tabNewsfeed, tabSql, tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabFehleranalyse, tabSecurity, tabCron].concat(tabsSkillCfg);
+        // ⚠ Die Liste der beim Wechsel AUSZUBLENDENDEN Panels kommt aus dem DOM,
+        // nicht aus einer Handliste. Bis 2026-11-15 fehlte `tabAimouse` in der
+        // Handliste: nach "AI-Maus" -> "Newsfeed" blieben die AI-Maus-Container
+        // stehen und der Newsfeed haengte sich darunter an. Jedes neue Panel
+        // mit `.settings-tab-content` wird so automatisch mit ausgeblendet.
+        const allSettingsTabs = Array.from(new Set(
+            Array.from(document.querySelectorAll('.settings-tab-content'))
+                .concat([tabProfiles, tabInstructions, tabSkills, tabWhatsApp, tabKnowledge, tabGoogle,
+                         tabVision, tabBranding, tabConfluence, tabJira, tabSap, tabVemas, tabEmail,
+                         tabTracks, tabExcel, tabAimouse, tabFeedback, tabNewsfeed, tabSql,
+                         tabKundenverwaltung, tabSupport, tabMcp, tabTelemetry, tabFehleranalyse,
+                         tabSecurity, tabCron], tabsSkillCfg)
+                .filter(Boolean)));
+
+        // Klapp-Container der Reiter, die bis 2026-11-15 lose Bereiche ohne
+        // Container hatten (Anweisungen, MCP, Support …). Bauform und Kennungen
+        // wie ueberall: <kenn>-hdr / <kenn>-body / <kenn>-tog. ⚠ Ein Container,
+        // der hier (oder in seiner _init…Collapse-Liste) fehlt, laesst sich
+        // nicht klappen – test_settings_reiter_wechsel_ui.js prueft das als
+        // REGEL ueber jeden Klapp-Kopf jedes Reiters.
+        const KLAPP_JE_REITER = {
+            instructions:       ['instr-sect'],
+            mcp:                ['mcp-sect'],
+            kundenverwaltung:   ['kv-sect-api', 'kv-sect-search'],
+            support:            ['sup-sect-conf'],
+            fehleranalyse:      ['fa-sect-lauf'],
+            google:             ['skcfg-sect-google', 'google-sect-conn'],
+            copilot:            ['skcfg-sect-copilot', 'copilot-sect-conn'],
+            agent_orchestrator: ['roles-sect'],
+            telegram:           ['skcfg-sect-telegram'],
+            browser_control:    ['skcfg-sect-browser_control'],
+            claude_subagent:    ['skcfg-sect-claude_subagent'],
+            agent_autonomy_kit: ['skcfg-sect-agent_autonomy_kit'],
+            avatar:             ['skcfg-sect-avatar'],
+        };
 
         // Zuletzt benutzter Reiter, je Browser. openModal stellt ihn wieder her;
         // bis 2026-11-02 oeffneten die Einstellungen IMMER auf "KI & System".
@@ -1065,6 +1106,11 @@
                     tabCron.style.display = '';
                     tabCron.classList.add('active');
                     if (window.cronManager) window.cronManager.init();
+                }
+
+                if (KLAPP_JE_REITER[target]) {
+                    _collapseInit(KLAPP_JE_REITER[target].map((k) =>
+                        ({ hdr: k + '-hdr', body: k + '-body', tog: k + '-tog' })));
                 }
 
                 // Polling stoppen wenn weg-navigiert

@@ -7310,12 +7310,23 @@ body.light .kb-cl-spanne { color: #5b6678; }
 /* ═══════════════════════════════════════════════════════════════════
    OpenClaw Marketplace Sektion
    ═══════════════════════════════════════════════════════════════════ */
+/* Flaeche, Rahmen und Ecken wie .kb-section (2026-11-15): Skills und
+   Protokolle sollen dieselben Container zeigen wie die uebrigen Reiter. */
 .sk-openclaw-section {
     margin-top: 0.75rem;
-    border: 1px solid var(--border, rgba(var(--fg-rgb), 0.1));
-    border-radius: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
     overflow: hidden;
-    background: rgba(var(--fg-rgb), 0.02);
+    background: var(--bg-glass);
+}
+
+/* Protokolle: die Kopfzeile ihrer Container (.kb-folder-header, eigentlich die
+   Zeile eines Wissensordners) bekommt Abstand und Schrift der uebrigen
+   Container-Koepfe statt der Ordnerpfad-Schrift (2026-11-15). */
+.sk-openclaw-section > .kb-folder-header { padding: 0.55rem 0.75rem 0.55rem 1rem; }
+.sk-openclaw-section > .kb-folder-header .kb-folder-path {
+    font-family: inherit;
+    font-size: 0.95rem;
 }
 
 .sk-openclaw-header {

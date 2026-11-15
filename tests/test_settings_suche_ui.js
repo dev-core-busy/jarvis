@@ -836,6 +836,10 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     const html = lies('settings.html');
     const gebunden = new Set((app.match(/hdr:\s*'([^']+)'/g) || [])
         .map(x => x.replace(/.*'([^']+)'.*/, '$1')));
+    // Seit 2026-11-15 zusaetzlich die Tabelle KLAPP_JE_REITER: dort steht je
+    // Container nur die Kennung, app.js haengt '-hdr' selbst an.
+    const tabelle = (app.split('const KLAPP_JE_REITER = {')[1] || '').split('};')[0];
+    (tabelle.match(/'([^']+)'/g) || []).forEach(x => gebunden.add(x.slice(1, -1) + '-hdr'));
     const alle = new Set();
     let m; const re = /class="[^"]*kb-collapse-header[^"]*"[^>]*id="([^"]+)"/g;
     while ((m = re.exec(html))) alle.add(m[1]);

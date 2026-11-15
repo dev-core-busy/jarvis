@@ -773,8 +773,13 @@ check("app.js ruft FeedbackAdmin.onShow()", "FeedbackAdmin" in app_js)
 check("⚠ app.js fasst den entfallenen Sicherheits-Block nicht mehr an",
       "sec-sub-feedback" not in app_js,
       "Verdrahtung auf ein Bedienelement, das es nicht mehr gibt")
-check("das Panel steht in allSettingsTabs (sonst bleibt es beim Wechsel stehen)",
-      "tabFeedback" in app_js.split("allSettingsTabs = ")[1].split("\n")[0])
+# Seit 2026-11-15 kommt allSettingsTabs aus dem DOM (jedes .settings-tab-content):
+# die Zusage "das Panel wird beim Wechsel ausgeblendet" haengt damit an der
+# Klasse des Panels, nicht an einer Handliste (dort fehlte tabAimouse).
+_ast_teil = app_js.split("const allSettingsTabs = ", 1)[-1][:400]
+check("das Panel wird beim Wechsel ausgeblendet (allSettingsTabs aus .settings-tab-content)",
+      "querySelectorAll('.settings-tab-content')" in _ast_teil
+      and 'id="settings-tab-feedback" class="settings-tab-content"' in (FRONT / "settings.html").read_text(encoding="utf-8"))
 check("skills.js kennt den Reiter (Zahnrad-Sprung)",
       "feedback:" in (FRONT / "js" / "skills.js").read_text(encoding="utf-8"))
 check("skillcfg.js blendet den Reiter am Skill-Zustand ein",

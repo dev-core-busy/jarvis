@@ -1546,7 +1546,8 @@ body.light :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hove
 .wi-section,                     /* /wissen */
 .ja-card, .ja-sect,              /* /jira-addon, /confluence-addon, /ai-mouse, /feedback, /wissensgraph */
 .sup-ai-card,                    /* /support */
-.kb-section {                    /* /settings: die Container der Reiter */
+.kb-section,                     /* /settings: die Container der Reiter */
+.sk-openclaw-section {           /* Skills, Protokolle: dieselbe Container-Gestalt */
     box-shadow: var(--shadow-md);
 }
 /* Karten in einem Klappabschnitt (/jira-addon) liegen schon auf einer

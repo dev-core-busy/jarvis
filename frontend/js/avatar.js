@@ -268,9 +268,14 @@
     // Der Theme-Knopf bleibt als Rueckfall fuer Seiten ohne Issues-Knopf.
     function injectToggle() {
         if (toggleBtn) return;
+        // /settings: Anker ist das Haus in der Symbolgruppe des Kopfes. Seit
+        // die Einstellungen randlos die ganze Seite fuellen (2026-11-15),
+        // reicht ihr Kopf bis an den rechten Rand – frei schwebend laege der
+        // Knopf dort genau ueber dem Schliessen-Kreuz.
         var anker = document.querySelector('.jv-issues-btn')
                  || document.getElementById('btn-theme-toggle')
-                 || document.getElementById('btn-theme');   // /chat; NICHT btn-theme-login
+                 || document.getElementById('btn-theme')    // /chat; NICHT btn-theme-login
+                 || document.getElementById('btn-home-settings');
         toggleBtn = document.createElement('button');
         toggleBtn.type = 'button';
         toggleBtn.id = 'jav-toggle';
@@ -281,7 +286,7 @@
             toggleBtn.classList.remove('jv-issues-btn');
             anker.parentNode.insertBefore(toggleBtn, anker);
         } else {
-            // Seiten ohne Symbolleiste (z.B. /settings): frei schwebend oben rechts
+            // Seiten ohne Symbolleiste: frei schwebend oben rechts
             toggleBtn.className = 'jav-toggle-float';
             document.body.appendChild(toggleBtn);
         }

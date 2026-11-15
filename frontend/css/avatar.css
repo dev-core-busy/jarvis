@@ -65,7 +65,7 @@
 #jav-toggle.jav-toggle-off { opacity: .55; }
 #jav-toggle.jav-toggle-off:hover { opacity: .85; }
 
-/* Seiten ohne Kopfzeilen-Symbolleiste (z.B. /settings) */
+/* Seiten ohne Kopfzeilen-Symbolleiste */
 .jav-toggle-float {
     position: fixed;
     top: 12px; right: 14px;

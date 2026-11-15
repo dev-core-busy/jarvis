@@ -2613,16 +2613,48 @@ body.light .modal-header h2 {
     transform: rotate(45deg);
 }
 
-/* ═══ Settings Modal Spezifisch ═══ */
-#settings-modal .modal-content {
-    max-width: min(1080px, 72vw);
-    width: 72vw;
-}
-
-/* Einheitliche Ausrichtung – kein Höhensprung beim Tab-Wechsel */
+/* ═══ Settings Modal Spezifisch ═══
+   /settings hat keine eigene Titelleiste – das Modal IST die Seite. Bis
+   2026-11-15 schwebte es als Karte (72vw, Rand, Radius, Schatten) ueber einem
+   abgedunkelten Hintergrund; jetzt randlos wie die uebrigen Bereichsseiten
+   (/tracks, /wissen …): Flaeche `--bg-flaeche`, der Kopf als Titelleiste mit
+   Trennlinie unten, der Inhalt mittig gedeckelt. ⛶ hebt die Deckelung auf
+   (dieselbe Bedeutung wie `jv-breit` auf den anderen Seiten).
+   Die Deckelung laeuft ueber PADDING, nicht ueber max-width: `.modal-body`
+   ist der Rollbereich – gedeckelt stuende sein Rollbalken mitten im Fenster. */
 #settings-modal {
-    align-items: flex-start;
-    padding-top: 4vh;
+    --st-deckel: 1180px;
+    --st-rand: 2rem;
+    padding: 0;
+    align-items: stretch;
+    background: var(--bg-flaeche, var(--bg-primary));
+    backdrop-filter: none;
+}
+#settings-modal .modal-content {
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    animation: none;
+    background: var(--bg-flaeche, var(--bg-primary));
+}
+#settings-modal .modal-header {
+    padding: 10px var(--st-rand);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-glass);
+}
+#settings-modal .settings-tabs,
+#settings-modal .modal-body {
+    padding-left: max(var(--st-rand), calc((100% - var(--st-deckel)) / 2));
+    padding-right: max(var(--st-rand), calc((100% - var(--st-deckel)) / 2));
+}
+#settings-modal .modal-body { flex: 1; min-height: 0; }
+@media (max-width: 640px) {
+    #settings-modal { --st-rand: 1rem; }
 }
 
 /* ── Vollbild-Modus für die Einstellungen (gilt für alle Tabs) ── */
@@ -2636,16 +2668,8 @@ body.light .modal-header h2 {
 .btn-maximize-settings:hover,
 .btn-maximize-settings.active { opacity: 1; }
 
-#settings-modal.settings-maximized { padding-top: 2vh; }
-#settings-modal.settings-maximized .modal-content {
-    width: 96vw;
-    max-width: none;
-    height: 92vh;
-}
-#settings-modal.settings-maximized .modal-body {
-    flex: 1;
-    min-height: 0;
-}
+/* Maximiert: die Inhaltsdeckelung faellt weg, die Seite bleibt randlos. */
+#settings-modal.settings-maximized { --st-deckel: 100vw; }
 
 /* ── Generischer Vollbild-/Expand-Umschalter für alle Popups (modal_expand.js) ── */
 /* margin-left:auto verhindert, dass der Button im space-between-Header

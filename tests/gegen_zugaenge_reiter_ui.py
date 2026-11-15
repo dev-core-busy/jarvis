@@ -68,9 +68,13 @@ PROBEN = [
     ("VEMAS: Rueckfrage nicht aufgerufen", "js/vemas.js",
      "            if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {",
      "            if (false && !(this._cfg && this._cfg.kachel_anmeldung)) {", 1),
-    ("SAP: Kennwortfelder folgen dem Haken nicht", "js/sap.js",
-     "            var kp = $('sap-persoenlich');\n            if (kp) kp.addEventListener('change', function () { self._applyKachel(); });\n",
-     "", 1),
+    # Seit 2026-11-15 bleiben die Kennwortfelder des gemeinsamen Zugangs frei;
+    # die Probe stellt die fruehere Sperre beim Abhaken wieder her.
+    ("SAP: Haken sperrt wieder das gemeinsame Kennwort", "js/sap.js",
+     "            var save = $('sap-save'); if (save) save.addEventListener('click', this.save.bind(this));\n",
+     "            var kp = $('sap-persoenlich');\n"
+     "            if (kp) kp.addEventListener('change', function () { var pw = $('sap-odata-pass'); if (pw) pw.disabled = !kp.checked; });\n"
+     "            var save = $('sap-save'); if (save) save.addEventListener('click', this.save.bind(this));\n", 1),
     ("Confluence: Liste wird nicht geladen", "js/confluence.js",
      "            this.loadZugaenge();\n        },", "        },", 1),
     ("Confluence: Liste setzt Fremdtext als Markup", "js/confluence.js",

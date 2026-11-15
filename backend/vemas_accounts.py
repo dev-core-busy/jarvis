@@ -211,14 +211,14 @@ ANMELDEARTEN = ("basic", "bearer", "login")
 # ── Anmeldung ueber die Portal-Kachel (Betreiber 2026-11-05, wie SAP) ───────
 #
 # Schaltet der Administrator unter Einstellungen → Vemas "Anmeldung ueber die
-# Portal-Kachel fordern" ein, liegt KEIN VEMAS-Kennwort/-Token mehr auf der
-# Platte: das des Sammelzugangs leert ``main.update_skill_config``, die der
-# persoenlichen Zugaenge ``kennwoerter_entfernen`` (die Zugaenge selbst –
-# Anmeldeart, Benutzer – bleiben). Eingegeben wird nur noch fuer die Sitzung
-# (Arbeitsspeicher, ``_SITZUNG``); der Browser darf es sich merken.
+# Portal-Kachel fordern" ein, liegt KEIN PERSOENLICHES VEMAS-Kennwort/-Token
+# mehr auf der Platte: ``kennwoerter_entfernen`` raeumt sie (die Zugaenge selbst
+# – Anmeldeart, Benutzer – bleiben). Eingegeben wird nur noch fuer die Sitzung
+# (Arbeitsspeicher, ``_SITZUNG``); der Browser darf es sich merken. Das
+# Kennwort des SAMMELZUGANGS bleibt (Betreiber 2026-11-15, wie Jira/Confluence).
 #
-# KEIN RUECKFALL auf den Sammelzugang, solange der Schalter an ist: dessen
-# Kennwort ist geleert, ein Rueckfall schickte nur abgelehnte Anmeldungen.
+# RUECKFALL auf den Sammelzugang ohne Anmeldung – aber nur, wenn er
+# vollstaendig eingetragen ist; sonst schickte er nur abgelehnte Anmeldungen.
 # Ein Prozess (uvicorn ohne --workers) – ein schlichtes dict genuegt.
 KACHEL_SCHALTER = "kachel_anmeldung"
 SITZUNG_LAUFZEIT = 12 * 3600
@@ -771,7 +771,7 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
     un = norm_user(user or "")
     hinweis = ""
     if kachel_pflicht():
-        return _aufloesen_kachel(un, trotz_aussetzer)
+        return _mit_rueckfall(_aufloesen_kachel(un, trotz_aussetzer))
     if un and ":" not in un:
         try:
             k = _laden().get(un)
@@ -804,8 +804,30 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
             "benutzer": un, "ausgesetzt": bool(hinweis)}
 
 
+def sammel_nutzbar() -> bool:
+    """Ist der Sammelzugang VOLLSTAENDIG eingetragen – Adresse UND Kennwort
+    bzw. Token? ``VemasClient.configured`` genuegt die Adresse allein; ein
+    Rueckfall ohne Geheimnis schickte nur abgelehnte Anmeldungen."""
+    c = skill_config()
+    return bool(sammel_client().configured) and any(
+        str(c.get(f) or "").strip() for f in GEHEIMFELDER)
+
+
+def _mit_rueckfall(z: dict) -> dict:
+    """Ohne nutzbaren persoenlichen Zugang gilt der Sammelzugang – sofern er
+    vollstaendig eingetragen ist (Betreiber 2026-11-15, wie Jira/Confluence)."""
+    if z.get("quelle") != QUELLE_KEINE or not sammel_nutzbar():
+        return z
+    sammel = sammel_client()
+    return {"client": sammel, "quelle": QUELLE_SAMMEL,
+            "hinweis": (z.get("hinweis") or "").rstrip()
+                       + " Bis dahin gilt der gemeinsame Zugang.",
+            "benutzer": z.get("benutzer", ""), "ausgesetzt": True}
+
+
 def _aufloesen_kachel(un: str, trotz_aussetzer: bool) -> dict:
-    """``aufloesen`` bei Kachelpflicht: nur der eigene Zugang MIT Anmeldung."""
+    """``aufloesen`` bei Kachelpflicht, OHNE Rueckfall: nur der eigene Zugang
+    MIT Anmeldung (den Rueckfall setzt ``_mit_rueckfall`` darueber)."""
     if not un or ":" in un:
         return _kein_zugang(un, "VEMAS verlangt eine persoenliche Anmeldung – "
                                 "fuer diesen Kanal gibt es keine.")
@@ -878,7 +900,7 @@ __all__ = [
     "merke_ergebnis", "melde_fehler", "ist_anmeldefehler", "max_anmeldefehler",
     "aufloesen", "client_fuer_lauf", "quelle_text", "sammel_client",
     "server_konfiguriert", "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "QUELLE_KEINE",
-    "kachel_pflicht", "kennwoerter_entfernen", "alle_entfernen", "kennwort_gespeichert",
+    "kachel_pflicht", "sammel_nutzbar", "kennwoerter_entfernen", "alle_entfernen", "kennwort_gespeichert",
     "sitzung_beenden", "sitzung_bis", "anmeldung_anbieten", "KACHEL_SCHALTER",
     "AENDERBAR", "TEXTFELDER", "GEHEIMFELDER", "ANMELDEARTEN",
 ]

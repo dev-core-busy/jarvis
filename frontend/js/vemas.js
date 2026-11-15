@@ -98,8 +98,8 @@
             if (ak) ak.addEventListener('change', function () { self._applyAuth(ak.value); });
             // EIN Haken (Betreiber 2026-11-15): "Persoenliche Zugaenge erlauben"
             // AUS heisst Anmeldung ueber die Portal-Kachel (_kachelGewaehlt).
-            var kp = $('vemas-persoenlich');
-            if (kp) kp.addEventListener('change', function () { self._applyKachel(); });
+            // Kennwort/Token des GEMEINSAMEN Zugangs bleiben dabei frei: er ist
+            // seit 2026-11-15 auch dann der Rueckfall (wie Jira/Confluence).
             var save = $('vemas-save'); if (save) save.addEventListener('click', this.save.bind(this));
             var test = $('vemas-test'); if (test) test.addEventListener('click', this.test.bind(this));
             var disc = $('vemas-discover'); if (disc) disc.addEventListener('click', this.discover.bind(this));
@@ -173,7 +173,6 @@
                     if (window.SkillCfg) window.SkillCfg.persoenlichAnwenden('vemas', !c.kachel_anmeldung);
                     self._cfg = c;
                     self._applyAuth(c.auth_kind || 'basic');
-                    self._applyKachel();
                 })
                 .catch(function () { status('✗ Konfiguration nicht abrufbar', 'error'); });
         },
@@ -222,15 +221,6 @@
             return cb ? !cb.checked : !!(this._cfg && this._cfg.kachel_anmeldung);
         },
 
-        _applyKachel: function () {
-            var an = this._kachelGewaehlt();
-            ['vemas-password', 'vemas-token'].forEach(function (id) {
-                var e = $(id); if (!e) return;
-                e.disabled = an;
-                if (an) e.value = '';
-            });
-        },
-
         // Zusatz je Benutzer in der Liste: Kennwort gespeichert? angemeldet?
         _kennwortZustand: function (a, kachel) {
             // Gemeinsame Fassung mit dem SAP-Reiter (skillcfg.js) – eine
@@ -243,9 +233,8 @@
             // Einschalten der Kachel-Anmeldung loescht Kennwoerter – vorher fragen.
             if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {
                 if (!window.confirm(T('vemas.kachel_pflicht_confirm',
-                    'Achtung: Beim Speichern werden das Kennwort bzw. Token des gemeinsamen VEMAS-Zugangs und die '
-                    + 'gespeicherten Kennwörter ALLER eigenen VEMAS-Zugänge gelöscht. Danach muss sich jeder Benutzer '
-                    + 'im Bereich VEMAS neu anmelden. Fortfahren?'))) {
+                    'Achtung: Beim Speichern werden ALLE persönlichen VEMAS-Zugänge gelöscht. Der gemeinsame '
+                    + 'Zugang bleibt erhalten. Fortfahren?'))) {
                     return;
                 }
             }
@@ -392,7 +381,7 @@
                     var kachel = !!d.kachel_pflicht;
                     // Ausdruecklich sagen, dass nichts gespeichert ist.
                     var kopf = kachel ? '<strong>' + esc(T('vemas.adm_kachel_kopf',
-                        'Anmeldung über die Portal-Kachel: Auf dem Server ist kein VEMAS-Kennwort gespeichert.'))
+                        'Anmeldung über die Portal-Kachel: Auf dem Server ist kein persönliches VEMAS-Kennwort gespeichert.'))
                         + '</strong><br>' : '';
                     if (!list.length && kachel) {
                         box.innerHTML = kopf + esc(T('vemas.acc_none_kachel',

@@ -382,8 +382,9 @@ check(getattr(a, "inhalt", {}).get("success") is True, "Einschalten wird gespeic
 check(_geloescht(spur, "sap_accounts", "alle_entfernen") == 1,
       "Umschalten loescht ALLE persoenlichen Zugaenge (Betreiber 2026-11-15)",
       f"Spur={[e[0:2] for e in spur]}")
-check(stand.get("kachel_anmeldung") is True and stand.get("password") == "",
-      "der Schalter steht an und das Sammel-Kennwort ist leer", str(stand))
+check(stand.get("kachel_anmeldung") is True and stand.get("password") == "geheim",
+      "der Schalter steht an und das Sammel-Kennwort BLEIBT (Rueckfall, Betreiber 2026-11-15)",
+      str(stand))
 check(bool(spur) and spur[0][2].get("kachel_anmeldung") is True,
       "geloescht wird NACH dem Speichern (der Stand ist schon geschrieben)",
       str(spur[0][2]) if spur else "keine Spur")
@@ -419,7 +420,7 @@ check(_geloescht(spur, "vemas_accounts", "alle_entfernen") == 1
       and _geloescht(spur, "sap_accounts") == 0,
       "VEMAS raeumt sein EIGENES Modul (nicht das von SAP)",
       f"Spur={[e[0:2] for e in spur]}")
-check(stand.get("password") == "", "VEMAS: das Sammel-Kennwort ist leer", str(stand))
+check(stand.get("password") == "geheim", "VEMAS: das Sammel-Kennwort BLEIBT", str(stand))
 
 a, spur, stand = lauf("sap", {"kachel_anmeldung": False},
                       {"kachel_anmeldung": True}, reste={"sap": 2}, wirft={"sap_accounts"})

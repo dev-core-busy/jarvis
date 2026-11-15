@@ -120,17 +120,32 @@
                 var el = $('sp-conn'); if (!el) return;
                 if (!d) { el.textContent = ''; return; }
                 accRenderState();
-                if (!d.configured && d.kachel_pflicht && d.anmeldung && d.anmeldung.feld) {
+                // Seit 2026-11-15 gilt ohne Anmeldung der gemeinsame Zugang
+                // (wie Jira/Confluence) – dann ist "configured" wahr, und die
+                // Anmeldung muss trotzdem angeboten werden. Massgeblich ist
+                // deshalb die QUELLE, nicht "configured".
+                var ohneAnmeldung = d.kachel_pflicht && d.quelle !== 'persoenlich';
+                if (ohneAnmeldung && d.anmeldung && d.anmeldung.feld) {
                     // Zugang hat schon funktioniert, es fehlt nur das Kennwort:
                     // direkt fragen statt einen Hinweistext zu zeigen.
                     el.className = 'sp-conn is-off';
                     el.textContent = T('sap.not_logged_in', 'Nicht bei SAP angemeldet');
-                    el.title = '';
+                    el.title = d.configured ? T('zs.nicht_an', 'Nicht angemeldet – es gilt der gemeinsame Zugang.') : '';
                     note('');
                     loginZeigen(d.anmeldung);
                     return;
                 }
                 loginVerbergen();
+                if (ohneAnmeldung && d.configured) {
+                    // Rueckfall auf den gemeinsamen Zugang: es geht weiter,
+                    // aber die Pille sagt wie bei Jira/Confluence, dass keine
+                    // eigene Anmeldung besteht.
+                    el.className = 'sp-conn is-off';
+                    el.textContent = T('sap.not_logged_in', 'Nicht bei SAP angemeldet');
+                    el.title = T('zs.nicht_an', 'Nicht angemeldet – es gilt der gemeinsame Zugang.');
+                    note('');
+                    return;
+                }
                 if (!d.configured && d.kachel_pflicht) {
                     el.className = 'sp-conn is-off';
                     el.textContent = T('sap.not_logged_in', 'Nicht bei SAP angemeldet');

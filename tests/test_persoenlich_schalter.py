@@ -247,12 +247,23 @@ for name in ("sap", "vemas"):
     except Exception as e:  # noqa: BLE001
         # Kein Wurf ohne Bilanzzeile: die Abweisung meldet die Pruefung oben.
         print(f"       ({type(e).__name__}: {e})")
-    # Gegenstueck: AUS ist die Kachelpflicht.
+    # Gegenstueck: AUS ist die Kachelpflicht. Seit 2026-11-15 (Betreiber: wie
+    # Jira/Confluence) gilt ohne Anmeldung der gemeinsame Zugang – aber nur,
+    # wenn er VOLLSTAENDIG eingetragen ist (mit Kennwort).
     CFG[name]["kachel_anmeldung"] = True
     z = m.aufloesen(USER)
-    check(z.get("quelle") == m.QUELLE_KEINE,
-          "Kachelpflicht (= persoenlich aus) ohne Anmeldung: kein Rueckfall auf den gemeinsamen Zugang",
+    check(z.get("quelle") == m.QUELLE_SAMMEL and z.get("client") is not None
+          and z["client"].configured,
+          "Kachelpflicht (= persoenlich aus) ohne Anmeldung: Rueckfall auf den gemeinsamen Zugang",
           str(z.get("quelle")))
+    check("gemeinsame" in (z.get("hinweis") or ""),
+          "der Hinweis nennt den gemeinsamen Zugang", str(z.get("hinweis")))
+    _pw = CFG[name].pop("password")
+    z = m.aufloesen(USER)
+    check(z.get("quelle") == m.QUELLE_KEINE,
+          "gemeinsamer Zugang ohne Kennwort: KEIN Rueckfall (sonst nur abgelehnte Anmeldungen)",
+          str(z.get("quelle")))
+    CFG[name]["password"] = _pw
     CFG[name].pop("persoenliche_zugaenge", None)
     frisch()
 

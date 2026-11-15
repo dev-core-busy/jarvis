@@ -47,18 +47,24 @@ PROBEN = [
      "        raise SapKontoFehler(\"abgeschaltet\")\n"
      "    alle = _laden()\n    k = alle.get(un) or _leer(un)", 1),
     ("SAP: aufloesen faellt bei persoenliche_zugaenge auf den Sammelzugang", "sap_accounts.py",
-     "        return _aufloesen_kachel(un, trotz_aussetzer)\n",
-     "        return _aufloesen_kachel(un, trotz_aussetzer)\n"
+     "        return _mit_rueckfall(_aufloesen_kachel(un, trotz_aussetzer))\n",
+     "        return _mit_rueckfall(_aufloesen_kachel(un, trotz_aussetzer))\n"
      "    if skill_config().get(\"persoenliche_zugaenge\") is False:\n"
      "        return {\"client\": SapClient(), \"quelle\": QUELLE_SAMMEL, \"hinweis\": \"\",\n"
      "                \"benutzer\": un, \"ausgesetzt\": False}\n", 1),
     ("VEMAS: zugang_info meldet wieder einen Schalter", "vemas_accounts.py",
      '        "kachel_pflicht": pflicht,\n',
      '        "kachel_pflicht": pflicht,\n        "persoenlich_erlaubt": False,\n', 1),
-    ("VEMAS: Kachelpflicht faellt auf den Sammelzugang zurueck", "vemas_accounts.py",
-     "        return _aufloesen_kachel(un, trotz_aussetzer)\n",
-     "        return {\"client\": sammel_client(), \"quelle\": QUELLE_SAMMEL, \"hinweis\": \"\",\n"
-     "                \"benutzer\": un, \"ausgesetzt\": False}\n", 1),
+    # Seit 2026-11-15 IST der Rueckfall gewollt – geprueft werden seine Grenzen.
+    ("VEMAS: Kachelpflicht ohne Rueckfall auf den Sammelzugang", "vemas_accounts.py",
+     "        return _mit_rueckfall(_aufloesen_kachel(un, trotz_aussetzer))\n",
+     "        return _aufloesen_kachel(un, trotz_aussetzer)\n", 1),
+    ("VEMAS: Rueckfall auch ohne Sammel-Kennwort", "vemas_accounts.py",
+     "    if z.get(\"quelle\") != QUELLE_KEINE or not sammel_nutzbar():\n",
+     "    if z.get(\"quelle\") != QUELLE_KEINE or not sammel_client().configured:\n", 1),
+    ("SAP: Rueckfall auch ohne Sammel-Kennwort", "sap_accounts.py",
+     "    if z.get(\"quelle\") != QUELLE_KEINE or not sammel_nutzbar():\n",
+     "    if z.get(\"quelle\") != QUELLE_KEINE or not SapClient().configured:\n", 1),
     ("SAP: alle_entfernen loescht die Zugaenge nicht", "sap_accounts.py",
      "    if n or KONTEN_DATEI.exists():\n        _speichern({})\n    _SITZUNG.clear()\n",
      "    _SITZUNG.clear()\n", 1),

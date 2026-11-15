@@ -222,9 +222,11 @@ KANAELE = ("odata", "hana", "rfc")
 #
 # WARUM: die gespeicherten Zugangsdaten sollen vom System. Schaltet der
 # Administrator unter Einstellungen → SAP "Anmeldung ueber die Portal-Kachel
-# fordern" ein, liegt KEIN SAP-Kennwort mehr auf der Platte:
+# fordern" ein, liegt KEIN PERSOENLICHES SAP-Kennwort mehr auf der Platte:
 #
-# * das Kennwort des Sammelzugangs wird geleert (``main.update_skill_config``),
+# * das Kennwort des Sammelzugangs BLEIBT (Betreiber 2026-11-15: SAP/VEMAS
+#   verhalten sich wie Jira/Confluence – der Schalter betrifft nur die
+#   persoenlichen Zugaenge),
 # * die Kennwoerter aller persoenlichen Zugaenge werden entfernt
 #   (``kennwoerter_entfernen``) – die Zugaenge SELBST bleiben (Server, Benutzer,
 #   Mandant, Zertifikatsanker); Vorgabe des Betreibers: "keine Kennwortarten
@@ -236,10 +238,12 @@ KANAELE = ("odata", "hana", "rfc")
 # merken (Formular mit ``autocomplete="current-password"`` in /sap) – der
 # Browser ist dann der einzige Ort, an dem es liegt.
 #
-# KEIN RUECKFALL AUF DEN SAMMELZUGANG, solange der Schalter an ist: dessen
-# Kennwort ist geleert, ein Rueckfall wuerde also nur einen sicheren 401 an SAP
-# schicken – und das zaehlt dort gegen ``login/fails_to_user_lock`` des
-# Sammelbenutzers. Stattdessen sagt ``aufloesen`` klar "bitte anmelden".
+# RUECKFALL AUF DEN SAMMELZUGANG (seit 2026-11-15, wie Jira/Confluence): ohne
+# Anmeldung in dieser Sitzung gilt der gemeinsame Zugang – aber nur, wenn er
+# VOLLSTAENDIG eingetragen ist (``client.configured``). Fehlt sein Kennwort,
+# gibt es keinen Rueckfall: der schickte nur einen sicheren 401 an SAP, und der
+# zaehlt dort gegen ``login/fails_to_user_lock`` des Sammelbenutzers. Dann sagt
+# ``aufloesen`` wie bisher klar "bitte anmelden".
 #
 # EIN PROZESS: uvicorn laeuft ohne ``--workers`` (siehe main.py), der
 # Sitzungsspeicher ist deshalb ein schlichtes dict.
@@ -1043,7 +1047,7 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
     un = norm_user(user or "")
     hinweis = ""
     if kachel_pflicht():
-        return _aufloesen_kachel(un, trotz_aussetzer)
+        return _mit_rueckfall(_aufloesen_kachel(un, trotz_aussetzer))
     if un and ":" not in un:
         try:
             k = _laden().get(un)
@@ -1084,12 +1088,41 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
             "benutzer": un, "ausgesetzt": bool(hinweis)}
 
 
-def _aufloesen_kachel(un: str, trotz_aussetzer: bool) -> dict:
-    """``aufloesen`` bei eingeschalteter Kachelpflicht.
+def sammel_nutzbar() -> bool:
+    """Ist der Sammelzugang VOLLSTAENDIG eingetragen – Adresse UND das Geheimnis
+    der aktiven Zugangsart?
 
-    Gilt nur der persoenliche Zugang MIT Anmeldung in dieser Sitzung. Kein
-    Rueckfall auf den Sammelzugang: dessen Kennwort ist geleert (siehe Kopf
-    des Abschnitts "Anmeldung ueber die Portal-Kachel")."""
+    ``SapClient.configured`` allein genuegt nicht: OData gilt dort schon mit
+    der blossen Adresse als konfiguriert. Ein Rueckfall auf einen Sammelzugang
+    ohne Kennwort schickte aber nur abgelehnte Anmeldungen an SAP, und die
+    zaehlen gegen ``login/fails_to_user_lock`` des Sammelbenutzers."""
+    c = skill_config()
+    if not SapClient().configured:
+        return False
+    ct = (c.get("connection_type") or "odata").strip().lower()
+    felder = {"hana": ("hana_password",), "rfc": ("rfc_password",)}.get(
+        ct, ("password", "bearer_token"))
+    return any(str(c.get(f) or "").strip() for f in felder)
+
+
+def _mit_rueckfall(z: dict) -> dict:
+    """Ohne nutzbaren persoenlichen Zugang gilt der Sammelzugang – sofern er
+    vollstaendig eingetragen ist (Betreiber 2026-11-15, wie Jira/Confluence).
+    Sonst bleibt es bei "kein Zugang" samt Hinweis (``sammel_nutzbar``)."""
+    if z.get("quelle") != QUELLE_KEINE or not sammel_nutzbar():
+        return z
+    sammel = SapClient()
+    return {"client": sammel, "quelle": QUELLE_SAMMEL,
+            "hinweis": (z.get("hinweis") or "").rstrip()
+                       + " Bis dahin gilt der gemeinsame Lesezugang.",
+            "benutzer": z.get("benutzer", ""), "ausgesetzt": True}
+
+
+def _aufloesen_kachel(un: str, trotz_aussetzer: bool) -> dict:
+    """``aufloesen`` bei eingeschalteter Kachelpflicht, OHNE Rueckfall.
+
+    Gilt nur der persoenliche Zugang MIT Anmeldung in dieser Sitzung; den
+    Rueckfall auf den Sammelzugang setzt ``_mit_rueckfall`` darueber."""
     if not un or ":" in un:
         return _kein_zugang(un, "SAP verlangt eine persoenliche Anmeldung in der "
                                 "SAP-Kachel – fuer diesen Kanal gibt es keine.")
@@ -1183,7 +1216,7 @@ __all__ = [
     "aufloesen", "client_fuer_lauf", "quelle_text",
     "hosts_erlaubt", "hosts_admin", "hosts_implizit", "host_ok",
     "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "QUELLE_KEINE", "AENDERBAR",
-    "kachel_pflicht", "kennwoerter_entfernen", "alle_entfernen", "sitzung_beenden", "sitzung_bis",
+    "kachel_pflicht", "sammel_nutzbar", "kennwoerter_entfernen", "alle_entfernen", "sitzung_beenden", "sitzung_bis",
     "anmeldung_anbieten", "kennwort_gespeichert",
     "KACHEL_SCHALTER", "TEXTFELDER",
     "GEHEIMFELDER", "KANAELE",

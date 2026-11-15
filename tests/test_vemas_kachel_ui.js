@@ -168,6 +168,45 @@ async function portal(opts) {
         k.dom.window.close();
     }
 
+    console.log('\n2b. /vemas: Rueckfall auf den gemeinsamen Zugang (2026-11-15)');
+    {
+        const k = await portal({
+            konto: Object.assign({ kachel_pflicht: true, angemeldet: false }, KONTO),
+            status: { configured: true, kachel_pflicht: true, quelle: 'sammel', product: 'VEMAS',
+                      hinweis: 'Fuer VEMAS ist eine Anmeldung noetig. Bis dahin gilt der gemeinsame Zugang.',
+                      anmeldung: ANM },
+        });
+        const pill = k.$('vm-conn');
+        check(k.$('vm-login').hidden === false, 'Rueckfall mit Vorlauf: Anmeldekarte wird trotzdem angeboten');
+        check(!!pill && pill.textContent === 'Nicht bei VEMAS angemeldet' && /is-off/.test(pill.className),
+              'Rueckfall mit Vorlauf: Pille "Nicht bei VEMAS angemeldet"', pill && pill.textContent);
+        k.dom.window.close();
+    }
+    {
+        const k = await portal({
+            konto: Object.assign({ kachel_pflicht: true, angemeldet: false }, KONTO),
+            status: { configured: true, kachel_pflicht: true, quelle: 'sammel', product: 'VEMAS',
+                      hinweis: 'Fuer VEMAS ist eine Anmeldung noetig. Bis dahin gilt der gemeinsame Zugang.',
+                      anmeldung: {} },
+        });
+        const pill = k.$('vm-conn');
+        check(!!pill && pill.textContent === 'Nicht bei VEMAS angemeldet' && /is-off/.test(pill.className)
+              && /gemeinsame/.test(pill.title),
+              'Rueckfall ohne Vorlauf: Pille "Nicht bei VEMAS angemeldet" mit Hinweis auf den gemeinsamen Zugang',
+              pill && (pill.textContent + ' | ' + pill.title));
+        k.dom.window.close();
+    }
+    {
+        const k = await portal({
+            konto: Object.assign({ kachel_pflicht: true, angemeldet: true }, KONTO),
+            status: { configured: true, kachel_pflicht: true, quelle: 'persoenlich', product: 'VEMAS', anmeldung: {} },
+        });
+        const pill = k.$('vm-conn');
+        check(!!pill && !/is-off/.test(pill.className) && /VEMAS/.test(pill.textContent),
+              'angemeldet: Pille zeigt den Zugang, keine Warnung', pill && pill.textContent);
+        k.dom.window.close();
+    }
+
     console.log('\n3. Einstellungen → Vemas');
     async function reiter(cfg, konten, antwort) {
         const html = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
@@ -214,7 +253,8 @@ async function portal(opts) {
         check(e.$('vemas-persoenlich').checked === true, 'Kachel aus -> "Persoenliche Zugaenge erlauben" angehakt');
         e.$('vemas-persoenlich').checked = false;
         e.$('vemas-persoenlich').dispatchEvent(new e.s.window.Event('change'));
-        check(e.$('vemas-password').disabled && e.$('vemas-token').disabled, 'Haken sperrt Kennwort und Token');
+        check(e.$('vemas-password').disabled === false && e.$('vemas-token').disabled === false,
+              'Haken laesst Kennwort und Token des gemeinsamen Zugangs frei (Rueckfall, 2026-11-15)');
         e.$('vemas-save').click();
         await sleep(60);
         check(e.fragen.length === 1 && /gelöscht/.test(e.fragen[0] || ''), 'Einschalten fragt nach', String(e.fragen[0]));
@@ -226,7 +266,7 @@ async function portal(opts) {
             { ok: true, kachel_pflicht: true, accounts: [{ user: 'm.mustermann', auth_kind: 'basic', aktiv: true,
               ausgesetzt: false, kennwort_gespeichert: false, angemeldet: false }] }, true);
         const txt = e.$('vemas-accounts-list').textContent;
-        check(/kein VEMAS-Kennwort gespeichert/.test(txt) && /kein Kennwort gespeichert · nicht angemeldet/.test(txt),
+        check(/kein persönliches VEMAS-Kennwort gespeichert/.test(txt) && /kein Kennwort gespeichert · nicht angemeldet/.test(txt),
               'Liste: kein Kennwort gespeichert, nicht angemeldet', txt);
         check(e.$('vemas-persoenlich').checked === false, 'Kachel an -> "Persoenliche Zugaenge erlauben" nicht angehakt');
         check(e.$('vemas-sect-acc') && e.$('vemas-sect-acc').style.display === 'none',

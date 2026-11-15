@@ -12,7 +12,8 @@
  * gleich verhalten; zwei Kopien liefen beim naechsten Feinschliff auseinander.
  *
  * Markup je Seite (Praefix p = "ja" bzw. "ca"): #p-sz-sect, #p-sz-pill,
- * #p-sz-note, #p-sz-token, #p-sz-login, #p-sz-logout, #p-sz-msg.
+ * #p-sz-note, #p-sz-token, #p-sz-login, #p-sz-logout, #p-sz-msg, dazu die
+ * Kopf-Pille #p-sz-kopf in der Titelleiste.
  */
 (function () {
     'use strict';
@@ -55,6 +56,17 @@
             // sonst gilt der gespeicherte Token aus "Mein …-Zugang".
             var an = !!(a && a.sitzungs_modus);
             if (sect) sect.style.display = an ? '' : 'none';
+            // Kopf-Pille wie auf /sap und /vemas: sichtbar NUR, wenn im
+            // Sitzungsbetrieb keine Anmeldung besteht; leer blendet sie aus.
+            var kopf = $('kopf');
+            if (kopf) {
+                var fehlt = an && !a.angemeldet;
+                kopf.className = 'ja-conn' + (fehlt ? ' is-off' : '');
+                kopf.textContent = fehlt
+                    ? T('zs.kopf_aus', 'Nicht bei {name} angemeldet').replace('{name}', o.name)
+                    : '';
+                kopf.title = fehlt ? T('zs.nicht_an', 'Nicht angemeldet – es gilt der gemeinsame Zugang.') : '';
+            }
             if (!an) return;
             var angemeldet = !!a.angemeldet;
 

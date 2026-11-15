@@ -13386,11 +13386,11 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
         return body[feld] if feld in body else gespeichert.get(feld)
 
     # SAP "Anmeldung ueber die Portal-Kachel fordern" (Betreiber 2026-11-05):
-    # mit dem Schalter liegt KEIN SAP-Kennwort mehr auf der Platte. Die
-    # Geheimfelder des Sammelzugangs werden ausdruecklich geleert (ein leeres
-    # Feld hiesse sonst "unveraendert"), und beim EINSCHALTEN verlieren auch
-    # alle persoenlichen Zugaenge ihre Kennwoerter. Die Umleitungs-Pruefung
-    # entfaellt dann: es bleibt kein Geheimnis, das umgeleitet werden koennte.
+    # mit dem Schalter liegt KEIN PERSOENLICHES SAP-Kennwort mehr auf der
+    # Platte – beim EINSCHALTEN verlieren alle persoenlichen Zugaenge ihre
+    # Kennwoerter. Das Kennwort des SAMMELZUGANGS bleibt seit 2026-11-15
+    # (Betreiber: SAP/VEMAS wie Jira/Confluence, Rueckfall auf den gemeinsamen
+    # Zugang) – und damit gilt auch die Umleitungs-Pruefung wieder.
     # Seit 2026-11-05 auch fuer VEMAS (derselbe Schalter, dasselbe Modulmuster).
     # In der Oberflaeche heisst dieser Schalter seit 2026-11-15 "Persoenliche
     # Zugaenge erlauben" (Haken AUS = kachel_anmeldung an) – fuer SAP/VEMAS
@@ -13401,12 +13401,10 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
             from backend import sap_accounts as _sapacc
         else:
             from backend import vemas_accounts as _sapacc
-        for _f in _sapacc.GEHEIMFELDER:
-            body[_f] = ""
     # Neue Adresse + behaltenes Geheimnis = das Geheimnis ginge an die neue
     # Adresse, ohne dass es je jemand eingegeben oder aufgedeckt hat
     # (Code-Review 2026-10-07). Wer umzieht, gibt es neu ein.
-    umgeleitet = [] if sap_kachel else _sr.umgeleitete_geheimnisse(body, gespeichert)
+    umgeleitet = _sr.umgeleitete_geheimnisse(body, gespeichert)
     if umgeleitet:
         return JSONResponse({"success": False, "code": "geheimnis_neu_eingeben",
                              "felder": umgeleitet,
@@ -13415,10 +13413,6 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
                                       "die neue Adresse."},
                             status_code=400)
     body = _sr.leere_geheimfelder_behalten(body, gespeichert)
-    if sap_kachel:
-        # NACH dem Behalten: das setzt leere Geheimfelder wieder ein.
-        for _f in _sapacc.GEHEIMFELDER:
-            body[_f] = ""
     success = sm.update_skill_config(name, body)
     # "Persoenliche Zugaenge erlauben" ABGESCHALTET: alle persoenlichen Zugaenge
     # loeschen. Jira seit 2026-11-05, Confluence seit 2026-11-15 – EIN Zweig,
@@ -15106,8 +15100,10 @@ async def sap_portal_status(user: str = Depends(require_sap_access)):
         # Direkt nach dem Kennwort fragen (Anmeldekarte in /sap), wenn der
         # Zugang schon einmal funktioniert hat und nur die Anmeldung fehlt.
         anmeldung = sap_accounts.anmeldung_anbieten(user) if kachel else {}
-        # Mit Kachelpflicht gibt es keinen gemeinsamen Lesezugang (Kennwort leer).
-        sammel = (not kachel) and bool(SapClient().configured)
+        # Seit 2026-11-15 auch mit Kachelpflicht: der gemeinsame Zugang bleibt
+        # der Rueckfall, sofern er vollstaendig eingetragen ist.
+        sammel = (sap_accounts.sammel_nutzbar() if kachel
+                  else bool(SapClient().configured))
     except Exception:  # noqa: BLE001
         pass
     return JSONResponse({
@@ -15623,8 +15619,10 @@ async def vemas_status(user: str = Depends(require_vemas_access)):
     try:
         from backend import vemas_accounts
         kachel = vemas_accounts.kachel_pflicht()
-        # Mit Kachelpflicht gibt es keinen gemeinsamen Zugang (Kennwort leer).
-        sammel = (not kachel) and bool(vemas_accounts.sammel_client().configured)
+        # Seit 2026-11-15 auch mit Kachelpflicht: der gemeinsame Zugang bleibt
+        # der Rueckfall, sofern er vollstaendig eingetragen ist.
+        sammel = (vemas_accounts.sammel_nutzbar() if kachel
+                  else bool(vemas_accounts.sammel_client().configured))
         # Direkt nach dem Kennwort fragen, wenn der Zugang schon funktioniert hat.
         anmeldung = vemas_accounts.anmeldung_anbieten(user) if kachel else {}
     except Exception:  # noqa: BLE001

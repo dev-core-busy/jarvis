@@ -19,7 +19,8 @@
  *      Kachelpflicht – AUS speichert kachel_anmeldung:true, es gibt KEINEN
  *      zweiten Kachel-Haken, der Container folgt wie bei Confluence dem
  *      gespeicherten Stand (AUS = Zugaenge geloescht, Container weg), und die
- *      Kennwortfelder des gemeinsamen Zugangs sperren sich sofort.
+ *      Kennwortfelder des gemeinsamen Zugangs bleiben frei (seit 2026-11-15
+ *      ist er auch dann der Rueckfall, wie bei Jira/Confluence).
  *
  * Aufruf: node tests/test_zugaenge_reiter_ui.js
  * Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
@@ -247,8 +248,8 @@ async function reiter(name, cfg, confirmAntwort, accounts) {
                 check(!!e.$(m.pw) && e.$(m.pw).disabled === false,
                       'Positivkontrolle: erlaubt -> Kennwortfeld des gemeinsamen Zugangs frei');
                 e.umschalten(cb, false);
-                check(!!e.$(m.pw) && e.$(m.pw).disabled === true,
-                      'Haken entfernt -> Kennwortfeld sofort gesperrt (kein Kennwort auf dem Server)');
+                check(!!e.$(m.pw) && e.$(m.pw).disabled === false,
+                      'Haken entfernt -> Kennwortfeld des gemeinsamen Zugangs bleibt frei (Rueckfall)');
                 e.umschalten(cb, true);
                 check(!!e.$(m.pw) && e.$(m.pw).disabled === false, 'wieder angehakt -> Kennwortfeld frei');
                 e.s.window.close();

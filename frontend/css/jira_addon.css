@@ -50,6 +50,16 @@ body {
     flex-shrink: 0; overflow: hidden;
 }
 .topbar-title { font-size: 19px; font-weight: 600; white-space: nowrap; }
+/* Kopf-Pille "Nicht bei Jira/Confluence angemeldet" – Bauform wie .sp-conn
+ * auf /sap und .vm-conn auf /vemas, damit alle vier Bereiche gleich aussehen. */
+.ja-conn { display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: 12px; font-size: .74rem; font-weight: 600;
+    background: rgba(var(--fg-rgb), .06); border: 1px solid var(--border);
+    color: var(--text-secondary); white-space: nowrap; }
+.ja-conn.is-off { color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+    background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.ja-conn:empty { display: none; }
 
 /* Die Symbole SELBST brauchen ihre Regeln ebenfalls – derselbe Fallstrick wie
  * bei .topbar, nur eine Ebene tiefer: `.lang-toggle` steht in theme.css gar

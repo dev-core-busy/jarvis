@@ -35,7 +35,7 @@ PROBEN = [
      "                if pflicht:\n                    sitzung_neu[f] = wert\n",
      "                if False:\n                    sitzung_neu[f] = wert\n"),
     ("Aufloesung ignoriert den Schalter", "modul",
-     "    if kachel_pflicht():\n        return _aufloesen_kachel(un, trotz_aussetzer)\n", ""),
+     "    if kachel_pflicht():\n        return _mit_rueckfall(_aufloesen_kachel(un, trotz_aussetzer))\n", ""),
     ("ohne Anmeldung wird verbunden", "modul",
      '    if not _sitzung_holen(un):\n        return _kein_zugang(un, "Fuer VEMAS ist eine Anmeldung noetig. " + ANMELDEN_TEXT)\n', ""),
     ("Zugang ohne Kennwort gilt als nicht eingerichtet", "modul",

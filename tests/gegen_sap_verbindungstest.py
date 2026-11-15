@@ -233,8 +233,13 @@ PROBEN = [
     ("Einschalten ohne Warnhinweis", "sapjs",
      "            if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {",
      "            if (false) {", 1),
-    ("Kennwortfelder bleiben trotz Haken frei", "sapjs",
-     "                e.disabled = an;\n", "", 1),
+    # Seit 2026-11-15 BLEIBEN die Kennwortfelder des gemeinsamen Zugangs frei
+    # (Rueckfall wie Jira/Confluence); die Probe stellt die fruehere Sperre her.
+    ("Kennwortfelder werden beim Laden wieder gesperrt", "sapjs",
+     "                    self._mountCert();\n",
+     "                    ['sap-odata-pass', 'sap-odata-token', 'sap-hana-pass', 'sap-rfc-pass'].forEach("
+     "function (id) { var x = $(id); if (x) x.disabled = !!c.kachel_anmeldung; });\n"
+     "                    self._mountCert();\n", 1),
     ("Normalmodus: Enter im Formular speichert", "portal",
      "            if (_kachel) saveAccount();\n        });",
      "            saveAccount();\n        });", 1),

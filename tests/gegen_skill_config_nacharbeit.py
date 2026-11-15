@@ -80,9 +80,14 @@ PROBEN = [
      [('"confluence_persoenliche_zugaenge_aus"', '"jira_persoenliche_zugaenge_aus"')]),
     ("Stand wird gar nicht gespeichert", "biss", "main",
      [("    success = sm.update_skill_config(name, body)", "    success = True")]),
-    ("Sammel-Kennwort wird nach dem Behalten nicht geleert", "biss", "main",
-     [("    if sap_kachel:\n        # NACH dem Behalten: das setzt leere Geheimfelder wieder ein.\n"
-       "        for _f in _sapacc.GEHEIMFELDER:\n            body[_f] = \"\"\n", "")]),
+    # Seit 2026-11-15 BLEIBT das Sammel-Kennwort (Rueckfall wie Jira/Confluence);
+    # die Probe stellt das fruehere Leeren wieder her.
+    ("Sammel-Kennwort wird wieder geleert", "biss", "main",
+     [("    body = _sr.leere_geheimfelder_behalten(body, gespeichert)\n"
+       "    success = sm.update_skill_config(name, body)\n",
+       "    body = _sr.leere_geheimfelder_behalten(body, gespeichert)\n"
+       "    if sap_kachel:\n        for _f in _sapacc.GEHEIMFELDER:\n            body[_f] = \"\"\n"
+       "    success = sm.update_skill_config(name, body)\n")]),
     ("Zahl der geloeschten Zugaenge nicht protokolliert", "biss", "main",
      [("                        kennwoerter_entfernt=_n, zugaenge_entfernt=_nz)",
        "                        kennwoerter_entfernt=_n)")]),

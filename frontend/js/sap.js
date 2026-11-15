@@ -28,8 +28,6 @@
         });
     }
 
-    // Kennwortfelder des gemeinsamen Zugangs (gesperrt bei Kachel-Anmeldung).
-    var KENNWORT_FELDER = ['sap-odata-pass', 'sap-odata-token', 'sap-hana-pass', 'sap-rfc-pass'];
     function token() { return window.JarvisSitzung.token(); }
     function authHeaders(extra) {
         return Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
@@ -95,8 +93,8 @@
             if (ct) ct.addEventListener('change', function () { self._applyType(ct.value); });
             // EIN Haken (Betreiber 2026-11-15): "Persoenliche Zugaenge erlauben"
             // AUS heisst Anmeldung ueber die Portal-Kachel (_kachelGewaehlt).
-            var kp = $('sap-persoenlich');
-            if (kp) kp.addEventListener('change', function () { self._applyKachel(); });
+            // Die Kennwortfelder des GEMEINSAMEN Zugangs bleiben dabei frei: er
+            // ist seit 2026-11-15 auch dann der Rueckfall (wie Jira/Confluence).
             var save = $('sap-save'); if (save) save.addEventListener('click', this.save.bind(this));
             var test = $('sap-test'); if (test) test.addEventListener('click', this.test.bind(this));
             var oq = $('sap-odata-run'); if (oq) oq.addEventListener('click', this.runOData.bind(this));
@@ -118,26 +116,15 @@
             });
         },
 
-        // Mit "Anmeldung ueber die Portal-Kachel" gibt es hier kein Kennwort –
-        // die Felder werden gesperrt, statt einen Wert anzunehmen, den der
-        // Server ohnehin verwirft.
         // "Persoenliche Zugaenge erlauben" ist die Umkehrung der Kachelpflicht:
-        // AN = jeder darf seinen Zugang samt Kennwort speichern (Rueckfall auf
-        // den gemeinsamen Zugang), AUS = kein Kennwort auf dem Server, jeder
-        // meldet sich in der Portal-Kachel an. Fehlt der Haken im Markup, gilt
-        // der gespeicherte Stand – nie still umschalten.
+        // AN = jeder darf seinen Zugang samt Kennwort speichern, AUS = kein
+        // PERSOENLICHES Kennwort auf dem Server, jeder meldet sich in der
+        // Portal-Kachel an. In beiden Faellen ist der gemeinsame Zugang der
+        // Rueckfall (seit 2026-11-15). Fehlt der Haken im Markup, gilt der
+        // gespeicherte Stand – nie still umschalten.
         _kachelGewaehlt: function () {
             var cb = $('sap-persoenlich');
             return cb ? !cb.checked : !!(this._cfg && this._cfg.kachel_anmeldung);
-        },
-
-        _applyKachel: function () {
-            var an = this._kachelGewaehlt();
-            KENNWORT_FELDER.forEach(function (id) {
-                var e = $(id); if (!e) return;
-                e.disabled = an;
-                if (an) e.value = '';
-            });
         },
 
         _applyType: function (type) {
@@ -198,7 +185,6 @@
                     // (Betreiber 2026-11-15: aus = Zugaenge geloescht, Container weg).
                     if (window.SkillCfg) window.SkillCfg.persoenlichAnwenden('sap', !c.kachel_anmeldung);
                     self._cfg = c;
-                    self._applyKachel();
                     self._mountCert();
                     self._applyType(c.connection_type || 'odata');
                 })
@@ -293,7 +279,7 @@
             // Abhaken loescht alle persoenlichen Zugaenge – vorher fragen.
             if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {
                 var frage = window.t ? window.t('sap.kachel_pflicht_confirm') : '';
-                if (!window.confirm(frage || 'Achtung: Beim Speichern werden das Kennwort des gemeinsamen SAP-Zugangs und ALLE persönlichen SAP-Zugänge gelöscht. Fortfahren?')) {
+                if (!window.confirm(frage || 'Achtung: Beim Speichern werden ALLE persönlichen SAP-Zugänge gelöscht. Der gemeinsame Zugang bleibt erhalten. Fortfahren?')) {
                     return;
                 }
             }
@@ -340,7 +326,7 @@
                     // Liste sah sonst genauso aus wie mit gespeicherten Kennwoertern.
                     if (kachel) {
                         kopf = '<strong>' + esc(T('sap.adm_kachel_kopf',
-                            'Anmeldung über die Portal-Kachel: Auf dem Server ist kein SAP-Kennwort gespeichert.'))
+                            'Anmeldung über die Portal-Kachel: Auf dem Server ist kein persönliches SAP-Kennwort gespeichert.'))
                             + '</strong><br>' + kopf;
                     }
                     var list = (d.accounts || []);

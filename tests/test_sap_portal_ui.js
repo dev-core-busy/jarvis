@@ -1429,6 +1429,57 @@ function loadScript(dom, rel) {
         check('Fehlschlag: Kennwortfeld geleert', $('sp-login-pass').value === '');
         k.d.window.close();
     }
+    // Rueckfall auf den gemeinsamen Zugang (Betreiber 2026-11-15, wie
+    // Jira/Confluence): "configured" ist dann WAHR, die Seite muss trotzdem
+    // sagen, dass keine eigene Anmeldung besteht, und die Karte anbieten.
+    async function rueckfall(status) {
+        const d = build('sap.html', { username: 'anna', is_admin: false, permissions: { sap: true } },
+                        { status: status });
+        loadScript(d, 'js/i18n.js');
+        loadScript(d, 'js/chatlib.js');
+        loadScript(d, 'js/sap_portal.js');
+        await sleep(160);
+        return { d, $: (id) => d.window.document.getElementById(id) };
+    }
+    {
+        const k = await rueckfall({ configured: true, kachel_pflicht: true, quelle: 'sammel',
+                                    connection_type: 'odata', product: 'S/4',
+                                    hinweis: 'Fuer SAP ist eine Anmeldung noetig. Bis dahin gilt der gemeinsame Lesezugang.',
+                                    anmeldung: { feld: 'password', benutzer: 'MUSTER', kanal: 'odata' } });
+        const pill = k.$('sp-conn');
+        check('Rueckfall mit Vorlauf: Anmeldekarte wird trotzdem angeboten',
+              !!k.$('sp-login') && k.$('sp-login').hidden === false);
+        check('Rueckfall mit Vorlauf: Pille "Nicht bei SAP angemeldet"',
+              !!pill && pill.textContent === 'Nicht bei SAP angemeldet' && /is-off/.test(pill.className),
+              pill && pill.textContent);
+        check('Rueckfall mit Vorlauf: Tooltip nennt den gemeinsamen Zugang',
+              !!pill && /gemeinsame/.test(pill.title), pill && pill.title);
+        k.d.window.close();
+    }
+    {
+        const k = await rueckfall({ configured: true, kachel_pflicht: true, quelle: 'sammel',
+                                    connection_type: 'odata', product: 'S/4',
+                                    hinweis: 'Fuer SAP ist eine Anmeldung noetig. Bis dahin gilt der gemeinsame Lesezugang.',
+                                    anmeldung: {} });
+        const pill = k.$('sp-conn');
+        check('Rueckfall ohne Vorlauf: Pille "Nicht bei SAP angemeldet"',
+              !!pill && pill.textContent === 'Nicht bei SAP angemeldet' && /is-off/.test(pill.className),
+              pill && pill.textContent);
+        check('Rueckfall ohne Vorlauf: keine Fehlermeldung (es geht ja weiter)',
+              !/is-error|error/.test(k.$('sp-note').className) || !k.$('sp-note').textContent.trim(),
+              k.$('sp-note').className + ' | ' + k.$('sp-note').textContent);
+        check('Rueckfall ohne Vorlauf: keine Anmeldekarte', !k.$('sp-login') || k.$('sp-login').hidden === true);
+        k.d.window.close();
+    }
+    {
+        const k = await rueckfall({ configured: true, kachel_pflicht: true, quelle: 'persoenlich',
+                                    connection_type: 'odata', product: 'S/4', anmeldung: {} });
+        const pill = k.$('sp-conn');
+        check('angemeldet: Pille zeigt die Schnittstelle, keine Warnung',
+              !!pill && /OData/.test(pill.textContent) && !/is-off/.test(pill.className),
+              pill && pill.textContent);
+        k.d.window.close();
+    }
     {
         // Ohne erfolgreichen Vorlauf (anmeldung leer) gibt es keine Karte –
         // dann fuehrt der Weg ueber "Mein SAP-Zugang".
@@ -1496,7 +1547,8 @@ function loadScript(dom, rel) {
                                          sitzung_bis: 1893456000 }, KONTO, { user: 'e.beispiel' })] }, true);
         const txt = e.$('sap-accounts-list').textContent;
         check('Positivkontrolle: Liste gerendert', /2 Benutzer mit eigenem Zugang/.test(txt), txt);
-        check('Kopf sagt: kein SAP-Kennwort auf dem Server', /kein SAP-Kennwort gespeichert/.test(txt), txt);
+        check('Kopf sagt: kein persoenliches SAP-Kennwort auf dem Server',
+              /kein persönliches SAP-Kennwort gespeichert/.test(txt), txt);
         check('je Benutzer: kein Kennwort gespeichert',
               (txt.match(/kein Kennwort gespeichert/g) || []).length === 2, txt);
         check('je Benutzer: angemeldet bzw. nicht angemeldet',
@@ -1506,9 +1558,11 @@ function loadScript(dom, rel) {
         check('Kachel an -> "Persoenliche Zugaenge erlauben" nicht angehakt', e.$('sap-persoenlich').checked === false);
         check('Container "Persoenliche SAP-Zugaenge" ausgeblendet (Betreiber 2026-11-15)',
               !!e.$('sap-sect-acc') && e.$('sap-sect-acc').style.display === 'none');
-        check('Kennwortfelder des gemeinsamen Zugangs gesperrt',
+        // Seit 2026-11-15 ist der gemeinsame Zugang auch hier der Rueckfall
+        // (wie Jira/Confluence) – seine Kennwortfelder bleiben frei.
+        check('Kennwortfelder des gemeinsamen Zugangs bleiben frei (Rueckfall)',
               ['sap-odata-pass', 'sap-odata-token', 'sap-hana-pass', 'sap-rfc-pass']
-                  .every((id) => e.$(id) && e.$(id).disabled));
+                  .every((id) => e.$(id) && e.$(id).disabled === false));
         e.$('sap-save').click();
         await sleep(60);
         check('schon an: Speichern fragt NICHT erneut', e.fragen.length === 0 && e.posts.length === 1,
@@ -1522,12 +1576,14 @@ function loadScript(dom, rel) {
               accounts: [Object.assign({ kennwort_gespeichert: true }, KONTO)] }, false);
         const txt = e.$('sap-accounts-list').textContent;
         check('ohne Schalter: "Kennwort gespeichert" je Benutzer', /– Kennwort gespeichert/.test(txt), txt);
-        check('ohne Schalter: kein Kopfsatz "kein SAP-Kennwort"', !/kein SAP-Kennwort/.test(txt), txt);
+        check('ohne Schalter: kein Kopfsatz "kein persoenliches SAP-Kennwort"',
+              !/kein persönliches SAP-Kennwort/.test(txt), txt);
         check('ohne Schalter: Kennwortfeld frei', e.$('sap-odata-pass').disabled === false);
         check('Kachel aus -> "Persoenliche Zugaenge erlauben" angehakt', e.$('sap-persoenlich').checked === true);
         e.$('sap-persoenlich').checked = false;
         e.$('sap-persoenlich').dispatchEvent(new e.s.window.Event('change'));
-        check('Haken entfernen sperrt die Kennwortfelder sofort', e.$('sap-odata-pass').disabled === true);
+        check('Haken entfernen laesst das Kennwortfeld des gemeinsamen Zugangs frei',
+              e.$('sap-odata-pass').disabled === false);
         e.$('sap-save').click();
         await sleep(60);
         check('Einschalten fragt nach (Warnhinweis)', e.fragen.length === 1 && /gelöscht/.test(e.fragen[0] || ''),

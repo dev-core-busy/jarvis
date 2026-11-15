@@ -4,16 +4,18 @@
 Zusagen (backend/sap_accounts.py, Abschnitt "Anmeldung ueber die Portal-Kachel",
 und backend/main.py::update_skill_config / logout):
 
-* Mit dem Schalter liegt KEIN SAP-Kennwort auf der Platte – weder neu
-  gespeichert noch als Rest von vorher.
+* Mit dem Schalter liegt KEIN PERSOENLICHES SAP-Kennwort auf der Platte –
+  weder neu gespeichert noch als Rest von vorher.
 * Beim Einschalten verlieren alle persoenlichen Zugaenge ihre Kennwoerter, die
   Zugaenge selbst (Server, Benutzer) bleiben.
 * Ein eingegebenes Kennwort gilt nur im Arbeitsspeicher: Ablauf, Abmelden und
   ein Anmeldefehler beenden es.
-* Ohne Anmeldung gibt es KEINEN Zugang – auch keinen Rueckfall auf den
-  Sammelzugang.
-* Das Einstellungs-Speichern leert die Geheimfelder des Sammelzugangs NACH dem
-  "leer = unveraendert"-Schritt (sonst setzte der sie wieder ein).
+* Ohne Anmeldung gilt der Sammelzugang (Betreiber 2026-11-15, wie
+  Jira/Confluence) – aber NUR, wenn er vollstaendig eingetragen ist. Ohne
+  sein Kennwort gibt es KEINEN Zugang (kein Rueckfall, der nur abgelehnte
+  Anmeldungen an SAP schickte).
+* Das Einstellungs-Speichern leert die Geheimfelder des Sammelzugangs NICHT
+  mehr (bis 2026-11-15 tat es das).
 
 Laeuft ohne fastapi und ohne SAP-System; ``backend.config`` ist eine Attrappe
 (der echte Import schreibt die Live-settings.json zurueck).
@@ -103,7 +105,9 @@ def admin(pflicht: bool):
     c = dict(SAMMEL)
     if pflicht:
         c["kachel_anmeldung"] = True
-        c["password"] = ""          # so wie update_skill_config es hinterlaesst
+        # Ohne Sammel-Kennwort: so prueft der Waechter den Fall "kein
+        # Rueckfall". Den Rueckfall MIT Kennwort misst Abschnitt 2b.
+        c["password"] = ""
     _skill_states["sap"]["config"] = c
 
 
@@ -168,6 +172,40 @@ check(sa.aufloesen("wa:+4917012345")["quelle"] == sa.QUELLE_KEINE,
 info = sa.zugang_info("m.mustermann")
 check(info.get("kachel_pflicht") is True and info.get("angemeldet") is False
       and info.get("passwort_gesetzt") is False, "zugang_info: Pflicht an, nicht angemeldet")
+check(sa.sammel_nutzbar() is False, "Sammelzugang ohne Kennwort gilt als NICHT nutzbar")
+
+# ═══════════════════════════════════════════════════════════════════════════
+section("2b. Ohne Anmeldung, Sammelzugang vollstaendig: Rueckfall (2026-11-15)")
+# ═══════════════════════════════════════════════════════════════════════════
+_skill_states["sap"]["config"]["password"] = SAMMEL["password"]
+check(sa.sammel_nutzbar() is True, "Sammelzugang mit Kennwort gilt als nutzbar")
+z = sa.aufloesen("m.mustermann")
+check(z["quelle"] == sa.QUELLE_SAMMEL, "Quelle 'sammel' (Rueckfall)", z["quelle"])
+check(z["client"].configured and z["client"].cfg.get("password") == SAMMEL["password"],
+      "der Client ist der Sammelzugang mit dessen Kennwort")
+check(sa.ANMELDEN_TEXT in (z["hinweis"] or "") and "gemeinsame" in (z["hinweis"] or ""),
+      "Hinweis nennt Anmeldung UND den geltenden gemeinsamen Zugang", z["hinweis"])
+check(sa.aufloesen("unbekannt")["quelle"] == sa.QUELLE_SAMMEL,
+      "Benutzer ohne eigenen Zugang: ebenfalls Rueckfall")
+check(sa.aufloesen("wa:+4917012345")["quelle"] == sa.QUELLE_SAMMEL,
+      "Kanal-Kennung: Rueckfall wie bei Jira/Confluence")
+# Geheimnis der AKTIVEN Zugangsart: RFC vollstaendig eingetragen (Adresse
+# ist damit "configured"), aber nur das OData-Kennwort hinterlegt. Ohne die
+# Positivkontrolle waere die Pruefung trivial wahr (ein unvollstaendiger
+# RFC-Eintrag scheitert schon an der Adresse).
+_cfg = _skill_states["sap"]["config"]
+_cfg.update(connection_type="rfc", rfc_ashost="sap.firma.de", rfc_sysnr="00",
+            rfc_client="100", rfc_user="SAMMEL")
+from backend.sap_client import SapClient as _SC  # noqa: E402
+check(_SC().configured, "Positivkontrolle: der RFC-Sammelzugang gilt als konfiguriert")
+check(sa.sammel_nutzbar() is False,
+      "RFC aktiv, aber nur das OData-Kennwort da: NICHT nutzbar (Geheimnis der AKTIVEN Art)")
+_cfg["rfc_password"] = "rfc-kennwort"
+check(sa.sammel_nutzbar() is True, "RFC mit RFC-Kennwort: nutzbar")
+for _k in ("rfc_ashost", "rfc_sysnr", "rfc_client", "rfc_user", "rfc_password"):
+    _cfg.pop(_k, None)
+_cfg["connection_type"] = "odata"
+_skill_states["sap"]["config"]["password"] = ""
 
 # ═══════════════════════════════════════════════════════════════════════════
 section("3. Anmelden: Kennwort nur im Arbeitsspeicher")
@@ -294,9 +332,9 @@ behalten = [c.lineno for c in _aufrufe(usc, "leere_geheimfelder_behalten")]
 speichern = [c.lineno for c in _aufrufe(usc, "update_skill_config")]
 leer = _leer_zuweisungen(usc)
 check(bool(behalten) and bool(speichern), "Positivkontrolle: Behalten und Speichern gefunden")
-check(any(min(behalten) < z_ < min(speichern) for z_ in leer),
-      "Geheimfelder werden NACH dem Behalten und VOR dem Speichern geleert",
-      f"behalten={behalten} leer={leer} speichern={speichern}")
+check(not leer,
+      "die Geheimfelder des Sammelzugangs werden NICHT mehr geleert (Rueckfall, 2026-11-15)",
+      f"leer={leer}")
 check(any(c.lineno > min(speichern) for c in _aufrufe(usc, "kennwoerter_entfernen")),
       "nach dem Speichern werden die Kennwoerter der eigenen Zugaenge entfernt")
 # Auf genau dem Namen, unter dem sap_accounts importiert wurde – seit auch

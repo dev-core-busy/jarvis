@@ -342,6 +342,38 @@ if hf is not None:
     check(len(schleifen) == 2 and all(any(isinstance(x, ast.Try) for x in s.body)
                                       for s in schleifen),
           "je System eigenes try (ein Fehler laesst nur dieses System weg)")
+    # Testphase: vor JEDER Systemschleife steht die Freigabe-Schranke mit
+    # leerer Rueckgabe – sonst sieht jeder Benutzer den zweiten Schritt.
+    erste_schleife = next((i for i, n in enumerate(hf.body) if isinstance(n, ast.For)),
+                          len(hf.body))
+    def _ist_schranke(n):
+        if not (isinstance(n, ast.If) and isinstance(n.test, ast.UnaryOp)
+                and isinstance(n.test.op, ast.Not) and isinstance(n.test.operand, ast.Call)):
+            return False
+        f = n.test.operand.func
+        return (isinstance(f, ast.Name) and f.id == "_user_may_use_zugang_anmeldung"
+                and len(n.body) == 1 and isinstance(n.body[0], ast.Return))
+    check(any(_ist_schranke(n) for n in hf.body[:erste_schleife]),
+          "Freigabe-Schranke steht vor den Systemen (Testphase)")
+
+# Die Schranke selbst: leer = niemand, nur gelistete Benutzer
+pf = _fn("_user_may_use_zugang_anmeldung")
+check(pf is not None, "_user_may_use_zugang_anmeldung existiert")
+if pf is not None:
+    gelesen = {n.args[0].value for n in ast.walk(pf) if isinstance(n, ast.Call)
+               and isinstance(n.func, ast.Attribute) and n.func.attr == "get_setting"
+               and n.args and isinstance(n.args[0], ast.Constant)}
+    check(gelesen == {"zugang_anmeldung_users"}, "liest genau zugang_anmeldung_users",
+          str(gelesen))
+    ns = {"config": type("C", (), {"get_setting": staticmethod(lambda k, d=None: _ZA[0])}),
+          "_norm_login": lambda x: x.strip().lower().split("\\")[-1]}
+    exec(compile(ast.Module(body=[pf], type_ignores=[]), "pf", "exec"), ns)
+    _ZA = [""]
+    check(ns[pf.name]("anna.beispiel") is False, "leere Liste = niemand")
+    _ZA = ["anna.beispiel, erika.muster"]
+    check(ns[pf.name]("Anna.Beispiel") is True, "gelisteter Benutzer darf")
+    check(ns[pf.name]("m.mustermann") is False, "nicht gelisteter Benutzer darf nicht")
+    check(ns[pf.name]("") is False, "leerer Benutzer darf nicht")
 
 print(f"\n{'═' * 70}\nERGEBNIS: {_ok} OK, {_fail} FAIL")
 sys.exit(1 if _fail else 0)

@@ -563,11 +563,14 @@ MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 for m, pfad in (("get", "/api/confluence/account"),
                 ("post", "/api/confluence/account"),
                 ("delete", "/api/confluence/account"),
-                ("post", "/api/confluence/account/test")):
+                ("post", "/api/confluence/account/test"),
+                # Anmeldung fuer die Sitzung (2026-11-15)
+                ("post", "/api/confluence/account/sitzung"),
+                ("delete", "/api/confluence/account/sitzung")):
     check("%s %s existiert" % (m.upper(), pfad),
           '@app.%s("%s")' % (m, pfad) in MAIN)
-check("alle vier haengen an require_confluence_account_access",
-      MAIN.count("Depends(require_confluence_account_access)") == 4,
+check("alle sechs haengen an require_confluence_account_access",
+      MAIN.count("Depends(require_confluence_account_access)") == 6,
       str(MAIN.count("Depends(require_confluence_account_access)")))
 check("die Seite /confluence-addon wird ausgeliefert",
       '@app.get("/confluence-addon")' in MAIN)

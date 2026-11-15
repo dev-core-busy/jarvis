@@ -1566,3 +1566,33 @@ body.light :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hove
 /* Am Seitenende einer Kachel-Seite (kein Platzhalter): eigener Rand, damit die
    Zeile nicht am letzten Container klebt und nicht am Fensterrand steht. */
 .pt-contact.pt-contact-seite { margin: 8px auto 0; padding: 18px 16px 22px; text-align: center; }
+
+/* ── Anmeldemaske: zweiter Schritt "Weitere Anmeldungen" (2026-11-15) ──────
+   zugang_anmeldung.js. `[hidden]` ausdruecklich, weil `.zg-*`-Regeln mit
+   `display` das Attribut sonst ueberstimmen (Register: .sp-row[hidden]). */
+/* Breite wie das Anmeldeformular (.login-form: max-width 380px), etwas Luft
+   fuer zwei Felder nebeneinander; der Seitenrand haelt es bei 380 px vom Rand. */
+.zg-schritt { text-align: left; width: 100%; max-width: 440px; margin: 0 auto;
+    padding: 0 12px; box-sizing: border-box; }
+.zg-schritt[hidden], .zg-meldung[hidden] { display: none; }
+.zg-titel { font-size: 1.05rem; margin: 0 0 6px; color: var(--text-primary); font-weight: 600; }
+.zg-hinweis { margin: 0 0 14px; font-size: 0.85rem; line-height: 1.45; color: var(--text-secondary); }
+.zg-liste { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.zg-zeile { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px;
+    background: var(--bg-secondary); }
+.zg-kopf { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    flex-wrap: wrap; margin-bottom: 8px; }
+.zg-name { font-weight: 600; color: var(--text-primary); }
+.zg-status { font-size: 0.8rem; color: var(--text-secondary); min-width: 0; overflow-wrap: anywhere; }
+.zg-status.is-ok { color: var(--text-primary); }
+.zg-status.is-fehler, .zg-meldung.is-fehler { color: var(--danger); }
+body.light .zg-status.is-fehler, body.light .zg-meldung.is-fehler {
+    color: color-mix(in srgb, var(--danger) 78%, #000); }
+.zg-felder { display: flex; gap: 8px; flex-wrap: wrap; }
+.zg-input { flex: 1 1 140px; min-width: 0; box-sizing: border-box; background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border); border-radius: var(--radius-md); padding: 9px 12px;
+    color: var(--text-primary); font-size: 0.9rem; font-family: var(--font-body); outline: none; }
+.zg-input:focus { border-color: var(--accent); box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.2); }
+.zg-input:disabled { opacity: 0.6; }
+.zg-meldung { margin: 0 0 12px; font-size: 0.85rem; line-height: 1.4; }
+.zg-ueberspringen { width: 100%; margin-top: 10px; justify-content: center; }

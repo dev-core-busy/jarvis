@@ -6204,6 +6204,18 @@ async def logout(request: Request, user: str = Depends(require_auth)):
         _vmacc.sitzung_beenden(user)
     except Exception:  # noqa: BLE001
         pass
+    # Jira/Confluence-Anmeldung fuer die Sitzung (Token nur im Arbeitsspeicher,
+    # "Persoenliche Zugaenge erlauben" = aus) endet ebenso.
+    try:
+        from backend import jira_accounts as _jiacc
+        _jiacc.sitzung_beenden(user)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from backend import confluence_accounts as _cfacc
+        _cfacc.sitzung_beenden(user)
+    except Exception:  # noqa: BLE001
+        pass
     _sicherheits_log.ereignis("abmeldung", benutzer=user,
                               ip=request.client.host if request.client else "",
                               ergebnis="erfolg")
@@ -6369,6 +6381,80 @@ async def totp_status(username: str = Depends(require_auth)):
     return JSONResponse({
         "enabled": bool(user_state.get("totp_enabled")),
     })
+
+
+# ── Weitere Anmeldungen direkt nach der Anmeldung an Jarvis (2026-11-15) ────
+#
+# Vorgabe des Betreibers: Zugangsdaten nur noch an EINER Stelle eingeben. Wo
+# keine persoenliche Anmeldung fest hinterlegt werden darf (SAP/VEMAS:
+# Anmeldung ueber die Portal-Kachel; Jira/Confluence: "Persoenliche Zugaenge
+# erlauben" aus), zeigt die Anmeldemaske nach dem Jarvis-Login einen zweiten
+# Schritt mit genau den Systemen, die DIESER Benutzer gerade braucht.
+#
+# Der Endpunkt sagt nur, WAS angeboten wird – angemeldet wird ueber die
+# vorhandenen Wege des jeweiligen Bereichs (SAP/VEMAS: ``POST …/account`` +
+# ``GET …/test``; Jira/Confluence: ``POST …/account/sitzung``). Eine zweite
+# Anmeldelogik hier liefe beim naechsten Feinschliff auseinander.
+#
+# Bewusst NACH der Anmeldung und nicht als Felder in der Maske davor: vorher
+# ist der Benutzer unbekannt (welche Freigaben, welcher SAP-Benutzer), und ein
+# vorab lesbarer Endpunkt verriete ohne Anmeldung, welche Systeme angebunden
+# sind.
+
+_ZUGANG_BENUTZERFELD = {
+    # Geheimfeld -> Feld des Benutzernamens im Zugang ("" = ohne Benutzer)
+    "sap": {"password": "username", "hana_password": "hana_user",
+            "rfc_password": "rfc_user", "bearer_token": ""},
+    "vemas": {"password": "username", "api_token": ""},
+}
+
+
+def _zugang_anmeldungen(user: str) -> list[dict]:
+    """Welche Anmeldungen braucht dieser Benutzer gerade? Fail-closed je
+    System: ein Fehler laesst das System weg, nie die ganze Liste."""
+    out: list[dict] = []
+    if not (user or "").strip() or ":" in user:
+        return out
+    from backend import (confluence_accounts, jira_accounts,  # noqa: PLC0415
+                         sap_accounts, vemas_accounts)
+    for system, darf, m in (
+            ("sap", lambda: _user_may_use_sap(user) and _skill_active("sap"), sap_accounts),
+            ("vemas", lambda: _user_may_use_vemas(user) and _skill_active("vemas"),
+             vemas_accounts)):
+        try:
+            if not darf():
+                continue
+            a = m.anmeldung_anbieten(user) or {}
+            if not a.get("feld"):
+                continue
+            out.append({"system": system, "art": "kennwort", "feld": a["feld"],
+                        "benutzer": a.get("benutzer") or "",
+                        "benutzer_feld": _ZUGANG_BENUTZERFELD[system].get(a["feld"], "")})
+        except Exception as e:  # noqa: BLE001
+            print(f"[Anmeldung] {system}: nicht ermittelbar: {e}", flush=True)
+    for system, darf, m in (
+            ("jira", lambda: _user_may_use_jira_assist(user) and _skill_active("jira"),
+             jira_accounts),
+            ("confluence", lambda: _skill_active("confluence"), confluence_accounts)):
+        try:
+            if not darf():
+                continue
+            if not m.sitzungs_modus() or not m.basis_url():
+                continue
+            if m.zugang_info(user).get("angemeldet"):
+                continue
+            out.append({"system": system, "art": "token", "feld": "api_token",
+                        "benutzer": "", "benutzer_feld": ""})
+        except Exception as e:  # noqa: BLE001
+            print(f"[Anmeldung] {system}: nicht ermittelbar: {e}", flush=True)
+    return out
+
+
+@app.get("/api/zugaenge/anmeldung")
+async def zugaenge_anmeldung(user: str = Depends(require_auth)):
+    """Fuer den zweiten Schritt der Anmeldemaske: welche Systeme brauchen jetzt
+    eine Anmeldung? OHNE Geheimnisse – nur Feldnamen und SAP/VEMAS-Benutzer."""
+    return JSONResponse({"ok": True, "anmeldungen": _zugang_anmeldungen(user)})
 
 
 @app.post("/api/auth/totp/setup")
@@ -14620,6 +14706,44 @@ async def confluence_account_del(user: str = Depends(require_confluence_account_
                          "account": confluence_accounts.zugang_info(user)})
 
 
+# ── Confluence: Anmeldung fuer die Sitzung (Betreiber 2026-11-15) ──
+# Nur wenn "Persoenliche Zugaenge erlauben" AUS ist: der Token liegt dann nur
+# im Arbeitsspeicher (``confluence_accounts.sitzung_anmelden``) und gilt bis zum Abmelden
+# – hier, bei der Jarvis-Abmeldung oder nach Ablauf. Angemeldet wird bei der
+# Anmeldung an Jarvis (zweiter Schritt) oder im Bereich Confluence.
+
+@app.post("/api/confluence/account/sitzung")
+async def confluence_account_anmelden(request: Request,
+                                 user: str = Depends(require_confluence_account_access)):
+    """Fuer die Sitzung anmelden (Rumpf ``{"api_token": …}``); der Token wird
+    VOR dem Merken gegen Confluence geprueft. Im Thread: der Client ist synchron."""
+    from backend import confluence_accounts  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        info = await asyncio.to_thread(confluence_accounts.sitzung_anmelden, user,
+                                       str(body.get("api_token") or ""))
+    except confluence_accounts.ConfluenceKontoFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "account": info})
+
+
+@app.delete("/api/confluence/account/sitzung")
+async def confluence_account_abmelden(user: str = Depends(require_confluence_account_access)):
+    """Von Confluence abmelden: den nur im Arbeitsspeicher gehaltenen Token
+    verwerfen. Danach gilt wieder der gemeinsame Zugang."""
+    from backend import confluence_accounts  # noqa: PLC0415
+    weg = confluence_accounts.sitzung_beenden(user)
+    return JSONResponse({"ok": True, "beendet": bool(weg),
+                         "account": confluence_accounts.zugang_info(user)})
+
+
 @app.post("/api/confluence/account/test")
 async def confluence_account_test(user: str = Depends(require_confluence_account_access)):
     """Verbindungstest MIT dem eigenen Token (``/rest/api/user/current``).
@@ -19816,6 +19940,44 @@ async def jira_account_del(user: str = Depends(require_jira_assist_access)):
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, "removed": bool(weg),
+                         "account": jira_accounts.zugang_info(user)})
+
+
+# ── Jira: Anmeldung fuer die Sitzung (Betreiber 2026-11-15) ──
+# Nur wenn "Persoenliche Zugaenge erlauben" AUS ist: der Token liegt dann nur
+# im Arbeitsspeicher (``jira_accounts.sitzung_anmelden``) und gilt bis zum Abmelden
+# – hier, bei der Jarvis-Abmeldung oder nach Ablauf. Angemeldet wird bei der
+# Anmeldung an Jarvis (zweiter Schritt) oder im Bereich Jira.
+
+@app.post("/api/jira/account/sitzung")
+async def jira_account_anmelden(request: Request,
+                                 user: str = Depends(require_jira_assist_access)):
+    """Fuer die Sitzung anmelden (Rumpf ``{"api_token": …}``); der Token wird
+    VOR dem Merken gegen Jira geprueft. Im Thread: der Client ist synchron."""
+    from backend import jira_accounts  # noqa: PLC0415
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        info = await asyncio.to_thread(jira_accounts.sitzung_anmelden, user,
+                                       str(body.get("api_token") or ""))
+    except jira_accounts.JiraKontoFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "account": info})
+
+
+@app.delete("/api/jira/account/sitzung")
+async def jira_account_abmelden(user: str = Depends(require_jira_assist_access)):
+    """Von Jira abmelden: den nur im Arbeitsspeicher gehaltenen Token
+    verwerfen. Danach gilt wieder der gemeinsame Zugang."""
+    from backend import jira_accounts  # noqa: PLC0415
+    weg = jira_accounts.sitzung_beenden(user)
+    return JSONResponse({"ok": True, "beendet": bool(weg),
                          "account": jira_accounts.zugang_info(user)})
 
 

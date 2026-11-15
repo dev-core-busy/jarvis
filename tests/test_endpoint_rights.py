@@ -352,6 +352,13 @@ EXEMPT = {
     ("get", "/api/confluence/account"), ("post", "/api/confluence/account"),
     ("delete", "/api/confluence/account"),
     ("post", "/api/confluence/account/test"),
+    # ── Anmeldung fuer die Sitzung (2026-11-15) ──
+    # Dieselbe Schranke und Begruendung wie die Konto-Routen darueber: der
+    # Token ERSETZT die Rechte des gemeinsamen Zugangs durch die eigenen und
+    # liegt nur im Arbeitsspeicher ("Persoenliche Zugaenge erlauben" = aus).
+    ("post", "/api/jira/account/sitzung"), ("delete", "/api/jira/account/sitzung"),
+    ("post", "/api/confluence/account/sitzung"),
+    ("delete", "/api/confluence/account/sitzung"),
     # ── Kennwort im Klartext ansehen (2026-09-04) ──
     # `require_auth` ist hier KEIN Rueckfall, sondern die einzige moegliche
     # Dependency: die Rechte sind JE BEREICH verschieden und stehen deshalb im

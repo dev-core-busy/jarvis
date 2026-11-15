@@ -300,6 +300,7 @@
      * leeres Feld heisst hier "unveraendert".
      */
     var _acc = null;          // zuletzt gelesener Zustand
+    var _sz = null;           // Abschnitt "Anmeldung fuer die Sitzung" (zugang_sitzung.js)
 
     function accMeld(text, art) {
         var p = $('ja-acc-msg');
@@ -319,6 +320,9 @@
         // entfaellt ganz (es gibt nichts mehr zu hinterlegen).
         var sect = $('ja-sect-account');
         if (sect) sect.style.display = (a.persoenlich_erlaubt === false) ? 'none' : '';
+        // Sitzungsbetrieb (persoenliche Zugaenge aus): eigener Abschnitt mit
+        // Anmelden/Abmelden (zugang_sitzung.js).
+        if (_sz) _sz.zeichnen(a);
         var pill = $('ja-acc-pill');
         var note = $('ja-acc-note');
         var srv = $('ja-acc-server');
@@ -500,6 +504,12 @@
         // ist: die Pille am Titel ist der einzige Hinweis darauf, welcher
         // Zugang gerade gilt – und sie muss dastehen, BEVOR jemand aufklappt.
         accVerdrahten();
+        if (window.ZugangSitzung) {
+            _sz = window.ZugangSitzung.einrichten({
+                praefix: 'ja', name: 'Jira', pfad: '/api/jira/account/sitzung', token: token,
+                nachher: function (acc) { _acc = acc; accZeichnen(); }
+            });
+        }
         accLaden();
 
         var p = $('ja-portal-btn');

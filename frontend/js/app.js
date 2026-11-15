@@ -212,13 +212,22 @@
                     }
                 } else if (data.must_change_password) {
                     showChangePwModal(true);
-                } else if (_isSettingsPage) {
-                    // Eigene /settings-Seite: nur Admins; sonst aufs Portal.
-                    if (data.is_admin === false) window.location.replace('/portal');
-                    else _enterSettingsPage();
                 } else {
-                    // Konsolidierung: alle Rollen landen auf dem Portal (kein Haupt-Chat mehr).
-                    window.location.replace('/portal');
+                    // Zweiter Schritt: weitere Anmeldungen (SAP, VEMAS, Jira,
+                    // Confluence), falls fuer diesen Benutzer noetig
+                    // (zugang_anmeldung.js). Loest nie mit Fehler auf – die
+                    // Anmeldung an Jarvis bleibt in jedem Fall gueltig.
+                    if (window.ZugangAnmeldung) {
+                        try { await window.ZugangAnmeldung.schritt(token); } catch (e) { /* weiter */ }
+                    }
+                    if (_isSettingsPage) {
+                        // Eigene /settings-Seite: nur Admins; sonst aufs Portal.
+                        if (data.is_admin === false) window.location.replace('/portal');
+                        else _enterSettingsPage();
+                    } else {
+                        // Konsolidierung: alle Rollen landen auf dem Portal (kein Haupt-Chat mehr).
+                        window.location.replace('/portal');
+                    }
                 }
             } else if (data.requires_totp_setup) {
                 // Admin ohne 2FA: QR + Schluessel zeigen, Code ins vorhandene Feld.

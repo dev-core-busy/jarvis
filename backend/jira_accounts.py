@@ -51,6 +51,7 @@ import time
 from pathlib import Path
 
 from backend.jira_client import JiraClient, JiraError, get_jira_config
+from backend.sitzungs_token import SitzungsSpeicher
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -237,6 +238,64 @@ def alle_entfernen() -> int:
     if n:
         _speichern({})
     return n
+
+
+# ── Anmeldung fuer die Sitzung (Betreiber 2026-11-15) ───────────────────────
+# Ist "Persoenliche Zugaenge erlauben" AUS, darf kein Token auf der Platte
+# liegen – angemeldet wird stattdessen fuer die Sitzung: bei der Anmeldung an
+# Jarvis oder im Bereich Jira. Der Token liegt NUR im Arbeitsspeicher, gilt
+# hoechstens ``sitzungs_token.LAUFZEIT_S`` und endet mit dem Abmelden (hier, im
+# Bereich oder bei Jarvis). Ohne Anmeldung gilt wie bisher der gemeinsame
+# Lesezugang – Entscheidung des Betreibers: "PAT, sonst gemeinsam".
+#
+# Bei ERLAUBTEN persoenlichen Zugaengen gibt es diesen Weg nicht: dort ist der
+# gespeicherte Token der Weg, und zwei Quellen fuer "mein Token" waeren nicht
+# erklaerbar.
+_SITZUNG = SitzungsSpeicher()
+NICHT_ANGEMELDET_TEXT = ("Du bist bei Jira nicht persoenlich angemeldet – es gilt "
+                         "der gemeinsame Lesezugang.")
+
+
+def sitzungs_modus(cfg: dict | None = None) -> bool:
+    """Wird fuer die Sitzung angemeldet (statt einen Token zu speichern)?"""
+    return not persoenlich_erlaubt(cfg)
+
+
+def sitzung_beenden(user: str) -> bool:
+    """Abmelden: den nur im Arbeitsspeicher gehaltenen Token verwerfen."""
+    return _SITZUNG.beenden(norm_user(user))
+
+
+def sitzung_anmelden(user: str, token: str) -> dict:
+    """Fuer die Sitzung anmelden. Der Token wird VOR dem Merken gegen
+    ``/myself`` geprueft – ein abgelehnter Token darf nicht als "angemeldet"
+    dastehen und danach jeden Lauf scheitern lassen. Rueckgabe = ``zugang_info``."""
+    un = norm_user(user)
+    if not un or ":" in un:
+        raise JiraKontoFehler("Fuer diese Kennung ist keine Jira-Anmeldung moeglich.")
+    if persoenlich_erlaubt():
+        raise JiraKontoFehler(
+            "Persoenliche Zugaenge sind erlaubt – hinterlege deinen Token unter "
+            "„Mein Jira-Zugang\".")
+    tok = str(token or "").strip()
+    if not tok:
+        raise JiraKontoFehler("Bitte den persoenlichen Token (PAT) eingeben.")
+    basis = basis_url()
+    if not basis:
+        raise JiraKontoFehler(
+            "Es ist keine Jira-Adresse hinterlegt – ein Administrator muss sie "
+            "unter Einstellungen → Jira eintragen.")
+    c = JiraClient({"base_url": basis, "api_token": tok})
+    try:
+        ich = c.myself() or {}
+    except JiraError as e:
+        raise JiraKontoFehler("Jira lehnt den Token ab: %s" % e) from None
+    except Exception as e:  # noqa: BLE001
+        raise JiraKontoFehler("Jira ist nicht erreichbar: %s" % e) from None
+    _SITZUNG.setzen(un, tok,
+                    anzeigename=str(ich.get("displayName") or "").strip(),
+                    konto=str(ich.get("name") or ich.get("key") or "").strip())
+    return zugang_info(user)
 AENDERBAR = ("aktiv",) + GEHEIMFELDER
 
 
@@ -321,6 +380,10 @@ def zugang_info(user: str) -> dict:
         "sammel_vorhanden": bool(sammel_client().configured),
         # Abgeschaltet blendet die Oberflaeche "Mein Jira-Zugang" aus.
         "persoenlich_erlaubt": persoenlich_erlaubt(),
+        # Anmeldung fuer die Sitzung (nur wenn persoenliche Zugaenge AUS sind):
+        # angemeldet, bis wann und als wer – OHNE Token.
+        "sitzungs_modus": sitzungs_modus(),
+        **_SITZUNG.info(un),
     }
 
 
@@ -468,12 +531,16 @@ def aufloesen(user: str | None = None) -> dict:
         # Lauf der Browser-Erweiterung: nur der gemeinsame Lesezugang.
         return {"client": sammel_client(), "quelle": QUELLE_SAMMEL,
                 "hinweis": "", "benutzer": un}
+    person = bool(un) and ":" not in un
+    token = ""
     if not persoenlich_erlaubt():
         # Ein Rest in der Datei (sollte es nach dem Abschalten nicht geben)
         # darf trotzdem nicht greifen – der Schalter entscheidet, nicht die Datei.
-        return {"client": sammel_client(), "quelle": QUELLE_SAMMEL,
-                "hinweis": "", "benutzer": un}
-    if un and ":" not in un:
+        # Es gilt nur eine Anmeldung fuer die Sitzung (Token im Arbeitsspeicher).
+        token = _SITZUNG.token(un) if (person and basis) else ""
+        if not token and person:
+            hinweis = NICHT_ANGEMELDET_TEXT
+    elif person:
         try:
             k = _laden().get(un)
         except Exception:  # noqa: BLE001
@@ -495,15 +562,17 @@ def aufloesen(user: str | None = None) -> dict:
                     token = entschluesseln(k.get("api_token_enc", ""))
                 except JiraKontoFehler as e:
                     hinweis = "%s Es gilt vorerst der gemeinsame Zugang." % e
-                else:
-                    # Nur der PERSOENLICHE Zugang darf schreiben (unter dem
-                    # eigenen Namen); alles andere ist Nur-Lesen.
-                    c = JiraClient({"base_url": basis, "api_token": token}, schreiben=True)
-                    if c.configured:
-                        return {"client": c, "quelle": QUELLE_PERSOENLICH,
-                                "hinweis": "", "benutzer": un}
-                    hinweis = ("Dein persoenlicher Jira-Zugang ist "
-                               "unvollstaendig – es gilt der gemeinsame Zugang.")
+    if token:
+        # EINE Stelle fuer den persoenlichen Client – gleich, ob der Token aus
+        # der Kontendatei oder aus der Anmeldung fuer die Sitzung stammt. Nur
+        # der PERSOENLICHE Zugang darf schreiben (unter dem eigenen Namen);
+        # alles andere ist Nur-Lesen (Waechter test_jira_nur_lesen).
+        c = JiraClient({"base_url": basis, "api_token": token}, schreiben=True)
+        if c.configured:
+            return {"client": c, "quelle": QUELLE_PERSOENLICH,
+                    "hinweis": "", "benutzer": un}
+        hinweis = ("Dein persoenlicher Jira-Zugang ist "
+                   "unvollstaendig – es gilt der gemeinsame Zugang.")
     return {"client": sammel_client(), "quelle": QUELLE_SAMMEL,
             "hinweis": hinweis, "benutzer": un}
 
@@ -562,5 +631,6 @@ __all__ = [
     "merke_ergebnis", "melde_fehler", "testen", "basis_url", "sammel_client",
     "aufloesen", "client_fuer_lauf", "quelle_text",
     "persoenlich_erlaubt", "alle_entfernen", "PERSOENLICH_SCHALTER", "nur_gemeinsam",
+    "sitzungs_modus", "sitzung_anmelden", "sitzung_beenden",
     "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "AENDERBAR", "GEHEIMFELDER",
 ]

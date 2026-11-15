@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Confluence</title>
     <link rel="icon" href="/static/favicon.ico">
-    <link rel="stylesheet" href="/static/css/theme.css?v=57">
+    <link rel="stylesheet" href="/static/css/theme.css?v=59">
     <!-- BEWUSST `jira_addon.css`, keine eigene Datei: die `.ja-*`-Klassen sind
          die Bauform ALLER Bereichsseiten dieser Art – /ai-mouse laedt sie aus
          demselben Grund. Eine eigene Datei waere eine zweite Fassung derselben
@@ -57,6 +57,32 @@
                 data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
                 title="Maximieren" aria-label="Maximieren">&#9974;</button>
     </div>
+
+    <!-- ══ Anmeldung fuer die Sitzung (2026-11-15) ══════════════════════
+         Nur sichtbar, wenn "Persoenliche Zugaenge erlauben" AUS ist (dann ist
+         "Mein …-Zugang" ausgeblendet): Token nur im Arbeitsspeicher, Anmelden
+         und Abmelden wie bei SAP. Logik: zugang_sitzung.js -->
+    <details class="ja-sect" id="ca-sz-sect" open style="display:none">
+        <summary>
+            <span data-i18n="zs.confluence_h">Confluence-Anmeldung</span>
+            <span class="ja-acc-pill" id="ca-sz-pill"></span>
+        </summary>
+        <div class="ja-sect-body">
+            <p class="ja-hint" data-i18n="zs.hint">Persönliche Tokens werden auf diesem System nicht gespeichert. Melde dich für die Sitzung an: der Token gilt bis zur Abmeldung, höchstens 12 Stunden. Ohne Anmeldung gilt der gemeinsame Zugang.</p>
+            <div class="ja-acc-note" id="ca-sz-note"></div>
+            <div class="ja-acc-row">
+                <label class="ja-acc-field">
+                    <span class="ja-acc-lab" data-i18n="zs.token">Persönlicher Token (PAT)</span>
+                    <input class="ja-acc-input" id="ca-sz-token" type="password" autocomplete="off">
+                </label>
+            </div>
+            <div class="ja-dl">
+                <button type="button" class="ja-btn ja-btn-haupt" id="ca-sz-login" data-i18n="zs.login">Anmelden</button>
+                <button type="button" class="ja-btn" id="ca-sz-logout" data-i18n="zs.logout">Abmelden</button>
+            </div>
+            <p class="ja-hint" id="ca-sz-msg" hidden></p>
+        </div>
+    </details>
 
     <!-- ══ Mein Confluence-Zugang ════════════════════════════════════════
          Bauform 1:1 uebernommen aus dem ersten Container von /jira-addon
@@ -146,7 +172,7 @@
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
-<script src="/static/js/i18n.js?v=479"></script>
+<script src="/static/js/i18n.js?v=480"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/sessions.js?v=10"></script>
@@ -154,6 +180,7 @@
 <script src="/static/js/settings_btn.js?v=7"></script>
 <script src="/static/js/activity.js?v=3"></script>
 <script src="/static/js/issues.js?v=16"></script>
-<script src="/static/js/confluence_addon.js?v=4"></script>
+<script src="/static/js/zugang_sitzung.js?v=1"></script>
+<script src="/static/js/confluence_addon.js?v=5"></script>
 </body>
 </html>

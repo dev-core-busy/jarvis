@@ -68,6 +68,7 @@ from pathlib import Path
 
 from backend.confluence_client import (ConfluenceClient, ConfluenceError,
                                        get_confluence_config)
+from backend.sitzungs_token import SitzungsSpeicher
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -293,6 +294,75 @@ def alle_entfernen() -> int:
     return n
 
 
+# ── Anmeldung fuer die Sitzung (Betreiber 2026-11-15) ───────────────────────
+# Bauart und Begruendung wie ``jira_accounts`` (dortiger Abschnitt): ist
+# "Persoenliche Zugaenge erlauben" AUS, liegt kein Token auf der Platte; der
+# Benutzer meldet sich fuer die Sitzung an (bei der Anmeldung an Jarvis oder im
+# Bereich Confluence), der Token liegt nur im Arbeitsspeicher. Ohne Anmeldung
+# gilt der gemeinsame Zugang.
+_SITZUNG = SitzungsSpeicher()
+NICHT_ANGEMELDET_TEXT = ("Du bist bei Confluence nicht persoenlich angemeldet – "
+                         "es gilt der gemeinsame Zugang.")
+
+
+def sitzungs_modus(cfg: dict | None = None) -> bool:
+    """Wird fuer die Sitzung angemeldet (statt einen Token zu speichern)?"""
+    return not persoenlich_erlaubt(cfg)
+
+
+def sitzung_beenden(user: str) -> bool:
+    """Abmelden: den nur im Arbeitsspeicher gehaltenen Token verwerfen."""
+    return _SITZUNG.beenden(norm_user(user))
+
+
+def _token_pruefen(basis: str, tok: str) -> tuple[str, str]:
+    """(anzeigename, konto) – oder ConfluenceKontoFehler.
+
+    Dieselbe zweistufige Pruefung wie ``testen``: ``/user/current`` kennt nicht
+    jede Fassung; NUR bei 404 dort gilt eine Lebendpruefung (``spaces``)."""
+    c = ConfluenceClient({"base_url": basis, "api_token": tok})
+    try:
+        ich = c.current_user() or {}
+        return (str(ich.get("displayName") or "").strip(),
+                str(ich.get("username") or ich.get("userKey") or "").strip())
+    except ConfluenceError as e:
+        if getattr(e, "status", 0) != 404:
+            raise ConfluenceKontoFehler("Confluence lehnt den Token ab: %s" % e) from None
+    except Exception as e:  # noqa: BLE001
+        raise ConfluenceKontoFehler("Confluence ist nicht erreichbar: %s" % e) from None
+    try:
+        c.spaces(1)
+    except ConfluenceError as e2:
+        raise ConfluenceKontoFehler("Confluence lehnt den Token ab: %s" % e2) from None
+    except Exception as e2:  # noqa: BLE001
+        raise ConfluenceKontoFehler("Confluence ist nicht erreichbar: %s" % e2) from None
+    return "", ""
+
+
+def sitzung_anmelden(user: str, token: str) -> dict:
+    """Fuer die Sitzung anmelden; der Token wird VOR dem Merken geprueft.
+    Rueckgabe = ``zugang_info``."""
+    un = norm_user(user)
+    if not un or ":" in un:
+        raise ConfluenceKontoFehler(
+            "Fuer diese Kennung ist keine Confluence-Anmeldung moeglich.")
+    if persoenlich_erlaubt():
+        raise ConfluenceKontoFehler(
+            "Persoenliche Zugaenge sind erlaubt – hinterlege deinen Token unter "
+            "„Mein Confluence-Zugang\".")
+    tok = str(token or "").strip()
+    if not tok:
+        raise ConfluenceKontoFehler("Bitte den persoenlichen Token (PAT) eingeben.")
+    basis = basis_url()
+    if not basis:
+        raise ConfluenceKontoFehler(
+            "Es ist keine Confluence-Adresse hinterlegt – ein Administrator "
+            "muss sie in der Confluence-Skill-Konfiguration eintragen.")
+    name, konto = _token_pruefen(basis, tok)
+    _SITZUNG.setzen(un, tok, anzeigename=name, konto=konto)
+    return zugang_info(user)
+
+
 def _leer(un: str) -> dict:
     return {"benutzer_norm": un, "aktiv": True,
             "angelegt": int(time.time()), "geaendert": 0,
@@ -374,6 +444,9 @@ def zugang_info(user: str) -> dict:
         "sammel_vorhanden": bool(sammel_client().configured),
         # Abgeschaltet blendet die Oberflaeche "Mein Confluence-Zugang" aus.
         "persoenlich_erlaubt": persoenlich_erlaubt(),
+        # Anmeldung fuer die Sitzung (nur wenn persoenliche Zugaenge AUS sind).
+        "sitzungs_modus": sitzungs_modus(),
+        **_SITZUNG.info(un),
     }
 
 
@@ -550,8 +623,16 @@ def aufloesen(user: str | None = None) -> dict:
     if not persoenlich_erlaubt():
         # Ein Rest in der Datei (sollte es nach dem Abschalten nicht geben)
         # darf trotzdem nicht greifen – der Schalter entscheidet, nicht die Datei.
+        # Es gilt nur eine Anmeldung fuer die Sitzung (Token im Arbeitsspeicher).
+        person = bool(un) and ":" not in un
+        tok = _SITZUNG.token(un) if person else ""
+        if tok and basis:
+            c = ConfluenceClient({"base_url": basis, "api_token": tok})
+            if c.configured:
+                return {"client": c, "quelle": QUELLE_PERSOENLICH,
+                        "hinweis": "", "benutzer": un}
         return {"client": sammel_client(), "quelle": QUELLE_SAMMEL,
-                "hinweis": "", "benutzer": un}
+                "hinweis": NICHT_ANGEMELDET_TEXT if person else "", "benutzer": un}
     if un and ":" not in un:
         try:
             k = _laden().get(un)
@@ -666,4 +747,5 @@ __all__ = [
     "sammel_client", "aufloesen", "client_fuer_lauf", "quelle_text", "klartext",
     "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "AENDERBAR", "GEHEIMFELDER",
     "persoenlich_erlaubt", "alle_entfernen", "PERSOENLICH_SCHALTER",
+    "sitzungs_modus", "sitzung_anmelden", "sitzung_beenden",
 ]

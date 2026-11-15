@@ -35,6 +35,24 @@ mehr. Die Bereiche werden nacheinander umgestellt.
 - [x] **Exchange-Explorer entfernt** (Einstellungen → E-Mail).
 - [ ] **Outlook (Stufe 2)** – über die Zukunft des Serverzugriffs entscheiden
       (gespeicherte Postfach-Kennwörter der noch ausgewählten Benutzer).
+- [x] **Anmeldung an einer Stelle** – nach der Anmeldung an Jarvis fragt ein
+      zweiter Schritt die Zugänge ab, die gerade fehlen (SAP/VEMAS mit
+      Portal-Kachel-Anmeldung, Jira/Confluence ohne erlaubte persönliche
+      Zugänge). Sie gelten nur für die Sitzung, abgemeldet wird im jeweiligen
+      Bereich oder mit der Jarvis-Abmeldung.
+- [ ] **Zugangsdaten im Browser merken** – mit dem Team klären, bevor gebaut
+      wird. Vorschlag: die Anmeldemaske legt die Zugangsdaten für SAP, VEMAS,
+      Jira und Confluence **verschlüsselt im Browser** ab, den Schlüssel hält
+      nur der Server (je Benutzer). Bei jeder Anmeldung werden sie automatisch
+      mitgeschickt und nur in den Arbeitsspeicher entschlüsselt. Das ist
+      zuverlässig, funktioniert auch für Tokens ohne Benutzernamen und braucht
+      keine Eingabe mehr – die Daten liegen damit aber dauerhaft (verschlüsselt)
+      auf dem Arbeitsplatz. Zu klären: verträgt sich das mit der Vorgabe „keine
+      persönliche Anmeldung fest hinterlegen“? Was gilt beim Verlassen des
+      Unternehmens (Schlüssel auf dem Server löschen macht die Daten im Browser
+      wertlos)? Der Kennwortmanager des Browsers taugt dafür nicht: er merkt
+      sich je Formular nur ein Benutzer/Kennwort-Paar und Tokens ohne Benutzer
+      unzuverlässig.
 
 ## Vor der Freigabe von E-Mail für alle Benutzer
 

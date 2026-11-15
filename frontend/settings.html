@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=57">
+    <link rel="stylesheet" href="/static/css/theme.css?v=59">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
     <link rel="stylesheet" href="/static/css/style.css?v=234">
@@ -120,6 +120,22 @@
                     </div>
                 </div>
             </form>
+
+            <!-- ═══ Zweiter Schritt: weitere Anmeldungen (2026-11-15) ═══
+                 Erscheint nach der Anmeldung an Jarvis nur, wenn fuer DIESEN
+                 Benutzer ein System eine Anmeldung fuer die Sitzung braucht
+                 (SAP/VEMAS mit Portal-Kachel-Anmeldung, Jira/Confluence ohne
+                 erlaubte persoenliche Zugaenge). Logik: zugang_anmeldung.js -->
+            <div id="zg-schritt" class="zg-schritt" hidden>
+                <h2 class="zg-titel" data-i18n="zg.titel">Weitere Anmeldungen</h2>
+                <p class="zg-hinweis" data-i18n="zg.hinweis">Diese Zugangsdaten werden nicht gespeichert. Sie gelten bis zur Abmeldung, höchstens 12 Stunden. Was du leer lässt, kannst du später im jeweiligen Bereich anmelden.</p>
+                <div id="zg-liste" class="zg-liste"></div>
+                <p id="zg-meldung" class="zg-meldung" hidden></p>
+                <button type="button" class="btn-login" id="zg-weiter" style="width:100%;">
+                    <span class="btn-text" data-i18n="zg.weiter">ANMELDEN UND WEITER</span>
+                </button>
+                <button type="button" class="btn-link zg-ueberspringen" id="zg-ueberspringen" data-i18n="zg.ueberspringen">Überspringen</button>
+            </div>
         </div>
         <div class="login-particles" id="particles"></div>
     </div>
@@ -6530,7 +6546,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=479"></script>
+    <script src="/static/js/i18n.js?v=480"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6579,6 +6595,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/excel_admin.js?v=9"></script>
     <script src="/static/js/modal_expand.js?v=2"></script>
     <script src="/static/js/sessions.js?v=10"></script>
+    <script src="/static/js/zugang_anmeldung.js?v=1"></script>
     <script src="/static/js/agent_roles.js?v=5"></script>
     <script src="/static/js/model_caps.js?v=7"></script>
     <script src="/static/js/alpha_sort.js?v=2"></script>
@@ -6586,7 +6603,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=252"></script>
+    <script src="/static/js/app.js?v=253"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

@@ -39,6 +39,7 @@
      * leeres Feld heisst hier "unveraendert".
      */
     var _acc = null;          // zuletzt gelesener Zustand
+    var _sz = null;           // Abschnitt "Anmeldung fuer die Sitzung" (zugang_sitzung.js)
 
     function accMeld(text, art) {
         var p = $('ca-acc-msg');
@@ -58,6 +59,9 @@
         // entfaellt ganz (gleiche Regel wie in /jira-addon).
         var sect = $('ca-sect-account');
         if (sect) sect.style.display = (a.persoenlich_erlaubt === false) ? 'none' : '';
+        // Sitzungsbetrieb (persoenliche Zugaenge aus): eigener Abschnitt mit
+        // Anmelden/Abmelden (zugang_sitzung.js).
+        if (_sz) _sz.zeichnen(a);
         var pill = $('ca-acc-pill');
         var note = $('ca-acc-note');
         var srv = $('ca-acc-server');
@@ -231,6 +235,12 @@
         // Der eigene Zugang wird IMMER geladen: die Pille am Titel ist der
         // einzige Hinweis darauf, welcher Zugang gerade gilt.
         accVerdrahten();
+        if (window.ZugangSitzung) {
+            _sz = window.ZugangSitzung.einrichten({
+                praefix: 'ca', name: 'Confluence', pfad: '/api/confluence/account/sitzung', token: token,
+                nachher: function (acc) { _acc = acc; accZeichnen(); }
+            });
+        }
         accLaden();
 
         var p = $('ca-portal-btn');

@@ -1107,6 +1107,28 @@
         });
     }
 
+    // Auswahl der Eingabeleiste an einen Auftrag haengen – EINE Stelle fuer
+    // JEDEN Weg, der einen Auftrag sendet (Senden, Bearbeiten, Wiederholen).
+    // Bis 2026-11-15 stand das nur in sendMessage: "Bearbeiten" und
+    // "Wiederholen" schickten den Auftrag OHNE kb_groups, und das Backend liest
+    // ein fehlendes Feld als "alle Gruppen". Gemeldet von ECHT: Wissen aus einer
+    // abgewaehlten Wissensgruppe nach einem Klick auf "Wiederholen".
+    //   kb_groups:    null = alle, [] = keine, [ids] = nur diese – IMMER gesendet,
+    //                 auch null: ein FEHLENDES Feld liest das Backend seit
+    //                 2026-11-15 als "gespeicherte Auswahl der Sitzung", und
+    //                 dann waere "alle" nicht mehr ausdrueckbar.
+    //   sql_schemata: nur mitschicken, wenn welche gewaehlt sind (fehlt = keins)
+    // agent_id gehoert bewusst NICHT hierher: das Backend kuerzt den Verlauf
+    // beim Bearbeiten nur fuer den Hauptagenten.
+    function _auswahlMitgeben(msg) {
+        if (_kbFilter) msg.kb_groups = _kbFilter.getSelection();
+        if (_sqlFilter) {
+            const _sq = _sqlFilter.getSelection();
+            if (_sq.length) msg.sql_schemata = _sq;
+        }
+        return msg;
+    }
+
     function sendMessage(_zweiterVersuch) {
         // Ohne aktive Sitzung erst eine beschaffen und dann erneut senden – sonst
         // ginge dieser Auftrag am Sitzungskontext vorbei (siehe _ensureSession).
@@ -1169,16 +1191,7 @@
         if (_pendingAttachments.length > 0) {
             msg.attachments = _pendingAttachments.map(a => ({ name: a.name, mime_type: a.mime_type, data: a.data }));
         }
-        // Wissensgruppen-Filter: null = alle (Feld weglassen), [] = keine, [ids] = nur diese
-        if (_kbFilter) {
-            const _sel = _kbFilter.getSelection();
-            if (_sel !== null) msg.kb_groups = _sel;
-        }
-        // SQL-Schemata: nur mitschicken, wenn welche gewaehlt sind (fehlt = keins)
-        if (_sqlFilter) {
-            const _sq = _sqlFilter.getSelection();
-            if (_sq.length) msg.sql_schemata = _sq;
-        }
+        _auswahlMitgeben(msg);
         wsSend(msg);
 
         msgInput.value = '';
@@ -2009,14 +2022,14 @@
         _lastBotCol  = null;
         _lastStats   = '';
         _runSid = _activeSid;   // Ursprungs-Sitzung dieser Anfrage merken (Antwort-Routing)
-        wsSend({
+        wsSend(_auswahlMitgeben({
             type: 'task',
             text: newText,
             lang: window._lang || 'de',
             bestaetigung: true,
             truncate_user_msg_index: userIndex,
             session_id: _activeSid || undefined,
-        });
+        }));
     }
 
     function appendToBotBubble(text) {

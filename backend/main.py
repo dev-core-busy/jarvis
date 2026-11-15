@@ -31072,10 +31072,11 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         target_agent_id = msg.get("agent_id", "")
         ui_lang = msg.get("lang", "de")  # UI-Sprache des Nutzers (de/en)
         # Vom Benutzer gewaehlter Wissensgruppen-Filter (Checkbox-Auswahl im Chat):
-        # None/fehlt = kein Filter (alle Gruppen), [] = keine, [ids] = nur diese.
-        kb_groups = msg.get("kb_groups")
-        if kb_groups is not None and not isinstance(kb_groups, list):
-            kb_groups = None
+        # None = kein Filter (alle Gruppen), [] = keine, [ids] = nur diese.
+        # Fehlt das Feld GANZ, gilt die gespeicherte Auswahl der Sitzung – nicht
+        # "alle" (Vorfall ECHT 2026-11-06, Regel in chat_sessions).
+        from backend import chat_sessions as _cs_kb
+        kb_groups = _cs_kb.kb_groups_fuer_auftrag(_get_ws_username(ws) or "anonymous", chat_sid, msg)
         # SQL-Schema-Auswahl (SQL-Assistent): fehlt/leer = KEIN Schema. Nur
         # Zeichenketten; ob es das Schema gibt, schneidet das Werkzeug.
         sql_schemata = msg.get("sql_schemata")

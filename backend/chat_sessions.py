@@ -409,6 +409,40 @@ def save_kb_groups(user: str, sid: str, groups) -> None:
         _write_meta(sd, meta)
 
 
+def kb_groups_fuer_auftrag(user: str, sid: str, msg) -> list[str] | None:
+    """Wissensgruppen-Auswahl fuer EINEN Auftrag (None=alle, []=keine, [ids]).
+
+    Die Nachricht entscheidet, sobald sie das Feld ueberhaupt TRAEGT – auch mit
+    ``null``: der Browser-Chat schickt "alle gewaehlt" ausdruecklich als
+    ``kb_groups: null``. Fehlt das Feld GANZ, gilt die in der Sitzung
+    gespeicherte Auswahl statt "alle".
+
+    Warum (Vorfall ECHT 2026-11-06): "Wiederholen"/"Bearbeiten" schickten den
+    Auftrag ohne das Feld, und ein fehlendes Feld hiess bis dahin "alle
+    Gruppen" – die Wissenssuche lieferte ein Dokument aus einer Gruppe, die in
+    der Sitzung abgewaehlt war. Der Rueckfall schuetzt jeden Client und jeden
+    kuenftigen Sendeweg, der das Feld vergisst.
+
+    Ohne Sitzung, ohne gespeicherte Auswahl oder bei unlesbaren Metadaten
+    bleibt es beim bisherigen Verhalten (None = alle). Eine gespeicherte Liste
+    wird gesaeubert (``_kb_ids_saeubern``): ``save_kb_groups`` legt den Wert
+    so ab, wie der Client ihn geschickt hat.
+    """
+    if isinstance(msg, dict) and "kb_groups" in msg:
+        wert = msg.get("kb_groups")
+        return wert if isinstance(wert, list) else None
+    if not sid:
+        return None
+    try:
+        meta = get_meta(user, sid)
+    except Exception as e:  # noqa: BLE001
+        print(f"[chat_sessions] Auswahl der Sitzung nicht lesbar ({e}) – ohne Filter", flush=True)
+        return None
+    if not isinstance(meta, dict) or not isinstance(meta.get("kb_groups"), list):
+        return None
+    return _kb_ids_saeubern(meta["kb_groups"])
+
+
 def save_sql_schemata(user: str, sid: str, schemata) -> None:
     """SQL-Schema-Auswahl der Sitzung merken (Liste von Kennungen, [] = keins).
 

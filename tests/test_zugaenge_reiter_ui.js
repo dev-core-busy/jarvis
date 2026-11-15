@@ -75,7 +75,7 @@ const APP = lies('frontend/js/app.js');
         const cb = doc.getElementById(r.cb);
         const body = doc.getElementById(r.sect + '-sect-conn-body');
         check(!!cb && !!body && body.contains(cb),
-              name + ': Haken "Persönliche Zugänge erlauben" liegt im Container "Verbindung"');
+              name + ': Haken "Speichern persönlicher Zugänge auf Server erlauben" liegt im Container "Verbindung"');
         // Ort wie bei Jira: der Block des Hakens steht DIREKT ueber der Zeile
         // mit "Speichern" (Betreiber 2026-11-15) – gemessen am naechsten
         // Element-Geschwister, nicht an einer Zeilennummer.
@@ -99,7 +99,7 @@ const APP = lies('frontend/js/app.js');
         check(new RegExp(r.init + '\\(\\);').test(APP.slice(APP.indexOf("target === '" + name + "'"))),
               name + ': die Bindung wird beim Oeffnen des Reiters aufgerufen');
     }
-    check(schalterTexte.size === 1 && schalterTexte.has('Persönliche Zugänge erlauben'),
+    check(schalterTexte.size === 1 && schalterTexte.has('Speichern persönlicher Zugänge auf Server erlauben'),
           'der Schalter heisst in allen vier Reitern gleich', [...schalterTexte].join(' | '));
 }
 

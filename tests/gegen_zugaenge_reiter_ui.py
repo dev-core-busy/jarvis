@@ -32,7 +32,7 @@ PROBEN = [
     ("SAP: Schalter fehlt ganz", "settings.html",
      'id="sap-persoenlich" checked>', 'id="sap-persoenlich-weg" checked>', 1),
     ("Confluence: anderer Schaltertext", "settings.html",
-     '<span data-i18n="cf.persoenlich">Persönliche Zugänge erlauben</span>',
+     '<span data-i18n="cf.persoenlich">Speichern persönlicher Zugänge auf Server erlauben</span>',
      '<span data-i18n="cf.persoenlich">Eigene Token erlauben</span>', 1),
     ("SAP: Container nicht klappbar gebunden", "js/app.js",
      "                { hdr: 'sap-sect-acc-hdr',  body: 'sap-sect-acc-body',  tog: 'sap-sect-acc-tog'  },\n", "", 1),

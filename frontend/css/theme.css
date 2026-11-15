@@ -1526,3 +1526,42 @@ body.light :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hove
     color: var(--text-secondary);
     font-size: 0.85em;
 }
+
+/* ── Schatten der Portal-Kacheln auch auf den Containern der Kachel-Seiten ──
+   (Vorgabe 2026-11-15) Die Kacheln in /portal tragen `box-shadow:
+   var(--shadow-md)`; die Container auf /sql, /email, /tracks ... lagen bisher
+   flach auf dem Seitengrund. Ein Wert fuer alle: --shadow-md folgt dem Theme
+   (Hell-Theme auf body umdefiniert), eine eigene Variable auf :root wuerde auf
+   dem Dunkel-Wert einfrieren (siehe --shadow-rgb oben).
+   /sap, /vemas, /support und /supportagent tragen denselben Wert schon in
+   ihrem eigenen Stylesheet. Hinweiskaesten INNERHALB einer Karte (.em-help,
+   .st-help, .sq-detail) bleiben bewusst flach – Schatten auf Schatten wirkt
+   wie ein Rahmenfehler, nicht wie eine Ebene. */
+.cs-card,                        /* /claude */
+.em-card, .em-noserver,          /* /email */
+.xp-card,                        /* /excel */
+.sq-card, .sq-schemabar,         /* /sql */
+.st-card,                        /* /tracks */
+.ep, .ad-search,                 /* /api */
+.wi-section,                     /* /wissen */
+.ja-card, .ja-sect,              /* /jira-addon, /confluence-addon, /ai-mouse, /feedback, /wissensgraph */
+.sup-ai-card,                    /* /support */
+.kb-section {                    /* /settings: die Container der Reiter */
+    box-shadow: var(--shadow-md);
+}
+/* Karten in einem Klappabschnitt (/jira-addon) liegen schon auf einer
+   schattierten Flaeche. */
+.ja-sect .ja-card { box-shadow: none; }
+
+/* ── Info-/Kontaktzeile (Fusszeile) ────────────────────────────────────────
+   Gebaut von fusszeile.js, befuellt von branding.js. Bis 2026-11-15 nur im
+   Portal (Inline-Style dort); jetzt auch auf jeder Kachel-Seite, deshalb hier. */
+.pt-contact { margin-top: 26px; display: flex; justify-content: center; align-items: center;
+    gap: 8px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-secondary); opacity: .75; }
+.pt-contact a { color: inherit; text-decoration: none; }
+.pt-contact a:hover { color: var(--accent-hover); text-decoration: underline; }
+.pt-contact-sep { opacity: .6; }
+.pt-contact .hidden, .pt-contact.hidden { display: none; }
+/* Am Seitenende einer Kachel-Seite (kein Platzhalter): eigener Rand, damit die
+   Zeile nicht am letzten Container klebt und nicht am Fensterrand steht. */
+.pt-contact.pt-contact-seite { margin: 8px auto 0; padding: 18px 16px 22px; text-align: center; }

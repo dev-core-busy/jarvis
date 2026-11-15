@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jarvis – Start</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=55">
+    <link rel="stylesheet" href="/static/css/theme.css?v=56">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=10">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
@@ -103,12 +103,7 @@
         body.pt-kompakt .pt-card-video { grid-column: span 2; min-width: 220px;
                                          padding: 12px; text-align: initial; }
 
-        /* Dezente Info-/Kontaktzeile unterhalb der Karten (Branding-Skill befuellbar) */
-        .pt-contact { margin-top: 26px; display: flex; justify-content: center; align-items: center;
-            gap: 8px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-secondary); opacity: .75; }
-        .pt-contact a { color: inherit; text-decoration: none; }
-        .pt-contact a:hover { color: var(--accent-hover); text-decoration: underline; }
-        .pt-contact-sep { opacity: .6; }
+        /* Info-/Kontaktzeile: Regeln in theme.css (gilt auch fuer die Kachel-Seiten) */
 
         /* ── Sicherheitsstatus-Badge + Banner (von /chat verschoben) ── */
         .security-badge { width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.25);cursor:pointer;transition:all .2s;flex-shrink:0; }
@@ -631,18 +626,9 @@
                    style="width:100%;height:auto;object-fit:contain;border-radius:10px;display:block;"></video>
         </div>
     </div>
-    <!-- Dezente Info-/Kontaktzeile: Standardwerte stehen hier im Markup,
-         der Branding-Skill überschreibt sie zur Laufzeit (branding.js).
-         Telefon ist ohne Branding leer und daher ausgeblendet. -->
-    <div class="pt-contact" id="pt-contact">
-        <span id="pt-contact-info" data-i18n="portal.contact_info_default">universelles, modulares KI Portal</span>
-        <span class="pt-contact-sep hidden" id="pt-contact-phone-sep">·</span>
-        <span id="pt-contact-phone" class="hidden"><span data-i18n="portal.contact_phone_prefix">Tel.</span> <a id="pt-contact-phone-link" href=""></a></span>
-        <span class="pt-contact-sep" id="pt-contact-email-sep">·</span>
-        <span id="pt-contact-email"><a id="pt-contact-email-link" href="mailto:dev-core@web.de">dev-core@web.de</a></span>
-        <span class="pt-contact-sep hidden" id="pt-contact-manual-sep">·</span>
-        <span id="pt-contact-manual" class="hidden"><a id="pt-contact-manual-link" href="" target="_blank" rel="noopener" data-i18n="portal.contact_manual">Benutzerhandbuch</a></span>
-    </div>
+    <!-- Dezente Info-/Kontaktzeile: das Markup baut fusszeile.js (eine Quelle
+         fuer Portal und Kachel-Seiten), befuellt wird sie von branding.js. -->
+    <div data-fusszeile></div>
 </div>
 
 <!-- ═══ Desktop/VNC-Overlay (nur Admin, von /chat hierher verschoben) ═══ -->
@@ -769,9 +755,10 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/cpubar.js?v=2"></script>
 <script src="/static/js/syspackages.js?v=20"></script>
 <script src="/static/js/sysload.js?v=6"></script>
+<script src="/static/js/fusszeile.js?v=1"></script>
 <script src="/static/js/i18n.js?v=474"></script>
 <script src="/static/js/theme.js?v=3"></script>
-<script src="/static/js/branding.js?v=30"></script>
+<script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/security_incidents.js?v=45"></script>
 <script src="/static/js/update_widget.js?v=9"></script>
 <script src="/static/js/issues.js?v=16"></script>

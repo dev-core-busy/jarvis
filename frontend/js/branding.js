@@ -365,7 +365,8 @@
         }
     }
 
-    // ── Kontakt-/Infozeile der Portalseite (#pt-contact, nur /portal) ──
+    // ── Kontakt-/Infozeile (#pt-contact): Portal und alle Kachel-Seiten ──
+    // Das Markup baut fusszeile.js (muss VOR diesem Skript eingebunden sein).
     // Ohne aktives Branding gelten die eingebauten Defaults (Info-Text via
     // i18n, Telefon leer, E-Mail dev-core@web.de). Bei aktivem Branding
     // zaehlen ausschliesslich die gepflegten Werte – leere Felder werden

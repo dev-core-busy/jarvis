@@ -231,7 +231,7 @@ PROBEN = [
      "                            + Manager._kennwortZustand(a, kachel) + '</li>';",
      "                            + '</li>';", 1),
     ("Einschalten ohne Warnhinweis", "sapjs",
-     "            if (checked('sap-kachel-pflicht') && !(this._cfg && this._cfg.kachel_anmeldung)) {",
+     "            if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {",
      "            if (false) {", 1),
     ("Kennwortfelder bleiben trotz Haken frei", "sapjs",
      "                e.disabled = an;\n", "", 1),

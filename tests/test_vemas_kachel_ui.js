@@ -209,8 +209,11 @@ async function portal(opts) {
         const txt = e.$('vemas-accounts-list').textContent;
         check(/– Kennwort gespeichert/.test(txt), 'ohne Schalter: "Kennwort gespeichert"', txt);
         check(e.$('vemas-password').disabled === false, 'ohne Schalter: Kennwortfeld frei');
-        e.$('vemas-kachel-pflicht').checked = true;
-        e.$('vemas-kachel-pflicht').dispatchEvent(new e.s.window.Event('change'));
+        // EIN Haken seit 2026-11-15: "Persoenliche Zugaenge erlauben" AUS = Kachelpflicht.
+        check(!e.$('vemas-kachel-pflicht'), 'kein eigener Kachel-Haken mehr');
+        check(e.$('vemas-persoenlich').checked === true, 'Kachel aus -> "Persoenliche Zugaenge erlauben" angehakt');
+        e.$('vemas-persoenlich').checked = false;
+        e.$('vemas-persoenlich').dispatchEvent(new e.s.window.Event('change'));
         check(e.$('vemas-password').disabled && e.$('vemas-token').disabled, 'Haken sperrt Kennwort und Token');
         e.$('vemas-save').click();
         await sleep(60);
@@ -225,6 +228,9 @@ async function portal(opts) {
         const txt = e.$('vemas-accounts-list').textContent;
         check(/kein VEMAS-Kennwort gespeichert/.test(txt) && /kein Kennwort gespeichert · nicht angemeldet/.test(txt),
               'Liste: kein Kennwort gespeichert, nicht angemeldet', txt);
+        check(e.$('vemas-persoenlich').checked === false, 'Kachel an -> "Persoenliche Zugaenge erlauben" nicht angehakt');
+        check(e.$('vemas-sect-acc') && e.$('vemas-sect-acc').style.display === 'none',
+              'Container "Persoenliche VEMAS-Zugaenge" ausgeblendet (Betreiber 2026-11-15)');
         e.$('vemas-save').click();
         await sleep(60);
         check(e.fragen.length === 0 && e.posts.length === 1 && e.posts[0].kachel_anmeldung === true,

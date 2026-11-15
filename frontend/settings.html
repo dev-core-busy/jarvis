@@ -3131,7 +3131,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <div class="kb-container">
                         <p class="kb-hint" data-i18n="cf.intro">Verbindung zu Atlassian Confluence per Personal Access Token (PAT). URL und Token eintragen, Verbindung testen und Seiten durchsuchen/lesen.</p>
 
-                        <h4 style="margin:16px 0 8px;">Verbindung</h4>
+                        <div class="kb-section" id="cf-sect-conn">
+                            <div class="kb-section-header kb-collapse-header" id="cf-sect-conn-hdr">
+                                <h3 data-i18n="jira.sect_conn">Verbindung</h3>
+                                <span class="sk-openclaw-toggle" id="cf-sect-conn-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="cf-sect-conn-body">
                         <!-- Nur-Lesen wie bei SAP: kein Schalter, sondern eine Zusage.
                              Durchgesetzt in backend/confluence_client.py (_request
                              laesst nur GET durch); einzige Ausnahme ist das Destillat. -->
@@ -3155,10 +3160,35 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </button>
                             </div>
                         </div>
+                        <!-- Persoenliche Zugaenge erlauben (2026-11-15, wie bei Jira). Abschalten
+                             loescht nach Rueckfrage alle persoenlichen Zugaenge
+                             (main.update_skill_config -> alle_entfernen) und blendet den
+                             Container "Persoenliche Confluence-Zugaenge" aus. -->
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="checkbox" id="cf-persoenlich" checked>
+                                <span data-i18n="cf.persoenlich">Persönliche Zugänge erlauben</span>
+                            </label>
+                            <span class="kb-hint" data-i18n-html="cf.persoenlich_hint">An: Benutzer können im Bereich <b>Confluence → Mein Confluence-Zugang</b> einen eigenen Token hinterlegen und arbeiten dann mit ihren eigenen Rechten. Aus: Alle Abfragen laufen über den gemeinsamen Zugang; <b>beim Abschalten werden alle gespeicherten persönlichen Zugänge gelöscht.</b></span>
+                        </div>
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
                             <button class="btn-primary" id="cf-save" type="button" data-i18n="common.save" style="flex:0 0 auto;">Speichern</button>
                             <button class="btn-secondary" id="cf-test" type="button" data-i18n="profile.test" style="flex:0 0 auto;">Verbindung testen</button>
                             <span id="cf-status" style="font-size:0.9em;"></span>
+                        </div>
+                            </div>
+                        </div>
+
+                        <!-- Wer hat einen EIGENEN Confluence-Token hinterlegt? Ohne Token, ohne Adressen. Endpunkt: /api/confluence/admin/accounts (Gegenstueck zu Jira). -->
+                        <div class="kb-section" id="cf-sect-acc">
+                            <div class="kb-section-header kb-collapse-header" id="cf-sect-acc-hdr">
+                                <h3 data-i18n="cfacc.h">Persönliche Confluence-Zugänge</h3>
+                                <span class="sk-openclaw-toggle" id="cf-sect-acc-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="cf-sect-acc-body">
+                                <p class="kb-hint" data-i18n-html="cfacc.intro">Der oben hinterlegte Token ist der <b>gemeinsame Zugang</b> und nur noch der Rückfall. Wer im Bereich <b>Confluence → Mein Confluence-Zugang</b> einen eigenen Token hinterlegt, arbeitet damit und sieht genau die Seiten, für die er in Confluence berechtigt ist.</p>
+                                <div id="cfacc-liste" class="kb-hint" style="margin:10px 0;">Lädt…</div>
+                            </div>
                         </div>
 
                         <h4 style="margin:22px 0 8px;">Durchsuchen</h4>
@@ -3183,7 +3213,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <div class="kb-container">
                         <p class="kb-hint">Nur-Lesen-Zugriff auf SAP-Systeme (S/4HANA, ECC, BW/4HANA, HANA&nbsp;Cloud, Datasphere). Wähle einen Verbindungstyp und trage die Zugangsdaten ein. <strong>Schreibzugriffe sind hart gesperrt:</strong> OData nur GET, SQL nur SELECT/WITH, RFC nur lesende Bausteine. Der Agent liest über die Skill-Tools; hier kannst du testen, Daten ansehen und direkte SQL-Abfragen absetzen.</p>
 
-                        <h4 style="margin:16px 0 8px;">Verbindung</h4>
+                        <div class="kb-section" id="sap-sect-conn">
+                            <div class="kb-section-header kb-collapse-header" id="sap-sect-conn-hdr">
+                                <h3 data-i18n="jira.sect_conn">Verbindung</h3>
+                                <span class="sk-openclaw-toggle" id="sap-sect-conn-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="sap-sect-conn-body">
                         <div class="form-group">
                             <label>Verbindungstyp</label>
                             <select id="sap-conn-type" class="config-input" style="width:100%;box-sizing:border-box;">
@@ -3224,16 +3259,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span data-i18n="sap.hana_allowed">Direkten SQL-Zugriff auf die HANA-Datenbank zulassen</span>
                             </label>
                             <span class="kb-hint" data-i18n="sap.hana_allowed_hint">Aus: Abfragen laufen nur über OData bzw. RFC. Die KI bekommt die SQL-Werkzeuge gar nicht angeboten, und auch ein eigener SAP-Zugang kann HANA-SQL nicht benutzen.</span>
-                        </div>
-                        <!-- Anmeldung ueber die Portal-Kachel: kein SAP-Kennwort auf dem
-                             Server (sap_accounts, Abschnitt "Anmeldung ueber die
-                             Portal-Kachel"). Beim Einschalten fragt sap.js nach. -->
-                        <div class="form-group">
-                            <label class="checkbox-group">
-                                <input type="checkbox" id="sap-kachel-pflicht">
-                                <span data-i18n="sap.kachel_pflicht">Anmeldung über die Portal-Kachel fordern</span>
-                            </label>
-                            <span class="kb-hint" data-i18n-html="sap.kachel_pflicht_hint">An: Auf dem Server liegt kein SAP-Kennwort mehr. Beim Einschalten werden das Kennwort dieses gemeinsamen Zugangs <b>und</b> die Kennwörter aller eigenen Zugänge gelöscht. Jeder Benutzer meldet sich im Bereich <b>SAP</b> unter „Mein SAP-Zugang“ mit seinem Kennwort an; es gilt nur für die laufende Sitzung, der Browser kann es sich merken. Zeitgesteuerte Aufträge erreichen SAP nur, solange der Benutzer angemeldet ist.</span>
                         </div>
 
                         <!-- OData-Felder -->
@@ -3381,18 +3406,42 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <b>Leer = niemand.</b> Der oben eingetragene Server ist immer erlaubt.</span>
                         </div>
 
+                        <!-- Persoenliche Zugaenge erlauben (2026-11-15, Betreiber): EIN Haken.
+                             AN = Zugang samt Kennwort speichern, Rueckfall auf den gemeinsamen
+                             Zugang. AUS = Anmeldung ueber die Portal-Kachel (gespeichert als
+                             kachel_anmeldung = true, sap_accounts Abschnitt "Anmeldung ueber
+                             die Portal-Kachel"): kein Kennwort auf dem Server. Beim Abschalten
+                             fragt sap.js nach; main.update_skill_config loescht dann alle
+                             persoenlichen Zugaenge. Steht wie bei Jira/Confluence
+                             direkt ueber "Speichern" (Betreiber 2026-11-15). -->
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="checkbox" id="sap-persoenlich" checked>
+                                <span data-i18n="sap.persoenlich">Persönliche Zugänge erlauben</span>
+                            </label>
+                            <span class="kb-hint" data-i18n-html="sap.persoenlich_hint">An: Jeder Benutzer kann im Bereich <b>SAP → Mein SAP-Zugang</b> seinen eigenen Zugang samt Kennwort hinterlegen und arbeitet dann mit seinen eigenen Rechten; wer keinen hat, arbeitet über den gemeinsamen Zugang. Aus: Auf dem Server liegt kein SAP-Kennwort mehr – jeder Benutzer meldet sich im Bereich <b>SAP</b> mit seinem Kennwort an; es gilt nur für die laufende Sitzung, der Browser kann es sich merken. Zeitgesteuerte Aufträge erreichen SAP dann nur, solange der Benutzer angemeldet ist. <b>Beim Abschalten werden das Kennwort des gemeinsamen Zugangs und alle persönlichen SAP-Zugänge gelöscht</b>; jeder Benutzer richtet seinen Zugang danach im Bereich SAP ohne Kennwort neu ein.</span>
+                        </div>
+
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
                             <button class="btn-primary" id="sap-save" type="button" data-i18n="common.save">Speichern</button>
                             <button class="btn-secondary" id="sap-test" type="button" data-i18n="profile.test">Verbindung testen</button>
                             <span id="sap-status" style="font-size:0.9em;"></span>
                         </div>
-
-                        <!-- Wer hat einen eigenen Zugang hinterlegt? Fuer den Admin die
-                             Antwort auf "warum sieht dieser Benutzer andere Zahlen". -->
-                        <div class="form-group" style="margin-top:18px;">
-                            <label>Persönliche SAP-Zugänge</label>
-                            <div id="sap-accounts-list" class="kb-hint">Lädt…</div>
+                            </div>
                         </div>
+
+                        <!-- Wer hat einen eigenen Zugang hinterlegt? Fuer den Admin die Antwort auf "warum sieht dieser Benutzer andere Zahlen". Endpunkt: /api/sap/admin/accounts. -->
+                        <div class="kb-section" id="sap-sect-acc">
+                            <div class="kb-section-header kb-collapse-header" id="sap-sect-acc-hdr">
+                                <h3 data-i18n="sapacc.h">Persönliche SAP-Zugänge</h3>
+                                <span class="sk-openclaw-toggle" id="sap-sect-acc-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="sap-sect-acc-body">
+                                <p class="kb-hint" data-i18n-html="sapacc.intro">Der oben hinterlegte Zugang ist der <b>gemeinsame Lesezugang</b> und nur der Rückfall. Wer im Bereich <b>SAP → Mein SAP-Zugang</b> einen eigenen Zugang hinterlegt, arbeitet damit und sieht genau die Daten, für die er in SAP berechtigt ist.</p>
+                                <div id="sap-accounts-list" class="kb-hint" style="margin:10px 0;">Lädt…</div>
+                            </div>
+                        </div>
+
 
                         <!-- Datenzugriff: OData -->
                         <div id="sap-data-odata" class="sap-data-group">
@@ -3455,7 +3504,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <p class="kb-hint">Anbindung an <b>VEMAS.NET</b> (MS&nbsp;Consulting) über dessen REST-Webservice. Hier stehen <b>Serveradresse, Anmeldeart und die Ressourcen-Zuordnung</b> – die eigenen Zugangsdaten hinterlegen die Anwender im Bereich <b>VEMAS</b> unter „Mein VEMAS-Zugang". Der hier eingetragene Zugang ist danach nur noch der <b>gemeinsame Rückfall</b>.</p>
                         <p class="kb-hint" style="margin-top:6px;">⚠ Die REST-Schnittstelle von VEMAS ist herstellerseitig <b>nicht öffentlich dokumentiert</b> und je Installation verschieden. Tragen Sie deshalb unbedingt die <b>Ressourcen-Zuordnung</b> unten ein – ohne sie muss der Agent Pfade raten, und Auswertungen bleiben leer.</p>
 
-                        <h4 style="margin:16px 0 8px;">Verbindung</h4>
+                        <div class="kb-section" id="vemas-sect-conn">
+                            <div class="kb-section-header kb-collapse-header" id="vemas-sect-conn-hdr">
+                                <h3 data-i18n="jira.sect_conn">Verbindung</h3>
+                                <span class="sk-openclaw-toggle" id="vemas-sect-conn-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="vemas-sect-conn-body">
                         <div class="form-group">
                             <label for="vemas-base-url">VEMAS Basis-URL</label>
                             <input type="text" id="vemas-base-url" class="config-input" placeholder="https://vemas.firma.de/api" style="width:100%;box-sizing:border-box;">
@@ -3569,17 +3623,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <span class="kb-hint">Abgewählt darf der Agent auch anlegen und ändern (POST/PUT/PATCH; <b>gelöscht wird nie</b>). <b>Zweite Schranke:</b> geschrieben wird ausschließlich mit dem <b>persönlichen</b> Zugang eines Benutzers – über den gemeinsamen Zugang bleibt es beim Lesen, damit jeder Vorgang in VEMAS zuzuordnen ist. Bedenken Sie, dass der Agent Fremdtext verarbeitet (E-Mails, Tickets); ein Schreibwerkzeug ist darüber erreichbar.</span>
                         </div>
 
-                        <!-- Anmeldung ueber die Portal-Kachel (2026-11-05, wie SAP):
-                             kein VEMAS-Kennwort auf dem Server. Beim Einschalten fragt
-                             vemas.js nach; main.update_skill_config leert die Kennwoerter. -->
-                        <div class="form-group">
-                            <label class="checkbox-group">
-                                <input type="checkbox" id="vemas-kachel-pflicht">
-                                <span data-i18n="vemas.kachel_pflicht">Anmeldung über die Portal-Kachel fordern</span>
-                            </label>
-                            <span class="kb-hint" data-i18n-html="vemas.kachel_pflicht_hint">An: Auf dem Server liegt kein VEMAS-Kennwort mehr. Beim Einschalten werden das Kennwort bzw. Token dieses gemeinsamen Zugangs <b>und</b> die Kennwörter aller eigenen Zugänge gelöscht. Jeder Benutzer meldet sich im Bereich <b>VEMAS</b> unter „Mein VEMAS-Zugang“ an; das Kennwort gilt nur für die laufende Sitzung, der Browser kann es sich merken. Zeitgesteuerte Aufträge erreichen VEMAS nur, solange der Benutzer angemeldet ist.</span>
-                        </div>
-
                         <div class="form-group">
                             <label for="vemas-test-path">Pfad für den Verbindungstest <span class="kb-hint">(optional)</span></label>
                             <input type="text" id="vemas-test-path" class="config-input" placeholder="z.B. projects" style="width:100%;box-sizing:border-box;">
@@ -3595,6 +3638,22 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <span class="kb-hint">Der Agent ruft diese Liste vor jeder Abfrage ab und benutzt die <b>Namen</b>. Ohne Zuordnung muss er Pfade raten – der häufigste Grund für leere Auswertungen. Der Knopf „Ressourcen erkunden" liest die Selbstauskunft des Servers, falls vorhanden.</span>
                         </div>
 
+                        <!-- Persoenliche Zugaenge erlauben (2026-11-15, Betreiber): EIN Haken.
+                             AN = Zugang samt Kennwort speichern, Rueckfall auf den gemeinsamen
+                             Zugang. AUS = Anmeldung ueber die Portal-Kachel (gespeichert als
+                             kachel_anmeldung = true, vemas_accounts Abschnitt "Anmeldung ueber
+                             die Portal-Kachel"): kein Kennwort auf dem Server. Beim Abschalten
+                             fragt vemas.js nach; main.update_skill_config loescht dann alle
+                             persoenlichen Zugaenge. Steht wie bei Jira/Confluence
+                             direkt ueber "Speichern" (Betreiber 2026-11-15). -->
+                        <div class="form-group">
+                            <label class="checkbox-group">
+                                <input type="checkbox" id="vemas-persoenlich" checked>
+                                <span data-i18n="vemas.persoenlich">Persönliche Zugänge erlauben</span>
+                            </label>
+                            <span class="kb-hint" data-i18n-html="vemas.persoenlich_hint">An: Jeder Benutzer kann im Bereich <b>VEMAS → Mein VEMAS-Zugang</b> seinen eigenen Zugang samt Kennwort hinterlegen und arbeitet dann mit seinen eigenen Rechten; wer keinen hat, arbeitet über den gemeinsamen Zugang. Aus: Auf dem Server liegt kein VEMAS-Kennwort mehr – jeder Benutzer meldet sich im Bereich <b>VEMAS</b> mit seinem Kennwort an; es gilt nur für die laufende Sitzung, der Browser kann es sich merken. Zeitgesteuerte Aufträge erreichen VEMAS dann nur, solange der Benutzer angemeldet ist. <b>Beim Abschalten werden Kennwort bzw. Token des gemeinsamen Zugangs und alle persönlichen VEMAS-Zugänge gelöscht</b>; jeder Benutzer richtet seinen Zugang danach im Bereich VEMAS ohne Kennwort neu ein.</span>
+                        </div>
+
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
                             <button class="btn-primary" id="vemas-save" type="button" data-i18n="common.save">Speichern</button>
                             <button class="btn-secondary" id="vemas-test" type="button" data-i18n="profile.test">Verbindung testen</button>
@@ -3602,13 +3661,21 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <span id="vemas-status" style="font-size:0.9em;"></span>
                         </div>
                         <div id="vemas-discover-out" style="margin-top:10px;"></div>
-
-                        <!-- Wer hat einen eigenen Zugang hinterlegt? Für den Admin die
-                             Antwort auf „warum sieht dieser Benutzer andere Daten". -->
-                        <div class="form-group" style="margin-top:18px;">
-                            <label>Persönliche VEMAS-Zugänge</label>
-                            <div id="vemas-accounts-list" class="kb-hint">Lädt…</div>
+                            </div>
                         </div>
+
+                        <!-- Wer hat einen eigenen Zugang hinterlegt? Fuer den Admin die Antwort auf "warum sieht dieser Benutzer andere Daten". Endpunkt: /api/vemas/admin/accounts. -->
+                        <div class="kb-section" id="vemas-sect-acc">
+                            <div class="kb-section-header kb-collapse-header" id="vemas-sect-acc-hdr">
+                                <h3 data-i18n="vemasacc.h">Persönliche VEMAS-Zugänge</h3>
+                                <span class="sk-openclaw-toggle" id="vemas-sect-acc-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="vemas-sect-acc-body">
+                                <p class="kb-hint" data-i18n-html="vemasacc.intro">Der oben hinterlegte Zugang ist der <b>gemeinsame Zugang</b> und nur der Rückfall. Wer im Bereich <b>VEMAS → Mein VEMAS-Zugang</b> eigene Zugangsdaten hinterlegt, arbeitet damit und sieht genau die Daten, für die er in VEMAS berechtigt ist.</p>
+                                <div id="vemas-accounts-list" class="kb-hint" style="margin:10px 0;">Lädt…</div>
+                            </div>
+                        </div>
+
 
                         <h4 style="margin:22px 0 8px;">Abfrage testen</h4>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -6279,7 +6346,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=474"></script>
+    <script src="/static/js/i18n.js?v=477"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6291,7 +6358,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/kbgroups.js?v=6"></script>
     <script src="/static/js/skills.js?v=55"></script>
     <script src="/static/js/chatlib.js?v=27"></script>
-    <script src="/static/js/skillcfg.js?v=16"></script>
+    <script src="/static/js/skillcfg.js?v=19"></script>
     <script src="/static/js/google.js?v=16"></script>
     <script src="/static/js/copilot.js?v=2"></script>
     <script src="/static/js/whatsapp.js?v=20"></script>
@@ -6301,12 +6368,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/knowledge_sync.js?v=6"></script>
     <script src="/static/js/mcp.js?v=13"></script>
     <script src="/static/js/vision.js?v=38"></script>
-    <script src="/static/js/confluence.js?v=11"></script>
+    <script src="/static/js/confluence.js?v=12"></script>
     <script src="/static/js/jira.js?v=32"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=4"></script>
-    <script src="/static/js/sap.js?v=11"></script>
-    <script src="/static/js/vemas.js?v=7"></script>
+    <script src="/static/js/sap.js?v=14"></script>
+    <script src="/static/js/vemas.js?v=10"></script>
     <script src="/static/js/email.js?v=11"></script>
     <script src="/static/js/short_tracks_admin.js?v=3"></script>
     <script src="/static/js/ai_mouse_admin.js?v=13"></script>
@@ -6335,7 +6402,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=4"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=250"></script>
+    <script src="/static/js/app.js?v=251"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

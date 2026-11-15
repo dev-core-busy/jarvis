@@ -32,6 +32,11 @@
         return Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
     }
     function $(id) { return document.getElementById(id); }
+    // Uebersetzung mit Rueckfall (der Reiter rendert auch ohne i18n.js).
+    function T(key, fallback) {
+        var s = window.t ? window.t(key) : '';
+        return (!s || s === key) ? fallback : s;
+    }
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
@@ -54,6 +59,7 @@
         onShow: function () {
             this._bind();
             this.loadConfig();
+            this.loadZugaenge();
         },
 
         _bind: function () {
@@ -82,6 +88,10 @@
                     var gs = (d && d.geheim_gesetzt) || [];
                     if ($('cf-url')) $('cf-url').value = c.base_url || '';
                     geheimFeld('cf-token', 'confluence:api_token', gs.indexOf('api_token') >= 0);
+                    // Persoenliche Zugaenge erlauben (gemeinsame Fassung in skillcfg.js)
+                    if (window.SkillCfg) {
+                        Manager._persoenlichGespeichert = window.SkillCfg.persoenlichLesen('cf', c);
+                    }
                 })
                 .catch(function () {});
         },
@@ -90,8 +100,14 @@
             var body = {
                 base_url: ($('cf-url') ? $('cf-url').value : '').trim(),
                 user: '',  // Server/DC: PAT als Bearer -> kein Benutzer noetig
-                api_token: ($('cf-token') ? $('cf-token').value : '').trim()
+                api_token: ($('cf-token') ? $('cf-token').value : '').trim(),
+                // Abschalten loescht serverseitig alle persoenlichen Token.
+                persoenliche_zugaenge: window.SkillCfg ? window.SkillCfg.persoenlichHaken('cf') : true
             };
+            if (window.SkillCfg && !window.SkillCfg.persoenlichBestaetigen('Confluence',
+                    Manager._persoenlichGespeichert !== false, body.persoenliche_zugaenge)) {
+                return;
+            }
             status(window.t('confluence.saving'));
             fetch('/api/skills/confluence/config', {
                 method: 'POST',
@@ -104,11 +120,89 @@
                     return d;
                 });
             })
-              .then(function () { status('✓ ' + window.t('confluence.saved'), 'ok'); })
+              .then(function () {
+                  status('✓ ' + window.t('confluence.saved'), 'ok');
+                  Manager._persoenlichGespeichert = body.persoenliche_zugaenge;
+                  if (window.SkillCfg) window.SkillCfg.persoenlichAnwenden('cf', body.persoenliche_zugaenge);
+                  Manager.loadZugaenge();
+              })
               .catch(function (e) {
                 status('✗ ' + (e && e.code === 'geheimnis_neu_eingeben'
                     ? window.t('common.secret_reenter') : window.t('confluence.save_failed')), 'error');
             });
+        },
+
+        // Folgt dem GESPEICHERTEN Stand (siehe skillcfg.js persoenlichLesen).
+        _persoenlichGespeichert: true,
+
+        /* Wer hat einen EIGENEN Confluence-Token hinterlegt? Gleiche Darstellung
+           wie die Liste im Jira-Reiter (jira.js loadZugaenge) – ohne Token und
+           ohne Adressen. Endpunkt: /api/confluence/admin/accounts. */
+        loadZugaenge: function () {
+            var box = $('cfacc-liste'); if (!box) return;
+            box.textContent = T('cfacc.loading', 'Lade …');
+            fetch('/api/confluence/admin/accounts', { headers: authHeaders() })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d || d.ok === false) throw new Error((d && d.error) || 'Fehler');
+                    box.innerHTML = '';
+                    var alle = d.accounts || [];
+                    if (!alle.length) {
+                        box.textContent = T('cfacc.empty',
+                            'Niemand hat bisher einen eigenen Token hinterlegt – es gilt für alle der gemeinsame Zugang.');
+                        return;
+                    }
+                    var liste = document.createElement('div');
+                    liste.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+                    alle.forEach(function (a) {
+                        var row = document.createElement('div');
+                        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;'
+                            + 'gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;'
+                            + 'background:var(--bg-glass);';
+                        var links = document.createElement('span');
+                        links.style.cssText = 'min-width:0;';
+                        var n = document.createElement('span');
+                        n.style.fontWeight = '600';
+                        // textContent: Benutzer- und Confluence-Anzeigename sind Fremdtext.
+                        n.textContent = a.user || '';
+                        links.appendChild(n);
+                        if (a.anzeigename) {
+                            var j = document.createElement('span');
+                            j.style.marginLeft = '8px';
+                            j.textContent = '→ ' + a.anzeigename;
+                            links.appendChild(j);
+                        }
+                        if (a.letzter_fehler) {
+                            var f = document.createElement('div');
+                            f.style.cssText = 'color:var(--danger);word-break:break-word;';
+                            f.textContent = a.letzter_fehler;
+                            links.appendChild(f);
+                        }
+                        row.appendChild(links);
+                        // Aussage doppelt (Text UND Farbe) – Farbe allein ist keine Information.
+                        var pill = document.createElement('span');
+                        pill.style.cssText = 'flex:0 0 auto;font-weight:600;';
+                        if (!a.aktiv) {
+                            pill.textContent = T('cfacc.off', 'inaktiv');
+                        } else if (a.letzter_fehler) {
+                            pill.textContent = T('cfacc.err', 'Token abgelehnt');
+                            pill.style.color = 'var(--danger)';
+                        } else {
+                            pill.textContent = T('cfacc.on', 'eigener Zugang');
+                            pill.style.color = 'var(--success)';
+                        }
+                        row.appendChild(pill);
+                        liste.appendChild(row);
+                    });
+                    box.appendChild(liste);
+                })
+                .catch(function (e) {
+                    box.innerHTML = '';
+                    var s = document.createElement('span');
+                    s.style.color = 'var(--danger)';
+                    s.textContent = (e && e.message) || T('cfacc.load_failed', 'Zugänge konnten nicht geladen werden.');
+                    box.appendChild(s);
+                });
         },
 
         test: function () {

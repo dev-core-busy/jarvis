@@ -1501,7 +1501,11 @@ function loadScript(dom, rel) {
               (txt.match(/kein Kennwort gespeichert/g) || []).length === 2, txt);
         check('je Benutzer: angemeldet bzw. nicht angemeldet',
               /nicht angemeldet/.test(txt) && /angemeldet bis \d/.test(txt), txt);
-        check('Schalter steht an', e.$('sap-kachel-pflicht').checked === true);
+        // EIN Haken seit 2026-11-15: "Persoenliche Zugaenge erlauben" AUS = Kachelpflicht.
+        check('kein eigener Kachel-Haken mehr', !e.$('sap-kachel-pflicht'));
+        check('Kachel an -> "Persoenliche Zugaenge erlauben" nicht angehakt', e.$('sap-persoenlich').checked === false);
+        check('Container "Persoenliche SAP-Zugaenge" ausgeblendet (Betreiber 2026-11-15)',
+              !!e.$('sap-sect-acc') && e.$('sap-sect-acc').style.display === 'none');
         check('Kennwortfelder des gemeinsamen Zugangs gesperrt',
               ['sap-odata-pass', 'sap-odata-token', 'sap-hana-pass', 'sap-rfc-pass']
                   .every((id) => e.$(id) && e.$(id).disabled));
@@ -1520,9 +1524,10 @@ function loadScript(dom, rel) {
         check('ohne Schalter: "Kennwort gespeichert" je Benutzer', /– Kennwort gespeichert/.test(txt), txt);
         check('ohne Schalter: kein Kopfsatz "kein SAP-Kennwort"', !/kein SAP-Kennwort/.test(txt), txt);
         check('ohne Schalter: Kennwortfeld frei', e.$('sap-odata-pass').disabled === false);
-        e.$('sap-kachel-pflicht').checked = true;
-        e.$('sap-kachel-pflicht').dispatchEvent(new e.s.window.Event('change'));
-        check('Haken setzen sperrt die Kennwortfelder sofort', e.$('sap-odata-pass').disabled === true);
+        check('Kachel aus -> "Persoenliche Zugaenge erlauben" angehakt', e.$('sap-persoenlich').checked === true);
+        e.$('sap-persoenlich').checked = false;
+        e.$('sap-persoenlich').dispatchEvent(new e.s.window.Event('change'));
+        check('Haken entfernen sperrt die Kennwortfelder sofort', e.$('sap-odata-pass').disabled === true);
         e.$('sap-save').click();
         await sleep(60);
         check('Einschalten fragt nach (Warnhinweis)', e.fragen.length === 1 && /gelöscht/.test(e.fragen[0] || ''),

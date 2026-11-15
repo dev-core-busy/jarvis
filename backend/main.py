@@ -13289,6 +13289,9 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
     # alle persoenlichen Zugaenge ihre Kennwoerter. Die Umleitungs-Pruefung
     # entfaellt dann: es bleibt kein Geheimnis, das umgeleitet werden koennte.
     # Seit 2026-11-05 auch fuer VEMAS (derselbe Schalter, dasselbe Modulmuster).
+    # In der Oberflaeche heisst dieser Schalter seit 2026-11-15 "Persoenliche
+    # Zugaenge erlauben" (Haken AUS = kachel_anmeldung an) – fuer SAP/VEMAS
+    # waere ein eigener Schalter daneben dieselbe Frage zweimal (Betreiber).
     sap_kachel = name in ("sap", "vemas") and bool(_endzustand("kachel_anmeldung"))
     if sap_kachel:
         if name == "sap":
@@ -13314,36 +13317,61 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
         for _f in _sapacc.GEHEIMFELDER:
             body[_f] = ""
     success = sm.update_skill_config(name, body)
-    # Jira "Persoenliche Zugaenge erlauben" ABGESCHALTET (vorher erlaubt):
-    # alle persoenlichen Token loeschen. Die Oberflaeche hat vorher gewarnt.
-    if success and name == "jira" and _endzustand("persoenliche_zugaenge") is False:
-        from backend import jira_accounts as _jacc
+    # "Persoenliche Zugaenge erlauben" ABGESCHALTET: alle persoenlichen Zugaenge
+    # loeschen. Jira seit 2026-11-05, Confluence seit 2026-11-15 – EIN Zweig,
+    # damit die Regel nicht je Bereich auseinanderlaeuft. SAP/VEMAS: dort ist
+    # "aus" die Kachelpflicht – geloescht wird im Zweig darunter.
+    # Entscheidend ist der ENDZUSTAND (siehe `_endzustand`): auch ein Rest bei
+    # schon abgeschaltetem Schalter wird geraeumt. Die Oberflaeche hat gewarnt.
+    # Skill → Konten-Modul; jedes traegt `persoenlich_erlaubt()` und
+    # `alle_entfernen()`. ⚠ Bewusst LOKAL und nicht auf Modulebene: mehrere
+    # Waechter schneiden diese Funktion heraus (test_bsi_m5,
+    # test_skill_config_nacharbeit) – eine neue Modulvariable liesse jeden
+    # fremden Harness mit NameError sterben (Register).
+    _PERSOENLICH_MODULE = {"jira": "jira_accounts", "confluence": "confluence_accounts"}
+    _pers_modul = _PERSOENLICH_MODULE.get(name)
+    if success and _pers_modul and _endzustand("persoenliche_zugaenge") is False:
+        import importlib  # noqa: PLC0415
         try:
-            _nj = _jacc.alle_entfernen()
+            _nj = importlib.import_module("backend." + _pers_modul).alle_entfernen()
         except Exception as e:  # noqa: BLE001
-            print(f"[Jira] persoenliche Zugaenge nicht entfernt: {e}", flush=True)
+            print(f"[{name}] persoenliche Zugaenge nicht entfernt: {e}", flush=True)
             return JSONResponse({"success": False,
                                  "error": "Die Einstellung ist gespeichert, aber die "
                                           f"persönlichen Zugänge ließen sich nicht entfernen: {e}"},
                                 status_code=500)
         if _nj or gespeichert.get("persoenliche_zugaenge") is not False:
-            _aktivitaet(user, "skills", "jira_persoenliche_zugaenge_aus", name,
-                        zugaenge_entfernt=_nj)
+            # Aktionsnamen als LITERAL (test_aktivitaet: Protokoll-Uebersetzung)
+            if name == "jira":
+                _aktivitaet(user, "skills", "jira_persoenliche_zugaenge_aus", name,
+                            zugaenge_entfernt=_nj)
+            else:
+                _aktivitaet(user, "skills", "confluence_persoenliche_zugaenge_aus", name,
+                            zugaenge_entfernt=_nj)
     if success and sap_kachel:
-        # Kein "nur beim Einschalten": `kennwoerter_entfernen` ist idempotent
-        # (ohne Rest kein Schreibzugriff und Rueckgabe 0) und heilt damit einen
-        # Bestand, der den Schalter schon traegt und trotzdem Kennwoerter haelt.
+        # Beim UMSCHALTEN ("Persoenliche Zugaenge erlauben" wird abgehakt)
+        # gehen ALLE persoenlichen Zugaenge weg (Betreiber 2026-11-15: "Zugaenge
+        # sollen geloescht werden"). Danach legt sich jeder Benutzer fuer die
+        # Kachel-Anmeldung wieder einen Zugang OHNE Kennwort an – deshalb nur im
+        # Umschalt-Moment und nicht bei jedem Speichern. Bei jedem Speichern
+        # dagegen `kennwoerter_entfernen`: idempotent (ohne Rest kein
+        # Schreibzugriff) und heilt einen Bestand, der trotz Schalter noch
+        # Kennwoerter haelt.
+        umschalten = not gespeichert.get("kachel_anmeldung")
+        _nz = 0
         try:
+            if umschalten:
+                _nz = _sapacc.alle_entfernen()
             _n = _sapacc.kennwoerter_entfernen()
         except Exception as e:  # noqa: BLE001
-            print(f"[SAP] Kennwoerter persoenlicher Zugaenge nicht entfernt: {e}", flush=True)
+            print(f"[{name}] persoenliche Zugaenge nicht entfernt: {e}", flush=True)
             return JSONResponse({"success": False,
                                  "error": "Die Einstellung ist gespeichert, aber die "
-                                          "Kennwörter der eigenen Zugänge ließen sich "
+                                          "persönlichen Zugänge ließen sich "
                                           f"nicht entfernen: {e}"}, status_code=500)
-        if _n or not gespeichert.get("kachel_anmeldung"):
+        if _n or _nz or umschalten:
             _aktivitaet(user, "skills", "kachel_anmeldung_an", name,
-                        kennwoerter_entfernt=_n)
+                        kennwoerter_entfernt=_n, zugaenge_entfernt=_nz)
 
     # Google-Spezialfall: Client-ID/Secret in .env schreiben
     if name == "google" and success:
@@ -14614,6 +14642,34 @@ async def confluence_account_test(user: str = Depends(require_confluence_account
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True, **d})
+
+
+@app.get("/api/confluence/admin/accounts")
+async def confluence_admin_accounts(user: str = Depends(require_local_auth)):
+    """Wer hat einen eigenen Confluence-Token hinterlegt? (*Einstellungen → Confluence*)
+
+    Gegenstueck zu ``/api/jira/admin/accounts`` – fuer den Administrator die
+    Antwort auf "warum sieht dieser Benutzer andere Seiten als ich". **Ohne
+    Token**; sichtbar ist nur, DASS es einen eigenen Zugang gibt und ob er
+    zuletzt funktioniert hat.
+    """
+    from backend import confluence_accounts  # noqa: PLC0415
+    out = []
+    try:
+        for un in confluence_accounts.alle_benutzer():
+            i = confluence_accounts.zugang_info(un)
+            out.append({
+                "user": _display_name(un),
+                "aktiv": bool(i.get("aktiv")),
+                "vorhanden": bool(i.get("vorhanden")),
+                "anzeigename": i.get("anzeigename") or "",
+                "letzter_erfolg": int(i.get("letzter_erfolg") or 0),
+                "letzter_fehler": i.get("letzter_fehler") or "",
+            })
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "accounts": out,
+                         "persoenlich_erlaubt": confluence_accounts.persoenlich_erlaubt()})
 
 
 # ─── SAP (Reiter: Read-Only-Zugriff) ─────────────────────────────────

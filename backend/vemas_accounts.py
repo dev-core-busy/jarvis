@@ -283,6 +283,23 @@ def kennwoerter_entfernen() -> int:
     return n
 
 
+def alle_entfernen() -> int:
+    """Loescht ALLE persoenlichen Zugaenge (samt Kennwoertern) und beendet alle
+    Anmeldungen im Arbeitsspeicher. Rueckgabe: Zahl der entfernten Zugaenge.
+
+    Aufgerufen, wenn der Administrator "Persoenliche Zugaenge erlauben"
+    ABSCHALTET (Betreiber 2026-11-15: "Zugaenge sollen geloescht werden").
+    Nur im Umschalt-Moment, nicht bei jedem Speichern: bei abgeschaltetem
+    Schalter legt ein Benutzer fuer die Kachel-Anmeldung wieder einen Zugang
+    OHNE Kennwort an – den darf ein spaeteres Speichern nicht wegraeumen."""
+    alle = _laden()
+    n = len(alle)
+    if n or KONTEN_DATEI.exists():
+        _speichern({})
+    _SITZUNG.clear()
+    return n
+
+
 def _eingerichtet(k: dict) -> bool:
     """Ist der Zugang OHNE Geheimnis vollstaendig (Kachel-Anmeldung)?"""
     ak = (k.get("auth_kind") or "").strip().lower()
@@ -861,7 +878,7 @@ __all__ = [
     "merke_ergebnis", "melde_fehler", "ist_anmeldefehler", "max_anmeldefehler",
     "aufloesen", "client_fuer_lauf", "quelle_text", "sammel_client",
     "server_konfiguriert", "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "QUELLE_KEINE",
-    "kachel_pflicht", "kennwoerter_entfernen", "kennwort_gespeichert",
+    "kachel_pflicht", "kennwoerter_entfernen", "alle_entfernen", "kennwort_gespeichert",
     "sitzung_beenden", "sitzung_bis", "anmeldung_anbieten", "KACHEL_SCHALTER",
     "AENDERBAR", "TEXTFELDER", "GEHEIMFELDER", "ANMELDEARTEN",
 ]

@@ -96,7 +96,9 @@
             var self = this;
             var ak = $('vemas-auth-kind');
             if (ak) ak.addEventListener('change', function () { self._applyAuth(ak.value); });
-            var kp = $('vemas-kachel-pflicht');
+            // EIN Haken (Betreiber 2026-11-15): "Persoenliche Zugaenge erlauben"
+            // AUS heisst Anmeldung ueber die Portal-Kachel (_kachelGewaehlt).
+            var kp = $('vemas-persoenlich');
             if (kp) kp.addEventListener('change', function () { self._applyKachel(); });
             var save = $('vemas-save'); if (save) save.addEventListener('click', this.save.bind(this));
             var test = $('vemas-test'); if (test) test.addEventListener('click', this.test.bind(this));
@@ -165,7 +167,10 @@
                     // nur lesend.
                     if ($('vemas-verify-ssl')) $('vemas-verify-ssl').checked = c.verify_ssl !== false;
                     if ($('vemas-read-only')) $('vemas-read-only').checked = c.read_only !== false;
-                    if ($('vemas-kachel-pflicht')) $('vemas-kachel-pflicht').checked = !!c.kachel_anmeldung;
+                    if ($('vemas-persoenlich')) $('vemas-persoenlich').checked = !c.kachel_anmeldung;
+                    // Container "Persoenliche …-Zugaenge" folgt dem GESPEICHERTEN Stand
+                    // (Betreiber 2026-11-15: aus = Zugaenge geloescht, Container weg).
+                    if (window.SkillCfg) window.SkillCfg.persoenlichAnwenden('vemas', !c.kachel_anmeldung);
                     self._cfg = c;
                     self._applyAuth(c.auth_kind || 'basic');
                     self._applyKachel();
@@ -200,15 +205,25 @@
                 test_path: val('vemas-test-path'),
                 resources: ($('vemas-resources') ? $('vemas-resources').value : ''),
                 // Anmeldung ueber die Portal-Kachel (Server leert dann die Kennwoerter)
-                kachel_anmeldung: checked('vemas-kachel-pflicht')
+                kachel_anmeldung: this._kachelGewaehlt()
             };
         },
 
         // Mit Kachel-Anmeldung gibt es hier kein Kennwort/Token – die Felder
         // werden gesperrt, statt einen Wert anzunehmen, den der Server verwirft.
         _cfg: {},
+        // "Persoenliche Zugaenge erlauben" ist die Umkehrung der Kachelpflicht:
+        // AN = jeder darf seinen Zugang samt Kennwort speichern (Rueckfall auf
+        // den gemeinsamen Zugang), AUS = kein Kennwort auf dem Server, jeder
+        // meldet sich in der Portal-Kachel an. Fehlt der Haken im Markup, gilt
+        // der gespeicherte Stand – nie still umschalten.
+        _kachelGewaehlt: function () {
+            var cb = $('vemas-persoenlich');
+            return cb ? !cb.checked : !!(this._cfg && this._cfg.kachel_anmeldung);
+        },
+
         _applyKachel: function () {
-            var an = checked('vemas-kachel-pflicht');
+            var an = this._kachelGewaehlt();
             ['vemas-password', 'vemas-token'].forEach(function (id) {
                 var e = $(id); if (!e) return;
                 e.disabled = an;
@@ -226,7 +241,7 @@
         save: function () {
             var self = this;
             // Einschalten der Kachel-Anmeldung loescht Kennwoerter – vorher fragen.
-            if (checked('vemas-kachel-pflicht') && !(this._cfg && this._cfg.kachel_anmeldung)) {
+            if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {
                 if (!window.confirm(T('vemas.kachel_pflicht_confirm',
                     'Achtung: Beim Speichern werden das Kennwort bzw. Token des gemeinsamen VEMAS-Zugangs und die '
                     + 'gespeicherten Kennwörter ALLER eigenen VEMAS-Zugänge gelöscht. Danach muss sich jeder Benutzer '

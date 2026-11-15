@@ -40,8 +40,8 @@ ALT_KOPIE = ("    gespeichert = dict(sm.get_skill_config(name) or {})",
              "    gespeichert = sm.get_skill_config(name) or {}")
 ALT_SAP = ("    if success and sap_kachel:",
            "    if success and sap_kachel and not gespeichert.get(\"kachel_anmeldung\"):")
-ALT_JIRA = ('    if success and name == "jira" and _endzustand("persoenliche_zugaenge") is False:',
-            '    if (success and name == "jira" and body.get("persoenliche_zugaenge") is False\n'
+ALT_JIRA = ('    if success and _pers_modul and _endzustand("persoenliche_zugaenge") is False:',
+            '    if (success and _pers_modul and body.get("persoenliche_zugaenge") is False\n'
             '            and gespeichert.get("persoenliche_zugaenge") is not False):')
 
 # (Name, Erwartung, Datei, [(alt, neu), ...])
@@ -57,24 +57,48 @@ PROBEN = [
     ("kennwoerter_entfernen wird nicht gerufen", "biss", "main",
      [("            _n = _sapacc.kennwoerter_entfernen()", "            _n = 0")]),
     ("alle_entfernen wird nicht gerufen", "biss", "main",
-     [("            _nj = _jacc.alle_entfernen()", "            _nj = 0")]),
+     [('            _nj = importlib.import_module("backend." + _pers_modul).alle_entfernen()',
+       "            _nj = 0")]),
+    # 2026-11-15: der Schalter fuer Confluence; SAP/VEMAS bewusst NICHT
+    ("Confluence fehlt in der Zuordnung", "biss", "main",
+     [('    _PERSOENLICH_MODULE = {"jira": "jira_accounts", "confluence": "confluence_accounts"}',
+       '    _PERSOENLICH_MODULE = {"jira": "jira_accounts"}')]),
+    ("SAP/VEMAS wieder in der Zuordnung (loeschte ganze Zugaenge)", "biss", "main",
+     [('    _PERSOENLICH_MODULE = {"jira": "jira_accounts", "confluence": "confluence_accounts"}',
+       '    _PERSOENLICH_MODULE = {"jira": "jira_accounts", "confluence": "confluence_accounts",\n'
+       '                           "sap": "sap_accounts", "vemas": "vemas_accounts"}')]),
+    ("nur noch Jira wird geraeumt (alter Zweig)", "biss", "main",
+     [('    if success and _pers_modul and _endzustand("persoenliche_zugaenge") is False:',
+       '    if success and name == "jira" and _endzustand("persoenliche_zugaenge") is False:')]),
+    ("SAP/VEMAS weisen persoenliche_zugaenge:false wieder ab", "biss", "main",
+     [('    sap_kachel = name in ("sap", "vemas") and bool(_endzustand("kachel_anmeldung"))\n',
+       '    if name in ("sap", "vemas") and _endzustand("persoenliche_zugaenge") is False:\n'
+       '        return JSONResponse({"success": False, "code": "kachel_braucht_persoenlich"},\n'
+       '                            status_code=400)\n'
+       '    sap_kachel = name in ("sap", "vemas") and bool(_endzustand("kachel_anmeldung"))\n')]),
+    ("Aktivitaet traegt nicht mehr den Bereich", "biss", "main",
+     [('"confluence_persoenliche_zugaenge_aus"', '"jira_persoenliche_zugaenge_aus"')]),
     ("Stand wird gar nicht gespeichert", "biss", "main",
      [("    success = sm.update_skill_config(name, body)", "    success = True")]),
     ("Sammel-Kennwort wird nach dem Behalten nicht geleert", "biss", "main",
      [("    if sap_kachel:\n        # NACH dem Behalten: das setzt leere Geheimfelder wieder ein.\n"
        "        for _f in _sapacc.GEHEIMFELDER:\n            body[_f] = \"\"\n", "")]),
-    ("Zahl der geleerten Zugaenge nicht protokolliert", "biss", "main",
-     [("            _aktivitaet(user, \"skills\", \"kachel_anmeldung_an\", name,\n"
-       "                        kennwoerter_entfernt=_n)",
-       "            _aktivitaet(user, \"skills\", \"kachel_anmeldung_an\", name)")]),
+    ("Zahl der geloeschten Zugaenge nicht protokolliert", "biss", "main",
+     [("                        kennwoerter_entfernt=_n, zugaenge_entfernt=_nz)",
+       "                        kennwoerter_entfernt=_n)")]),
     ("Fehlschlag des Loeschens wird verschluckt", "biss", "main",
-     [("        except Exception as e:  # noqa: BLE001\n"
-       "            print(f\"[SAP] Kennwoerter persoenlicher Zugaenge nicht entfernt: {e}\", flush=True)\n"
+     [("            print(f\"[{name}] persoenliche Zugaenge nicht entfernt: {e}\", flush=True)\n"
        "            return JSONResponse({\"success\": False,\n"
        "                                 \"error\": \"Die Einstellung ist gespeichert, aber die \"\n"
-       "                                          \"Kennwörter der eigenen Zugänge ließen sich \"\n"
+       "                                          \"persönlichen Zugänge ließen sich \"\n"
        "                                          f\"nicht entfernen: {e}\"}, status_code=500)",
-       "        except Exception:  # noqa: BLE001\n            _n = 0")]),
+       "            _n = 0")]),
+    # 2026-11-15: SAP/VEMAS loeschen beim Umschalten ALLE Zugaenge
+    ("SAP/VEMAS: Zugaenge beim Umschalten nicht geloescht", "biss", "main",
+     [("                _nz = _sapacc.alle_entfernen()", "                _nz = 0")]),
+    ("SAP/VEMAS: Zugaenge bei JEDEM Speichern geloescht", "biss", "main",
+     [('        umschalten = not gespeichert.get("kachel_anmeldung")',
+       "        umschalten = True")]),
     # Mess-Sabotagen: die Attrappe spiegelt das Original nicht mehr → Exit 2.
     ("config.save_skill_state merged nicht mehr", "abbruch", "config",
      [("        self._skill_states[name].update(state)",

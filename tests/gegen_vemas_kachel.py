@@ -69,7 +69,7 @@ PROBEN = [
      "if (accS) accS.addEventListener('click', function () { if (!_kachel) saveAccount(); });",
      "if (accS) accS.addEventListener('click', saveAccount);"),
     ("Einschalten ohne Warnhinweis", "vemasjs",
-     "            if (checked('vemas-kachel-pflicht') && !(this._cfg && this._cfg.kachel_anmeldung)) {",
+     "            if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {",
      "            if (false) {"),
     ("Liste ohne Kennwort-Zustand", "vemasjs",
      "                            + Manager._kennwortZustand(a, kachel) + '</li>';", "                            + '</li>';"),

@@ -9,6 +9,11 @@ gespeicherte Geheimnisse, und beide sind am 2026-11-05 AUSGEFALLEN:
   Kennwort (die Zugaenge selbst bleiben).
 * Jira "Persoenliche Zugaenge erlauben" AUS
   → ``alle_entfernen()`` loescht alle persoenlichen Token.
+* Seit 2026-11-15 derselbe Schalter fuer Confluence (``_PERSOENLICH_MODULE``).
+  Bei SAP/VEMAS IST der Haken die umgekehrte Kachelpflicht; beim Umschalten
+  auf die Kachel loescht ``alle_entfernen()`` dort alle persoenlichen Zugaenge
+  (Betreiber 2026-11-15) – nur im Umschalt-Moment, weil Benutzer danach fuer
+  die Kachel-Anmeldung wieder Zugaenge ohne Kennwort anlegen.
 
 ⚠ WARUM ES DIESEN WAECHTER GIBT (bezahlter Vorfall, gemeldet vom Betreiber):
 ``sm.get_skill_config(name)`` gibt das **lebende** dict aus
@@ -227,13 +232,15 @@ def _hat_funktion(datei: Path, name: str, argzahl: int) -> bool:
 SAP_PY = Path(os.environ.get("SKNACH_SAP") or ROOT / "backend" / "sap_accounts.py")
 VEM_PY = Path(os.environ.get("SKNACH_VEMAS") or ROOT / "backend" / "vemas_accounts.py")
 JIR_PY = Path(os.environ.get("SKNACH_JIRA") or ROOT / "backend" / "jira_accounts.py")
+CFL_PY = Path(os.environ.get("SKNACH_CONFLUENCE") or ROOT / "backend" / "confluence_accounts.py")
 SAP_FELDER = _tupel_literal(SAP_PY, "GEHEIMFELDER")
 VEM_FELDER = _tupel_literal(VEM_PY, "GEHEIMFELDER")
 if not SAP_FELDER or not VEM_FELDER:
     print("ABBRUCH: GEHEIMFELDER in sap_accounts/vemas_accounts nicht lesbar")
     sys.exit(2)
 for _d, _f in ((SAP_PY, "kennwoerter_entfernen"), (VEM_PY, "kennwoerter_entfernen"),
-               (JIR_PY, "alle_entfernen")):
+               (SAP_PY, "alle_entfernen"), (VEM_PY, "alle_entfernen"),
+               (JIR_PY, "alle_entfernen"), (CFL_PY, "alle_entfernen")):
     if not _hat_funktion(_d, _f, 0):
         print(f"ABBRUCH: {_d.name}::{_f}() ohne Argumente nicht gefunden")
         sys.exit(2)
@@ -241,37 +248,40 @@ check(True, "Positivkontrolle: Geheimfelder und Loeschfunktionen der echten Modu
       f"sap={len(SAP_FELDER)} vemas={len(VEM_FELDER)}")
 
 SPUR: list = []
-REST = {"sap": 0, "vemas": 0, "jira": 0}
+REST = {"sap": 0, "vemas": 0, "jira": 0, "confluence": 0}
 WIRFT: set = set()
 
 
-def _konten_attrappe(schluessel: str, felder, loeschname: str):
+def _konten_attrappe(schluessel: str, felder, loeschnamen):
     mod = types.ModuleType(f"backend.{schluessel}_attrappe")
     if felder is not None:
         mod.GEHEIMFELDER = felder
+    skill = schluessel.split("_")[0]
 
-    def _loeschen():
-        if schluessel in WIRFT:
-            raise RuntimeError("Platte voll (Attrappe)")
-        # Mitgemessen wird, ob der Stand zum Zeitpunkt des Loeschens schon
-        # gespeichert ist: zuerst speichern, dann loeschen.
-        gespeichert_jetzt = dict((_skill_states.get(
-            "sap" if schluessel == "sap_accounts" else
-            "vemas" if schluessel == "vemas_accounts" else "jira", {}) or {}).get("config", {}) or {})
-        SPUR.append((loeschname, schluessel, gespeichert_jetzt))
-        n = REST[schluessel.split("_")[0]]
-        REST[schluessel.split("_")[0]] = 0
-        return n
+    def _baue(loeschname):
+        def _loeschen():
+            if schluessel in WIRFT:
+                raise RuntimeError("Platte voll (Attrappe)")
+            # Mitgemessen wird, ob der Stand zum Zeitpunkt des Loeschens schon
+            # gespeichert ist: zuerst speichern, dann loeschen.
+            gespeichert_jetzt = dict((_skill_states.get(skill, {}) or {}).get("config", {}) or {})
+            SPUR.append((loeschname, schluessel, gespeichert_jetzt))
+            n = REST[skill]
+            REST[skill] = 0
+            return n
+        return _loeschen
 
-    setattr(mod, loeschname, _loeschen)
+    for loeschname in loeschnamen:
+        setattr(mod, loeschname, _baue(loeschname))
     return mod
 
 
 def _module_stellen():
     for schluessel, felder, loeschname in (
-            ("sap_accounts", SAP_FELDER, "kennwoerter_entfernen"),
-            ("vemas_accounts", VEM_FELDER, "kennwoerter_entfernen"),
-            ("jira_accounts", None, "alle_entfernen")):
+            ("sap_accounts", SAP_FELDER, ("kennwoerter_entfernen", "alle_entfernen")),
+            ("vemas_accounts", VEM_FELDER, ("kennwoerter_entfernen", "alle_entfernen")),
+            ("jira_accounts", None, ("alle_entfernen",)),
+            ("confluence_accounts", None, ("alle_entfernen",))):
         mod = _konten_attrappe(schluessel, felder, loeschname)
         sys.modules[f"backend.{schluessel}"] = mod
         setattr(backend, schluessel, mod)
@@ -297,6 +307,23 @@ def _Depends(x):
 def _require_local_auth():
     return "pruefer"
 
+
+# Die Zuordnung Skill → Konten-Modul wird aus der ECHTEN Funktion gelesen –
+# eine abgetippte Tabelle im Test liefe beim naechsten Bereich auseinander.
+_PM = None
+for _n in ast.walk(USC):
+    if (isinstance(_n, ast.Assign) and isinstance(_n.targets[0], ast.Name)
+            and _n.targets[0].id == "_PERSOENLICH_MODULE"):
+        try:
+            _PM = ast.literal_eval(_n.value)
+        except Exception:  # noqa: BLE001
+            _PM = None
+if not isinstance(_PM, dict):
+    print("ABBRUCH: _PERSOENLICH_MODULE in update_skill_config nicht als Literal lesbar")
+    sys.exit(2)
+# SAP/VEMAS NICHT: dort ist "persoenlich aus" die Kachelpflicht (Abschnitt 2).
+check(set(_PM) == {"jira", "confluence"},
+      "Loeschen ganzer Zugaenge nur fuer Jira und Confluence verdrahtet", str(sorted(_PM)))
 
 NS = {
     "Request": _Request,
@@ -327,7 +354,7 @@ def lauf(name: str, bestand: dict, body: dict, reste=None, wirft=()):
     _skill_states[name] = {"enabled": True, "config": dict(bestand)}
     SPUR.clear()
     AKTIVITAET.clear()
-    REST.update({"sap": 0, "vemas": 0, "jira": 0})
+    REST.update({"sap": 0, "vemas": 0, "jira": 0, "confluence": 0})
     REST.update(reste or {})
     WIRFT.clear()
     WIRFT.update(wirft)
@@ -339,12 +366,12 @@ def lauf(name: str, bestand: dict, body: dict, reste=None, wirft=()):
     return antwort, list(SPUR), stand
 
 
-def _geloescht(spur, schluessel: str) -> int:
-    return sum(1 for e in spur if e[1] == schluessel)
+def _geloescht(spur, schluessel: str, fname: str = "") -> int:
+    return sum(1 for e in spur if e[1] == schluessel and (not fname or e[0] == fname))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-section("2. SAP/VEMAS: Kachel-Anmeldung EIN loescht die Kennwoerter")
+section("2. SAP/VEMAS: Haken ABGEHAKT (= Kachel) loescht alle Zugaenge")
 # ═══════════════════════════════════════════════════════════════════════════
 a, spur, stand = lauf("sap", {"kachel_anmeldung": False, "password": "geheim",
                               "username": "sammel"},
@@ -352,16 +379,16 @@ a, spur, stand = lauf("sap", {"kachel_anmeldung": False, "password": "geheim",
                       reste={"sap": 5})
 check(getattr(a, "inhalt", {}).get("success") is True, "Einschalten wird gespeichert",
       str(getattr(a, "inhalt", None)))
-check(_geloescht(spur, "sap_accounts") == 1,
-      "Einschalten entfernt die Kennwoerter der persoenlichen Zugaenge",
+check(_geloescht(spur, "sap_accounts", "alle_entfernen") == 1,
+      "Umschalten loescht ALLE persoenlichen Zugaenge (Betreiber 2026-11-15)",
       f"Spur={[e[0:2] for e in spur]}")
 check(stand.get("kachel_anmeldung") is True and stand.get("password") == "",
       "der Schalter steht an und das Sammel-Kennwort ist leer", str(stand))
 check(bool(spur) and spur[0][2].get("kachel_anmeldung") is True,
       "geloescht wird NACH dem Speichern (der Stand ist schon geschrieben)",
       str(spur[0][2]) if spur else "keine Spur")
-check(any(k[0] == "kachel_anmeldung_an" and k[2].get("kennwoerter_entfernt") == 5
-          for k in AKTIVITAET), "die Zahl der geleerten Zugaenge wird protokolliert",
+check(any(k[0] == "kachel_anmeldung_an" and k[2].get("zugaenge_entfernt") == 5
+          for k in AKTIVITAET), "die Zahl der geloeschten Zugaenge wird protokolliert",
       str(AKTIVITAET))
 
 # ⚠ DER GEMELDETE FALL: der Schalter steht SCHON an, und es liegen trotzdem
@@ -369,8 +396,13 @@ check(any(k[0] == "kachel_anmeldung_an" and k[2].get("kennwoerter_entfernt") == 
 # immer liegen – genau das war auf dem Server zu sehen.
 a, spur, stand = lauf("sap", {"kachel_anmeldung": True, "password": ""},
                       {"kachel_anmeldung": True, "password": ""}, reste={"sap": 5})
-check(_geloescht(spur, "sap_accounts") == 1,
-      "Schalter schon an + Rest auf der Platte: es wird trotzdem geraeumt",
+check(_geloescht(spur, "sap_accounts", "kennwoerter_entfernen") == 1,
+      "Schalter schon an + Kennwort-Rest auf der Platte: es wird trotzdem geraeumt",
+      f"Spur={[e[0:2] for e in spur]}")
+# Schon an: die Zugaenge, die sich Benutzer fuer die Kachel-Anmeldung wieder
+# angelegt haben (ohne Kennwort), darf ein spaeteres Speichern NICHT loeschen.
+check(_geloescht(spur, "sap_accounts", "alle_entfernen") == 0,
+      "Schalter schon an: die neu eingerichteten Zugaenge bleiben (nur Umschalten loescht)",
       f"Spur={[e[0:2] for e in spur]}")
 
 a, spur, stand = lauf("sap", {"kachel_anmeldung": False, "password": "geheim"},
@@ -383,7 +415,8 @@ check(stand.get("password") == "geheim",
 
 a, spur, stand = lauf("vemas", {"kachel_anmeldung": False, "password": "geheim"},
                       {"kachel_anmeldung": True, "password": ""}, reste={"vemas": 3})
-check(_geloescht(spur, "vemas_accounts") == 1 and _geloescht(spur, "sap_accounts") == 0,
+check(_geloescht(spur, "vemas_accounts", "alle_entfernen") == 1
+      and _geloescht(spur, "sap_accounts") == 0,
       "VEMAS raeumt sein EIGENES Modul (nicht das von SAP)",
       f"Spur={[e[0:2] for e in spur]}")
 check(stand.get("password") == "", "VEMAS: das Sammel-Kennwort ist leer", str(stand))
@@ -399,8 +432,9 @@ check(getattr(a, "status_code", 0) == 500
 # der Endzustand bleibt "an", es darf kein Kennwort zurueckkommen.
 a, spur, stand = lauf("sap", {"kachel_anmeldung": True, "password": ""},
                       {"username": "sammel", "password": ""}, reste={"sap": 4})
-check(_geloescht(spur, "sap_accounts") == 1,
-      "Teil-Speichern ohne den Schalter raeumt weiter (Endzustand zaehlt)",
+check(_geloescht(spur, "sap_accounts", "kennwoerter_entfernen") == 1
+      and _geloescht(spur, "sap_accounts", "alle_entfernen") == 0,
+      "Teil-Speichern ohne den Schalter raeumt Kennwoerter, loescht keine Zugaenge",
       f"Spur={[e[0:2] for e in spur]}")
 check(stand.get("password") == "",
       "Teil-Speichern setzt kein Sammel-Kennwort zurueck", str(stand))
@@ -446,6 +480,77 @@ check(getattr(a, "status_code", 0) == 500
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+section("3b. Confluence: persoenliche Zugaenge AUS loescht sie")
+# ═══════════════════════════════════════════════════════════════════════════
+for _sk in ("confluence",):
+    _mod = _sk + "_accounts"
+    a, spur, stand = lauf(_sk, {"persoenliche_zugaenge": True},
+                          {"persoenliche_zugaenge": False}, reste={_sk: 4})
+    check(getattr(a, "inhalt", {}).get("success") is True,
+          f"{_sk}: Abschalten wird gespeichert", str(getattr(a, "inhalt", None)))
+    check(_geloescht(spur, _mod, "alle_entfernen") == 1,
+          f"{_sk}: Abschalten loescht alle persoenlichen Zugaenge",
+          f"Spur={[e[0:2] for e in spur]}")
+    check(bool(spur) and spur[0][2].get("persoenliche_zugaenge") is False,
+          f"{_sk}: geloescht wird NACH dem Speichern",
+          str(spur[0][2]) if spur else "keine Spur")
+    check(any(k[0] == f"{_sk}_persoenliche_zugaenge_aus" and k[2].get("zugaenge_entfernt") == 4
+              for k in AKTIVITAET), f"{_sk}: die Zahl der entfernten Zugaenge wird protokolliert",
+          str(AKTIVITAET))
+    # Nur das EIGENE Modul – ein Abschalten bei SAP darf Jira nicht leeren.
+    check(all(e[1] == _mod for e in spur),
+          f"{_sk}: es wird nur das eigene Konten-Modul geraeumt (nicht Jira/SAP/VEMAS)",
+          f"Spur={[e[0:2] for e in spur]}")
+
+    a, spur, stand = lauf(_sk, {"persoenliche_zugaenge": False},
+                          {"persoenliche_zugaenge": False}, reste={_sk: 2})
+    check(_geloescht(spur, _mod, "alle_entfernen") == 1,
+          f"{_sk}: schon abgeschaltet + Rest: es wird trotzdem geraeumt",
+          f"Spur={[e[0:2] for e in spur]}")
+
+    a, spur, stand = lauf(_sk, {"persoenliche_zugaenge": False},
+                          {"persoenliche_zugaenge": True}, reste={_sk: 2})
+    check(_geloescht(spur, _mod, "alle_entfernen") == 0,
+          f"{_sk}: wieder erlaubt – nichts geloescht", f"Spur={[e[0:2] for e in spur]}")
+
+    a, spur, stand = lauf(_sk, {}, {"base_url": "https://x.beispiel.de"}, reste={_sk: 2})
+    check(_geloescht(spur, _mod, "alle_entfernen") == 0,
+          f"{_sk}: Vorgabe (Feld fehlt) gilt als erlaubt", f"Spur={[e[0:2] for e in spur]}")
+
+    a, spur, stand = lauf(_sk, {"persoenliche_zugaenge": True},
+                          {"persoenliche_zugaenge": False}, reste={_sk: 2}, wirft={_mod})
+    check(getattr(a, "status_code", 0) == 500
+          and getattr(a, "inhalt", {}).get("success") is False,
+          f"{_sk}: misslingt das Loeschen, meldet der Endpunkt es (500)",
+          f"{getattr(a, 'status_code', None)} {getattr(a, 'inhalt', None)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+section("3c. SAP/VEMAS: EIN Haken – es zaehlt kachel_anmeldung, nicht persoenliche_zugaenge")
+# ═══════════════════════════════════════════════════════════════════════════
+# Der Haken "Persoenliche Zugaenge erlauben" speichert dort kachel_anmeldung
+# (umgekehrt). Ein Feld persoenliche_zugaenge – etwa aus einem Zwischenstand –
+# darf weder abweisen noch etwas loeschen; geloescht wird beim Umschalten von
+# kachel_anmeldung.
+for _sk in ("sap", "vemas"):
+    _mod = _sk + "_accounts"
+    a, spur, stand = lauf(_sk, {"kachel_anmeldung": False, "password": "geheim"},
+                          {"kachel_anmeldung": False, "persoenliche_zugaenge": False},
+                          reste={_sk: 3})
+    check(getattr(a, "inhalt", {}).get("success") is True,
+          f"{_sk}: persoenliche_zugaenge:false wird nicht abgewiesen",
+          f"{getattr(a, 'status_code', None)} {getattr(a, 'inhalt', None)}")
+    check(not spur, f"{_sk}: und es wird nichts geloescht", f"Spur={[e[0:2] for e in spur]}")
+    a, spur, stand = lauf(_sk, {"kachel_anmeldung": False, "password": "geheim"},
+                          {"kachel_anmeldung": True, "persoenliche_zugaenge": False},
+                          reste={_sk: 3})
+    check(getattr(a, "inhalt", {}).get("success") is True
+          and _geloescht(spur, _mod, "alle_entfernen") == 1,
+          f"{_sk}: Haken aus (= Kachel) loescht alle persoenlichen Zugaenge",
+          f"{getattr(a, 'inhalt', None)} Spur={[e[0:2] for e in spur]}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 section("4. Regeln am Syntaxbaum von update_skill_config")
 # ═══════════════════════════════════════════════════════════════════════════
 def _aufrufe(knoten, name):
@@ -481,8 +586,33 @@ check(bool(_speichern), "Positivkontrolle: der Speicher-Aufruf ist gefunden")
 # ⚠ KEIN min() auf eine leere Liste: das WIRFT, und ein Lauf ohne Bilanzzeile
 # ist von einem bestandenen nicht zu unterscheiden (Register).
 _sp_min = min(_speichern) if _speichern else None
+def _empfaenger(c):
+    v = c.func.value if isinstance(c.func, ast.Attribute) else None
+    return v.id if isinstance(v, ast.Name) else ""
+
+
+# SAP/VEMAS loeschen die Zugaenge ABSICHTLICH nur im Umschalt-Moment: danach
+# legen Benutzer fuer die Kachel-Anmeldung wieder Zugaenge ohne Kennwort an,
+# die ein spaeteres Speichern nicht wegraeumen darf. Dieser EINE Aufruf
+# (Empfaenger _sapacc) ist deshalb aus der Endzustand-Regel ausgenommen – und
+# muss umgekehrt am Vorzustand haengen.
+_sap_alle = [c for c in _aufrufe(USC, "alle_entfernen") if _empfaenger(c) == "_sapacc"]
+check(len(_sap_alle) == 1, "Positivkontrolle: genau ein alle_entfernen fuer SAP/VEMAS",
+      f"{len(_sap_alle)}")
+if _sap_alle:
+    _umgebend = [n for n in ast.walk(USC) if isinstance(n, ast.If)
+                 and any(c is _sap_alle[0] for b in n.body for c in ast.walk(b))]
+    _namen = {k.id for n in _umgebend for k in ast.walk(n.test) if isinstance(k, ast.Name)}
+    _aus_vorzustand = {z.targets[0].id for z in ast.walk(USC) if isinstance(z, ast.Assign)
+                       and isinstance(z.targets[0], ast.Name)
+                       and any(isinstance(k, ast.Name) and k.id == "gespeichert"
+                               for k in ast.walk(z.value))}
+    check(bool(_namen & (_aus_vorzustand | {"gespeichert"})),
+          "SAP/VEMAS: alle_entfernen nur beim UMSCHALTEN (Bedingung liest den Vorzustand)",
+          f"Bedingungsnamen={sorted(_namen)}")
 for fname in ("kennwoerter_entfernen", "alle_entfernen"):
-    rufe = _aufrufe(USC, fname)
+    rufe = [c for c in _aufrufe(USC, fname)
+            if not (fname == "alle_entfernen" and _empfaenger(c) == "_sapacc")]
     check(len(rufe) == 1, f"Positivkontrolle: genau ein Aufruf von {fname}",
           f"{len(rufe)}")
     if not rufe:

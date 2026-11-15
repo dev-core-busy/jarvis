@@ -252,6 +252,46 @@ def _speichern(alle: dict) -> None:
 GEHEIMFELDER = ("api_token",)
 AENDERBAR = ("aktiv",) + GEHEIMFELDER
 
+# ── Persoenliche Zugaenge erlauben? (Betreiber 2026-11-15) ──────────────────
+# Schalter in Einstellungen → Confluence, Container "Verbindung" – dieselbe
+# Bauart wie bei Jira (``jira_accounts.PERSOENLICH_SCHALTER``). AUS heisst: kein
+# persoenlicher Token liegt mehr auf dem Server (beim Abschalten loescht
+# ``main.update_skill_config`` sie alle ueber ``alle_entfernen``), neue werden
+# abgelehnt, und jeder Lauf benutzt den gemeinsamen Zugang.
+# Vorgabe (Feld fehlt) = erlaubt: so aendert das Einspielen nichts am Betrieb.
+PERSOENLICH_SCHALTER = "persoenliche_zugaenge"
+ABGESCHALTET_TEXT = ("Persoenliche Confluence-Zugaenge sind abgeschaltet – es gilt "
+                     "der gemeinsame Zugang.")
+
+
+def persoenlich_erlaubt(cfg: dict | None = None) -> bool:
+    if cfg is None:
+        try:
+            cfg = get_confluence_config() or {}
+        except Exception:  # noqa: BLE001
+            cfg = {}
+    return cfg.get(PERSOENLICH_SCHALTER) is not False
+
+
+def alle_entfernen() -> int:
+    """Loescht ALLE persoenlichen Zugaenge (samt Token). Rueckgabe: Anzahl.
+
+    Auch eine UNLESBARE Kontendatei wird geleert: sie enthaelt verschluesselte
+    Token, und der Auftrag lautet "keine persoenlichen Zugaenge mehr auf dem
+    Server". Anders als beim Speichern eines einzelnen Zugangs geht dabei
+    nichts verloren, was erhalten bleiben sollte."""
+    with _SPERRE:
+        try:
+            alle = _laden_streng()
+        except KontenUnlesbar as e:
+            print("[Confluence] Kontendatei unlesbar (%s) – wird geleert" % e, flush=True)
+            _speichern({})
+            return 0
+        n = len(alle)
+        if n:
+            _speichern({})
+    return n
+
 
 def _leer(un: str) -> dict:
     return {"benutzer_norm": un, "aktiv": True,
@@ -332,6 +372,8 @@ def zugang_info(user: str) -> dict:
         # ein eigener Token der EINZIGE Weg – dann darf die Oberflaeche ihn
         # nicht als "optional" beschreiben.
         "sammel_vorhanden": bool(sammel_client().configured),
+        # Abgeschaltet blendet die Oberflaeche "Mein Confluence-Zugang" aus.
+        "persoenlich_erlaubt": persoenlich_erlaubt(),
     }
 
 
@@ -365,6 +407,8 @@ def speichern(user: str, felder: dict) -> dict:
         # Confluence-Benutzer.
         raise ConfluenceKontoFehler(
             "Fuer diese Kennung kann kein Confluence-Zugang hinterlegt werden.")
+    if not persoenlich_erlaubt():
+        raise ConfluenceKontoFehler(ABGESCHALTET_TEXT)
 
     unbekannt = [f for f in (felder or {}) if f not in AENDERBAR]
     if unbekannt:
@@ -503,6 +547,11 @@ def aufloesen(user: str | None = None) -> dict:
     un = norm_user(user or "")
     basis = basis_url()
     hinweis = ""
+    if not persoenlich_erlaubt():
+        # Ein Rest in der Datei (sollte es nach dem Abschalten nicht geben)
+        # darf trotzdem nicht greifen – der Schalter entscheidet, nicht die Datei.
+        return {"client": sammel_client(), "quelle": QUELLE_SAMMEL,
+                "hinweis": "", "benutzer": un}
     if un and ":" not in un:
         try:
             k = _laden().get(un)
@@ -567,6 +616,8 @@ def testen(user: str) -> dict:
     403, Netz) ist ein echter Fehlschlag und wird als solcher gemeldet: ein
     Rueckfall auf jeden Fehler hin wuerde einen abgelehnten Token
     gruenfaerben."""
+    if not persoenlich_erlaubt():
+        raise ConfluenceKontoFehler(ABGESCHALTET_TEXT)
     un = norm_user(user)
     k = _laden().get(un)
     if not (k and _vollstaendig(k)):
@@ -614,4 +665,5 @@ __all__ = [
     "alle_benutzer", "merke_ergebnis", "melde_fehler", "testen", "basis_url",
     "sammel_client", "aufloesen", "client_fuer_lauf", "quelle_text", "klartext",
     "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "AENDERBAR", "GEHEIMFELDER",
+    "persoenlich_erlaubt", "alle_entfernen", "PERSOENLICH_SCHALTER",
 ]

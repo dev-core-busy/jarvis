@@ -54,6 +54,10 @@
     /** Zeichnet Pille, Hinweiskasten und Felder aus `_acc`. */
     function accZeichnen() {
         var a = _acc || {};
+        // Persoenliche Zugaenge vom Administrator abgeschaltet: der Abschnitt
+        // entfaellt ganz (gleiche Regel wie in /jira-addon).
+        var sect = $('ca-sect-account');
+        if (sect) sect.style.display = (a.persoenlich_erlaubt === false) ? 'none' : '';
         var pill = $('ca-acc-pill');
         var note = $('ca-acc-note');
         var srv = $('ca-acc-server');

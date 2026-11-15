@@ -93,7 +93,9 @@
             var self = this;
             var ct = $('sap-conn-type');
             if (ct) ct.addEventListener('change', function () { self._applyType(ct.value); });
-            var kp = $('sap-kachel-pflicht');
+            // EIN Haken (Betreiber 2026-11-15): "Persoenliche Zugaenge erlauben"
+            // AUS heisst Anmeldung ueber die Portal-Kachel (_kachelGewaehlt).
+            var kp = $('sap-persoenlich');
             if (kp) kp.addEventListener('change', function () { self._applyKachel(); });
             var save = $('sap-save'); if (save) save.addEventListener('click', this.save.bind(this));
             var test = $('sap-test'); if (test) test.addEventListener('click', this.test.bind(this));
@@ -119,8 +121,18 @@
         // Mit "Anmeldung ueber die Portal-Kachel" gibt es hier kein Kennwort –
         // die Felder werden gesperrt, statt einen Wert anzunehmen, den der
         // Server ohnehin verwirft.
+        // "Persoenliche Zugaenge erlauben" ist die Umkehrung der Kachelpflicht:
+        // AN = jeder darf seinen Zugang samt Kennwort speichern (Rueckfall auf
+        // den gemeinsamen Zugang), AUS = kein Kennwort auf dem Server, jeder
+        // meldet sich in der Portal-Kachel an. Fehlt der Haken im Markup, gilt
+        // der gespeicherte Stand – nie still umschalten.
+        _kachelGewaehlt: function () {
+            var cb = $('sap-persoenlich');
+            return cb ? !cb.checked : !!(this._cfg && this._cfg.kachel_anmeldung);
+        },
+
         _applyKachel: function () {
-            var an = checked('sap-kachel-pflicht');
+            var an = this._kachelGewaehlt();
             KENNWORT_FELDER.forEach(function (id) {
                 var e = $(id); if (!e) return;
                 e.disabled = an;
@@ -181,7 +193,10 @@
                     if ($('sap-rfc-lang')) $('sap-rfc-lang').value = c.rfc_lang || 'EN';
                     // Freigegebene Server fuer persoenliche Zugaenge (leer = niemand)
                     if ($('sap-allowed-hosts')) $('sap-allowed-hosts').value = c.allowed_hosts || '';
-                    if ($('sap-kachel-pflicht')) $('sap-kachel-pflicht').checked = !!c.kachel_anmeldung;
+                    if ($('sap-persoenlich')) $('sap-persoenlich').checked = !c.kachel_anmeldung;
+                    // Container "Persoenliche …-Zugaenge" folgt dem GESPEICHERTEN Stand
+                    // (Betreiber 2026-11-15: aus = Zugaenge geloescht, Container weg).
+                    if (window.SkillCfg) window.SkillCfg.persoenlichAnwenden('sap', !c.kachel_anmeldung);
                     self._cfg = c;
                     self._applyKachel();
                     self._mountCert();
@@ -263,7 +278,7 @@
                 // bei hidden_analyses).
                 allowed_hosts: ($('sap-allowed-hosts') ? $('sap-allowed-hosts').value.trim() : ''),
                 // Anmeldung ueber die Portal-Kachel (Server leert dann alle Kennwoerter)
-                kachel_anmeldung: checked('sap-kachel-pflicht')
+                kachel_anmeldung: this._kachelGewaehlt()
             };
         },
 
@@ -275,10 +290,10 @@
                     : 'Der Verbindungstyp HANA-SQL passt nicht zu „SQL-Zugriff nicht zulassen“.'), 'error');
                 return;
             }
-            // Einschalten der Kachel-Anmeldung loescht Kennwoerter – vorher fragen.
-            if (checked('sap-kachel-pflicht') && !(this._cfg && this._cfg.kachel_anmeldung)) {
+            // Abhaken loescht alle persoenlichen Zugaenge – vorher fragen.
+            if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {
                 var frage = window.t ? window.t('sap.kachel_pflicht_confirm') : '';
-                if (!window.confirm(frage || 'Achtung: Beim Speichern werden das Kennwort des gemeinsamen SAP-Zugangs und die gespeicherten Kennwörter ALLER eigenen SAP-Zugänge gelöscht. Danach muss sich jeder Benutzer im Bereich SAP neu anmelden. Fortfahren?')) {
+                if (!window.confirm(frage || 'Achtung: Beim Speichern werden das Kennwort des gemeinsamen SAP-Zugangs und ALLE persönlichen SAP-Zugänge gelöscht. Fortfahren?')) {
                     return;
                 }
             }

@@ -781,6 +781,31 @@
             ]);
         }
 
+        // ── Confluence-, SAP- und VEMAS-Tab Collapse (2026-11-15) ───────────
+        // Dieselbe Bauart wie im Jira-Reiter: "Verbindung" und "Persoenliche
+        // …-Zugaenge" sind Klapp-Container, damit die vier Bereiche gleich
+        // aussehen. ⚠ JEDE .kb-section des Reiters gehoert hier hinein – eine
+        // vergessene laesst sich nicht klappen (test_zugaenge_reiter_ui prueft
+        // das als REGEL).
+        function _initConfluenceCollapse() {
+            _collapseInit([
+                { hdr: 'cf-sect-conn-hdr', body: 'cf-sect-conn-body', tog: 'cf-sect-conn-tog' },
+                { hdr: 'cf-sect-acc-hdr',  body: 'cf-sect-acc-body',  tog: 'cf-sect-acc-tog'  },
+            ]);
+        }
+        function _initSapCollapse() {
+            _collapseInit([
+                { hdr: 'sap-sect-conn-hdr', body: 'sap-sect-conn-body', tog: 'sap-sect-conn-tog' },
+                { hdr: 'sap-sect-acc-hdr',  body: 'sap-sect-acc-body',  tog: 'sap-sect-acc-tog'  },
+            ]);
+        }
+        function _initVemasCollapse() {
+            _collapseInit([
+                { hdr: 'vemas-sect-conn-hdr', body: 'vemas-sect-conn-body', tog: 'vemas-sect-conn-tog' },
+                { hdr: 'vemas-sect-acc-hdr',  body: 'vemas-sect-acc-body',  tog: 'vemas-sect-acc-tog'  },
+            ]);
+        }
+
         // ── AI-Maus-Tab Collapse ───────────────────────────────────────────
         // ⚠ JEDE .kb-section des Reiters gehoert hier hinein. Eine vergessene
         // bleibt zugeklappt und laesst sich nicht oeffnen – der Wächter prueft
@@ -963,6 +988,7 @@
                 } else if (target === 'confluence' && tabConfluence) {
                     tabConfluence.style.display = '';
                     tabConfluence.classList.add('active');
+                    _initConfluenceCollapse();
                     if (window.ConfluenceManager) window.ConfluenceManager.onShow();
                 } else if (target === 'jira' && tabJira) {
                     tabJira.style.display = '';
@@ -992,10 +1018,12 @@
                 } else if (target === 'sap' && tabSap) {
                     tabSap.style.display = '';
                     tabSap.classList.add('active');
+                    _initSapCollapse();
                     if (window.SapManager) window.SapManager.onShow();
                 } else if (target === 'vemas' && tabVemas) {
                     tabVemas.style.display = '';
                     tabVemas.classList.add('active');
+                    _initVemasCollapse();
                     if (window.VemasManager) window.VemasManager.onShow();
                 } else if (target === 'email' && tabEmail) {
                     tabEmail.style.display = '';

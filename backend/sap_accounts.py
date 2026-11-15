@@ -316,6 +316,23 @@ def kennwoerter_entfernen() -> int:
     return n
 
 
+def alle_entfernen() -> int:
+    """Loescht ALLE persoenlichen Zugaenge (samt Kennwoertern) und beendet alle
+    Anmeldungen im Arbeitsspeicher. Rueckgabe: Zahl der entfernten Zugaenge.
+
+    Aufgerufen, wenn der Administrator "Persoenliche Zugaenge erlauben"
+    ABSCHALTET (Betreiber 2026-11-15: "Zugaenge sollen geloescht werden").
+    Nur im Umschalt-Moment, nicht bei jedem Speichern: bei abgeschaltetem
+    Schalter legt ein Benutzer fuer die Kachel-Anmeldung wieder einen Zugang
+    OHNE Kennwort an – den darf ein spaeteres Speichern nicht wegraeumen."""
+    alle = _laden()
+    n = len(alle)
+    if n or KONTEN_DATEI.exists():
+        _speichern({})
+    _SITZUNG.clear()
+    return n
+
+
 # ── Aussetzer nach wiederholten Anmeldefehlern ──────────────────────────────
 #
 # WARUM ES DAS GIBT: derselbe Vorfall wie beim E-Mail-Postfach (2026-08-16), nur
@@ -1166,7 +1183,7 @@ __all__ = [
     "aufloesen", "client_fuer_lauf", "quelle_text",
     "hosts_erlaubt", "hosts_admin", "hosts_implizit", "host_ok",
     "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "QUELLE_KEINE", "AENDERBAR",
-    "kachel_pflicht", "kennwoerter_entfernen", "sitzung_beenden", "sitzung_bis",
+    "kachel_pflicht", "kennwoerter_entfernen", "alle_entfernen", "sitzung_beenden", "sitzung_bis",
     "anmeldung_anbieten", "kennwort_gespeichert",
     "KACHEL_SCHALTER", "TEXTFELDER",
     "GEHEIMFELDER", "KANAELE",

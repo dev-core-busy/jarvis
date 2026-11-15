@@ -442,6 +442,43 @@
                 : tr('zugang.adm_nicht_angemeldet', 'nicht angemeldet');
             return ' – ' + esc(tr('zugang.adm_pw_nein', 'kein Kennwort gespeichert')) + ' · ' + esc(zustand);
         },
+
+        /* ── "Persoenliche Zugaenge erlauben" (Confluence; 2026-11-15)
+           Gleiche Bauart wie im Jira-Reiter (jira.js): Haken `<pre>-persoenlich`
+           im Container "Verbindung",
+           Container `<pre>-sect-acc` folgt dem GESPEICHERTEN Stand – ein
+           abgewaehlter, noch nicht gespeicherter Haken hat nichts geloescht.
+           Vorgabe (Feld fehlt) = erlaubt, dieselbe Regel wie
+           `<bereich>_accounts.persoenlich_erlaubt` im Backend. */
+        persoenlichLesen: function (pre, cfg) {
+            var erlaubt = (cfg || {}).persoenliche_zugaenge !== false;
+            var cb = document.getElementById(pre + '-persoenlich');
+            if (cb) cb.checked = erlaubt;
+            Manager.persoenlichAnwenden(pre, erlaubt);
+            return erlaubt;
+        },
+        persoenlichAnwenden: function (pre, erlaubt) {
+            var s = document.getElementById(pre + '-sect-acc');
+            if (s) s.style.display = erlaubt ? '' : 'none';
+        },
+        persoenlichHaken: function (pre) {
+            var cb = document.getElementById(pre + '-persoenlich');
+            return cb ? !!cb.checked : true;
+        },
+        // Abschalten loescht alle persoenlichen Zugaenge – vorher fragen.
+        // Rueckgabe false = Speichern abbrechen. Gefragt wird nur beim
+        // UEBERGANG erlaubt → aus, nicht bei jedem Speichern danach.
+        persoenlichBestaetigen: function (bereich, gespeichert, jetzt) {
+            if (jetzt || !gespeichert) return true;
+            var txt = tr('zugang.persoenlich_confirm',
+                'Achtung: Beim Speichern werden ALLE gespeicherten persönlichen {bereich}-Zugänge gelöscht. '
+                + 'Danach laufen alle Abfragen über den gemeinsamen Zugang. Fortfahren?');
+            return window.confirm(txt.split('{bereich}').join(bereich));
+        },
+        // SAP/VEMAS haben KEINEN eigenen Schalter dieser Art: dort ist "Persoenliche
+        // Zugaenge erlauben" die Umkehrung der Kachelpflicht (sap.js/vemas.js,
+        // _kachelGewaehlt); den Container blenden sie ueber persoenlichAnwenden aus,
+        // weil die Zugaenge (ohne Kennwort) fuer die Kachel-Anmeldung weiter gebraucht werden.
     };
 
     window.SkillCfg = Manager;

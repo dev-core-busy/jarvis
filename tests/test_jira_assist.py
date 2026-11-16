@@ -977,6 +977,35 @@ _farben = [f for f in re.findall(r"#[0-9a-fA-F]{3,8}\b", CSS)
            if f.lower() not in ("#fff", "#ffffff")]
 check(not _farben, "keine hartcodierten Farben", ", ".join(_farben[:5]))
 
+# Gegenstueck zur Regel darueber (2026-11-16): seit die Fehler-Schriftfarbe als
+# --danger-text aus theme.css kommt statt als color-mix mit #000, haengt sie an
+# einer DEFINITION. Fehlt die, faellt var() wortlos auf "inherit" zurueck – die
+# Fehlerzeile verliert ihre Farbe, und kein Test schlaegt an. Deshalb als REGEL:
+# jede benutzte Variable ist in theme.css oder in dieser Datei selbst definiert.
+# Kommentare ZUERST entfernen: theme.css nennt "body.light" in einem Kommentar
+# vor :root, und das Blockmuster lief von dort ueber den ganzen :root-Block
+# (erster Lauf: --accent, --bg-primary … "undefiniert" – ein Messfehler).
+_ohne_kommentar = lambda t: re.sub(r"/\*.*?\*/", "", t, flags=re.S)
+_THEME = _ohne_kommentar((ROOT / "frontend" / "css" / "theme.css").read_text(encoding="utf-8"))
+CSS_ROH = _ohne_kommentar(CSS)
+# Gezaehlt wird nur, was AUSSERHALB von body.light-Bloecken steht: eine
+# Variable, die nur das Hell-Theme setzt, ist im Dunkel-Theme undefiniert.
+# (Die erste Fassung zaehlte alles – die Gegenprobe "dunkle Fassung von
+# --danger-text entfernt" blieb stumm, weil die helle sie noch "definierte".)
+_RE_HELL = re.compile(r"body\.light[^{}]*\{[^{}]*\}")
+_RE_DEF = re.compile(r"(--[A-Za-z0-9_-]+)\s*:")
+_definiert = set(_RE_DEF.findall(_RE_HELL.sub("", _THEME + "\n" + CSS_ROH)))
+_hell = set(_RE_DEF.findall("\n".join(_RE_HELL.findall(_THEME))))
+_benutzt = set(re.findall(r"var\(\s*(--[A-Za-z0-9_-]+)", CSS_ROH))
+check(len(_benutzt) > 5 and "--bg-primary" in _hell,
+      "Positivkontrolle: Variablen gefunden, body.light-Bloecke erkannt",
+      f"benutzt={len(_benutzt)} hell={len(_hell)}")
+_fehlen = sorted(_benutzt - _definiert)
+check(not _fehlen, "jede var() in jira_addon.css hat einen Wert auch im Dunkel-Theme",
+      ", ".join(_fehlen[:5]))
+check("--danger-text" in _hell,
+      "--danger-text hat eine eigene Hell-Fassung (abgedunkelt statt aufgehellt)")
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 section("12) Prompt-Vorlagen")

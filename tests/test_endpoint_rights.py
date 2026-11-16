@@ -359,6 +359,17 @@ EXEMPT = {
     ("post", "/api/jira/account/sitzung"), ("delete", "/api/jira/account/sitzung"),
     ("post", "/api/confluence/account/sitzung"),
     ("delete", "/api/confluence/account/sitzung"),
+    # ── Fachprobe "Was sieht MEIN Zugang?" (2026-11-16) ──
+    # Dieselbe Schranke wie die Konto-Routen darueber. Anlass: die Proben in
+    # /confluence und /jira fragten /api/confluence/spaces bzw. /api/jira/search
+    # (Admin) – jeder andere Benutzer bekam "Nur Administratoren …". Diese
+    # beiden sind KEINE Lockerung jener Endpunkte: sie fragen NUR mit dem
+    # EIGENEN Zugang (gilt er nicht, wird nichts abgefragt), ohne frei waehlbare
+    # Abfrage (Jira fest: 5 zuletzt geaenderte Vorgaenge) – sie zeigen also nur,
+    # was der Benutzer mit seinem PAT ohnehin selbst sieht.
+    # Waechter: tests/test_zugang_angabe.py Abschnitt 5 (ausgefuehrt).
+    ("get", "/api/confluence/account/bereiche"),
+    ("get", "/api/jira/account/vorgaenge"),
     # ── Kennwort im Klartext ansehen (2026-09-04) ──
     # `require_auth` ist hier KEIN Rueckfall, sondern die einzige moegliche
     # Dependency: die Rechte sind JE BEREICH verschieden und stehen deshalb im

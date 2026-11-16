@@ -14803,6 +14803,49 @@ async def confluence_account_abmelden(user: str = Depends(require_confluence_acc
                          "account": confluence_accounts.zugang_info(user)})
 
 
+_PROBE_NICHT_EIGEN = ("Dein eigener Zugang ist nicht aktiv – die Prüfung fragt nur mit "
+                      "deinem eigenen Zugang, nicht mit dem gemeinsamen.")
+
+
+@app.get("/api/confluence/account/bereiche")
+async def confluence_account_bereiche(user: str = Depends(require_confluence_account_access)):
+    """Fachprobe in "Mein Confluence-Zugang": welche Bereiche sieht DEIN Zugang?
+
+    WARUM EIN EIGENER ENDPUNKT (gemeldet 2026-11-16 mit Bildschirmfoto: "Nur
+    Administratoren duerfen diese Aktion ausfuehren"): die Probe fragte
+    /api/confluence/spaces, und das haengt an ``require_local_auth`` – also nur
+    Administratoren. Fuer jeden anderen Benutzer war die Probe tot. Jenen
+    Endpunkt zu oeffnen kaeme nicht in Frage: er dient dem Wissen-Reiter und
+    liefert ueber den GEMEINSAMEN Zugang.
+
+    DESHALB NUR MIT DEM EIGENEN ZUGANG: gilt er nicht (nicht angemeldet, kein
+    Token, inaktiv), wird NICHTS abgefragt, und die Antwort nennt den Grund.
+    Die gestellte Frage ist "was sehe ich mit meinem PAT?" – eine Liste des
+    gemeinsamen Zugangs beantwortet sie nicht und gaebe jedem Bereichsbenutzer
+    heraus, was bisher nur Administratoren sahen. Schranke wie die uebrigen
+    Konto-Routen: ``require_confluence_account_access``."""
+    from backend import confluence_accounts as _cfa  # noqa: PLC0415
+    from backend.confluence_client import ConfluenceError  # noqa: PLC0415
+    c = _confluence_client(user)
+    zugang = _zugang_angabe(getattr(c, "zugang", None))
+    if not zugang or zugang["quelle"] != _cfa.QUELLE_PERSOENLICH:
+        grund = (zugang or {}).get("hinweis") or ""
+        return JSONResponse({"zugang": zugang, "ok": False, "eigener_zugang": False,
+                             "error": (_PROBE_NICHT_EIGEN + (" " + grund if grund else ""))})
+    if not c.configured:
+        return JSONResponse({"zugang": zugang, "ok": False,
+                             "error": "Nicht konfiguriert (Serveradresse fehlt)."})
+    try:
+        spaces = await asyncio.to_thread(c.spaces_detailed, _CF_MAX_BEREICHE)
+    except ConfluenceError as e:
+        return JSONResponse({"zugang": zugang, "ok": False, "status": e.status,
+                             "error": str(e)})
+    spaces.sort(key=lambda x: (x.get("name") or "").lower())
+    return JSONResponse({"zugang": zugang, "ok": True, "count": len(spaces),
+                         "spaces": [{"key": x.get("key"), "name": x.get("name")}
+                                    for x in spaces]})
+
+
 @app.post("/api/confluence/account/test")
 async def confluence_account_test(user: str = Depends(require_confluence_account_access)):
     """Verbindungstest MIT dem eigenen Token (``/rest/api/user/current``).
@@ -20048,6 +20091,37 @@ async def jira_account_abmelden(user: str = Depends(require_jira_assist_access))
     weg = jira_accounts.sitzung_beenden(user)
     return JSONResponse({"ok": True, "beendet": bool(weg),
                          "account": jira_accounts.zugang_info(user)})
+
+
+@app.get("/api/jira/account/vorgaenge")
+async def jira_account_vorgaenge(user: str = Depends(require_jira_assist_access)):
+    """Fachprobe in "Mein Jira-Zugang": welche Vorgaenge sieht DEIN Zugang?
+
+    Gleiche Begruendung wie /api/confluence/account/bereiche: die Probe fragte
+    /api/jira/search (``require_local_auth`` = nur Administratoren) und war fuer
+    jeden anderen Benutzer tot (gemeldet 2026-11-16). Hier mit der Schranke der
+    Konto-Routen, NUR mit dem eigenen Zugang und mit FESTER Abfrage (die fuenf
+    zuletzt geaenderten Vorgaenge) – keine frei waehlbare JQL, also keine
+    allgemeine Ticketsuche durch die Hintertuer."""
+    from backend import jira_accounts as _jia  # noqa: PLC0415
+    from backend.jira_client import JiraError, issue_brief  # noqa: PLC0415
+    c = _jira_client(user)
+    zugang = _zugang_angabe(getattr(c, "zugang", None))
+    if not zugang or zugang["quelle"] != _jia.QUELLE_PERSOENLICH:
+        grund = (zugang or {}).get("hinweis") or ""
+        return JSONResponse({"zugang": zugang, "ok": False, "eigener_zugang": False,
+                             "error": (_PROBE_NICHT_EIGEN + (" " + grund if grund else ""))})
+    if not c.configured:
+        return JSONResponse({"zugang": zugang, "ok": False,
+                             "error": "Nicht konfiguriert (Serveradresse fehlt)."})
+    try:
+        data = await asyncio.to_thread(c.search, "ORDER BY updated DESC", 5)
+    except JiraError as e:
+        return JSONResponse({"zugang": zugang, "ok": False, "status": e.status,
+                             "error": str(e)})
+    items = [issue_brief(it, c.base) for it in data.get("issues", [])]
+    return JSONResponse({"zugang": zugang, "ok": True,
+                         "total": data.get("total", len(items)), "results": items})
 
 
 @app.post("/api/jira/account/test")

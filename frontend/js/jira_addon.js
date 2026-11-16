@@ -475,11 +475,12 @@
      * nicht zu unterscheiden; gemerkt haette man es erst, wenn eine Ticketsuche
      * im Chat leer bleibt. Deshalb eine zweite, FACHLICHE Probe.
      *
-     * Gefragt wird derselbe Endpunkt, den die Ticketsuche benutzt
-     * (`/api/jira/search`) – also genau der Weg, der im Betrieb gilt, und nicht
-     * ein eigener Pruefpfad daneben. `jql=ORDER BY updated DESC` ohne
-     * Einschraenkung ist dabei Absicht: gefragt ist die Reichweite des Zugangs,
-     * nicht ein Suchbegriff. `limit=5` haelt die Probe billig.
+     * Gefragt wird `/api/jira/account/vorgaenge` (Schranke der Konto-Routen,
+     * NUR der eigene Zugang). Die erste Fassung fragte `/api/jira/search` – das
+     * ist Administratoren vorbehalten, jeder andere Benutzer bekam eine
+     * Abweisung (gemeldet 2026-11-16). Der Server fragt fest
+     * `ORDER BY updated DESC` mit 5 Treffern: gefragt ist die Reichweite des
+     * Zugangs, nicht ein Suchbegriff, und die Probe bleibt billig.
      *
      * NULL TREFFER IST EIN EIGENES ERGEBNIS, kein Fehler: der Token gilt, sieht
      * aber keinen Vorgang. Das wird so gesagt – "0 Tickets" stumm anzuzeigen
@@ -524,8 +525,11 @@
         if (out) { out.hidden = true; out.innerHTML = ''; }
         probeMeld(T('jaddon.probe_wait', 'Frage Jira …'));
         try {
-            var r = await fetch('/api/jira/search?jql='
-                                + encodeURIComponent('ORDER BY updated DESC') + '&limit=5',
+            // Eigener Probe-Endpunkt (2026-11-16): /api/jira/search ist
+            // Administratoren vorbehalten – jeder andere Benutzer bekam hier
+            // "Nur Administratoren duerfen diese Aktion ausfuehren". Der neue
+            // fragt mit fester Abfrage und NUR mit dem eigenen Zugang.
+            var r = await fetch('/api/jira/account/vorgaenge',
                                 { headers: { 'Authorization': 'Bearer ' + token() } });
             var d = null;
             try { d = await r.json(); } catch (e) { d = null; }

@@ -68,13 +68,13 @@ SEITEN = {
     'confluence': ('confluence_addon.html', 'confluence', 'ca-acc-probe', 'ca-acc-probe-out', {
         'Sitzungsbetrieb': {'/api/confluence/account': {'ok': True, 'account': KONTO_SZ}},
         'eigener Zugang': {'/api/confluence/account': {'ok': True, 'account': KONTO_EIGEN}},
-    }, {'/api/confluence/spaces': {'ok': True, 'count': 2, 'zugang': {'quelle': 'sammel', 'hinweis': 'x'},
+    }, {'/api/confluence/account/bereiche': {'ok': True, 'count': 2, 'zugang': {'quelle': 'sammel', 'hinweis': 'x'},
                                    'spaces': [{'key': 'SONDEA', 'name': 'Sonde A'},
                                               {'key': 'SONDEB', 'name': 'Sonde B'}]}}),
     'jira': ('jira_addon.html', 'jira_assist', 'ja-acc-probe', 'ja-acc-probe-out', {
         'Sitzungsbetrieb': {'/api/jira/account': {'ok': True, 'account': KONTO_SZ}},
         'eigener Zugang': {'/api/jira/account': {'ok': True, 'account': KONTO_EIGEN}},
-    }, {'/api/jira/search': {'ok': True, 'total': 1, 'results': [{'key': 'PRJA-1', 'summary': 'Sonde'}]},
+    }, {'/api/jira/account/vorgaenge': {'ok': True, 'total': 1, 'results': [{'key': 'PRJA-1', 'summary': 'Sonde'}]},
         '/api/jira/assist/health': {'ok': True}}),
     'sap': ('sap.html', 'sap', 'sp-acc-probe', 'sp-acc-probe-out', {
         'Sitzungsbetrieb': {'/api/sap/status': dict(SAP_SZ, ok=True)},

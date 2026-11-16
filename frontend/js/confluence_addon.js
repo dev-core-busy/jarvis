@@ -214,10 +214,12 @@
      * gemerkt haette man es erst, wenn eine Suche im Chat leer bleibt. Deshalb
      * eine zweite, FACHLICHE Probe.
      *
-     * Gefragt wird `/api/confluence/spaces` – derselbe Endpunkt, den der
-     * Bereich Wissen benutzt, also genau der Weg, der im Betrieb gilt, und
-     * nicht ein eigener Pruefpfad daneben. Er loest den Zugang ueber den
-     * ANGEMELDETEN Benutzer auf; ein eigener Token wirkt damit sofort.
+     * Gefragt wird `/api/confluence/account/bereiche` – mit der Schranke der
+     * Konto-Routen und NUR mit dem eigenen Zugang. Die erste Fassung fragte
+     * `/api/confluence/spaces`; das ist Administratoren vorbehalten, und jeder
+     * andere Benutzer bekam "Nur Administratoren duerfen diese Aktion
+     * ausfuehren" (gemeldet 2026-11-16). Gilt der eigene Zugang nicht, fragt
+     * der Server gar nicht erst und nennt den Grund.
      *
      * NULL BEREICHE IST EIN EIGENES ERGEBNIS, kein Fehler: der Token gilt,
      * sieht aber keinen Bereich. Das wird so gesagt – stumm "0" anzuzeigen
@@ -293,7 +295,7 @@
         if (out) { out.hidden = true; out.innerHTML = ''; }
         probeMeld(T('caddon.probe_wait', 'Frage Confluence …'));
         try {
-            var r = await fetch('/api/confluence/spaces',
+            var r = await fetch('/api/confluence/account/bereiche',
                                 { headers: { 'Authorization': 'Bearer ' + token() } });
             var d = null;
             try { d = await r.json(); } catch (e) { d = null; }

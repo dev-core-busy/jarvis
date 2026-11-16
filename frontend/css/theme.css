@@ -120,11 +120,21 @@ body {
        Auf <body> deklariert, damit eine Branding-Farbe (inline auf body)
        eingerechnet wird - gleiche Falle wie --gradient darueber. */
     --bg-flaeche: var(--bg-primary);
+    /* Lesbare FEHLER-SCHRIFT (Register: --danger pur haelt als Schriftfarbe in
+       keinem der beiden Themen unter 4,5:1). Dunkel aufgehellt, im Hell-Theme
+       unten abgedunkelt – EINE Stelle statt einer color-mix-Formel je Datei:
+       Bereichs-CSS (jira_addon.css) darf keine festen Farben tragen
+       (test_jira_assist.py), die Mischung mit Weiss/Schwarz gehoert hierher.
+       Auf <body> deklariert, damit ein dort gesetztes --danger eingerechnet
+       wird (dieselbe Falle wie --gradient). */
+    --danger-text: color-mix(in srgb, var(--danger) 65%, #fff);
 }
 
 /* ─── Hell-Theme: kippt nur die Basis-Variablen, alles andere folgt ─── */
 body.light {
     color-scheme: light;
+    /* Gegenstueck zu --danger-text oben: auf hellem Grund abdunkeln. */
+    --danger-text: color-mix(in srgb, var(--danger) 78%, #000);
 
     --fg-rgb: 17, 24, 39;
     --shadow-rgb: 15, 23, 42;

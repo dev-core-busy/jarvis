@@ -569,9 +569,28 @@ for m, pfad in (("get", "/api/confluence/account"),
                 ("delete", "/api/confluence/account/sitzung")):
     check("%s %s existiert" % (m.upper(), pfad),
           '@app.%s("%s")' % (m, pfad) in MAIN)
-check("alle sechs haengen an require_confluence_account_access",
-      MAIN.count("Depends(require_confluence_account_access)") == 6,
-      str(MAIN.count("Depends(require_confluence_account_access)")))
+# Als REGEL statt Zahl (2026-11-16): hier stand `count(...) == 6` – die neue,
+# richtig geschuetzte Probe-Route /api/confluence/account/bereiche liess das
+# platzen, obwohl nichts falsch war (Register: feste Zahl = Zeitbombe). Gemeint
+# ist: JEDE Route unter /api/confluence/account haengt an dieser Schranke.
+import ast as _ast  # noqa: E402
+_konto = {}
+for _n in _ast.walk(_ast.parse(MAIN)):
+    if isinstance(_n, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+        for _d in _n.decorator_list:
+            if (isinstance(_d, _ast.Call) and isinstance(_d.func, _ast.Attribute)
+                    and _d.args and isinstance(_d.args[0], _ast.Constant)
+                    and str(_d.args[0].value).startswith("/api/confluence/account")):
+                _deps = [getattr(x.args[0], "id", "") for x in
+                         list(_n.args.defaults) + list(_n.args.kw_defaults or [])
+                         if isinstance(x, _ast.Call) and getattr(x.func, "id", "") == "Depends"
+                         and x.args]
+                _konto["%s %s" % (_d.func.attr.upper(), _d.args[0].value)] = _deps
+check("Positivkontrolle: mindestens die sechs bekannten Konto-Routen gefunden",
+      len(_konto) >= 6, str(sorted(_konto)))
+_falsch = {k: v for k, v in _konto.items() if "require_confluence_account_access" not in v}
+check("jede Route unter /api/confluence/account haengt an require_confluence_account_access",
+      not _falsch, str(_falsch))
 check("die Seite /confluence-addon wird ausgeliefert",
       '@app.get("/confluence-addon")' in MAIN)
 check("/api/me meldet permissions.confluence",

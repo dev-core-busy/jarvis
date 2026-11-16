@@ -65,10 +65,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BEREICHE = [
     { id: 'jira', seite: 'jira_addon.html', sekt: 'ja-sect-account', perm: 'jira_assist',
       save: 'ja-acc-save', btn: 'ja-acc-probe', note: 'ja-acc-probe-note', out: 'ja-acc-probe-out',
-      pfad: '/api/jira/search' },
+      pfad: '/api/jira/account/vorgaenge' },
     { id: 'conf', seite: 'confluence_addon.html', sekt: 'ca-sect-account', perm: 'confluence',
       save: 'ca-acc-save', btn: 'ca-acc-probe', note: 'ca-acc-probe-note', out: 'ca-acc-probe-out',
-      pfad: '/api/confluence/spaces' },
+      pfad: '/api/confluence/account/bereiche' },
     { id: 'sap', seite: 'sap.html', sekt: 'sp-sect-account', perm: 'sap',
       save: 'sp-acc-save', btn: 'sp-acc-probe', note: 'sp-acc-probe-note', out: 'sp-acc-probe-out',
       pfad: '/api/sap/odata/services' },
@@ -195,11 +195,11 @@ function kastenText(s, b) {
     section('2) Wirkung: der Klick fragt den FACHLICHEN Endpunkt und zeigt Treffer');
     {
         const faelle = [
-            { b: BEREICHE[0], ant: { '/api/jira/search': { ok: true, total: 42, results: [
+            { b: BEREICHE[0], ant: { '/api/jira/account/vorgaenge': { ok: true, total: 42, results: [
                 { key: 'PRJA-1', summary: 'Erster Vorgang' },
                 { key: 'PRJA-2', summary: 'Zweiter Vorgang' }] } },
               muss: ['PRJA-1', 'Erster Vorgang'], zahl: '42' },
-            { b: BEREICHE[1], ant: { '/api/confluence/spaces': { ok: true, count: 7, spaces: [
+            { b: BEREICHE[1], ant: { '/api/confluence/account/bereiche': { ok: true, count: 7, spaces: [
                 { key: 'SONDEA', name: 'Sondenbereich A' }, { key: 'SONDEB', name: 'Sondenbereich B' }] } },
               muss: ['SONDEA', 'Sondenbereich A'], zahl: '7' },
             { b: BEREICHE[2], ant: { '/api/sap/odata/services': { ok: true, count: 3,
@@ -243,8 +243,8 @@ function kastenText(s, b) {
     section('3) Null Treffer: GRUND in der Meldezeile, Kasten bleibt LEER');
     {
         const faelle = [
-            { b: BEREICHE[0], ant: { '/api/jira/search': { ok: true, total: 0, results: [] } } },
-            { b: BEREICHE[1], ant: { '/api/confluence/spaces': { ok: true, count: 0, spaces: [] } } },
+            { b: BEREICHE[0], ant: { '/api/jira/account/vorgaenge': { ok: true, total: 0, results: [] } } },
+            { b: BEREICHE[1], ant: { '/api/confluence/account/bereiche': { ok: true, count: 0, spaces: [] } } },
             { b: BEREICHE[2], ant: { '/api/sap/odata/services': { ok: true, count: 0, services: [] } } },
             { b: BEREICHE[3], ant: {
                 '/api/vemas/resources': { ok: true, resources: [{ name: 'Projekte', pfad: 'projects' }] },
@@ -268,8 +268,8 @@ function kastenText(s, b) {
     section('4) Fehlschlag: die Meldung traegt den Grund des SERVERS');
     {
         const faelle = [
-            { b: BEREICHE[0], ant: { '/api/jira/search': { __status: 400, ok: false, error: 'JQL kaputt' } }, grund: 'JQL kaputt' },
-            { b: BEREICHE[1], ant: { '/api/confluence/spaces': { ok: false, error: 'Token abgelaufen' } }, grund: 'Token abgelaufen' },
+            { b: BEREICHE[0], ant: { '/api/jira/account/vorgaenge': { __status: 400, ok: false, error: 'JQL kaputt' } }, grund: 'JQL kaputt' },
+            { b: BEREICHE[1], ant: { '/api/confluence/account/bereiche': { ok: false, error: 'Token abgelaufen' } }, grund: 'Token abgelaufen' },
             { b: BEREICHE[2], ant: { '/api/sap/odata/services': { ok: false, error: 'Logon abgelehnt' } }, grund: 'Logon abgelehnt' },
             { b: BEREICHE[3], ant: {
                 '/api/vemas/resources': { ok: true, resources: [{ name: 'Projekte', pfad: 'projects' }] },
@@ -295,8 +295,8 @@ function kastenText(s, b) {
     section('5) Doppelklick loest EINEN Lauf aus (jeder Lauf kostet eine echte Abfrage)');
     for (const b of BEREICHE) {
         const ant = {
-            '/api/jira/search': { ok: true, total: 1, results: [{ key: 'PRJA-9', summary: 'x' }] },
-            '/api/confluence/spaces': { ok: true, count: 1, spaces: [{ key: 'K', name: 'n' }] },
+            '/api/jira/account/vorgaenge': { ok: true, total: 1, results: [{ key: 'PRJA-9', summary: 'x' }] },
+            '/api/confluence/account/bereiche': { ok: true, count: 1, spaces: [{ key: 'K', name: 'n' }] },
             '/api/sap/odata/services': { ok: true, count: 1, services: ['sap/X'] },
             '/api/vemas/resources': { ok: true, resources: [{ name: 'Projekte', pfad: 'projects' }] },
             '/api/vemas/query': { ok: true, columns: ['A'], rows: [{ A: 1 }] },
@@ -405,13 +405,16 @@ function kastenText(s, b) {
         // Eine Probe, die den ganzen Bestand holt, ist Last und keine Messung.
         const b0 = BEREICHE[0];
         const s0 = seite(b0, grundAntworten(b0.perm, {
-            '/api/jira/search': { ok: true, total: 1, results: [{ key: 'PRJA-1', summary: 'x' }] } }));
+            '/api/jira/account/vorgaenge': { ok: true, total: 1, results: [{ key: 'PRJA-1', summary: 'x' }] } }));
         await sleep(60);
         s0.$(b0.btn).dispatchEvent(new s0.win.Event('click'));
         await sleep(80);
-        const r0 = s0.rufe.filter((r) => r.u === '/api/jira/search').pop();
-        check(!!r0 && /limit=\d+/.test(r0.voll), 'jira: limit= in der Anfrage',
-              r0 && r0.voll);
+        // Seit 2026-11-16 ein eigener Probe-Endpunkt: die Grenze (5 Treffer,
+        // feste Abfrage) steht im SERVER (test_zugang_angabe.py prueft sie),
+        // und der Client darf keine Abfrage mitschicken koennen.
+        const r0 = s0.rufe.filter((r) => r.u === '/api/jira/account/vorgaenge').pop();
+        check(!!r0 && !/[?&](jql|limit)=/.test(r0.voll),
+              'jira: Probe-Endpunkt ohne frei waehlbare Abfrage', r0 && r0.voll);
         s0.win.close();
 
         const b3 = BEREICHE[3];
@@ -433,7 +436,7 @@ function kastenText(s, b) {
     {
         const b = BEREICHE[0];
         const s = seite(b, grundAntworten(b.perm, {
-            '/api/jira/search': { ok: true, total: 1, results: [
+            '/api/jira/account/vorgaenge': { ok: true, total: 1, results: [
                 { key: 'PRJA-1', summary: '<img src=x onerror=alert(1)>' }] } }));
         await sleep(60);
         s.$(b.btn).dispatchEvent(new s.win.Event('click'));
@@ -541,7 +544,7 @@ function kastenText(s, b) {
 
         // 12a) eigener PAT: ALLE Zeilen, Meldung sagt "PAT funktioniert"
         {
-            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/account/bereiche':
                 { ok: true, count: N, spaces: viele, zugang: { quelle: 'persoenlich', hinweis: '' } } }));
             await klick(s);
             check(li(s).length === N, 'alle ' + N + ' Bereiche stehen in der Liste (keine Kappung)',
@@ -581,7 +584,7 @@ function kastenText(s, b) {
         // 12c) gemeinsamer Zugang: KEIN "PAT funktioniert", sondern Warnung samt Grund
         {
             const grund = 'Sondengrund: nicht angemeldet.';
-            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/account/bereiche':
                 { ok: true, count: 3, spaces: viele.slice(0, 3),
                   zugang: { quelle: 'sammel', hinweis: grund } } }));
             await klick(s);
@@ -597,7 +600,7 @@ function kastenText(s, b) {
 
         // 12d) Fehlschlag MIT dem eigenen PAT: die Meldung sagt, dass der PAT nicht geht
         {
-            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/account/bereiche':
                 { ok: false, error: 'HTTP 401', zugang: { quelle: 'persoenlich', hinweis: '' } } }));
             await klick(s);
             const note = s.$(b.note).textContent || '';
@@ -608,7 +611,7 @@ function kastenText(s, b) {
 
         // 12e) aelteres Backend ohne `zugang`: es wird NICHTS ueber den PAT behauptet
         {
-            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/account/bereiche':
                 { ok: true, count: 2, spaces: viele.slice(0, 2) } }));
             await klick(s);
             const note = s.$(b.note).textContent || '';
@@ -619,7 +622,7 @@ function kastenText(s, b) {
 
         // 12f) Fremdtext im Such-Attribut sprengt nichts
         {
-            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/account/bereiche':
                 { ok: true, count: 1, spaces: [{ key: 'X"><img src=x>', name: '"><b>fett</b>' }],
                   zugang: { quelle: 'persoenlich', hinweis: '' } } }));
             await klick(s);
@@ -683,9 +686,9 @@ function kastenText(s, b) {
     section('14) Alle vier: die Meldung nennt den verwendeten Zugang');
     {
         const ERFOLG = {
-            jira: (z) => ({ '/api/jira/search': Object.assign({ ok: true, total: 3,
+            jira: (z) => ({ '/api/jira/account/vorgaenge': Object.assign({ ok: true, total: 3,
                 results: [{ key: 'PRJA-1', summary: 'Sonde' }] }, z ? { zugang: z } : {}) }),
-            conf: (z) => ({ '/api/confluence/spaces': Object.assign({ ok: true, count: 1,
+            conf: (z) => ({ '/api/confluence/account/bereiche': Object.assign({ ok: true, count: 1,
                 spaces: [{ key: 'SONDE', name: 'Sonde' }] }, z ? { zugang: z } : {}) }),
             sap: (z) => ({ '/api/sap/odata/services': Object.assign({ ok: true, count: 1,
                 services: ['sap/API_SONDE_SRV'] }, z ? { zugang: z } : {}) }),
@@ -694,8 +697,8 @@ function kastenText(s, b) {
                                                   z ? { zugang: z } : {}) }),
         };
         const FEHLER = {
-            jira: (z) => ({ '/api/jira/search': { __status: 400, ok: false, error: 'HTTP 401', zugang: z } }),
-            conf: (z) => ({ '/api/confluence/spaces': { ok: false, error: 'HTTP 401', zugang: z } }),
+            jira: (z) => ({ '/api/jira/account/vorgaenge': { __status: 400, ok: false, error: 'HTTP 401', zugang: z } }),
+            conf: (z) => ({ '/api/confluence/account/bereiche': { ok: false, error: 'HTTP 401', zugang: z } }),
             sap: (z) => ({ '/api/sap/odata/services': { ok: false, error: 'HTTP 401', zugang: z } }),
             vemas: (z) => ({ '/api/vemas/resources': { ok: true, resources: [{ name: 'Projekte', pfad: 'p' }] },
                 '/api/vemas/query': { __status: 400, ok: false, error: 'HTTP 401', zugang: z } }),
@@ -731,6 +734,23 @@ function kastenText(s, b) {
             r = await lauf(b, FEHLER[b.id](SAMMEL));
             check(!/funktioniert nicht:/.test(r.text) && r.text.indexOf('HTTP 401') >= 0,
                   b.id + ': Fehlschlag ueber gemeinsamen Zugang -> keine Aussage ueber den eigenen', r.text);
+            // f) Jira/Confluence, ECHTE Antwort der Probe-Endpunkte ohne eigenen
+            //    Zugang (2026-11-16): der Server fragt nicht und nennt den Grund.
+            //    Kein Kasten, kein "funktioniert", Grund sichtbar, als Fehler.
+            if (b.id === 'jira' || b.id === 'conf') {
+                const ant = {};
+                ant[b.pfad] = { ok: false, eigener_zugang: false, zugang: SAMMEL,
+                    error: 'Dein eigener Zugang ist nicht aktiv – ' + GRUND };
+                const s = seite(b, grundAntworten(b.perm, ant));
+                await sleep(60);
+                s.$(b.btn).dispatchEvent(new s.win.Event('click'));
+                await sleep(90);
+                const t = s.$(b.note).textContent || '';
+                check(t.indexOf(GRUND) >= 0 && /nicht aktiv/.test(t) && /is-error/.test(s.$(b.note).className)
+                      && !/funktioniert –/.test(t) && kastenText(s, b) === '',
+                      b.id + ': ohne eigenen Zugang -> Grund sichtbar, kein Kasten, kein Erfolg', t);
+                s.win.close();
+            }
             // e) aelteres Backend ohne Angabe: nichts behaupten
             r = await lauf(b, ERFOLG[b.id](null));
             check(!/funktioniert|NICHT verwendet/.test(r.text) && /is-ok/.test(r.kl),

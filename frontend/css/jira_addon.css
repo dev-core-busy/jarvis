@@ -255,10 +255,10 @@ body {
  * Messung, nicht ein Nebenhinweis (muted liegt in beiden Themen unter 4,5:1). */
 .ja-probe-note { font-size: .84rem; color: var(--text-secondary); }
 .ja-probe-note.is-ok { color: var(--success); }
-/* `--danger` pur haelt als Schriftfarbe in keinem der beiden Themen (Register):
- * im Dunklen aufhellen, im Hellen abdunkeln. */
-.ja-probe-note.is-error { color: color-mix(in srgb, var(--danger) 65%, #fff); }
-body.light .ja-probe-note.is-error { color: color-mix(in srgb, var(--danger) 78%, #000); }
+/* `--danger` pur haelt als Schriftfarbe in keinem der beiden Themen (Register).
+ * Die themenabhaengige Mischung steht EINMAL in theme.css (--danger-text) –
+ * hier keine feste Farbe (test_jira_assist.py: "keine hartcodierten Farben"). */
+.ja-probe-note.is-error { color: var(--danger-text); }
 
 /* DECKENDE Flaeche (`--bg-secondary`): der Kasten liegt ueber Containerinhalt,
  * halbtransparent schiene der Text darunter durch (Lehre von den Panels). */

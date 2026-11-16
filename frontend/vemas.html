@@ -285,6 +285,36 @@
            `hidden` verborgene Zeile sichtbar (im Screenshot aufgefallen: das
            Token-Feld stand neben Benutzer/Kennwort). Gleiche Klassen-Falle wie
            bei `.input-group` und `.role-grid`. */
+        /* ── Fachprobe am eigenen Zugang ───────────────────────────────────
+           Eigene Zeile UNTER der Knopfzeile (Vorgabe 2026-11-16): die
+           Reihenfolge ist die Arbeitsfolge – erst eintragen und speichern,
+           dann nachsehen, was man damit sieht. In dieselbe `.vm-actions`
+           gelegt stuende der Knopf neben "Speichern" und saehe wie eine
+           weitere Einrichtungs-Aktion aus. */
+        .vm-probe-zeile { display: flex; gap: 10px; flex-wrap: wrap;
+            align-items: center; margin-top: 10px; }
+        /* `--text-secondary`, nicht `--text-muted`: hier steht das ERGEBNIS
+           einer Messung, kein Nebenhinweis (muted liegt in beiden Themen
+           unter 4,5:1). */
+        .vm-probe-note { font-size: .82rem; color: var(--text-secondary); }
+        .vm-probe-note.is-ok { color: var(--success); }
+        /* `--danger` pur haelt als Schriftfarbe in KEINEM der beiden Themen
+           (Register): im Dunklen aufhellen, im Hellen abdunkeln. */
+        .vm-probe-note.is-error { color: color-mix(in srgb, var(--danger) 65%, #fff); }
+        body.light .vm-probe-note.is-error { color: color-mix(in srgb, var(--danger) 78%, #000); }
+        /* Bewusst OHNE eigenes `display`, damit das `hidden`-Attribut greift
+           (dieselbe Klassen-Falle wie bei `.vm-row`). Deckende Flaeche: der
+           Kasten liegt ueber Containerinhalt. */
+        .vm-probe { background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: 12px 14px; margin-top: 10px;
+            font-size: .84rem; line-height: 1.5; color: var(--text-primary); }
+        .vm-probe-kopf { margin: 0 0 8px; color: var(--text-secondary); }
+        .vm-probe ul { margin: 0; padding-left: 20px; }
+        /* `overflow-wrap`: ein Spaltenname kann laenger sein als der Container
+           breit ist – ohne das laeuft die Seite waagerecht ueber. */
+        .vm-probe li { margin: 2px 0; font-family: var(--font-mono); font-size: .8rem;
+            overflow-wrap: anywhere; }
+        .vm-probe-rest { margin: 8px 0 0; color: var(--text-muted); font-size: .78rem; }
         .vm-row[hidden] { display: none; }
         /* Dieselbe Falle an den Knoepfen: `.vm-hist-btn` setzt ebenfalls
            `display: flex`. In Chrome gemessen (2026-11-10): "Von VEMAS
@@ -544,6 +574,26 @@
                     <button class="vm-hist-btn" id="vm-acc-logout" type="button" data-i18n="vemas.acc_logout" hidden>Von VEMAS abmelden</button>
                     <span class="vm-note" id="vm-acc-status"></span>
                 </div>
+
+                <!-- ── Fachprobe: WAS sehe ich mit diesem Zugang? ───────────
+                     "Verbindung testen" beantwortet nur, OB die Anmeldung
+                     greift. Die andere, im Alltag wichtigere Frage ist, welche
+                     Daten VEMAS MIT DIESEN Berechtigungen herausgibt: ein
+                     Zugang, der sich anmelden darf und keine Ressource lesen
+                     kann, ist von einem richtig eingerichteten sonst nicht zu
+                     unterscheiden (erst eine leere Auswertung faellt auf).
+                     Gefragt wird die ERSTE vom Administrator hinterlegte
+                     Ressource mit einer Handvoll Zeilen – nicht der ganze
+                     Bestand: eine Probe darf das System nicht belasten.
+                     Steht ABSICHTLICH unter der Speichern-Zeile (Vorgabe
+                     2026-11-16) – das ist die Arbeitsfolge: eintragen,
+                     speichern, nachsehen. -->
+                <div class="vm-probe-zeile">
+                    <button type="button" class="vm-hist-btn" id="vm-acc-probe"
+                            data-i18n="vemas.probe_btn">Sichtbare Daten abfragen</button>
+                    <span class="vm-probe-note" id="vm-acc-probe-note"></span>
+                </div>
+                <div class="vm-probe" id="vm-acc-probe-out" hidden></div>
                 </form>
                 <p class="vm-sect-hint" id="vm-acc-write"></p>
             </div>
@@ -650,7 +700,7 @@
 <script src="/static/js/syspackages.js?v=24"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
-<script src="/static/js/i18n.js?v=487"></script>
+<script src="/static/js/i18n.js?v=488"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
@@ -665,7 +715,7 @@
 <script src="/static/js/vendor/chartjs-plugin-annotation.min.js?v=1"></script>
 <script src="/static/js/charts.js?v=4"></script>
 <script src="/static/js/mermaid_blocks.js?v=2"></script>
-<script src="/static/js/vemas_portal.js?v=9"></script>
+<script src="/static/js/vemas_portal.js?v=10"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR

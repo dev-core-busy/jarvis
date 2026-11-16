@@ -449,7 +449,96 @@
         }
     }
 
+    /* ── Fachprobe: welche Vorgaenge liefert Jira mit DIESEN Rechten? ───────
+     *
+     * "Verbindung testen" fragt /myself – es beantwortet nur, OB der Token
+     * gilt. Ein gueltiger Token ohne Projektrechte sieht NICHTS und ist davon
+     * nicht zu unterscheiden; gemerkt haette man es erst, wenn eine Ticketsuche
+     * im Chat leer bleibt. Deshalb eine zweite, FACHLICHE Probe.
+     *
+     * Gefragt wird derselbe Endpunkt, den die Ticketsuche benutzt
+     * (`/api/jira/search`) – also genau der Weg, der im Betrieb gilt, und nicht
+     * ein eigener Pruefpfad daneben. `jql=ORDER BY updated DESC` ohne
+     * Einschraenkung ist dabei Absicht: gefragt ist die Reichweite des Zugangs,
+     * nicht ein Suchbegriff. `limit=5` haelt die Probe billig.
+     *
+     * NULL TREFFER IST EIN EIGENES ERGEBNIS, kein Fehler: der Token gilt, sieht
+     * aber keinen Vorgang. Das wird so gesagt – "0 Tickets" stumm anzuzeigen
+     * waere von einem Fehlschlag nicht zu unterscheiden. */
+    var _probeLaeuft = false;
+
+    function probeMeld(text, art) {
+        var n = $('ja-acc-probe-note');
+        if (!n) return;
+        n.textContent = text || '';
+        n.className = 'ja-probe-note' + (art ? ' is-' + art : '');
+    }
+
+    /** Maskiert JEDEN Wert: Titel und Schluessel kommen aus Jira, also aus
+     *  Vorgaengen, in die Kunden selbst schreiben. */
+    function probeEsc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+
+    async function probeLaufen() {
+        if (_probeLaeuft) return;          // Doppelklick: ein Lauf genuegt
+        var btn = $('ja-acc-probe');
+        var out = $('ja-acc-probe-out');
+        _probeLaeuft = true;
+        if (btn) btn.disabled = true;
+        if (out) { out.hidden = true; out.innerHTML = ''; }
+        probeMeld(T('jaddon.probe_wait', 'Frage Jira …'));
+        try {
+            var r = await fetch('/api/jira/search?jql='
+                                + encodeURIComponent('ORDER BY updated DESC') + '&limit=5',
+                                { headers: { 'Authorization': 'Bearer ' + token() } });
+            var d = null;
+            try { d = await r.json(); } catch (e) { d = null; }
+            if (!r.ok || !d || d.ok === false) {
+                throw new Error((d && (d.error || d.detail))
+                                || T('jaddon.probe_fail', 'Abfrage fehlgeschlagen.'));
+            }
+            var tr = Array.isArray(d.results) ? d.results : [];
+            var ges = (typeof d.total === 'number') ? d.total : tr.length;
+            if (!tr.length) {
+                // Der Token gilt und sieht nichts – das ist eine Aussage, kein
+                // Fehler. Sie nennt den naechsten Schritt.
+                probeMeld(T('jaddon.probe_leer',
+                    'Der Zugang gilt, sieht aber keinen Vorgang. Bitte in Jira pruefen, '
+                    + 'ob dein Konto fuer die Projekte freigegeben ist.'), 'error');
+                return;
+            }
+            probeMeld('✓ ' + T('jaddon.probe_ok', 'Sichtbare Vorgaenge insgesamt:')
+                      + ' ' + ges, 'ok');
+            var html = '<p class="ja-probe-kopf">'
+                + probeEsc(T('jaddon.probe_head', 'Zuletzt geaenderte Vorgaenge:'))
+                + '</p><ul>';
+            tr.forEach(function (it) {
+                html += '<li><span class="ja-probe-key">' + probeEsc(it.key || '?')
+                     + '</span> ' + probeEsc(it.summary || '') + '</li>';
+            });
+            html += '</ul>';
+            if (ges > tr.length) {
+                html += '<p class="ja-probe-rest">'
+                     + probeEsc(T('jaddon.probe_rest', 'Angezeigt sind die ersten'))
+                     + ' ' + tr.length + ' ' + probeEsc(T('jaddon.probe_rest2', 'von'))
+                     + ' ' + ges + '.</p>';
+            }
+            if (out) { out.innerHTML = html; out.hidden = false; }
+        } catch (e) {
+            probeMeld('❌ ' + e.message, 'error');
+        } finally {
+            _probeLaeuft = false;
+            if (btn) btn.disabled = false;
+        }
+    }
+
     function accVerdrahten() {
+        var pb = $('ja-acc-probe');
+        if (pb) pb.addEventListener('click', probeLaufen);
+
         var sp = $('ja-acc-save');
         if (sp) sp.addEventListener('click', function () {
             var tok = ($('ja-acc-token') ? $('ja-acc-token').value : '').trim();

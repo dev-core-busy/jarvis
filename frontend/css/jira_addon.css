@@ -243,6 +243,43 @@ body {
  * die Beschriftung rutschte darunter (Register: erst die Klasse ansehen). */
 .ja-acc-check input { flex: 0 0 auto; width: auto; }
 
+/* ── Fachprobe am eigenen Zugang ───────────────────────────────────────────
+ * Eigene Zeile UNTER der Speichern-Zeile (Vorgabe 2026-11-16): die Reihenfolge
+ * ist die Arbeitsfolge – erst eintragen und speichern, dann nachsehen, was man
+ * damit sieht. In dieselbe `.ja-dl` gelegt stuende der Knopf neben "Speichern"
+ * und saehe wie eine weitere Einrichtungs-Aktion aus.
+ * `margin-top: 0`, weil `.ja-dl` darueber schon 8px Abstand nach unten setzt. */
+.ja-probe-zeile { display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    margin: 6px 0 0; }
+/* `--text-secondary` statt `--text-muted`: hier steht das ERGEBNIS einer
+ * Messung, nicht ein Nebenhinweis (muted liegt in beiden Themen unter 4,5:1). */
+.ja-probe-note { font-size: .84rem; color: var(--text-secondary); }
+.ja-probe-note.is-ok { color: var(--success); }
+/* `--danger` pur haelt als Schriftfarbe in keinem der beiden Themen (Register):
+ * im Dunklen aufhellen, im Hellen abdunkeln. */
+.ja-probe-note.is-error { color: color-mix(in srgb, var(--danger) 65%, #fff); }
+body.light .ja-probe-note.is-error { color: color-mix(in srgb, var(--danger) 78%, #000); }
+
+/* DECKENDE Flaeche (`--bg-secondary`): der Kasten liegt ueber Containerinhalt,
+ * halbtransparent schiene der Text darunter durch (Lehre von den Panels). */
+.ja-probe {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 10px 0 0;
+    font-size: .86rem;
+    line-height: 1.5;
+}
+.ja-probe[hidden] { display: none; }
+.ja-probe-kopf { margin: 0 0 8px; color: var(--text-secondary); }
+.ja-probe ul { margin: 0; padding-left: 18px; }
+/* `overflow-wrap` statt `nowrap`: ein Bereichsname kann laenger sein als der
+ * Container breit ist – ohne das laeuft die Seite waagerecht ueber. */
+.ja-probe li { margin: 2px 0; overflow-wrap: anywhere; }
+.ja-probe-key { font-family: var(--font-mono); color: var(--text-muted); }
+.ja-probe-rest { margin: 8px 0 0; color: var(--text-muted); font-size: .8rem; }
+
 /* Der Merksatz der Seite: er traegt die wichtigste Zusage und darf nicht wie
  * Fliesstext aussehen. Akzentkante statt Farbflaeche – die waere in Hell und
  * Dunkel nie gleichzeitig richtig. */

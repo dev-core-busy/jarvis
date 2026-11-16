@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
-    <link rel="stylesheet" href="/static/css/jira_addon.css?v=15">
+    <link rel="stylesheet" href="/static/css/jira_addon.css?v=16">
 </head>
 <body>
 <script src="/static/js/theme_frueh.js?v=1"></script>
@@ -139,6 +139,23 @@
                 <button type="button" class="ja-btn" id="ja-acc-del" data-i18n="jaddon.acc_del">Zugang entfernen</button>
             </div>
             <p class="ja-hint" id="ja-acc-msg" hidden></p>
+
+            <!-- ── Fachprobe: WAS sehe ich mit diesem Zugang? ───────────────
+                 "Verbindung testen" fragt /myself und beantwortet damit nur,
+                 OB der Token gilt. Die andere, im Alltag wichtigere Frage ist,
+                 welche Vorgaenge Jira MIT DIESEN Rechten herausgibt: ein
+                 gueltiger Token ohne Projektrechte sieht nichts und ist von
+                 einem richtig eingerichteten Zugang sonst nicht zu
+                 unterscheiden (erst eine leere Ticketsuche faellt auf).
+                 Steht ABSICHTLICH unter der Speichern-Zeile (Vorgabe
+                 2026-11-16) – das ist die Arbeitsfolge: eintragen, speichern,
+                 nachsehen. -->
+            <div class="ja-probe-zeile">
+                <button type="button" class="ja-btn" id="ja-acc-probe"
+                        data-i18n="jaddon.probe_btn">Sichtbare Tickets anzeigen</button>
+                <span class="ja-probe-note" id="ja-acc-probe-note"></span>
+            </div>
+            <div class="ja-probe" id="ja-acc-probe-out" hidden></div>
 
             <p class="ja-hint" data-i18n="jaddon.acc_how_note">Der Token wird verschlüsselt gespeichert und nie wieder angezeigt – auch nicht dir. Läuft er ab, trägst du hier einfach einen neuen ein.</p>
         </div>
@@ -326,7 +343,7 @@
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
-<script src="/static/js/i18n.js?v=487"></script>
+<script src="/static/js/i18n.js?v=488"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/sessions.js?v=10"></script>
@@ -335,6 +352,6 @@
 <script src="/static/js/activity.js?v=3"></script>
 <script src="/static/js/issues.js?v=16"></script>
 <script src="/static/js/zugang_sitzung.js?v=4"></script>
-<script src="/static/js/jira_addon.js?v=14"></script>
+<script src="/static/js/jira_addon.js?v=15"></script>
 </body>
 </html>

@@ -188,7 +188,94 @@
         }
     }
 
+    /* ── Fachprobe: welche Bereiche liefert Confluence mit DIESEN Rechten? ──
+     *
+     * "Verbindung testen" beantwortet nur, OB der Token gilt. Ein gueltiger
+     * Token ohne Leserechte sieht NICHTS und ist davon nicht zu unterscheiden;
+     * gemerkt haette man es erst, wenn eine Suche im Chat leer bleibt. Deshalb
+     * eine zweite, FACHLICHE Probe.
+     *
+     * Gefragt wird `/api/confluence/spaces` – derselbe Endpunkt, den der
+     * Bereich Wissen benutzt, also genau der Weg, der im Betrieb gilt, und
+     * nicht ein eigener Pruefpfad daneben. Er loest den Zugang ueber den
+     * ANGEMELDETEN Benutzer auf; ein eigener Token wirkt damit sofort.
+     *
+     * NULL BEREICHE IST EIN EIGENES ERGEBNIS, kein Fehler: der Token gilt,
+     * sieht aber keinen Bereich. Das wird so gesagt – stumm "0" anzuzeigen
+     * waere von einem Fehlschlag nicht zu unterscheiden. */
+    var _probeLaeuft = false;
+    var PROBE_MAX = 10;        // mehr Zeilen beantworten die Frage nicht besser
+
+    function probeMeld(text, art) {
+        var n = $('ca-acc-probe-note');
+        if (!n) return;
+        n.textContent = text || '';
+        n.className = 'ja-probe-note' + (art ? ' is-' + art : '');
+    }
+
+    /** Maskiert JEDEN Wert: Bereichsnamen kommen aus Confluence, also aus
+     *  Inhalten, die Menschen frei benennen. */
+    function probeEsc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+
+    async function probeLaufen() {
+        if (_probeLaeuft) return;          // Doppelklick: ein Lauf genuegt
+        var btn = $('ca-acc-probe');
+        var out = $('ca-acc-probe-out');
+        _probeLaeuft = true;
+        if (btn) btn.disabled = true;
+        if (out) { out.hidden = true; out.innerHTML = ''; }
+        probeMeld(T('caddon.probe_wait', 'Frage Confluence …'));
+        try {
+            var r = await fetch('/api/confluence/spaces',
+                                { headers: { 'Authorization': 'Bearer ' + token() } });
+            var d = null;
+            try { d = await r.json(); } catch (e) { d = null; }
+            if (!r.ok || !d || d.ok === false) {
+                throw new Error((d && (d.error || d.detail))
+                                || T('caddon.probe_fail', 'Abfrage fehlgeschlagen.'));
+            }
+            var sp = Array.isArray(d.spaces) ? d.spaces : [];
+            var ges = (typeof d.count === 'number') ? d.count : sp.length;
+            if (!sp.length) {
+                probeMeld(T('caddon.probe_leer',
+                    'Der Zugang gilt, sieht aber keinen Bereich. Bitte in Confluence pruefen, '
+                    + 'ob dein Konto Leserechte hat.'), 'error');
+                return;
+            }
+            probeMeld('✓ ' + T('caddon.probe_ok', 'Sichtbare Bereiche insgesamt:')
+                      + ' ' + ges, 'ok');
+            var zeig = sp.slice(0, PROBE_MAX);
+            var html = '<p class="ja-probe-kopf">'
+                + probeEsc(T('caddon.probe_head', 'Bereiche, die dein Zugang lesen darf:'))
+                + '</p><ul>';
+            zeig.forEach(function (s) {
+                html += '<li><span class="ja-probe-key">' + probeEsc(s.key || '?')
+                     + '</span> ' + probeEsc(s.name || '') + '</li>';
+            });
+            html += '</ul>';
+            if (ges > zeig.length) {
+                html += '<p class="ja-probe-rest">'
+                     + probeEsc(T('caddon.probe_rest', 'Angezeigt sind die ersten'))
+                     + ' ' + zeig.length + ' ' + probeEsc(T('caddon.probe_rest2', 'von'))
+                     + ' ' + ges + '.</p>';
+            }
+            if (out) { out.innerHTML = html; out.hidden = false; }
+        } catch (e) {
+            probeMeld('❌ ' + e.message, 'error');
+        } finally {
+            _probeLaeuft = false;
+            if (btn) btn.disabled = false;
+        }
+    }
+
     function accVerdrahten() {
+        var pb = $('ca-acc-probe');
+        if (pb) pb.addEventListener('click', probeLaufen);
+
         var sp = $('ca-acc-save');
         if (sp) sp.addEventListener('click', function () {
             var tok = ($('ca-acc-token') ? $('ca-acc-token').value : '').trim();

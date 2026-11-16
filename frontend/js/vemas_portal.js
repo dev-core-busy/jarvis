@@ -917,6 +917,102 @@
             });
     }
 
+    /* ── Fachprobe: welche Daten liefert VEMAS mit DIESEN Berechtigungen? ───
+     *
+     * "Verbindung testen" beantwortet nur, OB die Anmeldung greift. Ein Zugang,
+     * der sich anmelden darf und keine Ressource lesen kann, sieht NICHTS und
+     * ist davon nicht zu unterscheiden; gemerkt haette man es erst, wenn eine
+     * Auswertung leer bleibt. Deshalb eine zweite, FACHLICHE Probe.
+     *
+     * ZWEI SCHRITTE, und der erste ist eine eigene Aussage: zuerst die vom
+     * Administrator hinterlegten Ressourcen (`/api/vemas/resources`), dann eine
+     * Leseabfrage auf die ERSTE davon (`/api/vemas/query`) – derselbe Endpunkt,
+     * den die Abfrage-Konsole benutzt, also der Weg, der im Betrieb gilt.
+     * Ist keine Ressource hinterlegt, ist das KEIN Fehler des Zugangs, sondern
+     * eine fehlende Konfiguration – und wird als solche benannt, sonst sucht
+     * jemand den Fehler bei seinem Kennwort.
+     *
+     * `top=5` ist Absicht: eine Probe darf das System nicht belasten (lesender
+     * Zugriff ueber Minuten gilt in diesem Projekt als Last, nicht als Messung). */
+    var _probeLaeuft = false;
+    var PROBE_TOP = 5;
+    var PROBE_MAX_SPALTEN = 12;
+
+    function probeMeld(msg, kind) {
+        var n = $('vm-acc-probe-note');
+        if (!n) return;
+        n.textContent = msg || '';
+        n.className = 'vm-probe-note' + (kind ? ' is-' + kind : '');
+    }
+
+    async function probeLaufen() {
+        if (_probeLaeuft) return;          // Doppelklick: ein Lauf genuegt
+        var btn = $('vm-acc-probe');
+        var out = $('vm-acc-probe-out');
+        _probeLaeuft = true;
+        if (btn) btn.disabled = true;
+        if (out) { out.hidden = true; out.innerHTML = ''; }
+        probeMeld(T('vemas.probe_wait', 'Frage VEMAS …'));
+        try {
+            var rr = await fetch('/api/vemas/resources', { headers: authHeaders() });
+            var rd = null;
+            try { rd = await rr.json(); } catch (e) { rd = null; }
+            if (!rr.ok || !rd || rd.ok === false) {
+                throw new Error((rd && (rd.error || rd.detail))
+                                || T('vemas.probe_fail', 'Abfrage fehlgeschlagen.'));
+            }
+            var res = Array.isArray(rd.resources) ? rd.resources : [];
+            if (!res.length) {
+                // Konfigurationsmangel, kein Rechteproblem – und der Satz sagt,
+                // WER das behebt. Ein "fehlgeschlagen" schickte den Benutzer
+                // sonst zu seinem eigenen Kennwort.
+                probeMeld(T('vemas.probe_keine_res',
+                    'Der Administrator hat noch keine Ressourcen hinterlegt – es gibt nichts '
+                    + 'abzufragen. Das sagt nichts über deinen Zugang.'), 'error');
+                return;
+            }
+            var erste = res[0] || {};
+            var name = erste.name || erste.pfad || erste.path || '';
+            var qr = await fetch('/api/vemas/query?resource=' + encodeURIComponent(name)
+                                 + '&top=' + PROBE_TOP, { headers: authHeaders() });
+            var qd = null;
+            try { qd = await qr.json(); } catch (e) { qd = null; }
+            if (!qr.ok || !qd || qd.ok === false) {
+                throw new Error((qd && (qd.error || qd.detail))
+                                || T('vemas.probe_fail', 'Abfrage fehlgeschlagen.'));
+            }
+            var zeilen = Array.isArray(qd.rows) ? qd.rows : [];
+            var spalten = Array.isArray(qd.columns) ? qd.columns : [];
+            if (!zeilen.length) {
+                probeMeld(T('vemas.probe_leer',
+                    'Der Zugang gilt, liefert aber keinen Datensatz. Bitte die '
+                    + 'VEMAS-Berechtigungen dieses Kontos prüfen.'), 'error');
+                return;
+            }
+            probeMeld('✓ ' + T('vemas.probe_ok', 'Gelesene Datensätze:') + ' ' + zeilen.length,
+                      'ok');
+            var zeig = spalten.slice(0, PROBE_MAX_SPALTEN);
+            var html = '<p class="vm-probe-kopf">'
+                + esc(T('vemas.probe_head', 'Abgefragte Ressource:')) + ' ' + esc(name)
+                + '</p><ul>';
+            zeig.forEach(function (c) { html += '<li>' + esc(c) + '</li>'; });
+            html += '</ul>';
+            if (spalten.length > zeig.length) {
+                html += '<p class="vm-probe-rest">'
+                     + esc(T('vemas.probe_rest', 'Angezeigt sind die ersten'))
+                     + ' ' + zeig.length + ' ' + esc(T('vemas.probe_rest2', 'von'))
+                     + ' ' + spalten.length + ' '
+                     + esc(T('vemas.probe_felder', 'Feldern')) + '.</p>';
+            }
+            if (out) { out.innerHTML = html; out.hidden = false; }
+        } catch (e) {
+            probeMeld('❌ ' + e.message, 'error');
+        } finally {
+            _probeLaeuft = false;
+            if (btn) btn.disabled = false;
+        }
+    }
+
     function testAccount() {
         accNote(T('vemas.acc_testing', 'Teste Verbindung…'));
         fetch('/api/vemas/test', { headers: authHeaders() })
@@ -999,6 +1095,7 @@
         var accS = $('vm-acc-save');
         if (accS) accS.addEventListener('click', function () { if (!_kachel) saveAccount(); });
         var accP = $('vm-acc-test'); if (accP) accP.addEventListener('click', testAccount);
+        var accPr = $('vm-acc-probe'); if (accPr) accPr.addEventListener('click', probeLaufen);
         var accD = $('vm-acc-del'); if (accD) accD.addEventListener('click', delAccount);
         var accL = $('vm-acc-logout'); if (accL) accL.addEventListener('click', accAbmelden);
         // Absenden nur im Kachel-Modus (Enter im Kennwortfeld = Anmelden).

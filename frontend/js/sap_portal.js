@@ -133,6 +133,10 @@
             .then(function (d) {
                 _status = d;
                 accHanaFreigabe();
+                // Der Probe-Knopf haengt an der VERBINDUNGSART des geltenden
+                // Zugangs – er wird mit jedem Status nachgezogen. Fehlt der
+                // Status (`d` ist null), sperrt probeZiel() fail-closed.
+                probeKnopf();
                 var el = $('sp-conn'); if (!el) return;
                 if (!d) { el.textContent = ''; return; }
                 accRenderState();
@@ -1558,6 +1562,135 @@
         accRenderTestInfo();
     }
 
+    /* ── Fachprobe: welche Objekte liefert SAP mit DIESEN Berechtigungen? ───
+     *
+     * "Verbindung testen" beantwortet nur, OB die Anmeldung greift. Ein Zugang,
+     * der sich anmelden darf und keinen Katalog lesen kann, sieht NICHTS und ist
+     * davon nicht zu unterscheiden; gemerkt haette man es erst, wenn eine
+     * Auswertung leer bleibt. Deshalb eine zweite, FACHLICHE Probe.
+     *
+     * ⚠ WAS gefragt wird, entscheidet `_status` – also die VERBINDUNGSART DES
+     * GELTENDEN ZUGANGS vom Server, NICHT das Pulldown darueber: ohne eigenen
+     * Zugang steht dort "kein eigener Zugang", waehrend der gemeinsame
+     * Lesezugang laeuft. Wer das Pulldown liest, misst den falschen Zugang.
+     *
+     * Gefragt werden dieselben Endpunkte, die die Abfrage-Konsole benutzt – also
+     * der Weg, der im Betrieb gilt, und kein eigener Pruefpfad daneben.
+     * Fuer RFC gibt es keine Katalog-Abfrage; der Knopf bleibt dann GESPERRT MIT
+     * GRUND statt verborgen (Projektregel) – ein Knopf, der je Zugangsart
+     * auftaucht und verschwindet, ist unerklaerbar. */
+    var _probeLaeuft = false;
+    var PROBE_MAX = 10;        // mehr Zeilen beantworten die Frage nicht besser
+
+    function probeMeld(msg, kind) {
+        var n = $('sp-acc-probe-note');
+        if (!n) return;
+        n.textContent = msg || '';
+        n.className = 'sp-probe-note' + (kind ? ' is-' + kind : '');
+    }
+
+    /** Welche Abfrage passt zum GELTENDEN Zugang? `art` ist leer, wenn gar
+     *  keiner konfiguriert ist. */
+    function probeZiel() {
+        var s = _status || {};
+        if (s.odata) return { art: 'odata', pfad: '/api/sap/odata/services' };
+        if (s.hana) return { art: 'hana', pfad: '/api/sap/tables?limit=' + PROBE_MAX };
+        if (s.rfc) return { art: 'rfc', pfad: '' };
+        return { art: '', pfad: '' };
+    }
+
+    /** Sperrt den Knopf MIT GRUND, wo es keine Abfrage gibt. Laeuft nach jedem
+     *  Statuswechsel – der Zustand entscheidet, nicht der Zeitpunkt. */
+    function probeKnopf() {
+        var b = $('sp-acc-probe');
+        if (!b) return;
+        var z = probeZiel();
+        if (z.art === 'rfc') {
+            b.disabled = true;
+            b.title = T('sap.probe_rfc',
+                'Für RFC gibt es keine Katalog-Abfrage. „Verbindung testen" prüft den Zugang.');
+        } else if (!z.art) {
+            b.disabled = true;
+            b.title = T('sap.probe_kein_zugang',
+                'Es ist kein SAP-Zugang konfiguriert – weder ein eigener noch ein gemeinsamer.');
+        } else {
+            b.disabled = false;
+            b.title = '';
+        }
+    }
+
+    function probeLaufen() {
+        if (_probeLaeuft) return;          // Doppelklick: ein Lauf genuegt
+        var z = probeZiel();
+        if (!z.pfad) { probeKnopf(); return; }   // gesperrte Lage, kein Aufruf
+        var btn = $('sp-acc-probe');
+        var out = $('sp-acc-probe-out');
+        _probeLaeuft = true;
+        if (btn) btn.disabled = true;
+        if (out) { out.hidden = true; out.innerHTML = ''; }
+        probeMeld(T('sap.probe_wait', 'Frage SAP …'));
+        fetch(z.pfad, { headers: authHeaders() })
+            .then(function (r) {
+                return r.json().catch(function () { return null; })
+                    .then(function (d) { return { ok: r.ok, d: d }; });
+            })
+            .then(function (res) {
+                var d = res.d;
+                if (!res.ok || !d || d.ok === false) {
+                    probeMeld('❌ ' + ((d && (d.error || d.detail))
+                        || T('sap.probe_fail', 'Abfrage fehlgeschlagen.')), 'error');
+                    return;
+                }
+                probeZeichnen(z.art, d);
+            })
+            .catch(function () {
+                probeMeld('❌ ' + T('sap.probe_fail', 'Abfrage fehlgeschlagen.'), 'error');
+            })
+            .then(function () {
+                _probeLaeuft = false;
+                probeKnopf();              // Sperrzustand wieder aus dem Status
+            });
+    }
+
+    /** NULL TREFFER IST EIN EIGENES ERGEBNIS, kein Fehler: der Zugang gilt,
+     *  sieht aber nichts. Das wird so gesagt und nennt den naechsten Schritt –
+     *  eine stumme "0" waere von einem Fehlschlag nicht zu unterscheiden. */
+    function probeZeichnen(art, d) {
+        var out = $('sp-acc-probe-out');
+        var zeilen = [], ges = 0, kopf = '';
+        if (art === 'odata') {
+            var sv = Array.isArray(d.services) ? d.services : [];
+            ges = (typeof d.count === 'number') ? d.count : sv.length;
+            zeilen = sv.slice(0, PROBE_MAX);
+            kopf = T('sap.probe_head_odata', 'Services im Gateway-Katalog:');
+        } else {
+            var rw = Array.isArray(d.rows) ? d.rows : [];
+            ges = (typeof d.count === 'number') ? d.count : rw.length;
+            zeilen = rw.slice(0, PROBE_MAX).map(function (r) {
+                var n = r.OBJECT_NAME || r.object_name || '';
+                var ty = r.OBJECT_TYPE || r.object_type || '';
+                var sc = r.SCHEMA_NAME || r.schema_name || '';
+                return (sc ? sc + '.' : '') + n + (ty ? ' (' + ty + ')' : '');
+            });
+            kopf = T('sap.probe_head_hana', 'Tabellen und Views im Schema:');
+        }
+        if (!zeilen.length) {
+            probeMeld(T('sap.probe_leer',
+                'Der Zugang gilt, liefert aber kein Objekt. Bitte die SAP-Berechtigungen '
+                + 'dieses Kontos prüfen.'), 'error');
+            return;
+        }
+        probeMeld('✓ ' + T('sap.probe_ok', 'Sichtbare Objekte insgesamt:') + ' ' + ges, 'ok');
+        var html = '<p class="sp-probe-kopf">' + esc(kopf) + '</p><ul>';
+        zeilen.forEach(function (n) { html += '<li>' + esc(n) + '</li>'; });
+        html += '</ul>';
+        if (ges > zeilen.length) {
+            html += '<p class="sp-probe-rest">' + esc(T('sap.probe_rest', 'Angezeigt sind die ersten'))
+                 + ' ' + zeilen.length + ' ' + esc(T('sap.probe_rest2', 'von')) + ' ' + ges + '.</p>';
+        }
+        if (out) { out.innerHTML = html; out.hidden = false; }
+    }
+
     function testAccount() {
         accNote(T('sap.acc_testing', 'Teste Verbindung…'));
         accResetTestInfo();
@@ -1643,10 +1776,15 @@
         var accS = $('sp-acc-save');
         if (accS) accS.addEventListener('click', function () { if (!_kachel) saveAccount(); });
         var accP = $('sp-acc-test'); if (accP) accP.addEventListener('click', testAccount);
+        var accPr = $('sp-acc-probe'); if (accPr) accPr.addEventListener('click', probeLaufen);
         // Der Bericht wird aus T() gebaut – nach einem Sprachwechsel neu zeichnen.
         // accRenderTestInfo ruft kein applyLang(), loest also kein Ereignis aus.
         window.addEventListener('jarvis-lang-changed', function () {
             if (_letzterTest) accRenderTestInfo();
+            // Der Sperrgrund des Probe-Knopfes steht im `title` und kommt aus
+            // T() – er traegt bewusst kein `data-i18n-title`, weil applyLang()
+            // sonst den zugangsabhaengigen Text ueberschreibt (Register).
+            probeKnopf();
         });
         var accD = $('sp-acc-del'); if (accD) accD.addEventListener('click', delAccount);
         var accL = $('sp-acc-logout'); if (accL) accL.addEventListener('click', accAbmelden);

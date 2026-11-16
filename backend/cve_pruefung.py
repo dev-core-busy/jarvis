@@ -991,6 +991,343 @@ def veroeffentlichung_ergaenzen(befunde: list[dict], holen=None) -> dict:
             "ohne_datum": sum(1 for b in befunde if not b["veroeffentlicht"])}
 
 
+# ── Auskunft zu EINER Kennung (Suche in der Paketliste) ──────────────────────
+#
+# Die Suche der Paketliste kennt nur BEFUNDE – also Luecken, die dieses System
+# gerade betreffen. Eine Kennung, die behoben ist, nie zutraf oder lokal noch
+# gar nicht bekannt ist, ergab eine leere Liste, und die sah aus wie
+# "unbekannt" (gemeldet 2026-11-16: CVE-2026-99270 auf ECHT, laufender Kernel
+# trug die Behebung schon). Die Auskunft antwortet deshalb in drei Stufen:
+# Pruefergebnis, gespeicherter Debian-Tracker, und erst wenn beide schweigen
+# OSV online – mit dem Abgleich gegen die installierten Pakete.
+
+KENNUNG_MUSTER = re.compile(r"^(CVE-\d{4}-\d{4,}|GHSA(?:-[23456789cfghjmpqrvwx]{4}){3})$")
+# Zustaende je Quellpaket, die "dieses System ist betroffen" bedeuten.
+BETROFFEN = ("update", "neustart", "offen")
+AUSKUNFT_ONLINE_S = 900          # Online-Antwort so lange im Speicher
+AUSKUNFT_ONLINE_MAX = 2_000_000  # Deckel fuer eine OSV-Antwort (Bytes)
+_auskunft_sperre = threading.Lock()
+_online_cache: dict = {}
+_tracker_suche = {"schluessel": None, "wert": None}
+_LEER = re.compile(r"\s*")
+
+
+def kennung_norm(roh) -> str:
+    """Schreibweise vereinheitlichen; ``""`` = keine gueltige Kennung."""
+    k = str(roh or "").strip()
+    if k[:4].upper() == "CVE-":
+        k = "CVE-" + k[4:]
+    elif k[:5].upper() == "GHSA-":
+        k = "GHSA-" + k[5:].lower()
+    return k if KENNUNG_MUSTER.match(k) else ""
+
+
+def release_nummer() -> str:
+    """``VERSION_ID`` (``13``) – so benennt OSV das Debian-Oekosystem."""
+    try:
+        for z in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if z.startswith("VERSION_ID="):
+                return z.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def tracker_suchen(kennung: str) -> dict | None:
+    """Alle Eintraege einer Kennung im gespeicherten Tracker: {quelle: eintrag}.
+
+    ``None`` = es ist gar kein Tracker gespeichert. Der Tracker wird NICHT als
+    Ganzes geladen: auf DEV gemessen (2026-11-16) kostet ``json.loads`` 0,5 s
+    und ~450 MB Spitze – im Dienst je Suche zu viel. Ein Textvorfilter (14 ms)
+    entscheidet "kommt gar nicht vor"; nur sonst werden die Quellpakete
+    einzeln dekodiert und sofort wieder verworfen.
+    """
+    try:
+        st = TRACKER_CACHE.stat()
+    except OSError:
+        return None
+    schl = (st.st_mtime_ns, st.st_size, st.st_ino, kennung)
+    if _tracker_suche["schluessel"] == schl:
+        return dict(_tracker_suche["wert"])
+    with gzip.open(TRACKER_CACHE, "rb") as f:
+        roh = f.read(TRACKER_MAX_BYTES)
+    treffer: dict = {}
+    if json.dumps(kennung).encode() in roh:
+        text = roh.decode("utf-8")
+        del roh
+        dec = json.JSONDecoder()
+        i = _LEER.match(text, 0).end()
+        if text[i:i + 1] != "{":
+            raise ValueError("Tracker-Datei ist kein JSON-Objekt")
+        i = _LEER.match(text, i + 1).end()
+        while i < len(text) and text[i] != "}":
+            quelle, i = dec.raw_decode(text, i)
+            i = _LEER.match(text, i).end()
+            if text[i:i + 1] != ":":
+                raise ValueError("Tracker-Datei: ':' erwartet")
+            wert, i = dec.raw_decode(text, _LEER.match(text, i + 1).end())
+            if isinstance(wert, dict) and kennung in wert:
+                treffer[str(quelle)] = wert[kennung]
+            i = _LEER.match(text, i).end()
+            if text[i:i + 1] == ",":
+                i = _LEER.match(text, i + 1).end()
+    _tracker_suche.update(schluessel=schl, wert=treffer)
+    return dict(treffer)
+
+
+def lokal_bewerten(eintraege: dict, pakete: list[dict], rel: str, kernel: str = "") -> list[dict]:
+    """Tracker-Eintraege einer Kennung gegen die installierten Pakete (rein).
+
+    ``zustand`` je Quellpaket: ``update`` (installiert ist aelter als die
+    Behebung), ``neustart`` (Kernel: Behebung installiert, laeuft noch nicht),
+    ``offen`` (Debian hat keine Behebung), ``behoben``, ``nie_betroffen``,
+    ``nicht_installiert``, ``nicht_im_release`` oder ``unbekannt``.
+    Die Kernel-Regel ist dieselbe wie in ``debian_bewerten``.
+    """
+    je_quelle: dict[str, list[dict]] = {}
+    for p in pakete:
+        je_quelle.setdefault(p["quelle"], []).append(p)
+    kernel_images = [p for p in pakete if _KERNEL_IMAGE.match(p["paket"])]
+    erg = []
+    for quelle in sorted(eintraege):
+        e = eintraege[quelle] if isinstance(eintraege[quelle], dict) else {}
+        rels = e.get("releases") or {}
+        r = rels.get(rel)
+        # Eigene Schreibweise, nicht die aus debian_bewerten: die Gegenprobe
+        # dort verankert ihre Sabotage am Wortlaut und muss genau EINE Stelle treffen.
+        ist_kernel = bool(kernel) and bool(kernel_images) and quelle == "linux"
+        bins = kernel_images if ist_kernel else je_quelle.get(quelle, [])
+        einst = str((r or {}).get("urgency") or "").rstrip("*").strip()
+        z = {"quelle": quelle, "tracker_status": str((r or {}).get("status") or ""),
+             "fix": "", "einstufung": einst if einst in RANG else "",
+             "installiert": [{"paket": p["paket"],
+                              "version": p["version"] if ist_kernel else p["quell_version"]}
+                             for p in sorted(bins, key=lambda p: p["paket"])],
+             "laufend": kernel if ist_kernel else "",
+             "nodsa": str((r or {}).get("nodsa") or ""),
+             "nodsa_grund": str((r or {}).get("nodsa_reason") or ""),
+             "anderswo": _anderswo_gruppen({
+                 n: str(o.get("fixed_version")) for n, o in rels.items()
+                 if n != rel and isinstance(o, dict) and o.get("status") == "resolved"
+                 and str(o.get("fixed_version") or "0") != "0"}),
+             "text": str(e.get("description") or "")[:240]}
+        status = z["tracker_status"]
+        fv = str((r or {}).get("fixed_version") or "")
+        if fv and fv != "0":
+            z["fix"] = fv
+        if r is None:
+            z["zustand"] = "nicht_im_release"
+        elif status == "resolved" and fv == "0":
+            z["zustand"] = "nie_betroffen"
+        elif not bins:
+            z["zustand"] = "nicht_installiert"
+        elif status == "resolved" and fv:
+            if ist_kernel:
+                if cve_apt.vergleiche(kernel, fv) >= 0:
+                    z["zustand"] = "behoben"
+                elif any(cve_apt.vergleiche(p["version"], fv) >= 0 for p in bins):
+                    z["zustand"] = "neustart"
+                else:
+                    z["zustand"] = "update"
+            else:
+                alt = any(cve_apt.vergleiche(p["quell_version"], fv) < 0 for p in bins)
+                z["zustand"] = "update" if alt else "behoben"
+        elif status in ("open", "undetermined"):
+            z["zustand"] = "offen"
+        else:
+            z["zustand"] = "unbekannt"
+        erg.append(z)
+    return erg
+
+
+def _osv_json(kennung: str) -> dict | None:
+    """OSV-Eintrag; ``None`` = OSV kennt die Kennung nicht (404). Wirft sonst."""
+    try:
+        with urllib.request.urlopen(OSV_VULN + kennung, timeout=20) as a:  # nosec B310
+            roh = a.read(AUSKUNFT_ONLINE_MAX + 1)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    if len(roh) > AUSKUNFT_ONLINE_MAX:
+        raise ValueError("Antwort von OSV ist unplausibel gross")
+    d = json.loads(roh or b"{}")
+    return d if isinstance(d, dict) else None
+
+
+def _osv_im_bereich(v: str, a: dict, vergleich) -> bool | None:
+    """Liegt Version ``v`` in einem betroffenen Bereich des OSV-Eintrags ``a``?
+
+    ``None`` = nicht entscheidbar (keine ECOSYSTEM-Bereiche, keine Liste)."""
+    if v in (a.get("versions") or []):
+        return True
+    bereiche = [r for r in a.get("ranges") or [] if r.get("type") == "ECOSYSTEM"]
+    if not bereiche:
+        return False if a.get("versions") else None
+
+    def ab_hier(ab):
+        return ab == "0" or vergleich(v, ab) >= 0
+
+    try:
+        for r in bereiche:
+            ab = None
+            for ev in r.get("events") or []:
+                if "introduced" in ev:
+                    ab = str(ev["introduced"])
+                elif "fixed" in ev:
+                    if ab is not None and ab_hier(ab) and vergleich(v, str(ev["fixed"])) < 0:
+                        return True
+                    ab = None
+                elif "last_affected" in ev:
+                    if ab is not None and ab_hier(ab) and vergleich(v, str(ev["last_affected"])) <= 0:
+                        return True
+                    ab = None
+            # Bereich ohne Ende: alles ab "introduced" ist betroffen.
+            if ab is not None and ab_hier(ab):
+                return True
+    except Exception:  # noqa: BLE001 – unlesbare Fassung: nichts behaupten
+        return None
+    return False
+
+
+def _py_vergleich(a: str, b: str) -> int:
+    from packaging.version import Version
+    va, vb = Version(a), Version(b)
+    return (va > vb) - (va < vb)
+
+
+def online_auskunft(kennung: str, holen=None) -> dict:
+    """OSV online, abgeglichen gegen die installierten Pakete.
+
+    Fragt bei CVE-Kennungen zuerst ``DEBIAN-…`` (traegt den Stand je
+    Debian-Release, siehe ``_osv_datum``), dann die Kennung selbst (Titel).
+    Nur ein gelungener Abruf wird gemerkt.
+    """
+    c = _online_cache.get(kennung)
+    if c and time.time() - c[0] < AUSKUNFT_ONLINE_S:
+        return c[1]
+    holen = holen or _osv_json
+    kand = ([f"DEBIAN-{kennung}"] if kennung.startswith("CVE-") else []) + [kennung]
+    daten = {}
+    try:
+        for k in kand:
+            daten[k] = holen(k)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "quelle": "OSV", "fehler": f"{type(e).__name__}: {e}"[:300]}
+    gefunden = [d for d in daten.values() if isinstance(d, dict) and d]
+    aus = {"ok": True, "quelle": "OSV", "gefunden": bool(gefunden), "veroeffentlicht": "",
+           "titel": "", "debian": [], "andere": []}
+    if gefunden:
+        allg = daten.get(kennung) or gefunden[0]
+        aus["titel"] = str(allg.get("summary") or allg.get("details") or "")[:300]
+        for d in gefunden:
+            m = _DATUM.match(str(d.get("published") or ""))
+            if m and (not aus["veroeffentlicht"] or m.group(0) < aus["veroeffentlicht"]):
+                aus["veroeffentlicht"] = m.group(0)
+        nummer, kernel = release_nummer(), laufender_kernel()
+        try:
+            pakete = debian_pakete()
+        except Exception:  # noqa: BLE001 – ohne dpkg: Abgleich "unbekannt", nicht "nein"
+            pakete = None
+        py = python_installiert()
+        gesehen = set()
+        for d in gefunden:
+            for a in d.get("affected") or []:
+                pk = a.get("package") or {}
+                eco, name = str(pk.get("ecosystem") or ""), str(pk.get("name") or "")
+                if not eco or not name or (eco, name) in gesehen:
+                    continue
+                gesehen.add((eco, name))
+                if eco.startswith("Debian:"):
+                    if eco != f"Debian:{nummer}":
+                        continue
+                    aus["debian"].append(_osv_debian(name, a, pakete, kernel))
+                elif eco == "PyPI":
+                    v = (py or {}).get(_py_norm(name))
+                    aus["andere"].append({
+                        "oekosystem": eco, "paket": name, "installiert": v or "",
+                        "betroffen": (_osv_im_bereich(v, a, _py_vergleich) if v
+                                      else (False if py is not None else None))})
+                else:
+                    aus["andere"].append({"oekosystem": eco, "paket": name,
+                                          "installiert": "", "betroffen": None})
+    _online_cache[kennung] = (time.time(), aus)
+    return aus
+
+
+def _osv_debian(name: str, a: dict, pakete: list[dict] | None, kernel: str) -> dict:
+    fix = ""
+    for r in a.get("ranges") or []:
+        for ev in r.get("events") or []:
+            if ev.get("fixed"):
+                fix = str(ev["fixed"])
+    if pakete is None:
+        return {"paket": name, "fix": fix, "installiert": "", "betroffen": None}
+    if name == "linux" and kernel and any(_KERNEL_IMAGE.match(p["paket"]) for p in pakete):
+        v = kernel
+    else:
+        vs = sorted({p["quell_version"] for p in pakete if p["quelle"] == name},
+                    key=_vschluessel)
+        v = vs[0] if vs else ""
+    if not v:
+        return {"paket": name, "fix": fix, "installiert": "", "betroffen": False}
+    return {"paket": name, "fix": fix, "installiert": v,
+            "betroffen": _osv_im_bereich(v, a, cve_apt.vergleiche)}
+
+
+def _urteil(aus: dict) -> str:
+    bef = aus.get("befunde") or []
+    lokal = aus.get("lokal") or []
+    if any(b.get("klasse") != "ausgenommen" for b in bef):
+        return "betroffen"
+    if any(z["zustand"] in BETROFFEN for z in lokal):
+        return "betroffen"
+    if lokal:
+        return "nicht_betroffen"
+    if bef:
+        return "bewertet"
+    on = aus.get("online") or {}
+    if not on.get("ok"):
+        return "online_fehler"
+    return "lokal_fehlt" if on.get("gefunden") else "unbekannt"
+
+
+def kennung_auskunft(roh, online=None) -> dict:
+    """Bearbeitungsstand einer Kennung auf DIESEM System – eine klare Antwort.
+
+    ``urteil``: ``betroffen`` · ``nicht_betroffen`` · ``bewertet`` (nur als
+    Ausnahme bewertete Befunde) · ``lokal_fehlt`` (lokal unbekannt, online
+    bekannt) · ``unbekannt`` (auch online nicht) · ``online_fehler``.
+    """
+    k = kennung_norm(roh)
+    if not k:
+        return {"ok": False, "fehler": "Keine gültige Kennung (CVE-JJJJ-NNNN oder GHSA-…)."}
+    with _auskunft_sperre:
+        erg = zustand_ergebnis() or {}
+        bef = [{f: b.get(f) for f in ("bereich", "quelle", "klasse", "pakete", "version", "fix")}
+               for b in erg.get("befunde") or []
+               if k in [b.get("cve")] + list(b.get("aliase") or [])]
+        meta = _lesen(TRACKER_META, {})
+        aus = {"ok": True, "kennung": k, "befunde": bef,
+               "ergebnis_stand": str(erg.get("erzeugt_am") or ""),
+               "tracker_stand": str(meta.get("last_modified") or "") if isinstance(meta, dict) else "",
+               "tracker_fehlt": False, "lokal": [], "online": None}
+        if k.startswith("CVE-"):
+            try:
+                eintr = tracker_suchen(k)
+            except Exception as e:  # noqa: BLE001 – unlesbarer Tracker: weiter mit online
+                eintr, aus["tracker_fehler"] = {}, f"{type(e).__name__}: {e}"[:200]
+            if eintr is None:
+                aus["tracker_fehlt"] = True
+            elif eintr:
+                aus["lokal"] = lokal_bewerten(eintr, debian_pakete(), release(),
+                                              laufender_kernel())
+        if not bef and not aus["lokal"]:
+            aus["online"] = (online or online_auskunft)(k)
+        aus["urteil"] = _urteil(aus)
+    return aus
+
+
 # ── Pruefen, Plan, Beheben ───────────────────────────────────────────────────
 
 def schluessel(b: dict) -> str:

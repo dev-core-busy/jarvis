@@ -1082,6 +1082,26 @@ button.jv-pkg-cve { cursor: pointer; }
 .jv-pkg-cve-t { margin-top: 2px; font-size: .74rem; }
 .jv-pkg-cve-andere { margin-top: 6px; }
 .jv-pkg-cve-andere > summary { cursor: pointer; color: var(--text-primary); }
+/* Auskunft zu einer gesuchten Kennung (syspackages.js, kennungBlock). Das
+   Urteil steht als SATZ da – der farbige Rand ist nur Zugabe. */
+.jv-pkg-kenn {
+    margin: 8px 0; padding: 8px 10px; border-radius: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid rgba(var(--fg-rgb, 148,163,184), .35);
+    border-left-width: 4px;
+    color: var(--text-primary);
+    font-size: .8rem;
+}
+.jv-pkg-kenn.ist-betroffen { border-color: rgba(var(--danger-rgb), .60); }
+.jv-pkg-kenn.ist-ok { border-color: rgba(var(--success-rgb), .60); }
+.jv-pkg-kenn.ist-fehlt, .jv-pkg-kenn.ist-fehler { border-color: rgba(var(--warning-rgb), .60); }
+.jv-pkg-kenn-urteil { font-weight: 600; }
+.jv-pkg-kenn-liste { list-style: none; margin: 4px 0 0; padding: 0; }
+.jv-pkg-kenn-liste li { padding: 2px 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.jv-pkg-kenn-hinweis { margin-top: 4px; color: var(--text-secondary); }
+.jv-pkg-kenn .jv-pkg-cve-btn { margin-top: 6px; }
+.jv-pkg-kenn-links { margin-top: 4px; font-size: .76rem; color: var(--text-secondary); }
+.jv-pkg-kenn-links a { color: inherit; text-decoration: underline; }
 
 @media (max-width: 720px) {
     /* Auf schmalen Fenstern faellt die Beschreibung heraus – sie ist die

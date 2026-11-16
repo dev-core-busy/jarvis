@@ -9118,6 +9118,20 @@ async def system_cve(user: str = Depends(require_local_auth)):
     return JSONResponse(d)
 
 
+@app.get("/api/system/cve/kennung")
+async def system_cve_kennung(k: str = "", user: str = Depends(require_local_auth)):
+    """Bearbeitungsstand EINER Kennung (CVE/GHSA) auf diesem System.
+
+    Fuer die Suche der Paketliste: findet sie keinen Befund, sagt diese
+    Auskunft, warum – behoben, nie betroffen, oder lokal (noch) unbekannt; im
+    letzten Fall mit dem Stand von OSV online. Kann einen Abruf ins Netz
+    ausloesen, deshalb im Thread.
+    """
+    from backend import cve_pruefung
+    d = await asyncio.to_thread(cve_pruefung.kennung_auskunft, k)
+    return JSONResponse(d, status_code=200 if d.get("ok") else 400)
+
+
 @app.post("/api/system/cve/pruefen")
 async def system_cve_pruefen(req: Request, user: str = Depends(require_local_auth)):
     """Startet eine Pruefung im Hintergrund; ``{"beheben": true}`` behebt danach.

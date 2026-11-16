@@ -92,6 +92,8 @@
     var _cveOffen = {};       // ausdruecklich auf-/zugeklappte Detailzeilen je Paket
     var _suche = '';          // Suchtext (klein), gesetzt in zeichnen(), gelesen von cveBlock()
     var _cveMeldung = '';     // Ergebnis/Fehler am Knopf (bleibt stehen)
+    var _kennung = {};        // Kennung -> {laedt}|{d}|{fehler} (Auskunft zur Suche)
+    var _kennungTimer = null; // {k, t}: Anfrage, die noch auf die Tipp-Pause wartet
     /* BADGE AM ⓘ-KNOPF (Vorgabe 2026-10-29: nicht am Zahnrad). Die Zahl kommt
      * aus `/api/me` (`cve_badge`, nur fuer Admins) – derselbe Abruf, der den
      * Knopf ueberhaupt einblendet. Gezaehlt werden PAKETE mit Handlungsbedarf
@@ -216,6 +218,8 @@
         _cve = null;
         _cveOffen = {};
         _cveMeldung = '';
+        _kennung = {};
+        if (_kennungTimer) { clearTimeout(_kennungTimer.t); _kennungTimer = null; }
         if (_cvePoll) { clearTimeout(_cvePoll); _cvePoll = null; }
         document.removeEventListener('keydown', beiTaste);
         var b = knopf();
@@ -398,6 +402,12 @@
         var offen = function (n) {
             return Object.prototype.hasOwnProperty.call(_cveOffen, n) ? !!_cveOffen[n] : !!ueberKennung[n];
         };
+        // Vollstaendige Kennung ohne sichtbaren Befund: der Server sagt, warum.
+        var kennung = kennungAusSuche(q);
+        var kennHtml = kennung && !Object.keys(ueberKennung).length
+            && !andereGezeigt(cveBefunde().filter(function (b) { return !inPaketliste(b); }))
+                .some(function (b) { return befundTrifft(b, q); })
+            ? kennungBlock(kennung) : '';
         var zeigen = sortiert(treffer).slice(0, ZEILEN_MAX);
         var rest = treffer.length - zeigen.length;
 
@@ -448,6 +458,7 @@
             + '<input type="search" id="jv-pkg-suche" class="jv-pkg-suche" autocomplete="off"'
             + ' placeholder="' + esc(T('pkg.search', 'Paket, Version, Beschreibung oder CVE suchen …'))
             + '" value="' + esc(q) + '">'
+            + kennHtml
             + '<div class="jv-pkg-scroll"><table class="jv-pkg-tab"><thead><tr>'
             + th('package', T('pkg.col_name', 'Paket'))
             + th('version', T('pkg.col_version', 'Version'))
@@ -589,6 +600,9 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!offen()) return;
+                // Neues Pruefergebnis: gemerkte Auskuenfte beschreiben den alten Stand.
+                var tsAlt = _cve && _cve.ergebnis && _cve.ergebnis.ts;
+                if (d && d.ergebnis && d.ergebnis.ts !== tsAlt) _kennung = {};
                 _cve = d;
                 if (_bericht) zeichnen();
                 // Laeuft gerade eine Pruefung, nachfragen, bis sie fertig ist.
@@ -646,6 +660,183 @@
     function andereTrifft(b, q) {
         if (!q) return true;
         return befundTrifft(b, q) || String(b.quelle || '').toLowerCase().indexOf(q) >= 0;
+    }
+
+    /* AUSKUNFT ZU EINER KENNUNG. Die Suche oben findet nur BEFUNDE – eine
+     * Kennung, die behoben ist, nie zutraf oder lokal noch fehlt, ergab eine
+     * leere Liste, und die sah aus wie „unbekannt" (gemeldet 2026-11-16,
+     * CVE-2026-99270 auf ECHT). Ist die Suche eine VOLLSTAENDIGE Kennung und
+     * zeigt die Liste keinen Befund dazu, fragt der Kasten den Server
+     * (`/api/system/cve/kennung`): Pruefergebnis, lokaler Debian-Tracker und,
+     * wenn beide schweigen, OSV online. Die Antwort steht als EIN Satz da. */
+    var KENNUNG_RE = /^(cve-\d{4}-\d{4,}|ghsa(-[23456789cfghjmpqrvwx]{4}){3})$/;
+
+    /** Suchtext -> vereinheitlichte Kennung, '' = keine vollstaendige Kennung. */
+    function kennungAusSuche(q) {
+        var s = String(q || '').trim().toLowerCase();
+        if (!KENNUNG_RE.test(s)) return '';
+        return s.indexOf('cve-') === 0 ? s.toUpperCase() : 'GHSA-' + s.slice(5);
+    }
+
+    /** Anfrage mit kurzer Wartezeit: waehrend des Tippens ist „CVE-2026-9927"
+     *  schon eine gueltige Kennung – erst wer kurz innehaelt, meint sie. */
+    function kennungAnfragen(k) {
+        if (_kennungTimer) {
+            clearTimeout(_kennungTimer.t);
+            var alt = _kennung[_kennungTimer.k];
+            // Nie gesendete Anfrage abraeumen, sonst stuende sie beim
+            // Zuruecktippen dauerhaft auf „wird nachgesehen".
+            if (alt && alt.laedt && !alt.gesendet) delete _kennung[_kennungTimer.k];
+        }
+        _kennung[k] = { laedt: true };
+        _kennungTimer = { k: k, t: setTimeout(function () {
+            _kennungTimer = null;
+            if (!_kennung[k]) return;
+            _kennung[k].gesendet = true;
+            fetch('/api/system/cve/kennung?k=' + encodeURIComponent(k),
+                  { headers: { 'Authorization': 'Bearer ' + token() } })
+                .then(function (r) {
+                    return r.json().catch(function () { return null; })
+                        .then(function (d) {
+                            _kennung[k] = r.ok && d && d.ok ? { d: d }
+                                : { fehler: (d && (d.fehler || d.detail)) || ('HTTP ' + r.status) };
+                        });
+                })
+                .catch(function () { _kennung[k] = { fehler: T('pkg.err_net', 'Der Server war nicht erreichbar.') }; })
+                .then(function () { if (_bericht && offen()) zeichnen(); });
+        }, 500) };
+    }
+
+    function kennZustandText(z) {
+        switch (z.zustand) {
+            case 'update': return T('pkg.kenn_z_update', 'Update nötig');
+            case 'neustart': return T('pkg.kenn_z_neustart', 'Behebung installiert, Neustart nötig');
+            case 'offen': return T('pkg.cve_k_offen', 'noch keine Behebung von Debian');
+            case 'behoben': return T('pkg.kenn_z_behoben', 'behoben');
+            case 'nie_betroffen': return T('pkg.kenn_z_nie', 'laut Debian nie betroffen');
+            case 'nicht_installiert': return T('pkg.kenn_z_nicht_inst', 'nicht installiert');
+            case 'nicht_im_release': return T('pkg.kenn_z_release', 'in dieser Debian-Version nicht geführt');
+        }
+        return T('pkg.kenn_z_unklar', 'Stand unklar') + (z.tracker_status ? ' (' + z.tracker_status + ')' : '');
+    }
+
+    /** true/false/null aus dem Online-Abgleich als Wort. */
+    function kennBetroffenText(e) {
+        if (!e.installiert && e.betroffen === false) return T('pkg.kenn_z_nicht_inst', 'nicht installiert');
+        // Ohne installierte Version und ohne Urteil: dieses Oekosystem (Go, Maven …)
+        // prueft der Server gar nicht – „nicht entscheidbar" klaenge nach einem Versuch.
+        if (!e.installiert && e.betroffen == null) return T('pkg.kenn_on_ungeprueft', 'hier nicht geprüft');
+        var hier = e.installiert ? T('pkg.kenn_hier', 'hier') + ' ' + e.installiert + ': ' : '';
+        if (e.betroffen === true) return hier + T('pkg.kenn_on_ja', 'betroffen');
+        if (e.betroffen === false) return hier + T('pkg.kenn_on_nein', 'nicht betroffen');
+        return hier + T('pkg.kenn_on_unklar', 'nicht entscheidbar');
+    }
+
+    function kennLinks(k) {
+        var l = [];
+        var a = function (url, text) {
+            return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + esc(text) + '</a>';
+        };
+        if (/^CVE-/.test(k)) {
+            l.push(a('https://security-tracker.debian.org/tracker/' + k, T('pkg.kenn_l_debian', 'Debian-Tracker')));
+            l.push(a('https://nvd.nist.gov/vuln/detail/' + k, 'NVD'));
+        }
+        l.push(a('https://osv.dev/vulnerability/' + k, 'OSV'));
+        return '<div class="jv-pkg-kenn-links">' + l.join(' · ') + '</div>';
+    }
+
+    /** Der Kasten unter dem Suchfeld. `k` ist eine vollstaendige Kennung. */
+    function kennungBlock(k) {
+        var st = _kennung[k];
+        if (!st) { kennungAnfragen(k); st = _kennung[k]; }
+        var rahmen2 = function (art, inhalt) {
+            return '<div class="jv-pkg-kenn ist-' + art + '" data-kennung="' + esc(k) + '">' + inhalt + '</div>';
+        };
+        var satz = function (key, fallback, f) {
+            return '<div class="jv-pkg-kenn-urteil">'
+                + esc(T(key, fallback).replace('{k}', k).replace('{f}', f || '')) + '</div>';
+        };
+        if (st.laedt) {
+            return rahmen2('laedt', '<span class="jv-pkg-spin" aria-hidden="true"></span> '
+                + esc(T('pkg.kenn_laedt', '{k}: Stand wird nachgesehen …').replace('{k}', k)));
+        }
+        if (st.fehler) {
+            return rahmen2('fehler', satz('pkg.kenn_fehler', 'Die Auskunft zu {k} konnte nicht geholt werden: {f}', st.fehler));
+        }
+        var d = st.d, zeilen = [];
+        (d.befunde || []).forEach(function (b) {
+            zeilen.push(bereichText(b.bereich) + ' ' + b.quelle + ': ' + klasseText(b.klasse)
+                + (b.fix ? ' · ' + T('pkg.cve_fix', 'behoben in') + ' ' + b.fix : ''));
+        });
+        (d.lokal || []).forEach(function (z) {
+            var t = z.quelle + ': ' + kennZustandText(z);
+            if (z.fix) t += ' · ' + T('pkg.cve_fix', 'behoben in') + ' ' + z.fix;
+            if (z.laufend) {
+                t += ' · ' + T('pkg.kenn_laeuft', 'laufender Kernel') + ' ' + z.laufend;
+            } else if ((z.installiert || []).length) {
+                var inst = z.installiert.map(function (p) { return p.paket + ' ' + p.version; });
+                t += ' · ' + T('pkg.kenn_inst', 'installiert') + ' '
+                    + inst.slice(0, 3).join(', ') + (inst.length > 3 ? ' … (+' + (inst.length - 3) + ')' : '');
+            }
+            var aw = z.zustand === 'offen' ? anderswoText(z.anderswo) : '';
+            if (aw) t += ' · ' + aw;
+            zeilen.push(t);
+        });
+        var on = d.online;
+        if (on && on.ok && on.gefunden) {
+            zeilen.push(T('pkg.kenn_online', 'Online (OSV)')
+                + (on.veroeffentlicht ? ', ' + T('pkg.cve_veroeff', 'veröffentlicht') + ' ' + on.veroeffentlicht : '')
+                + (on.titel ? ': ' + on.titel : ''));
+            (on.debian || []).forEach(function (e) {
+                zeilen.push('Debian · ' + e.paket + (e.fix ? ' · ' + T('pkg.cve_fix', 'behoben in') + ' ' + e.fix : '')
+                    + ' · ' + kennBetroffenText(e));
+            });
+            (on.andere || []).forEach(function (e) {
+                zeilen.push(e.oekosystem + ' · ' + e.paket + ' · ' + kennBetroffenText(e));
+            });
+        }
+        var u = d.urteil, art = 'ok', kopf;
+        var gefiltert = (d.befunde || []).length && u === 'betroffen';
+        if (u === 'betroffen') {
+            art = 'betroffen';
+            kopf = satz('pkg.kenn_betroffen', '{k} betrifft dieses System.');
+        } else if (u === 'nicht_betroffen') {
+            kopf = satz('pkg.kenn_nicht_betroffen', '{k} ist bekannt und betrifft dieses System nicht (mehr).');
+        } else if (u === 'bewertet') {
+            kopf = satz('pkg.kenn_bewertet', '{k} ist bewertet und als Ausnahme eingetragen.');
+        } else if (u === 'lokal_fehlt') {
+            art = 'fehlt';
+            kopf = satz('pkg.kenn_lokal_fehlt', '{k} fehlt im lokalen Datenbestand, ist online aber bekannt.');
+        } else if (u === 'unbekannt') {
+            art = 'fehlt';
+            kopf = satz('pkg.kenn_unbekannt', '{k} ist weder lokal noch online (OSV) bekannt – bitte die Schreibweise prüfen.');
+        } else {
+            art = 'fehler';
+            kopf = satz('pkg.kenn_online_fehler', '{k} steht nicht im lokalen Datenbestand, und die Online-Abfrage ist gescheitert: {f}',
+                        (on && on.fehler) || '');
+        }
+        var hinweise = [];
+        if (gefiltert) hinweise.push(T('pkg.kenn_gefiltert', 'Der Befund ist durch einen Filter oben ausgeblendet.'));
+        // Betroffen laut Tracker, aber kein Befund: die letzte Pruefung ist aelter.
+        var neu = u === 'betroffen' && !(d.befunde || []).length;
+        if (neu) {
+            hinweise.push(T('pkg.kenn_neu', 'Die letzte Prüfung ({t}) hat das noch nicht erfasst.')
+                .replace('{t}', d.ergebnis_stand ? zeitpunkt(d.ergebnis_stand) : '–'));
+        }
+        if (u === 'lokal_fehlt') {
+            hinweise.push(T('pkg.kenn_stand', 'Lokaler Stand des Debian-Trackers: {t}. Die nächste Prüfung holt einen neuen Stand.')
+                .replace('{t}', d.tracker_stand || '–'));
+        }
+        var knopf = (neu || u === 'lokal_fehlt') && !(_cve && _cve.laeuft)
+            ? '<button type="button" class="jv-pkg-cve-btn" data-cve-aktion="pruefen">'
+              + esc(T('pkg.kenn_pruefen', 'Jetzt prüfen')) + '</button>'
+            : '';
+        return rahmen2(art, kopf
+            + (zeilen.length ? '<ul class="jv-pkg-kenn-liste">' + zeilen.map(function (z) {
+                return '<li>' + esc(z) + '</li>';
+            }).join('') + '</ul>' : '')
+            + (hinweise.length ? '<div class="jv-pkg-kenn-hinweis">' + esc(hinweise.join(' ')) + '</div>' : '')
+            + knopf + kennLinks(d.kennung || k));
     }
 
     /** Binaerpaket -> {rang, klasse, befunde[]} (Debian und Node.js als Paket). */

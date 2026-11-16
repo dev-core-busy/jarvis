@@ -1463,4 +1463,181 @@ check(".jv-pkg-cve-nicht_in_lock" in _TH,
       "die Markierung hat eine CSS-Regel – ohne sie ist sie unsichtbar")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+abschnitt("11. Auskunft zu EINER Kennung (Suche in der Paketliste)")
+# ═══════════════════════════════════════════════════════════════════════════
+# Anlass (2026-11-16): die Suche nach CVE-2026-99270 blieb auf ECHT leer – der
+# laufende Kernel trug die Behebung schon. Die Auskunft muss je Lage eine
+# eigene Antwort geben und darf OSV nur fragen, wenn lokal nichts steht.
+import gzip as _gz
+_K = cve_pruefung
+check(_K.kennung_norm(" cve-2026-99270 ") == "CVE-2026-99270", "Kennung wird vereinheitlicht")
+check(_K.kennung_norm("GHSA-Q675-QJ96-32M9") == "GHSA-q675-qj96-32m9", "GHSA in OSV-Schreibweise")
+check(_K.kennung_norm("CVE-2026-99") == "" and _K.kennung_norm("CVE-2026-99270; rm") == "",
+      "unvollstaendig oder mit Anhang: keine Kennung")
+check(_K.kennung_auskunft("../etc").get("ok") is False, "ungueltige Kennung wird abgewiesen, nicht gesucht")
+
+# Tracker mit DERSELBEN Kennung in zwei Quellpaketen, dazu eine Kennung, deren
+# Text die gesuchte als Praefix enthaelt (CVE-2026-9927 in CVE-2026-99270).
+_TR = {
+    "linux": {"CVE-2026-99270": {"description": "tcp: UAF", "releases": {
+        "trixie": {"status": "resolved", "fixed_version": "6.12.117-1", "urgency": "not yet assigned"},
+        "forky": {"status": "resolved", "fixed_version": "7.1.3-1"}}},
+        "CVE-2026-9927": {"releases": {"trixie": {"status": "open"}}}},
+    "linux-6.1": {"CVE-2026-99270": {"releases": {"bookworm": {"status": "open"}}}},
+    "openssl": {"CVE-2026-1111": {"releases": {"trixie": {"status": "resolved", "fixed_version": "3.5.1-1"}}},
+                "CVE-2026-2222": {"releases": {"trixie": {"status": "resolved", "fixed_version": "0"}}},
+                "CVE-2026-3333": {"releases": {"trixie": {"status": "open", "urgency": "low"}}}},
+    "nicht-da": {"CVE-2026-1111": {"releases": {"trixie": {"status": "resolved", "fixed_version": "1-1"}}}},
+}
+with _gz.open(_K.TRACKER_CACHE, "wt", encoding="utf-8") as _f:
+    json.dump(_TR, _f, indent=1)   # mit Leerraum: der Zerleger darf sich nicht auf kompaktes JSON verlassen
+_t = _K.tracker_suchen("CVE-2026-99270")
+check(sorted(_t) == ["linux", "linux-6.1"], "Tracker: Kennung in beiden Quellpaketen gefunden", str(sorted(_t)))
+check(_K.tracker_suchen("CVE-2026-9927") == {"linux": _TR["linux"]["CVE-2026-9927"]},
+      "Praefix-Kennung trifft nur sich selbst", str(_K.tracker_suchen("CVE-2026-9927")))
+check(_K.tracker_suchen("CVE-2026-4444") == {}, "nicht enthaltene Kennung: leeres Ergebnis")
+_K.TRACKER_CACHE.rename(_K.TRACKER_CACHE.with_suffix(".weg"))
+check(_K.tracker_suchen("CVE-2026-99270") is None, "kein gespeicherter Tracker: None (nicht 'nicht enthalten')")
+_K.TRACKER_CACHE.with_suffix(".weg").rename(_K.TRACKER_CACHE)
+
+def _pk(paket, quelle, v, qv=None):
+    return {"paket": paket, "arch": "amd64", "version": v, "quelle": quelle, "quell_version": qv or v, "status": "ii"}
+_PAK = [_pk("linux-image-6.12.116+deb13-amd64", "linux-signed-amd64", "6.12.116-1", "6.12.116+1"),
+        _pk("linux-image-6.12.117+deb13-amd64", "linux-signed-amd64", "6.12.117-1", "6.12.117+1"),
+        _pk("libssl3t64", "openssl", "3.5.0-1"), _pk("openssl", "openssl", "3.5.0-1")]
+
+def _zust(eintr, kernel="6.12.116-1", pak=None):
+    return {z["quelle"]: z for z in _K.lokal_bewerten(eintr, _PAK if pak is None else pak, "trixie", kernel)}
+_lin = {"linux": _TR["linux"]["CVE-2026-99270"]}
+check(_zust(_lin, "6.12.117-1")["linux"]["zustand"] == "behoben",
+      "Kernel: laufender Kernel traegt die Behebung -> behoben (der ECHT-Fall)")
+check(_zust(_lin, "6.12.116-1")["linux"]["zustand"] == "neustart",
+      "Kernel: Behebung installiert, laeuft nicht -> neustart")
+_ohne117 = [p for p in _PAK if "117" not in p["paket"]]
+check(_zust(_lin, "6.12.116-1", _ohne117)["linux"]["zustand"] == "update", "Kernel: nichts Neueres installiert -> update")
+check(_zust(_lin, "6.12.117-1")["linux"]["laufend"] == "6.12.117-1", "der laufende Kernel steht in der Antwort")
+_ssl = {k: _TR["openssl"][k] for k in _TR["openssl"]}
+check(_zust({"openssl": _ssl["CVE-2026-1111"]})["openssl"]["zustand"] == "update",
+      "installiert aelter als Behebung -> update")
+check(_zust({"openssl": _ssl["CVE-2026-1111"]}, pak=[_pk("openssl", "openssl", "3.5.1-1")])["openssl"]["zustand"] == "behoben",
+      "installiert gleich Behebung -> behoben")
+check(_zust({"openssl": _ssl["CVE-2026-2222"]})["openssl"]["zustand"] == "nie_betroffen", "fixed_version 0 -> nie betroffen")
+_off = _zust({"openssl": _ssl["CVE-2026-3333"]})["openssl"]
+check(_off["zustand"] == "offen" and _off["einstufung"] == "low", "open -> offen, mit Einstufung")
+check(_zust({"nicht-da": _TR["nicht-da"]["CVE-2026-1111"]})["nicht-da"]["zustand"] == "nicht_installiert",
+      "Quellpaket nicht installiert -> nicht_installiert")
+check(_zust({"linux-6.1": _TR["linux-6.1"]["CVE-2026-99270"]})["linux-6.1"]["zustand"] == "nicht_im_release",
+      "kein Eintrag fuer dieses Release -> nicht_im_release")
+check(_zust(_lin, "6.12.117-1")["linux"]["anderswo"] == [{"version": "7.1.3-1", "releases": ["forky"]}],
+      "Behebung in anderen Releases wird mitgeliefert")
+
+# OSV-Bereiche
+_a = {"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "6.12.117-1"}]}]}
+_v = cve_apt.vergleiche
+check(_K._osv_im_bereich("6.12.116-1", _a, _v) is True and _K._osv_im_bereich("6.12.117-1", _a, _v) is False,
+      "OSV: unter der Behebung betroffen, ab ihr nicht")
+check(_K._osv_im_bereich("1.0", {"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "2.0"}, {"fixed": "3.0"}]}]}, _v) is False,
+      "OSV: vor 'introduced' nicht betroffen")
+check(_K._osv_im_bereich("2.5", {"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "2.0"}]}]}, _v) is True,
+      "OSV: Bereich ohne Ende -> betroffen")
+check(_K._osv_im_bereich("2.0", {"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "1.0"}, {"last_affected": "2.0"}]}]}, _v) is True,
+      "OSV: last_affected zaehlt einschliesslich")
+check(_K._osv_im_bereich("9", {"versions": ["9"]}, _v) is True and _K._osv_im_bereich("8", {"versions": ["9"]}, _v) is False,
+      "OSV: Versionsliste ohne Bereich")
+check(_K._osv_im_bereich("9", {"ranges": [{"type": "GIT", "events": []}]}, _v) is None,
+      "OSV: nur GIT-Bereich -> nicht entscheidbar (nicht 'nein')")
+
+# Ganze Auskunft mit Attrappen (echte Signaturen); OSV zaehlt die Aufrufe.
+_alt = {n: getattr(_K, n) for n in ("debian_pakete", "release", "release_nummer", "laufender_kernel",
+                                    "python_installiert", "zustand_ergebnis")}
+_K.debian_pakete = lambda: list(_PAK)
+_K.release = lambda: "trixie"
+_K.release_nummer = lambda: "13"
+_K.laufender_kernel = lambda: "6.12.117-1"
+_K.python_installiert = lambda: {"jinja2": "3.1.6"}
+_erg = {"erzeugt_am": "2026-11-15T19:00:09+01:00", "befunde": []}
+_K.zustand_ergebnis = lambda: _erg
+_osv_rufe = []
+def _osv(antworten):
+    def holen(k):
+        _osv_rufe.append(k)
+        a = antworten.get(k)
+        if isinstance(a, Exception):
+            raise a
+        return a
+    return holen
+try:
+    _osv_rufe.clear()
+    _a1 = _K.kennung_auskunft("CVE-2026-99270", online=_osv({}))
+    check(_a1["urteil"] == "nicht_betroffen" and _a1["lokal"][0]["zustand"] == "behoben",
+          "ECHT-Fall: bekannt, behoben -> nicht_betroffen", json.dumps(_a1)[:200])
+    check(_osv_rufe == [] and _a1["online"] is None, "lokal bekannt: KEINE Online-Abfrage", str(_osv_rufe))
+    _K.laufender_kernel = lambda: "6.12.116-1"
+    check(_K.kennung_auskunft("CVE-2026-99270", online=_osv({}))["urteil"] == "betroffen",
+          "derselbe Fall vor dem Neustart -> betroffen")
+    _K.laufender_kernel = lambda: "6.12.117-1"
+    _erg["befunde"] = [{"bereich": "python", "quelle": "x", "cve": "GHSA-q675-qj96-32m9",
+                        "aliase": ["CVE-2026-7777"], "klasse": "ausgenommen"}]
+    _a2 = _K.kennung_auskunft("cve-2026-7777", online=_osv({}))
+    check(_a2["urteil"] == "bewertet" and len(_a2["befunde"]) == 1 and _osv_rufe == [],
+          "Befund nur ueber Alias, als Ausnahme bewertet -> bewertet, ohne Online-Abfrage", json.dumps(_a2)[:200])
+    _erg["befunde"][0]["klasse"] = "lock"
+    check(_K.kennung_auskunft("CVE-2026-7777", online=_osv({}))["urteil"] == "betroffen", "offener Befund -> betroffen")
+    _erg["befunde"] = []
+
+    # Lokal unbekannt -> OSV, mit der echten Antwortform (DEBIAN-… traegt die Releases).
+    _deb = {"id": "DEBIAN-CVE-2026-55555", "published": "2026-11-03T13:17:24Z", "affected": [
+        {"package": {"name": "linux", "ecosystem": "Debian:12"},
+         "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]},
+        {"package": {"name": "linux", "ecosystem": "Debian:13"},
+         "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "6.12.118-1"}]}]}]}
+    _cve = {"id": "CVE-2026-55555", "summary": "tcp: UAF", "published": "2026-11-03T12:32:09Z", "affected": [
+        {"package": {"name": "Jinja2", "ecosystem": "PyPI"}, "versions": ["3.1.5"]},
+        {"package": {"name": "Kernel", "ecosystem": "Linux"},
+         "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "4.2.0"}, {"fixed": "6.12.118"}]}]}]}
+    _osv_rufe.clear()
+    _a3 = _K.kennung_auskunft("CVE-2026-55555", online=lambda k: _K.online_auskunft(
+        k, holen=_osv({"DEBIAN-CVE-2026-55555": _deb, "CVE-2026-55555": _cve})))
+    _on = _a3["online"] or {}
+    check(_a3["urteil"] == "lokal_fehlt" and _on.get("gefunden"), "lokal unbekannt, online bekannt -> lokal_fehlt",
+          json.dumps(_a3)[:300])
+    check(_osv_rufe == ["DEBIAN-CVE-2026-55555", "CVE-2026-55555"], "OSV: zuerst DEBIAN-…, dann die Kennung", str(_osv_rufe))
+    check(_on.get("debian") == [{"paket": "linux", "fix": "6.12.118-1", "installiert": "6.12.117-1", "betroffen": True}],
+          "nur das EIGENE Debian-Release, abgeglichen gegen den laufenden Kernel", str(_on.get("debian")))
+    _py = [e for e in _on.get("andere") or [] if e["oekosystem"] == "PyPI"]
+    check(_py == [{"oekosystem": "PyPI", "paket": "Jinja2", "installiert": "3.1.6", "betroffen": False}],
+          "Python-Paket: installierte Version gegen die Liste (Namen normiert)", str(_py))
+    check(_on.get("veroeffentlicht") == "2026-11-03" and _on.get("titel") == "tcp: UAF", "Datum und Titel aus OSV")
+    _osv_rufe.clear()
+    _K.kennung_auskunft("CVE-2026-55555", online=lambda k: _K.online_auskunft(k, holen=_osv({})))
+    check(_osv_rufe == [], "gelungene Online-Antwort wird gemerkt (kein zweiter Abruf)", str(_osv_rufe))
+
+    _a4 = _K.kennung_auskunft("CVE-2026-66666", online=lambda k: _K.online_auskunft(k, holen=_osv({})))
+    check(_a4["urteil"] == "unbekannt", "auch online unbekannt -> unbekannt", _a4["urteil"])
+    _a5 = _K.kennung_auskunft("CVE-2026-66667", online=lambda k: _K.online_auskunft(
+        k, holen=_osv({"DEBIAN-CVE-2026-66667": OSError("Netz weg")})))
+    check(_a5["urteil"] == "online_fehler" and "Netz weg" in (_a5["online"] or {}).get("fehler", ""),
+          "Online-Fehler -> online_fehler mit Grund (nicht 'unbekannt')", json.dumps(_a5)[:200])
+    _osv_rufe.clear()
+    _K.kennung_auskunft("CVE-2026-66667", online=lambda k: _K.online_auskunft(
+        k, holen=_osv({"DEBIAN-CVE-2026-66667": None, "CVE-2026-66667": None})))
+    check(len(_osv_rufe) == 2, "ein gescheiterter Abruf wird NICHT gemerkt", str(_osv_rufe))
+finally:
+    for _n, _f in _alt.items():
+        setattr(_K, _n, _f)
+
+# Endpunkt: Admin-Schranke und Abruf im Thread (Regel am Syntaxbaum).
+_MAIN = ast.parse((ROOT / "backend" / "main.py").read_text(encoding="utf-8"))
+_ep = [f for f in ast.walk(_MAIN) if isinstance(f, ast.AsyncFunctionDef) and any(
+    isinstance(d, ast.Call) and getattr(d.func, "attr", "") == "get" and d.args
+    and getattr(d.args[0], "value", "") == "/api/system/cve/kennung" for d in f.decorator_list)]
+check(len(_ep) == 1, "Endpunkt /api/system/cve/kennung existiert genau einmal", str(len(_ep)))
+if _ep:
+    _src = ast.unparse(_ep[0])
+    check("Depends(require_local_auth)" in _src, "nur fuer Administratoren (require_local_auth)")
+    check("asyncio.to_thread(cve_pruefung.kennung_auskunft" in _src,
+          "die Auskunft laeuft im Thread (sie kann ins Netz fragen)")
+
+
 ende()

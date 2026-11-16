@@ -1557,6 +1557,13 @@ async def _sicherheits_protokoll_mw(request: Request, call_next):
 
 app.add_middleware(_AnfragePfadMiddleware)
 
+# GZip fuer statische Inhalte und HTML-Seiten (nicht /api/, /ws, /webdav) –
+# Begruendung und Grenzen in backend/kompression.py. ZULETZT registriert, damit
+# sie die AEUSSERSTE Schicht ist: die inneren Middlewares (no_cache_static
+# schreibt HTML um) sehen den unkomprimierten Rumpf.
+from backend import kompression as _kompression
+app.add_middleware(_kompression.KompressionsWeiche)
+
 
 def _aktivitaet(user: str, bereich: str, aktion: str, objekt: str = "", *,
                 rechte: bool = False, **details) -> None:

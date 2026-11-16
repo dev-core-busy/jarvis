@@ -52,6 +52,22 @@
         p.hidden = false;
     }
 
+    /* Auf-/Zuklappen nach Bedarf (Vorgabe 2026-11-16): offen nur, wenn eine
+     * persoenliche Anmeldung NOETIG ist – nicht bei gemeinsamem Zugang und
+     * nicht, wenn schon angemeldet. Gesetzt beim ersten bekannten Zustand;
+     * danach wird nur noch AUFgeklappt, wenn sie noetig WIRD. Ein
+     * automatisches Zuklappen nach Speichern/Anmelden verschluckte die
+     * Erfolgsmeldung im Container, und ein Klick des Benutzers bliebe nie
+     * stehen. */
+    var _accNoetig = null;
+    function accKlappen(noetig) {
+        var s = $('ca-sect-account');
+        if (!s) return;
+        var erstes = (_accNoetig === null);
+        if (erstes || (noetig && !_accNoetig)) s.open = !!noetig;
+        _accNoetig = !!noetig;
+    }
+
     /** Zeichnet Pille, Hinweiskasten und Felder aus `_acc`. */
     function accZeichnen() {
         var a = _acc || {};
@@ -59,6 +75,12 @@
         // entfaellt ganz (gleiche Regel wie in /jira-addon).
         var sect = $('ca-sect-account');
         if (sect) sect.style.display = (a.persoenlich_erlaubt === false) ? 'none' : '';
+        // Noetig nur ohne gueltigen eigenen Token UND ohne gemeinsamen Zugang
+        // (und mit Serveradresse – ohne sie hilft auch kein Token).
+        if (_acc) {
+            accKlappen(!!a.server_konfiguriert && a.sammel_vorhanden === false
+                       && !(a.vorhanden && a.aktiv !== false));
+        }
         // Sitzungsbetrieb (persoenliche Zugaenge aus): eigener Abschnitt mit
         // Anmelden/Abmelden (zugang_sitzung.js).
         if (_sz) _sz.zeichnen(a);

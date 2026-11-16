@@ -85,16 +85,13 @@
         zeile.className = 'zg-zeile';
         zeile.setAttribute('data-system', e.system);
 
-        var kopf = document.createElement('div');
-        kopf.className = 'zg-kopf';
+        // EINE Zeile je System (Vorgabe 2026-11-16): Name links, Felder rechts.
+        // Der Status steht darunter ueber die ganze Breite und nimmt nur Platz
+        // ein, wenn er etwas meldet (theme.css: .zg-status:empty).
         var name = document.createElement('span');
         name.className = 'zg-name';
         name.textContent = sys.name;
-        var status = document.createElement('span');
-        status.className = 'zg-status';
-        kopf.appendChild(name);
-        kopf.appendChild(status);
-        zeile.appendChild(kopf);
+        zeile.appendChild(name);
 
         var felder = document.createElement('div');
         felder.className = 'zg-felder';
@@ -119,6 +116,10 @@
         g.setAttribute('aria-label', sys.name + ' – ' + ph);
         felder.appendChild(g);
         zeile.appendChild(felder);
+
+        var status = document.createElement('span');
+        status.className = 'zg-status';
+        zeile.appendChild(status);
         return zeile;
     }
 

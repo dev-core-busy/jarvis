@@ -2021,8 +2021,10 @@
         // (entfernten) Header-Zahnrad-Button oeffnen kann.
         window._openSettingsModal = openModal;
         if (btnOpen) btnOpen.addEventListener('click', openModal);
-        btnClose.addEventListener('click', closeModal);
-        // Kein Schließen bei Klick außerhalb oder versehentlichem Drag – nur explizit via X-Button
+        // Das Kreuz gibt es seit 2026-11-16 nicht mehr (zurueck geht es ueber das
+        // Haus); die Pruefung bleibt, falls eine Seite es noch mitbringt.
+        if (btnClose) btnClose.addEventListener('click', closeModal);
+        // Kein Schliessen bei Klick ausserhalb oder versehentlichem Drag.
 
         // ── Vollbild-Umschalter (gilt für alle Einstellungs-Tabs) ──
         const btnMax = document.getElementById('btn-maximize-settings');

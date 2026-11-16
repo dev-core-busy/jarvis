@@ -20,11 +20,11 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=63">
+    <link rel="stylesheet" href="/static/css/theme.css?v=64">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
-    <link rel="stylesheet" href="/static/css/style.css?v=235">
+    <link rel="stylesheet" href="/static/css/style.css?v=236">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1578,7 +1578,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <!-- Suchfeld (Vorbild: Android-Systemeinstellungen; Bauform
                          wie das Benutzer-Panel in /portal). LINKS vom Haus, weil
                          es zum Titel gehoert und nicht zu den Fenster-Aktionen
-                         (Startseite / Vollbild / Schliessen) rechts daneben.
+                         (Startseite / Vollbild) rechts daneben.
                          Gesucht wird in den GANZEN Einstellungen: Reiter,
                          Abschnitte, Feldbeschriftungen und die Skills samt
                          ihren Konfigurationsfeldern. Der Suchraum steht im
@@ -1617,7 +1617,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </svg>
                     </a>
                     <button class="btn-icon btn-maximize-settings" id="btn-maximize-settings" title="Vollbild ein/aus" aria-label="Vollbild">⛶</button>
-                    <button class="btn-close-modal" id="btn-close-settings">&times;</button>
+                    <!-- Kein Schliessen-Kreuz mehr (Vorgabe 2026-11-16): /settings ist
+                         eine eigene Seite, das Haus fuehrt zurueck – ein zweites
+                         Symbol fuer denselben Weg war doppelt. -->
                 </div>
                 <!-- ⚠ DAS PANEL IST KIND DES KOPFES, NICHT DES SUCHFELDES.
                      `.modal-content` traegt `overflow: hidden`; solange das
@@ -6688,15 +6690,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/cpubar.js?v=4"></script>
     <script src="/static/js/sysload.js?v=6"></script>
     <script src="/static/js/syspackages.js?v=24"></script>
-    <script src="/static/js/zugang_anmeldung.js?v=1"></script>
+    <script src="/static/js/zugang_anmeldung.js?v=2"></script>
     <script src="/static/js/agent_roles.js?v=5"></script>
     <script src="/static/js/model_caps.js?v=7"></script>
     <script src="/static/js/alpha_sort.js?v=2"></script>
     <!-- Suchfeld im Modal-Kopf. VOR app.js: dessen openModal ruft SettingsSearch.init(). -->
-    <script src="/static/js/settings_search.js?v=4"></script>
+    <script src="/static/js/settings_search.js?v=5"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=254"></script>
+    <script src="/static/js/app.js?v=255"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

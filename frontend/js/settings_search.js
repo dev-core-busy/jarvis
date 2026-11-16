@@ -714,7 +714,7 @@
             if (p.classList && p.classList.contains('kb-collapse-body')
                 && p.style.display === 'none' && p.id) kette.unshift(p);
             // ⚠ EIN <details> GEHOERT MIT AUFGEKLAPPT. Die Berechtigungs-
-            // Bloecke des Sicherheits-Reiters („SAP-Zugriff", „Internet-Zugang",
+            // Bloecke des Sicherheits-Reiters („Verbindung", „Internet-Sperre",
             // …) und „Letzte Zugriffs-Verstoesse" sind so gebaut und starten ZU;
             // ohne diesen Zweig landete der Treffer auf einer geschlossenen
             // Zeile – also derselbe Fehler eine Ebene tiefer.
@@ -756,7 +756,12 @@
             } catch (x) { /* kein Sprung - der Reiter steht trotzdem richtig */ }
         });
         // Die Hervorhebung ist eine ANTWORT auf den Klick („hier ist er"),
-        // kein Zustand - sie verfaellt wieder.
+        // kein Zustand - sie verfaellt wieder. Eine noch lebende vom VORIGEN
+        // Treffer faellt sofort weg: zwei Markierungen zugleich sagen nicht
+        // mehr, wohin der Klick gefuehrt hat.
+        document.querySelectorAll('.st-such-treffer').forEach(function (alt) {
+            alt.classList.remove('st-such-treffer');
+        });
         el.classList.add('st-such-treffer');
         setTimeout(function () { el.classList.remove('st-such-treffer'); }, 2600);
         return true;

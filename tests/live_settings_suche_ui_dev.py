@@ -281,12 +281,13 @@ with connect(ws, open_timeout=20, max_size=80_000_000) as sock:
 
         feld = rect(sock, "#st-such-feld")
         haus = rect(sock, "#btn-home-settings")
-        zu = rect(sock, "#btn-close-settings")
+        # Letztes Symbol der Gruppe ist seit 2026-11-16 "Vollbild" (kein Kreuz mehr).
+        zu = rect(sock, "#btn-maximize-settings")
         check("Suchfeld ist sichtbar", bool(feld) and feld["w"] > 60 and feld["h"] > 10,
               json.dumps(feld))
         check("es steht LINKS vom Haus", bool(feld) and bool(haus) and feld["r"] <= haus["x"] + 2,
               f"feld.r={feld and feld['r']} haus.x={haus and haus['x']}")
-        check("Feld, Haus und Schliessen stehen in EINER Zeile",
+        check("Feld, Haus und Vollbild stehen in EINER Zeile",
               bool(feld) and bool(zu) and abs(feld["y"] - zu["y"]) < 14,
               f"{feld and feld['y']} vs {zu and zu['y']}")
         check("die Symbolgruppe bleibt im Kopf",
@@ -407,14 +408,14 @@ with connect(ws, open_timeout=20, max_size=80_000_000) as sock:
             width=520, height=800, deviceScaleFactor=1, mobile=False)
         time.sleep(0.8)
         f3 = rect(sock, "#st-such-feld")
-        z3 = rect(sock, "#btn-close-settings")
+        z3 = rect(sock, "#btn-maximize-settings")
         h3 = rect(sock, "#btn-home-settings")
         k3 = rect(sock, "#settings-modal .modal-header")
         check("schmal: das Feld schrumpft, bleibt aber benutzbar",
               bool(f3) and f3["w"] >= 60, json.dumps(f3))
         check("schmal: die Symbole behalten ihre Groesse",
               bool(h3) and h3["w"] >= 30, json.dumps(h3))
-        check("schmal: Schliessen bleibt im Kopf",
+        check("schmal: Vollbild bleibt im Kopf",
               bool(z3) and bool(k3) and z3["r"] <= k3["r"] + 1,
               f"zu.r={z3 and z3['r']} kopf.r={k3 and k3['r']}")
 
@@ -542,24 +543,27 @@ with connect(ws, open_timeout=20, max_size=80_000_000) as sock:
         # Sicherheits-Reiters sind so gebaut und starten ZU; ohne das landete
         # der Treffer auf einer geschlossenen Zeile.
         js(sock, """(function(){
-            var d=document.querySelector('details.sec-sub[data-sub="internet"]');
+            var d=document.querySelector('details.sec-sub[data-sub="egress"]');
             if(d) d.open=false;
             var f=document.getElementById('st-such-feld');
             f.value=''; f.dispatchEvent(new Event('input',{bubbles:true}));
             f.focus();})()""")
-        for z in "internet-zugang":
+        # Ziel ist „Internet-Sperre (Firewall)": den frueheren Block
+        # „Internet-Zugang" (data-sub="internet") gibt es seit ce4e6cc7 nicht
+        # mehr – die Probe zielte danach ins Leere.
+        for z in "internet-sperre":
             cdp(sock, "Input.dispatchKeyEvent", type="keyDown", text=z)
             cdp(sock, "Input.dispatchKeyEvent", type="keyUp")
         time.sleep(1.2)
         vor = js(sock, """(function(){var d=document.querySelector(
-            'details.sec-sub[data-sub="internet"]'); return d?d.open:null;})()""")
+            'details.sec-sub[data-sub="egress"]'); return d?d.open:null;})()""")
         check("Positivkontrolle: der Block ist VOR dem Klick zu", vor is False, str(vor))
         nI = js(sock, "document.querySelectorAll('#st-such-liste .st-such-item').length")
-        check("„internet-zugang“ findet etwas", bool(nI) and nI > 0, str(nI))
+        check("„internet-sperre“ findet etwas", bool(nI) and nI > 0, str(nI))
         js(sock, "document.querySelector('#st-such-liste .st-such-item').click();")
         time.sleep(0.6)
         nach = js(sock, """(function(){var d=document.querySelector(
-            'details.sec-sub[data-sub="internet"]');
+            'details.sec-sub[data-sub="egress"]');
             var r=d?d.getBoundingClientRect():null;
             return { open: d?d.open:null,
                      sichtbar: r ? (r.height>0 && r.top<window.innerHeight && r.bottom>0) : false };

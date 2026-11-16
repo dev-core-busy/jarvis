@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jira</title>
     <link rel="icon" href="/static/favicon.ico">
-    <link rel="stylesheet" href="/static/css/theme.css?v=63">
+    <link rel="stylesheet" href="/static/css/theme.css?v=64">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
@@ -68,7 +68,7 @@
          Nur sichtbar, wenn "Persoenliche Zugaenge erlauben" AUS ist (dann ist
          "Mein …-Zugang" ausgeblendet): Token nur im Arbeitsspeicher, Anmelden
          und Abmelden wie bei SAP. Logik: zugang_sitzung.js -->
-    <details class="ja-sect" id="ja-sz-sect" open style="display:none">
+    <details class="ja-sect" id="ja-sz-sect" style="display:none">
         <summary>
             <span data-i18n="zs.jira_h">Mein Jira-Zugang</span>
             <span class="ja-acc-pill" id="ja-sz-pill"></span>
@@ -101,7 +101,7 @@
          ist dieselbe wie fuer den ganzen Bereich. Eine zusaetzliche Freigabe
          waere eine Schranke vor einer offenen Tuer – der Token erweitert keine
          Rechte, er ERSETZT die des Sammelzugangs durch die eigenen. -->
-    <details class="ja-sect" id="ja-sect-account" open>
+    <details class="ja-sect" id="ja-sect-account">
         <summary>
             <span data-i18n="jaddon.acc_h">Mein Jira-Zugang</span>
             <span class="ja-acc-pill" id="ja-acc-pill"></span>
@@ -334,7 +334,7 @@
 <script src="/static/js/settings_btn.js?v=7"></script>
 <script src="/static/js/activity.js?v=3"></script>
 <script src="/static/js/issues.js?v=16"></script>
-<script src="/static/js/zugang_sitzung.js?v=3"></script>
-<script src="/static/js/jira_addon.js?v=13"></script>
+<script src="/static/js/zugang_sitzung.js?v=4"></script>
+<script src="/static/js/jira_addon.js?v=14"></script>
 </body>
 </html>

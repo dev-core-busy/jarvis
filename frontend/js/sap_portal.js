@@ -110,6 +110,22 @@
     }
     function startLlmStatus() { checkLlm(); if (!_llmTimer) _llmTimer = setInterval(checkLlm, 30000); }
 
+    /* Auf-/Zuklappen nach Bedarf (Vorgabe 2026-11-16): offen nur, wenn eine
+     * persoenliche Anmeldung NOETIG ist – nicht bei gemeinsamem Zugang und
+     * nicht, wenn schon angemeldet. Gesetzt beim ersten bekannten Zustand;
+     * danach wird nur noch AUFgeklappt, wenn sie noetig WIRD. Ein
+     * automatisches Zuklappen nach Speichern/Anmelden verschluckte die
+     * Erfolgsmeldung im Container, und ein Klick des Benutzers bliebe nie
+     * stehen. */
+    var _accNoetig = null;
+    function accKlappen(noetig) {
+        var s = $('sp-sect-account');
+        if (!s) return;
+        var erstes = (_accNoetig === null);
+        if (erstes || (noetig && !_accNoetig)) s.open = !!noetig;
+        _accNoetig = !!noetig;
+    }
+
     // ── Verbindungszustand ──────────────────────────────────────────
     function loadStatus() {
         fetch('/api/sap/status', { headers: authHeaders() })
@@ -125,6 +141,9 @@
                 // Anmeldung muss trotzdem angeboten werden. Massgeblich ist
                 // deshalb die QUELLE, nicht "configured".
                 var ohneAnmeldung = d.kachel_pflicht && d.quelle !== 'persoenlich';
+                // Noetig ist der Container nur, wenn KEIN Zugang gilt und die
+                // Anmeldung nicht schon im Formular darueber abgefragt wird.
+                accKlappen(!d.configured && !(ohneAnmeldung && d.anmeldung && d.anmeldung.feld));
                 if (ohneAnmeldung && d.anmeldung && d.anmeldung.feld) {
                     // Zugang hat schon funktioniert, es fehlt nur das Kennwort:
                     // direkt fragen statt einen Hinweistext zu zeigen.
@@ -151,8 +170,6 @@
                     el.textContent = T('sap.not_logged_in', 'Nicht bei SAP angemeldet');
                     el.title = d.hinweis || '';
                     note(d.hinweis || T('sap.not_logged_in', 'Nicht bei SAP angemeldet'), 'error');
-                    // Den Anmeldebereich gleich aufklappen – dort geht es weiter.
-                    var sect = $('sp-sect-account'); if (sect) sect.open = true;
                     return;
                 }
                 if (!d.configured) {

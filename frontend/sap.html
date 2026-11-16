@@ -148,8 +148,9 @@
            Anmeldekarte mit ihrem margin-bottom), darunter derselbe Abstand wie
            zwischen allen Containern. */
         #sp-sect-account { margin-top: 0; }
-        #sp-sect-account + .sp-card { margin-top: var(--jv-abstand, 16px); }
-        .sp-karte-h { margin: 0 0 12px; font-size: 1rem; color: var(--text-primary); }
+        /* Die Ergebniskarte folgt seit 2026-11-16 dem Klapp-Container "Analyse"
+           (vorher einer Karte, dann galt .sp-card + .sp-card). */
+        #sp-sect-analyse + .sp-card { margin-top: var(--jv-abstand, 16px); }
         .sp-login h3 { margin: 0 0 6px; font-size: 1rem; color: var(--text-primary); }
         .sp-login .sp-row { align-items: flex-end; margin-top: 10px; }
         .sp-login .sp-input[readonly] { opacity: .8; }
@@ -637,38 +638,43 @@
             </div>
         </details>
 
-        <!-- ── Analyse starten ── -->
-        <div class="sp-card">
-            <h3 class="sp-karte-h" data-i18n="sap.karte_h">Analyse</h3>
-            <div class="sp-row">
-                <div class="sp-field">
-                    <label class="sp-label" for="sp-analysis" data-i18n="sap.analysis">Analyse</label>
-                    <select id="sp-analysis" class="sp-select"></select>
+        <!-- ── Analyse starten ──
+             Seit 2026-11-16 ein Klapp-Container wie "Mein SAP-Zugang" und die
+             BI-Anbindung (Vorgabe: "'Analyse' in /sap in Container wandeln").
+             Aufgeklappt als Vorgabe: es ist die Arbeitsflaeche der Seite. -->
+        <details class="sp-sect" id="sp-sect-analyse" open>
+            <summary><span data-i18n="sap.karte_h">Analyse</span></summary>
+            <div class="sp-sect-body">
+                <div class="sp-row">
+                    <div class="sp-field">
+                        <label class="sp-label" for="sp-analysis" data-i18n="sap.analysis">Analyse</label>
+                        <select id="sp-analysis" class="sp-select"></select>
+                    </div>
+                    <div class="sp-field">
+                        <label class="sp-label" for="sp-bitool" data-i18n="sap.bitool">Auswertung für</label>
+                        <select id="sp-bitool" class="sp-select"></select>
+                    </div>
                 </div>
-                <div class="sp-field">
-                    <label class="sp-label" for="sp-bitool" data-i18n="sap.bitool">Auswertung für</label>
-                    <select id="sp-bitool" class="sp-select"></select>
+
+                <div id="sp-desc" class="sp-desc hidden">
+                    <div class="sp-desc-title" id="sp-desc-title"></div>
+                    <div id="sp-desc-text"></div>
+                    <div class="sp-chips" id="sp-desc-kpis"></div>
+                    <div class="sp-src" id="sp-desc-src"></div>
+                </div>
+
+                <textarea id="sp-question" data-i18n-placeholder="sap.question_ph"
+                          data-i18n-tabfill="sap.question_suggest"
+                          data-tabfill="Nur Buchungskreis 1000, letzte zwei Quartale. Nenne die Quelltabelle."
+                          placeholder="Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Buchungskreis 1000, letzte zwei Quartale“"></textarea>
+
+                <div class="sp-actions">
+                    <button class="sp-btn" id="sp-run" type="button" data-i18n="sap.run">Analyse starten</button>
+                    <button class="sp-btn-cancel hidden" id="sp-cancel" type="button" data-i18n="common.cancel">Abbrechen</button>
+                    <span class="sp-note" id="sp-note"></span>
                 </div>
             </div>
-
-            <div id="sp-desc" class="sp-desc hidden">
-                <div class="sp-desc-title" id="sp-desc-title"></div>
-                <div id="sp-desc-text"></div>
-                <div class="sp-chips" id="sp-desc-kpis"></div>
-                <div class="sp-src" id="sp-desc-src"></div>
-            </div>
-
-            <textarea id="sp-question" data-i18n-placeholder="sap.question_ph"
-                      data-i18n-tabfill="sap.question_suggest"
-                      data-tabfill="Nur Buchungskreis 1000, letzte zwei Quartale. Nenne die Quelltabelle."
-                      placeholder="Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Buchungskreis 1000, letzte zwei Quartale“"></textarea>
-
-            <div class="sp-actions">
-                <button class="sp-btn" id="sp-run" type="button" data-i18n="sap.run">Analyse starten</button>
-                <button class="sp-btn-cancel hidden" id="sp-cancel" type="button" data-i18n="common.cancel">Abbrechen</button>
-                <span class="sp-note" id="sp-note"></span>
-            </div>
-        </div>
+        </details>
 
         <!-- ── Ergebnis ── -->
         <div class="sp-card sp-result hidden" id="sp-result">

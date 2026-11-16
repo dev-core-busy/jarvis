@@ -155,8 +155,9 @@
            Anmeldekarte mit ihrem margin-bottom), darunter derselbe Abstand wie
            zwischen allen Containern. */
         #vm-sect-account { margin-top: 0; }
-        #vm-sect-account + .vm-card { margin-top: var(--jv-abstand, 16px); }
-        .vm-karte-h { margin: 0 0 12px; font-size: 1rem; color: var(--text-primary); }
+        /* Die Ergebniskarte folgt seit 2026-11-16 dem Klapp-Container "Abfrage"
+           (vorher einer Karte, dann galt .vm-card + .vm-card). */
+        #vm-sect-abfrage + .vm-card { margin-top: var(--jv-abstand, 16px); }
         .vm-login h3 { margin: 0 0 6px; font-size: 1rem; color: var(--text-primary); }
         .vm-login .vm-row { align-items: flex-end; margin-top: 10px; }
         .vm-row { display: flex; gap: 14px; flex-wrap: wrap; }
@@ -548,38 +549,43 @@
             </div>
         </details>
 
-        <!-- ── Auswertung starten ── -->
-        <div class="vm-card">
-            <h3 class="vm-karte-h" data-i18n="vemas.karte_h">Abfrage</h3>
-            <div class="vm-row">
-                <div class="vm-field">
-                    <label class="vm-label" for="vm-analysis" data-i18n="vemas.analysis">Abfrage</label>
-                    <select id="vm-analysis" class="vm-select"></select>
+        <!-- ── Auswertung starten ──
+             Seit 2026-11-16 ein Klapp-Container wie "Mein VEMAS-Zugang" und die
+             uebrigen Abschnitte (wie "Analyse" auf /sap, Vorgabe des Betreibers).
+             Aufgeklappt als Vorgabe: es ist die Arbeitsflaeche der Seite. -->
+        <details class="vm-sect" id="vm-sect-abfrage" open>
+            <summary><span data-i18n="vemas.karte_h">Abfrage</span></summary>
+            <div class="vm-sect-body">
+                <div class="vm-row">
+                    <div class="vm-field">
+                        <label class="vm-label" for="vm-analysis" data-i18n="vemas.analysis">Abfrage</label>
+                        <select id="vm-analysis" class="vm-select"></select>
+                    </div>
+                    <div class="vm-field">
+                        <label class="vm-label" for="vm-tool" data-i18n="vemas.tool">Aufbereiten für</label>
+                        <select id="vm-tool" class="vm-select"></select>
+                    </div>
                 </div>
-                <div class="vm-field">
-                    <label class="vm-label" for="vm-tool" data-i18n="vemas.tool">Aufbereiten für</label>
-                    <select id="vm-tool" class="vm-select"></select>
+
+                <div id="vm-desc" class="vm-desc hidden">
+                    <div class="vm-desc-title" id="vm-desc-title"></div>
+                    <div id="vm-desc-text"></div>
+                    <div class="vm-chips" id="vm-desc-kpis"></div>
+                    <div class="vm-src" id="vm-desc-src"></div>
+                </div>
+
+                <textarea id="vm-question" data-i18n-placeholder="vemas.question_ph"
+                          data-i18n-tabfill="vemas.question_suggest"
+                          data-tabfill="Nur Projekte des Standorts Krefeld, letzte zwei Quartale."
+                          placeholder="Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Projekte von Kunde Müller, laufendes Quartal“"></textarea>
+
+                <div class="vm-actions">
+                    <button class="vm-btn" id="vm-run" type="button" data-i18n="vemas.run">Auswertung starten</button>
+                    <button class="vm-btn-cancel hidden" id="vm-cancel" type="button" data-i18n="common.cancel">Abbrechen</button>
+                    <span class="vm-note" id="vm-note"></span>
                 </div>
             </div>
-
-            <div id="vm-desc" class="vm-desc hidden">
-                <div class="vm-desc-title" id="vm-desc-title"></div>
-                <div id="vm-desc-text"></div>
-                <div class="vm-chips" id="vm-desc-kpis"></div>
-                <div class="vm-src" id="vm-desc-src"></div>
-            </div>
-
-            <textarea id="vm-question" data-i18n-placeholder="vemas.question_ph"
-                      data-i18n-tabfill="vemas.question_suggest"
-                      data-tabfill="Nur Projekte des Standorts Krefeld, letzte zwei Quartale."
-                      placeholder="Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Projekte von Kunde Müller, laufendes Quartal“"></textarea>
-
-            <div class="vm-actions">
-                <button class="vm-btn" id="vm-run" type="button" data-i18n="vemas.run">Auswertung starten</button>
-                <button class="vm-btn-cancel hidden" id="vm-cancel" type="button" data-i18n="common.cancel">Abbrechen</button>
-                <span class="vm-note" id="vm-note"></span>
-            </div>
-        </div>
+        </details>
 
         <!-- ── Ergebnis ── -->
         <div class="vm-card vm-result hidden" id="vm-result">

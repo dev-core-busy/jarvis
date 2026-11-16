@@ -66,12 +66,15 @@ PROBEN = [
      '    _eingeloest = _vnc_ticket.einloesen(websocket.query_params.get("ticket", ""))\n'
      '    if not _eingeloest and verify_token(websocket.query_params.get("token", "")):\n'
      '        _eingeloest = (verify_token(websocket.query_params.get("token", "")), None)\n'),
+    # Anker 2026-11-16 nachgezogen: seit Befund A9 (2026-11-05) steht die
+    # Kontosperre ZWISCHEN Kontext und Anmeldeberechtigung – der alte
+    # zweizeilige Anker existierte nicht mehr, beide Proben liefen ins Leere.
     ("WebSocket setzt den Sitzungskontext nicht (fail-open, M3)", MA,
-     '    _sitzung_kontext.set(_vnc_kontext)\n    if not _login_still_allowed(_vnc_user):\n',
-     '    if not _login_still_allowed(_vnc_user):\n'),
+     '    _vnc_user, _vnc_kontext = _eingeloest\n    _sitzung_kontext.set(_vnc_kontext)\n',
+     '    _vnc_user, _vnc_kontext = _eingeloest\n'),
     ("WebSocket ohne Pruefung der Anmeldeberechtigung", MA,
-     '    _sitzung_kontext.set(_vnc_kontext)\n    if not _login_still_allowed(_vnc_user):\n',
-     '    _sitzung_kontext.set(_vnc_kontext)\n    if False:\n'),
+     '    if not _login_still_allowed(_vnc_user):\n        await websocket.close(code=4001, reason="Nicht authentifiziert")\n',
+     '    if False:\n        await websocket.close(code=4001, reason="Nicht authentifiziert")\n'),
     # ── Ticket-Endpunkt ──
     ("Endpunkt uebernimmt den Kontext der Dependency (nicht neu bestimmt)", MA,
      '    if verify_token(token) != user:\n        raise HTTPException(status_code=401, detail="Nicht authentifiziert")\n'
@@ -120,12 +123,16 @@ PROBEN = [
      '    v = config.get_setting("download_key_strict", True)\n',
      '    v = config.get_setting("download_key_strict", False)\n'),
     # ── Android ──
+    # Anker 2026-11-16 nachgezogen: seit Pentest A7 (e82f9b65) gibt es den
+    # Rueckfall `?: tok.takeUnless { istSitzung }` nicht mehr – die Zeile heisst
+    # `val wert = abrufSchluessel()`. Die Proben bilden dieselben Rueckschritte
+    # an der heutigen Form nach.
     ("Android: Sitzungstoken wieder in der Adresse", AR,
-     '        val wert = abrufSchluessel() ?: tok.takeUnless { istSitzung }\n',
-     '        val wert = tok\n'),
-    ("Android: Rueckfall aufs Sitzungstoken", AR,
-     '        val wert = abrufSchluessel() ?: tok.takeUnless { istSitzung }\n',
-     '        val wert = abrufSchluessel() ?: tok\n'),
+     '        val wert = abrufSchluessel()\n',
+     '        val wert = token()\n'),
+    ("Android: Rueckfall auf den dauerhaften Schluessel", AR,
+     '        val wert = abrufSchluessel()\n',
+     '        val wert = abrufSchluessel() ?: token()\n'),
     ("Android: Schluessel ohne Kopfsatz geholt", AR,
      '            httpClient.newCall(authBuilder("/api/download-key").get().build()).execute().use { resp ->\n',
      '            httpClient.newCall(Request.Builder().url("${baseUrl()}/api/download-key").get().build()).execute().use { resp ->\n'),

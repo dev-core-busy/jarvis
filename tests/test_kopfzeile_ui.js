@@ -318,8 +318,9 @@ const KERN = [
     abschnitt('6. „Angemeldet als …“ und Reihenfolge (Vorgabe 2026-11-16)');
     {
         const BOX = [
-            { f: 'sap.html', pille: 'sp-conn', zugang: 'sp-sect-account', karte: '.sp-card:not(.sp-login)' },
-            { f: 'vemas.html', pille: 'vm-conn', zugang: 'vm-sect-account', karte: '.vm-card:not(.vm-login)' },
+            // /sap: "Analyse" ist seit 2026-11-16 ein Klapp-Container (summary = Ueberschrift).
+            { f: 'sap.html', pille: 'sp-conn', zugang: 'sp-sect-account', karte: '#sp-sect-analyse' },
+            { f: 'vemas.html', pille: 'vm-conn', zugang: 'vm-sect-account', karte: '#vm-sect-abfrage' },
             { f: 'jira_addon.html', pille: 'ja-sz-kopf', zugang: 'ja-sz-sect' },
             { f: 'confluence_addon.html', pille: 'ca-sz-kopf', zugang: 'ca-sz-sect' },
         ];
@@ -345,10 +346,23 @@ const KERN = [
             const davor = andere.filter((e) => zugang && (e.compareDocumentPosition(zugang) & 4));
             pruefe(!!zugang && davor.length === 0, `${b.f}: „Mein …-Zugang“ ist der oberste Container`,
                    davor.map((e) => e.id || e.className).join(', '));
+            // /sap „Analyse“ und /vemas „Abfrage“ sind seit 2026-11-16 Klapp-
+            // Container wie die uebrigen Abschnitte, aufgeklappt (Arbeitsflaeche).
+            const KLAPP = { 'sap.html': ['sp-sect-analyse', 'sp-sect', 'sp-run', 'sp-question'],
+                            'vemas.html': ['vm-sect-abfrage', 'vm-sect', 'vm-run', 'vm-question'] };
+            if (KLAPP[b.f]) {
+                const [kid, kcls, krun, kfrage] = KLAPP[b.f];
+                const an = d.getElementById(kid);
+                pruefe(!!an && an.tagName === 'DETAILS' && an.classList.contains(kcls),
+                       `${b.f}: Abfrage-Container ist ein Klapp-Container wie die uebrigen`);
+                pruefe(!!an && an.open === true, `${b.f}: Abfrage-Container ist aufgeklappt`);
+                pruefe(!!an && !!an.querySelector('#' + krun) && !!an.querySelector('#' + kfrage),
+                       `${b.f}: Start-Knopf und Frage liegen im Container`);
+            }
             if (b.karte) {
                 const k = d.querySelector(b.karte);
                 const h = k && k.firstElementChild;
-                pruefe(!!h && /^H[23]$/.test(h.tagName) && h.textContent.trim().length > 0,
+                pruefe(!!h && /^(H[23]|SUMMARY)$/.test(h.tagName) && h.textContent.trim().length > 0,
                        `${b.f}: Analyse-/Abfrage-Container hat eine Ueberschrift`);
             }
             dom.window.close();

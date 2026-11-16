@@ -309,6 +309,18 @@ check("Gedaechtnis-Eintrag geloescht", r.status_code == 200 and "geheim" not in 
 check("⚠ auch aus der Sicherungskopie", "geheim" not in _mempfad.with_suffix(".json.bak").read_text())
 r = ausfuehren("gedaechtnis_eintrag_loeschen", ns2, _Req({"key": "gibtsnicht"}), user="anna")
 check("unbekannter Eintrag: 404", r.status_code == 404)
+# Alles loeschen (2026-11-16): {"alle": true} leert Datei UND Sicherungskopie
+_mempfad.write_text(json.dumps(_daten))
+_mempfad.with_suffix(".json.bak").write_text(json.dumps(_daten))
+check("Positivkontrolle: zwei Eintraege vor dem Leeren", len(json.loads(_mempfad.read_text())) == 2)
+r = ausfuehren("gedaechtnis_eintrag_loeschen", ns2, _Req({"alle": "ja"}), user="anna")
+check("alle nur mit echtem true (\"ja\" -> 400, nichts geloescht)",
+      r.status_code == 400 and len(json.loads(_mempfad.read_text())) == 2, r.status_code)
+r = ausfuehren("gedaechtnis_eintrag_loeschen", ns2, _Req({"alle": True}), user="anna")
+check("alle geloescht: 200, Anzahl genannt",
+      r.status_code == 200 and r.inhalt.get("deleted_all") == 2, getattr(r, "inhalt", r))
+check("Datei ist leer", json.loads(_mempfad.read_text()) == {})
+check("⚠ auch die Sicherungskopie ist leer", json.loads(_mempfad.with_suffix(".json.bak").read_text()) == {})
 
 # ═════════════════════════════════════════════════════════════════════════════
 print("\n[F] Herkunft der Lernnotizen")

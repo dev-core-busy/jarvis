@@ -2665,23 +2665,6 @@ body.light .modal-header h2 {
     #settings-modal { --st-rand: 1rem; }
 }
 
-/* ── Vollbild-Modus für die Einstellungen (gilt für alle Tabs) ── */
-/* Kein `margin-left: auto` / `margin-right` mehr (2026-11-16): beides stammt
-   aus der Zeit, als der Knopf direkt im `space-between`-Kopf neben dem ×
-   stand. Er sitzt laengst in `.modal-head-actions`, das × ist weg – und beim
-   Umbruch der Gruppe (schmales Fenster) schob das `auto` ihn allein an den
-   rechten Rand, weit weg von Sonne und Haus. */
-.btn-maximize-settings {
-    font-size: 1.05rem;
-    line-height: 1;
-    opacity: 0.7;
-}
-.btn-maximize-settings:hover,
-.btn-maximize-settings.active { opacity: 1; }
-
-/* Maximiert: die Inhaltsdeckelung faellt weg, die Seite bleibt randlos. */
-#settings-modal.settings-maximized { --st-deckel: 100vw; }
-
 /* ── Generischer Vollbild-/Expand-Umschalter für alle Popups (modal_expand.js) ── */
 /* margin-left:auto verhindert, dass der Button im space-between-Header
    (Titel | ? | Schliessen) mittig landet – er gruppiert sich rechts neben

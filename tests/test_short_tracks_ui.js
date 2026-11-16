@@ -797,10 +797,10 @@ abschnitt('4b. Maximieren (ganze Seite, Knopf ausserhalb der Karten)');
     pruefe(!!knopf && !!erste
         && (knopf.compareDocumentPosition(erste) & w.Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
         'der Knopf steht VOR der ersten Karte (ganz oben)');
-    // DIESELBEN ZEICHEN wie der Vollbild-Knopf der Einstellungen – aus DEREN
-    // Quelle gelesen, nicht abgetippt (Vorgabe des Nutzers 2026-08-18).
-    const symMax = (SET_HTML.match(/id="btn-maximize-settings"[^>]*>(.)</) || [])[1];
-    pruefe(symMax === '⛶', 'die Einstellungen nutzen U+26F6 (⛶)', symMax);
+    // Das Zeichen war frueher das des Vollbild-Knopfes der Einstellungen
+    // (Vorgabe 2026-08-18); der ist seit 2026-11-16 ersatzlos weg, das
+    // Zeichen U+26F6 bleibt.
+    const symMax = '\u26f6';
     pruefe(!!knopf && knopf.textContent.trim() === symMax,
         'der Knopf hier zeigt dasselbe Zeichen', knopf && knopf.textContent.trim());
     if (knopf) {
@@ -1279,7 +1279,7 @@ abschnitt('8. Verdrahtung, Portal, i18n, CSS');
         'in der Kopfzeile steht der Titel VOR dem Pfeil');
     // Emoji: farbig voreingestellte Zeichen folgen keinem Theme
     // AUSNAHME: ⛶ (U+26F6) und 🗗 (U+1F5D7) sind die Zeichen des vorhandenen
-    // Vollbild-Knopfes (#btn-maximize-settings, modal_expand.js). Konsistenz mit
+    // Vollbild-Knopfes (seite_breit.js, modal_expand.js). Konsistenz mit
     // dem Bestand geht hier vor der Emoji-Regel – ausdrueckliche Vorgabe des
     // Nutzers. Alles ANDERE bleibt gesperrt.
     const emoji = ((TR_HTML + TR_JS).match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || [])

@@ -7,12 +7,22 @@
  * verschoben: /settings leitet Nicht-Admins nach /portal um, die Funktion war
  * dort also faktisch admin-only – obwohl sie fuer JEDEN Benutzer gedacht ist.
  *
- * Aufruf: JarvisGedaechtnis.laden(box) – box ist der Listen-Container.
+ * 2026-11-16: Knopf "Alles löschen" (DELETE /api/memory mit {"alle": true}).
+ * Er steht nur da, solange es Eintraege gibt – ein Loeschknopf ueber einer
+ * leeren Liste verspricht eine Wirkung, die es nicht gibt.
+ *
+ * Aufruf: JarvisGedaechtnis.laden(box, alleKnopf) – box ist der Listen-
+ * Container, alleKnopf (optional) der Knopf "Alles löschen".
  */
 (function () {
     'use strict';
 
-    function T(k) { return (window.t ? window.t(k) : k); }
+    // window.t kennt keine Platzhalter – {name} wird hier ersetzt.
+    function T(k, p) {
+        var s = window.t ? window.t(k) : k;
+        Object.keys(p || {}).forEach(function (n) { s = s.split('{' + n + '}').join(String(p[n])); });
+        return s;
+    }
     function kopf(extra) {
         return window.JarvisSitzung ? window.JarvisSitzung.kopfsatz(extra) : (extra || {});
     }
@@ -23,15 +33,35 @@
         return e;
     }
 
-    async function laden(box) {
+    // Knopf "Alles löschen": sichtbar genau dann, wenn die Liste Eintraege hat.
+    var _alleKnopf = null;
+    function anzahl(box) { return box ? box.querySelectorAll('.lk-mem').length : 0; }
+    function alleKnopfZeigen(box) {
+        if (_alleKnopf) _alleKnopf.hidden = anzahl(box) === 0;
+    }
+    function leerAnzeigen(box) {
+        box.textContent = '';
+        box.appendChild(el('div', 'lk-leer', T('lk.gedaechtnis_leer')));
+        alleKnopfZeigen(box);
+    }
+
+    async function laden(box, alleKnopf) {
         if (!box) return;
+        if (alleKnopf) {
+            _alleKnopf = alleKnopf;
+            if (!alleKnopf._gebunden) {
+                alleKnopf._gebunden = true;
+                alleKnopf.addEventListener('click', function () { alleLoeschen(box, alleKnopf); });
+            }
+        }
+        alleKnopfZeigen(box);
         try {
             var r = await fetch('/api/memory', { headers: kopf() });
             if (!r.ok) { box.textContent = T('common.error') + ' (' + r.status + ')'; return; }
             var d = await r.json();
             box.textContent = '';
             var liste = d.eintraege || [];
-            if (!liste.length) { box.appendChild(el('div', 'lk-leer', T('lk.gedaechtnis_leer'))); return; }
+            if (!liste.length) { leerAnzeigen(box); return; }
             liste.forEach(function (e) {
                 var z = el('div', 'lk-mem');
                 var text = el('div', 'lk-mem-text');
@@ -48,6 +78,7 @@
                 z.appendChild(btn);
                 box.appendChild(z);
             });
+            alleKnopfZeigen(box);
         } catch (e) {
             box.textContent = T('common.error') + ': ' + e.message;
         }
@@ -70,10 +101,38 @@
             var box = zeile.parentNode;
             zeile.remove();
             // Letzter Eintrag weg: dieselbe Leer-Anzeige wie beim Laden
-            if (box && !box.querySelector('.lk-mem')) box.appendChild(el('div', 'lk-leer', T('lk.gedaechtnis_leer')));
+            if (box && !box.querySelector('.lk-mem')) leerAnzeigen(box);
         } catch (e) {
             btn.disabled = false;
             zeile.appendChild(el('div', 'lk-fehler', e.message));
+        }
+    }
+
+    async function alleLoeschen(box, knopf) {
+        var n = anzahl(box);
+        if (!n) return;
+        if (!window.confirm(T('wissen.mem_alle_frage', { n: n }))) return;
+        knopf.disabled = true;
+        // Eine alte Fehlerzeile vom letzten Versuch weg, sonst stehen zwei da
+        var alt = knopf.parentNode && knopf.parentNode.querySelector('.lk-fehler');
+        if (alt) alt.remove();
+        try {
+            var r = await fetch('/api/memory', {
+                method: 'DELETE',
+                headers: kopf({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ alle: true })
+            });
+            if (!r.ok) {
+                var d = await r.json().catch(function () { return {}; });
+                // Fehler am Knopf, der ihn ausgeloest hat – und er bleibt stehen
+                knopf.parentNode.appendChild(el('div', 'lk-fehler', d.error || ('HTTP ' + r.status)));
+                return;
+            }
+            leerAnzeigen(box);
+        } catch (e) {
+            knopf.parentNode.appendChild(el('div', 'lk-fehler', e.message));
+        } finally {
+            knopf.disabled = false;
         }
     }
 

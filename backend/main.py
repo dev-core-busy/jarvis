@@ -23554,28 +23554,39 @@ async def gedaechtnis_lesen(user: str = Depends(require_auth)):
 
 @app.delete("/api/memory")
 async def gedaechtnis_eintrag_loeschen(request: Request, user: str = Depends(require_auth)):
-    """Einen eigenen Gedaechtnis-Eintrag loeschen (BSI M9: einzeln loeschbar).
+    """Eigenes Gedaechtnis loeschen (BSI M9): einen Eintrag (``{"key": ...}``)
+    oder alle auf einmal (``{"alle": true}``, Knopf "Alles löschen" in /wissen).
     Die Sicherungskopie (.json.bak) wird mit dem neuen Stand ueberschrieben –
-    sonst stuende der geloeschte Eintrag dort weiter."""
+    sonst stuende das Geloeschte dort weiter.
+
+    ``alle`` muss echt ``true`` sein (kein "1", kein "ja"): ein Tippfehler im
+    Rumpf soll nicht das ganze Gedaechtnis leeren."""
     from backend.tools import memory as _mem
     try:
         body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
         body = {}
+    alle = (body or {}).get("alle") is True
     key = str((body or {}).get("key") or "")
-    if not key:
+    if not alle and not key:
         return JSONResponse({"error": "key fehlt"}, status_code=400)
     with _mem._lock:
         daten = dict(_mem._load_memory_dict(user) or {})
-        if key not in daten:
+        if alle:
+            anzahl = len(daten)
+            daten = {}
+        elif key not in daten:
             return JSONResponse({"error": "Eintrag nicht gefunden"}, status_code=404)
-        daten.pop(key)
+        else:
+            daten.pop(key)
         _mem._save_memory_dict(daten, user)
         pfad = _mem._get_memory_path(user)
         bak = pfad.with_suffix(".json.bak")
         if bak.exists():
             import shutil as _sh_m9
             _sh_m9.copy2(pfad, bak)
+    if alle:
+        return JSONResponse({"ok": True, "deleted_all": anzahl})
     return JSONResponse({"ok": True, "deleted": key})
 
 

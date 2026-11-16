@@ -2,7 +2,9 @@
    Einstellungen-Modal. Fügt jedem <div class="modal"> mit einer .modal-header
    einen ⛶-Button hinzu, der .modal-expanded auf dem Modal umschaltet
    (CSS vergrößert dann die .modal-content auf nahezu Vollbild).
-   Das Einstellungen-Modal hat bereits einen eigenen Maximieren-Button. */
+   Das Einstellungen-Modal bleibt AUSGENOMMEN: sein eigener Vollbild-Knopf
+   wurde 2026-11-16 ersatzlos entfernt (Vorgabe) – ohne den SKIP-Eintrag
+   kaeme er hier als generischer Knopf zurueck. */
 (function () {
     'use strict';
     var SKIP = { 'settings-modal': 1 };

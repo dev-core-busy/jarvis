@@ -12,6 +12,9 @@
  *   2. mit Wissensbereich: Pflege-Abschnitte UND Gedaechtnis-Container
  *   3. globaler Editor ohne Gruppen: sieht die Gruppenverwaltung
  *  3b. erste Gruppe angelegt (echtes knowledge.js): Seite schaltet selbst um
+ *  1b. "Alles löschen" (2026-11-16): Rueckfrage, EIN DELETE mit {alle:true},
+ *      Liste leer, Knopf weg; abgelehnte Rueckfrage schickt nichts; Fehler
+ *      bleibt am Knopf stehen; Infozeile zur Loeschfrist steht im Container
  *   4. Regeln: Einstellungen tragen den Block nicht mehr, Texte DE/EN da
  *
  *   node tests/test_wissen_gedaechtnis_ui.js
@@ -69,7 +72,14 @@ async function seite(scope, gedaechtnis, opt) {
         if (p === '/api/knowledge/groups') return j({ ok: true, groups: kgruppen.slice(), ungrouped_count: 0 });
         if (p === '/api/memory' && methode === 'GET') return j({ eintraege: mem });
         if (p === '/api/memory' && methode === 'DELETE') {
-            const key = JSON.parse(init.body).key;
+            const rumpf = JSON.parse(init.body);
+            if (opt.deleteFehler) return j({ error: 'Testfehler' }, 500);
+            if (rumpf.alle === true) {
+                const n = mem.length;
+                mem.splice(0, mem.length);
+                return j({ ok: true, deleted_all: n });
+            }
+            const key = rumpf.key;
             const i = mem.findIndex(e => e.key === key);
             if (i === -1) return j({ error: 'Eintrag nicht gefunden' }, 404);
             mem.splice(i, 1);
@@ -79,6 +89,9 @@ async function seite(scope, gedaechtnis, opt) {
         return j({ ok: true, pending: [], spaces: [], bereiche: [] });
     };
     win.alert = () => {};
+    // Rueckfrage: gezaehlt, Antwort steuerbar (Vorgabe: ja)
+    win.__fragen = [];
+    win.confirm = (txt) => { win.__fragen.push(txt); return opt.confirm !== false; };
     win.eval(lies('frontend/js/sitzung.js'));
     win.eval(lies('frontend/js/icons.js'));
     win.eval(lies('frontend/js/i18n.js'));
@@ -150,6 +163,66 @@ section('1. Ohne Wissensbereich: nur "Mein Gedaechtnis"');
     s.win.close();
 }
 
+section('1b. "Alles löschen" und Infozeile zur Loeschfrist');
+{
+    const EINTR = [
+        { key: 'a', value: '1', updated: '2026-10-14T10:00:00' },
+        { key: 'b', value: '2', updated: '2026-10-13T10:00:00' },
+        { key: 'c', value: '3', updated: '2026-10-12T10:00:00' },
+    ];
+    const s = await seite({ is_editor: false, groups: [], folders: [] }, EINTR);
+    const d = s.doc;
+    const knopf = d.getElementById('wi-gedaechtnis-alle');
+    const zeilen = () => d.querySelectorAll('#wi-gedaechtnis-liste .lk-mem').length;
+    check('Positivkontrolle: drei Eintraege gezeigt', zeilen() === 3, String(zeilen()));
+    if (zeilen() !== 3) { console.log('ABBRUCH: Liste nicht aufgebaut'); process.exit(2); }
+    check('Knopf "Alles löschen" steht im Gedaechtnis-Container',
+          !!knopf && !!knopf.closest('#wi-sec-gedaechtnis'));
+    check('… mit Eintraegen sichtbar', !!knopf && knopf.hidden === false);
+    check('… beschriftet', !!knopf && /Alles löschen/.test(knopf.textContent), knopf && knopf.textContent);
+    const frist = d.querySelector('#wi-sec-gedaechtnis .wi-mem-frist');
+    check('Infozeile zur Loeschfrist steht im Container', !!frist);
+    check('… und sagt, dass nichts automatisch geloescht wird',
+          !!frist && /Automatisch gelöscht wird hier nichts/.test(frist.textContent), frist && frist.textContent);
+    if (knopf) knopf.click();
+    await schlaf(40);
+    const dels = () => s.rufe.filter(r => r.p === '/api/memory' && r.methode === 'DELETE');
+    check('Rueckfrage nennt die Anzahl', s.win.__fragen.length === 1 && /\b3\b/.test(s.win.__fragen[0]),
+          s.win.__fragen.join(' | '));
+    check('genau EIN DELETE mit {alle:true}',
+          dels().length === 1 && JSON.parse(dels()[0].body).alle === true, dels().map(r => r.body).join(' | '));
+    check('Liste danach leer mit Leer-Anzeige',
+          zeilen() === 0 && !!d.querySelector('#wi-gedaechtnis-liste .lk-leer'));
+    check('Knopf danach ausgeblendet', !!knopf && knopf.hidden === true);
+    s.win.close();
+}
+{
+    const s = await seite({ is_editor: false, groups: [], folders: [] },
+                          [{ key: 'a', value: '1', updated: '' }], { confirm: false });
+    const d = s.doc;
+    const knopf = d.getElementById('wi-gedaechtnis-alle');
+    if (knopf) knopf.click();
+    await schlaf(40);
+    check('Positivkontrolle: Rueckfrage gestellt', s.win.__fragen.length === 1);
+    check('abgelehnte Rueckfrage schickt KEIN DELETE',
+          !s.rufe.some(r => r.p === '/api/memory' && r.methode === 'DELETE'));
+    check('… und die Zeile bleibt', d.querySelectorAll('#wi-gedaechtnis-liste .lk-mem').length === 1);
+    s.win.close();
+}
+{
+    const s = await seite({ is_editor: false, groups: [], folders: [] },
+                          [{ key: 'a', value: '1', updated: '' }], { deleteFehler: true });
+    const d = s.doc;
+    const knopf = d.getElementById('wi-gedaechtnis-alle');
+    if (knopf) knopf.click();
+    await schlaf(40);
+    const fehler = knopf && knopf.parentNode.querySelector('.lk-fehler');
+    check('Serverfehler steht am Knopf', !!fehler && /Testfehler/.test(fehler.textContent));
+    check('… die Liste bleibt stehen', d.querySelectorAll('#wi-gedaechtnis-liste .lk-mem').length === 1);
+    check('… der Knopf ist wieder bedienbar', !!knopf && !knopf.disabled && !knopf.hidden);
+    s.win.close();
+}
+
 section('2. Mit Wissensbereich: Pflege UND eigenes Wissen');
 {
     const s = await seite({ is_editor: false, groups: [GRUPPE],
@@ -162,6 +235,8 @@ section('2. Mit Wissensbereich: Pflege UND eigenes Wissen');
     check('Gedaechtnis-Container ebenfalls sichtbar', !aus(d.getElementById('wi-sec-gedaechtnis')));
     check('/api/memory geladen', gerufen(s, '/api/memory', 'GET'));
     check('leeres Gedaechtnis -> Leer-Anzeige', !!d.querySelector('#wi-gedaechtnis-liste .lk-leer'));
+    check('leeres Gedaechtnis -> kein "Alles löschen"',
+          !!d.getElementById('wi-gedaechtnis-alle') && d.getElementById('wi-gedaechtnis-alle').hidden === true);
     s.win.close();
 }
 
@@ -216,7 +291,8 @@ section('4. Regeln');
     check('wissen.html bindet gedaechtnis.js VOR wissen.js ein',
           /gedaechtnis\.js\?v=\d+[\s\S]*wissen\.js\?v=\d+/.test(HTML.slice(HTML.indexOf('<script'))));
     const i18n = lies('frontend/js/i18n.js');
-    ['wissen.sec_mem', 'wissen.sec_mem_desc', 'wissen.nur_eigenes', 'wissen.no_groups_editor'].forEach(k =>
+    ['wissen.sec_mem', 'wissen.sec_mem_desc', 'wissen.nur_eigenes', 'wissen.no_groups_editor',
+     'wissen.mem_frist', 'wissen.mem_alle', 'wissen.mem_alle_frage'].forEach(k =>
         check(k + ' in DE und EN', (i18n.match(new RegExp("'" + k.replace('.', '\\.') + "'\\s*:", 'g')) || []).length === 2));
 }
 

@@ -162,7 +162,7 @@
                 showApp();
                 renderScope();
                 // Mein Gedaechtnis: fuer JEDEN Benutzer (js/gedaechtnis.js)
-                if (window.JarvisGedaechtnis) window.JarvisGedaechtnis.laden($('wi-gedaechtnis-liste'));
+                if (window.JarvisGedaechtnis) window.JarvisGedaechtnis.laden($('wi-gedaechtnis-liste'), $('wi-gedaechtnis-alle'));
                 // Ohne Wissensbereich gibt es nichts zu pflegen: keine Abrufe fuer
                 // Dateien, Entwuerfe, Confluence und Destillat (Abschnitte sind aus).
                 if (nurEigenes()) return;

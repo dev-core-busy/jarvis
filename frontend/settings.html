@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
-    <link rel="stylesheet" href="/static/css/style.css?v=236">
+    <link rel="stylesheet" href="/static/css/style.css?v=237">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1577,8 +1577,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                 <div class="modal-head-actions">
                     <!-- Suchfeld (Vorbild: Android-Systemeinstellungen; Bauform
                          wie das Benutzer-Panel in /portal). LINKS vom Haus, weil
-                         es zum Titel gehoert und nicht zu den Fenster-Aktionen
-                         (Startseite / Vollbild) rechts daneben.
+                         es zum Titel gehoert und nicht zur Fenster-Aktion
+                         (Startseite) rechts daneben.
                          Gesucht wird in den GANZEN Einstellungen: Reiter,
                          Abschnitte, Feldbeschriftungen und die Skills samt
                          ihren Konfigurationsfeldern. Der Suchraum steht im
@@ -1616,10 +1616,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <polyline points="9 22 9 12 15 12 15 22"/>
                         </svg>
                     </a>
-                    <button class="btn-icon btn-maximize-settings" id="btn-maximize-settings" title="Vollbild ein/aus" aria-label="Vollbild">⛶</button>
                     <!-- Kein Schliessen-Kreuz mehr (Vorgabe 2026-11-16): /settings ist
                          eine eigene Seite, das Haus fuehrt zurueck – ein zweites
-                         Symbol fuer denselben Weg war doppelt. -->
+                         Symbol fuer denselben Weg war doppelt.
+                         Ebenso kein Vollbild-Umschalter mehr (Vorgabe 2026-11-16,
+                         ersatzlos entfernt; modal_expand.js nimmt das Modal
+                         weiterhin aus, sonst kaeme er generisch zurueck). -->
                 </div>
                 <!-- ⚠ DAS PANEL IST KIND DES KOPFES, NICHT DES SUCHFELDES.
                      `.modal-content` traegt `overflow: hidden`; solange das
@@ -6634,7 +6636,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=486"></script>
+    <script src="/static/js/i18n.js?v=487"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6681,7 +6683,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
     <script src="/static/js/rechte_matrix.js?v=8"></script>
     <script src="/static/js/excel_admin.js?v=9"></script>
-    <script src="/static/js/modal_expand.js?v=2"></script>
+    <script src="/static/js/modal_expand.js?v=3"></script>
     <script src="/static/js/sessions.js?v=10"></script>
     <!-- Gemeinsame Titelleiste (kopfzeile.js, oben hinter sitzung.js): /settings
          hat seit 2026-11-16 dieselben Kernelemente wie jede Bereichsseite –
@@ -6698,7 +6700,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=5"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=255"></script>
+    <script src="/static/js/app.js?v=256"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

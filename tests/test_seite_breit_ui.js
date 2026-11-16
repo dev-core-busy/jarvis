@@ -211,11 +211,14 @@ const KARTE = '[class$="-card"], [class*="-card "], .ja-card, .st-card, .wi-sect
         const n = (I18N.match(new RegExp("'" + k.replace('.', '\\.') + "'", 'g')) || []).length;
         c('„' + k + '" in DE und EN', n === 2, n + 'x');
     }
-    // Dieselben Zeichen wie der Vollbild-Knopf des Einstellungs-Dialogs.
+    // Die Zeichen ⛶ / 🗗 (frueher vom Vollbild-Knopf des Einstellungs-Dialogs
+    // uebernommen; der ist seit 2026-11-16 ersatzlos weg – die Zeichen bleiben).
+    c('Vollbild-Zeichen ⛶ / 🗗 als HTML-Entity',
+      /an \? '&#128471;' : '&#9974;'/.test(SEITE_BREIT));
+    // Und der Knopf der Einstellungen kommt nicht zurueck (Vorgabe 2026-11-16).
     const SETQ = lies('frontend/settings.html');
-    c('dieselben Zeichen wie der Einstellungs-Dialog (⛶ / 🗗)',
-      /id="btn-maximize-settings"[^>]*>\u26f6</.test(SETQ)
-      && /an \? '&#128471;' : '&#9974;'/.test(SEITE_BREIT));
+    c('/settings traegt keinen Vollbild-Knopf mehr',
+      !/btn-maximize-settings/.test(SETQ) && !/settings-maximized/.test(lies('frontend/js/app.js')));
 
     console.log('\n' + '='.repeat(70));
     console.log(ok + ' OK, ' + fail + ' FAIL');

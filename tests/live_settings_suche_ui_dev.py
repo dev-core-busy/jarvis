@@ -281,13 +281,14 @@ with connect(ws, open_timeout=20, max_size=80_000_000) as sock:
 
         feld = rect(sock, "#st-such-feld")
         haus = rect(sock, "#btn-home-settings")
-        # Letztes Symbol der Gruppe ist seit 2026-11-16 "Vollbild" (kein Kreuz mehr).
-        zu = rect(sock, "#btn-maximize-settings")
+        # Letztes Symbol der Gruppe ist seit 2026-11-16 das Haus (kein Kreuz,
+        # kein Vollbild-Knopf mehr).
+        zu = haus
         check("Suchfeld ist sichtbar", bool(feld) and feld["w"] > 60 and feld["h"] > 10,
               json.dumps(feld))
         check("es steht LINKS vom Haus", bool(feld) and bool(haus) and feld["r"] <= haus["x"] + 2,
               f"feld.r={feld and feld['r']} haus.x={haus and haus['x']}")
-        check("Feld, Haus und Vollbild stehen in EINER Zeile",
+        check("Feld und Haus stehen in EINER Zeile",
               bool(feld) and bool(zu) and abs(feld["y"] - zu["y"]) < 14,
               f"{feld and feld['y']} vs {zu and zu['y']}")
         check("die Symbolgruppe bleibt im Kopf",
@@ -408,14 +409,14 @@ with connect(ws, open_timeout=20, max_size=80_000_000) as sock:
             width=520, height=800, deviceScaleFactor=1, mobile=False)
         time.sleep(0.8)
         f3 = rect(sock, "#st-such-feld")
-        z3 = rect(sock, "#btn-maximize-settings")
         h3 = rect(sock, "#btn-home-settings")
+        z3 = h3
         k3 = rect(sock, "#settings-modal .modal-header")
         check("schmal: das Feld schrumpft, bleibt aber benutzbar",
               bool(f3) and f3["w"] >= 60, json.dumps(f3))
         check("schmal: die Symbole behalten ihre Groesse",
               bool(h3) and h3["w"] >= 30, json.dumps(h3))
-        check("schmal: Vollbild bleibt im Kopf",
+        check("schmal: das Haus bleibt im Kopf",
               bool(z3) and bool(k3) and z3["r"] <= k3["r"] + 1,
               f"zu.r={z3 and z3['r']} kopf.r={k3 and k3['r']}")
 

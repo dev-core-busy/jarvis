@@ -2026,24 +2026,6 @@
         if (btnClose) btnClose.addEventListener('click', closeModal);
         // Kein Schliessen bei Klick ausserhalb oder versehentlichem Drag.
 
-        // ── Vollbild-Umschalter (gilt für alle Einstellungs-Tabs) ──
-        const btnMax = document.getElementById('btn-maximize-settings');
-        if (btnMax && !btnMax._bound) {
-            btnMax._bound = true;
-            const applyMax = (on) => {
-                modal.classList.toggle('settings-maximized', on);
-                btnMax.textContent = on ? '🗗' : '⛶';
-                btnMax.classList.toggle('active', on);
-            };
-            // Zustand aus localStorage wiederherstellen
-            applyMax(localStorage.getItem('jarvis_settings_maximized') === '1');
-            btnMax.addEventListener('click', () => {
-                const on = !modal.classList.contains('settings-maximized');
-                localStorage.setItem('jarvis_settings_maximized', on ? '1' : '0');
-                applyMax(on);
-            });
-        }
-
         // ── Ansicht wechseln ──
         function showListView() {
             listView.style.display = '';

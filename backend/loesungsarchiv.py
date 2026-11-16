@@ -108,6 +108,18 @@ KANDIDATEN_MAX = 3
 # Bewusst 4 und nicht 8: der Haus-Server bedient tagsueber auch den Chat, und
 # ein Lauf per Knopf soll ihn nicht spuerbar belegen.
 PARALLEL = 4
+# ⚠ MODELLSERVER WEG (ECHT 2026-11-15): LiteLLM meldete stundenweise
+# "HTTP 500 … Cannot connect to host" – der vLLM-Server dahinter war nicht
+# erreichbar. Bis dahin kostete das je Ticket sofort zwei Fehlversuche, und
+# der Lauf meldete "39 Fehler" ohne Art. Jetzt wartet ein Aufruf in diesen
+# Abstaenden (Sekunden) und versucht es erneut; erst danach zaehlt das Ticket
+# als Fehler der Art "Modellserver".
+SERVER_WARTEN = (10, 30, 60)
+# So viele Tickets IN FOLGE mit "Modellserver"-Fehler beenden den Lauf. Ohne
+# Deckel liefe ein Lauf bei ausgefallenem Server mit je ~100 s Warten pro
+# Ticket tagelang und blockierte den naechsten Nachtlauf.
+SERVER_AUS_SERIE = 10
+FEHLER_BEISPIELE_JE_ART = 3      # gemerkte Beispiele je Fehlerart
 MAX_TITEL = 160
 MAX_PROBLEM = 4000
 MAX_LOESUNG = 8000
@@ -144,6 +156,10 @@ def anhalten() -> bool:
 
 class ArchivFehler(ValueError):
     """Eingabe- oder Zustandsfehler mit einer Meldung fuer die Oberflaeche."""
+
+
+class ModellserverWeg(RuntimeError):
+    """Der Modellserver war auch nach ``SERVER_WARTEN`` nicht erreichbar."""
 
 
 # ── Ablage ──────────────────────────────────────────────────────────────────
@@ -543,6 +559,55 @@ def _backslashes_reparieren(s: str) -> str:
     return re.sub(r"\\(u[0-9a-fA-F]{4}|.)", ersetzen, s, flags=re.DOTALL)
 
 
+ANF_REPARATUR_MAX = 64           # Reparaturschritte je Antwort (2 je Zitat)
+
+
+def _vorher(s: str, pos: int) -> int:
+    """Index des letzten Nicht-Leerzeichens vor ``pos`` (-1 = keins)."""
+    i = pos - 1
+    while i >= 0 and s[i] in " \t\r\n":
+        i -= 1
+    return i
+
+
+def _anfuehrungszeichen_reparieren(s: str) -> str | None:
+    """Ungeschuetzte Anfuehrungszeichen IN einem Textwert schuetzen.
+
+    ⚠ ECHT 2026-11-15: das Modell schreibt Zitate ungeschuetzt in den Wert –
+    ``"titel": "Status "in Bearbeitung" trotz …"`` – und das ganze Objekt
+    bricht mit "Expecting ',' delimiter". Auf DEV am selben Ticket
+    nachgestellt: 2 von 8 Antworten so kaputt, beide Versuche eines Laufs
+    koennen es treffen.
+
+    GEFUEHRT VOM PARSER, nicht per Muster: ``json`` meldet die Stelle, an der
+    nach einem Wert ein Komma erwartet war. Steht direkt davor ein ``"``, hat
+    es den Text zu frueh beendet – das wird geschuetzt und neu gelesen. Ein
+    Zitat, auf das ein Komma folgt (``"fertig", danach``), meldet sich als
+    fehlender Schluessel/Wert NACH dem Komma; dann ist das ``"`` vor dem Komma
+    gemeint. Alles andere bleibt unrepariert (``None``) – geraten wird nicht.
+    Das Ergebnis muss danach noch ``analyse_pruefen`` bestehen."""
+    for _ in range(ANF_REPARATUR_MAX):
+        try:
+            json.loads(s)
+            return s
+        except json.JSONDecodeError as e:
+            q = -1
+            if e.msg == "Expecting ',' delimiter":
+                q = _vorher(s, e.pos)
+            elif e.msg in ("Expecting property name enclosed in double quotes",
+                           "Expecting value"):
+                k = _vorher(s, e.pos)
+                if k > 0 and s[k] == ",":
+                    q = k - 1
+            # Ein schon geschuetztes ``\"`` kann hier nicht stehen: der Parser
+            # liest es als Teil des Textes und meldet die Stelle erst nach dem
+            # ungeschuetzten, das den Text beendet hat.
+            if q < 0 or s[q] != '"':
+                return None
+            s = s[:q] + "\\" + s[q:]
+    return None
+
+
 def antwort_lesen(roh: str) -> tuple[dict | None, str]:
     """``(Objekt, "")`` oder ``(None, Grund)``. Der Grund nennt nur die Art des
     Fehlers, nie Antworttext – er landet im Stand und in der Oberflaeche, und
@@ -560,12 +625,16 @@ def antwort_lesen(roh: str) -> tuple[dict | None, str]:
     try:
         obj = json.loads(kern)
     except Exception:  # noqa: BLE001
+        repariert = _backslashes_reparieren(kern)
         try:
-            obj = json.loads(_backslashes_reparieren(kern))
+            obj = json.loads(repariert)
         except Exception as e:  # noqa: BLE001
-            if isinstance(e, json.JSONDecodeError):
-                return None, f"JSON ungültig ({e.msg}, Zeile {e.lineno})"
-            return None, f"JSON ungültig ({type(e).__name__})"
+            zitat = _anfuehrungszeichen_reparieren(repariert)
+            if zitat is None:
+                if isinstance(e, json.JSONDecodeError):
+                    return None, f"JSON ungültig ({e.msg}, Zeile {e.lineno})"
+                return None, f"JSON ungültig ({type(e).__name__})"
+            obj = json.loads(zitat)
     if not isinstance(obj, dict):
         return None, "Antwort ist kein JSON-Objekt"
     return obj, ""
@@ -665,14 +734,51 @@ def _provider():
     return provider, modell
 
 
+_SERVER_WEG_RE = re.compile(r"^HTTP 5\d\d von |Cannot connect to host|Connection refused",
+                            re.IGNORECASE)
+
+
+def server_weg(e: BaseException) -> bool:
+    """Ist das ein Ausfall des Modellservers (und kein Fehler der Anfrage)?
+
+    Erkannt werden die Formen, die ``llm`` wirklich wirft: ``ValueError("HTTP
+    500 von <url>: …")`` aus dem OpenAI-kompatiblen Zweig (LiteLLM meldet einen
+    toten vLLM-Server als 500) und die Verbindungsfehler von httpx. Ein
+    ``ReadTimeout`` zaehlt NICHT – das ist ein langsames Modell, und ein
+    Wiederholen vervielfachte die Wartezeit (dieselbe Abwaegung wie
+    ``llm._retry_with_backoff``)."""
+    try:
+        import httpx
+        if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout,
+                          httpx.RemoteProtocolError, httpx.PoolTimeout)):
+            return True
+    except ImportError:  # pragma: no cover
+        pass
+    return bool(_SERVER_WEG_RE.search(str(e)))
+
+
 async def _modell(provider, modell: str, auftrag: str) -> str:
-    """EIN Aufruf mit ``tools=[]``."""
+    """EIN Aufruf mit ``tools=[]`` – bei ausgefallenem Modellserver mit
+    Wartepausen (``SERVER_WARTEN``), danach ``ModellserverWeg``."""
     from google.genai import types
-    resp = await provider.generate_response(
-        model=modell, system_prompt=SYSTEM,
-        contents=[types.Content(role="user", parts=[types.Part.from_text(text=auftrag)])],
-        tools=[], reasoning_effort="low")
-    return "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None))
+    inhalt = [types.Content(role="user", parts=[types.Part.from_text(text=auftrag)])]
+    for versuch in range(len(SERVER_WARTEN) + 1):
+        try:
+            resp = await provider.generate_response(
+                model=modell, system_prompt=SYSTEM, contents=inhalt,
+                tools=[], reasoning_effort="low")
+            return "".join(p.text for p in (resp.parts or []) if getattr(p, "text", None))
+        except Exception as e:  # noqa: BLE001
+            if not server_weg(e):
+                raise
+            if versuch >= len(SERVER_WARTEN):
+                raise ModellserverWeg(
+                    f"Modellserver nicht erreichbar ({versuch + 1} Versuche): {e}") from e
+            warten = SERVER_WARTEN[versuch]
+            print(f"[Lösungsarchiv] Modellserver nicht erreichbar, neuer Versuch in "
+                  f"{warten} s: {str(e)[:160]}", flush=True)
+            await asyncio.sleep(warten)
+    raise AssertionError("unerreichbar")  # pragma: no cover
 
 
 # ── Aehnlichkeit ────────────────────────────────────────────────────────────
@@ -1196,6 +1302,40 @@ async def beim_beenden(deckel: float = BEENDEN_DECKEL) -> bool:
     return True
 
 
+FEHLERARTEN = {"modellserver": "Modellserver", "modellantwort": "Modellantwort",
+               "jira": "Jira", "sonstige": "sonstige"}
+
+
+def fehlerart(e: BaseException) -> str:
+    """Art eines Ticketfehlers fuer Zaehlung und Protokoll.
+
+    ⚠ ECHT 2026-11-15: "39 Fehler" ohne Art, und nur fuenf Beispiele im Stand –
+    ob der Modellserver ausfiel oder das Modell kaputtes JSON schrieb, war
+    nicht feststellbar. Beides verlangt etwas anderes (warten gegen
+    reparieren)."""
+    if isinstance(e, ModellserverWeg):
+        return "modellserver"
+    if isinstance(e, ArchivFehler) and "keine gültige Auswertung" in str(e):
+        return "modellantwort"
+    try:
+        from backend.jira_assist import AssistFehler
+        from backend.jira_client import JiraError
+        if isinstance(e, (AssistFehler, JiraError)):
+            return "jira"
+    except ImportError:  # pragma: no cover
+        pass
+    if type(e).__module__.split(".")[0] in ("requests", "urllib3"):
+        return "jira"
+    return "sonstige"
+
+
+def _fehler_text(zahl: int, arten: dict) -> str:
+    """``"39 Fehler (Modellserver 30, Modellantwort 9)"`` – Arten nur, wenn es
+    Fehler gab, in fester Reihenfolge."""
+    teile = [f"{FEHLERARTEN[a]} {arten[a]}" for a in FEHLERARTEN if arten.get(a)]
+    return f"{zahl} Fehler" + (f" ({', '.join(teile)})" if teile else "")
+
+
 async def _lauf(client, provider, laden, index_und_graph) -> dict:
     st = einstellungen()
     if not st["aktiv"]:
@@ -1235,6 +1375,9 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
 
     zahl = {"neu": 0, "gleich": 0, "irrelevant": 0, "fehler": 0, "erneut": 0}
     fehler: list[str] = []
+    arten: dict[str, int] = {}
+    server_serie = 0                # Tickets IN FOLGE mit "Modellserver"
+    server_aus = False              # Lauf wegen ausgefallenem Server beendet
     weg: list[str] = []             # beim Loesen entfernte, veroeffentlichte Dateien
     ausgewertet = 0                 # angefasste Tickets (bei "beenden" < len(neu))
     zeiten = Zeiten()
@@ -1253,7 +1396,7 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
         quelle = iter(neu)
 
         def nachlegen() -> None:
-            while len(vorlauf) < PARALLEL and not _stopp_angefordert:
+            while len(vorlauf) < PARALLEL and not _stopp_angefordert and not server_aus:
                 t = next(quelle, None)
                 if t is None:
                     return
@@ -1268,7 +1411,7 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
                 # prueft die Marke), aber eine FERTIGE Analyse noch einordnen –
                 # sie ist bezahlt, verworfen kaeme dasselbe Ticket naechstes Mal
                 # ein zweites Mal durchs Modell.
-                if _stopp_angefordert and not analyse_fertig.done():
+                if (_stopp_angefordert or server_aus) and not analyse_fertig.done():
                     break
                 vorlauf.popleft()
                 ausgewertet += 1
@@ -1286,10 +1429,24 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
                     zahl[art] += 1
                     if t.get("geaendert"):
                         zahl["erneut"] += 1
+                    server_serie = 0
                 except Exception as e:  # noqa: BLE001 – ein Ticket kippt nicht den Lauf
                     zahl["fehler"] += 1
-                    if len(fehler) < 5:
+                    fa = fehlerart(e)
+                    arten[fa] = arten.get(fa, 0) + 1
+                    # JEDER Fehler ins Journal – im Stand stehen nur Beispiele.
+                    # Der Text nennt nie Ticketinhalt: Gruende aus
+                    # ``antwort_lesen`` tragen nur die Art, Server- und
+                    # Jira-Meldungen keinen Fremdtext.
+                    print(f"[Lösungsarchiv] {t['key']} nicht ausgewertet "
+                          f"({FEHLERARTEN[fa]}): {str(e)[:240]}", flush=True)
+                    if arten[fa] <= FEHLER_BEISPIELE_JE_ART:
                         fehler.append(f"{t['key']}: {e}"[:200])
+                    server_serie = server_serie + 1 if fa == "modellserver" else 0
+                    if server_serie >= SERVER_AUS_SERIE and not server_aus:
+                        server_aus = True
+                        print(f"[Lösungsarchiv] {server_serie} Tickets in Folge ohne "
+                              "Modellserver – Lauf wird beendet.", flush=True)
                 _lauf_info["fertig"] = _lauf_info.get("fertig", 0) + 1
                 # Nach JEDEM Ticket sichern: ein Neustart mitten im Lauf soll nicht
                 # Hunderte bereits bezahlte Modellaufrufe wegwerfen.
@@ -1329,8 +1486,14 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
               if zahl["erneut"] else "")
     beendet = (f"Von Hand beendet nach {ausgewertet} von {len(neu)} Tickets. "
                if _stopp_angefordert else "")
+    if server_aus and not _stopp_angefordert:
+        # Beginnt mit "Fehler:" – ``cron_log.ist_fehler`` erkennt den
+        # Fehlschlag am Textanfang, und ein Lauf, der wegen des Servers
+        # aufgibt, darf dort nicht als erfolgreich stehen.
+        beendet = (f"Fehler: Modellserver nicht erreichbar – Lauf beendet nach "
+                   f"{ausgewertet} von {len(neu)} Tickets, der Rest folgt im nächsten Lauf. ")
     grund = (f"{beendet}{ausgewertet} Ticket(s) ausgewertet{erneut}: {zahl['neu']} neu, {zahl['gleich']} "
-             f"zugeordnet, {zahl['irrelevant']} ohne Lösung, {zahl['fehler']} Fehler · "
+             f"zugeordnet, {zahl['irrelevant']} ohne Lösung, {_fehler_text(zahl['fehler'], arten)} · "
              f"Wissensdatenbank: {sch['veroeffentlicht']} neu, {sch['aktualisiert']} "
              f"aktualisiert, {sch['entfernt']} entfernt")
     if rest:
@@ -1341,7 +1504,8 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     if zeile:
         grund += " · " + zeile
     erg = {"ok": zahl["fehler"] == 0, "grund": grund, **zahl, **sch,
-           "offen": rest, "fehler_beispiele": fehler,
+           "offen": rest, "fehler_beispiele": fehler, "fehler_arten": arten,
+           "server_aus": server_aus,
            "beendet": bool(_stopp_angefordert),
            "zeiten": zeiten.als_dict(wanduhr, ausgewertet)}
     _ergebnis_merken(erg)

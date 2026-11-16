@@ -397,6 +397,43 @@ check("gueltige Escapes bleiben bei der Reparatur Zeichen fuer Zeichen gleich",
 check("\\u ohne vier Hexziffern gilt als kaputt und wird repariert",
       (la.json_aus('{"a": "C:\\users"}') or {}).get("a") == "C:\\users", la.json_aus('{"a": "C:\\users"}'))
 
+# Ungeschuetzte Anfuehrungszeichen (ECHT 2026-11-15, Form der Rohantwort von DEV
+# am selben Ticket nachgestellt; Inhalt hier neutral).
+_zit = ('{\n  "relevant": true,\n'
+        '  "titel": "Falscher Status "in Bearbeitung" trotz Freigabe",\n'
+        '  "problem": "Faelle stehen als "in Bearbeitung" (oder "im Zugriff") da.",\n'
+        '  "loesung": "1. Fall freigeben. 2. Sitzung schliessen.",\n'
+        '  "schlagworte": ["Status", "Sperre"]\n}')
+check("Positivkontrolle: die Zitat-Probe ist ohne Reparatur wirklich ungueltig",
+      isinstance(wirft(json.loads, _zit), json.JSONDecodeError)
+      and isinstance(wirft(json.loads, la._backslashes_reparieren(_zit)), json.JSONDecodeError))
+_oz, _gz = la.antwort_lesen(_zit)
+check("⚠ ungeschuetzte Zitate im Wert werden lesbar und bleiben woertlich",
+      (_oz or {}).get("titel") == 'Falscher Status "in Bearbeitung" trotz Freigabe'
+      and (_oz or {}).get("problem") == 'Faelle stehen als "in Bearbeitung" (oder "im Zugriff") da.',
+      (_oz, _gz))
+check("die uebrigen Felder bleiben unberuehrt",
+      (_oz or {}).get("schlagworte") == ["Status", "Sperre"] and (_oz or {}).get("relevant") is True, _oz)
+check("und die Auswertung besteht danach die Feldpruefung",
+      la.pruefe_analyse(_oz) is not None, _oz)
+_komma = '{"relevant": true, "titel": "Status "fertig", danach nichts", "problem": "P", "loesung": "L"}'
+check("Zitat mit folgendem Komma (einzeilig) wird repariert",
+      (la.json_aus(_komma) or {}).get("titel") == 'Status "fertig", danach nichts', la.antwort_lesen(_komma))
+_liste = '{"relevant": true, "titel": "T", "problem": "P", "loesung": ["Knopf "Senden" druecken", "fertig"]}'
+check("Zitat in einem Listeneintrag wird repariert",
+      (la.json_aus(_liste) or {}).get("loesung") == ['Knopf "Senden" druecken', "fertig"], la.antwort_lesen(_liste))
+_zbs = '{"relevant": true, "titel": "Pfad "C:\\Daten" fehlt", "problem": "P", "loesung": "L"}'
+check("Zitat und ungeschuetzter Backslash zugleich",
+      (la.json_aus(_zbs) or {}).get("titel") == 'Pfad "C:\\Daten" fehlt', la.antwort_lesen(_zbs))
+_gut_zit = '{"a": "schon \\"geschuetzt\\" hier", "b": 1}'
+check("gueltiges JSON bleibt bei der Zitat-Reparatur Zeichen fuer Zeichen gleich",
+      la._anfuehrungszeichen_reparieren(_gut_zit) == _gut_zit)
+check("nicht reparierbar bleibt nicht reparierbar (kein Raten)",
+      la._anfuehrungszeichen_reparieren('{"a":\n x}') is None
+      and la.antwort_lesen('{"a":\n x}')[0] is None)
+check("die Reparatur ist gedeckelt (endet bei sehr vielen Zitaten)",
+      la._anfuehrungszeichen_reparieren('{"a": "' + ' "x"' * (la.ANF_REPARATUR_MAX + 5) + '"}') is None)
+
 _basis = {"relevant": True, "titel": "T", "problem": "P"}
 _lo = lambda w: (la.pruefe_analyse({**_basis, "loesung": w}) or {}).get("loesung")
 check("Loesung als Liste wird zu nummerierten Zeilen, nicht zu Python-Text",
@@ -1521,6 +1558,134 @@ _aufrufe = {getattr(c.func, "attr", getattr(c.func, "id", "")) for c in ast.walk
 check("⚠ Skript stellt kein Token aus und spricht den Dienst nicht an",
       "main" not in _namen and "generate_token" not in _aufrufe and "urlopen" not in _aufrufe
       and not any(i.startswith("urllib") for i in _importe), (_importe, _namen))
+
+# ════════════════════════════════════════════════════════════════════════════
+section("21. Modellserver weg, Fehlerarten (Vorfall ECHT 2026-11-15)")
+import httpx  # noqa: E402
+
+_SERVER_500 = ("HTTP 500 von https://llm.beispiel.de/v1/chat/completions: litellm.InternalServerError: "
+               "Hosted_vllmException - Cannot connect to host 192.0.2.10:9081 ssl:default")
+check("Ausfall erkannt: HTTP 500 mit 'Cannot connect' (Form aus llm.py)",
+      la.server_weg(ValueError(_SERVER_500)))
+check("Ausfall erkannt: httpx-Verbindungsfehler", la.server_weg(httpx.ConnectError("weg")))
+check("KEIN Ausfall: Lesezeitueberschreitung (langsames Modell)",
+      not la.server_weg(httpx.ReadTimeout("langsam")))
+check("KEIN Ausfall: HTTP 400 (Anfragefehler)",
+      not la.server_weg(ValueError("HTTP 400 von https://llm.beispiel.de/v1: bad request")))
+check("Fehlerart: kaputtes JSON ist 'modellantwort'",
+      la.fehlerart(la.ArchivFehler("keine gültige Auswertung vom Modell (2 Versuche): JSON ungültig")) == "modellantwort")
+check("Fehlerart: Server weg ist 'modellserver'", la.fehlerart(la.ModellserverWeg("x")) == "modellserver")
+from backend.jira_assist import AssistFehler as _AF  # noqa: E402
+check("Fehlerart: Jira-Fehler beim Laden ist 'jira'", la.fehlerart(_AF("Jira antwortet nicht")) == "jira")
+check("Fehlertext nennt die Arten in fester Folge",
+      la._fehler_text(5, {"modellantwort": 2, "modellserver": 3}) == "5 Fehler (Modellserver 3, Modellantwort 2)",
+      la._fehler_text(5, {"modellantwort": 2, "modellserver": 3}))
+check("Fehlertext ohne Fehler bleibt wie bisher", la._fehler_text(0, {}) == "0 Fehler")
+
+
+class _ServerWegAttrappe(ProviderAttrappe):
+    """Wirft fuer die ersten ``n_weg`` Aufrufe (bzw. immer) die ECHTE Fehlerform
+    des OpenAI-kompatiblen Zweigs; danach Antwort wie die Grundattrappe."""
+    def __init__(self, n_weg=None, fehler=_SERVER_500):
+        super().__init__()
+        self.n_weg, self.fehler, self.weg = n_weg, fehler, 0
+    async def generate_response(self, **kw):
+        if self.n_weg is None or self.weg < self.n_weg:
+            self.weg += 1
+            raise ValueError(self.fehler)
+        return await super().generate_response(**kw)
+
+
+_alt_warten, _alt_serie = la.SERVER_WARTEN, la.SERVER_AUS_SERIE
+la.SERVER_WARTEN = (0.01, 0.01, 0.01)
+try:
+    _neu21 = []
+    for i in range(1, 9):
+        k = f"{BEREICH}-21{i}"
+        TICKETS[k] = _ticket(k, f"Serverfall {i} Scanner", f"Scanner {i} meldet Fehler", f"Treiber {i} neu")
+        _neu21.append(k)
+    _vor21 = la.einstellungen()
+    la.einstellungen_speichern({**_vor21, "je_lauf": 1}, cron_manager=CronAttrappe())
+    client.keys.append(_neu21[0])
+    # a) Zwei Ausfaelle, dann wieder da: das Ticket gelingt, kein Fehler.
+    _p_a = _ServerWegAttrappe(n_weg=2)
+    _e_a = lauf(client, _p_a)
+    _st_a = json.loads((la._wurzel() / "stand.json").read_text())
+    check("Positivkontrolle: die Attrappe hat wirklich zweimal versagt", _p_a.weg == 2, _p_a.weg)
+    check("⚠ kurzer Ausfall: Ticket wird nach Wartepause doch ausgewertet",
+          _e_a.get("fehler") == 0 and _neu21[0] in _st_a["verarbeitet"], _e_a.get("grund"))
+    # b) Dauerhaft weg: Fehlerart, Journalzeile, Ticket bleibt offen, Versuche gedeckelt.
+    client.keys.append(_neu21[1])
+    _p_b = _ServerWegAttrappe()
+    _aus_b = io.StringIO()
+    with redirect_stdout(_aus_b):
+        _e_b = lauf(client, _p_b)
+    _st_b = json.loads((la._wurzel() / "stand.json").read_text())
+    check("dauerhaft weg: genau 1 + len(SERVER_WARTEN) Versuche, kein zweiter Auswerteversuch",
+          _p_b.weg == 1 + len(la.SERVER_WARTEN), _p_b.weg)
+    check("Fehler als Art 'modellserver' gezaehlt",
+          _e_b.get("fehler") == 1 and _e_b.get("fehler_arten") == {"modellserver": 1}, _e_b)
+    check("⚠ der Grund nennt die Art", "1 Fehler (Modellserver 1)" in _e_b.get("grund", ""), _e_b.get("grund"))
+    check("Ticket bleibt offen", _neu21[1] not in _st_b["verarbeitet"])
+    _zeilen_b = [z for z in _aus_b.getvalue().splitlines() if "nicht ausgewertet" in z]
+    check("⚠ je Ticketfehler EINE Journalzeile mit Ticket und Art",
+          len(_zeilen_b) == 1 and _neu21[1] in _zeilen_b[0] and "(Modellserver)" in _zeilen_b[0], _zeilen_b)
+    check("jede Wartepause steht im Journal",
+          _aus_b.getvalue().count("Modellserver nicht erreichbar, neuer Versuch") == len(la.SERVER_WARTEN))
+    # c) Anfragefehler (400) wird NICHT wiederholt.
+    _p_c = _ServerWegAttrappe(fehler="HTTP 400 von https://llm.beispiel.de/v1: bad request")
+    with redirect_stdout(io.StringIO()):
+        _e_c = lauf(client, _p_c)
+    check("Anfragefehler: keine Wartepause, ein Aufruf",
+          _p_c.weg == 1 and _e_c.get("fehler_arten") == {"sonstige": 1}, (_p_c.weg, _e_c.get("fehler_arten")))
+    # d) Serienabbruch: alle offenen Tickets scheitern am Server.
+    for k in _neu21[2:]:
+        client.keys.append(k)
+    la.einstellungen_speichern({**_vor21, "je_lauf": 50}, cron_manager=CronAttrappe())
+    la.SERVER_AUS_SERIE = 2
+    _p_d = _ServerWegAttrappe()
+    with redirect_stdout(io.StringIO()) as _aus_d:
+        _e_d = lauf(client, _p_d)
+    _offen_d = len(_neu21) - 1          # _neu21[0] ist verarbeitet
+    check("Positivkontrolle: mehr offene Tickets als die Serie", _offen_d > la.SERVER_AUS_SERIE + la.PARALLEL)
+    check("⚠ Serie ohne Server beendet den Lauf (nicht jedes Ticket wartet)",
+          _e_d.get("server_aus") is True and _e_d.get("fehler", 0) < _offen_d, _e_d)
+    check("⚠ der Grund beginnt mit 'Fehler:' (Cron-Protokoll erkennt den Fehlschlag)",
+          _e_d.get("grund", "").startswith("Fehler: Modellserver nicht erreichbar"), _e_d.get("grund"))
+    check("der Rest wird als offen genannt", (_e_d.get("offen") or 0) > 0, _e_d)
+    check("Beispiele je Art gedeckelt", len(_e_d.get("fehler_beispiele") or []) <= la.FEHLER_BEISPIELE_JE_ART,
+          _e_d.get("fehler_beispiele"))
+    # e) Server wieder da: der naechste Lauf holt alle nach.
+    _e_e = lauf(client, ProviderAttrappe())
+    _st_e = json.loads((la._wurzel() / "stand.json").read_text())
+    check("naechster Lauf holt alle offenen Tickets nach",
+          all(k in _st_e["verarbeitet"] for k in _neu21) and _e_e.get("server_aus") is False, _e_e.get("grund"))
+    # f) Ausfall und Erfolg im Wechsel: KEIN Serienabbruch (die Serie zaehlt nur in Folge).
+    class _WechselAttrappe(ProviderAttrappe):
+        def __init__(self, weg):
+            super().__init__(); self.weg_keys, self.weg = weg, 0
+        async def generate_response(self, *, contents, **kw):
+            key = (re.search(r"Ticket: (\S+)", contents[0].parts[0].text) or [None, ""])[1]
+            if key in self.weg_keys:
+                self.weg += 1
+                raise ValueError(_SERVER_500)
+            return await super().generate_response(contents=contents, **kw)
+    _neu21f = []
+    for i in range(1, 7):
+        k = f"{BEREICH}-22{i}"
+        TICKETS[k] = _ticket(k, f"Wechselfall {i} Monitor", f"Monitor {i} flackert", f"Kabel {i} getauscht")
+        _neu21f.append(k)
+        client.keys.append(k)
+    _p_f = _WechselAttrappe(set(_neu21f[0::2]))
+    with redirect_stdout(io.StringIO()):
+        _e_f = lauf(client, _p_f)
+    check("Positivkontrolle: im Wechsel sind wirklich Ausfaelle aufgetreten",
+          _e_f.get("fehler") == 3 and _p_f.weg > 0, _e_f.get("grund"))
+    check("⚠ Ausfall/Erfolg im Wechsel beendet den Lauf NICHT",
+          _e_f.get("server_aus") is False and (_e_f.get("offen") or 0) == 0, _e_f)
+finally:
+    la.SERVER_WARTEN, la.SERVER_AUS_SERIE = _alt_warten, _alt_serie
+    la.einstellungen_speichern(_vor21, cron_manager=CronAttrappe())
 
 print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m")
 sys.exit(0 if FAIL == 0 else 1)

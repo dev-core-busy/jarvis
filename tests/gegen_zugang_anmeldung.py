@@ -66,6 +66,26 @@ PROBEN = [
     ("Confluence-Sitzung auch bei erlaubten Zugaengen", "backend/confluence_accounts.py",
      "    if persoenlich_erlaubt():\n        raise ConfluenceKontoFehler(\n            \"Persoenliche Zugaenge sind erlaubt",
      "    if False:\n        raise ConfluenceKontoFehler(\n            \"Persoenliche Zugaenge sind erlaubt"),
+    # ── Anmeldeschritt fuer jeden Benutzer (seit 2026-11-16) ──
+    ("Freigabeliste kehrt zurueck", "backend/main.py",
+     '    if not (user or "").strip() or ":" in user:\n        return out\n    from backend import',
+     '    if not (user or "").strip() or ":" in user:\n        return out\n'
+     '    if user != "anna.beispiel":\n        return out\n    from backend import'),
+    ("Kanal-Kennung bekommt den Schritt", "backend/main.py",
+     '    if not (user or "").strip() or ":" in user:\n        return out\n    from backend import',
+     '    if not (user or "").strip():\n        return out\n    from backend import'),
+    ("laufende Sitzung wird erneut angeboten", "backend/main.py",
+     '            if m.zugang_info(user).get("angemeldet"):\n                continue\n',
+     '            if False:\n                continue\n'),
+    ("erlaubte persoenliche Zugaenge werden angeboten", "backend/main.py",
+     "            if not m.sitzungs_modus() or not m.basis_url():\n",
+     "            if not m.basis_url():\n"),
+    # Nicht ueber das Entfernen von ``if not a.get("feld")``: ohne die Zeile
+    # wirft ``a["feld"]`` einen KeyError, das try je System laesst SAP trotzdem
+    # weg – die Sabotage waere wirkungslos, kein Waechter-Mangel.
+    ("SAP/VEMAS ohne Angebot trotzdem gelistet", "backend/main.py",
+     "            a = m.anmeldung_anbieten(user) or {}\n",
+     '            a = m.anmeldung_anbieten(user) or {"feld": "password"}\n'),
 ]
 
 

@@ -342,38 +342,141 @@ if hf is not None:
     check(len(schleifen) == 2 and all(any(isinstance(x, ast.Try) for x in s.body)
                                       for s in schleifen),
           "je System eigenes try (ein Fehler laesst nur dieses System weg)")
-    # Testphase: vor JEDER Systemschleife steht die Freigabe-Schranke mit
-    # leerer Rueckgabe – sonst sieht jeder Benutzer den zweiten Schritt.
-    erste_schleife = next((i for i, n in enumerate(hf.body) if isinstance(n, ast.For)),
-                          len(hf.body))
-    def _ist_schranke(n):
-        if not (isinstance(n, ast.If) and isinstance(n.test, ast.UnaryOp)
-                and isinstance(n.test.op, ast.Not) and isinstance(n.test.operand, ast.Call)):
-            return False
-        f = n.test.operand.func
-        return (isinstance(f, ast.Name) and f.id == "_user_may_use_zugang_anmeldung"
-                and len(n.body) == 1 and isinstance(n.body[0], ast.Return))
-    check(any(_ist_schranke(n) for n in hf.body[:erste_schleife]),
-          "Freigabe-Schranke steht vor den Systemen (Testphase)")
-
-# Die Schranke selbst: leer = niemand, nur gelistete Benutzer
-pf = _fn("_user_may_use_zugang_anmeldung")
-check(pf is not None, "_user_may_use_zugang_anmeldung existiert")
-if pf is not None:
-    gelesen = {n.args[0].value for n in ast.walk(pf) if isinstance(n, ast.Call)
+    # Keine Freigabeliste mehr (Testphase bis 2026-11-16): die Funktion liest
+    # keine Einstellung – wer was sieht, entscheiden allein die Bereiche.
+    gelesen = {n.args[0].value for n in ast.walk(hf) if isinstance(n, ast.Call)
                and isinstance(n.func, ast.Attribute) and n.func.attr == "get_setting"
                and n.args and isinstance(n.args[0], ast.Constant)}
-    check(gelesen == {"zugang_anmeldung_users"}, "liest genau zugang_anmeldung_users",
-          str(gelesen))
-    ns = {"config": type("C", (), {"get_setting": staticmethod(lambda k, d=None: _ZA[0])}),
-          "_norm_login": lambda x: x.strip().lower().split("\\")[-1]}
-    exec(compile(ast.Module(body=[pf], type_ignores=[]), "pf", "exec"), ns)
-    _ZA = [""]
-    check(ns[pf.name]("anna.beispiel") is False, "leere Liste = niemand")
-    _ZA = ["anna.beispiel, erika.muster"]
-    check(ns[pf.name]("Anna.Beispiel") is True, "gelisteter Benutzer darf")
-    check(ns[pf.name]("m.mustermann") is False, "nicht gelisteter Benutzer darf nicht")
-    check(ns[pf.name]("") is False, "leerer Benutzer darf nicht")
+    check(not gelesen, "liest keine Freigabeliste", str(gelesen))
+check(_fn("_user_may_use_zugang_anmeldung") is None,
+      "die Testphasen-Schranke ist entfernt")
+
+# ── Wirkung: _zugang_anmeldungen WIRKLICH ausfuehren ─────────────────────────
+# Attrappen fuer die vier Kontomodule und die Bereichsfreigaben; der Import
+# ``from backend import …`` wird ueber ein eigenes __import__ bedient, damit
+# die echten (oben im Sandkasten geladenen) Module unberuehrt bleiben.
+section("Anmeldeschritt: wer bekommt was angeboten")
+import builtins  # noqa: E402
+
+_bf = next((n for n in baum.body if isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "_ZUGANG_BENUTZERFELD"
+                    for t in n.targets)), None)
+if hf is None or _bf is None:
+    print("ABBRUCH: _zugang_anmeldungen oder _ZUGANG_BENUTZERFELD nicht gefunden")
+    sys.exit(2)
+
+
+class _KachelKonto:
+    """SAP/VEMAS: ``anmeldung_anbieten`` liefert {} oder das Geheimfeld."""
+    def __init__(self):
+        self.angebot = {}
+
+    def anmeldung_anbieten(self, user):
+        return dict(self.angebot)
+
+
+class _SitzungsKonto:
+    """Jira/Confluence: Sitzungsbetrieb, Adresse, laufende Anmeldung."""
+    def __init__(self):
+        self.modus, self.basis, self.angemeldet = True, "https://jira.beispiel.de", False
+
+    def sitzungs_modus(self, cfg=None):
+        return self.modus
+
+    def basis_url(self):
+        return self.basis
+
+    def zugang_info(self, user):
+        return {"angemeldet": self.angemeldet}
+
+
+_M = {"sap_accounts": _KachelKonto(), "vemas_accounts": _KachelKonto(),
+      "jira_accounts": _SitzungsKonto(), "confluence_accounts": _SitzungsKonto()}
+_DARF = {"sap": True, "vemas": True, "jira": True, "skill": True}
+_echt_import = builtins.__import__
+
+
+def _import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == "backend" and fromlist:
+        return types.SimpleNamespace(**_M)
+    return _echt_import(name, globals, locals, fromlist, level)
+
+
+_ns = {"__builtins__": dict(builtins.__dict__, __import__=_import),
+       "_user_may_use_sap": lambda u: _DARF["sap"],
+       "_user_may_use_vemas": lambda u: _DARF["vemas"],
+       "_user_may_use_jira_assist": lambda u: _DARF["jira"],
+       "_skill_active": lambda s: _DARF["skill"]}
+exec(compile(ast.Module(body=[_bf, hf], type_ignores=[]), "za", "exec"), _ns)
+_za = _ns["_zugang_anmeldungen"]
+ALLE = ["sap", "vemas", "jira", "confluence"]
+
+
+def _systeme(user="anna.beispiel"):
+    return [e.get("system") for e in _za(user)]
+
+
+# Positivkontrolle: Ausgangslage ist "nichts hinterlegt, alles erlaubt" –
+# ohne Eintraege hier waeren alle folgenden Abwesenheiten trivial wahr.
+_M["sap_accounts"].angebot = {"feld": "password", "benutzer": "ABEISPIEL"}
+_M["vemas_accounts"].angebot = {"feld": "api_token", "benutzer": ""}
+if _systeme() != ALLE:
+    print(f"ABBRUCH: Positivkontrolle – erwartet {ALLE}, bekam {_systeme()}")
+    sys.exit(2)
+
+# Kern der Umstellung: JEDER Benutzer, keine Liste.
+for wer in ("m.mustermann", "erika.muster", "CONTOSO\\erika.muster"):
+    check(_systeme(wer) == ALLE,
+          f"ohne Freigabeliste: {wer} bekommt alle offenen Anmeldungen",
+          str(_systeme(wer)))
+check(_za("wa:4915100000000") == [], "Kanal-Kennung bekommt nichts")
+check(_za("") == [], "leerer Benutzer bekommt nichts")
+
+e_sap = next((e for e in _za("anna.beispiel") if e.get("system") == "sap"), {})
+check(e_sap.get("benutzer_feld") == "username" and e_sap.get("benutzer") == "ABEISPIEL",
+      "SAP: Benutzer und Benutzerfeld zum Kennwort", str(e_sap))
+
+# Persoenlicher Zugang hinterlegt bzw. keine Anmeldung noetig -> nicht angeboten.
+_M["sap_accounts"].angebot = {}
+check(_systeme() == ["vemas", "jira", "confluence"],
+      "SAP ohne Angebot (Zugang hinterlegt) fehlt", str(_systeme()))
+_M["sap_accounts"].angebot = {"feld": "password", "benutzer": "ABEISPIEL"}
+
+_M["jira_accounts"].modus = False
+check(_systeme() == ["sap", "vemas", "confluence"],
+      "Jira mit erlaubten persoenlichen Zugaengen fehlt", str(_systeme()))
+_M["jira_accounts"].modus = True
+
+_M["confluence_accounts"].angemeldet = True
+check(_systeme() == ["sap", "vemas", "jira"],
+      "Confluence mit laufender Sitzung fehlt", str(_systeme()))
+_M["confluence_accounts"].angemeldet = False
+
+_M["jira_accounts"].basis = ""
+check(_systeme() == ["sap", "vemas", "confluence"], "Jira ohne Adresse fehlt",
+      str(_systeme()))
+_M["jira_accounts"].basis = "https://jira.beispiel.de"
+
+# Bereichsfreigaben gelten weiter.
+_DARF["sap"] = False
+check(_systeme() == ["vemas", "jira", "confluence"], "SAP ohne Bereichsfreigabe fehlt",
+      str(_systeme()))
+_DARF["sap"] = True
+_DARF["jira"] = False
+check(_systeme() == ["sap", "vemas", "confluence"],
+      "Jira ohne Freigabe fehlt, Confluence bleibt", str(_systeme()))
+_DARF["jira"] = True
+
+
+# Fail-closed je System: ein Fehler laesst nur dieses System weg.
+def _wirft(*a, **k):
+    raise RuntimeError("Probe")
+
+
+_M["vemas_accounts"].anmeldung_anbieten = _wirft
+check(_systeme() == ["sap", "jira", "confluence"],
+      "Fehler bei VEMAS laesst nur VEMAS weg", str(_systeme()))
+del _M["vemas_accounts"].anmeldung_anbieten
 
 print(f"\n{'═' * 70}\nERGEBNIS: {_ok} OK, {_fail} FAIL")
 sys.exit(1 if _fail else 0)

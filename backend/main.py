@@ -6416,28 +6416,19 @@ _ZUGANG_BENUTZERFELD = {
 }
 
 
-def _user_may_use_zugang_anmeldung(user: str) -> bool:
-    """Testphase (2026-11-15): der zweite Anmeldeschritt erscheint nur fuer
-    Benutzer in ``zugang_anmeldung_users`` (Komma-Liste in settings.json,
-    ``extra``). Leer = niemand – wie jedes Freigabefeld, ohne Admin-Bypass.
-    Eine AD-Gruppe gibt es bewusst nicht: das ist ein Probeschalter, keine
-    Bereichsfreigabe."""
-    u = (user or "").strip()
-    if not u:
-        return False
-    roh = str(config.get_setting("zugang_anmeldung_users", "") or "").strip()
-    if not roh:
-        return False
-    return _norm_login(u) in {_norm_login(x) for x in roh.split(",") if x.strip()}
-
-
 def _zugang_anmeldungen(user: str) -> list[dict]:
     """Welche Anmeldungen braucht dieser Benutzer gerade? Fail-closed je
-    System: ein Fehler laesst das System weg, nie die ganze Liste."""
+    System: ein Fehler laesst das System weg, nie die ganze Liste.
+
+    Fuer JEDEN Benutzer (seit 2026-11-16; vorher Testphase mit Freigabeliste
+    ``zugang_anmeldung_users``). Angeboten wird nur, wofuer er keinen
+    persoenlichen Zugang hinterlegt hat und der Bereich ihm offensteht:
+    SAP/VEMAS mit Kachel-Anmeldung (dort liegt kein Kennwort auf der Platte,
+    ``anmeldung_anbieten``), Jira/Confluence ohne erlaubte persoenliche
+    Zugaenge und ohne laufende Sitzung. Wer nichts davon braucht, bekommt
+    eine leere Liste – der zweite Schritt erscheint dann gar nicht."""
     out: list[dict] = []
     if not (user or "").strip() or ":" in user:
-        return out
-    if not _user_may_use_zugang_anmeldung(user):
         return out
     from backend import (confluence_accounts, jira_accounts,  # noqa: PLC0415
                          sap_accounts, vemas_accounts)

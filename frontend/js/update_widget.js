@@ -59,8 +59,32 @@
         document.addEventListener('click', function (e) {
             if (_open && !widget.contains(e.target) && !(dropdown && dropdown.contains(e.target))) close();
         });
-        check();
+        // Die Pille steht seit 2026-11-16 auf JEDER Seite (kopfzeile.js) –
+        // und /api/update/status macht ein `git fetch`. Bei jedem Seitenwechsel
+        // nachzufragen hiesse, je Klick eines Admins einmal zum Git-Server.
+        // Ein frischer gemerkter Stand wird deshalb nur gezeichnet; beim
+        // Oeffnen des Popups fragt open() wie bisher neu nach.
+        var g = gemerkt();
+        if (g) pille(g); else check();
         _timer = setInterval(check, 30 * 60 * 1000);
+    }
+
+    // Gemerkter Stand fuer die Pille – null, wenn keiner oder zu alt.
+    var FRISCH_MS = 15 * 60 * 1000;
+    function gemerkt() {
+        var g = window.JarvisKopf ? window.JarvisKopf.gemerkt('update') : null;
+        if (!g || typeof g.zeit !== 'number') return null;
+        var alter = Date.now() - g.zeit;
+        return (alter >= 0 && alter < FRISCH_MS) ? g : null;
+    }
+    function merken(d) {
+        if (!window.JarvisKopf) return;
+        window.JarvisKopf.merke('update', {
+            jarvis_version: d.jarvis_version, has_update: !!d.has_update,
+            commits_behind: d.commits_behind, ok: !!d.ok, image: !!d.image,
+            zeit: Date.now()
+        });
+        if (d.jarvis_version) window.JarvisKopf.merke('version', d.jarvis_version);
     }
 
     function toggle() { _open ? close() : open(); }
@@ -79,6 +103,18 @@
     }
 
     function render(d) {
+        pille(d);
+        merken(d);
+        if (!body || _ansicht === 'verlauf') return;
+        if (d.image) { buildImageBody(); return; }
+        fetch('/api/update/settings', { headers: auth() })
+            .then(function (r) { return r.json(); })
+            .then(function (s) { buildBody(d, s.auto_update_schedule || 'never'); })
+            .catch(function () { buildBody(d, 'never'); });
+    }
+
+    // Nur die Pille (Version, Farbe, Badge) – ohne Popup-Inhalt.
+    function pille(d) {
         if (verEl) verEl.textContent = 'v' + (d.jarvis_version || '?');
         if (badge) {
             badge.style.display = d.has_update ? 'inline' : 'none';
@@ -94,12 +130,6 @@
                 ? T('update.widget_title_avail', { n: d.commits_behind })
                 : T('update.widget_title_ok');
         }
-        if (!body || _ansicht === 'verlauf') return;
-        if (d.image) { buildImageBody(); return; }
-        fetch('/api/update/settings', { headers: auth() })
-            .then(function (r) { return r.json(); })
-            .then(function (s) { buildBody(d, s.auto_update_schedule || 'never'); })
-            .catch(function () { buildBody(d, 'never'); });
     }
 
     function buildBody(d, schedule) {
@@ -260,6 +290,9 @@
     }
 
     function applyUpdate() {
+        // Der gemerkte Stand ist nach dem Update falsch (alte Version, rote
+        // Pille) – verwerfen, damit die naechste Seite neu fragt.
+        if (window.JarvisKopf) window.JarvisKopf.merke('update', null);
         var btn = document.getElementById('upd-apply-btn');
         if (btn) { btn.disabled = true; btn.textContent = T('update.applying'); }
         if (body) {

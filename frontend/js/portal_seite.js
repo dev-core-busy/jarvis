@@ -313,6 +313,16 @@
         });
     });
     var _si = document.getElementById('security-indicator'); if (_si) _si.addEventListener('click', openCert);
+    // Das Schild der gemeinsamen Titelleiste (kopfzeile.js) fuehrt von Seiten
+    // ohne eigenen Zertifikat-Dialog hierher – der Dialog lebt nur einmal.
+    // Den Parameter danach aus der Adresse nehmen, sonst oeffnet ein Neuladen
+    // den Dialog erneut.
+    try {
+        if (/[?&]zertifikat=1\b/.test(location.search)) {
+            openCert();
+            history.replaceState(null, '', location.pathname + location.hash);
+        }
+    } catch (e) { /* ohne history-API bleibt der Parameter stehen */ }
     var _bhelp = document.getElementById('btn-banner-help'); if (_bhelp) _bhelp.addEventListener('click', openCert);
     var _bclose = document.getElementById('btn-close-banner');
     if (_bclose) _bclose.addEventListener('click', function(){ var b=document.getElementById('security-banner'); if(b) b.style.display='none'; try{localStorage.setItem('jarvis_cert_dismissed','true');}catch(e){} });

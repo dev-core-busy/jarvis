@@ -79,9 +79,11 @@ try { localStorage.setItem('jarvis_token','probe'); } catch(e){}
 MESS = """(function(){
   var d=document.documentElement,b=document.body;
   var ue=Math.max(d.scrollWidth-d.clientWidth,b.scrollWidth-b.clientWidth);
-  var leiste=document.querySelector('.topbar,.wi-topbar,.pt-topbar,.sa-topbar,.ad-top');
+  // `.jv-kopfzeile`/`.modal-head-actions`: /settings hat seit 2026-11-16 die
+  // gemeinsame Leiste im Kopf des Einstellungsfensters (kopfzeile.js).
+  var leiste=document.querySelector('.topbar,.wi-topbar,.pt-topbar,.sa-topbar,.ad-top,.jv-kopfzeile');
   var gruppe=document.querySelector('.topbar-right,.wi-top-icons,.pt-top-icons,'
-             +'.sa-top-icons,.ad-top-icons');
+             +'.sa-top-icons,.ad-top-icons,.jv-kopfzeile .modal-head-actions');
   var w=d.clientWidth, schlimm=null, max=0, alle=document.querySelectorAll('body *');
   for(var i=0;i<alle.length;i++){var e=alle[i],cs=getComputedStyle(e);
     if(cs.display==='none'||cs.visibility==='hidden')continue;

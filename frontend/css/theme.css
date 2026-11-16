@@ -1616,3 +1616,80 @@ body.light .zg-status.is-fehler, body.light .zg-meldung.is-fehler {
 .zg-input:disabled { opacity: 0.6; }
 .zg-meldung { margin: 0 0 12px; font-size: 0.85rem; line-height: 1.4; }
 .zg-ueberspringen { width: 100%; margin-top: 10px; justify-content: center; }
+
+/* ══ Gemeinsame Titelleiste (kopfzeile.js, 2026-11-16) ═══════════════════
+   Vorgabe: Logo, Marke, LLM-Punkt, Schild, Update-Pille, CPU, ⓘ und
+   Abmelden stehen auf JEDER Seite an derselben Stelle, und die Leiste soll
+   beim Seitenwechsel stehen bleiben statt neu aufgebaut zu wirken. */
+
+/* Nur-Admin-Elemente: sichtbar erst, wenn kopfzeile.js die Rolle (gemerkt
+   oder aus /api/me belegt) auf <html> gesetzt hat. `!important`, weil die
+   Module die Elemente per Inline-`display` einblenden – die Rolle muss
+   trotzdem das letzte Wort haben. Sichtbarkeit ist keine Berechtigung: die
+   Endpunkte pruefen selbst. */
+html:not(.jv-kopf-admin) .jv-kopf-nuradmin { display: none !important; }
+
+/* Eigener LLM-Punkt fuer Seiten, die keinen mitbringen (gleiche Masse wie
+   die Punkte in /portal, /support, /sap). */
+.jv-kopf-llm {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    background: var(--text-muted);
+    transition: background .3s;
+}
+.jv-kopf-llm.connected { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.jv-kopf-llm.disconnected { background: var(--danger); }
+
+/* /settings: der Fensterkopf traegt jetzt Logo + Marke + Titel als EINE
+   Gruppe (ein drittes direktes Kind wuerde `space-between` zerreissen). Die
+   Seite laedt chat.css nicht – das Logo braucht hier seine eigene Form. */
+.jv-kopf-links {
+    display: flex; align-items: center; gap: 10px;
+    min-width: 0; flex-wrap: wrap;
+}
+.jv-kopf-links .topbar-avatar {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    background: var(--gradient);
+    color: var(--text-on-accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+}
+/* Marke und Titel wie auf den Bereichsseiten (`.topbar-title`: 19px/600,
+   einfarbig) – der Verlauf von `.modal-header h2` liess „Einstellungen“
+   anders aussehen als „Jarvis“ davor. */
+/* `margin-right: -5px`: die Gruppe hat 10px Abstand, zwischen Marke und
+   Titel gehoert aber nur ein Wortabstand (wie „Jarvis Chat“). */
+.jv-kopf-links .jv-kopf-marke { font-size: 19px; font-weight: 600; color: var(--text-primary); margin-right: -5px; }
+#settings-modal .jv-kopf-links h2 {
+    margin: 0; font-size: 19px; font-weight: 600;
+    background: none; -webkit-text-fill-color: currentColor; color: var(--text-primary);
+}
+/* Derselbe Rand wie bei jeder Titelleiste (10px 16px): sonst steht das Logo
+   auf /settings 16 px weiter rechts und die Leiste springt beim Wechsel. */
+#settings-modal .modal-header.jv-kopfzeile { padding: 10px 16px; }
+
+/* Schild: das Symbol gehoert IN den Kreis (bisher nur in portal.html
+   geregelt – auf den uebrigen Seiten fuellte es den Kreis ganz). */
+.security-badge > svg { width: 14px; height: 14px; }
+
+/* Seitenwechsel: der Browser blendet zwischen den Dokumenten ueber und haelt
+   die Leiste dabei fest (Cross-Document View Transitions; Chrome/Edge ab 126,
+   Safari ab 18.2 – andere Browser wechseln wie bisher, ohne Fehler). Die
+   Leiste bekommt KEINE Animation: alt und neu tauschen im selben Bild, und
+   weil Elemente und Reihenfolge gleich sind, sieht man keinen Wechsel. Der
+   Inhalt darunter blendet kurz ueber. */
+@view-transition { navigation: auto; }
+/* Der Name haengt an den festen Bauformen und nicht nur an der Klasse aus
+   kopfzeile.js: das Skript laeuft am Seitenende, der Browser kann die neue
+   Seite schon vorher zeigen – ohne Namen blendete die Leiste dann mit. */
+header.topbar, .pt-topbar, .wi-topbar, .ad-top, .sa-topbar,
+#settings-modal .modal-header, .jv-kopfzeile { view-transition-name: jv-kopfzeile; }
+::view-transition-group(jv-kopfzeile),
+::view-transition-old(jv-kopfzeile),
+::view-transition-new(jv-kopfzeile) { animation: none; }
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: .12s; }
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) { animation: none !important; }
+}

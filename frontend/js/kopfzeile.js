@@ -1,0 +1,438 @@
+/* ============================================================
+ * kopfzeile.js – EINE Titelleiste fuer alle Bereichsseiten (shared)
+ *
+ * VORGABE DES BETREIBERS (2026-11-16): "bei jedem Wechsel der Seiten wird die
+ * Headerzeile komplett neu aufgebaut. [...] Logo, Branding, LLM Status Pill,
+ * Zertifikathinweis, Update-Pill (nur Admin), CPU (nur Admin), 'i' (nur
+ * Admin), Logout sollen immer sichtbar sein [Einstellungen muss dazu auch
+ * angepasst werden]".
+ *
+ * WARUM DIE LEISTE NICHT WIRKLICH STEHEN BLEIBT: jede Bereichsseite ist ein
+ * eigenes HTML-Dokument – ein Seitenwechsel verwirft das alte Dokument samt
+ * Leiste. Eine echte Einzelseiten-Anwendung haette alle 21 Seiten umgebaut.
+ * Stattdessen wirken drei Dinge zusammen, damit die Leiste STEHEN BLEIBT, wie
+ * man sie sieht:
+ *   1. dieselben Kernelemente stehen auf jeder Seite an derselben Stelle
+ *      (dieses Modul baut fehlende ein und ordnet vorhandene),
+ *   2. der zuletzt bekannte Stand (Admin-Rolle, LLM-Zustand, CPU, Version)
+ *      liegt in sessionStorage und wird SOFORT gezeichnet – vorher erschienen
+ *      Update-Pille, CPU und ⓘ erst nach der Antwort von /api/me, und genau
+ *      dieses Nachschieben sah wie ein Neuaufbau aus,
+ *   3. der Browser blendet zwischen den Dokumenten ueber (View Transitions,
+ *      Regeln in theme.css) und haelt die Leiste dabei fest.
+ *
+ * REIHENFOLGE LINKS (auf jeder Seite gleich, hinter Logo und Titel):
+ *     LLM-Punkt · Schild · Update-Pille · CPU · ⓘ
+ * Seitenspezifische Anzeigen (SAP-Verbindung, Konto-Pille …) folgen dahinter.
+ * Abmelden steht als letztes Symbol rechts.
+ *
+ * NUR-ADMIN-ELEMENTE tragen `jv-kopf-nuradmin`; sichtbar sind sie nur, wenn
+ * `<html>` die Klasse `jv-kopf-admin` traegt (Regel in theme.css). Die Klasse
+ * setzt dieses Modul – sofort aus dem gemerkten Stand, danach belegt aus
+ * /api/me. ⚠ SICHTBARKEIT IST KEINE BERECHTIGUNG: die Endpunkte pruefen selbst.
+ *
+ * Der gemerkte Stand gehoert zu GENAU EINER Anmeldung: er traegt eine
+ * Pruefsumme des Tokens. Meldet sich in demselben Tab jemand anderes an, passt
+ * die Summe nicht mehr und der Stand wird verworfen – sonst saehe ein
+ * Nicht-Admin bis zur Antwort von /api/me die Admin-Symbole.
+ *
+ * ⚠ LAEDT DIREKT HINTER sitzung.js (harte Abhaengigkeit, siehe dort) und VOR
+ * cpubar.js / syspackages.js / update_widget.js: die bauen ihre Elemente nur,
+ * wenn sie fehlen, und uebernehmen sonst die von hier.
+ *
+ * API:
+ *   JarvisKopf.adminBelegt()  – true/false aus /api/me, null = noch offen
+ *   JarvisKopf.istAdmin()     – belegter ODER gemerkter Admin-Stand
+ *   JarvisKopf.merke(k, v)    – Wert fuer den naechsten Seitenaufbau merken
+ *   JarvisKopf.gemerkt(k)     – gemerkten Wert lesen (undefined = keiner)
+ * ============================================================ */
+(function () {
+    'use strict';
+
+    if (window.JarvisKopf) return;   // doppeltes Laden vermeiden
+
+    var S = window.JarvisSitzung;
+    var SPEICHER = 'jarvis_kopf';
+    var LLM_TAKT_MS = 30000;
+
+    // Bauformen der Titelleiste, in dieser Reihenfolge gesucht. /settings hat
+    // keine eigene Leiste – dort ist der Kopf des Einstellungsfensters die
+    // Leiste (das Fenster IST die Seite).
+    var WIRTE = ['header.topbar', '.pt-topbar', '.wi-topbar', '.ad-top', '.sa-topbar',
+                 '#settings-modal .modal-header'];
+    var LINKS = '.topbar-left';
+    var RECHTS = '.topbar-right, .pt-top-icons, .wi-top-icons, .ad-top-icons, .sa-top-icons, .modal-head-actions';
+    var TITEL = '.topbar-title, .pt-title, .wi-title, .ad-title, .sa-title, .jv-kopf-marke';
+    // Die LLM-Punkte, die Seiten selbst mitbringen und selbst abfragen.
+    var LLM_PUNKTE = '#status-dot, #pt-status-dot, #sup-status-dot, #sp-status-dot, #vm-status-dot, #wi-status-dot';
+
+    function T(key, fallback) {
+        try { if (window.t) { var v = window.t(key); if (v && v !== key) return v; } } catch (e) {}
+        return fallback;
+    }
+
+    /* ── Gemerkter Stand ─────────────────────────────────────────────── */
+
+    // Pruefsumme statt Token: der Token selbst gehoert nicht in einen zweiten
+    // Speicher. Es geht nur um "dieselbe Anmeldung wie beim Merken?".
+    function summe(s) {
+        var h = 5381;
+        for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+        return String(h >>> 0);
+    }
+
+    var _schluessel = '';
+    var _stand = {};
+
+    function laden() {
+        var tok = S.token();
+        _schluessel = tok ? summe(tok) : '';
+        _stand = {};
+        if (!_schluessel) return;
+        try {
+            var roh = sessionStorage.getItem(SPEICHER);
+            var s = roh ? JSON.parse(roh) : null;
+            if (s && s.k === _schluessel) _stand = s;
+        } catch (e) { /* Speicher gesperrt oder kaputt: ohne Merker weiter */ }
+    }
+
+    function sichern() {
+        if (!_schluessel) return;
+        _stand.k = _schluessel;
+        try { sessionStorage.setItem(SPEICHER, JSON.stringify(_stand)); } catch (e) { /* egal */ }
+    }
+
+    function merke(k, v) {
+        if (!_schluessel) return;
+        _stand[k] = v;
+        sichern();
+    }
+
+    function gemerkt(k) { return _stand[k]; }
+
+    /* ── Admin-Rolle ─────────────────────────────────────────────────── */
+
+    var _adminBelegt = null;   // null = /api/me hat noch nicht geantwortet
+
+    function adminKlasse(an) {
+        try { document.documentElement.classList.toggle('jv-kopf-admin', !!an); } catch (e) {}
+    }
+
+    function istAdmin() {
+        if (_adminBelegt !== null) return _adminBelegt;
+        return _stand.admin === true;
+    }
+
+    function updateStarten() {
+        if (istAdmin() && window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
+    }
+
+    function meHolen() {
+        if (!S.token() || typeof fetch !== 'function') return;
+        fetch('/api/me', { headers: S.kopfsatz() })
+            .then(function (r) {
+                if (r.status === 401 || r.status === 403) return { is_admin: false };
+                return r.ok ? r.json() : null;
+            })
+            .then(function (d) {
+                if (!d) return;            // technischer Fehler: gemerkten Stand behalten
+                _adminBelegt = !!d.is_admin;
+                merke('admin', _adminBelegt);
+                adminKlasse(_adminBelegt);
+                updateStarten();
+            })
+            .catch(function () { /* Netzfehler: gemerkten Stand behalten */ });
+    }
+
+    /* ── Bausteine ───────────────────────────────────────────────────── */
+
+    function el(tag, attrs, html) {
+        var e = document.createElement(tag);
+        for (var k in attrs) {
+            if (Object.prototype.hasOwnProperty.call(attrs, k)) e.setAttribute(k, attrs[k]);
+        }
+        if (html) e.innerHTML = html;
+        return e;
+    }
+
+    function nachDem(anker, neu) {
+        if (!anker || !anker.parentNode) return neu;
+        if (anker.nextSibling !== neu) anker.parentNode.insertBefore(neu, anker.nextSibling);
+        return neu;
+    }
+
+    var LLM_KLASSEN = ['connected', 'disconnected'];
+
+    function llmZeigen(punkt, z) {
+        if (!z) return;
+        LLM_KLASSEN.forEach(function (c) { punkt.classList.toggle(c, z.c === c); });
+        if (z.t) punkt.title = z.t;
+    }
+
+    // Vorhandener Punkt der Seite: gemerkten Zustand vorzeichnen, solange die
+    // Seite selbst noch nichts gesetzt hat, und jeden Wechsel mitschreiben.
+    function llmUebernehmen(punkt) {
+        if (!LLM_KLASSEN.some(function (c) { return punkt.classList.contains(c); })) {
+            llmZeigen(punkt, gemerkt('llm'));
+        }
+        if (typeof MutationObserver !== 'function') return;
+        new MutationObserver(function () {
+            var c = punkt.classList.contains('connected') ? 'connected'
+                  : punkt.classList.contains('disconnected') ? 'disconnected' : '';
+            if (c) merke('llm', { c: c, t: punkt.title || '' });
+        }).observe(punkt, { attributes: true, attributeFilter: ['class', 'title'] });
+    }
+
+    // Eigener Punkt (Seiten ohne LLM-Anzeige): selbst abfragen.
+    var _llmTimer = null;
+    function llmAbfragen(punkt) {
+        if (!S.token()) return;
+        fetch('/api/llm/active-status', { headers: S.kopfsatz() })
+            .then(function (r) {
+                if (r.status === 401 || r.status === 403) {
+                    if (_llmTimer) { clearInterval(_llmTimer); _llmTimer = null; }
+                    return null;
+                }
+                return r.ok ? r.json() : null;
+            })
+            .then(function (d) {
+                if (!d) return;
+                var ok = (d.status === 'ok' || d.status === 'degraded');
+                var text = (d.status === 'ok' ? T('sup.llm_ok', 'LLM erreichbar')
+                          : d.status === 'degraded' ? T('sup.llm_degraded', 'LLM eingeschränkt')
+                          : T('sup.llm_down', 'LLM nicht erreichbar'))
+                          + (d.profile_name ? ' – ' + d.profile_name : '');
+                var z = { c: ok ? 'connected' : 'disconnected', t: text };
+                llmZeigen(punkt, z);
+                merke('llm', z);
+            })
+            .catch(function () {
+                var z = { c: 'disconnected', t: T('sup.llm_down', 'LLM nicht erreichbar') };
+                llmZeigen(punkt, z);
+            });
+    }
+
+    function llmPunkt(wirt, anker) {
+        var p = wirt.querySelector(LLM_PUNKTE);
+        if (p) {
+            llmUebernehmen(p);
+        } else {
+            p = el('span', { 'class': 'jv-kopf-llm', id: 'jv-kopf-llm', title: 'LLM-Status',
+                             'data-i18n-title': 'portal.llm_status' });
+            llmZeigen(p, gemerkt('llm'));
+            if (S.token()) {
+                var punkt = p;
+                setTimeout(function () { llmAbfragen(punkt); }, 0);
+                _llmTimer = setInterval(function () { llmAbfragen(punkt); }, LLM_TAKT_MS);
+            }
+        }
+        p.setAttribute('data-kopf', 'llm');
+        // Der Punkt der Seite bleibt, wo die Seite ihn hingestellt hat, wenn er
+        // schon in der Reihe steht – sonst rueckt er hinter den Titel.
+        return nachDem(anker, p);
+    }
+
+    /* Schild: gruen = verschluesselt, rot = unverschluesselt. /portal bringt es
+     * mit (samt Zertifikat-Dialog). Wo die Seite einen eigenen Dialog hat
+     * (/chat), oeffnet der Klick ihn; sonst fuehrt er zum Dialog im Portal. */
+    function schild(wirt, anker) {
+        var s = wirt.querySelector('#security-indicator, #jv-kopf-schild');
+        if (!s) {
+            s = el('div', { id: 'jv-kopf-schild', 'class': 'security-badge', role: 'button',
+                            tabindex: '0', 'data-i18n-title': 'security.status', title: 'Sicherheitsstatus' },
+                   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">'
+                   + '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>');
+            var sicher = location.protocol === 'https:'
+                || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (sicher) s.classList.add('secure');
+            s.setAttribute('data-i18n-title', sicher ? 'panel.security_secure' : 'panel.security_critical');
+            s.title = sicher ? T('panel.security_secure', 'Gesichert')
+                             : T('panel.security_critical', 'Kritisch: Keine Verschlüsselung');
+            var oeffnen = function () {
+                var dlg = document.querySelector('#cert-modal.modal-overlay');
+                if (dlg) { dlg.classList.remove('hidden'); return; }
+                // In einem fremden Rahmen (Jira/Confluence) nicht den Rahmen
+                // selbst umleiten – der Dialog gehoert in ein eigenes Fenster.
+                var ziel = '/portal?zertifikat=1';
+                if (window.top !== window.self) window.open(ziel, '_blank', 'noopener');
+                else location.href = ziel;
+            };
+            s.addEventListener('click', oeffnen);
+            s.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); oeffnen(); }
+            });
+        }
+        return nachDem(anker, s);
+    }
+
+    function nurAdmin(e) {
+        e.classList.add('jv-kopf-nuradmin');
+        // Ein Inline-`display:none` aus dem Markup (portal.html) wuerde die
+        // Klassenregel ueberstimmen – die Sichtbarkeit entscheidet jetzt sie.
+        if (e.style.display === 'none') e.style.display = '';
+        return e;
+    }
+
+    function updatePille(wirt, anker) {
+        var w = document.getElementById('chat-update-wrap');
+        if (!w || !wirt.contains(w)) {
+            w = el('div', { 'class': 'update-widget-wrap', id: 'chat-update-wrap' },
+                '<div id="version-pill" class="header-version-pill upd-pill-clickable" title="Updates &amp; Version">'
+                + '<span id="update-version" class="upd-pill-ver">v?</span>'
+                + '<span id="update-badge" class="update-badge" style="display:none;">●</span></div>'
+                + '<div id="update-dropdown" class="update-dropdown hidden">'
+                + '<div class="update-dropdown-header"><span><span class="brand-app-name">Jarvis</span> Updates</span>'
+                + '<button id="upd-close" class="update-close-btn" data-i18n-title="common.close" title="Schließen">✕</button></div>'
+                + '<div id="upd-body" class="update-dropdown-body"><p class="kb-hint" style="margin:0;">…</p></div></div>');
+        }
+        // Gemerkte Version sofort zeigen; update_widget.js setzt Farbe und
+        // Badge aus seinem eigenen Merker.
+        var v = gemerkt('version');
+        var ve = w.querySelector('#update-version');
+        if (v && ve && ve.textContent === 'v?') ve.textContent = 'v' + v;
+        return nachDem(anker, nurAdmin(w));
+    }
+
+    function cpuBalken(wirt, anker) {
+        var b = document.getElementById('cpu-bar');
+        if (!b || !wirt.contains(b)) {
+            b = el('div', { id: 'cpu-bar', 'class': 'jv-cpu-bar', title: 'CPU-Auslastung',
+                            'data-i18n-title': 'wissen.cpu_load' },
+                '<div class="cpu-bar-fill" id="cpu-bar-fill" style="width:0%"></div>'
+                + '<span class="cpu-bar-label" id="cpu-bar-label">CPU: 0%</span>');
+            b.style.display = 'none';
+        }
+        var p = gemerkt('cpu');
+        if (typeof p === 'number' && S.token()) {
+            var f = b.querySelector('.cpu-bar-fill'), l = b.querySelector('.cpu-bar-label');
+            if (f) { f.style.width = p + '%'; f.style.backgroundPosition = p + '% 0'; }
+            if (l) l.textContent = 'CPU: ' + Math.round(p) + '%';
+            b.style.display = '';
+        }
+        b.classList.add('jv-kopf-nuradmin');
+        return nachDem(anker, b);
+    }
+
+    function paketKnopf(wirt, anker) {
+        var b = document.getElementById('jv-pkg-btn');
+        if (!b || !wirt.contains(b)) {
+            // Dasselbe Markup wie syspackages.js::aufbauen() – das Modul
+            // uebernimmt den Knopf und verdrahtet ihn.
+            b = el('button', { type: 'button', id: 'jv-pkg-btn', 'class': 'jv-pkg-btn',
+                               'data-i18n-title': 'pkg.btn', 'data-i18n-aria': 'pkg.btn',
+                               title: 'Installierte Pakete', 'aria-label': 'Installierte Pakete' },
+                '<svg viewBox="0 0 24 24" width="18" height="18" fill="none"'
+                + ' stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+                + ' stroke-linejoin="round" aria-hidden="true">'
+                + '<circle cx="12" cy="12" r="10"/>'
+                + '<line x1="12" y1="16" x2="12" y2="11"/>'
+                + '<line x1="12" y1="8" x2="12.01" y2="8"/></svg>');
+        }
+        if (!S.token()) b.style.display = 'none';
+        return nachDem(anker, nurAdmin(b));
+    }
+
+    /* Abmelden: fast jede Seite bringt den Knopf samt eigener Abmeldung mit.
+     * Nur wo er fehlt (/settings, /supportagent), kommt dieser dazu. */
+    function abmelden(wirt) {
+        if (wirt.querySelector('[id*="logout"], .btn-logout')) return;
+        var gruppe = wirt.querySelector(RECHTS);
+        if (!gruppe) return;
+        var vorlage = gruppe.querySelector('[data-i18n-title="nav.home"]');
+        var b = el('button', { type: 'button', id: 'jv-kopf-logout',
+                               'class': (vorlage && vorlage.className) || 'btn-theme',
+                               'data-i18n-title': 'chat.logout', 'data-i18n-aria': 'chat.logout',
+                               title: 'Abmelden', 'aria-label': 'Abmelden' },
+            '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"'
+            + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            + '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/>'
+            + '<line x1="21" y1="12" x2="9" y2="12"/></svg>');
+        if (!S.token()) b.style.display = 'none';
+        b.addEventListener('click', function () {
+            // Erst dem Server sagen, DANN das Token verwerfen (wie /portal).
+            var p = window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve();
+            try {
+                S.tokenSchluessel().concat(S.benutzerSchluessel())
+                    .forEach(function (k) { localStorage.removeItem(k); });
+                sessionStorage.removeItem(SPEICHER);
+            } catch (e) { /* Speicher gesperrt */ }
+            p.catch(function () {}).then(function () { location.replace('/'); });
+        });
+        gruppe.appendChild(b);
+    }
+
+    /* /settings: der Fensterkopf traegt Titel + Symbolgruppe (space-between).
+     * Logo, Marke und Titel kommen in EINE linke Gruppe – ein drittes direktes
+     * Kind wuerde die Verteilung zerreissen (Lehre aus style.css). */
+    function einstellungsKopf(wirt) {
+        var links = wirt.querySelector('.jv-kopf-links');
+        if (links) return links;
+        var titel = wirt.querySelector('#settings-title');
+        links = el('div', { 'class': 'jv-kopf-links topbar-left' });
+        wirt.insertBefore(links, wirt.firstChild);
+        links.appendChild(el('div', { 'class': 'topbar-avatar' }, 'J'));
+        links.appendChild(el('span', { 'class': 'jv-kopf-marke brand-app-name' }, 'Jarvis'));
+        if (titel) links.appendChild(titel);
+        return links;
+    }
+
+    var _gebaut = false;
+
+    function aufbauen() {
+        if (_gebaut) return true;
+        var wirt = null;
+        for (var i = 0; i < WIRTE.length && !wirt; i++) wirt = document.querySelector(WIRTE[i]);
+        if (!wirt) return false;
+        _gebaut = true;
+        wirt.classList.add('jv-kopfzeile');
+
+        var links = wirt.matches('#settings-modal .modal-header')
+            ? einstellungsKopf(wirt)
+            : (wirt.querySelector(LINKS) || wirt);
+        var anker = links.querySelector(TITEL)
+            || links.querySelector('.topbar-avatar, .sa-logo')
+            || null;
+        if (!anker) {
+            // Ohne Titel und Logo keine Reihe, an die man anhaengen koennte.
+            anker = el('span', { 'class': 'jv-kopf-anker' });
+            links.insertBefore(anker, links.firstChild);
+        }
+        // Die Titelgruppe auf /settings steht in `links`; der Titel selbst
+        // ist dort das h2 – an das wird angehaengt.
+        var h2 = links.querySelector('#settings-title');
+        if (h2) anker = h2;
+
+        anker = llmPunkt(wirt, anker);
+        anker = schild(wirt, anker);
+        anker = updatePille(wirt, anker);
+        anker = cpuBalken(wirt, anker);
+        paketKnopf(wirt, anker);
+        abmelden(wirt);
+        return true;
+    }
+
+    /* ── Start ───────────────────────────────────────────────────────── */
+
+    laden();
+    adminKlasse(istAdmin());
+
+    window.JarvisKopf = {
+        adminBelegt: function () { return _adminBelegt; },
+        istAdmin: istAdmin,
+        merke: merke,
+        gemerkt: gemerkt,
+        aufbauen: aufbauen
+    };
+
+    // Auf fast allen Seiten steht die Leiste VOR diesem Skript im Markup und
+    // wird sofort ergaenzt. /settings laedt sitzung.js ganz oben – dort erst,
+    // wenn das Dokument steht.
+    if (!aufbauen() && document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', aufbauen);
+    }
+    // update_widget.js laedt nach diesem Modul – gestartet wird es, sobald
+    // das Dokument steht (gemerkter Admin) bzw. /api/me es belegt.
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', updateStarten);
+    else setTimeout(updateStarten, 0);
+    meHolen();
+})();

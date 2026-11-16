@@ -1,5 +1,5 @@
 /* ============================================================
- * cpubar.js – CPU-Auslastung in der Titelleiste (shared)
+ * cpubar.js – CPU-Auslastung in der Titelleiste (shared, NUR ADMIN)
  *
  * Wird auf JEDER Seite mit Titelleiste geladen und baut die Anzeige
  * selbst auf, wenn sie im Markup fehlt. Bis 2026-08-22 gab es VIER
@@ -63,6 +63,10 @@
             var luecke = wirt.querySelector('.pt-spacer, .wi-spacer, .ad-spacer, .sa-spacer');
             if (luecke) wirt.insertBefore(balken, luecke); else wirt.appendChild(balken);
         }
+        // Nur fuer Administratoren (Vorgabe 2026-11-16). Die Sichtbarkeit
+        // entscheidet die Klassenregel in theme.css zusammen mit
+        // `html.jv-kopf-admin` (kopfzeile.js) – hier wird nur markiert.
+        balken.classList.add('jv-kopf-nuradmin');
         fuellung = document.getElementById('cpu-bar-fill');
         beschriftung = document.getElementById('cpu-bar-label');
         return !!(fuellung && beschriftung);
@@ -83,6 +87,9 @@
         fuellung.style.backgroundPosition = p + '% 0';
         beschriftung.textContent = 'CPU: ' + Math.round(p) + '%';
         sichtbar(true);
+        // Fuer den naechsten Seitenaufbau merken: die Anzeige steht dann
+        // sofort mit dem letzten Wert da, statt erst nach dem ersten Takt.
+        if (window.JarvisKopf) window.JarvisKopf.merke('cpu', p);
     }
 
     function abfragen() {
@@ -90,6 +97,10 @@
         var t = token();
         if (!t) { if (aufbauen()) sichtbar(false); return; }
         if (!aufbauen()) return;
+        // Belegter Nicht-Admin: die Anzeige bleibt ohnehin verborgen, jeder
+        // Abruf waere Last ohne Wirkung. Solange /api/me noch offen ist
+        // (null), wird gefragt – sonst fehlte dem Admin der erste Wert.
+        if (window.JarvisKopf && window.JarvisKopf.adminBelegt() === false) return;
         fetch('/api/cpu', { headers: { 'Authorization': 'Bearer ' + t } })
             .then(function (r) {
                 if (r.status === 401 || r.status === 403) { stop(); return null; }

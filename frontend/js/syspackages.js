@@ -148,9 +148,19 @@
 
     function knopf() { return document.getElementById('jv-pkg-btn'); }
 
+    /* Klick genau einmal anhaengen. Der Knopf kann aus kopfzeile.js stammen
+     * (vorgebaut, damit er beim Seitenwechsel nicht nachrutscht) – dann ist er
+     * hier noch nicht verdrahtet. */
+    function verdrahten(b) {
+        if (b.dataset.jvPkgVerdrahtet) return b;
+        b.dataset.jvPkgVerdrahtet = '1';
+        b.addEventListener('click', oeffnen);
+        return b;
+    }
+
     function aufbauen() {
         var b = knopf();
-        if (b) return b;
+        if (b) return verdrahten(b);
         var wirt = null;
         for (var i = 0; i < ANKER.length && !wirt; i++) wirt = document.querySelector(ANKER[i]);
         if (!wirt) return null;                 // Seite ohne Titelleiste
@@ -171,7 +181,7 @@
             + '<circle cx="12" cy="12" r="10"/>'
             + '<line x1="12" y1="16" x2="12" y2="11"/>'
             + '<line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
-        b.addEventListener('click', oeffnen);
+        verdrahten(b);
         // DIREKT hinter die CPU-Anzeige (Vorgabe). Fehlt sie – etwa weil das
         // Token noch nicht da war –, dann vor den Abstandhalter, damit der
         // Knopf nicht in der rechten Symbolgruppe landet.
@@ -1350,10 +1360,18 @@
                                      oeffnen({ nurLuecken: true });
                                  } };
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', pruefe);
-    } else {
+    // Ein vorgebauter Knopf (kopfzeile.js, gemerkter Admin-Stand) ist schon
+    // sichtbar, bevor /api/me antwortet – er muss SOFORT klickbar sein, auch
+    // wenn der Abruf danach scheitert (dort wird `zeige` nie gerufen).
+    function start() {
+        var b = knopf();
+        if (b) verdrahten(b);
         pruefe();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
     }
 
     // Der Kasten wird gerendert und steht nicht im Markup – `applyLang()`

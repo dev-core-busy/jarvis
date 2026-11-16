@@ -578,8 +578,21 @@ def aufloesen(user: str | None = None) -> dict:
 
 
 def client_fuer_lauf(user: str | None = None) -> JiraClient:
-    """Nur der Client – fuer Aufrufer, die den Hinweis nicht brauchen."""
-    return aufloesen(user)["client"]
+    """Der Client des geltenden Zugangs. Er traegt zusaetzlich ``zugang``
+    (``quelle``, ``hinweis``, ``benutzer``), damit ein Endpunkt sagen kann, MIT
+    WELCHEM Zugang ein Ergebnis entstand – die Fachprobe in "Mein Jira-Zugang"
+    behauptete sonst "funktioniert", auch wenn still der gemeinsame Zugang
+    geantwortet hat (gemeldet 2026-11-16, Bauform wie confluence_accounts).
+    Der Client ist je Aufruf ein FRISCHES Objekt, das Attribut wird also nie
+    zwischen zwei Benutzern geteilt."""
+    z = aufloesen(user)
+    c = z["client"]
+    try:
+        c.zugang = {"quelle": z.get("quelle") or "", "hinweis": z.get("hinweis") or "",
+                    "benutzer": z.get("benutzer") or ""}
+    except Exception:  # noqa: BLE001 – eine Attrappe ohne Attribute darf nicht scheitern
+        pass
+    return c
 
 
 def quelle_text(quelle: str, lang: str = "de") -> str:

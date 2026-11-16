@@ -1619,6 +1619,19 @@
         }
     }
 
+    /** 'eigen' | 'sammel' | '' aus `zugang` der Antwort (Vorgabe 2026-11-16):
+     *  der Endpunkt faellt still auf den gemeinsamen Zugang zurueck, wenn der
+     *  eigene nicht greift – ohne diese Angabe meldete die Probe "funktioniert",
+     *  obwohl der eigene Zugang gar nicht benutzt wurde. Fehlt die Angabe
+     *  (aelteres Backend) oder ist sie unbekannt, wird NICHTS behauptet. */
+    function probeQuelle(d) {
+        var z = d && d.zugang;
+        if (!z || typeof z !== 'object') return '';
+        if (z.quelle === 'persoenlich') return 'eigen';
+        if (z.quelle === 'sammel') return 'sammel';
+        return '';
+    }
+
     function probeLaufen() {
         if (_probeLaeuft) return;          // Doppelklick: ein Lauf genuegt
         var z = probeZiel();
@@ -1637,8 +1650,13 @@
             .then(function (res) {
                 var d = res.d;
                 if (!res.ok || !d || d.ok === false) {
-                    probeMeld('❌ ' + ((d && (d.error || d.detail))
-                        || T('sap.probe_fail', 'Abfrage fehlgeschlagen.')), 'error');
+                    var grund = (d && (d.error || d.detail))
+                        || T('sap.probe_fail', 'Abfrage fehlgeschlagen.');
+                    // Mit dem EIGENEN Zugang gescheitert heisst: er geht nicht.
+                    probeMeld('❌ ' + (probeQuelle(d) === 'eigen'
+                        ? T('sap.probe_eigen_fehler', 'Dein eigener SAP-Zugang funktioniert nicht:')
+                          + ' ' + grund
+                        : grund), 'error');
                     return;
                 }
                 probeZeichnen(z.art, d);
@@ -1680,7 +1698,20 @@
                 + 'dieses Kontos prüfen.'), 'error');
             return;
         }
-        probeMeld('✓ ' + T('sap.probe_ok', 'Sichtbare Objekte insgesamt:') + ' ' + ges, 'ok');
+        var zaehl = T('sap.probe_ok', 'Sichtbare Objekte insgesamt:') + ' ' + ges;
+        var quelle = probeQuelle(d);
+        if (quelle === 'sammel') {
+            // Echte Liste, aber nicht die gefragte: als Warnung gekennzeichnet.
+            var hw = (d.zugang && d.zugang.hinweis) ? ' ' + d.zugang.hinweis : '';
+            probeMeld('⚠ ' + T('sap.probe_sammel',
+                'Dein eigener SAP-Zugang wurde NICHT verwendet – das Ergebnis zeigt den gemeinsamen Zugang.')
+                + hw + ' ' + zaehl, 'error');
+        } else if (quelle === 'eigen') {
+            probeMeld('✓ ' + T('sap.probe_eigen_ok', 'Dein eigener SAP-Zugang funktioniert –')
+                      + ' ' + zaehl, 'ok');
+        } else {
+            probeMeld('✓ ' + zaehl, 'ok');
+        }
         var html = '<p class="sp-probe-kopf">' + esc(kopf) + '</p><ul>';
         zeilen.forEach(function (n) { html += '<li>' + esc(n) + '</li>'; });
         html += '</ul>';

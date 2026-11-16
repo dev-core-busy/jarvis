@@ -14554,6 +14554,23 @@ _CF_MAX_BEREICHE = 5000
 _CF_MAX_SEITEN = 3000
 
 
+def _zugang_angabe(z) -> dict | None:
+    """``{quelle, hinweis}`` – MIT WELCHEM Zugang eine Antwort entstand.
+
+    Fuer die Fachprobe in "Mein …-Zugang" (/confluence, /jira, /sap, /vemas):
+    jeder dieser Endpunkte faellt still auf den gemeinsamen Zugang zurueck,
+    wenn der eigene nicht greift. Ohne die Angabe sieht eine Liste ueber den
+    gemeinsamen Zugang aus wie eine ueber den eigenen, und die Probe meldete
+    "funktioniert", obwohl der eigene Zugang gar nicht benutzt wurde
+    (gemeldet 2026-11-16). ``z`` ist die Rueckgabe eines ``*_accounts.aufloesen``
+    bzw. das ``zugang``-Attribut eines Clients. Nur Herkunft und Grund – kein
+    Token, kein Benutzername. Unbekanntes -> ``None`` (dann behauptet die
+    Oberflaeche nichts)."""
+    if not isinstance(z, dict):
+        return None
+    return {"quelle": str(z.get("quelle") or ""), "hinweis": str(z.get("hinweis") or "")}
+
+
 def _confluence_client(user: str = ""):
     """Confluence-Client fuer einen Aufruf.
 
@@ -14608,9 +14625,7 @@ async def confluence_spaces_api(user: str = Depends(require_local_auth)):
     Kein Token, keine Kennung – nur Herkunft und Grund."""
     from backend.confluence_client import ConfluenceError
     c = _confluence_client(user)
-    z = getattr(c, "zugang", None)
-    zugang = ({"quelle": str(z.get("quelle") or ""), "hinweis": str(z.get("hinweis") or "")}
-              if isinstance(z, dict) else None)
+    zugang = _zugang_angabe(getattr(c, "zugang", None))
     if not c.configured:
         return JSONResponse({"ok": False, "configured": False, "zugang": zugang,
                              "error": "Nicht konfiguriert (URL/Token fehlen)."})
@@ -14984,9 +14999,11 @@ async def sap_odata_services_api(user: str = Depends(require_sap_access)):
     geschah. Die Felder der obersten Ebene behalten ihre Bedeutung (``ok``,
     sobald einer antwortet; ``kein_katalog`` nur, wenn BEIDE 404 melden)."""
     from backend.sap_client import SapError
-    c = _sap_client(user)
+    z = _sap_zugang(user)
+    c = z["client"]
+    zugang = _zugang_angabe(z)
     if not c.odata.configured:
-        return JSONResponse({"ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
+        return JSONResponse({"zugang": zugang, "ok": False, "error": "OData nicht konfiguriert."}, status_code=400)
 
     async def frage(fn) -> dict:
         try:
@@ -15000,7 +15017,7 @@ async def sap_odata_services_api(user: str = Depends(require_sap_access)):
     if v2.get("status") == 401:
         # Abgelehnter Logon: mit denselben Daten nicht noch einmal fragen –
         # jeder Versuch zaehlt auf der SAP-Seite gegen login/fails_to_user_lock.
-        return JSONResponse({"ok": False, "status": 401, "kein_katalog": False,
+        return JSONResponse({"zugang": zugang, "ok": False, "status": 401, "kein_katalog": False,
                              "error": v2["error"]})
     v4 = await frage(c.odata.catalog_v4_service_pfade)
     teile = [k for k in (v2, v4) if k["ok"]]
@@ -15014,12 +15031,12 @@ async def sap_odata_services_api(user: str = Depends(require_sap_access)):
         return aus
 
     if not teile:
-        return JSONResponse({"ok": False, "status": v2["status"],
+        return JSONResponse({"zugang": zugang, "ok": False, "status": v2["status"],
                              "kein_katalog": v2["kein_katalog"] and v4["kein_katalog"],
                              "error": "V2: %s · V4: %s" % (v2["error"], v4["error"]),
                              "v2": kurz(v2), "v4": kurz(v4)})
     services = [x for k in teile for x in k["services"]]
-    return JSONResponse({"ok": True, "services": services, "count": len(services),
+    return JSONResponse({"zugang": zugang, "ok": True, "services": services, "count": len(services),
                          "ausgelassen": sum(k["ausgelassen"] for k in teile),
                          "genau": all(k["genau"] for k in teile),
                          "v2": kurz(v2), "v4": kurz(v4)})
@@ -15059,9 +15076,11 @@ async def sap_tables_api(schema: str = "", limit: int = 200,
                          user: str = Depends(require_sap_access)):
     """Tabellen/Views eines HANA-Schemas – fuer den Reiter."""
     from backend.sap_client import SapError
-    c = _sap_client(user)
+    z = _sap_zugang(user)
+    c = z["client"]
+    zugang = _zugang_angabe(z)
     if not c.hana.configured:
-        return JSONResponse({"ok": False, "error": c.hana.nicht_nutzbar_grund()
+        return JSONResponse({"zugang": zugang, "ok": False, "error": c.hana.nicht_nutzbar_grund()
                              or "HANA nicht konfiguriert."}, status_code=400)
     try:
         limit = max(1, min(int(limit), 5000))
@@ -15069,9 +15088,9 @@ async def sap_tables_api(schema: str = "", limit: int = 200,
         limit = 200
     try:
         rows = await asyncio.to_thread(c.hana.list_tables, schema.strip(), limit)
-        return JSONResponse({"ok": True, "rows": rows, "count": len(rows)})
+        return JSONResponse({"zugang": zugang, "ok": True, "rows": rows, "count": len(rows)})
     except SapError as e:
-        return JSONResponse({"ok": False, "status": e.status, "error": str(e)})
+        return JSONResponse({"zugang": zugang, "ok": False, "status": e.status, "error": str(e)})
 
 
 @app.get("/api/sap/reporting-endpoints")
@@ -15734,18 +15753,19 @@ async def vemas_query(resource: str, params: str = "", top: int = 20,
     from backend.vemas_client import VemasError
     z = _vemas_zugang(user)
     c = z["client"]
+    zugang = _zugang_angabe(z)
     if not c.configured:
-        return JSONResponse({"ok": False, "configured": False,
+        return JSONResponse({"zugang": zugang, "ok": False, "configured": False,
                              "error": "VEMAS ist nicht konfiguriert."}, status_code=400)
     p = {}
     if (params or "").strip():
         try:
             p = json.loads(params)
         except ValueError as e:
-            return JSONResponse({"ok": False, "error": f"Parameter sind kein gültiges JSON: {e}"},
+            return JSONResponse({"zugang": zugang, "ok": False, "error": f"Parameter sind kein gültiges JSON: {e}"},
                                 status_code=400)
         if not isinstance(p, dict):
-            return JSONResponse({"ok": False, "error": "Parameter müssen ein JSON-Objekt sein."},
+            return JSONResponse({"zugang": zugang, "ok": False, "error": "Parameter müssen ein JSON-Objekt sein."},
                                 status_code=400)
     try:
         zeilen = await asyncio.to_thread(c.abfragen, c.ressource_pfad(resource), p,
@@ -15754,10 +15774,10 @@ async def vemas_query(resource: str, params: str = "", top: int = 20,
         from backend import vemas_accounts
         if z.get("quelle") == vemas_accounts.QUELLE_PERSOENLICH:
             vemas_accounts.melde_fehler(user, e)
-        return JSONResponse({"ok": False, "error": str(e),
+        return JSONResponse({"zugang": zugang, "ok": False, "error": str(e),
                              "status": getattr(e, "status", 0)}, status_code=400)
     except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"zugang": zugang, "ok": False, "error": str(e)}, status_code=500)
     # Spalten aus der VEREINIGUNG der Zeilen: JSON-APIs lassen leere Felder gern
     # weg, und eine Spalte, die in Zeile 1 fehlt, waere sonst unsichtbar.
     cols: list = []
@@ -15766,7 +15786,7 @@ async def vemas_query(resource: str, params: str = "", top: int = 20,
             for k in zl:
                 if k not in cols:
                     cols.append(k)
-    return JSONResponse({"ok": True, "columns": cols, "rows": zeilen,
+    return JSONResponse({"zugang": zugang, "ok": True, "columns": cols, "rows": zeilen,
                          "quelle": z.get("quelle")})
 
 
@@ -19417,8 +19437,9 @@ async def jira_search_api(q: str = "", project: str = "", status: str = "",
     """Ticketsuche fuer den Reiter – liefert Treffer mit Link."""
     from backend.jira_client import JiraError, issue_brief
     c = _jira_client(user)
+    zugang = _zugang_angabe(getattr(c, "zugang", None))
     if not c.configured:
-        return JSONResponse({"ok": False, "error": "Nicht konfiguriert."}, status_code=400)
+        return JSONResponse({"zugang": zugang, "ok": False, "error": "Nicht konfiguriert."}, status_code=400)
     try:
         limit = max(1, min(int(limit), 50))
     except (TypeError, ValueError):
@@ -19429,10 +19450,10 @@ async def jira_search_api(q: str = "", project: str = "", status: str = "",
     try:
         data = await asyncio.to_thread(c.search, query, limit)
         items = [issue_brief(it, c.base) for it in data.get("issues", [])]
-        return JSONResponse({"ok": True, "total": data.get("total", len(items)),
+        return JSONResponse({"zugang": zugang, "ok": True, "total": data.get("total", len(items)),
                              "jql": query, "results": items})
     except JiraError as e:
-        return JSONResponse({"ok": False, "status": e.status, "error": str(e), "jql": query})
+        return JSONResponse({"zugang": zugang, "ok": False, "status": e.status, "error": str(e), "jql": query})
 
 
 @app.get("/api/jira/issue")

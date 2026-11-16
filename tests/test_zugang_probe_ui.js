@@ -675,6 +675,70 @@ function kastenText(s, b) {
     }
 
     // ══════════════════════════════════════════════════════════════════════
+    // Vorgabe 2026-11-16: "fuer Jira, SAP und VEMAS nachziehen" – jede Probe
+    // sagt, MIT WELCHEM Zugang sie lief. Die Endpunkte fallen still auf den
+    // gemeinsamen Zugang zurueck; ohne Angabe hiesse eine Liste des
+    // gemeinsamen Zugangs "funktioniert". Gemessen wird der SICHTBARE Text der
+    // Meldezeile und ihre Kennzeichnung (ok/error), je Lage.
+    section('14) Alle vier: die Meldung nennt den verwendeten Zugang');
+    {
+        const ERFOLG = {
+            jira: (z) => ({ '/api/jira/search': Object.assign({ ok: true, total: 3,
+                results: [{ key: 'PRJA-1', summary: 'Sonde' }] }, z ? { zugang: z } : {}) }),
+            conf: (z) => ({ '/api/confluence/spaces': Object.assign({ ok: true, count: 1,
+                spaces: [{ key: 'SONDE', name: 'Sonde' }] }, z ? { zugang: z } : {}) }),
+            sap: (z) => ({ '/api/sap/odata/services': Object.assign({ ok: true, count: 1,
+                services: ['sap/API_SONDE_SRV'] }, z ? { zugang: z } : {}) }),
+            vemas: (z) => ({ '/api/vemas/resources': { ok: true, resources: [{ name: 'Projekte', pfad: 'p' }] },
+                '/api/vemas/query': Object.assign({ ok: true, columns: ['A'], rows: [{ A: 1 }] },
+                                                  z ? { zugang: z } : {}) }),
+        };
+        const FEHLER = {
+            jira: (z) => ({ '/api/jira/search': { __status: 400, ok: false, error: 'HTTP 401', zugang: z } }),
+            conf: (z) => ({ '/api/confluence/spaces': { ok: false, error: 'HTTP 401', zugang: z } }),
+            sap: (z) => ({ '/api/sap/odata/services': { ok: false, error: 'HTTP 401', zugang: z } }),
+            vemas: (z) => ({ '/api/vemas/resources': { ok: true, resources: [{ name: 'Projekte', pfad: 'p' }] },
+                '/api/vemas/query': { __status: 400, ok: false, error: 'HTTP 401', zugang: z } }),
+        };
+        const EIGEN = { quelle: 'persoenlich', hinweis: '' };
+        const GRUND = 'Sondengrund-nicht-angemeldet.';
+        const SAMMEL = { quelle: 'sammel', hinweis: GRUND };
+        const lauf = async (b, ant) => {
+            const s = seite(b, grundAntworten(b.perm, ant));
+            await sleep(60);
+            s.$(b.btn).dispatchEvent(new s.win.Event('click'));
+            await sleep(90);
+            const n = s.$(b.note);
+            const r = { text: (n && n.textContent) || '', kl: (n && n.className) || '' };
+            s.win.close();
+            return r;
+        };
+        for (const b of BEREICHE) {
+            // a) eigener Zugang: "funktioniert" + Erfolg
+            let r = await lauf(b, ERFOLG[b.id](EIGEN));
+            check(/funktioniert –/.test(r.text) && /is-ok/.test(r.kl),
+                  b.id + ': eigener Zugang -> "funktioniert", als Erfolg', r.text + ' | ' + r.kl);
+            // b) gemeinsamer Zugang: KEIN "funktioniert", Warnung MIT Grund
+            r = await lauf(b, ERFOLG[b.id](SAMMEL));
+            check(!/funktioniert –/.test(r.text), b.id + ': gemeinsamer Zugang -> KEIN "funktioniert"', r.text);
+            check(/NICHT verwendet/.test(r.text) && r.text.indexOf(GRUND) >= 0 && /is-error/.test(r.kl),
+                  b.id + ': gemeinsamer Zugang -> Warnung "NICHT verwendet" samt Grund', r.text + ' | ' + r.kl);
+            // c) Fehlschlag mit eigenem Zugang: "funktioniert nicht" + Servergrund
+            r = await lauf(b, FEHLER[b.id](EIGEN));
+            check(/funktioniert nicht:/.test(r.text) && r.text.indexOf('HTTP 401') >= 0,
+                  b.id + ': Fehlschlag mit eigenem Zugang -> "funktioniert nicht" + Grund', r.text);
+            // d) Fehlschlag ueber den gemeinsamen Zugang: KEINE Aussage ueber den eigenen
+            r = await lauf(b, FEHLER[b.id](SAMMEL));
+            check(!/funktioniert nicht:/.test(r.text) && r.text.indexOf('HTTP 401') >= 0,
+                  b.id + ': Fehlschlag ueber gemeinsamen Zugang -> keine Aussage ueber den eigenen', r.text);
+            // e) aelteres Backend ohne Angabe: nichts behaupten
+            r = await lauf(b, ERFOLG[b.id](null));
+            check(!/funktioniert|NICHT verwendet/.test(r.text) && /is-ok/.test(r.kl),
+                  b.id + ': ohne Zugangsangabe keine Behauptung', r.text);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
     console.log('\nErgebnis: ' + ok + ' OK, ' + fail + ' FAIL');
     process.exit(fail ? 1 : 0);
 })();

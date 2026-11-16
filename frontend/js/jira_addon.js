@@ -501,6 +501,20 @@
         });
     }
 
+
+    /** 'eigen' | 'sammel' | '' aus `zugang` der Antwort (Vorgabe 2026-11-16):
+     *  der Endpunkt faellt still auf den gemeinsamen Zugang zurueck, wenn der
+     *  eigene nicht greift – ohne diese Angabe meldete die Probe "funktioniert",
+     *  obwohl der eigene Zugang gar nicht benutzt wurde. Fehlt die Angabe
+     *  (aelteres Backend) oder ist sie unbekannt, wird NICHTS behauptet. */
+    function probeQuelle(d) {
+        var z = d && d.zugang;
+        if (!z || typeof z !== 'object') return '';
+        if (z.quelle === 'persoenlich') return 'eigen';
+        if (z.quelle === 'sammel') return 'sammel';
+        return '';
+    }
+
     async function probeLaufen() {
         if (_probeLaeuft) return;          // Doppelklick: ein Lauf genuegt
         var btn = $('ja-acc-probe');
@@ -515,9 +529,14 @@
                                 { headers: { 'Authorization': 'Bearer ' + token() } });
             var d = null;
             try { d = await r.json(); } catch (e) { d = null; }
+            var quelle = probeQuelle(d);
             if (!r.ok || !d || d.ok === false) {
-                throw new Error((d && (d.error || d.detail))
-                                || T('jaddon.probe_fail', 'Abfrage fehlgeschlagen.'));
+                var grund = (d && (d.error || d.detail))
+                            || T('jaddon.probe_fail', 'Abfrage fehlgeschlagen.');
+                // Mit dem EIGENEN Token gescheitert heisst: der PAT geht nicht.
+                throw new Error(quelle === 'eigen'
+                    ? T('jaddon.probe_pat_fehler', 'Dein PAT funktioniert nicht:') + ' ' + grund
+                    : grund);
             }
             var tr = Array.isArray(d.results) ? d.results : [];
             var ges = (typeof d.total === 'number') ? d.total : tr.length;
@@ -529,8 +548,18 @@
                     + 'ob dein Konto fuer die Projekte freigegeben ist.'), 'error');
                 return;
             }
-            probeMeld('✓ ' + T('jaddon.probe_ok', 'Sichtbare Vorgaenge insgesamt:')
-                      + ' ' + ges, 'ok');
+            var zaehl = T('jaddon.probe_ok', 'Sichtbare Vorgaenge insgesamt:') + ' ' + ges;
+            if (quelle === 'sammel') {
+                // Echte Liste, aber nicht die gefragte: als Warnung gekennzeichnet.
+                var hw = (d.zugang && d.zugang.hinweis) ? ' ' + d.zugang.hinweis : '';
+                probeMeld('⚠ ' + T('jaddon.probe_sammel',
+                    'Dein PAT wurde NICHT verwendet – die Liste zeigt den gemeinsamen Zugang.')
+                    + hw + ' ' + zaehl, 'error');
+            } else if (quelle === 'eigen') {
+                probeMeld('✓ ' + T('jaddon.probe_pat_ok', 'Dein PAT funktioniert –') + ' ' + zaehl, 'ok');
+            } else {
+                probeMeld('✓ ' + zaehl, 'ok');
+            }
             var html = '<p class="ja-probe-kopf">'
                 + probeEsc(T('jaddon.probe_head', 'Zuletzt geaenderte Vorgaenge:'))
                 + '</p><ul>';

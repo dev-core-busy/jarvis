@@ -945,6 +945,19 @@
         n.className = 'vm-probe-note' + (kind ? ' is-' + kind : '');
     }
 
+    /** 'eigen' | 'sammel' | '' aus `zugang` der Antwort (Vorgabe 2026-11-16):
+     *  der Endpunkt faellt still auf den gemeinsamen Zugang zurueck, wenn der
+     *  eigene nicht greift – ohne diese Angabe meldete die Probe "funktioniert",
+     *  obwohl der eigene Zugang gar nicht benutzt wurde. Fehlt die Angabe
+     *  (aelteres Backend) oder ist sie unbekannt, wird NICHTS behauptet. */
+    function probeQuelle(d) {
+        var z = d && d.zugang;
+        if (!z || typeof z !== 'object') return '';
+        if (z.quelle === 'persoenlich') return 'eigen';
+        if (z.quelle === 'sammel') return 'sammel';
+        return '';
+    }
+
     async function probeLaufen() {
         if (_probeLaeuft) return;          // Doppelklick: ein Lauf genuegt
         var btn = $('vm-acc-probe');
@@ -977,9 +990,15 @@
                                  + '&top=' + PROBE_TOP, { headers: authHeaders() });
             var qd = null;
             try { qd = await qr.json(); } catch (e) { qd = null; }
+            var quelle = probeQuelle(qd);
             if (!qr.ok || !qd || qd.ok === false) {
-                throw new Error((qd && (qd.error || qd.detail))
-                                || T('vemas.probe_fail', 'Abfrage fehlgeschlagen.'));
+                var grund = (qd && (qd.error || qd.detail))
+                            || T('vemas.probe_fail', 'Abfrage fehlgeschlagen.');
+                // Mit dem EIGENEN Zugang gescheitert heisst: er geht nicht.
+                throw new Error(quelle === 'eigen'
+                    ? T('vemas.probe_eigen_fehler', 'Dein eigener VEMAS-Zugang funktioniert nicht:')
+                      + ' ' + grund
+                    : grund);
             }
             var zeilen = Array.isArray(qd.rows) ? qd.rows : [];
             var spalten = Array.isArray(qd.columns) ? qd.columns : [];
@@ -989,8 +1008,19 @@
                     + 'VEMAS-Berechtigungen dieses Kontos prüfen.'), 'error');
                 return;
             }
-            probeMeld('✓ ' + T('vemas.probe_ok', 'Gelesene Datensätze:') + ' ' + zeilen.length,
-                      'ok');
+            var zaehl = T('vemas.probe_ok', 'Gelesene Datensätze:') + ' ' + zeilen.length;
+            if (quelle === 'sammel') {
+                // Echte Daten, aber nicht die gefragten: als Warnung gekennzeichnet.
+                var hw = (qd.zugang && qd.zugang.hinweis) ? ' ' + qd.zugang.hinweis : '';
+                probeMeld('⚠ ' + T('vemas.probe_sammel',
+                    'Dein eigener VEMAS-Zugang wurde NICHT verwendet – das Ergebnis zeigt den gemeinsamen Zugang.')
+                    + hw + ' ' + zaehl, 'error');
+            } else if (quelle === 'eigen') {
+                probeMeld('✓ ' + T('vemas.probe_eigen_ok', 'Dein eigener VEMAS-Zugang funktioniert –')
+                          + ' ' + zaehl, 'ok');
+            } else {
+                probeMeld('✓ ' + zaehl, 'ok');
+            }
             var zeig = spalten.slice(0, PROBE_MAX_SPALTEN);
             var html = '<p class="vm-probe-kopf">'
                 + esc(T('vemas.probe_head', 'Abgefragte Ressource:')) + ' ' + esc(name)

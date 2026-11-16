@@ -18,6 +18,11 @@ const path = require('path');
 const { JSDOM } = require('./lib/jsdom_laden')();
 
 const ROOT = path.resolve(__dirname, '..');
+/* Die Portal-Stile liegen seit der gemeinsamen Titelleiste (2b3e868f) in
+   css/theme.css, nicht mehr inline in portal.html. Gelesen wird beides,
+   damit eine Regel an jedem der beiden Orte zaehlt. */
+const PORTAL_CSS = () => fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8')
+    + '\n' + fs.readFileSync(path.join(ROOT, 'frontend', 'css', 'theme.css'), 'utf8');
 const results = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -292,7 +297,7 @@ async function main() {
     check('keine aufgereihten Schluessel-Wert-Paare mehr',
           doc.querySelectorAll('.pt-usr-sep').length === 0,
           String(doc.querySelectorAll('.pt-usr-sep').length));
-    const css = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+    const css = PORTAL_CSS();
     check('CSS verbietet den Umbruch der Metazeile',
           /\.pt-usr-meta\s*\{[^}]*white-space:\s*nowrap/.test(css));
     check('CSS kuerzt zu langen Text mit Ellipse',
@@ -449,7 +454,7 @@ async function main() {
     check('Dauer steht im Text, nicht nur in der Farbe',
           /untätig seit 10 Min/.test(mtxt('mittel')) && /untätig seit 1 Std\. 30 Min/.test(mtxt('lange')),
           mtxt('mittel') + ' | ' + mtxt('lange'));
-    const cssIdle = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+    const cssIdle = PORTAL_CSS();
     check('CSS: Warnfarbe haengt an .is-warn',
           /\.pt-usr-idle\.is-warn\s*\{[^}]*var\(--warning\)/.test(cssIdle));
     check('CSS: Grundfarbe ist NICHT die Warnfarbe',
@@ -536,7 +541,7 @@ async function main() {
         check('dora (idle unbekannt) bleibt online – nichts geraten',
               dora && dora.txt === 'online', JSON.stringify(dora));
         // Farbe UND Text tragen die Aussage (Projekt-Regel fuer Farbfehlsichtige)
-        const cssP = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+        const cssP = PORTAL_CSS();
         check('CSS: is-idle nutzt die Warnfarbe',
               /\.pt-usr-pill\.is-idle\s*\{[^}]*var\(--warning/.test(cssP));
         check('CSS: is-idle ist NICHT die Erfolgsfarbe',

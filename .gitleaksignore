@@ -63,3 +63,8 @@ tests/test_skills_liste_geheim.py:generic-api-key:49
 # SQL-DDL im Test ("PRIMARY KEY, <spalte>") – kein Geheimnis; Fundstelle lokal
 # nachgerechnet, nicht mit gitleaks selbst bestaetigt (2026-11-11).
 tests/test_schema_graph_zugang.py:generic-api-key:449
+# Erfundener Altschluessel im Test ("legacy-schluessel-1234567": eigener Key darf
+# den Legacy-Key nicht wiederholen) – kein Geheimnis. Seit be9a8743 der einzige
+# Fund (CI: "leaks found: 1" ab genau diesem Commit); Fundstelle lokal mit Regel
+# und Entropie nachgerechnet, nicht mit gitleaks selbst bestaetigt (2026-11-16).
+tests/test_agent_key_eigen.py:generic-api-key:164

@@ -610,8 +610,15 @@ I18N = (ROOT / "frontend" / "js" / "i18n.js").read_text(encoding="utf-8")
 
 check("es gibt einen Container 'Mein Confluence-Zugang'",
       'id="ca-sect-account"' in HTML)
-check("er ist OFFEN (einziger Container der Seite)",
-      re.search(r'id="ca-sect-account"[^>]*\bopen\b', HTML) is not None)
+# Seit d0db2efc (2026-11-16) klappt der Container NACH BEDARF: offen nur, wenn
+# eine persoenliche Anmeldung noetig ist. Das feste `open` im Markup ist
+# bewusst entfernt, die Entscheidung trifft accKlappen() in confluence_addon.js.
+check("er traegt KEIN festes open im Markup (klappt nach Bedarf)",
+      re.search(r'id="ca-sect-account"', HTML) is not None
+      and re.search(r'id="ca-sect-account"[^>]*\bopen\b', HTML) is None)
+check("…und das Skript entscheidet ueber accKlappen() aus dem Kontozustand",
+      "function accKlappen(" in JS and "s.open = !!noetig" in JS
+      and re.search(r"accKlappen\(", JS.split("function accZeichnen(")[-1]) is not None)
 check("der Plugin-Container der Jira-Seite ist NICHT mitkopiert",
       "ja-sect-plugin" not in HTML and "browser-addon" not in HTML)
 check("die Seite laedt das geteilte CSS (keine zweite Fassung)",

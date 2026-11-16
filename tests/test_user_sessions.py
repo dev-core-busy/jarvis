@@ -5,6 +5,7 @@ Laeuft ohne pytest:  python3 tests/test_user_sessions.py
 """
 
 import json
+import re
 import sys
 import tempfile
 import time
@@ -395,10 +396,32 @@ def test_verdrahtung():
     # Portal-Logik liegt seit BSI H4 (CSP ohne Inline-Skript, 2026-10-04) in
     # js/portal_seite.js - die Verhaltens-Pruefungen lesen dort.
     portal_js = (root / "frontend" / "js" / "portal_seite.js").read_text(encoding="utf-8")
+    # Den Admin-Zweig per Klammerzaehlung schneiden – ein festes Fenster
+    # ([:1200]) lief aus, als der Zweig den Desktop-Sprung der gemeinsamen
+    # Titelleiste bekam (2b3e868f). Kommentare werden laengentreu geleert, damit
+    # eine Klammer im Kommentar nicht mitzaehlt.
+    def _zweig(quelle, kopf):
+        roh = re.sub(r"/\*[\s\S]*?\*/|//[^\n]*", lambda m: " " * len(m.group(0)), quelle)
+        i = roh.find(kopf)
+        if i < 0:
+            return ""
+        a = roh.find("{", i)
+        tiefe = 0
+        for k in range(a, len(roh)):
+            if roh[k] == "{":
+                tiefe += 1
+            elif roh[k] == "}":
+                tiefe -= 1
+                if tiefe == 0:
+                    return roh[a:k + 1]
+        return ""
+    _admin = _zweig(portal_js, "if (d.is_admin)")
+    check("Positivkontrolle: Admin-Zweig geschnitten", "pt-vnc-btn" in _admin, str(len(_admin)))
     check("nur im Admin-Zweig freigeschaltet",
-          "window.UserSessions.init()" in portal_js.split("if (d.is_admin)")[1].split("}")[0]
-          or "window.UserSessions.init()" in portal_js.split("if (d.is_admin)")[1][:1200])
+          bool(_admin) and "window.UserSessions.init()" in _admin)
     check("Abmeldung meldet sich beim Server ab", "JarvisSession.logout()" in portal_js)
+    # Die Portal-Stile liegen seit 2b3e868f in css/theme.css (gemeinsame Titelleiste).
+    theme_css = (root / "frontend" / "css" / "theme.css").read_text(encoding="utf-8")
 
     js = (root / "frontend" / "js" / "sessions.js").read_text(encoding="utf-8")
     check("keepalive gesetzt (Navigation bricht die Anfrage sonst ab)", "keepalive: true" in js)
@@ -415,7 +438,7 @@ def test_verdrahtung():
     check("unbekannte Untaetigkeit wird NICHT als inaktiv geraten",
           "u.idle_seconds != null" in js.split("function zustand(")[1].split("}")[0])
     for _kl, _farbe in (("is-on", "--success"), ("is-idle", "--warning"), ("is-off", None)):
-        _regel = [z for z in portal.splitlines() if ".pt-usr-pill." + _kl in z]
+        _regel = [z for z in (portal + "\n" + theme_css).splitlines() if ".pt-usr-pill." + _kl in z]
         check("CSS-Regel fuer ." + _kl + " vorhanden", bool(_regel), str(_regel))
         if _farbe:
             check("." + _kl + " nutzt " + _farbe, any(_farbe in z for z in _regel), str(_regel))

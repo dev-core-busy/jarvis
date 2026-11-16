@@ -647,8 +647,51 @@ _dek = [n for n in BAUM.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctio
 _letzte = max([n.lineno for n in _reg] + [n.lineno for n in _dek], default=0)
 _pfad_mw = [n for n in _reg if n.value.args and isinstance(n.value.args[0], ast.Name)
             and n.value.args[0].id == "_AnfragePfadMiddleware"]
-check("_AnfragePfadMiddleware ist registriert und als letzte (aeusserste) Schicht",
-      len(_pfad_mw) == 1 and _pfad_mw[0].lineno == _letzte)
+# Die eigentliche Zusage: jede Schicht, die die Sitzung befragt, liegt INNEN.
+# Aeusser ihr darf nur liegen, was nachweislich nichts von der Sitzung weiss –
+# seit c0a24600 die KompressionsWeiche, die selbst aeusserste Schicht sein muss
+# (no_cache_static schreibt HTML um, test_kompression.py). Gemessen wird am
+# QUELLTEXT der spaeter registrierten Schichten, nicht an einer Namensliste.
+_SITZUNGS_NAMEN = {"verify_token", "_sitzung", "ANFRAGE_PFAD", "_token_aufloesen"}
+def _quelle_der_schicht(ausdruck):
+    """Quelltext einer registrierten Schicht: Klasse/Funktion in main.py oder
+    das ganze Modul bei ``modul.Klasse`` (``from backend import modul as alias``)."""
+    if isinstance(ausdruck, ast.Name):
+        for n in BAUM.body:
+            if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and n.name == ausdruck.id:
+                return n
+        return None
+    if isinstance(ausdruck, ast.Attribute) and isinstance(ausdruck.value, ast.Name):
+        alias = ausdruck.value.id
+        for n in ast.walk(BAUM):
+            if isinstance(n, ast.ImportFrom) and n.module == "backend":
+                for a in n.names:
+                    if (a.asname or a.name) == alias:
+                        datei = ROOT / "backend" / (a.name + ".py")
+                        return ast.parse(datei.read_text(encoding="utf-8")) if datei.exists() else None
+    return None
+def _fragt_sitzung(knoten):
+    return any((isinstance(x, ast.Name) and x.id in _SITZUNGS_NAMEN)
+               or (isinstance(x, ast.Attribute) and x.attr in _SITZUNGS_NAMEN)
+               or (isinstance(x, ast.alias) and (x.asname or x.name) in _SITZUNGS_NAMEN)
+               for x in ast.walk(knoten))
+# Positivkontrolle: die Sonde erkennt die Pfad-Middleware selbst als sitzungsnah
+_pk = _quelle_der_schicht(ast.Name(id="_AnfragePfadMiddleware"))
+if _pk is None or not _fragt_sitzung(_pk):
+    print("ABBRUCH: die Sitzungs-Sonde erkennt _AnfragePfadMiddleware nicht")
+    sys.exit(2)
+_aussen = [n for n in _reg if _pfad_mw and n.lineno > _pfad_mw[0].lineno]
+_aussen_q = [(ast.unparse(n.value.args[0]) if n.value.args else "?",
+              _quelle_der_schicht(n.value.args[0]) if n.value.args else None) for n in _aussen]
+_aussen_dek = [n.name for n in _dek if _pfad_mw and n.lineno > _pfad_mw[0].lineno]
+check("_AnfragePfadMiddleware ist genau einmal registriert (%d)" % len(_pfad_mw),
+      len(_pfad_mw) == 1)
+check("ausserhalb von ihr liegt keine dekorierte Middleware (@app.middleware) %s" % _aussen_dek,
+      not _aussen_dek)
+check("jede Schicht ausserhalb ist auffindbar und fragt die Sitzung NICHT %s"
+      % [(name, "unauffindbar" if q is None else _fragt_sitzung(q)) for name, q in _aussen_q],
+      all(q is not None and not _fragt_sitzung(q) for _, q in _aussen_q))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\n" + "=" * 60)

@@ -53,6 +53,9 @@ function seite(datei, api) {
             };
         },
     });
+    // sitzung.js zuerst, wie auf jeder Seite (tests/lib/sitzung_laden.js):
+    // der Pruefstand fuehrt Module ueber eine Pfadvariable aus.
+    require('./lib/sitzung_laden')(dom.window);
     dom.window.eval(I18N);
     return { dom, rufe, $: (id) => dom.window.document.getElementById(id) };
 }

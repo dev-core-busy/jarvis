@@ -324,6 +324,10 @@ const JS_AUSNAHMEN = [
     // /support-api ist die oeffentliche Doku-Seite OHNE branding.js – dort
     // gibt es keine Marke, die eingesetzt werden koennte.
     { datei: 'frontend/js/support_api_sprache.js', text: 'Jarvis Support API',  grund: 'Seite ohne Branding' },
+    // Branding-HAKEN der Update-Pille, seit 2b3e868f von der gemeinsamen Titelleiste
+    // gebaut statt im Markup von portal.html: branding.js ersetzt den Text jedes
+    // `.brand-app-name` – dieselbe Regel wie Abschnitt 7 fuer das Markup.
+    { datei: 'frontend/js/kopfzeile.js', text: '<span class="brand-app-name">Jarvis</span>', grund: 'Branding-Haken .brand-app-name' },
     { datei: 'frontend/js/support_api_sprache.js', text: 'Jarvis Support-API',  grund: 'Seite ohne Branding' },
 ];
 const acornJs = require('./lib/acorn_laden')();

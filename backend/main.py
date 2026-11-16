@@ -14597,20 +14597,31 @@ async def confluence_test(user: str = Depends(require_local_auth)):
 
 @app.get("/api/confluence/spaces")
 async def confluence_spaces_api(user: str = Depends(require_local_auth)):
-    """Listet alle Confluence-Bereiche (Spaces) mit Link – fuer den Wissen-Reiter."""
+    """Listet alle Confluence-Bereiche (Spaces) mit Link – fuer den Wissen-Reiter
+    und die Fachprobe in /confluence.
+
+    ``zugang`` nennt, MIT WELCHEM Zugang die Liste entstand (``quelle``:
+    ``persoenlich``/``sammel``, ``hinweis``: warum nicht der eigene). Ohne die
+    Angabe sieht eine Liste ueber den gemeinsamen Zugang genauso aus wie eine
+    ueber den eigenen PAT – die Fachprobe beantwortete dann "funktioniert
+    mein PAT?" mit Ja, obwohl er gar nicht benutzt wurde (Vorgabe 2026-11-16).
+    Kein Token, keine Kennung – nur Herkunft und Grund."""
     from backend.confluence_client import ConfluenceError
     c = _confluence_client(user)
+    z = getattr(c, "zugang", None)
+    zugang = ({"quelle": str(z.get("quelle") or ""), "hinweis": str(z.get("hinweis") or "")}
+              if isinstance(z, dict) else None)
     if not c.configured:
-        return JSONResponse({"ok": False, "configured": False,
+        return JSONResponse({"ok": False, "configured": False, "zugang": zugang,
                              "error": "Nicht konfiguriert (URL/Token fehlen)."})
     try:
         spaces = await asyncio.to_thread(c.spaces_detailed, _CF_MAX_BEREICHE)
         spaces.sort(key=lambda s: (s.get("name") or "").lower())
         return JSONResponse({"ok": True, "configured": True, "base": c.base,
-                             "count": len(spaces), "spaces": spaces})
+                             "count": len(spaces), "spaces": spaces, "zugang": zugang})
     except ConfluenceError as e:
         return JSONResponse({"ok": False, "configured": True, "status": e.status,
-                             "error": str(e)})
+                             "zugang": zugang, "error": str(e)})
 
 
 @app.get("/api/confluence/pages")

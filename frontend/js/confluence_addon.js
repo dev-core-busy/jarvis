@@ -69,12 +69,31 @@
     }
 
     /** Zeichnet Pille, Hinweiskasten und Felder aus `_acc`. */
+    /* Die Fachprobe steht unter der Aktion, die im jeweiligen Betrieb gilt:
+     * "Speichern" bei gespeicherten Zugaengen, "Anmelden/Abmelden" im
+     * Sitzungsbetrieb. Grund (gemeldet 2026-11-16, im echten Chrome
+     * nachgemessen): im Sitzungsbetrieb ist "Mein …-Zugang" ausgeblendet, und
+     * die Probe darin war nach dem Aufklappen des sichtbaren Containers
+     * schlicht NICHT DA. Es wird die EINE Huelle verschoben, nicht kopiert –
+     * zwei Proben liefen beim naechsten Feinschliff auseinander.
+     * Entscheidet dieselbe Bedingung wie das Ausblenden (``ohneEigenen``),
+     * damit Ausblenden und Umsetzen nie auseinanderfallen. */
+    function probePlatzieren(ohneEigenen) {
+        var blk = $('ca-acc-probe-block');
+        var anker = ohneEigenen ? $('ca-sz-msg') : $('ca-acc-msg');
+        if (blk && anker && anker.nextElementSibling !== blk) {
+            anker.parentNode.insertBefore(blk, anker.nextSibling);
+        }
+    }
+
     function accZeichnen() {
         var a = _acc || {};
         // Persoenliche Zugaenge vom Administrator abgeschaltet: der Abschnitt
         // entfaellt ganz (gleiche Regel wie in /jira-addon).
         var sect = $('ca-sect-account');
-        if (sect) sect.style.display = (a.persoenlich_erlaubt === false) ? 'none' : '';
+        var ohneEigenen = (a.persoenlich_erlaubt === false);
+        if (sect) sect.style.display = ohneEigenen ? 'none' : '';
+        probePlatzieren(ohneEigenen);
         // Noetig nur ohne gueltigen eigenen Token UND ohne gemeinsamen Zugang
         // (und mit Serveradresse – ohne sie hilft auch kein Token).
         if (_acc) {
@@ -202,9 +221,53 @@
      *
      * NULL BEREICHE IST EIN EIGENES ERGEBNIS, kein Fehler: der Token gilt,
      * sieht aber keinen Bereich. Das wird so gesagt – stumm "0" anzuzeigen
-     * waere von einem Fehlschlag nicht zu unterscheiden. */
+     * waere von einem Fehlschlag nicht zu unterscheiden.
+     *
+     * DIE LISTE IST VOLLSTAENDIG (Vorgabe 2026-11-16: "ICH MOECHTE EINE LISTE
+     * DER BEREICHE, DIE der Benutzer sieht"). Die erste Fassung zeigte nur
+     * zehn – die Frage "sehe ich Bereich X?" beantwortet ein Ausschnitt nicht,
+     * und ein fehlender Eintrag darin liest sich wie "kein Zugriff". Bei
+     * hunderten Bereichen traegt ein Filterfeld die Suche, der Kasten rollt.
+     *
+     * WELCHER ZUGANG: der Endpunkt faellt auf den gemeinsamen Zugang zurueck,
+     * wenn der eigene PAT nicht gilt. Ohne `zugang` aus der Antwort saehe
+     * diese Liste dann aus wie die des PAT – die Probe behauptete "dein PAT
+     * funktioniert", obwohl er gar nicht benutzt wurde. Fehlt die Angabe
+     * (aelteres Backend), wird darueber NICHTS behauptet. */
     var _probeLaeuft = false;
-    var PROBE_MAX = 10;        // mehr Zeilen beantworten die Frage nicht besser
+
+    /** 'eigen' | 'sammel' | '' (unbekannt) – aus `zugang` der Antwort. */
+    function probeQuelle(d) {
+        var z = d && d.zugang;
+        if (!z || typeof z !== 'object') return '';
+        if (z.quelle === 'persoenlich') return 'eigen';
+        if (z.quelle === 'sammel') return 'sammel';
+        return '';
+    }
+
+    /** Filtert die gezeichnete Liste nach Schluessel ODER Name; die Zahl
+     *  daneben nennt Treffer UND Gesamtzahl (eine gefilterte Liste ohne
+     *  Gesamtzahl liest sich als ganzer Bestand). */
+    function probeFiltern() {
+        var out = $('ca-acc-probe-out');
+        var feld = $('ca-acc-probe-filter');
+        if (!out || !feld) return;
+        var q = (feld.value || '').trim().toLowerCase();
+        var lis = out.querySelectorAll('li[data-such]');
+        var n = 0;
+        for (var i = 0; i < lis.length; i++) {
+            var treffer = !q || lis[i].getAttribute('data-such').indexOf(q) >= 0;
+            lis[i].hidden = !treffer;
+            if (treffer) n++;
+        }
+        var z = $('ca-acc-probe-zahl');
+        if (z) {
+            z.textContent = q
+                ? (n + ' ' + T('caddon.probe_von', 'von') + ' ' + lis.length
+                   + ' ' + T('caddon.probe_treffer', 'Bereichen passen.'))
+                : '';
+        }
+    }
 
     function probeMeld(text, art) {
         var n = $('ca-acc-probe-note');
@@ -234,36 +297,69 @@
                                 { headers: { 'Authorization': 'Bearer ' + token() } });
             var d = null;
             try { d = await r.json(); } catch (e) { d = null; }
+            var quelle = probeQuelle(d);
             if (!r.ok || !d || d.ok === false) {
-                throw new Error((d && (d.error || d.detail))
-                                || T('caddon.probe_fail', 'Abfrage fehlgeschlagen.'));
+                var grund = (d && (d.error || d.detail))
+                            || T('caddon.probe_fail', 'Abfrage fehlgeschlagen.');
+                // Mit dem EIGENEN PAT gescheitert heisst: der PAT funktioniert
+                // nicht – das gehoert dazugesagt, sonst sucht man beim Server.
+                throw new Error(quelle === 'eigen'
+                    ? T('caddon.probe_pat_fehler', 'Dein PAT funktioniert nicht:') + ' ' + grund
+                    : grund);
             }
             var sp = Array.isArray(d.spaces) ? d.spaces : [];
             var ges = (typeof d.count === 'number') ? d.count : sp.length;
+            var hinweis = (d.zugang && d.zugang.hinweis) ? String(d.zugang.hinweis) : '';
             if (!sp.length) {
                 probeMeld(T('caddon.probe_leer',
                     'Der Zugang gilt, sieht aber keinen Bereich. Bitte in Confluence pruefen, '
                     + 'ob dein Konto Leserechte hat.'), 'error');
                 return;
             }
-            probeMeld('✓ ' + T('caddon.probe_ok', 'Sichtbare Bereiche insgesamt:')
-                      + ' ' + ges, 'ok');
-            var zeig = sp.slice(0, PROBE_MAX);
+            if (quelle === 'eigen') {
+                probeMeld('✓ ' + T('caddon.probe_pat_ok', 'Dein PAT funktioniert –')
+                          + ' ' + ges + ' ' + T('caddon.probe_sichtbar', 'Bereiche sichtbar.'), 'ok');
+            } else if (quelle === 'sammel') {
+                // Die Liste ist echt, aber sie beantwortet die gestellte Frage
+                // NICHT: als Fehler gekennzeichnet, damit niemand sie fuer die
+                // eigene haelt.
+                probeMeld('⚠ ' + T('caddon.probe_sammel',
+                    'Dein PAT wurde NICHT verwendet – die Liste zeigt den gemeinsamen Zugang.')
+                    + (hinweis ? ' ' + hinweis : ''), 'error');
+            } else {
+                probeMeld('✓ ' + T('caddon.probe_ok', 'Sichtbare Bereiche insgesamt:')
+                          + ' ' + ges, 'ok');
+            }
             var html = '<p class="ja-probe-kopf">'
-                + probeEsc(T('caddon.probe_head', 'Bereiche, die dein Zugang lesen darf:'))
-                + '</p><ul>';
-            zeig.forEach(function (s) {
-                html += '<li><span class="ja-probe-key">' + probeEsc(s.key || '?')
-                     + '</span> ' + probeEsc(s.name || '') + '</li>';
+                + probeEsc(quelle === 'sammel'
+                    ? T('caddon.probe_head_sammel', 'Bereiche, die der gemeinsame Zugang lesen darf:')
+                    : T('caddon.probe_head', 'Bereiche, die dein Zugang lesen darf:'))
+                + ' ' + ges + '</p>'
+                + '<div class="ja-probe-filterzeile">'
+                + '<input type="search" class="ja-acc-input ja-probe-filter" id="ca-acc-probe-filter"'
+                + ' autocomplete="off" placeholder="'
+                + probeEsc(T('caddon.probe_filter_ph', 'Bereiche filtern (Schlüssel oder Name)'))
+                + '"><span class="ja-probe-zahl" id="ca-acc-probe-zahl"></span></div>'
+                + '<ul class="ja-probe-liste">';
+            sp.forEach(function (s) {
+                var such = (String(s.key || '') + ' ' + String(s.name || '')).toLowerCase();
+                html += '<li data-such="' + probeEsc(such) + '"><span class="ja-probe-key">'
+                     + probeEsc(s.key || '?') + '</span> ' + probeEsc(s.name || '') + '</li>';
             });
             html += '</ul>';
-            if (ges > zeig.length) {
-                html += '<p class="ja-probe-rest">'
-                     + probeEsc(T('caddon.probe_rest', 'Angezeigt sind die ersten'))
-                     + ' ' + zeig.length + ' ' + probeEsc(T('caddon.probe_rest2', 'von'))
-                     + ' ' + ges + '.</p>';
+            if (out) {
+                out.innerHTML = html;
+                out.hidden = false;
+                var feld = $('ca-acc-probe-filter');
+                if (feld) {
+                    feld.addEventListener('input', probeFiltern);
+                    // Escape leert das Feld – sonst muss man den Text von Hand
+                    // loeschen, um die volle Liste zurueckzubekommen.
+                    feld.addEventListener('keydown', function (ev) {
+                        if (ev.key === 'Escape') { feld.value = ''; probeFiltern(); }
+                    });
+                }
             }
-            if (out) { out.innerHTML = html; out.hidden = false; }
         } catch (e) {
             probeMeld('❌ ' + e.message, 'error');
         } finally {

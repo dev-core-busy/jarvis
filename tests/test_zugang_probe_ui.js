@@ -137,6 +137,12 @@ function seite(b, tabelle) {
     // die sich selbst umleitet, macht jede Pruefung bedeutungslos).
     require('./lib/sitzung_laden')(dom.window, { token: 'probetoken' });
     dom.window.eval(I18N_SRC);
+    // Jira/Confluence binden zugang_sitzung.js VOR dem Seitenmodul ein – es
+    // blendet im Sitzungsbetrieb den Anmelde-Container ein. Fehlt es hier,
+    // misst Abschnitt 13 einen Container, den es im Betrieb so nicht gibt.
+    if (b.id === 'jira' || b.id === 'conf') {
+        dom.window.eval(fs.readFileSync(path.join(ROOT, 'frontend/js/zugang_sitzung.js'), 'utf8'));
+    }
     dom.window.eval(fs.readFileSync(JS[b.id], 'utf8'));
     return { dom, rufe, win: dom.window,
              $: (id) => dom.window.document.getElementById(id) };
@@ -484,6 +490,8 @@ function kastenText(s, b) {
         const paare = [
             ['ja-probe-zeile', JA_CSS], ['ja-probe-note', JA_CSS], ['ja-probe', JA_CSS],
             ['ja-probe-kopf', JA_CSS], ['ja-probe-rest', JA_CSS], ['ja-probe-key', JA_CSS],
+            ['ja-probe-filterzeile', JA_CSS], ['ja-probe-filter', JA_CSS],
+            ['ja-probe-zahl', JA_CSS], ['ja-probe-liste', JA_CSS],
             ['sp-probe-zeile', SAP_HTML], ['sp-probe-note', SAP_HTML], ['sp-probe', SAP_HTML],
             ['sp-probe-kopf', SAP_HTML], ['sp-probe-rest', SAP_HTML],
             ['vm-probe-zeile', VM_HTML], ['vm-probe-note', VM_HTML], ['vm-probe', VM_HTML],
@@ -505,6 +513,165 @@ function kastenText(s, b) {
         }
         check(/\.ja-probe\[hidden\]/.test(JA_CSS),
               '.ja-probe[hidden] ist ausdruecklich auf display:none gesetzt');
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Vorgabe 2026-11-16 (Nachtrag): "ICH MOECHTE EINE LISTE DER BEREICHE, DIE
+    // der Benutzer sieht" – und ob der Zugriff mit SEINEM PAT funktioniert.
+    // Die erste Fassung zeigte zehn Zeilen und sagte nicht, welcher Zugang
+    // gefragt wurde (der Endpunkt faellt still auf den gemeinsamen zurueck).
+    section('12) Confluence: VOLLSTAENDIGE Liste, Filter, und WELCHER Zugang gefragt wurde');
+    {
+        const b = BEREICHE[1];
+        // Mehr als jede plausible Kappung (10, 20) – und eine Zahl, die nicht
+        // zufaellig an anderer Stelle im Text steht.
+        const N = 37;
+        const viele = [];
+        for (let i = 1; i <= N; i++) {
+            const k = 'SONDE' + String(i).padStart(2, '0');
+            viele.push({ key: k, name: 'Sondenbereich ' + k });
+        }
+        const li = (s) => Array.from(s.$(b.out).querySelectorAll('li'));
+        const sichtbar = (s) => li(s).filter((x) => !x.hidden);
+        const klick = async (s) => {
+            await sleep(60);
+            s.$(b.btn).dispatchEvent(new s.win.Event('click'));
+            await sleep(80);
+        };
+
+        // 12a) eigener PAT: ALLE Zeilen, Meldung sagt "PAT funktioniert"
+        {
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+                { ok: true, count: N, spaces: viele, zugang: { quelle: 'persoenlich', hinweis: '' } } }));
+            await klick(s);
+            check(li(s).length === N, 'alle ' + N + ' Bereiche stehen in der Liste (keine Kappung)',
+                  'gezaehlt: ' + li(s).length);
+            const txt = kastenText(s, b);
+            check(txt.indexOf('SONDE01') >= 0 && txt.indexOf('SONDE' + N) >= 0,
+                  'erster UND letzter Bereich sind sichtbar', txt.slice(-80));
+            const note = s.$(b.note).textContent || '';
+            check(/PAT funktioniert/.test(note) && note.indexOf(String(N)) >= 0,
+                  'Meldung: PAT funktioniert + Gesamtzahl', note);
+            check(/is-ok/.test(s.$(b.note).className), 'als Erfolg gekennzeichnet');
+
+            // 12b) Filter: genau ein Treffer, Zahl nennt Treffer UND Gesamt
+            const f = s.$('ca-acc-probe-filter');
+            check(!!f, 'Filterfeld steht im Kasten');
+            if (f) {
+                f.value = 'sonde07';   // klein geschrieben: Filter ist case-insensitiv
+                f.dispatchEvent(new s.win.Event('input'));
+                const v = sichtbar(s);
+                check(v.length === 1 && /SONDE07/.test(v.length ? v[0].textContent : ''),
+                      'Filter "sonde07" laesst genau SONDE07 stehen',
+                      v.map((x) => x.textContent).join(' | '));
+                const z = (s.$('ca-acc-probe-zahl') || {}).textContent || '';
+                check(z.indexOf('1') >= 0 && z.indexOf(String(N)) >= 0,
+                      'Trefferzahl nennt Treffer und Gesamtzahl', z);
+                f.value = 'Sondenbereich SONDE1';
+                f.dispatchEvent(new s.win.Event('input'));
+                check(sichtbar(s).length === 10, 'Filter trifft auch den NAMEN (SONDE10–19)',
+                      'gezaehlt: ' + sichtbar(s).length);
+                f.dispatchEvent(new s.win.KeyboardEvent('keydown', { key: 'Escape' }));
+                check(f.value === '' && sichtbar(s).length === N,
+                      'Escape leert den Filter, alle Zeilen wieder da');
+            }
+            s.win.close();
+        }
+
+        // 12c) gemeinsamer Zugang: KEIN "PAT funktioniert", sondern Warnung samt Grund
+        {
+            const grund = 'Sondengrund: nicht angemeldet.';
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+                { ok: true, count: 3, spaces: viele.slice(0, 3),
+                  zugang: { quelle: 'sammel', hinweis: grund } } }));
+            await klick(s);
+            const note = s.$(b.note).textContent || '';
+            check(!/PAT funktioniert/.test(note), 'gemeinsamer Zugang: KEIN "PAT funktioniert"', note);
+            check(/NICHT verwendet/.test(note) && note.indexOf(grund) >= 0,
+                  'Meldung sagt: PAT nicht verwendet, mit Grund', note);
+            check(/is-error/.test(s.$(b.note).className), 'als Warnung gekennzeichnet');
+            check(/gemeinsame Zugang/.test(kastenText(s, b)), 'Kopf des Kastens nennt den gemeinsamen Zugang');
+            check(li(s).length === 3, 'die Liste steht trotzdem da');
+            s.win.close();
+        }
+
+        // 12d) Fehlschlag MIT dem eigenen PAT: die Meldung sagt, dass der PAT nicht geht
+        {
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+                { ok: false, error: 'HTTP 401', zugang: { quelle: 'persoenlich', hinweis: '' } } }));
+            await klick(s);
+            const note = s.$(b.note).textContent || '';
+            check(/PAT funktioniert nicht/.test(note) && note.indexOf('HTTP 401') >= 0,
+                  'Fehlschlag mit eigenem PAT: "PAT funktioniert nicht" + Servergrund', note);
+            s.win.close();
+        }
+
+        // 12e) aelteres Backend ohne `zugang`: es wird NICHTS ueber den PAT behauptet
+        {
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+                { ok: true, count: 2, spaces: viele.slice(0, 2) } }));
+            await klick(s);
+            const note = s.$(b.note).textContent || '';
+            check(!/PAT/.test(note), 'ohne Zugangsangabe keine Aussage ueber den PAT', note);
+            check(li(s).length === 2, 'Liste steht');
+            s.win.close();
+        }
+
+        // 12f) Fremdtext im Such-Attribut sprengt nichts
+        {
+            const s = seite(b, grundAntworten(b.perm, { '/api/confluence/spaces':
+                { ok: true, count: 1, spaces: [{ key: 'X"><img src=x>', name: '"><b>fett</b>' }],
+                  zugang: { quelle: 'persoenlich', hinweis: '' } } }));
+            await klick(s);
+            const out = s.$(b.out);
+            check(!!out && !out.querySelector('img') && !out.querySelector('li b'),
+                  'Schluessel/Name maskiert, auch im data-such-Attribut');
+            s.win.close();
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Gemeldet 2026-11-16: "unter /confluence ist WEITERHIN KEIN TEST SICHTBAR".
+    // Im Sitzungsbetrieb (persoenliche Zugaenge AUS – so auf DEV) ist
+    // "Mein …-Zugang" ausgeblendet; die Probe darin war unerreichbar. Sie muss
+    // dann im SICHTBAREN Anmelde-Container stehen, unter Anmelden/Abmelden,
+    // und bei erlaubten Zugaengen dort bleiben, wo sie war (unter Speichern).
+    // Optisch im echten Chrome: tests/live_zugang_probe_ui.py.
+    section('13) Jira/Confluence: Probe folgt dem SICHTBAREN Container');
+    for (const [b, kontoPfad, sz] of [[BEREICHE[0], '/api/jira/account', 'ja-sz-sect'],
+                                      [BEREICHE[1], '/api/confluence/account', 'ca-sz-sect']]) {
+        const praefix = sz.slice(0, 2);
+        for (const [lage, konto, soll] of [
+            ['Sitzungsbetrieb', { persoenlich_erlaubt: false, sitzungs_modus: true,
+                                  server_konfiguriert: true, sammel_vorhanden: true }, sz],
+            ['eigene Zugaenge erlaubt', { persoenlich_erlaubt: true, sitzungs_modus: false,
+                                          vorhanden: true, aktiv: true, server_konfiguriert: true,
+                                          sammel_vorhanden: true }, b.sekt],
+        ]) {
+            const ant = {};
+            ant[kontoPfad] = { ok: true, account: konto };
+            const s = seite(b, grundAntworten(b.perm, ant));
+            await sleep(120);
+            const knopf = s.$(b.btn);
+            const ziel = s.$(soll);
+            check(!!knopf && !!ziel && ziel.contains(knopf),
+                  b.id + ' · ' + lage + ': Probe steht in #' + soll);
+            // Kein Vorfahr der Probe ist per style ausgeblendet.
+            let versteckt = false;
+            for (let e = knopf; e; e = e.parentElement) {
+                if (e.style && e.style.display === 'none') versteckt = true;
+            }
+            check(!!knopf && !versteckt, b.id + ' · ' + lage + ': kein ausgeblendeter Vorfahr');
+            // Position: unter der Aktionszeile des Containers.
+            const aktion = s.$(soll === sz ? praefix + '-sz-login' : b.save);
+            check(!!aktion && !!knopf
+                  && (aktion.compareDocumentPosition(knopf) & s.win.Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+                  b.id + ' · ' + lage + ': Probe steht NACH ' + (aktion ? aktion.id : '?'));
+            // Genau EINE Probe im Dokument (verschoben, nicht kopiert).
+            check(s.win.document.querySelectorAll('#' + b.btn).length === 1,
+                  b.id + ' · ' + lage + ': genau eine Probe im Dokument');
+            s.win.close();
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════

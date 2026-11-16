@@ -9,9 +9,27 @@ Netzwerkaufrufe laufen ueber ``asyncio.to_thread`` (Event-Loop nicht blockieren)
 """
 
 import asyncio
+import re
 
 from backend.tools.base import BaseTool
 from backend.confluence_client import ConfluenceClient, ConfluenceError, html_to_text
+
+# Hoechstzahl der Bereiche, die eine Liste abruft (in Seiten zu 50). Auf ECHT
+# sieht ein Zugang je nach Rechten 27 bis knapp 500 Bereiche; die Grenze ist
+# nur ein Netz gegen einen Server, der endlos weiterzaehlt. Wird sie erreicht,
+# sagt die Ausgabe "mindestens" – eine Zahl, die vollstaendig klingt und es
+# nicht ist, war der Kern des NXPT-Vorfalls (2026-11-13).
+MAX_SPACES_ABRUF = 5000
+# Unter dieser Laenge gilt der Seitentext als "kaum Inhalt": dann werden die
+# Makros benannt und die Unterseiten mitgeliefert, damit das Modell einen Weg
+# zum eigentlichen Inhalt hat.
+KURZ_INHALT = 200
+MAX_UNTERSEITEN = 50
+# Makro-Parameter sind Einstellungen (Breite, Tiefe, Sortierung), kein Inhalt.
+# html_to_text liesse ihren Wert als Text stehen – eine Startseite aus Makros
+# wurde dadurch zu einem nackten "400", das das Modell als HTTP-Fehler las.
+_RE_MAKRO_PARAM = re.compile(r"<ac:parameter\b[^>]*>.*?</ac:parameter\s*>", re.I | re.S)
+_RE_MAKRO_NAME = re.compile(r"<ac:structured-macro\b[^>]*?\bac:name=\"([^\"]+)\"", re.I)
 
 
 def _client() -> ConfluenceClient:
@@ -45,18 +63,84 @@ def _fmt_err(e: ConfluenceError) -> str:
     if e.status in (401, 403):
         return "❌ Authentifizierung fehlgeschlagen (HTTP %s). Benutzer/API-Token pruefen." % e.status
     if e.status == 404:
-        return "❌ Nicht gefunden (HTTP 404). URL/ID/Titel pruefen (Cloud-URL meist mit /wiki)."
+        # Confluence antwortet auch bei fehlender LESEBERECHTIGUNG mit 404 –
+        # "nicht gefunden" allein schickt die Suche zur falschen Ursache.
+        return ("❌ Nicht gefunden (HTTP 404): existiert nicht ODER der verwendete "
+                "Confluence-Zugang darf es nicht lesen – Confluence unterscheidet das "
+                "nicht. ID/Schluessel/Titel pruefen (Cloud-URL meist mit /wiki).")
     if e.status == 0:
         return "❌ %s" % e
     return "❌ Confluence-Fehler (HTTP %s): %s" % (e.status, e)
 
 
+def _alle_spaces(c: ConfluenceClient) -> tuple[list[dict], bool]:
+    """(Bereiche, vollstaendig) – EINE Quelle fuer Liste UND Verbindungstest.
+
+    Vorher fragte der Test 25 ab und die Liste 50, beide ohne weiterzublaettern:
+    im selben Lauf stand "25 Space(s)" neben "50 Space(s)", und keine der beiden
+    Zahlen war die wahre (489)."""
+    alle = c.spaces_detailed(MAX_SPACES_ABRUF)
+    return alle, len(alle) < MAX_SPACES_ABRUF
+
+
+def _anzahl_text(n: int, vollstaendig: bool) -> str:
+    return ("%d" % n) if vollstaendig else ("mindestens %d" % n)
+
+
+def _seitentext(storage: str) -> str:
+    """Lesbarer Seitentext ohne Makro-Parameter (siehe ``_RE_MAKRO_PARAM``)."""
+    return html_to_text(_RE_MAKRO_PARAM.sub("", storage or "")).strip()
+
+
+def _zugang_kopf(c) -> str:
+    """Erste Zeile jedes Ergebnisses: MIT WELCHEM Zugang es entstand.
+
+    Anlass ECHT 2026-11-16: "kein Zugriff auf NXPT" war nicht einzuordnen –
+    fehlte dem Benutzer das Recht, oder lief der Abruf ueber den gemeinsamen
+    Zugang, weil er nicht persoenlich angemeldet war? ``aufloesen`` kannte die
+    Antwort (``hinweis``), sie wurde aber verworfen. Ohne Angabe am Client
+    (Attrappe, aelterer Aufrufer) gibt es keine Zeile – nichts zu behaupten
+    ist besser als etwas Geratenes."""
+    z = getattr(c, "zugang", None)
+    if not isinstance(z, dict) or not z.get("quelle"):
+        return ""
+    benutzer = str(z.get("benutzer") or "")
+    person = bool(benutzer) and ":" not in benutzer
+    if z["quelle"] == "persoenlich":
+        return ("ℹ Confluence-Zugang: persoenlicher Zugang von '%s' – Ergebnisse zeigen "
+                "SEINE Rechte." % benutzer)
+    if not person:
+        return "ℹ Confluence-Zugang: gemeinsamer Zugang."
+    grund = str(z.get("hinweis") or "").strip()
+    return ("ℹ Confluence-Zugang: GEMEINSAMER Zugang, nicht der von '%s'.%s Ergebnisse "
+            "zeigen die Rechte des gemeinsamen Zugangs – was hier fehlt oder gesperrt "
+            "ist, kann der Benutzer mit eigener Confluence-Anmeldung (persoenlicher "
+            "Token) womoeglich sehen." % (benutzer, (" Grund: " + grund) if grund else ""))
+
+
 class _Base(BaseTool):
-    """Gemeinsame Hilfen fuer alle Confluence-Tools."""
+    """Gemeinsame Hilfen fuer alle Confluence-Tools.
+
+    ``execute`` ist fuer ALLE Werkzeuge dieselbe: Zugang aufloesen (``_guard``),
+    Werkzeug ausfuehren (``_ausfuehren``), Zugangszeile davor. Je Werkzeug
+    eine eigene Fassung haette die Zeile an einer Stelle vergessen."""
+
+    NICHT_KONFIGURIERT = "Confluence ist nicht konfiguriert."
 
     def _guard(self) -> ConfluenceClient | None:
         c = _client()
         return c if c.configured else None
+
+    async def execute(self, **kwargs):
+        c = self._guard()
+        if not c:
+            return self.NICHT_KONFIGURIERT
+        ergebnis = await self._ausfuehren(c, **kwargs)
+        kopf = _zugang_kopf(c)
+        return (kopf + "\n\n" + ergebnis) if kopf else ergebnis
+
+    async def _ausfuehren(self, c, **kwargs):  # pragma: no cover – je Werkzeug ueberschrieben
+        raise NotImplementedError
 
 
 class ConfluenceTestConnectionTool(_Base):
@@ -65,22 +149,38 @@ class ConfluenceTestConnectionTool(_Base):
 
     @property
     def description(self):
-        return "Prueft die Confluence-Verbindung und meldet zugaengliche Spaces."
+        return ("Prueft die Confluence-Verbindung und meldet, als WER verbunden ist und "
+                "wie viele Bereiche (Spaces) dieser Zugang sieht. Ob ein BESTIMMTER "
+                "Bereich sichtbar ist, beantwortet confluence_list_spaces mit 'key'.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {}, "required": []}
 
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert. Bitte URL und API-Token im Confluence-Reiter eintragen."
+    NICHT_KONFIGURIERT = ("Confluence ist nicht konfiguriert. Bitte URL und API-Token "
+                          "im Confluence-Reiter eintragen.")
+
+    async def _ausfuehren(self, c, **kwargs):
         try:
-            spaces = await _to_thread(c.spaces, 25)
+            spaces, vollstaendig = await _to_thread(_alle_spaces, c)
         except ConfluenceError as e:
             return _fmt_err(e)
-        keys = ", ".join(s.get("key", "?") for s in spaces[:10])
-        return "✅ Verbindung erfolgreich zu %s (%d Space(s)).%s" % (
-            c.base, len(spaces), (" – " + keys) if keys else "")
+        # Wer ist verbunden? Ohne diese Angabe ist "kein Zugriff" nicht
+        # einzuordnen (eigener Token oder gemeinsamer?). /user/current kennt
+        # nicht jede Fassung – fehlt es, entfaellt nur die Angabe.
+        konto = ""
+        try:
+            ich = await _to_thread(c.current_user) or {}
+            name = str(ich.get("displayName") or "").strip()
+            kennung = str(ich.get("username") or ich.get("userKey") or "").strip()
+            wer = ("%s (%s)" % (name, kennung)) if (name and kennung) else (name or kennung)
+            konto = (" als " + wer) if wer else ""
+        except Exception:  # noqa: BLE001
+            konto = ""
+        keys = ", ".join(str(s.get("key") or "?") for s in spaces[:10])
+        return ("✅ Verbindung erfolgreich zu %s%s – %s Bereich(e) sichtbar.%s\n"
+                "Ob ein bestimmter Bereich sichtbar ist: confluence_list_spaces(key=\"…\")." % (
+                    c.base, konto, _anzahl_text(len(spaces), vollstaendig),
+                    (" Beispiele: " + keys) if keys else ""))
 
 
 class ConfluenceListSpacesTool(_Base):
@@ -89,28 +189,83 @@ class ConfluenceListSpacesTool(_Base):
 
     @property
     def description(self):
-        return "Listet zugaengliche Confluence-Spaces (Key und Name)."
+        return ("Listet die Confluence-Bereiche (Spaces), die der verwendete Zugang sieht – "
+                "mit Gesamtzahl. Ob ein BESTIMMTER Bereich sichtbar ist (\"habe ich Zugriff "
+                "auf NXPT?\"): 'key' angeben, das prueft genau diesen Bereich direkt. "
+                "'suche' filtert nach Schluessel oder Name. Die Liste zeigt hoechstens "
+                "'limit' Eintraege – fehlt ein Bereich in einer gekuerzten Liste, ist das "
+                "KEIN Beleg, dass er nicht sichtbar ist. Die Antwort gilt fuer JETZT; ein "
+                "frueheres Ergebnis im Verlauf kann nach einer Zugangsaenderung veraltet sein.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
-            "limit": {"type": "INTEGER", "description": "Max. Anzahl (Standard 50)."}}, "required": []}
+            "key": {"type": "STRING",
+                    "description": "Schluessel EINES Bereichs (z. B. NXPT) – prueft gezielt, "
+                                   "ob genau dieser Bereich sichtbar ist."},
+            "suche": {"type": "STRING",
+                      "description": "Optional: Teil von Schluessel oder Name zum Filtern."},
+            "limit": {"type": "INTEGER",
+                      "description": "Max. Anzahl gezeigter Eintraege (Standard 50, hoechstens 200)."},
+        }, "required": []}
 
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
+    async def _ausfuehren(self, c, **kwargs):
+        key = str(kwargs.get("key") or "").strip()
+        if key:
+            return await self._ein_bereich(c, key)
+        suche = str(kwargs.get("suche") or "").strip()
         try:
             limit = max(1, min(int(kwargs.get("limit") or 50), 200))
         except (TypeError, ValueError):
             limit = 50
         try:
-            spaces = await _to_thread(c.spaces, limit)
+            alle, vollstaendig = await _to_thread(_alle_spaces, c)
         except ConfluenceError as e:
             return _fmt_err(e)
-        if not spaces:
-            return "Keine Spaces gefunden."
-        return "%d Space(s):\n" % len(spaces) + "\n".join(
-            "- %s — %s" % (s.get("key", "?"), s.get("name", "")) for s in spaces)
+        if suche:
+            s_cf = suche.casefold()
+            treffer = [s for s in alle
+                       if s_cf in str(s.get("key") or "").casefold()
+                       or s_cf in str(s.get("name") or "").casefold()]
+        else:
+            treffer = alle
+        gezeigt = treffer[:limit]
+        kopf = ["%s Bereich(e) mit dem verwendeten Zugang sichtbar." % _anzahl_text(
+            len(alle), vollstaendig)]
+        if suche:
+            kopf.append("Treffer fuer '%s': %d." % (suche, len(treffer)))
+        if not treffer:
+            kopf.append("Kein Bereich passt." if suche else "Keine Bereiche gefunden.")
+            return " ".join(kopf)
+        # Der Kuerzungshinweis steht VOR der Liste: am Ende schnitte ihn die
+        # naechste Kappung weg, und ein Ausschnitt ohne Hinweis liest sich als
+        # vollstaendig (Register: "jede Kuerzung beziffern").
+        if len(gezeigt) < len(treffer):
+            kopf.append("⚠ GEKUERZT: gezeigt %d von %d – %d weitere sind sichtbar, aber "
+                        "nicht aufgefuehrt. Fehlt ein Bereich hier, ist er deshalb NICHT "
+                        "unsichtbar: mit key=\"…\" gezielt pruefen oder 'suche' verwenden." % (
+                            len(gezeigt), len(treffer), len(treffer) - len(gezeigt)))
+        else:
+            kopf.append("Gezeigt: alle %d." % len(gezeigt))
+        return "\n".join(kopf) + "\n" + "\n".join(
+            "- %s — %s" % (s.get("key") or "?", s.get("name") or "") for s in gezeigt)
+
+    @staticmethod
+    async def _ein_bereich(c: ConfluenceClient, key: str) -> str:
+        try:
+            s = await _to_thread(c.space, key)
+        except ConfluenceError as e:
+            if e.status == 404:
+                return ("❌ Bereich '%s' ist mit dem verwendeten Confluence-Zugang NICHT "
+                        "sichtbar (HTTP 404). Confluence unterscheidet dabei nicht zwischen "
+                        "\"gibt es nicht\" und \"keine Leseberechtigung\"." % key)
+            return _fmt_err(e)
+        teile = ["✅ Bereich %s — %s ist mit dem verwendeten Confluence-Zugang sichtbar." % (
+            s.get("key") or key, s.get("name") or "")]
+        if s.get("homepage"):
+            teile.append("Startseite: ID %s (confluence_get_page)." % s["homepage"])
+        if s.get("link"):
+            teile.append("Link: %s" % s["link"])
+        return "\n".join(teile)
 
 
 class ConfluenceSearchTool(_Base):
@@ -130,10 +285,7 @@ class ConfluenceSearchTool(_Base):
             "limit": {"type": "INTEGER", "description": "Max. Trefferzahl (Standard 10)."},
         }, "required": []}
 
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
+    async def _ausfuehren(self, c, **kwargs):
         query = (kwargs.get("query") or "").strip()
         space = (kwargs.get("space") or "").strip() or None
         label = (kwargs.get("label") or "").strip() or None
@@ -173,10 +325,7 @@ class ConfluenceGetPageTool(_Base):
             "space_key": {"type": "STRING", "description": "Space-Key (zusammen mit title)."},
         }, "required": []}
 
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
+    async def _ausfuehren(self, c, **kwargs):
         page_id = (kwargs.get("page_id") or "").strip() or None
         title = (kwargs.get("title") or "").strip() or None
         space = (kwargs.get("space_key") or "").strip() or None
@@ -188,9 +337,44 @@ class ConfluenceGetPageTool(_Base):
             return _fmt_err(e)
         body = (((page.get("body") or {}).get("storage") or {}).get("value")) or ""
         sp = ((page.get("space") or {}).get("key")) or "?"
-        return "📄 %s (ID %s, Space %s)\n\n%s" % (
-            page.get("title", "?"), page.get("id", "?"), sp,
-            html_to_text(body) or "(kein Textinhalt)")
+        pid = str(page.get("id") or page_id or "")
+        text = _seitentext(body)
+        # "Erfolgreich" steht ausdruecklich da, und der Inhalt traegt eine
+        # Ueberschrift mit Laenge: ein nackter Text wie "400" direkt unter dem
+        # Titel wurde als HTTP-Fehler gelesen (ECHT 2026-11-13).
+        teile = ["📄 %s (ID %s, Space %s) – Seite erfolgreich abgerufen." % (
+            page.get("title", "?"), pid or "?", sp)]
+        if text:
+            teile.append("Seiteninhalt (%d Zeichen):\n%s" % (len(text), text))
+        else:
+            teile.append("Seiteninhalt: KEIN Fliesstext.")
+        if len(text) < KURZ_INHALT:
+            makros = []
+            for m in _RE_MAKRO_NAME.findall(body):
+                if m not in makros:
+                    makros.append(m)
+            if makros:
+                teile.append("Die Seite besteht ueberwiegend aus Confluence-Makros (%s). "
+                             "Deren Inhalt erzeugt Confluence erst beim Anzeigen – er ist "
+                             "hier nicht enthalten." % ", ".join(makros[:10]))
+            if pid:
+                teile.append(await self._unterseiten(c, pid))
+        return "\n\n".join(teile)
+
+    @staticmethod
+    async def _unterseiten(c: ConfluenceClient, pid: str) -> str:
+        try:
+            kinder = await _to_thread(c.get_child_pages, pid, MAX_UNTERSEITEN)
+        except ConfluenceError as e:
+            return "Unterseiten konnten nicht gelesen werden: %s" % _fmt_err(e)
+        if not kinder:
+            return "Unterseiten: keine."
+        zeilen = ["- %s (ID %s)" % (k.get("title") or "?", k.get("id") or "?")
+                  for k in kinder[:MAX_UNTERSEITEN]]
+        mehr = (" (hoechstens %d gezeigt – es kann weitere geben)" % MAX_UNTERSEITEN
+                if len(kinder) >= MAX_UNTERSEITEN else "")
+        return ("Unterseiten (%d)%s – einzeln mit confluence_get_page(page_id=…) "
+                "abrufen:\n%s" % (len(zeilen), mehr, "\n".join(zeilen)))
 
 
 
@@ -207,10 +391,7 @@ class ConfluenceListAttachmentsTool(_Base):
         return {"type": "OBJECT", "properties": {
             "page_id": {"type": "STRING", "description": "ID der Seite."}}, "required": ["page_id"]}
 
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
+    async def _ausfuehren(self, c, **kwargs):
         page_id = (kwargs.get("page_id") or "").strip()
         if not page_id:
             return "page_id ist erforderlich."
@@ -261,10 +442,7 @@ class ConfluenceDownloadAttachmentTool(_Base):
                                         "Leer = alle Anhaenge der Seite."},
         }, "required": ["page_id"]}
 
-    async def execute(self, **kwargs):
-        c = self._guard()
-        if not c:
-            return "Confluence ist nicht konfiguriert."
+    async def _ausfuehren(self, c, **kwargs):
         page_id = (kwargs.get("page_id") or "").strip()
         if not page_id:
             return "page_id ist erforderlich."

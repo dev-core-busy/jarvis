@@ -330,12 +330,31 @@
     }
 
     /** Zeichnet Pille, Hinweiskasten und Felder aus `_acc`. */
+    /* Die Fachprobe steht unter der Aktion, die im jeweiligen Betrieb gilt:
+     * "Speichern" bei gespeicherten Zugaengen, "Anmelden/Abmelden" im
+     * Sitzungsbetrieb. Grund (gemeldet 2026-11-16, im echten Chrome
+     * nachgemessen): im Sitzungsbetrieb ist "Mein …-Zugang" ausgeblendet, und
+     * die Probe darin war nach dem Aufklappen des sichtbaren Containers
+     * schlicht NICHT DA. Es wird die EINE Huelle verschoben, nicht kopiert –
+     * zwei Proben liefen beim naechsten Feinschliff auseinander.
+     * Entscheidet dieselbe Bedingung wie das Ausblenden (``ohneEigenen``),
+     * damit Ausblenden und Umsetzen nie auseinanderfallen. */
+    function probePlatzieren(ohneEigenen) {
+        var blk = $('ja-acc-probe-block');
+        var anker = ohneEigenen ? $('ja-sz-msg') : $('ja-acc-msg');
+        if (blk && anker && anker.nextElementSibling !== blk) {
+            anker.parentNode.insertBefore(blk, anker.nextSibling);
+        }
+    }
+
     function accZeichnen() {
         var a = _acc || {};
         // Persoenliche Zugaenge vom Administrator abgeschaltet: der Abschnitt
         // entfaellt ganz (es gibt nichts mehr zu hinterlegen).
         var sect = $('ja-sect-account');
-        if (sect) sect.style.display = (a.persoenlich_erlaubt === false) ? 'none' : '';
+        var ohneEigenen = (a.persoenlich_erlaubt === false);
+        if (sect) sect.style.display = ohneEigenen ? 'none' : '';
+        probePlatzieren(ohneEigenen);
         // Noetig nur ohne gueltigen eigenen Token UND ohne gemeinsamen Zugang
         // (und mit Serveradresse – ohne sie hilft auch kein Token).
         if (_acc) {

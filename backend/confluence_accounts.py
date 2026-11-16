@@ -312,7 +312,12 @@ def sitzungs_modus(cfg: dict | None = None) -> bool:
 
 def sitzung_beenden(user: str) -> bool:
     """Abmelden: den nur im Arbeitsspeicher gehaltenen Token verwerfen."""
-    return _SITZUNG.beenden(norm_user(user))
+    un = norm_user(user)
+    weg = _SITZUNG.beenden(un)
+    if weg:
+        print("[Confluence] Sitzung beendet: '%s' – es gilt wieder der gemeinsame "
+              "Zugang" % un, flush=True)
+    return weg
 
 
 def _token_pruefen(basis: str, tok: str) -> tuple[str, str]:
@@ -341,7 +346,29 @@ def _token_pruefen(basis: str, tok: str) -> tuple[str, str]:
 
 def sitzung_anmelden(user: str, token: str) -> dict:
     """Fuer die Sitzung anmelden; der Token wird VOR dem Merken geprueft.
-    Rueckgabe = ``zugang_info``."""
+    Rueckgabe = ``zugang_info``.
+
+    JEDER Ausgang schreibt eine Journal-Zeile (ohne Token): Erfolg mit dem
+    Confluence-Konto, Fehlschlag mit Grund. Anlass ECHT 2026-11-16 – ein
+    Benutzer gab beim Login einen PAT ein, und spaeter liess sich nicht mehr
+    feststellen, ob die Anmeldung gelungen war: der Token liegt nur im
+    Arbeitsspeicher, und weder Erfolg noch Fehlschlag standen irgendwo."""
+    un = norm_user(user)
+    try:
+        info = _sitzung_anmelden(user, token)
+    except Exception as e:  # noqa: BLE001 – protokollieren und unveraendert weiterreichen
+        print("[Confluence] Sitzungsanmeldung FEHLGESCHLAGEN fuer '%s': %s" % (
+            un or "?", str(e)[:300] or type(e).__name__), flush=True)
+        raise
+    s = _SITZUNG.info(un)
+    print("[Confluence] Sitzungsanmeldung erfolgreich: '%s' als Confluence-Konto %s" % (
+        un, s.get("sitzung_konto") or s.get("sitzung_anzeigename") or "(unbekannt)"),
+        flush=True)
+    return info
+
+
+def _sitzung_anmelden(user: str, token: str) -> dict:
+    """Die eigentliche Anmeldung – nur ueber ``sitzung_anmelden`` rufen."""
     un = norm_user(user)
     if not un or ":" in un:
         raise ConfluenceKontoFehler(
@@ -667,8 +694,21 @@ def aufloesen(user: str | None = None) -> dict:
 
 
 def client_fuer_lauf(user: str | None = None) -> ConfluenceClient:
-    """Nur der Client – fuer Aufrufer, die den Hinweis nicht brauchen."""
-    return aufloesen(user)["client"]
+    """Der Client des geltenden Zugangs. Er traegt zusaetzlich ``zugang``
+    (``quelle``, ``hinweis``, ``benutzer``), damit die Werkzeuge sagen koennen,
+    MIT WELCHEM Zugang ein Ergebnis entstand – vorher wurde der Hinweis hier
+    verworfen, und "kein Zugriff" war nicht von "gemeinsamer Zugang darf es
+    nicht" zu unterscheiden (ECHT 2026-11-16). Der Client ist je Aufruf ein
+    FRISCHES Objekt (``aufloesen`` baut ihn neu), das Attribut wird also nie
+    zwischen zwei Benutzern geteilt."""
+    z = aufloesen(user)
+    c = z["client"]
+    try:
+        c.zugang = {"quelle": z.get("quelle") or "", "hinweis": z.get("hinweis") or "",
+                    "benutzer": z.get("benutzer") or ""}
+    except Exception:  # noqa: BLE001 – eine Attrappe ohne Attribute darf nicht scheitern
+        pass
+    return c
 
 
 def quelle_text(quelle: str, lang: str = "de") -> str:

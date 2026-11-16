@@ -148,6 +148,28 @@ class ConfluenceClient:
         d = self._request("GET", "/rest/api/space", params={"limit": limit})
         return d.get("results", [])
 
+    def space(self, key: str) -> dict:
+        """Genau EIN Bereich – Schluessel, Name, Typ, Link, Startseite.
+
+        Antwortet Confluence mit 404, wirft ``ConfluenceError(404)``: der
+        Bereich existiert nicht ODER der Zugang darf ihn nicht lesen –
+        Confluence unterscheidet das bewusst nicht. Gebraucht fuer die Frage
+        "sehe ich Bereich X?": eine Liste beantwortet sie nur, wenn sie
+        vollstaendig ist, und eine erste Seite von 50 aus 489 war es nicht
+        (ECHT 2026-11-13, NXPT stand alphabetisch dahinter)."""
+        k = str(key or "").strip()
+        if not k:
+            raise ConfluenceError(0, "Bereichsschluessel fehlt.")
+        d = self._request("GET", "/rest/api/space/%s" % quote(k, safe=""),
+                          params={"expand": "homepage"})
+        return {
+            "key": d.get("key"),
+            "name": d.get("name"),
+            "type": d.get("type"),
+            "link": self.link_for(d, d),
+            "homepage": str(((d.get("homepage") or {}).get("id")) or ""),
+        }
+
     def spaces_detailed(self, limit: int = 500) -> list[dict]:
         """Alle Spaces (Bereiche) mit Schluessel, Name, Typ und Web-Link.
 

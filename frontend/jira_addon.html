@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
-    <link rel="stylesheet" href="/static/css/jira_addon.css?v=16">
+    <link rel="stylesheet" href="/static/css/jira_addon.css?v=17">
 </head>
 <body>
 <script src="/static/js/theme_frueh.js?v=1"></script>
@@ -150,12 +150,18 @@
                  Steht ABSICHTLICH unter der Speichern-Zeile (Vorgabe
                  2026-11-16) – das ist die Arbeitsfolge: eintragen, speichern,
                  nachsehen. -->
-            <div class="ja-probe-zeile">
-                <button type="button" class="ja-btn" id="ja-acc-probe"
-                        data-i18n="jaddon.probe_btn">Sichtbare Tickets anzeigen</button>
-                <span class="ja-probe-note" id="ja-acc-probe-note"></span>
+            <!-- Huelle der Probe: im Sitzungsbetrieb ist dieser Container
+                 ausgeblendet, dann setzt das Seitenmodul die Huelle unter
+                 "Anmelden/Abmelden" (probePlatzieren) – sonst waere die
+                 Probe dort unerreichbar (gemeldet 2026-11-16). -->
+            <div id="ja-acc-probe-block">
+                <div class="ja-probe-zeile">
+                    <button type="button" class="ja-btn" id="ja-acc-probe"
+                            data-i18n="jaddon.probe_btn">Sichtbare Tickets anzeigen</button>
+                    <span class="ja-probe-note" id="ja-acc-probe-note"></span>
+                </div>
+                <div class="ja-probe" id="ja-acc-probe-out" hidden></div>
             </div>
-            <div class="ja-probe" id="ja-acc-probe-out" hidden></div>
 
             <p class="ja-hint" data-i18n="jaddon.acc_how_note">Der Token wird verschlüsselt gespeichert und nie wieder angezeigt – auch nicht dir. Läuft er ab, trägst du hier einfach einen neuen ein.</p>
         </div>
@@ -343,7 +349,7 @@
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
-<script src="/static/js/i18n.js?v=488"></script>
+<script src="/static/js/i18n.js?v=489"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/sessions.js?v=10"></script>
@@ -352,6 +358,6 @@
 <script src="/static/js/activity.js?v=3"></script>
 <script src="/static/js/issues.js?v=16"></script>
 <script src="/static/js/zugang_sitzung.js?v=4"></script>
-<script src="/static/js/jira_addon.js?v=15"></script>
+<script src="/static/js/jira_addon.js?v=16"></script>
 </body>
 </html>

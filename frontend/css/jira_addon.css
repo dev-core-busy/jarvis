@@ -280,6 +280,16 @@ body.light .ja-probe-note.is-error { color: color-mix(in srgb, var(--danger) 78%
 .ja-probe-key { font-family: var(--font-mono); color: var(--text-muted); }
 .ja-probe-rest { margin: 8px 0 0; color: var(--text-muted); font-size: .8rem; }
 
+/* Vollstaendige Liste (Confluence: bis zu hunderte Bereiche): der Kasten
+ * waechst nicht ueber die Seite, sondern rollt – die Filterzeile bleibt
+ * darueber stehen. */
+.ja-probe-filterzeile { display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    margin: 0 0 8px; }
+.ja-probe-filter { flex: 1 1 220px; min-width: 0; }
+.ja-probe-zahl { font-size: .84rem; color: var(--text-secondary); }
+.ja-probe-liste { max-height: 420px; overflow-y: auto; }
+.ja-probe li[hidden] { display: none; }
+
 /* Der Merksatz der Seite: er traegt die wichtigste Zusage und darf nicht wie
  * Fliesstext aussehen. Akzentkante statt Farbflaeche – die waere in Hell und
  * Dunkel nie gleichzeitig richtig. */

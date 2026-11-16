@@ -259,9 +259,12 @@ async def begriff_pruefen(kid: str, quellen: dict, provider, modell: str, drosse
     Rueckgabe ``{"aufrufe": n, "befunde": [...]}``; Fehler werden vermerkt,
     nicht geworfen (der Arbeiter darf an einem Begriff nicht haengen)."""
     st = st or wgx.einstellungen()
-    k = next((x for x in wg.graph()["knoten"] if x["id"] == kid), None)
+    # ⚠ Graph durchsuchen und ``_vermerken`` (liest/schreibt die ganze
+    # widersprueche.json, ECHT 2026-11-16: 22 MB) laufen im Thread – in der
+    # Event-Loop hielten sie je geprueftem Begriff alle Benutzer an.
+    k = await asyncio.to_thread(_knoten_suchen, kid)
     if k is None:
-        _vermerken(kid, quellen, [], "")
+        await asyncio.to_thread(_vermerken, kid, quellen, [], "")
         return {"aufrufe": 0, "befunde": []}
     namen = [k["name"], *k.get("aliasse", [])]
     texte: list[tuple[str, str]] = []
@@ -273,7 +276,7 @@ async def begriff_pruefen(kid: str, quellen: dict, provider, modell: str, drosse
         if len(texte) >= MAX_QUELLEN:
             break
     if len(texte) < 2:
-        _vermerken(kid, quellen, [])
+        await asyncio.to_thread(_vermerken, kid, quellen, [])
         return {"aufrufe": 0, "befunde": []}
     aufrufe = 0
     try:
@@ -286,7 +289,7 @@ async def begriff_pruefen(kid: str, quellen: dict, provider, modell: str, drosse
         obj, _art = wgx.json_streng(roh)
         paare = pruefe_antwort(obj, len(texte))
         if paare is None:
-            _vermerken(kid, quellen, None, "Antwort der Pruefung ungueltig")
+            await asyncio.to_thread(_vermerken, kid, quellen, None, "Antwort der Pruefung ungueltig")
             return {"aufrufe": aufrufe, "befunde": []}
         befunde = []
         for p in paare:
@@ -316,10 +319,14 @@ async def begriff_pruefen(kid: str, quellen: dict, provider, modell: str, drosse
                             "aussage_a": za, "aussage_b": zb, "frage": beleg["frage"],
                             "erklaerung": p["erklaerung"], "zeit": time.time()})
     except Exception as e:  # noqa: BLE001
-        _vermerken(kid, quellen, None, f"{type(e).__name__}: {e}")
+        await asyncio.to_thread(_vermerken, kid, quellen, None, f"{type(e).__name__}: {e}")
         return {"aufrufe": aufrufe, "befunde": []}
-    _vermerken(kid, quellen, befunde)
+    await asyncio.to_thread(_vermerken, kid, quellen, befunde)
     return {"aufrufe": aufrufe, "befunde": befunde}
+
+
+def _knoten_suchen(kid: str) -> dict | None:
+    return next((x for x in wg.graph()["knoten"] if x["id"] == kid), None)
 
 
 def liste(erlaubt=None) -> list[dict]:

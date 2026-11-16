@@ -1257,15 +1257,51 @@ def widersprueche_gueltig() -> list[dict]:
     return _widersprueche_gueltig(inhalts_stand())
 
 
+# Geparster Wiki-Index, gebunden an (Pfad, Inode, mtime_ns, Groesse) der Datei.
+# ⚠ WARUM (gemessen auf ECHT 2026-11-16): 18.346 Eintraege, 19 MB. Jede
+# erzeugte Seite las den Index ganz, schrieb ihn ganz neu (fsync) – IN der
+# Event-Loop – und Status/Seitenansicht parsten ihn bei jedem Abruf erneut.
+# Zusammen mit dem 104-MB-FAISS-Parsen hing die Loop alle 2-5 s fuer 0,5-4 s,
+# jede Unterseite brauchte >5 s. Der Schluessel aus dem Datei-Stand faengt
+# auch Schreiber ab, die am Cache vorbei schreiben (z.B. ein Test).
+_wiki_cache: tuple | None = None
+
+
+def _datei_stand(p: Path) -> tuple | None:
+    try:
+        s = os.stat(p)
+    except OSError:
+        return None
+    return (str(p), s.st_ino, s.st_mtime_ns, s.st_size)
+
+
 def wiki_index_lesen() -> dict:
-    """``{kid: {"datei", "quellen": {m: mtime}, "erzeugt", "modell", "fehler"?, "versuche"?}}``"""
-    d = _json_lesen(_o() / "wiki" / "index.json", {})
-    return d if isinstance(d, dict) else {}
+    """``{kid: {"datei", "quellen": {m: mtime}, "erzeugt", "modell", "fehler"?, "versuche"?}}``
+
+    ⚠ Liefert das GEMEINSAME, gecachte Objekt. Lesende Aufrufer veraendern es
+    nicht; wer es aendert, tut das unter ``_sperre`` und schreibt es danach mit
+    ``wiki_index_schreiben`` zurueck (sonst wiche der Cache von der Platte ab)."""
+    global _wiki_cache
+    p = _o() / "wiki" / "index.json"
+    with _sperre:
+        stand = _datei_stand(p)
+        if stand is not None and _wiki_cache is not None and _wiki_cache[0] == stand:
+            return _wiki_cache[1]
+        d = _json_lesen(p, {})
+        d = d if isinstance(d, dict) else {}
+        _wiki_cache = (stand, d) if stand is not None else None
+        return d
 
 
 def wiki_index_schreiben(d: dict) -> None:
+    global _wiki_cache
+    p = _o() / "wiki" / "index.json"
     with _sperre:
-        _json_schreiben(_o() / "wiki" / "index.json", d)
+        _wiki_cache = None
+        _json_schreiben(p, d)
+        stand = _datei_stand(p)
+        if stand is not None:
+            _wiki_cache = (stand, d)
 
 
 def _nebenablagen_umschreiben(alt: str, neu: str) -> None:
@@ -1294,7 +1330,7 @@ def _nebenablagen_umschreiben(alt: str, neu: str) -> None:
             q[neu] = q.pop(alt)
             geaendert = True
     if geaendert:
-        _json_schreiben(_o() / "wiki" / "index.json", wi)
+        wiki_index_schreiben(wi)
 
 
 # Rueckkopplung aus der Kachel: eine verworfene Auffaelligkeit senkt kuenftig
@@ -1366,8 +1402,9 @@ def status_schreiben(d: dict) -> None:
 
 def _zuruecksetzen_fuer_test() -> None:
     """Speicher-Caches verwerfen (Tests lenken ``ORDNER`` um)."""
-    global _graph_cache, _graph_veraltet, _queue_cache, _index_cache
+    global _graph_cache, _graph_veraltet, _queue_cache, _index_cache, _wiki_cache
     with _sperre:
         _graph_cache, _graph_veraltet, _queue_cache, _index_cache = None, True, None, None
+        _wiki_cache = None
         _vek_cache.clear()
         _pruef.update(erzeugt=None, paare=[], zeit=0.0, laeuft=False, fehler="")

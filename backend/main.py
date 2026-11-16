@@ -22819,7 +22819,9 @@ async def _rundsenden_gezielt(message: dict, besitzer: "str | None" = None) -> N
 async def get_knowledge_stats(user: str = Depends(require_auth)):
     """Gibt Statistiken der Knowledge Base zurück."""
     from backend.tools.knowledge import get_stats
-    data = get_stats()
+    # Im Thread: liest Index-Uebersicht und zaehlt Dateien auf der Platte
+    # (ECHT 2026-11-16: in der Event-Loop hielt das alle Benutzer an).
+    data = await asyncio.to_thread(get_stats)
     # Mount-Pfade aus der Ordner-Liste herausfiltern – sie erscheinen unter "Netzwerk-Freigaben"
     mount_prefix = str(_MOUNT_BASE)
     data["folders"] = [f for f in data.get("folders", [])
@@ -25654,6 +25656,12 @@ async def wissen_scope(user: str = Depends(require_auth)):
     ohne Zuordnung haben dort kein Speicherziel. Zusaetzlich traegt jede Gruppe
     ihre eigenen Speicherordner (``folders``), damit die Auswahl clientseitig
     auf die gewaehlten Gruppen eingegrenzt werden kann."""
+    # Im Thread (ECHT 2026-11-16): Gruppen aus dem Index, Unterordner per
+    # os.walk – jede Portal-Seite ruft diesen Endpunkt beim Aufbau.
+    return JSONResponse(await asyncio.to_thread(_wissen_scope_daten, user))
+
+
+def _wissen_scope_daten(user: str) -> dict:
     groups = _editable_groups_for(user)
     configured = _kb_current_folder_list()
     allowed = _wissen_allowed_folders(user, groups)
@@ -25668,14 +25676,14 @@ async def wissen_scope(user: str = Depends(require_auth)):
             folders.append({"path": sub["path"], "name": sub["name"],
                             "display": _rag.anzeige(sub["path"]),
                             "root": p, "depth": sub["depth"]})
-    return JSONResponse({
+    return {
         "ok": True, "user": user, "is_editor": _may_edit_knowledge(user),
         "is_admin": _user_is_admin(user),
         "groups": [{"id": g["id"], "name": g["name"], "color": g.get("color", "#64748b"),
                     "folders": _wissen_group_folders(g, configured)}
                    for g in groups],
         "folders": folders,
-    })
+    }
 
 
 @app.post("/api/wissen/upload")
@@ -27480,8 +27488,9 @@ async def knowledge_groups_list(user: str = Depends(require_auth)):
     try:
         # Zähl-Basis: Index + Platte (gleiche Basis wie die Dokumentlisten,
         # sonst zeigt der Badge weniger als die Liste; tote Shares abgefangen)
-        paths = known_paths_with_disk()
-        data = kg.list_groups(paths)
+        # Im Thread: Index + Plattendurchlauf ueber alle Wissensordner.
+        paths = await asyncio.to_thread(known_paths_with_disk)
+        data = await asyncio.to_thread(kg.list_groups, paths)
         return JSONResponse({"ok": True, **_kb_strip_editor_fields(user, data)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -27512,8 +27521,8 @@ async def knowledge_groups_ungrouped(user: str = Depends(require_auth)):
     from backend import knowledge_groups as kg
     from backend.tools.knowledge import known_paths_with_disk
     try:
-        paths = known_paths_with_disk()
-        return JSONResponse({"ok": True, "files": kg.ungrouped_files(paths)})
+        paths = await asyncio.to_thread(known_paths_with_disk)
+        return JSONResponse({"ok": True, "files": await asyncio.to_thread(kg.ungrouped_files, paths)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

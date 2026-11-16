@@ -2029,6 +2029,52 @@ def _is_pending_path(p) -> bool:
     return "data/knowledge/pending/" in str(p or "").replace("\\", "/")
 
 
+# Uebersicht ueber die FAISS-Metadaten: (Datei-Stand, Chunkzahl, Pfadmenge).
+# ⚠ WARUM (gemessen auf ECHT 2026-11-16): ``faiss_meta.json`` hat 104 MB
+# (58.044 Chunks samt Text). Drei Endpunkte – darunter /api/wissen/scope, das
+# jede Portal-Seite beim Aufbau ruft – parsten sie bei JEDEM Abruf neu, IN der
+# Event-Loop: 0,7 s reines Parsen, im 3,7-GB-Dienst ein Mehrfaches, in denen
+# kein anderer Benutzer eine Antwort bekam. Gebraucht werden dort nur Pfade und
+# Anzahl – die liefert der geladene VectorStore in Millisekunden, sonst ein an
+# den Datei-Stand gebundener Cache.
+_faiss_uebersicht_cache: tuple | None = None
+_faiss_uebersicht_lock = threading.Lock()
+
+
+def _faiss_meta_pfad() -> Path:
+    return PROJECT_ROOT / "data" / "vector_store" / "faiss_meta.json"
+
+
+def _faiss_uebersicht() -> tuple[int, frozenset]:
+    """``(chunks, pfade)`` des FAISS-Index, ohne die Metadaten-Datei je Abruf zu parsen.
+
+    Ist der VectorStore im Prozess geladen, ist er die Quelle (aktueller als
+    die Platte zwischen zwei gedrosselten Speicherungen). Sonst wird die Datei
+    EINMAL je Datei-Stand (Inode, mtime_ns, Groesse) gelesen."""
+    global _faiss_uebersicht_cache
+    vs = _vector_store
+    if vs is not None:
+        with vs._lock:
+            meta = vs._meta
+            return len(meta), frozenset(m.get("file_path") for m in meta if m.get("file_path"))
+    p = _faiss_meta_pfad()
+    try:
+        s = p.stat()
+    except OSError:
+        return 0, frozenset()
+    if s.st_size <= 10:
+        return 0, frozenset()
+    stand = (str(p), s.st_ino, s.st_mtime_ns, s.st_size)
+    with _faiss_uebersicht_lock:
+        c = _faiss_uebersicht_cache
+        if c is not None and c[0] == stand:
+            return c[1], c[2]
+        meta = json.loads(p.read_text(encoding="utf-8"))
+        pfade = frozenset(m.get("file_path") for m in meta if isinstance(m, dict) and m.get("file_path"))
+        _faiss_uebersicht_cache = (stand, len(meta), pfade)
+        return len(meta), pfade
+
+
 def _indexed_rel_paths() -> list:
     """Alle Datei-Pfade, die im INDEX (lokale Wissensdatenbank) stehen.
 
@@ -2045,12 +2091,9 @@ def _indexed_rel_paths() -> list:
     except Exception:
         pass
     try:
-        _meta = PROJECT_ROOT / "data" / "vector_store" / "faiss_meta.json"
-        if _meta.exists() and _meta.stat().st_size > 10:
-            for m in json.loads(_meta.read_text(encoding="utf-8")):
-                fp = m.get("file_path")
-                if fp and not _is_pending_path(fp):
-                    paths.add(fp)
+        for fp in _faiss_uebersicht()[1]:
+            if not _is_pending_path(fp):
+                paths.add(fp)
     except Exception:
         pass
     return list(paths)
@@ -2107,12 +2150,20 @@ def content_search_paths(needle: str) -> list:
     except Exception:
         pass
     try:
-        _meta = PROJECT_ROOT / "data" / "vector_store" / "faiss_meta.json"
-        if _meta.exists() and _meta.stat().st_size > 10:
-            for m in json.loads(_meta.read_text(encoding="utf-8")):
-                fp = m.get("file_path")
-                if fp and fp not in hits and needle in (m.get("text") or "").lower():
-                    hits.add(fp)
+        # Texte aus dem geladenen VectorStore, falls vorhanden – die 104-MB-Datei
+        # (ECHT 2026-11-16) je Suche neu zu parsen kostete Sekunden.
+        vs = _vector_store
+        if vs is not None:
+            with vs._lock:
+                _metaliste = list(vs._meta)
+        else:
+            _meta = _faiss_meta_pfad()
+            _metaliste = (json.loads(_meta.read_text(encoding="utf-8"))
+                          if _meta.exists() and _meta.stat().st_size > 10 else [])
+        for m in _metaliste:
+            fp = m.get("file_path")
+            if fp and fp not in hits and needle in (m.get("text") or "").lower():
+                hits.add(fp)
     except Exception:
         pass
     # Disk-Scan fuer Textformate (Index kann hinter der Platte herhinken)
@@ -2758,7 +2809,6 @@ def get_stats() -> dict:
     vector_db_version = ""
     vector_model = ""
     faiss_file_paths: set = set()
-    faiss_meta_list: list = []
     try:
         import faiss as _faiss
         vector_db_available = True
@@ -2766,15 +2816,10 @@ def get_stats() -> dict:
         vector_db_version = getattr(_faiss, "__version__", "")
         from backend.tools.vector_store import MODEL_NAME as _VS_MODEL
         vector_model = _VS_MODEL
-        _meta_path = PROJECT_ROOT / "data" / "vector_store" / "faiss_meta.json"
-        if _meta_path.exists() and _meta_path.stat().st_size > 10:
-            import json as _json
-            with open(_meta_path, "r", encoding="utf-8") as _f:
-                faiss_meta_list = _json.load(_f)
-            vector_chunks = len(faiss_meta_list)
-            has_vector = vector_chunks > 0
-            faiss_file_paths = {m["file_path"] for m in faiss_meta_list}
-            vector_files = len(faiss_file_paths)
+        vector_chunks, _pfade = _faiss_uebersicht()
+        has_vector = vector_chunks > 0
+        faiss_file_paths = set(_pfade)
+        vector_files = len(faiss_file_paths)
     except Exception:
         pass
 

@@ -247,27 +247,38 @@ async def seite_erzeugen(kid: str, provider, modell: str, drossel, chunks_fuer,
                          st: dict | None = None) -> dict:
     """EINE Seite erzeugen und ablegen. Rueckgabe ``{"ok": bool, "grund"?}``;
     Fehler werden vermerkt, nicht geworfen."""
+    # ⚠ ALLES ausser dem Modellaufruf laeuft im Thread (ECHT 2026-11-16): Graph
+    # (127 MB) durchsuchen, Inhaltsstand bilden und vor allem ``_vermerken`` –
+    # das liest und schreibt den ganzen Wiki-Index (19 MB, fsync). In der
+    # Event-Loop hielt das je erzeugter Seite ALLE Benutzer an.
     st = st or wgx.einstellungen()
-    k = _knoten(kid)
+    k = await asyncio.to_thread(_knoten, kid)
     if k is None:
         return {"ok": False, "grund": "unbekannter Begriff"}
-    quellen = _stand(k)
-    g = wg.graph()
+    quellen = await asyncio.to_thread(_stand, k)
+    g = await asyncio.to_thread(wg.graph)
     text, verwandt = await asyncio.to_thread(angaben, k, g, chunks_fuer)
     if not text:
-        _vermerken(kid, quellen, fehler="keine Angaben")
+        await asyncio.to_thread(_vermerken, kid, quellen, fehler="keine Angaben")
         return {"ok": False, "grund": "keine Angaben"}
     try:
         await drossel.warten(st["rate_min_abstand_s"], st["rate_max_pro_stunde"])
         roh, _u = await wgx.pflege_aufruf(provider, modell, auftrag_wiki(k, text, verwandt), system=SYSTEM)
     except Exception as e:  # noqa: BLE001
-        _vermerken(kid, quellen, fehler=f"{type(e).__name__}: {e}")
+        await asyncio.to_thread(_vermerken, kid, quellen, fehler=f"{type(e).__name__}: {e}")
         return {"ok": False, "grund": "Modellaufruf fehlgeschlagen"}
     md = bereinigen(roh, verwandt)
     if md is None:
-        _vermerken(kid, quellen, fehler="Antwort hatte nicht die Form einer Seite")
+        await asyncio.to_thread(_vermerken, kid, quellen,
+                                fehler="Antwort hatte nicht die Form einer Seite")
         return {"ok": False, "grund": "Antwort hatte nicht die Form einer Seite"}
     datei = datei_name(kid, k["name"])
+    await asyncio.to_thread(_seite_ablegen, datei, md)
+    await asyncio.to_thread(_vermerken, kid, quellen, datei=datei, modell=modell)
+    return {"ok": True}
+
+
+def _seite_ablegen(datei: str, md: str) -> None:
     ziel = wg._o() / "wiki" / datei
     with wg._sperre:
         wg._ordner_anlegen()
@@ -275,8 +286,6 @@ async def seite_erzeugen(kid: str, provider, modell: str, drossel, chunks_fuer,
         tmp = ziel.with_name(ziel.name + ".tmp")
         tmp.write_text(md + "\n", encoding="utf-8")
         tmp.replace(ziel)
-    _vermerken(kid, quellen, datei=datei, modell=modell)
-    return {"ok": True}
 
 
 def wiki_zaehler() -> dict:

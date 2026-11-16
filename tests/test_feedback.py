@@ -714,11 +714,20 @@ check("und wird an `permissions.feedback` eingeblendet",
 # Feedback-Kachel weiterhin nur, wer Wissen bearbeiten darf. Das ist gewollt –
 # kein Drift, den man „reparieren" muesste.
 _scope_fn = None
+_scope_daten = None
 for _k in ast.walk(BAUM):
-    if (isinstance(_k, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and _k.name == "wissen_scope"):
-        _scope_fn = ast.get_source_segment(QUELLE, _k)
+    if isinstance(_k, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if _k.name == "wissen_scope":
+            _scope_fn = ast.get_source_segment(QUELLE, _k)
+        elif _k.name == "_wissen_scope_daten":
+            _scope_daten = ast.get_source_segment(QUELLE, _k)
 check("der Scope-Endpunkt wurde gefunden (Positivkontrolle)", _scope_fn is not None)
+# Seit 2026-11-16 rechnet der Endpunkt im Thread (`_wissen_scope_daten`, sonst
+# blockiert er die Event-Loop) – gemessen wird dann der Helfer, an den er
+# nachweislich uebergibt, nicht ein Name irgendwo in der Datei.
+if _scope_fn is not None and "to_thread(_wissen_scope_daten" in _scope_fn:
+    check("der Scope-Helfer wurde gefunden (Positivkontrolle)", _scope_daten is not None)
+    _scope_fn = _scope_daten
 check("⚠ die Wissen-Kachel leitet sich aus `_editable_groups_for` ab",
       _scope_fn is not None and "_editable_groups_for" in _scope_fn)
 check("⚠ die Feedback-Kachel aus DEMSELBEN Praedikat",

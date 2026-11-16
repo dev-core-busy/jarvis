@@ -482,8 +482,13 @@ check("_renderFolders reicht `display` durch", "f.has_children, f.display" in KJ
 # `_rag.anzeige(` – eine Sabotage, die nur den SCHLUESSEL umbenennt, liess sie
 # gruen: der Client bekaeme dann kein `display` und faellt auf seinen Rueckfall
 # zurueck, also genau die Drift, gegen die das Feld gebaut ist.
+# `wissen_scope` rechnet seit 2026-11-16 im Thread – das Feld entsteht in
+# `_wissen_scope_daten`; dass der Endpunkt dorthin uebergibt, prueft die Zeile danach.
+_ws = funktionen.get("wissen_scope")
+check("wissen_scope uebergibt an _wissen_scope_daten",
+      _ws is not None and "to_thread(_wissen_scope_daten" in (ast.get_source_segment(MAIN, _ws) or ""))
 for fname in ("get_knowledge_stats", "knowledge_folder_tree",
-              "browse_knowledge_dir", "wissen_scope"):
+              "browse_knowledge_dir", "_wissen_scope_daten"):
     node = funktionen.get(fname)
     check(f"{fname} vorhanden", node is not None)
     if node is None:

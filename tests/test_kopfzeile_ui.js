@@ -14,10 +14,14 @@
  *         gemerkte Stand steht SOFORT da (fetch antwortet absichtlich nie)
  * Teil 3  Der Merker gehoert genau einer Anmeldung; /api/me entscheidet
  * Teil 4  Die Module dahinter: Update-Pille fragt mit frischem Merker NICHT
- *         nach (sonst ein git fetch je Seitenwechsel), CPU fragt fuer einen
- *         belegten Nicht-Admin nicht, ⓘ uebernimmt den vorgebauten Knopf
+ *         nach (sonst ein git fetch je Seitenwechsel), CPU ist fuer ALLE
+ *         sichtbar (Nachtrag 2026-11-16), ⓘ uebernimmt den vorgebauten Knopf
  * Teil 5  CSS-Regeln (Admin-Sperre, View Transition) als REGEL – jsdom rechnet
  *         keine Kaskade (Register: `getComputedStyle` ignoriert Spezifitaet)
+ * Teil 7  Rechte Gruppe: DE/EN, Desktop, Benutzer, Dokumente, Issues,
+ *         Hell/Dunkel auf jeder Seite; kein Zertifikat-Download mehr
+ * Teil 6  Box „Angemeldet als …“ auf /sap, /vemas, /jira-addon, /confluence-addon,
+ *         „Mein …-Zugang“ als oberster Container, einheitliche Abstaende
  *
  *   node tests/test_kopfzeile_ui.js
  */
@@ -154,10 +158,14 @@ const KERN = [
         for (const id of ['cpu-bar', 'jv-pkg-btn', 'chat-update-wrap', 'version-pill', 'update-version'])
             pruefe(d.querySelectorAll('#' + id).length === 1, `${f}: #${id} genau einmal`);
 
-        for (const [n, sel] of [['update', '#chat-update-wrap'], ['cpu', '#cpu-bar'], ['pakete', '#jv-pkg-btn']]) {
+        for (const [n, sel] of [['update', '#chat-update-wrap'], ['pakete', '#jv-pkg-btn']]) {
             const e = wirt.querySelector(sel);
             pruefe(!!e && e.classList.contains('jv-kopf-nuradmin'), `${f}: ${n} ist als Nur-Admin markiert`);
         }
+        // Nachtrag 2026-11-16: "CPU sollen wie vorher alle sehen" – nur das
+        // Systemauslastungs-Fenster dahinter ist Admins vorbehalten (sysload.js).
+        const cpuEl = wirt.querySelector('#cpu-bar');
+        pruefe(!!cpuEl && !cpuEl.classList.contains('jv-kopf-nuradmin'), `${f}: CPU ist fuer alle sichtbar (kein Nur-Admin)`);
         pruefe(d.documentElement.classList.contains('jv-kopf-admin'), `${f}: gemerkter Admin sofort auf <html>`);
         const lab = d.getElementById('cpu-bar-label');
         pruefe(!!lab && lab.textContent === 'CPU: 42%', `${f}: CPU zeigt sofort den gemerkten Wert`, lab && lab.textContent);
@@ -256,7 +264,8 @@ const KERN = [
         pruefe(frisch.rot, 'Update-Pille: Farbe kommt sofort aus dem Merker');
     }
     {
-        // CPU: belegter Nicht-Admin -> keine Abrufe.
+        // CPU: fuer ALLE Angemeldeten (Nachtrag 2026-11-16) – auch ein belegter
+        // Nicht-Admin bekommt Werte, und die Anzeige ist nicht als Nur-Admin markiert.
         const antwort = (body) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
         const lauf = (admin) => {
             const dom = seite('tracks.html', { stand: { k: summe('TOK-A') },
@@ -275,8 +284,8 @@ const KERN = [
         const a = await lauf(true);
         pruefe(a.n === 1, 'CPU: fuer einen Admin wird abgefragt', 'Abrufe ' + a.n);
         const b = await lauf(false);
-        pruefe(a.n === 1 && b.n === 0, 'CPU: fuer einen belegten Nicht-Admin keine Abfrage', 'Abrufe ' + b.n);
-        pruefe(b.markiert, 'CPU: cpubar.js markiert die Anzeige selbst als Nur-Admin');
+        pruefe(b.n === 1, 'CPU: auch fuer einen Nicht-Admin wird abgefragt', 'Abrufe ' + b.n);
+        pruefe(!b.markiert, 'CPU: cpubar.js markiert die Anzeige nicht als Nur-Admin');
     }
     {
         // ⓘ: den vorgebauten Knopf uebernehmen und SOFORT klickbar machen.
@@ -303,6 +312,102 @@ const KERN = [
             pruefe(sel.includes(s), `View-Transition-Name an der Bauform ${s}`);
         pruefe(/::view-transition-group\(jv-kopfzeile\)[\s\S]*?\{\s*animation:\s*none;?\s*\}/.test(css),
                'die Leiste selbst wird nicht animiert');
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════ */
+    abschnitt('6. „Angemeldet als …“ und Reihenfolge (Vorgabe 2026-11-16)');
+    {
+        const BOX = [
+            { f: 'sap.html', pille: 'sp-conn', zugang: 'sp-sect-account', karte: '.sp-card:not(.sp-login)' },
+            { f: 'vemas.html', pille: 'vm-conn', zugang: 'vm-sect-account', karte: '.vm-card:not(.vm-login)' },
+            { f: 'jira_addon.html', pille: 'ja-sz-kopf', zugang: 'ja-sz-sect' },
+            { f: 'confluence_addon.html', pille: 'ca-sz-kopf', zugang: 'ca-sz-sect' },
+        ];
+        for (const b of BOX) {
+            const st = STAND('TOK-A'); st.benutzer = 'probe.name';
+            const dom = seite(b.f, { stand: st });
+            await bereit(dom);
+            const d = dom.window.document;
+            const box = d.querySelector('.jv-max-row > .jv-anmelde-box');
+            pruefe(!!box, `${b.f}: Box "Angemeldet als" in der Zeile mit ⛶`);
+            const name = box && box.querySelector('[data-kopf-benutzer]');
+            pruefe(!!name && name.textContent === 'probe.name', `${b.f}: Name sofort aus dem Merker`, name && name.textContent);
+            const pille = d.getElementById(b.pille);
+            pruefe(!!pille && !!box && box.contains(pille), `${b.f}: Pille steht in der Box`);
+            pruefe(!!pille && !pille.closest('header'), `${b.f}: Pille nicht mehr in der Titelleiste`);
+            // Oberster Container = "Mein …-Zugang": in Dokumentreihenfolge vor
+            // jedem anderen Container (Box und eine verborgene Anmeldekarte
+            // zaehlen nicht).
+            const zugang = d.getElementById(b.zugang);
+            const andere = [...d.querySelectorAll('details, .sp-card, .vm-card, .ja-card')]
+                .filter((e) => e !== zugang && !e.hidden && !e.closest('[hidden]')
+                    && !(zugang && zugang.contains(e)) && !e.closest('header'));
+            const davor = andere.filter((e) => zugang && (e.compareDocumentPosition(zugang) & 4));
+            pruefe(!!zugang && davor.length === 0, `${b.f}: „Mein …-Zugang“ ist der oberste Container`,
+                   davor.map((e) => e.id || e.className).join(', '));
+            if (b.karte) {
+                const k = d.querySelector(b.karte);
+                const h = k && k.firstElementChild;
+                pruefe(!!h && /^H[23]$/.test(h.tagName) && h.textContent.trim().length > 0,
+                       `${b.f}: Analyse-/Abfrage-Container hat eine Ueberschrift`);
+            }
+            dom.window.close();
+        }
+    }
+    {
+        // Abstaende als REGEL (jsdom rechnet kein Layout; gemessen im Chrome).
+        const css = THEME.replace(/\/\*[\s\S]*?\*\//g, '');
+        pruefe(/--jv-oben:\s*16px/.test(css) && /--jv-abstand:\s*16px/.test(css), 'Masse: 16 px oben und zwischen Containern');
+        pruefe(/#settings-modal \.settings-tabs\s*\{\s*margin-bottom:\s*0;?\s*\}/.test(css), '/settings: Reiterleiste ohne 32-px-Rand');
+        pruefe(/#settings-modal \.kb-container\s*\{[^}]*gap:\s*var\(--jv-abstand\)/.test(css), '/settings: Container-Abstand = --jv-abstand');
+        pruefe(/#settings-modal \.kb-container > \.sk-openclaw-section\s*\{\s*margin-top:\s*0;?\s*\}/.test(css), '/settings: Protokolle ohne Zusatzrand');
+        const st = lies('frontend/settings.html');
+        // Bis zum NAECHSTEN Reiter schneiden – die Klasse des eigenen Reiters
+        // steht in derselben Zeile wie seine Id.
+        const tele = (st.split('id="settings-tab-telemetry"')[1] || '').split('id="settings-tab-')[0];
+        pruefe(tele.length > 1000 && !/class="sk-openclaw-section"[^>]*style="[^"]*margin/.test(tele),
+               'Protokolle: kein Inline-Rand an den Containern');
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════ */
+    abschnitt('7. Rechte Gruppe auf jeder Seite (Vorgabe 2026-11-16)');
+    for (const f of SEITEN) {
+        const q = nurCode(lies('frontend/' + f));
+        for (const m of ['info_files.js', 'issues.js', 'sessions.js', 'avatar.js', 'i18n.js'])
+            pruefe(skriptPos(q, m) > skriptPos(q, 'sitzung.js'), `${f}: bindet ${m} ein`);
+        pruefe(/\/static\/js\/avatar\.js[\s\S]*$/.test(q) && skriptPos(q, 'avatar.js') > q.indexOf('clippy.min.js') && q.indexOf('clippy.min.js') > 0,
+               `${f}: clippy vor avatar.js`);
+        const dom = seite(f, { stand: STAND('TOK-A') });
+        await bereit(dom);
+        const d = dom.window.document;
+        const wirt = d.querySelector('.jv-kopfzeile');
+        if (!wirt) { pruefe(false, `${f}: Leiste`); dom.window.close(); continue; }
+        const teile = [
+            ['DE/EN', '.lang-toggle'],
+            ['Desktop', '#pt-vnc-btn, #jv-kopf-desktop'],
+            ['Benutzer', '#pt-usr-wrap'],
+            ['Dokumente', '#pt-info-wrap'],
+            ['Issues', '.jv-issues-btn'],
+            ['Hell/Dunkel', '#btn-theme-toggle, .btn-theme-toggle, #btn-theme'],
+        ];
+        const els = teile.map(([n, sel]) => [n, wirt.querySelector(sel)]);
+        for (const [n, e] of els) pruefe(!!e, `${f}: ${n} in der Leiste`);
+        const da = els.filter(([, e]) => e).map(([n, e]) => [n, e]);
+        let reihe = da.length === teile.length;
+        for (let i = 1; i < da.length; i++)
+            if (!(da[i - 1][1].compareDocumentPosition(da[i][1]) & 4)) reihe = false;
+        pruefe(reihe, `${f}: Reihenfolge DE/EN · Desktop · Benutzer · Dokumente · Issues · Hell/Dunkel`,
+               da.map(([n]) => n).join(' '));
+        for (const id of ['pt-info-wrap', 'pt-usr-wrap', 'pt-info-btn', 'pt-usr-btn'])
+            pruefe(d.querySelectorAll('#' + id).length === 1, `${f}: #${id} genau einmal`);
+        const desk = wirt.querySelector('#pt-vnc-btn, #jv-kopf-desktop');
+        const usr = wirt.querySelector('#pt-usr-wrap');
+        pruefe(!!desk && (desk.id === 'pt-vnc-btn' || desk.classList.contains('jv-kopf-nuradmin')), `${f}: Desktop nur fuer Admins`);
+        pruefe(!!usr && (f === 'portal.html' || usr.classList.contains('jv-kopf-nuradmin')), `${f}: Benutzer nur fuer Admins`);
+        const schild = wirt.querySelector('#security-indicator, #jv-kopf-schild');
+        pruefe(!!schild && !schild.classList.contains('jv-kopf-nuradmin'), `${f}: Schild fuer jeden sichtbar`);
+        pruefe(!wirt.querySelector('a[href="/api/cert"]'), `${f}: kein Zertifikat-Download in der Leiste`);
+        dom.window.close();
     }
 
     fertig();

@@ -76,7 +76,9 @@ class JarvisVNC {
     async _verifyConnection() {
         if (!this.connected) return;
         try {
-            const res = await fetch('/api/config', { cache: 'no-store' });
+            // Seit 2026-11-16 nur fuer Administratoren (require_local_auth) – die
+            // Anmeldung muss mit.
+            const res = await fetch('/api/config', { cache: 'no-store', headers: window.JarvisSitzung.kopfsatz() });
             const data = await res.json();
             if (data.vnc_available) {
                 // x11vnc läuft – Verbindung als OK annehmen
@@ -134,7 +136,7 @@ class JarvisVNC {
             attempts++;
 
             try {
-                const res  = await fetch('/api/config', { cache: 'no-store' });
+                const res  = await fetch('/api/config', { cache: 'no-store', headers: window.JarvisSitzung.kopfsatz() });
                 const data = await res.json();
                 if (data.vnc_available) {
                     // VNC erreichbar → sofort verbinden

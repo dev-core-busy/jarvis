@@ -411,8 +411,8 @@ const _I18N = {
         // zeigt ihn nur einmal"), und ein geteilter Schlüssel müsste sie
         // systemneutral machen – dann stünde auf beiden Seiten weniger.
         // Anmeldung fuer die Sitzung in /jira-addon und /confluence-addon (zugang_sitzung.js)
-        'zs.jira_h':      'Jira-Anmeldung',
-        'zs.confluence_h':'Confluence-Anmeldung',
+        'zs.jira_h':      'Mein Jira-Zugang',
+        'zs.confluence_h':'Mein Confluence-Zugang',
         'zs.hint':        'Persönliche Tokens werden auf diesem System nicht gespeichert. Melde dich für die Sitzung an: der Token gilt bis zur Abmeldung, höchstens 12 Stunden. Ohne Anmeldung gilt der gemeinsame Zugang.',
         'zs.token':       'Persönlicher Token (PAT)',
         'zs.login':       'Anmelden',
@@ -4545,6 +4545,7 @@ const _I18N = {
         // auseinanderlaufen. Hier nur die Oberflaechen-Beschriftungen.
         'sap.portal_title': 'SAP-Analysen',
         'sap.analysis': 'Analyse',
+        'sap.karte_h': 'Analyse',
         'sap.bitool': 'Auswertung für',
         'sap.free_question': '— Freie Frage (keine Vorlage) —',
         'sap.free_question_short': 'Freie Frage',
@@ -4601,7 +4602,6 @@ const _I18N = {
         'sap.login_empty': 'Bitte das Kennwort eingeben.',
         'sap.login_failed': 'Anmeldung fehlgeschlagen:',
         'sap.acc_hint_kachel': 'Melde dich hier mit deinem SAP-Kennwort an – dann laufen Auswertungen, Chat-Abfragen und die Abfrage-Konsole mit deinen SAP-Berechtigungen. Das Kennwort wird auf dem Server nicht gespeichert und gilt nur für diese Sitzung; dein Browser kann es sich merken.',
-        'sap.acc_pill_none': 'nicht angemeldet',
         'sap.not_logged_in': 'Nicht bei SAP angemeldet',
         'sap.acc_login': 'Anmelden',
         'sap.acc_logout': 'Von SAP abmelden',
@@ -4761,6 +4761,7 @@ const _I18N = {
         // auseinanderlaufen. Hier nur die Oberflaechen-Beschriftungen.
         'vemas.portal_title':           'VEMAS',
         'vemas.analysis':               'Abfrage',
+        'vemas.karte_h':                'Abfrage',
         'vemas.tool':                   'Aufbereiten für',
         'vemas.free_question':          '— Freie Frage (keine Vorlage) —',
         'vemas.free_question_short':    'Freie Frage',
@@ -6010,8 +6011,8 @@ const _I18N = {
         'jaddon.acc_how_note':   'The token is stored encrypted and never shown again – not even to you. If it expires, simply enter a new one here.',
         // ── Mein Confluence-Zugang (/confluence-addon) ──
         // Anmeldung fuer die Sitzung in /jira-addon und /confluence-addon (zugang_sitzung.js)
-        'zs.jira_h':      'Jira sign-in',
-        'zs.confluence_h':'Confluence sign-in',
+        'zs.jira_h':      'My Jira access',
+        'zs.confluence_h':'My Confluence access',
         'zs.hint':        'Personal tokens are not stored on this system. Sign in for the session: the token is valid until you sign out, for at most 12 hours. Without signing in, the shared access applies.',
         'zs.token':       'Personal access token (PAT)',
         'zs.login':       'Sign in',
@@ -10072,6 +10073,7 @@ const _I18N = {
         // backend/sap_analyses.py liegt, steht im DE-Block ──
         'sap.portal_title': 'SAP analytics',
         'sap.analysis': 'Analysis',
+        'sap.karte_h': 'Analysis',
         'sap.bitool': 'Prepare for',
         'sap.free_question': '— Free question (no template) —',
         'sap.free_question_short': 'Free question',
@@ -10128,7 +10130,6 @@ const _I18N = {
         'sap.login_empty': 'Please enter the password.',
         'sap.login_failed': 'Sign-in failed:',
         'sap.acc_hint_kachel': 'Sign in here with your SAP password – analyses, chat queries and the query console then run with your SAP authorizations. The password is not stored on the server and only applies to this session; your browser can remember it.',
-        'sap.acc_pill_none': 'not signed in',
         'sap.not_logged_in': 'Not signed in to SAP',
         'sap.acc_login': 'Sign in',
         'sap.acc_logout': 'Sign out of SAP',
@@ -10283,6 +10284,7 @@ const _I18N = {
         // ── VEMAS.NET-Bereich (/vemas) ─────────────────────────
         'vemas.portal_title':           'VEMAS',
         'vemas.analysis':               'Query',
+        'vemas.karte_h':                'Query',
         'vemas.tool':                   'Prepare for',
         'vemas.free_question':          '— Free question (no template) —',
         'vemas.free_question_short':    'Free question',

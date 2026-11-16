@@ -807,9 +807,21 @@ async function baueSeite(zustand) {
                 const q = fs.readFileSync(path.join(ROOT, 'frontend', f), 'utf8');
                 if (/data-i18n-title="chat\.ssl_cert"/.test(q)) mitZert.push(f);
             }
-            check(mitZert.join(',') === 'portal.html',
-                  'Zertifikat-Symbol nur auf der Startseite',
-                  `gefunden auf: ${mitZert.join(', ') || '(nirgends)'}`);
+            // Seit 2026-11-16 (Vorgabe): "das rechte Schild 'SSL-Zertifikat'
+            // download entfernen, das linke Schild 'Sicherheitsstatus' dafuer
+            // ueberall" – das Symbol steht auf KEINER Seite mehr. Der Download
+            // bleibt im Zertifikat-Dialog des Portals, den das Schild oeffnet;
+            // ohne ihn gaebe es keinen Weg mehr zum Zertifikat.
+            check(seiten.length >= 10, 'Positivkontrolle: Seiten fuer die Zertifikat-Pruefung', String(seiten.length));
+            check(mitZert.length === 0,
+                  'Zertifikat-Download-Symbol auf keiner Seite mehr',
+                  `gefunden auf: ${mitZert.join(', ')}`);
+            {
+                const pq = fs.readFileSync(path.join(ROOT, 'frontend', 'portal.html'), 'utf8');
+                const dlg = (pq.split('id="cert-modal"')[1] || '').split('<script')[0];
+                check(dlg.length > 200 && /href="\/api\/cert"/.test(dlg),
+                      'Download des Zertifikats bleibt im Dialog des Portals');
+            }
 
             // ── Die zwei Symbole, die es nur auf EINER Seite gibt ──────────
             // Sie stehen links von Issues und damit vom Avatar-Schalter.

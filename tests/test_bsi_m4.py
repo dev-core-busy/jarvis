@@ -16,6 +16,8 @@ Gemessen an der WIRKUNG:
       aus einer Sitzung ohne 2FA bekommt keine Admin-Rechte (BSI M3 bleibt).
   [E] der echte Rumpf von ``vnc_ticket_holen``: Kontext kommt aus DIESER
       Anfrage, gesperrtes Konto 403, ``no-store``; Route + Admin-Dependency.
+  [E2] ``/api/config`` (VNC-Port/-Erreichbarkeit) nur fuer Administratoren,
+      keine Ausnahme im Register, Frontend schickt die Anmeldung mit.
   [F] /docs und /redoc reichen einen Abruf-Schluessel weiter, kein Sitzungstoken.
   [G] ``frontend/js/vnc.js`` in Node ausgefuehrt: die noVNC-Adresse traegt das
       Ticket und NICHT das Sitzungstoken.
@@ -424,6 +426,37 @@ _deko = [ast.unparse(d) for d in _k.decorator_list]
 check("Route POST /api/vnc/ticket", _deko == ["app.post('/api/vnc/ticket')"], _deko)
 _dep = [ast.unparse(d) for d in _k.args.defaults]
 check("nur fuer Administratoren (require_local_auth)", "Depends(require_local_auth)" in _dep, _dep)
+
+# [E2] /api/config (VNC-Port und -Erreichbarkeit) – seit 2026-11-16 nur fuer
+# Administratoren, nicht mehr oeffentlich (Vorgabe: "/api/config anpassen, so
+# dass der Desktop geschuetzt bleibt"). Route + Dependency am AST; dazu: der
+# Eintrag "oeffentlich" im Ausnahmen-Register ist weg (sonst liesse die
+# Middleware sie trotzdem als Ausnahme gelten), und jeder Aufrufer im Frontend
+# schickt die Anmeldung mit (sonst sieht der Admin nur noch "nicht erreichbar").
+_c = fdef("get_config")
+check("[E2] Route GET /api/config", [ast.unparse(d) for d in _c.decorator_list] == ["app.get('/api/config')"],
+      [ast.unparse(d) for d in _c.decorator_list])
+_cdep = [ast.unparse(d) for d in _c.args.defaults]
+check("[E2] /api/config nur fuer Administratoren (require_local_auth)",
+      "Depends(require_local_auth)" in _cdep, _cdep)
+_zr = (ROOT / "backend" / "zugang_regel.py").read_text(encoding="utf-8")
+_zr_ast = ast.parse(_zr)
+_ausn = [k for k in ast.walk(_zr_ast) if isinstance(k, ast.Dict)]
+_keys = set()
+for d in _ausn:
+    for k in d.keys:
+        if isinstance(k, ast.Tuple) and len(k.elts) == 2 and all(isinstance(e, ast.Constant) for e in k.elts):
+            _keys.add((k.elts[0].value, k.elts[1].value))
+check("[E2] Positivkontrolle: Ausnahmen-Register gelesen", ("GET", "/api/health") in _keys, len(_keys))
+check("[E2] /api/config ist keine Ausnahme mehr", ("GET", "/api/config") not in _keys)
+import re as _re
+for _datei in ["frontend/js/vnc.js", "frontend/js/portal_seite.js"]:
+    _q = (ROOT / _datei).read_text(encoding="utf-8")
+    _aufrufe = _re.findall(r"fetch\(\s*'/api/config'\s*(,[^)]*)?\)", _q)
+    check("[E2] %s: ruft /api/config ueberhaupt auf" % _datei, len(_aufrufe) >= 1, len(_aufrufe))
+    check("[E2] %s: jeder Aufruf schickt die Anmeldung mit" % _datei,
+          # Der Ausschnitt endet an der ERSTEN ")" – also in "kopfsatz(".
+          all("JarvisSitzung.kopfsatz(" in a for a in _aufrufe), _aufrufe)
 
 # ═══════════════════════════════════════════════════════════════════════════
 print("[F] /docs und /redoc")

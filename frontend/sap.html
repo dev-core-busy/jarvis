@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SAP-Analysen</title>
-    <link rel="stylesheet" href="/static/css/theme.css?v=62">
+    <link rel="stylesheet" href="/static/css/theme.css?v=63">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
@@ -143,6 +143,13 @@
         .sp-login[hidden] { display: none; }
         .sp-login { margin-bottom: 16px; border-color: var(--accent); }
         .sp-login + .sp-card { margin-top: 0; }
+        /* „Mein …-Zugang“ ist seit 2026-11-16 der OBERSTE Container: oben kein
+           eigener Rand (den Abstand gibt die Zeile darueber bzw. die
+           Anmeldekarte mit ihrem margin-bottom), darunter derselbe Abstand wie
+           zwischen allen Containern. */
+        #sp-sect-account { margin-top: 0; }
+        #sp-sect-account + .sp-card { margin-top: var(--jv-abstand, 16px); }
+        .sp-karte-h { margin: 0 0 12px; font-size: 1rem; color: var(--text-primary); }
         .sp-login h3 { margin: 0 0 6px; font-size: 1rem; color: var(--text-primary); }
         .sp-login .sp-row { align-items: flex-end; margin-top: 10px; }
         .sp-login .sp-input[readonly] { opacity: .8; }
@@ -349,7 +356,6 @@
                 <span data-i18n="sap.portal_title">SAP-Analysen</span></span>
             <span class="sp-status-dot" id="sp-status-dot" title="LLM-Status"
                   data-i18n-title="portal.llm_status"></span>
-            <span class="sp-conn" id="sp-conn"></span>
         </div>
         <div class="topbar-right">
             <div class="lang-toggle" id="sp-lang-toggle">
@@ -419,6 +425,11 @@
              sitzt AUSSERHALB der Kacheln ganz oben; maximiert nutzen ALLE
              Kacheln die volle Fensterbreite. Logik in seite_breit.js. -->
         <div class="jv-max-row">
+            <!-- „Angemeldet als …“ wie auf /wissen (Vorgabe 2026-11-16) – die Pille
+             stand bis dahin in der Titelleiste. Den Namen setzt kopfzeile.js. -->
+            <div class="jv-anmelde-box"><span data-i18n="wissen.scope_as">Angemeldet als</span>
+                <b data-kopf-benutzer></b>
+                <span class="sp-conn" id="sp-conn"></span></div>
             <button type="button" class="jv-max-btn" id="jv-max" data-seite="sap" aria-pressed="false"
                     data-i18n-title="common.maximize" data-i18n-aria="common.maximize"
                     title="Maximieren" aria-label="Maximieren">&#9974;</button>
@@ -449,49 +460,9 @@
             </div>
         </form>
 
-        <!-- ── Analyse starten ── -->
-        <div class="sp-card">
-            <div class="sp-row">
-                <div class="sp-field">
-                    <label class="sp-label" for="sp-analysis" data-i18n="sap.analysis">Analyse</label>
-                    <select id="sp-analysis" class="sp-select"></select>
-                </div>
-                <div class="sp-field">
-                    <label class="sp-label" for="sp-bitool" data-i18n="sap.bitool">Auswertung für</label>
-                    <select id="sp-bitool" class="sp-select"></select>
-                </div>
-            </div>
-
-            <div id="sp-desc" class="sp-desc hidden">
-                <div class="sp-desc-title" id="sp-desc-title"></div>
-                <div id="sp-desc-text"></div>
-                <div class="sp-chips" id="sp-desc-kpis"></div>
-                <div class="sp-src" id="sp-desc-src"></div>
-            </div>
-
-            <textarea id="sp-question" data-i18n-placeholder="sap.question_ph"
-                      data-i18n-tabfill="sap.question_suggest"
-                      data-tabfill="Nur Buchungskreis 1000, letzte zwei Quartale. Nenne die Quelltabelle."
-                      placeholder="Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Buchungskreis 1000, letzte zwei Quartale“"></textarea>
-
-            <div class="sp-actions">
-                <button class="sp-btn" id="sp-run" type="button" data-i18n="sap.run">Analyse starten</button>
-                <button class="sp-btn-cancel hidden" id="sp-cancel" type="button" data-i18n="common.cancel">Abbrechen</button>
-                <span class="sp-note" id="sp-note"></span>
-            </div>
-        </div>
-
-        <!-- ── Ergebnis ── -->
-        <div class="sp-card sp-result hidden" id="sp-result">
-            <div class="sp-result-head">
-                <span class="sp-result-title" id="sp-result-title" data-i18n="sap.result">Ergebnis</span>
-                <span style="flex:1"></span>
-                <button class="sp-hist-btn" id="sp-copy" type="button" data-i18n="sap.copy">Kopieren</button>
-            </div>
-            <div class="sp-result-body" id="sp-result-body"></div>
-        </div>
-
         <!-- ── Mein SAP-Zugang (persoenliche Zugangsdaten) ──
+             OBERSTER CONTAINER (Vorgabe 2026-11-16: „Mein …-Zugang soll der
+             oberste Container sein, wenn er sichtbar ist“) – vor der Analyse.
              Steht bewusst VOR der BI-Anbindung: wer die Seite zum ersten Mal
              oeffnet und noch keinen eigenen Zugang hat, soll ihn hier finden.
              Wer /sap betreten darf, darf ihn pflegen – die Berechtigungsfrage
@@ -666,6 +637,50 @@
             </div>
         </details>
 
+        <!-- ── Analyse starten ── -->
+        <div class="sp-card">
+            <h3 class="sp-karte-h" data-i18n="sap.karte_h">Analyse</h3>
+            <div class="sp-row">
+                <div class="sp-field">
+                    <label class="sp-label" for="sp-analysis" data-i18n="sap.analysis">Analyse</label>
+                    <select id="sp-analysis" class="sp-select"></select>
+                </div>
+                <div class="sp-field">
+                    <label class="sp-label" for="sp-bitool" data-i18n="sap.bitool">Auswertung für</label>
+                    <select id="sp-bitool" class="sp-select"></select>
+                </div>
+            </div>
+
+            <div id="sp-desc" class="sp-desc hidden">
+                <div class="sp-desc-title" id="sp-desc-title"></div>
+                <div id="sp-desc-text"></div>
+                <div class="sp-chips" id="sp-desc-kpis"></div>
+                <div class="sp-src" id="sp-desc-src"></div>
+            </div>
+
+            <textarea id="sp-question" data-i18n-placeholder="sap.question_ph"
+                      data-i18n-tabfill="sap.question_suggest"
+                      data-tabfill="Nur Buchungskreis 1000, letzte zwei Quartale. Nenne die Quelltabelle."
+                      placeholder="Zusätzliche Frage oder Einschränkung (optional) – z. B. „nur Buchungskreis 1000, letzte zwei Quartale“"></textarea>
+
+            <div class="sp-actions">
+                <button class="sp-btn" id="sp-run" type="button" data-i18n="sap.run">Analyse starten</button>
+                <button class="sp-btn-cancel hidden" id="sp-cancel" type="button" data-i18n="common.cancel">Abbrechen</button>
+                <span class="sp-note" id="sp-note"></span>
+            </div>
+        </div>
+
+        <!-- ── Ergebnis ── -->
+        <div class="sp-card sp-result hidden" id="sp-result">
+            <div class="sp-result-head">
+                <span class="sp-result-title" id="sp-result-title" data-i18n="sap.result">Ergebnis</span>
+                <span style="flex:1"></span>
+                <button class="sp-hist-btn" id="sp-copy" type="button" data-i18n="sap.copy">Kopieren</button>
+            </div>
+            <div class="sp-result-body" id="sp-result-body"></div>
+        </div>
+
+
         <!-- ── BI-Anbindung ── -->
         <details class="sp-sect" id="sp-sect-bi">
             <summary><span data-i18n="sap.section_bi">Anbindung an das BI-Werkzeug</span></summary>
@@ -739,17 +754,18 @@
 </div>
 
 <script src="/static/js/sitzung.js?v=3"></script>
-<script src="/static/js/kopfzeile.js?v=1"></script>
+<script src="/static/js/kopfzeile.js?v=2"></script>
 <script src="/static/js/update_widget.js?v=10"></script>
+<script src="/static/js/info_files.js?v=8"></script>
 <script src="/static/js/konto_hinweise.js?v=2"></script>
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/dlkey.js?v=4"></script>
-<script src="/static/js/cpubar.js?v=3"></script>
+<script src="/static/js/cpubar.js?v=4"></script>
 <script src="/static/js/syspackages.js?v=24"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
-<script src="/static/js/i18n.js?v=485"></script>
+<script src="/static/js/i18n.js?v=486"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
 <script src="/static/js/theme.js?v=3"></script>
@@ -767,7 +783,7 @@
 <!-- sapcert.js VOR sap_portal.js: die Benutzerkachel haengt den Baustein
      beim Laden des Zugangs ein. -->
 <script src="/static/js/sapcert.js?v=4"></script>
-<script src="/static/js/sap_portal.js?v=21"></script>
+<script src="/static/js/sap_portal.js?v=22"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter baut sich selbst und haengt sich VOR

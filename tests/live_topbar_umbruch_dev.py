@@ -36,7 +36,9 @@ from pathlib import Path
 
 BASIS = "https://127.0.0.1"
 SEITEN = ["/portal", "/chat", "/wissen", "/support", "/sap", "/vemas", "/tracks",
-          "/email", "/feedback", "/ai-mouse", "/claude", "/userchat", "/settings"]
+          "/email", "/feedback", "/ai-mouse", "/claude", "/userchat", "/settings",
+          # seit 2026-11-16 mit der Box "Angemeldet als …" ueber den Containern
+          "/jira-addon", "/confluence-addon"]
 SCHMAL = [520, 700]
 BREIT = 1400
 
@@ -57,7 +59,7 @@ def check(text, bed, info=""):
 # Alle Bereichs-Berechtigungen – sonst leitet die Seite aufs Portal um und die
 # Messung gilt einer anderen Seite (die Namen stammen aus main.py, nicht geraten).
 RECHTE = ["sap", "vemas", "email", "tracks", "jira_assist", "claudesub",
-          "ai_mouse", "feedback", "userchat", "excel", "internet"]
+          "ai_mouse", "feedback", "userchat", "excel", "internet", "confluence"]
 
 VORLAUF = r"""
 try { localStorage.setItem('jarvis_token','probe'); } catch(e){}

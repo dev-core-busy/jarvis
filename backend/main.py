@@ -9292,13 +9292,23 @@ async def vnc_ticket_holen(request: Request, user: str = Depends(require_local_a
 
 
 @app.get("/api/config")
-async def get_config():
-    """Öffentliche Konfiguration für Frontend."""
+async def get_config(user: str = Depends(require_local_auth)):
+    """Desktop-Konfiguration (VNC-Port und -Erreichbarkeit) – nur Administratoren.
+
+    Bis 2026-11-16 oeffentlich. Der Desktop-Knopf steht seitdem auf JEDER Seite
+    (kopfzeile.js) – Vorgabe des Betreibers: „/api/config anpassen, so dass der
+    Desktop geschuetzt bleibt“. Die Verbindung selbst war schon geschuetzt
+    (``/ws/vnc`` nur mit Einmal-Ticket aus ``/api/vnc/ticket``, BSI M4); offen
+    war, dass JEDER ohne Anmeldung Port und Laufzustand des Desktops erfragen
+    konnte – und jede Abfrage einen Verbindungsversuch auf Port 5900 ausloest.
+    Einziger Nutzer ist der Desktop selbst (portal_seite.js, vnc.js), und der
+    ist nur fuer Administratoren da; dieselbe Schranke wie beim Ticket.
+    """
     vnc_ok = await asyncio.get_event_loop().run_in_executor(None, _check_vnc_available)
     return JSONResponse({
         "websockify_port": config.WEBSOCKIFY_PORT,
         "vnc_available": vnc_ok,
-    })
+    }, headers={"Cache-Control": "no-store"})
 
 
 def _is_admin_user(username: str) -> bool:

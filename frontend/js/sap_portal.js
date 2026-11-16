@@ -1014,8 +1014,12 @@
         var hinweis = (_status && _status.hinweis) || '';
         if (pill) {
             if (quelle === 'keine') {
-                pill.className = 'sp-acc-pill is-warn';
-                pill.textContent = T('sap.acc_pill_none', 'nicht angemeldet');
+                // Leer = ausgeblendet (:empty). "Nicht angemeldet" steht seit
+                // 2026-11-16 in der Box "Angemeldet als …" ganz oben (#sp-conn);
+                // dieselbe Aussage direkt darunter noch einmal war doppelt
+                // (Vorgabe des Betreibers).
+                pill.className = 'sp-acc-pill';
+                pill.textContent = '';
             } else if (quelle === 'persoenlich') {
                 pill.className = 'sp-acc-pill is-own';
                 pill.textContent = T('sap.acc_pill_own', 'eigener Zugang');

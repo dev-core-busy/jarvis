@@ -184,6 +184,9 @@ def bild(sock, name, m):
             base64.b64decode(d["data"]))
 
 
+# Was SOFORT aus dem Merker stehen muss: Update-Pille und ⓘ (nur Admin) und
+# die CPU (fuer alle, Nachtrag 2026-11-16) – alle drei haengen an verzoegerten
+# Antworten und waeren ohne Merker zum Messzeitpunkt noch nicht da.
 ADMIN = ("update", "cpu", "pakete")
 IMMER = ("logo", "marke", "llm", "schild", "abmelden")
 

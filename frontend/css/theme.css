@@ -1392,7 +1392,7 @@ button.jv-pkg-cve { cursor: pointer; }
    stehen – ohne `!important`. */
 body.jv-breit [data-jv-breit] { max-width: none; }
 .jv-max-row { display: flex; justify-content: flex-end; align-items: center;
-    margin: 0 0 10px; }
+    gap: 10px; margin: 0 0 var(--jv-abstand); }
 .jv-max-btn { background: none; border: 1px solid var(--border);
     color: var(--text-secondary); width: 28px; height: 28px; border-radius: 8px;
     cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
@@ -1693,3 +1693,217 @@ header.topbar, .pt-topbar, .wi-topbar, .ad-top, .sa-topbar,
     ::view-transition-old(*),
     ::view-transition-new(*) { animation: none !important; }
 }
+
+/* ══ Einheitliche Abstaende der Container (Vorgabe 2026-11-16) ══════════════
+   „Die Abstaende sollen in allen Seiten gleich sein“ – gewaehlt wurde das
+   Mass der Bereichsseiten: 16 px zwischen den Containern und 16 px von der
+   Titelleiste (in /settings: von der Reiterleiste) bis zum ersten Element.
+   Vorher: Einstellungen 24 px (+12 px in den Protokollen, also ~36 px) und
+   68 px bis zum ersten Container, Bereichsseiten 14-28 px Seitenrand. */
+:root { --jv-oben: 16px; --jv-abstand: 16px; }
+
+/* Oberer Rand der Inhaltsflaeche. `body` davor: die Seiten setzen ihren Rand
+   in einem eigenen <style> NACH theme.css – bei gleicher Spezifitaet gewaenne
+   dieser. */
+body .ja-main, body .sp-wrap, body .vm-wrap, body .st-wrap, body .em-wrap,
+body .sq-wrap, body .sup-wrap, body .wi-wrap, body .xp-wrap, body .cs-wrap {
+    padding-top: var(--jv-oben);
+}
+/* /wissen: Banner-Zeile und Abschnitte im selben Takt. */
+body .wi-scope-row { margin-bottom: var(--jv-abstand); }
+body .wi-section { margin-bottom: var(--jv-abstand); }
+
+/* „Angemeldet als …“ (/sap, /vemas, /jira-addon, /confluence-addon) – dieselbe
+   Box wie `.wi-banner` auf /wissen, rechts daneben ⛶. Die Pille (z. B. „Nicht
+   bei SAP angemeldet“) stand bis 2026-11-16 in der Titelleiste. */
+.jv-anmelde-box {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    padding: 12px 16px; border-radius: 10px; font-size: 0.9rem;
+    color: var(--text-primary);
+    background: rgba(var(--fg-rgb), 0.05); border: 1px solid var(--border);
+}
+.jv-anmelde-box > [data-kopf-benutzer]:empty { display: none; }
+/* Die Pille rueckt nach rechts ans Ende der Box. */
+.jv-anmelde-box > .ja-conn, .jv-anmelde-box > .sp-conn, .jv-anmelde-box > .vm-conn { margin-left: auto; }
+
+/* /settings: Reiter-Inhalt 16 px unter der Reiterleiste, Container 16 px
+   auseinander und zugeklappt so hoch wie auf den Bereichsseiten (~50 px). */
+/* `.settings-tabs` traegt in style.css `margin-bottom: 2rem` – das waren die
+   32 px, die zusaetzlich zwischen Reiterleiste und Inhalt standen. */
+#settings-modal .settings-tabs { margin-bottom: 0; }
+#settings-modal .modal-body { padding-top: var(--jv-oben); }
+#settings-modal .kb-container { gap: var(--jv-abstand); padding-top: 0; }
+#settings-modal .kb-section { padding-top: 12px; padding-bottom: 12px; }
+/* Protokolle/Skills: `.sk-openclaw-section` brachte zusaetzlich 12 px Rand
+   mit – im Flex-Gap addierte sich das zu ~36 px. Die Kopfzeile bekommt
+   Hoehe und Innenabstand der uebrigen Container-Koepfe. */
+#settings-modal .kb-container > .sk-openclaw-section { margin-top: 0; }
+#settings-modal .sk-openclaw-section > .kb-folder-header,
+#settings-modal .sk-openclaw-section > .sk-openclaw-header {
+    padding: 12px 1.25rem; min-height: 50px; box-sizing: border-box;
+}
+
+/* ══ Dokumente und angemeldete Benutzer (Titelleiste) ═════════════════════
+   Bis 2026-11-16 im <style> von portal.html – seitdem stehen beide Knoepfe
+   per kopfzeile.js auf jeder Seite (Vorgabe: "Dokumente fehlt bei fast allen
+   Unterseiten", "unter Einstellungen fehlt ... angemeldete Benutzer"). Inhalt
+   unveraendert uebernommen. */
+/* ── Info-Dokumente (Ordnersymbol oben rechts) ──────────────────────
+   Der Knopf ist per Vorgabe versteckt und wird nur eingeblendet, wenn
+   /api/info_files Dateien liefert. Das Panel haengt am Knopf (dessen
+   Wrapper ist position:relative), damit es beim Scrollen mitgeht. */
+.pt-info-wrap { position:relative; display:flex; }
+.pt-info-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:60;
+    min-width:280px; max-width:min(420px, calc(100vw - 32px));
+    /* DECKEND, nicht Glas: ueber dem Panel liegen die Portal-Karten mit
+       Text – mit halbtransparentem Hintergrund scheint deren Schrift
+       durch die Dateinamen (im Test sichtbar geworden). backdrop-filter
+       hilft nicht zuverlaessig, er wird nicht in jeder Umgebung
+       gerendert. */
+    background:var(--bg-secondary);
+    border:1px solid var(--border); border-radius:12px;
+    box-shadow:0 12px 32px rgba(var(--shadow-rgb),.28); overflow:hidden; }
+.pt-info-panel[hidden] { display:none; }
+.pt-info-head { display:flex; align-items:center; gap:8px; padding:10px 12px;
+    border-bottom:1px solid var(--border); font-size:.82rem; font-weight:600;
+    color:var(--text-primary); }
+.pt-info-head .pt-info-count { margin-left:auto; font-weight:500; font-size:.75rem;
+    color:var(--text-muted); }
+.pt-info-list { max-height:min(60vh, 420px); overflow-y:auto; padding:6px; }
+/* ── Angemeldete Benutzer (Admin) ── */
+.pt-usr-wrap { position:relative; display:flex; }
+/* DECKEND wie das Dokumente-Panel: darunter liegen die Portal-Karten mit
+   Text, der bei halbtransparentem Grund durch die Namen scheint. */
+.pt-usr-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:60;
+    min-width:320px; max-width:min(440px, calc(100vw - 32px));
+    background:var(--bg-secondary); border:1px solid var(--border);
+    border-radius:12px; box-shadow:0 12px 32px rgba(var(--shadow-rgb),.28);
+    overflow:hidden; }
+.pt-usr-panel[hidden] { display:none; }
+.pt-usr-head { display:flex; align-items:center; gap:8px; padding:10px 12px;
+    border-bottom:1px solid var(--border); font-size:.82rem; font-weight:600;
+    color:var(--text-primary); }
+.pt-usr-count { margin-left:auto; font-weight:500; font-size:.75rem;
+    color:var(--text-muted); }
+/* Filterfeld: bei vielen Anmeldungen der einzige Weg, einen bestimmten
+   Benutzer zu finden, ohne durch die Liste zu scrollen. */
+.pt-usr-filter { padding:8px 10px; border-bottom:1px solid var(--border); }
+.pt-usr-filter input { width:100%; box-sizing:border-box; padding:6px 9px;
+    font-size:.8rem; font-family:inherit; border-radius:8px;
+    border:1px solid var(--border); background:rgba(var(--fg-rgb),.05);
+    color:var(--text-primary); }
+.pt-usr-filter input::placeholder { color:var(--text-muted); }
+.pt-usr-filter input:focus { outline:none; border-color:var(--accent);
+    background:rgba(var(--fg-rgb),.08); }
+.pt-usr-list { max-height:min(60vh, 420px); overflow-y:auto; padding:4px; }
+/* KOMPAKT: zwei Zeilen à ~16 px statt eines umbrechenden Metablocks.
+   Bei zwanzig Anmeldungen ist Ueberblick wichtiger als Vollstaendigkeit –
+   die Zeitstempel stehen im title des Eintrags. */
+.pt-usr-item { padding:4px 8px; border-radius:7px; }
+.pt-usr-item:hover { background:rgba(var(--accent-rgb),.10); }
+.pt-usr-top { display:flex; align-items:center; gap:7px; min-width:0; }
+/* min-width:0 ist Pflicht: ein Flex-Kind schrumpft sonst nicht unter
+   seine Textbreite und der lange Name schiebt den ⋯-Knopf hinaus. */
+.pt-usr-name { flex:0 1 auto; min-width:0; font-size:.82rem; line-height:1.3;
+    color:var(--text-primary); overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; }
+/* Die Pille traegt die Aussage doppelt (Farbe UND Text) – Farbe allein
+   waere fuer Farbfehlsichtige keine Information. */
+.pt-usr-pill { flex:0 0 auto; font-size:.6rem; font-weight:700;
+    letter-spacing:.02em; padding:1px 6px; border-radius:999px;
+    text-transform:uppercase; }
+.pt-usr-pill.is-on { background:color-mix(in srgb, var(--success, #22c55e) 22%, transparent);
+    color:var(--success, #22c55e);
+    border:1px solid color-mix(in srgb, var(--success, #22c55e) 45%, transparent); }
+/* Dritte Stufe: verbunden, aber untaetig. Warnfarbe wie bei der
+   Untaetigkeits-Angabe, damit beide dieselbe Sprache sprechen. */
+.pt-usr-pill.is-idle { background:color-mix(in srgb, var(--warning, #f59e0b) 22%, transparent);
+    color:var(--warning, #f59e0b); }
+.pt-usr-pill.is-off { background:rgba(var(--fg-rgb),.07); color:var(--text-muted);
+    border:1px solid var(--border); }
+.pt-usr-tag { font-size:.62rem; font-weight:700; padding:1px 6px; border-radius:6px;
+    background:rgba(var(--accent-rgb),.18); color:var(--text-secondary); }
+/* EINE Zeile, kein Umbruch: sonst waechst der Eintrag je nach Textlaenge
+   auf zwei bis drei Zeilen und die Liste wird unregelmaessig hoch. */
+.pt-usr-meta { font-size:.68rem; line-height:1.35; color:var(--text-muted);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    padding-left:2px; }
+.pt-usr-meta b { font-weight:600; color:var(--text-secondary); }
+.pt-usr-meta i { font-style:normal; opacity:.85; }
+.pt-usr-sep { opacity:.5; }
+/* "untätig seit …" steht ab 5 Minuten da, faellt aber erst ab 30 auf:
+   in einer langen Liste ist die Mehrheit fast immer laenger als fuenf
+   Minuten untaetig – eine Warnfarbe, die fast ueberall steht, ist keine
+   Warnung mehr, sondern Tapete. Ohne .is-warn nur leichte Betonung. */
+.pt-usr-idle { color:var(--text-secondary); font-weight:600; }
+.pt-usr-idle.is-warn { color:var(--warning); }
+.pt-usr-blocked { background:color-mix(in srgb, var(--danger) 22%, transparent);
+    color:var(--danger); }
+/* Der ⋯-Knopf ist der SICHTBARE Weg ins Menue – ein Menue, das man nur
+   per Rechtsklick findet, findet niemand. */
+.pt-usr-menubtn { margin-left:auto; flex:0 0 auto; background:none; border:none;
+    color:var(--text-muted); cursor:pointer; font-size:1rem; line-height:1;
+    padding:2px 6px; border-radius:6px; }
+.pt-usr-menubtn:hover, .pt-usr-menubtn:focus {
+    background:rgba(var(--fg-rgb),.10); color:var(--text-primary); outline:none; }
+.pt-usr-menu { position:fixed; z-index:10070; min-width:210px;
+    background:var(--bg-secondary); border:1px solid var(--border);
+    border-radius:10px; box-shadow:0 12px 32px rgba(var(--shadow-rgb),.35);
+    overflow:hidden; padding:4px; }
+.pt-usr-menu-head { padding:6px 10px 7px; font-size:.72rem; font-weight:600;
+    color:var(--text-muted); border-bottom:1px solid var(--border);
+    margin:-4px -4px 4px; background:rgba(var(--fg-rgb),.04);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pt-usr-menu-item { display:flex; align-items:center; gap:9px; width:100%;
+    padding:7px 10px; border:none; border-radius:7px; background:none;
+    color:var(--text-primary); font-size:.82rem; font-family:inherit;
+    text-align:left; cursor:pointer; }
+.pt-usr-menu-item:hover, .pt-usr-menu-item:focus {
+    background:rgba(var(--accent-rgb),.16); outline:none; }
+.pt-usr-menu-item.is-danger { color:var(--danger); }
+.pt-usr-menu-item.is-danger:hover, .pt-usr-menu-item.is-danger:focus {
+    background:color-mix(in srgb, var(--danger) 16%, transparent); }
+.pt-usr-menu-ico { width:1.1em; text-align:center; flex:0 0 auto; }
+.pt-usr-empty { padding:14px 12px; font-size:.8rem; color:var(--text-muted); }
+.pt-usr-hint { padding:8px 12px 10px; font-size:.68rem; line-height:1.35;
+    color:var(--text-muted); border-top:1px solid var(--border); }
+.pt-info-item { display:flex; align-items:center; gap:10px; padding:8px 10px;
+    border-radius:8px; text-decoration:none; color:var(--text-primary);
+    transition:background .15s; }
+.pt-info-item:hover { background:rgba(var(--accent-rgb),.12); }
+.pt-info-item svg { width:20px; height:20px; flex-shrink:0; }
+.pt-info-name { flex:1; min-width:0; font-size:.82rem; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; }
+.pt-info-meta { font-size:.7rem; color:var(--text-muted); flex-shrink:0; }
+/* Verwaltung (Administratoren): Zeile = Link + Muelleimer daneben */
+.pt-info-row { display:flex; align-items:center; gap:2px; }
+.pt-info-row .pt-info-item { flex:1; min-width:0; }
+.pt-info-del { flex:0 0 auto; display:flex; align-items:center; justify-content:center;
+    width:30px; height:30px; padding:0; border:none; border-radius:8px; cursor:pointer;
+    background:transparent; color:var(--text-muted); }
+.pt-info-del:hover { color:var(--danger); background:rgba(var(--accent-rgb),.12); }
+.pt-info-del svg { width:16px; height:16px; }
+.pt-info-admin { border-top:1px solid var(--border); padding:8px 12px 10px; }
+.pt-info-admin[hidden] { display:none; }
+.pt-info-admin-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.pt-info-upload { flex:0 0 auto; padding:6px 14px; border-radius:8px; cursor:pointer;
+    border:1px solid var(--accent); background:var(--accent); color:var(--text-on-accent);
+    font-size:.78rem; font-weight:600; }
+.pt-info-upload:hover { filter:brightness(1.08); }
+.pt-info-hint { flex:1; min-width:0; font-size:.68rem; color:var(--text-muted); }
+.pt-info-status { margin-top:6px; font-size:.72rem; color:var(--text-muted);
+    word-break:break-word; }
+.pt-info-status:empty { display:none; }
+.pt-info-status.pt-info-status-err { color:var(--danger); }
+/* Dateien auf das Fenster ziehen */
+.pt-info-panel.pt-info-drop { outline:2px dashed var(--accent); outline-offset:-4px; }
+/* Typ-Farben ueber Theme-Variablen (kein hartes Rot/Gruen) */
+.pt-ico-pdf        { color:var(--danger); }
+.pt-ico-word       { color:var(--accent); }
+.pt-ico-excel      { color:var(--success); }
+.pt-ico-powerpoint { color:var(--warning); }
+.pt-ico-image      { color:var(--accent-hover, var(--accent)); }
+.pt-ico-archive    { color:var(--warning); }
+.pt-ico-video, .pt-ico-audio { color:var(--accent); }
+.pt-ico-text, .pt-ico-code, .pt-ico-file { color:var(--text-secondary); }

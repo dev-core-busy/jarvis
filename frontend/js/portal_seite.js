@@ -188,6 +188,17 @@
             // Desktop/VNC-Button (Admin) – verschoben von /chat
             var vb = document.getElementById('pt-vnc-btn');
             if (vb) vb.style.display = '';
+            // Desktop-Knopf der gemeinsamen Titelleiste (kopfzeile.js): er fuehrt
+            // von jeder Seite mit `?desktop=1` hierher, denn der Desktop (noVNC)
+            // lebt nur im Portal. Ausgewertet NUR hier, also erst nach dem
+            // belegten Admin-Status aus /api/me – derselbe Weg wie der Knopf.
+            // Der Parameter verschwindet danach, sonst oeffnet ein Neuladen erneut.
+            try {
+                if (vb && /[?&]desktop=1\b/.test(location.search)) {
+                    history.replaceState(null, '', location.pathname + location.hash);
+                    vb.click();
+                }
+            } catch (e) { /* ohne history-API bleibt der Parameter stehen */ }
             // Angemeldete Benutzer (Admin): init() blendet den Knopf selbst ein
             if (window.UserSessions) window.UserSessions.init();
             // API-Dokumentation (Admin)
@@ -432,7 +443,7 @@
         if (ov) ov.style.display = 'flex';
         if (!_vnc && window.JarvisVNC) {
             _vnc = new window.JarvisVNC();
-            fetch('/api/config').then(function (r) { return r.json(); }).then(function (data) {
+            fetch('/api/config', { headers: window.JarvisSitzung.kopfsatz() }).then(function (r) { return r.json(); }).then(function (data) {
                 if (data.vnc_available) _vnc.connect(data.websockify_port);
                 else if (_vnc.showError) _vnc.showError();
             }).catch(function () { if (_vnc && _vnc.showError) _vnc.showError(); });

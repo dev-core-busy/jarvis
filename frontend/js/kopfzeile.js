@@ -5,7 +5,10 @@
  * Headerzeile komplett neu aufgebaut. [...] Logo, Branding, LLM Status Pill,
  * Zertifikathinweis, Update-Pill (nur Admin), CPU (nur Admin), 'i' (nur
  * Admin), Logout sollen immer sichtbar sein [Einstellungen muss dazu auch
- * angepasst werden]".
+ * angepasst werden]". NACHTRAG (derselbe Tag): "CPU sollen wie vorher alle
+ * sehen, die Systemauslastung duerfen weiterhin nur Admins sehen" – die
+ * CPU-Anzeige ist deshalb KEIN Nur-Admin-Element; das Fenster dahinter
+ * schuetzt sysload.js selbst (Klick nur fuer Admins, Endpunkt mit Schranke).
  *
  * WARUM DIE LEISTE NICHT WIRKLICH STEHEN BLEIBT: jede Bereichsseite ist ein
  * eigenes HTML-Dokument – ein Seitenwechsel verwirft das alte Dokument samt
@@ -125,6 +128,9 @@
 
     function updateStarten() {
         if (istAdmin() && window.JarvisUpdateWidget) window.JarvisUpdateWidget.init();
+        // Angemeldete Benutzer: init() blendet den Knopf ein und startet die
+        // Abfrage – idempotent, das Portal ruft es zusaetzlich selbst.
+        if (istAdmin() && window.UserSessions) window.UserSessions.init();
     }
 
     function meHolen() {
@@ -136,12 +142,28 @@
             })
             .then(function (d) {
                 if (!d) return;            // technischer Fehler: gemerkten Stand behalten
+                if (d.username) { merke('benutzer', String(d.username)); benutzerZeigen(); }
                 _adminBelegt = !!d.is_admin;
                 merke('admin', _adminBelegt);
                 adminKlasse(_adminBelegt);
                 updateStarten();
             })
             .catch(function () { /* Netzfehler: gemerkten Stand behalten */ });
+    }
+
+    /* ── „Angemeldet als …“ ────────────────────────────────────────────
+     * Die Box auf /sap, /vemas, /jira-addon und /confluence-addon (Vorbild
+     * /wissen, Vorgabe 2026-11-16) traegt `[data-kopf-benutzer]`. Der Name
+     * kommt aus /api/me (sofort aus dem Merker bzw. dem bei der Anmeldung
+     * abgelegten Namen, danach belegt). textContent, kein innerHTML: der Name
+     * stammt aus dem Verzeichnis und ist fremder Text. */
+    function benutzerZeigen() {
+        var n = gemerkt('benutzer') || (S.token() ? S.benutzer() : '');
+        if (!n) return;
+        var els = document.querySelectorAll('[data-kopf-benutzer]');
+        for (var i = 0; i < els.length; i++) {
+            if (els[i].textContent !== n) els[i].textContent = n;
+        }
     }
 
     /* ── Bausteine ───────────────────────────────────────────────────── */
@@ -309,7 +331,8 @@
             if (l) l.textContent = 'CPU: ' + Math.round(p) + '%';
             b.style.display = '';
         }
-        b.classList.add('jv-kopf-nuradmin');
+        // Fuer ALLE Angemeldeten sichtbar (Nachtrag 2026-11-16) – nur das
+        // Systemauslastungs-Fenster hinter dem Klick ist Admins vorbehalten.
         return nachDem(anker, b);
     }
 
@@ -361,6 +384,120 @@
         gruppe.appendChild(b);
     }
 
+    /* ── Rechte Gruppe (Vorgabe 2026-11-16) ──────────────────────────────
+     * „unter Einstellungen fehlt DE/EN, Desktop, angemeldete Benutzer, Issues,
+     * Hell/Dunkel“ und „Dokumente fehlt bei fast allen Unterseiten“. Ergaenzt
+     * wird nur, was fehlt, in der Reihenfolge des Portals:
+     *   DE/EN · … · Desktop · Benutzer · Dokumente · Issues · (Avatar) ·
+     *   Hell/Dunkel · Startseite · Einstellungen · Abmelden
+     * Die Knoepfe uebernehmen die Klasse des Haus-Symbols der Seite – so
+     * passen sie ohne Extrawurst zum Stil jeder Leiste (wie avatar.js). Die
+     * SVGs tragen width/height="18": /settings begrenzt sie nicht per CSS
+     * (dort fuellten sie den Knopf), die Bereichsseiten setzen 20px darueber.
+     * Desktop und Benutzer sind Nur-Admin-Elemente; Dokumente blendet
+     * info_files.js ein (nur wenn es Dateien gibt oder fuer Admins). */
+    var SVG = {
+        mond: '<svg class="theme-icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+        sonne: '<svg class="theme-icon-sun" style="display:none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
+        issues: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+        ordner: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+        leute: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+        monitor: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>'
+    };
+
+    function knopf(klasse, attrs, html) {
+        var a = { type: 'button', 'class': klasse };
+        for (var k in attrs) { if (Object.prototype.hasOwnProperty.call(attrs, k)) a[k] = attrs[k]; }
+        return el('button', a, html);
+    }
+
+    // Zum Portal mit einem Auftrag (Dialog, der nur dort lebt). In einem
+    // fremden Rahmen (Jira/Confluence) nicht den Rahmen umleiten.
+    function zumPortal(auftrag) {
+        var ziel = '/portal?' + auftrag + '=1';
+        if (window.top !== window.self) window.open(ziel, '_blank', 'noopener');
+        else location.href = ziel;
+    }
+
+    function rechteGruppe(wirt) {
+        var g = wirt.querySelector(RECHTS);
+        if (!g) return;
+        var haus = g.querySelector('[data-i18n-title="nav.home"]');
+        var kl = (haus && haus.className) || 'btn-theme';
+        var vorHaus = function (e) {
+            var nach = haus && haus.parentNode === g ? haus : null;
+            if (!nach) nach = g.querySelector('[id*="settings"], [id*="logout"], .btn-logout');
+            if (nach && nach.parentNode === g) g.insertBefore(e, nach); else g.appendChild(e);
+        };
+
+        // DE/EN: erstes Element der Gruppe (auf /settings hinter dem Suchfeld).
+        if (!wirt.querySelector('.lang-toggle')) {
+            var lt = el('div', { 'class': 'lang-toggle', id: 'jv-kopf-lang' },
+                '<button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>'
+                + '<button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>');
+            var such = g.querySelector('.st-such-wrap');
+            if (such) nachDem(such, lt); else g.insertBefore(lt, g.firstChild);
+            var lang = window._lang || (function () { try { return localStorage.getItem('jarvis_lang'); } catch (e) { return ''; } })() || 'de';
+            Array.prototype.forEach.call(lt.children, function (b) { b.classList.toggle('active', b.getAttribute('data-lang') === lang); });
+        }
+        // Hell/Dunkel (theme.js bindet #btn-theme-toggle/.btn-theme-toggle).
+        var thema = wirt.querySelector('#btn-theme-toggle, .btn-theme-toggle, #btn-theme');
+        if (!thema) {
+            thema = knopf(kl + ' btn-theme-toggle', { id: 'jv-kopf-thema', 'data-i18n-title': 'chat.theme',
+                'data-i18n-aria': 'chat.theme', title: 'Hell/Dunkel umschalten', 'aria-label': 'Hell/Dunkel umschalten' },
+                SVG.mond + SVG.sonne);
+            vorHaus(thema);
+        }
+        // Issues (issues.js oeffnet per Delegation ueber data-issues-oeffnen).
+        var iss = wirt.querySelector('.jv-issues-btn');
+        if (!iss) {
+            iss = knopf(kl + ' jv-issues-btn', { id: 'jv-kopf-issues', 'data-issues-oeffnen': '',
+                'data-i18n-title': 'sup.issues', 'data-i18n-aria': 'sup.issues',
+                title: 'Issues / Feedback', 'aria-label': 'Issues / Feedback' }, SVG.issues);
+            if (thema.parentNode === g) g.insertBefore(iss, thema); else vorHaus(iss);
+        }
+        var vorIssues = function (e) {
+            if (iss.parentNode === g) g.insertBefore(e, iss); else vorHaus(e);
+        };
+        // Dokumente (info_files.js) – Markup wie im Portal.
+        if (!document.getElementById('pt-info-wrap')) {
+            var doku = el('div', { 'class': 'pt-info-wrap', id: 'pt-info-wrap' },
+                '<button class="' + kl + '" id="pt-info-btn" type="button" title="Dokumente" data-i18n-title="portal.info_files" aria-haspopup="true" aria-expanded="false">' + SVG.ordner + '</button>'
+                + '<div class="pt-info-panel" id="pt-info-panel" hidden>'
+                + '<div class="pt-info-head"><span data-i18n="portal.info_files">Dokumente</span><span class="pt-info-count" id="pt-info-count"></span></div>'
+                + '<div class="pt-info-list" id="pt-info-list"></div>'
+                + '<div class="pt-info-admin" id="pt-info-admin" hidden><input type="file" id="pt-info-input" multiple hidden>'
+                + '<div class="pt-info-admin-row"><button type="button" class="pt-info-upload" id="pt-info-upload" data-i18n="portal.info_upload">Hochladen</button>'
+                + '<span class="pt-info-hint" data-i18n="portal.info_admin_hint">Sichtbar für alle angemeldeten Benutzer</span></div>'
+                + '<div class="pt-info-status" id="pt-info-status" role="status" aria-live="polite"></div></div>'
+                + '</div>');
+            // Gemerkt sichtbar -> sofort da (info_files.js entscheidet danach).
+            doku.style.display = (gemerkt('dokumente') === true && S.token()) ? '' : 'none';
+            vorIssues(doku);
+        }
+        // Angemeldete Benutzer (sessions.js, nur Admin).
+        if (!document.getElementById('pt-usr-wrap')) {
+            var usr = el('div', { 'class': 'pt-usr-wrap jv-kopf-nuradmin', id: 'pt-usr-wrap' },
+                '<button class="' + kl + '" id="pt-usr-btn" type="button" title="Angemeldete Benutzer" data-i18n-title="sessions.title" aria-haspopup="true" aria-expanded="false">' + SVG.leute + '</button>'
+                + '<div class="pt-usr-panel" id="pt-usr-panel" hidden>'
+                + '<div class="pt-usr-head"><span data-i18n="sessions.title">Angemeldete Benutzer</span><span class="pt-usr-count" id="pt-usr-count"></span></div>'
+                + '<div class="pt-usr-filter" id="pt-usr-filter"><input type="search" id="pt-usr-search" autocomplete="off" spellcheck="false" placeholder="Benutzer filtern…" data-i18n-placeholder="sessions.search_ph" aria-label="Benutzerliste filtern" data-i18n-aria="sessions.search_aria"></div>'
+                + '<div class="pt-usr-list" id="pt-usr-list"></div><div class="pt-usr-hint" id="pt-usr-hint"></div>'
+                + '</div>');
+            var doc = document.getElementById('pt-info-wrap');
+            if (doc && doc.parentNode === g) g.insertBefore(usr, doc); else vorIssues(usr);
+        }
+        // Desktop (VNC, nur Admin): der Desktop lebt im Portal – von dort
+        // geoeffnet (`?desktop=1`), statt noVNC auf jeder Seite mitzuladen.
+        if (!document.getElementById('pt-vnc-btn') && !document.getElementById('jv-kopf-desktop')) {
+            var vnc = knopf(kl + ' jv-kopf-nuradmin', { id: 'jv-kopf-desktop', 'data-i18n-title': 'chat.desktop',
+                'data-i18n-aria': 'chat.desktop', title: 'Desktop (VNC)', 'aria-label': 'Desktop (VNC)' }, SVG.monitor);
+            vnc.addEventListener('click', function () { zumPortal('desktop'); });
+            var u = document.getElementById('pt-usr-wrap');
+            if (u && u.parentNode === g) g.insertBefore(vnc, u); else vorIssues(vnc);
+        }
+    }
+
     /* /settings: der Fensterkopf traegt Titel + Symbolgruppe (space-between).
      * Logo, Marke und Titel kommen in EINE linke Gruppe – ein drittes direktes
      * Kind wuerde die Verteilung zerreissen (Lehre aus style.css). */
@@ -407,6 +544,7 @@
         anker = updatePille(wirt, anker);
         anker = cpuBalken(wirt, anker);
         paketKnopf(wirt, anker);
+        rechteGruppe(wirt);
         abmelden(wirt);
         return true;
     }
@@ -432,7 +570,15 @@
     }
     // update_widget.js laedt nach diesem Modul – gestartet wird es, sobald
     // das Dokument steht (gemerkter Admin) bzw. /api/me es belegt.
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', updateStarten);
-    else setTimeout(updateStarten, 0);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateStarten);
+        // Die Box steht im Seiteninhalt, also HINTER der Leiste im Markup –
+        // gesetzt wird der Name deshalb erst, wenn das Dokument steht (EINE
+        // Stelle; ein zweiter Aufruf in aufbauen() machte sie unpruefbar).
+        document.addEventListener('DOMContentLoaded', benutzerZeigen);
+    } else {
+        setTimeout(updateStarten, 0);
+        benutzerZeigen();
+    }
     meHolen();
 })();

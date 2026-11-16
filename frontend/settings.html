@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=62">
+    <link rel="stylesheet" href="/static/css/theme.css?v=63">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
@@ -39,7 +39,9 @@
 <!-- VOR der Anmeldemaske: verbirgt sie, solange eine vorhandene Sitzung
      geprueft wird (sonst blitzt sie bei jedem Seitenwechsel auf). -->
 <script src="/static/js/sitzung.js?v=3"></script>
-<script src="/static/js/kopfzeile.js?v=1"></script>
+<script src="/static/js/kopfzeile.js?v=2"></script>
+<script src="/static/js/issues.js?v=16"></script>
+<script src="/static/js/info_files.js?v=8"></script>
     <!-- ═══ Security Banner ═══ -->
     <div id="security-banner" class="security-banner" hidden>
         <div class="banner-content">
@@ -5492,7 +5494,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              wie lange Diagnosedaten ueberhaupt vorliegen. Ohne diese Zeile
                              sieht ein leerer Abschnitt nach "nichts passiert" aus, obwohl
                              die Eintraege bloss abgelaufen sind. -->
-                        <div id="tele-retention-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <div id="tele-retention-info" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                             <span id="tele-retention-text"></span>
                             <!-- "Jetzt bereinigen" ist seit 2026-10-20 ENTFERNT: die Bereinigung laeuft
                                  60 s nach jedem Dienststart und danach taeglich, und die Frist
@@ -5519,7 +5521,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                         </div>
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="tele-convlog-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.llm_history">LLM-Verlauf</span>
                                 <span style="margin-left:auto;margin-right:8px;">
@@ -5536,7 +5538,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                             <div id="tele-convlog-body" style="display:none;max-height:420px;overflow-y:auto;"><div class="kb-loading">Lade…</div></div>
                         </div>
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="tele-errors-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.error_log">Fehler-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5562,7 +5564,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              global fuer alle Benutzer gilt und keine Diagnose ist. -->
 
                         <!-- ── Audit-Log ── -->
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="audit-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.audit_log">Tool-Audit-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5630,7 +5632,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              Oberflaeche waere der Weg, Spuren zu beseitigen. Kein Symbol
                              im Kopf: Emojis sind verboten, und keines aus icons.js traegt
                              diese Bedeutung (das Schloss heisst dort "beschraenkt"). -->
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="sprot-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.sprot_title">Sicherheitsprotokoll</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5692,7 +5694,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              /api/security/csp. Kein Symbol im Kopf (Emojis verboten). ── -->
                         <!-- Aktivitaeten (2026-11-04): wer hat was an gemeinsamen Bestaenden
                              geaendert – backend/aktivitaet.py, GET /api/logs/aktivitaet. -->
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="akt">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.akt.titel">Aktivitäten</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5741,7 +5743,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="journal">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.journal.titel">Dienst-Journal</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5790,7 +5792,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="csp">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.csp.titel">Inhaltssicherheit (CSP-Verstöße)</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5823,7 +5825,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="updates">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.updates.titel">Update-Verlauf</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5854,7 +5856,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="ssh">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.ssh.titel">SSH-Anmeldungen</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5898,7 +5900,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="fixes">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.fixes.titel">Selbstkorrekturen des Agenten</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5929,7 +5931,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section" style="margin-top:10px;">
+                        <div class="sk-openclaw-section">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="abh">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.abh.titel">Abhängigkeitsprüfung</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -6630,7 +6632,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/icons.js?v=11"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/dlkey.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=485"></script>
+    <script src="/static/js/i18n.js?v=486"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6683,7 +6685,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
          hat seit 2026-11-16 dieselben Kernelemente wie jede Bereichsseite –
          Update-Pille, CPU (samt Systemauslastung) und ⓘ fuer Admins. -->
     <script src="/static/js/update_widget.js?v=10"></script>
-    <script src="/static/js/cpubar.js?v=3"></script>
+    <script src="/static/js/cpubar.js?v=4"></script>
     <script src="/static/js/sysload.js?v=6"></script>
     <script src="/static/js/syspackages.js?v=24"></script>
     <script src="/static/js/zugang_anmeldung.js?v=1"></script>

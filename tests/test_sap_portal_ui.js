@@ -1306,7 +1306,9 @@ function loadScript(dom, rel) {
               $('sp-acc-save').type + ' / ' + $('sp-acc-save').textContent);
         check('Kachel-Hinweis sichtbar, normaler Hinweis verborgen',
               !$('sp-acc-hint-kachel').hidden && $('sp-acc-hint').hidden);
-        check('Pille: nicht angemeldet', /nicht angemeldet/.test($('sp-acc-pill').textContent),
+        // Seit 2026-11-16 steht "nicht angemeldet" nur noch oben in der Box
+        // "Angemeldet als …" (#sp-conn) – die Pille am Container bleibt leer.
+        check('Pille am Zugang leer (Aussage steht oben in der Box)', $('sp-acc-pill').textContent === '',
               $('sp-acc-pill').textContent);
         check('Anmeldebereich ist aufgeklappt', $('sp-sect-account').open === true);
         check('Abmelden-Knopf verborgen, solange nicht angemeldet', $('sp-acc-logout').hidden === true);
@@ -1356,7 +1358,9 @@ function loadScript(dom, rel) {
             + fs.readFileSync(path.join(ROOT, 'frontend/sap.html'), 'utf8');
         const keys = [...new Set([...quelle.matchAll(/'(sap\.(?:acc_(?:pass_kachel_ph|hint_kachel|pill_none|login|logout|logging_in|logged_in|logged_out)|not_logged_in))'|"(sap\.(?:acc_hint_kachel|acc_logout))"/g)]
             .map((m) => m[1] || m[2]))];
-        check('Positivkontrolle: Kachel-Schluessel im Modul/Markup gefunden', keys.length >= 9, String(keys.length));
+        // 8 seit 2026-11-16: `sap.acc_pill_none` ("nicht angemeldet" an „Mein
+        // SAP-Zugang“) entfiel – die Aussage steht nur noch oben in der Box.
+        check('Positivkontrolle: Kachel-Schluessel im Modul/Markup gefunden', keys.length >= 8, String(keys.length));
         const fehlt = [];
         keys.forEach((k) => ['de', 'en'].forEach((lg) => {
             if (bloecke[lg].indexOf("'" + k + "':") < 0) fehlt.push(lg + ':' + k);

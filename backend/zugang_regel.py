@@ -85,7 +85,8 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     # ── oeffentlich ──
     ("GET", "/api/health"): ("oeffentlich", "Zustandsabfrage, liefert nur ok"),
     ("GET", "/api/version"): ("oeffentlich", "Versionsnummer fuer die Anmeldemaske"),
-    ("GET", "/api/config"): ("oeffentlich", "VNC-Port/-Verfuegbarkeit fuer die Oberflaeche"),
+    # /api/config ist seit 2026-11-16 NICHT mehr oeffentlich (require_local_auth,
+    # Desktop nur fuer Administratoren) – der Eintrag entfiel deshalb.
     ("GET", "/api/branding"): ("oeffentlich", "Marke/Farben – gebraucht auf der Anmeldemaske"),
     ("GET", "/api/branding/logo"): ("oeffentlich", "Logo – gebraucht auf der Anmeldemaske"),
     ("GET", "/api/branding/portal-video"): ("oeffentlich", "Portal-Video der Marke"),

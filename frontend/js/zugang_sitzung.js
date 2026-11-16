@@ -13,7 +13,8 @@
  *
  * Markup je Seite (Praefix p = "ja" bzw. "ca"): #p-sz-sect, #p-sz-pill,
  * #p-sz-note, #p-sz-token, #p-sz-login, #p-sz-logout, #p-sz-msg, dazu die
- * Kopf-Pille #p-sz-kopf in der Titelleiste.
+ * Pille #p-sz-kopf – seit 2026-11-16 in der Box „Angemeldet als …“ ueber
+ * den Containern, nicht mehr in der Titelleiste.
  */
 (function () {
     'use strict';

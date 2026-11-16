@@ -286,6 +286,9 @@
                     // Administratoren, die sonst keinen Weg zum ersten Upload haetten.
                     var zeigen = Mgr._files.length || Mgr._admin;
                     wrap.style.display = zeigen ? '' : 'none';
+                    // Fuer den naechsten Seitenaufbau merken (kopfzeile.js baut
+                    // den Knopf auf jeder Seite und zeigt ihn dann sofort).
+                    if (window.JarvisKopf) window.JarvisKopf.merke('dokumente', !!zeigen);
                     if (!zeigen) Mgr.close();
                     Mgr._render();
                 })

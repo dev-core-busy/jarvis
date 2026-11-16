@@ -8,7 +8,8 @@
  *   - nach der Anmeldung und ausserhalb des Sitzungsbetriebs ist sie LEER
  *     (`:empty` blendet sie aus) – eine Pille, die nach dem Anmelden stehen
  *     bliebe, waere eine falsche Aussage.
- * Dazu als Regel: der Platz liegt in der Titelleiste (nicht im Inhalt), und
+ * Dazu als Regel: der Platz liegt seit 2026-11-16 in der Box „Angemeldet als …“
+ * oben im Inhalt (vorher Titelleiste), und
  * die Klasse ist im CSS DIESER Seiten definiert (eine Klasse ohne Regel faellt
  * niemandem auf).
  *
@@ -60,8 +61,22 @@ for (const s of SEITEN) {
     const kopf = doc.getElementById(s.praefix + "-sz-kopf");
     check(!!kopf, s.name + ": Kopf-Pille ist im Markup");
     if (!kopf) { w.close(); continue; }
-    check(!!kopf.closest("header.topbar .topbar-left"),
-          s.name + ": die Pille sitzt in der Titelleiste neben dem Titel");
+    // Seit 2026-11-16 (Vorgabe): die Pille steht in der Box "Angemeldet als …"
+    // ueber den Containern (wie /wissen), NICHT mehr in der Titelleiste.
+    check(!!kopf.closest(".jv-max-row .jv-anmelde-box"),
+          s.name + ": die Pille sitzt in der Box \"Angemeldet als …\"");
+    check(!kopf.closest("header.topbar"),
+          s.name + ": die Pille steht nicht mehr in der Titelleiste");
+    // Die Box ist das erste Element des Inhalts, der oberste Container ist
+    // "Mein …-Zugang" (Sitzungs-Anmeldung) – Vorgabe 2026-11-16.
+    const main = doc.querySelector("main");
+    const sects = main ? [...main.querySelectorAll(":scope > details.ja-sect")] : [];
+    check(!!main && main.firstElementChild && main.firstElementChild.classList.contains("jv-max-row"),
+          s.name + ": die Box steht ganz oben im Inhalt");
+    check(sects.length > 0 && sects[0].id === s.praefix + "-sz-sect",
+          s.name + ": oberster Container ist die Sitzungs-Anmeldung", sects[0] && sects[0].id);
+    check(!!doc.getElementById(s.praefix + "-sect-token"),
+          s.name + ": eigener Container \"Wo finde ich meinen Token?\"");
     check(kopf.classList.contains("ja-conn"), s.name + ": die Pille traegt die Klasse .ja-conn");
     check(kopf.textContent.trim() === "", s.name + ": vor dem ersten Zeichnen ist sie leer");
 

@@ -467,6 +467,13 @@
                   size: a.erwaehnt ? 0.5 : (a.widerspruch ? 2.5 : Math.min(4, 0.8 + 0.9 * a.gewicht)), label: '',
                   labelColor: _farben.text };
         var ende = G.extremities(k);
+        // Schwache Linien (ein Dokument oder nur erwaehnt) fallen weg, solange
+        // es im Bild eng ist – beim Ueberfahren und fuer hervorgehobene Kanten
+        // bleiben sie. Widersprueche sind nie schwach.
+        if (_schwachAus && !stark && !a.widerspruch && !_hover && !(_hervor && _hervor.kanten[k])) {
+            r.visibility = 'hidden';
+            return r;
+        }
         if (_hover) {
             if (ende[0] !== _hover && ende[1] !== _hover) { r.visibility = 'hidden'; }
             else {
@@ -493,6 +500,11 @@
     var _versteckt = {};             // Knoten -> true, solange verborgen
     var _zuKlein = 0;                // davon unter der Mindestgroesse
     var _ohnePlatz = 0;              // davon wegen Platzmangel
+    // Eng im Bild: im SICHTBAREN Ausschnitt fehlt mindestens ein Begriff aus
+    // Platzmangel. Solange das so ist, sind schwache Linien ausgeblendet –
+    // gemessen am Ausschnitt, nicht am ganzen Graphen, sonst blieben sie beim
+    // Hineinzoomen in eine Ecke weg, weil es woanders eng ist.
+    var _schwachAus = false;
     var _dichteTimer = null;
 
     function erzwungen(n) {
@@ -501,17 +513,19 @@
     }
 
     /** Berechnet ``_versteckt`` neu; true, wenn sich die Menge geaendert hat.
-     *  Waehrend die Anordnung laeuft, wandern die Punkte noch – dann gilt nur
-     *  die Mindestgroesse, der Platz wird danach bemessen. */
+     *  Auch waehrend der Anordnung: dann taktet ``anordnen`` das Neubemessen,
+     *  weil die Punkte noch wandern. Gemeldet 2026-11-17: mit "erst danach
+     *  bemessen" erschienen beim Neu-Anordnen sekundenlang ALLE Begriffe, und
+     *  die Einstellung schien erst verzoegert zu greifen. */
     function ausduennenBerechnen() {
-        var neu = {}, zuKlein = 0, ohnePlatz = 0;
+        var neu = {}, zuKlein = 0, ohnePlatz = 0, engImBild = 0;
         var liste = [];
         if (G) {
             G.forEachNode(function (n, a) {
                 if ((a.grad || 0) < _minGrad) { neu[n] = true; zuKlein++; } else { liste.push(n); }
             });
         }
-        if (_ausduennen && R && !_layout && liste.length > 1) {
+        if (_ausduennen && R && liste.length > 1) {
             liste.sort(function (x, y) {
                 var ax = G.getNodeAttributes(x), ay = G.getNodeAttributes(y);
                 return ((ay.size || 0) - (ax.size || 0)) || ((ay.grad || 0) - (ax.grad || 0))
@@ -527,6 +541,10 @@
             // Zellgroesse >= groesster noetiger Abstand: dann genuegen die
             // acht Nachbarzellen fuer die Pruefung.
             var zelle = Math.max(1, 2 * maxR + LUFT_PX);
+            var mass = typeof R.getDimensions === 'function' ? R.getDimensions() : null;
+            var imBild = function (p) {
+                return !mass || (p.x >= 0 && p.y >= 0 && p.x <= mass.width && p.y <= mass.height);
+            };
             var raster = {};
             punkte.forEach(function (p) {
                 var zx = Math.floor(p.x / zelle), zy = Math.floor(p.y / zelle);
@@ -537,7 +555,11 @@
                         for (var i = 0; i < fach.length; i++) {
                             var q = fach[i], ab = p.r + q.r + LUFT_PX;
                             var ddx = p.x - q.x, ddy = p.y - q.y;
-                            if (ddx * ddx + ddy * ddy < ab * ab) { neu[p.n] = true; ohnePlatz++; return; }
+                            if (ddx * ddx + ddy * ddy < ab * ab) {
+                                neu[p.n] = true; ohnePlatz++;
+                                if (imBild(p)) { engImBild++; }
+                                return;
+                            }
                         }
                     }
                 }
@@ -547,7 +569,11 @@
         }
         var alt = Object.keys(_versteckt), geaendert = alt.length !== zuKlein + ohnePlatz;
         if (!geaendert) { geaendert = alt.some(function (n) { return !neu[n]; }); }
-        _versteckt = neu; _zuKlein = zuKlein; _ohnePlatz = ohnePlatz;
+        // engImBild zaehlt nur, wenn ausgeduennt wird – der Schalter wirkt also
+        // schon darueber, eine zweite Bedingung hier waere eine Doppelung.
+        var schwachAus = engImBild > 0;
+        if (schwachAus !== _schwachAus) { geaendert = true; }
+        _versteckt = neu; _zuKlein = zuKlein; _ohnePlatz = ohnePlatz; _schwachAus = schwachAus;
         return geaendert;
     }
 
@@ -572,6 +598,9 @@
         if (_ohnePlatz) {
             teile.push(t('wissensgraph.thinned', '{n} kleinere ausgeblendet, weil der Platz fehlt – beim Hineinzoomen erscheinen sie.',
                          { n: _ohnePlatz }));
+        }
+        if (_schwachAus) {
+            teile.push(t('wissensgraph.weak_hidden', 'Verbindungen aus nur einem Dokument erscheinen ebenfalls erst beim Hineinzoomen.'));
         }
         if (_zuKlein) {
             teile.push(t('wissensgraph.below_min', '{n} unter der Mindestgröße ausgeblendet.', { n: _zuKlein }));
@@ -650,17 +679,27 @@
         });
     }
 
+    // Takt des Neubemessens waehrend der Anordnung, und die Nummer des
+    // laufenden Anordnens: ein zweiter Klick auf "Neu anordnen" startet einen
+    // neuen Lauf, dessen Ende der Zeitgeber des ersten nicht vorziehen darf.
+    var ANORDNEN_TAKT_MS = 250;
+    var _anordnenTakt = null;
+    var _anordnenLauf = 0;
+
     function anordnen(dauer, danach) {
         if (!G || !G.order || !window.JarvisFA2) { if (danach) { danach(); } return; }
         if (_layout) { try { _layout.kill(); } catch (e) { } _layout = null; }
+        if (_anordnenTakt) { clearInterval(_anordnenTakt); _anordnenTakt = null; }
+        var lauf = ++_anordnenLauf;
         var einst = window.JarvisFA2.forceAtlas2.inferSettings(G);
         einst.barnesHutOptimize = G.order > 500;
         try {
             _layout = new window.JarvisFA2.FA2Layout(G, { settings: einst, getEdgeWeight: 'gewicht' });
             _layout.start();
-            // Waehrend die Punkte wandern, waere jede Platzmessung gleich
-            // wieder falsch – bis zum Ende gilt nur die Mindestgroesse.
+            // Die Punkte wandern: sofort bemessen und im Takt nachziehen, damit
+            // Platzregel und Mindestgroesse schon waehrend der Anordnung gelten.
             dichteAnwenden();
+            _anordnenTakt = setInterval(dichteAnwenden, ANORDNEN_TAKT_MS);
         } catch (e) {
             // Ohne Worker (z. B. gesperrt): synchron und knapp, statt gar nicht.
             try { window.JarvisFA2.forceAtlas2.assign(G, { iterations: 80, settings: einst }); } catch (e2) { }
@@ -670,6 +709,8 @@
             return;
         }
         setTimeout(function () {
+            if (lauf !== _anordnenLauf) { return; }
+            if (_anordnenTakt) { clearInterval(_anordnenTakt); _anordnenTakt = null; }
             if (_layout) { try { _layout.stop(); _layout.kill(); } catch (e) { } _layout = null; }
             positionenSichern();
             dichteAnwenden();

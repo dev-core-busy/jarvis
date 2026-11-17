@@ -22,6 +22,12 @@
  *   4. Mindestgroesse: Begriffe darunter verborgen, auch ganz nah; Zeile
  *      darunter nennt die Zahl; der Wert ueberlebt ein Neuladen.
  *   5. Ueberfahren und Suche zeigen verborgene Nachbarn/Treffer trotzdem.
+ *   7. Neu anordnen: waehrend die Anordnung laeuft, gilt die Ausduennung
+ *      SOFORT (nicht erst an ihrem Ende) und wird im Takt nachgemessen.
+ *   6. Schwache Linien (ein Dokument) fallen weg, solange es IM BILD eng ist:
+ *      weit weg verborgen, ganz nah und in einer freien Ecke sichtbar (auch
+ *      wenn es ausserhalb des Bildes eng bleibt); starke Linien und
+ *      Widersprueche bleiben immer; Ueberfahren und Schalter holen sie zurueck.
  *
  *   node tests/test_wissensgraph_ausduennen.js
  */
@@ -71,6 +77,10 @@ function testgraph() {
     }
     k('frei1', 2, 80, 80);
     k('frei2', 1, -70, 60);
+    // Eine starke Linie (drei Dokumente) und ein Widerspruch, beide vom grossen
+    // Begriff aus – sie duerfen nie wegfallen.
+    ka.push({ von: 'gross', nach: 'frei1', art: 'nutzt', gewicht: 3, sources: [] });
+    ka.push({ von: 'gross', nach: 'frei2', art: 'widerspricht', gewicht: 1, sources: [] });
     return { daten: { knoten: kn, kanten: ka, treffer: [], gesamt: kn.length, gefiltert: kn.length,
                       offset: 0, limit: 500, erzeugt: 1 }, pos };
 }
@@ -127,6 +137,7 @@ function baueSeite(vorher) {
         this.kill = () => {}; this.resize = () => {};
         this.getCamera = () => kamera;
         this.getSetting = () => 14;
+        this.getDimensions = () => ({ width: 800, height: 600 });
         this.graphToViewport = (p) => ({ x: (p.x - kam.x) / kam.ratio * MASS, y: (p.y - kam.y) / kam.ratio * MASS });
         this.framedGraphToViewport = this.graphToViewport;
         this.scaleSize = (g) => (g === undefined ? 1 : g) / Math.sqrt(kam.ratio);
@@ -143,6 +154,20 @@ function sichtbarkeit(s) {
     G.forEachNode((n, a) => {
         const r = R.einst.nodeReducer(n, {}, a);
         (r.visibility === 'hidden' ? raus.verborgen : raus.sichtbar).push(n);
+    });
+    return raus;
+}
+
+// Kanten nach dem Kanten-Reduzierer: schwach / stark / Widerspruch, je sichtbar?
+function kanten(s) {
+    const R = s.renderer, G = R.graph, raus = { schwachSichtbar: 0, schwachVerborgen: 0, starkSichtbar: 0,
+                                                 widerspruchSichtbar: 0 };
+    G.forEachEdge((k, a) => {
+        const r = R.einst.edgeReducer(k, {}, a);
+        const sicht = r.visibility !== 'hidden';
+        if (a.widerspruch) { if (sicht) { raus.widerspruchSichtbar++; } }
+        else if (!a.erwaehnt && a.gewicht > 1) { if (sicht) { raus.starkSichtbar++; } }
+        else if (sicht) { raus.schwachSichtbar++; } else { raus.schwachVerborgen++; }
     });
     return raus;
 }
@@ -246,8 +271,111 @@ async function main() {
     pruefe(sichtbarkeit(c.s).sichtbar.indexOf(ziel) >= 0, 'gesuchter, verborgener Begriff wird gezeigt', ziel);
     c.w.close();
 
-    pruefe(a.fehler.concat(b.fehler, c.fehler).length === 0, 'keine Skriptfehler',
-           a.fehler.concat(b.fehler, c.fehler).join(' | '));
+    abschnitt('6. Schwache Linien');
+    const d = baueSeite();
+    await warte(400);
+    const RD = d.s.renderer;
+    const SCHWACH = 36;              // gross -> klein0..35, je ein Dokument
+    let kz = kanten(d.s);
+    if (kz.schwachSichtbar + kz.schwachVerborgen !== SCHWACH) {
+        console.log('  ✗ Testgraph traegt nicht die erwarteten schwachen Linien – Pruefstand kaputt');
+        process.exit(2);
+    }
+    const zeileD = d.w.document.getElementById('wg-ausgeduennt');
+    pruefe(kz.schwachVerborgen === SCHWACH, 'weit weg (eng im Bild): alle schwachen Linien verborgen',
+           JSON.stringify(kz));
+    pruefe(kz.starkSichtbar === 1 && kz.widerspruchSichtbar === 1, 'starke Linie und Widerspruch bleiben',
+           JSON.stringify(kz));
+    pruefe(/einem Dokument/.test(zeileD.textContent), 'Zeile unter der Grafik nennt die schwachen Linien',
+           zeileD.textContent);
+    RD.kamera.setState({ x: 5, y: 5, ratio: 0.02 });
+    await warte(300);
+    kz = kanten(d.s);
+    pruefe(kz.schwachSichtbar === SCHWACH, 'ganz nah: schwache Linien wieder da', JSON.stringify(kz));
+    pruefe(!/einem Dokument/.test(zeileD.textContent), 'ganz nah: Hinweis auf schwache Linien weg');
+    // Freie Ecke: der Haufen liegt ausserhalb des Bildes und ist dort weiter
+    // eng (Positivkontrolle), im Bild aber ist Platz.
+    RD.kamera.setState({ x: -73, y: 57, ratio: 0.05 });
+    await warte(300);
+    const engDraussen = sichtbarkeit(d.s).verborgen.length;
+    kz = kanten(d.s);
+    pruefe(engDraussen > 0, 'Positivkontrolle: ausserhalb des Bildes bleibt es eng (' + engDraussen + ' verborgen)');
+    pruefe(kz.schwachSichtbar === SCHWACH, 'freie Ecke: schwache Linien sichtbar, obwohl es draussen eng ist',
+           JSON.stringify(kz));
+    RD.kamera.setState({ x: 0, y: 0, ratio: 1 });
+    await warte(300);
+    pruefe(kanten(d.s).schwachVerborgen === SCHWACH, 'zurueck auf weit: wieder verborgen');
+    // Nur verschieben, gleicher Zoom: die Platzmessung haengt nur am Abstand,
+    // dieselben Begriffe bleiben verborgen – geaendert hat sich allein, dass
+    // die Enge aus dem Bild ist. sigma muss trotzdem neu zeichnen.
+    const vorVerborgen = sichtbarkeit(d.s).verborgen.join(',');
+    const vorRefresh = RD.refreshs;
+    RD.kamera.setState({ x: -200, y: -200, ratio: 1 });
+    await warte(300);
+    pruefe(sichtbarkeit(d.s).verborgen.join(',') === vorVerborgen,
+           'Positivkontrolle: Verschieben aendert die verborgenen Begriffe nicht');
+    pruefe(kanten(d.s).schwachSichtbar === SCHWACH && RD.refreshs > vorRefresh,
+           'Enge aus dem Bild geschoben: schwache Linien sichtbar UND neu gezeichnet',
+           'refresh ' + vorRefresh + ' -> ' + RD.refreshs);
+    RD.kamera.setState({ x: 0, y: 0, ratio: 1 });
+    await warte(300);
+    RD.hoerer.enterNode({ node: 'gross' });
+    pruefe(kanten(d.s).schwachSichtbar === SCHWACH, 'Ueberfahren zeigt die schwachen Linien des Begriffs');
+    RD.hoerer.leaveNode({});
+    const hd = d.w.document.getElementById('wg-ausduennen');
+    hd.checked = false; hd.dispatchEvent(new d.w.Event('change'));
+    pruefe(kanten(d.s).schwachSichtbar === SCHWACH, 'Schalter aus: schwache Linien sichtbar');
+    d.w.close();
+
+    abschnitt('7. Neu anordnen');
+    const e = baueSeite();
+    await warte(400);
+    const RE = e.s.renderer;
+    // Anordnungs-Attrappe: laeuft, bis gestoppt wird (wie der Worker), und
+    // bewegt selbst nichts – Bewegung stellt der Test her.
+    const fa2 = { laeuft: 0 };
+    // Die Exporte des Bundles sind nur lesbar (Getter, nicht konfigurierbar) –
+    // deshalb das ganze Objekt ersetzen, die echte Einstellungs-Ableitung bleibt.
+    const echtFA2 = e.w.JarvisFA2;
+    e.w.JarvisFA2 = { forceAtlas2: echtFA2.forceAtlas2, FA2Layout: function () {
+        this.start = () => { fa2.laeuft++; };
+        this.stop = () => {}; this.kill = () => { fa2.laeuft--; };
+    } };
+    const weitE = sichtbarkeit(e.s).verborgen.length;
+    const reglerE = e.w.document.getElementById('wg-mindest');
+    reglerE.value = '3'; reglerE.dispatchEvent(new e.w.Event('input'));
+    const mitMin = sichtbarkeit(e.s).verborgen.length;
+    e.w.document.getElementById('wg-anordnen').click();
+    if (fa2.laeuft !== 1) {
+        console.log('  ✗ Anordnungs-Attrappe wurde nicht gestartet – Pruefstand kaputt');
+        process.exit(2);
+    }
+    pruefe(weitE > 0 && sichtbarkeit(e.s).verborgen.length === mitMin,
+           'sofort nach "Neu anordnen": Ausduennung und Mindestgroesse gelten weiter',
+           sichtbarkeit(e.s).verborgen.length + ' verborgen, erwartet ' + mitMin);
+    // Die Anordnung zieht den Haufen weit auseinander: der Takt muss das
+    // mitbekommen, solange sie noch laeuft.
+    RE.graph.forEachNode((n, at) => { RE.graph.mergeNodeAttributes(n, { x: at.x * 100, y: at.y * 100 }); });
+    await warte(600);
+    const waehrend = sichtbarkeit(e.s).verborgen;
+    pruefe(fa2.laeuft === 1, 'Positivkontrolle: Anordnung laeuft noch');
+    pruefe(waehrend.every((n) => RE.graph.getNodeAttribute(n, 'grad') < 3) && waehrend.length < mitMin,
+           'waehrend der Anordnung nachgemessen: Platz da, nur die Mindestgroesse verbirgt noch',
+           waehrend.length + ' verborgen');
+    // Zweiter Klick waehrend der ersten Anordnung: deren Zeitgeber darf den
+    // NEUEN Lauf nicht vorzeitig beenden (dann waere der Takt weg und die
+    // Punkte blieben halb angeordnet). Dauer aus derselben Formel wie im Modul.
+    const dauer = Math.min(8000, 1500 + RE.graph.order * 2);
+    e.w.document.getElementById('wg-anordnen').click();          // Lauf 2 startet jetzt
+    await warte(Math.round(dauer * 0.6));
+    e.w.document.getElementById('wg-anordnen').click();          // Lauf 3
+    await warte(Math.round(dauer * 0.6));                        // Ende von Lauf 2 ist vorbei
+    pruefe(fa2.laeuft === 1, 'zweiter Klick: der fruehere Zeitgeber beendet den neuen Lauf nicht',
+           'laufende Anordnungen: ' + fa2.laeuft);
+    e.w.close();
+
+    pruefe(a.fehler.concat(b.fehler, c.fehler, d.fehler, e.fehler).length === 0, 'keine Skriptfehler',
+           a.fehler.concat(b.fehler, c.fehler, d.fehler, e.fehler).join(' | '));
 
     console.log('\nErgebnis: ' + ok + ' ok, ' + fail + ' fehlgeschlagen');
     process.exit(fail ? 1 : 0);

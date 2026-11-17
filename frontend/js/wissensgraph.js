@@ -358,6 +358,11 @@
         // den Grund des Themas.
         var r = { label: a.label, size: a.size, x: a.x, y: a.y, color: grundfarbe(a), zIndex: 1,
                   labelColor: _farben.text, backdropColor: _farben.grund };
+        // Ausgeduennt (zu klein oder ohne Platz) – ausser er ist gerade gemeint:
+        // der ueberfahrene Knoten, seine Nachbarn und alles Hervorgehobene
+        // erscheinen immer. Linien zu einem verborgenen Knoten verbirgt sigma
+        // selbst (Kantenprogramm prueft beide Enden).
+        if (_versteckt[n] && !erzwungen(n)) { r.visibility = 'hidden'; return r; }
         // Erzwungen beschriftet wird nur eine begrenzte Auswahl (``beschriftet``) –
         // die uebrigen Nachbarn bleiben hell, ihre Beschriftung entscheidet das
         // Raster von sigma (keine Ueberlappung). Bei einem Knoten mit hundert
@@ -475,6 +480,142 @@
         return r;
     }
 
+    // ── Ausduennen: nur zeigen, was Platz hat ──────────────────────────────
+    // Grosse Knoten zuerst; ein Punkt erscheint nur, wenn er auf dem
+    // BILDSCHIRM keinen schon gesetzten beruehrt (Abstand in Bildpunkten).
+    // Beim Hineinzoomen waechst der Abstand schneller als die Punkte
+    // (sigma: Groesse ~ Wurzel des Zooms), also erscheinen die kleineren
+    // nach und nach. Dazu eine Mindestgroesse (Zahl der Verbindungen).
+    var DICHTE_SPEICHER = 'jarvis_wg_dichte';
+    var LUFT_PX = 6;                 // freier Rand zwischen zwei Punkten
+    var _ausduennen = true;
+    var _minGrad = 0;
+    var _versteckt = {};             // Knoten -> true, solange verborgen
+    var _zuKlein = 0;                // davon unter der Mindestgroesse
+    var _ohnePlatz = 0;              // davon wegen Platzmangel
+    var _dichteTimer = null;
+
+    function erzwungen(n) {
+        if (_hover && (n === _hover || _hoverNachbarn[n])) { return true; }
+        return !!(_hervor && _hervor.knoten[n]);
+    }
+
+    /** Berechnet ``_versteckt`` neu; true, wenn sich die Menge geaendert hat.
+     *  Waehrend die Anordnung laeuft, wandern die Punkte noch – dann gilt nur
+     *  die Mindestgroesse, der Platz wird danach bemessen. */
+    function ausduennenBerechnen() {
+        var neu = {}, zuKlein = 0, ohnePlatz = 0;
+        var liste = [];
+        if (G) {
+            G.forEachNode(function (n, a) {
+                if ((a.grad || 0) < _minGrad) { neu[n] = true; zuKlein++; } else { liste.push(n); }
+            });
+        }
+        if (_ausduennen && R && !_layout && liste.length > 1) {
+            liste.sort(function (x, y) {
+                var ax = G.getNodeAttributes(x), ay = G.getNodeAttributes(y);
+                return ((ay.size || 0) - (ax.size || 0)) || ((ay.grad || 0) - (ax.grad || 0))
+                    || (x < y ? -1 : (x > y ? 1 : 0));
+            });
+            var punkte = liste.map(function (n) {
+                var a = G.getNodeAttributes(n);
+                var v = R.graphToViewport({ x: a.x, y: a.y });
+                return { n: n, x: v.x, y: v.y, r: R.scaleSize(a.size || 1) };
+            });
+            var maxR = 0;
+            punkte.forEach(function (p) { if (p.r > maxR) { maxR = p.r; } });
+            // Zellgroesse >= groesster noetiger Abstand: dann genuegen die
+            // acht Nachbarzellen fuer die Pruefung.
+            var zelle = Math.max(1, 2 * maxR + LUFT_PX);
+            var raster = {};
+            punkte.forEach(function (p) {
+                var zx = Math.floor(p.x / zelle), zy = Math.floor(p.y / zelle);
+                for (var dx = -1; dx <= 1; dx++) {
+                    for (var dy = -1; dy <= 1; dy++) {
+                        var fach = raster[(zx + dx) + ':' + (zy + dy)];
+                        if (!fach) { continue; }
+                        for (var i = 0; i < fach.length; i++) {
+                            var q = fach[i], ab = p.r + q.r + LUFT_PX;
+                            var ddx = p.x - q.x, ddy = p.y - q.y;
+                            if (ddx * ddx + ddy * ddy < ab * ab) { neu[p.n] = true; ohnePlatz++; return; }
+                        }
+                    }
+                }
+                var k = zx + ':' + zy;
+                (raster[k] = raster[k] || []).push(p);
+            });
+        }
+        var alt = Object.keys(_versteckt), geaendert = alt.length !== zuKlein + ohnePlatz;
+        if (!geaendert) { geaendert = alt.some(function (n) { return !neu[n]; }); }
+        _versteckt = neu; _zuKlein = zuKlein; _ohnePlatz = ohnePlatz;
+        return geaendert;
+    }
+
+    /** Neu bemessen, bei Aenderung neu zeichnen, Zeile darunter erneuern. */
+    function dichteAnwenden() {
+        if (ausduennenBerechnen() && R) { R.refresh(); }
+        dichteZeileZeichnen();
+    }
+
+    // Kamera bewegt sich: hoechstens alle 150 ms neu bemessen. Jede Bewegung
+    // nach einem Lauf plant den naechsten – der Endzustand wird also immer
+    // bemessen.
+    function dichtePlanen() {
+        if (_dichteTimer) { return; }
+        _dichteTimer = setTimeout(function () { _dichteTimer = null; dichteAnwenden(); }, 150);
+    }
+
+    function dichteZeileZeichnen() {
+        var z = $('wg-ausgeduennt');
+        if (!z) { return; }
+        var teile = [];
+        if (_ohnePlatz) {
+            teile.push(t('wissensgraph.thinned', '{n} kleinere ausgeblendet, weil der Platz fehlt – beim Hineinzoomen erscheinen sie.',
+                         { n: _ohnePlatz }));
+        }
+        if (_zuKlein) {
+            teile.push(t('wissensgraph.below_min', '{n} unter der Mindestgröße ausgeblendet.', { n: _zuKlein }));
+        }
+        z.textContent = teile.join(' ');
+        z.classList.toggle('hidden', !teile.length);
+    }
+
+    /** Obergrenze des Reglers aus den geladenen Begriffen: das 95. Perzentil
+     *  der Verbindungszahl – darueber blieben nur noch Einzelne stehen. */
+    function reglerBemessen() {
+        var regler = $('wg-mindest');
+        if (!regler) { return; }
+        var grade = [];
+        if (G) { G.forEachNode(function (n, a) { grade.push(a.grad || 0); }); }
+        grade.sort(function (a, b) { return a - b; });
+        var oben = grade.length ? grade[Math.min(grade.length - 1, Math.floor(grade.length * 0.95))] : 1;
+        oben = Math.max(2, oben);
+        regler.max = String(oben);
+        if (_minGrad > oben) { _minGrad = oben; }
+        regler.value = String(_minGrad);
+        reglerTextZeichnen();
+    }
+
+    function reglerTextZeichnen() {
+        var w = $('wg-mindest-wert');
+        if (!w) { return; }
+        w.textContent = _minGrad <= 1
+            ? t('wissensgraph.min_all', 'alle')
+            : t('wissensgraph.min_n', 'ab {n} Verbindungen', { n: _minGrad });
+    }
+
+    function dichteLaden() {
+        var d = speicherLesen(DICHTE_SPEICHER, {});
+        _ausduennen = !(d && d.ausduennen === false);
+        _minGrad = d && typeof d.minGrad === 'number' && d.minGrad >= 0 ? Math.floor(d.minGrad) : 0;
+        var h = $('wg-ausduennen');
+        if (h) { h.checked = _ausduennen; }
+    }
+
+    function dichteSichern() {
+        speicherSchreiben(DICHTE_SPEICHER, { ausduennen: _ausduennen, minGrad: _minGrad });
+    }
+
     function rendererBauen() {
         var box = $('wg-graph');
         if (!box || !G) { return; }
@@ -501,6 +642,8 @@
         R.on('leaveNode', function () {
             _hover = null; _hoverNachbarn = {}; _hoverAuswahl = { knoten: {}, kanten: {} }; R.refresh();
         });
+        R.getCamera().on('updated', dichtePlanen);
+        dichteAnwenden();
         R.on('clickNode', function (e) { detailOeffnen(e.node); });
         R.on('clickStage', function () {
             if (_hervor) { _hervor = null; R.refresh(); }
@@ -515,16 +658,21 @@
         try {
             _layout = new window.JarvisFA2.FA2Layout(G, { settings: einst, getEdgeWeight: 'gewicht' });
             _layout.start();
+            // Waehrend die Punkte wandern, waere jede Platzmessung gleich
+            // wieder falsch – bis zum Ende gilt nur die Mindestgroesse.
+            dichteAnwenden();
         } catch (e) {
             // Ohne Worker (z. B. gesperrt): synchron und knapp, statt gar nicht.
             try { window.JarvisFA2.forceAtlas2.assign(G, { iterations: 80, settings: einst }); } catch (e2) { }
             positionenSichern();
+            dichteAnwenden();
             if (danach) { danach(); }
             return;
         }
         setTimeout(function () {
             if (_layout) { try { _layout.stop(); _layout.kill(); } catch (e) { } _layout = null; }
             positionenSichern();
+            dichteAnwenden();
             if (danach) { danach(); }
         }, dauer);
     }
@@ -544,6 +692,7 @@
                 _hoverNachbarn = {}; _hoverAuswahl = { knoten: {}, kanten: {} };
             }
             graphFuellen(d, anhaengen);
+            reglerBemessen();
             if (!G.order) {
                 hinweis(_zugang.steuern
                     ? t('wissensgraph.empty', 'Für diese Auswahl gibt es noch keine Begriffe. Aufgebaut wird der Graph unter Einstellungen → Wissen → Wissensgraph.')
@@ -559,7 +708,8 @@
             G.forEachNode(function (n, a) { if (!a._gecacht) { neu++; } });
             // Zugeklappte Grafik: kein Renderer ohne Flaeche – er entsteht beim Aufklappen.
             if (!R && grafikMoeglich() && !grafikZu()) { rendererBauen(); }
-            else if (R) { R.refresh(); }
+            else if (R) { R.refresh(); dichteAnwenden(); }
+            else { ausduennenBerechnen(); dichteZeileZeichnen(); }
             if (!grafikMoeglich()) {
                 hinweis(t('wissensgraph.no_webgl', 'Die Grafik braucht WebGL 2 – dieser Browser stellt es nicht bereit. Auffälligkeiten, Prüfliste und Pflege darunter funktionieren trotzdem.'), 'err');
                 return;
@@ -679,6 +829,7 @@
             holeJson('/api/wissensgraph/graph?' + p.toString()).then(function (d) {
                 hinweis('');
                 graphFuellen(d, true);
+                reglerBemessen();
                 inselnBerechnen(); legendeZeichnen(); insightsZeichnen();
                 anordnen(1500, function () {
                     if (R) { R.refresh(); }
@@ -1300,6 +1451,7 @@
     }
 
     function binden() {
+        dichteLaden();
         $('wg-faerbung').addEventListener('click', function () { faerbungSetzen(_modus === 'typ' ? 'insel' : 'typ'); });
         $('wg-zoom-plus').addEventListener('click', function () { if (R) { R.getCamera().zoomIn({ duration: 250 }); } });
         $('wg-zoom-minus').addEventListener('click', function () { if (R) { R.getCamera().zoomOut({ duration: 250 }); } });
@@ -1310,6 +1462,17 @@
             });
         });
         $('wg-mehr').addEventListener('click', function () { laden(true); });
+        $('wg-ausduennen').addEventListener('change', function () {
+            _ausduennen = $('wg-ausduennen').checked;
+            dichteSichern();
+            dichteAnwenden();
+        });
+        $('wg-mindest').addEventListener('input', function () {
+            _minGrad = parseInt($('wg-mindest').value, 10) || 0;
+            reglerTextZeichnen();
+            dichteSichern();
+            dichteAnwenden();
+        });
         ['wg-typ', 'wg-gruppe', 'wg-ordner', 'wg-dokumente'].forEach(function (id) {
             $(id).addEventListener('change', function () { laden(false); });
         });
@@ -1346,9 +1509,11 @@
             faerbungSetzen(_modus);
             insightsZeichnen();
             zaehlerZeichnen();
+            reglerTextZeichnen();
+            dichteZeileZeichnen();
         });
         klappInit();
-        window.addEventListener('jarvis-breit', function () { if (R) { R.resize(); R.refresh(); } });
+        window.addEventListener('jarvis-breit', function () { if (R) { R.resize(); R.refresh(); dichtePlanen(); } });
     }
 
     // ── Aufklappbare Container (Bauform /feedback, /ai-mouse) ───────────────
@@ -1383,7 +1548,7 @@
         karte.classList.toggle('is-zu', !!zu);
         if (kopf) { kopf.setAttribute('aria-expanded', zu ? 'false' : 'true'); }
         if (!zu && id === 'graph') {
-            if (R) { R.resize(); R.refresh(); }
+            if (R) { R.resize(); R.refresh(); dichtePlanen(); }
             else if (G && G.order && grafikMoeglich()) { rendererBauen(); }
         }
         var liste = klappZustand().filter(function (x) { return x !== id; });

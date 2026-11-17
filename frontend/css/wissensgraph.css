@@ -38,6 +38,13 @@
     font-size: .88rem; color: var(--text-secondary); cursor: pointer;
 }
 .wg-gruppe-knoepfe { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+/* Regler "Mindestgroesse": Text, Schieber, aktueller Wert in einer Zeile. */
+.wg-regler {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: .88rem; color: var(--text-secondary);
+}
+.wg-regler input[type="range"] { width: 120px; accent-color: var(--accent); }
+.wg-regler-wert { min-width: 9ch; color: var(--text-primary); }
 .wg-icon { min-width: 36px; font-weight: 600; }
 
 /* ── Buehne: Grafik + Detail ───────────────────────────────────────────── */

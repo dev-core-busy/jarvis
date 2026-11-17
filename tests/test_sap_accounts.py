@@ -475,17 +475,54 @@ check(mainpy.count("    c = _sap_client()") == 0,
 # Benutzer" am Syntaxbaum – hier stand bis 2026-10-30 die feste Zahl 5, und der
 # sechste, voellig richtige Endpunkt (Service-Liste der Konsole) machte sie rot.
 import ast as _ast
-_aufrufe = [n for n in _ast.walk(_ast.parse(mainpy)) if isinstance(n, _ast.Call)
-            and isinstance(n.func, _ast.Name) and n.func.id == "_sap_client"]
-check(len(_aufrufe) >= 5, "Positivkontrolle: Aufrufe von _sap_client gefunden",
-      str(len(_aufrufe)))
-check(all(len(n.args) == 1 and not n.keywords and isinstance(n.args[0], _ast.Name)
-          and n.args[0].id == "user" for n in _aufrufe),
-      "jeder Aufruf von _sap_client uebergibt den Benutzer",
-      str(mainpy.count("_sap_client(user)")))
-check(mainpy.count("z = _sap_zugang(user") == 3,
+# Seit 2026-11-16 (b63d287d) gehen auch Service-Liste und Tabellenliste ueber
+# _sap_zugang, damit die Fachprobe die Herkunft des Zugangs nennt. Danach waren
+# BEIDE festen Zahlen hier falsch (_sap_client >= 5, _sap_zugang == 3), obwohl
+# kein Endpunkt den Benutzer verlor. Deshalb: beide Helfer gemeinsam, gezaehlt
+# wird nur noch als Positivkontrolle, die Zusage wird pro Endpunkt geprueft.
+_baum = _ast.parse(mainpy)
+_HELFER = ("_sap_client", "_sap_zugang")
+_aufrufe = [n for n in _ast.walk(_baum) if isinstance(n, _ast.Call)
+            and isinstance(n.func, _ast.Name) and n.func.id in _HELFER]
+_sap_routen = {}
+for _f in _ast.walk(_baum):
+    if not isinstance(_f, _ast.AsyncFunctionDef):
+        continue
+    for _d in _f.decorator_list:
+        if (isinstance(_d, _ast.Call) and _d.args
+                and isinstance(_d.args[0], _ast.Constant)
+                and str(_d.args[0].value).startswith("/api/sap/")):
+            _sap_routen[str(_d.args[0].value)] = _f
+check(len(_aufrufe) >= 1 and len(_sap_routen) >= 3,
+      "Positivkontrolle: SAP-Routen und Aufrufe der Zugangs-Helfer gefunden",
+      f"{len(_sap_routen)} Routen, {len(_aufrufe)} Aufrufe")
+
+
+def _benutzer_uebergeben(n) -> bool:
+    """Genau ein Positionsargument ``user``; erlaubt ist nur der Schalter
+    ``trotz_aussetzer`` (bei _sap_zugang, fuer die Verbindungsprobe)."""
+    return (len(n.args) == 1 and isinstance(n.args[0], _ast.Name)
+            and n.args[0].id == "user"
+            and all(k.arg == "trotz_aussetzer" for k in n.keywords)
+            and (n.func.id == "_sap_zugang" or not n.keywords))
+
+
+_ohne = [f"{n.func.id} Zeile {n.lineno}" for n in _aufrufe
+         if not _benutzer_uebergeben(n)]
+check(not _ohne, "jeder Aufruf von _sap_client/_sap_zugang uebergibt den Benutzer",
+      ", ".join(_ohne))
+
+
+def _ruft(fn, name: str) -> bool:
+    return any(isinstance(n, _ast.Call) and isinstance(n.func, _ast.Name)
+               and n.func.id == name for n in _ast.walk(fn))
+
+
+_ohne_zugang = [p for p in ("/api/sap/test", "/api/sap/status", "/api/sap/ask")
+                if p not in _sap_routen or not _ruft(_sap_routen[p], "_sap_zugang")]
+check(not _ohne_zugang,
       "Test, Status und ask holen zusaetzlich Quelle und Hinweis",
-      str(mainpy.count("z = _sap_zugang(user")))
+      ", ".join(_ohne_zugang))
 
 # Rechte der neuen Endpunkte: Konto = require_sap_access, Admin-Sicht = Admin.
 for pfad, dep in (('@app.get("/api/sap/account")', "require_sap_access"),

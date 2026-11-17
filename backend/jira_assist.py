@@ -385,7 +385,7 @@ def _client(user: str = ""):
     return c
 
 
-async def ticket_laden(key: str, user: str = "") -> dict:
+async def ticket_laden(key: str, user: str = "", client=None) -> dict:
     """Ticket als STRUKTUR, nicht als Fliesstext.
 
     ``user`` entscheidet, mit WESSEN Jira-Rechten geladen wird (eigener Token
@@ -408,7 +408,9 @@ async def ticket_laden(key: str, user: str = "") -> dict:
         JiraError, fmt_err, html_to_text, issue_brief,
     )
 
-    c = _client(user)
+    # ``client``: ein Aufrufer mit EIGENEM Zugang (Loesungsarchiv mit
+    # Dienst-Token) reicht ihn durch; sonst der gemeinsame Lesezugang.
+    c = client if client is not None else _client(user)
     try:
         it = await asyncio.to_thread(c.get_issue, key)
     except JiraError as e:

@@ -692,6 +692,7 @@
                 { hdr: 'kb-sect-webdav-hdr', body: 'kb-sect-webdav-body', tog: 'kb-sect-webdav-tog' },
                 { hdr: 'kb-sect-net-hdr',    body: 'kb-sect-net-body',    tog: 'kb-sect-net-tog'    },
                 { hdr: 'kb-sect-wg-hdr',     body: 'kb-sect-wg-body',     tog: 'kb-sect-wg-tog'     },
+                { hdr: 'kb-sect-cfb-hdr',    body: 'kb-sect-cfb-body',    tog: 'kb-sect-cfb-tog'    },
             ]);
         }
 

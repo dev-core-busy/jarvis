@@ -974,15 +974,21 @@ def jql(bereiche_: list, start: str) -> str:
 
 
 def _client():
-    from backend.jira_client import JiraClient
-    c = JiraClient()
+    """Der Jira-Client des Archivs: der EIGENE Dienst-Token, wenn einer
+    hinterlegt ist (Einstellungen → Jira → Loesungsarchiv, Betreiber
+    2026-11-17), sonst der gemeinsame Lesezugang (``backend/dienst_zugang``).
+    Nur-Lesen in beiden Faellen. Derselbe Client holt die Ticketliste UND die
+    einzelnen Tickets (``_lauf`` reicht ihn an ``ticket_laden`` durch) – zwei
+    Zugaenge in einem Lauf saehen verschiedene Tickets."""
+    from backend import dienst_zugang
+    c = dienst_zugang.client("loesungsarchiv")
     if not c.configured:
         raise ArchivFehler("Jira ist nicht konfiguriert (Einstellungen → Jira → Verbindung).")
     return c
 
 
 def bereiche() -> list[dict]:
-    """Projekte, die der Sammelzugang sehen darf – fuer das Pulldown."""
+    """Projekte, die der Zugang des Archivs sehen darf – fuer das Pulldown."""
     c = _client()
     out = []
     for p in c.projects(limit=500):
@@ -1472,6 +1478,15 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     if not (st["bereiche"] and st["start"] and st["gruppen"]):
         return {"ok": False, "grund": "Lösungsarchiv ist unvollständig eingerichtet."}
     client = client or await asyncio.to_thread(_client)
+    if laden is None:
+        # Die Tickets mit DEMSELBEN Client holen wie die Liste – ohne das liefe
+        # ``ticket_laden`` ueber den gemeinsamen Zugang, waehrend die Liste vom
+        # Dienst-Token kam (Betreiber 2026-11-17: "dediziert").
+        from backend import jira_assist
+        _c = client
+
+        async def laden(key, user=""):
+            return await jira_assist.ticket_laden(key, user, client=_c)
     with _STAND_SPERRE:
         stand = _stand_laden()
     # Mehrere Bereiche (seit 2026-11-02): der Stand wird bei einer Aenderung

@@ -482,6 +482,32 @@ def sammel_client() -> ConfluenceClient:
     return ConfluenceClient()
 
 
+QUELLE_DIENST = "dienst"
+
+
+def dienst_client(feld: str) -> ConfluenceClient:
+    """Client eines Serverdienstes mit EIGENEM Token (``backend/dienst_zugang``).
+
+    ``feld`` ist das Geheimfeld der Skill-Config, in dem der Dienst-Token
+    liegt (z. B. ``einbindung_api_token``). Ist es leer, gilt der gemeinsame
+    Zugang. Die Adresse kommt wie immer aus der Skill-Config. ``zugang``
+    nennt, welcher Token gilt."""
+    cfg = get_confluence_config() or {}
+    roh = cfg.get(feld)
+    eigen = roh.strip() if isinstance(roh, str) else ""
+    if eigen:
+        c = ConfluenceClient({"base_url": basis_url(), "api_token": eigen})
+        quelle = QUELLE_DIENST
+    else:
+        c = sammel_client()
+        quelle = QUELLE_SAMMEL
+    try:
+        c.zugang = {"quelle": quelle, "hinweis": "", "benutzer": ""}
+    except Exception:  # noqa: BLE001 – eine Attrappe ohne Attribute darf nicht scheitern
+        pass
+    return c
+
+
 # ── Schreiben ───────────────────────────────────────────────────────────────
 
 def speichern(user: str, felder: dict) -> dict:

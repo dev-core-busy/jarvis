@@ -221,8 +221,12 @@
                     return d;
                 });
             })
-              .then(function () {
-                  status('✓ Gespeichert', 'ok');
+              .then(function (d) {
+                  // Adresse geaendert: der eigene Token des Loesungsarchivs ist
+                  // dabei entfernt worden (er ginge sonst an die neue Adresse).
+                  status('✓ Gespeichert' + (d && d.dienst_entfernt && d.dienst_entfernt.length
+                      ? ' ' + window.t('dzg.adresse_entfernt') : ''), 'ok');
+                  if (window.DienstZugang) window.DienstZugang.neuLaden();
                   Manager._persoenlichGespeichert = body.persoenliche_zugaenge;
                   Manager._applyPersoenlich(body.persoenliche_zugaenge);
                   if (Manager.loadZugaenge) Manager.loadZugaenge();

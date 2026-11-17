@@ -392,6 +392,33 @@ def sammel_client() -> JiraClient:
     return JiraClient()
 
 
+QUELLE_DIENST = "dienst"
+
+
+def dienst_client(feld: str) -> JiraClient:
+    """Client eines Serverdienstes mit EIGENEM Token (``backend/dienst_zugang``).
+
+    ``feld`` ist das Geheimfeld der Skill-Config, in dem der Dienst-Token
+    liegt (z. B. ``loesungsarchiv_api_token``). Ist es leer, gilt der
+    gemeinsame Lesezugang. Die Adresse kommt wie immer aus der Skill-Config,
+    und der Client ist Nur-Lesen (kein ``schreiben`` – Waechter
+    ``test_jira_nur_lesen``). ``zugang`` nennt, welcher Token gilt."""
+    cfg = get_jira_config() or {}
+    roh = cfg.get(feld)
+    eigen = roh.strip() if isinstance(roh, str) else ""
+    if eigen:
+        c = JiraClient({"base_url": basis_url(), "api_token": eigen})
+        quelle = QUELLE_DIENST
+    else:
+        c = sammel_client()
+        quelle = QUELLE_SAMMEL
+    try:
+        c.zugang = {"quelle": quelle, "hinweis": "", "benutzer": ""}
+    except Exception:  # noqa: BLE001 – eine Attrappe ohne Attribute darf nicht scheitern
+        pass
+    return c
+
+
 # ── Schreiben ───────────────────────────────────────────────────────────────
 
 def speichern(user: str, felder: dict) -> dict:

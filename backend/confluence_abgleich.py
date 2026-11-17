@@ -344,8 +344,11 @@ def _lauf(client) -> dict:
     from backend.confluence_client import html_to_text
 
     if client is None:
-        from backend.confluence_client import ConfluenceClient
-        client = ConfluenceClient()
+        # Eigener Dienst-Token der Einbindung, sonst der gemeinsame Zugang
+        # (Einstellungen → Wissen → Dynamische Confluence-Einbindung,
+        # Betreiber 2026-11-17; ``backend/dienst_zugang``).
+        from backend import dienst_zugang
+        client = dienst_zugang.client("confluence_einbindung")
     # ⚠ Wirft ``BestandUnlesbar``, wenn die Ablage da, aber nicht lesbar ist –
     # und MUSS es: als leere Liste gelesen raeumte der Abschnitt "Nicht mehr
     # gewollt" unten jede importierte Seite ab. ``lauf`` faengt den Fehler, der

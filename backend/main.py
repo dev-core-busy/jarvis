@@ -13423,6 +13423,18 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
             from backend import sap_accounts as _sapacc
         else:
             from backend import vemas_accounts as _sapacc
+    # Dienst-Token (Loesungsarchiv, Confluence-Einbindung) haengen an der
+    # Adresse, das Verbindungsformular schickt sie aber nie mit: beim Umzug
+    # werden sie ENTFERNT statt das Speichern zu sperren – mit der Sperre allein
+    # liesse sich die Adresse nie mehr aendern (``dienst_zugang.
+    # bei_adresswechsel``). Fail-safe: scheitert der Schritt, greift die
+    # Umleitungs-Pruefung darunter wie bisher.
+    dienst_entfernt = []
+    try:
+        from backend import dienst_zugang as _dz
+        dienst_entfernt = _dz.bei_adresswechsel(name, body, gespeichert)
+    except Exception as e:  # noqa: BLE001
+        print(f"[{name}] Dienst-Token beim Adresswechsel nicht geprueft: {e}", flush=True)
     # Neue Adresse + behaltenes Geheimnis = das Geheimnis ginge an die neue
     # Adresse, ohne dass es je jemand eingegeben oder aufgedeckt hat
     # (Code-Review 2026-10-07). Wer umzieht, gibt es neu ein.
@@ -13504,6 +13516,8 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
     if success:
         # Nur die FELDNAMEN – die Werte koennen Kennwoerter und Tokens sein
         _aktivitaet(user, "skills", "skill_konfiguriert", name, felder=sorted(body))
+    if success and dienst_entfernt:
+        return JSONResponse({"success": success, "dienst_entfernt": dienst_entfernt})
     return JSONResponse({"success": success})
 
 
@@ -20212,8 +20226,9 @@ async def jira_admin_areas(request: Request, user: str = Depends(require_local_a
 
 
 # ── Loesungsarchiv (backend/loesungsarchiv.py, Einstellungen → Jira) ──────────
-# Admin-Sache wie der ganze Jira-Reiter: der Lauf arbeitet mit dem
-# SAMMELZUGANG und legt einen zeitgesteuerten Auftrag an.
+# Admin-Sache wie der ganze Jira-Reiter: der Lauf arbeitet mit dem eigenen
+# Dienst-Token des Archivs, sonst mit dem SAMMELZUGANG (``dienst_zugang``),
+# und legt einen zeitgesteuerten Auftrag an.
 
 @app.get("/api/jira/admin/loesungsarchiv")
 async def jira_loesungsarchiv_lesen(user: str = Depends(require_local_auth)):
@@ -20234,7 +20249,7 @@ async def jira_loesungsarchiv_lesen(user: str = Depends(require_local_auth)):
 
 @app.get("/api/jira/admin/loesungsarchiv/bereiche")
 async def jira_loesungsarchiv_bereiche(user: str = Depends(require_local_auth)):
-    """Jira-Projekte, die der Sammelzugang sehen darf (Pulldown "Bereich")."""
+    """Jira-Projekte, die der Zugang des Archivs sehen darf (Pulldown "Bereich")."""
     from backend import loesungsarchiv as la  # noqa: PLC0415
     try:
         return JSONResponse({"ok": True, "bereiche": await asyncio.to_thread(la.bereiche)})
@@ -20296,6 +20311,79 @@ async def jira_loesungsarchiv_stopp(user: str = Depends(require_local_auth)):
         return JSONResponse({"ok": False, "error": "Es läuft gerade keine Auswertung."},
                             status_code=409)
     return JSONResponse({"ok": True, "stopp": True})
+
+
+# ── Dienstzugaenge (backend/dienst_zugang.py, Betreiber 2026-11-17) ─────────
+# Eigener PAT fuer das Loesungsarchiv (Einstellungen → Jira) und die
+# Dynamische Confluence-Einbindung (Einstellungen → Wissen). Gespeichert als
+# Geheimfeld der Skill-Config – das Auge geht ueber ``/api/secret/reveal``
+# (Quelle "skill"), diese Endpunkte geben KEINEN Token heraus.
+
+def _dienst_antwort(dienst: str) -> dict:
+    from backend import dienst_zugang as _dz  # noqa: PLC0415
+    z = _dz.zustand(dienst)
+    z["skill_aktiv"] = bool(_skill_active(z["skill"]))
+    return z
+
+
+@app.get("/api/dienstzugang/{dienst}")
+async def dienstzugang_lesen(dienst: str, user: str = Depends(require_local_auth)):
+    """Welcher Zugang gilt fuer diesen Dienst – ohne Token."""
+    from backend import dienst_zugang as _dz  # noqa: PLC0415
+    try:
+        return JSONResponse({"ok": True, **_dienst_antwort(dienst)})
+    except _dz.DienstFehler as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
+
+
+@app.post("/api/dienstzugang/{dienst}")
+async def dienstzugang_speichern(dienst: str, request: Request,
+                                 user: str = Depends(require_local_auth)):
+    """Eigenen Token hinterlegen (``{"token": "…"}``). Leer ist ein Fehler –
+    entfernt wird ueber DELETE."""
+    from backend import dienst_zugang as _dz  # noqa: PLC0415
+    try:
+        body = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        e = _dz.eintrag(dienst)
+        await asyncio.to_thread(_dz.speichern, dienst, (body or {}).get("token"),
+                                _get_skill_manager())
+    except _dz.DienstFehler as ex:
+        return JSONResponse({"ok": False, "error": str(ex)}, status_code=400)
+    except Exception as ex:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(ex)}, status_code=500)
+    # Nur der FELDNAME – der Wert ist ein Token.
+    _aktivitaet(user, "skills", "skill_konfiguriert", e["skill"], felder=[e["feld"]])
+    return JSONResponse({"ok": True, **_dienst_antwort(dienst)})
+
+
+@app.delete("/api/dienstzugang/{dienst}")
+async def dienstzugang_loeschen(dienst: str, user: str = Depends(require_local_auth)):
+    """Eigenen Token entfernen – danach gilt der gemeinsame Zugang."""
+    from backend import dienst_zugang as _dz  # noqa: PLC0415
+    try:
+        e = _dz.eintrag(dienst)
+        await asyncio.to_thread(_dz.loeschen, dienst, _get_skill_manager())
+    except _dz.DienstFehler as ex:
+        return JSONResponse({"ok": False, "error": str(ex)}, status_code=404)
+    except Exception as ex:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(ex)}, status_code=500)
+    _aktivitaet(user, "skills", "skill_konfiguriert", e["skill"], felder=[e["feld"]])
+    return JSONResponse({"ok": True, **_dienst_antwort(dienst)})
+
+
+@app.post("/api/dienstzugang/{dienst}/test")
+async def dienstzugang_testen(dienst: str, user: str = Depends(require_local_auth)):
+    """Verbindungstest mit GENAU dem Zugang, den der Dienst benutzt; die
+    Antwort nennt ihn (``quelle``)."""
+    from backend import dienst_zugang as _dz  # noqa: PLC0415
+    try:
+        erg = await asyncio.to_thread(_dz.testen, dienst)
+    except _dz.DienstFehler as ex:
+        return JSONResponse({"ok": False, "error": str(ex)}, status_code=404)
+    return JSONResponse(erg)
 
 
 @app.post("/api/jira/assist/vorlagen/standard")
@@ -26693,10 +26781,11 @@ async def wissen_confluence_pages(space: str = "", user: str = Depends(require_a
 def _cfb_aktiv() -> tuple[bool, bool]:
     """(Skill aktiv?, konfiguriert?) fuer die Sichtbarkeit des Containers.
 
-    "konfiguriert" heisst hier: der SAMMELzugang ist eingerichtet. Mit Absicht
-    (Code-Review 2026-10-07 geprueft): eingebundene Bereiche holt der Cron
-    "Wissensabgleich" mit dem Sammelzugang (``confluence_abgleich``) – ohne ihn
-    waere eine Einbindung eine Auswahl, die nie ankommt. Wo mit dem Zugang des
+    "konfiguriert" heisst hier: der Zugang, mit dem der Cron "Wissensabgleich"
+    die eingebundenen Bereiche holt (``confluence_abgleich``), ist eingerichtet –
+    der eigene Dienst-Token der Einbindung, sonst der Sammelzugang
+    (``dienst_zugang``, Betreiber 2026-11-17). Ohne ihn waere eine Einbindung
+    eine Auswahl, die nie ankommt. Wo mit dem Zugang des
     BENUTZERS geschrieben wird (Destillat -> Confluence-Seite), gilt dessen
     Zugang, nicht diese Funktion.
 
@@ -26708,7 +26797,9 @@ def _cfb_aktiv() -> tuple[bool, bool]:
     einer Funktion, die niemand gemeldet hat.
     """
     try:
-        return bool(_skill_active("confluence")), bool(_confluence_client().configured)
+        from backend import dienst_zugang as _dz
+        return (bool(_skill_active("confluence")),
+                bool(_dz.client("confluence_einbindung").configured))
     except Exception as e:  # noqa: BLE001
         print(f"[Wissen/CF-Bindung] Zustand nicht ermittelbar: {e}")
         return False, False

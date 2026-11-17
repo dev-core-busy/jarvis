@@ -120,8 +120,13 @@
                     return d;
                 });
             })
-              .then(function () {
-                  status('✓ ' + window.t('confluence.saved'), 'ok');
+              .then(function (d) {
+                  // Adresse geaendert: der eigene Token der Einbindung ist dabei
+                  // entfernt worden (er ginge sonst an die neue Adresse) – sagen.
+                  status('✓ ' + window.t('confluence.saved')
+                      + (d && d.dienst_entfernt && d.dienst_entfernt.length
+                          ? ' ' + window.t('dzg.adresse_entfernt') : ''), 'ok');
+                  if (window.DienstZugang) window.DienstZugang.neuLaden();
                   Manager._persoenlichGespeichert = body.persoenliche_zugaenge;
                   if (window.SkillCfg) window.SkillCfg.persoenlichAnwenden('cf', body.persoenliche_zugaenge);
                   Manager.loadZugaenge();

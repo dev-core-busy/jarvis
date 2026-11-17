@@ -415,13 +415,14 @@ section("13) EINE Konstruktionsstelle – als REGEL, nicht als Liste")
 #
 # ABSICHTLICH beim Sammelzugang – jede Zeile mit eigenem Grund:
 SAMMEL_OK = {
-    # Fuellt die GEMEINSAME Wissensdatenbank. Mit einem persoenlichen Token
-    # haenge der Inhalt des geteilten Index davon ab, wer den Lauf zuletzt
-    # angestossen hat.
-    "backend/confluence_abgleich.py",
     # Holt Profilbilder fuer ALLE Benutzer – eine Serveraufgabe ohne Person.
     "backend/avatar.py",
 }
+# ``backend/confluence_abgleich.py`` stand hier bis 2026-11-17. Seitdem holt
+# der Abgleich seinen Client ueber ``dienst_zugang`` (eigener Dienst-Token der
+# Einbindung, sonst Sammelzugang) – gebaut in ``confluence_accounts.
+# dienst_client``. Eine eigene Konstruktion dort waere ein Weg am Dienst-Token
+# vorbei; die Regel unten meldet sie deshalb.
 ERLAUBT = {"backend/confluence_client.py", "backend/confluence_accounts.py"}
 bauer = []
 for pfad in sorted(ROOT.glob("backend/*.py")) + sorted(ROOT.glob("skills/*/main.py")):
@@ -437,13 +438,17 @@ for pfad in sorted(ROOT.glob("backend/*.py")) + sorted(ROOT.glob("skills/*/main.
 bauer = sorted(set(bauer))
 # Positivkontrolle: findet die Regel ueberhaupt Stellen? Eine leere Menge waere
 # trivial erfuellt und der ganze Abschnitt wertlos.
+# Positivkontrolle ueber die bekannten Stellen statt ueber eine feste Zahl
+# (die Zahl fiel, als der Abgleich auf den Dienstzugang umzog).
 check("Positivkontrolle: die Regel findet Konstruktionsstellen",
-      len(bauer) >= 3, str(bauer))
+      "backend/confluence_accounts.py" in bauer and "backend/avatar.py" in bauer, str(bauer))
 check("keine unbegruendete Konstruktionsstelle",
       not (set(bauer) - ERLAUBT - SAMMEL_OK),
       str(sorted(set(bauer) - ERLAUBT - SAMMEL_OK)))
 check("⚠ der SKILL baut keinen Client selbst – er fragt das Konten-Modul",
       "skills/confluence/main.py" not in bauer, str(bauer))
+check("⚠ der Abgleich baut keinen Client selbst – er nimmt den Dienstzugang",
+      "backend/confluence_abgleich.py" not in bauer, str(bauer))
 
 # ⚠ VORGABE 2026-09-29: der eigene Zugang hat IN JEDEM BEREICH Vorrang. Als
 # REGEL ueber main.py: jede Funktion mit angemeldetem Benutzer (`user`-

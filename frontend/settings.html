@@ -2526,6 +2526,32 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- Dynamische Confluence-Einbindung: eigener Zugang des Abgleichs
+                             (backend/dienst_zugang.py, Betreiber 2026-11-17). Die Auswahl
+                             der Bereiche bleibt unter /wissen; hier steht nur, mit WELCHEM
+                             Token der Cron "Wissensabgleich" sie holt. Sichtbar nur mit
+                             aktivem Confluence-Skill (js/dienst_zugang.js). -->
+                        <div class="kb-section" data-dzg-sektion style="display:none;">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-cfb-hdr">
+                                <h3 data-i18n="wissen.sec_cfbind">Dynamische Confluence-Einbindung</h3>
+                                <span class="sk-openclaw-toggle" id="kb-sect-cfb-tog">▶</span>
+                            </div>
+                            <div id="kb-sect-cfb-body" class="kb-collapse-body" style="display:none;">
+                                <div class="form-group" data-dienstzugang="confluence_einbindung">
+                                    <label for="dzg-cfb-token" data-i18n="dzg.h">Eigener Zugang (Personal Access Token)</label>
+                                    <p class="kb-hint" style="margin:0 0 4px;" data-i18n="dzg.cfb_hint">Wird ein Token hinterlegt, holt der Wissensabgleich die unter /wissen eingebundenen Confluence-Seiten ausschließlich damit – unabhängig vom gemeinsamen Zugang. Ohne eigenen Token gilt der gemeinsame Zugang. Die Adresse kommt aus der Confluence-Verbindung.</p>
+                                    <div class="sec-ssh-neu">
+                                        <input type="password" id="dzg-cfb-token" class="sec-ssh-feld dzg-token" autocomplete="new-password" spellcheck="false">
+                                        <button type="button" class="sec-btn primary dzg-save" data-i18n="dzg.save">Token speichern</button>
+                                        <button type="button" class="sec-btn dzg-test" data-i18n="dzg.test">Verbindung prüfen</button>
+                                        <button type="button" class="sec-btn dzg-del" title="Eigenen Token entfernen" data-i18n-title="dzg.del" aria-label="Eigenen Token entfernen"></button>
+                                    </div>
+                                    <div class="kb-hint dzg-status" style="margin-top:6px;"></div>
+                                    <div class="dzg-meldung" role="status" aria-live="polite" hidden></div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Wissensgraph: Aufbau und Pflege (2026-11-01 von /wissensgraph
                              hierher verlegt – die Kachel haengt damit nur noch an den
                              Wissenseditoren). Logik: wissensgraph_steuerung.js; die
@@ -4141,6 +4167,22 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <p class="kb-hint" data-i18n-html="jlarch.intro">Wertet die <b>geschlossenen und gelösten</b> Tickets eines Jira-Bereichs nach Zeitplan aus: Problem und Lösungsweg werden <b>ohne Personen- und Kundendaten</b> herausgezogen, gleichartige Fälle in einem Eintrag gesammelt und gezählt. Erst wenn ein Problem den <b>Schwellwert</b> erreicht, wandert die Lösung in die Wissensdatenbank – und, falls eingeschaltet, in den Wissensgraphen. Einzelfälle bleiben draußen.</p>
                                 <div class="form-group">
                                     <label class="checkbox-group"><input type="checkbox" id="jlarch-aktiv"><span data-i18n="jlarch.aktiv">Lösungsarchiv einschalten</span></label>
+                                </div>
+                                <!-- Eigener Zugang des Archivs (backend/dienst_zugang.py,
+                                     js/dienst_zugang.js, Betreiber 2026-11-17). Eigene
+                                     Knoepfe, eigener Endpunkt: "Speichern" darunter
+                                     schickt den Token NICHT mit. -->
+                                <div class="form-group" data-dienstzugang="loesungsarchiv">
+                                    <label for="dzg-larch-token" data-i18n="dzg.h">Eigener Zugang (Personal Access Token)</label>
+                                    <p class="kb-hint" style="margin:0 0 4px;" data-i18n="dzg.larch_hint">Wird ein Token hinterlegt, liest das Lösungsarchiv Jira ausschließlich damit – unabhängig vom gemeinsamen Zugang und von den persönlichen Zugängen. Ohne eigenen Token gilt der gemeinsame Zugang. Die Adresse kommt aus der Verbindung oben.</p>
+                                    <div class="sec-ssh-neu">
+                                        <input type="password" id="dzg-larch-token" class="sec-ssh-feld dzg-token" autocomplete="new-password" spellcheck="false">
+                                        <button type="button" class="sec-btn primary dzg-save" data-i18n="dzg.save">Token speichern</button>
+                                        <button type="button" class="sec-btn dzg-test" data-i18n="dzg.test">Verbindung prüfen</button>
+                                        <button type="button" class="sec-btn dzg-del" title="Eigenen Token entfernen" data-i18n-title="dzg.del" aria-label="Eigenen Token entfernen"></button>
+                                    </div>
+                                    <div class="kb-hint dzg-status" style="margin-top:6px;"></div>
+                                    <div class="dzg-meldung" role="status" aria-live="polite" hidden></div>
                                 </div>
                                 <div class="form-group">
                                     <label for="jlarch-bereich-neu" data-i18n="jlarch.bereiche">Jira-Bereiche</label>
@@ -6636,7 +6678,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=490"></script>
+    <script src="/static/js/i18n.js?v=491"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6658,8 +6700,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/knowledge_sync.js?v=6"></script>
     <script src="/static/js/mcp.js?v=13"></script>
     <script src="/static/js/vision.js?v=38"></script>
-    <script src="/static/js/confluence.js?v=12"></script>
-    <script src="/static/js/jira.js?v=32"></script>
+    <script src="/static/js/confluence.js?v=13"></script>
+    <script src="/static/js/jira.js?v=33"></script>
+    <script src="/static/js/dienst_zugang.js?v=1"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=4"></script>
     <script src="/static/js/sap.js?v=15"></script>
@@ -6700,7 +6743,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=5"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=256"></script>
+    <script src="/static/js/app.js?v=257"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

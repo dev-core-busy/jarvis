@@ -1825,5 +1825,49 @@ finally:
     la.einstellungen_speichern(_vor22, cron_manager=CronAttrappe())
 
 
+
+# ── 23. Jira-Suche: grosse Seiten, Obergrenze des Servers, Zeit im Ergebnis ─
+# ECHT 2026-11-17: 50 je Abruf = 3.100 Abrufe = 20 min vor dem ersten Ticket.
+print("\n\033[1m23. Jira-Suche: grosse Seiten und Suchzeit (ECHT 2026-11-17)\033[0m")
+class _DeckelClient:
+    """Wie ``ClientAttrappe.search``, aber der Server liefert hoechstens ``deckel``."""
+    def __init__(self, keys, deckel):
+        self.keys, self.deckel, self.limits = list(keys), deckel, []
+    def search(self, jql, limit=25, start=0, fields=None):
+        self.limits.append(limit)
+        seite = self.keys[start:start + min(limit, self.deckel)]
+        return {"total": len(self.keys), "startAt": start,
+                "issues": [{"key": k, "fields": {"resolutiondate": "2026-10-15T10:00:00.000+0200"}}
+                           for k in seite]}
+_k23 = [f"{BEREICH}-9{i:03d}" for i in range(10)]
+_dc = _DeckelClient(_k23, 3)
+_neu23, _offen23 = la.offene_tickets(_dc, [BEREICH], "2026-01-01", {}, 100)
+check("Positivkontrolle: der Server deckelt wirklich unter der Seitengroesse",
+      _dc.deckel < la.SEITE and len(_dc.limits) > 1, _dc.limits)
+check("⚠ Server liefert weniger als verlangt: trotzdem ALLE Treffer",
+      [t["key"] for t in _neu23] == _k23 and _offen23 == len(_k23), (_offen23, len(_neu23)))
+check("Abrufe = Treffer / gelieferte Seite (kein Leerlauf)",
+      len(_dc.limits) == -(-len(_k23) // _dc.deckel), _dc.limits)
+check("⚠ verlangt wird die volle Seite (SEITE)", set(_dc.limits) == {la.SEITE}, _dc.limits)
+check("⚠ SEITE ist gross (bei 50 dauerte die Suche auf ECHT 20 min)", la.SEITE >= 500, la.SEITE)
+_dc2 = _DeckelClient(_k23, 10 ** 6)
+la.offene_tickets(_dc2, [BEREICH], "2026-01-01", {}, 100)
+check("ohne Deckel genuegt ein Abruf fuer wenige Treffer", len(_dc2.limits) == 1, _dc2.limits)
+
+_vor23 = la.einstellungen()
+try:
+    la.einstellungen_speichern({**_vor23, "je_lauf": 50}, cron_manager=CronAttrappe())
+    with redirect_stdout(io.StringIO()) as _aus23:
+        _e23 = lauf(client, ProviderAttrappe())
+    check("Positivkontrolle: Lauf hat ein Ergebnis", isinstance(_e23.get("zeiten"), dict), _e23)
+    check("⚠ Suchzeit steht im Ergebnis", isinstance((_e23.get("zeiten") or {}).get("suche_s"), (int, float)),
+          _e23.get("zeiten"))
+    check("Suchzeit steht im Grund", "Jira-Suche " in (_e23.get("grund") or ""), _e23.get("grund"))
+    check("Suchzeit steht im Journal", "[Lösungsarchiv] Jira-Suche:" in _aus23.getvalue(),
+          _aus23.getvalue()[-300:])
+finally:
+    la.einstellungen_speichern(_vor23, cron_manager=CronAttrappe())
+
+
 print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m")
 sys.exit(0 if FAIL == 0 else 1)

@@ -100,7 +100,12 @@ SCHWELLE_VORGABE = 10
 SCHWELLE_MAX = 100000
 JE_LAUF_VORGABE = 300
 JE_LAUF_MAX = 100000
-SEITE = 50                       # Tickets je Suchabruf
+# ⚠ SEITE (2026-11-17): bei 50 brauchte die Suche auf ECHT (Start 2020,
+# 155.000 Treffer, 3.100 Abrufe) rund 20 Minuten VOR dem ersten Ticket. Ein
+# Abruf kostet fast gleich viel, egal wie gross die Seite ist (DEV: 0,16 s bei
+# 50, 0,21 s bei 1000). Liefert Jira weniger als verlangt (Obergrenze des
+# Servers), blaettert ``offene_tickets`` nach der GELIEFERTEN Zahl weiter.
+SEITE = 1000                     # Tickets je Suchabruf
 KANDIDATEN_SCHWELLE = 0.80       # e5-Kosinus, ab dem ein Eintrag Kandidat ist
 KANDIDATEN_MAX = 3
 # Gleichzeitige Analysen je Lauf. Auf DEV gemessen (Haus-Server, Denken aus):
@@ -1489,9 +1494,14 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
         await _sichern(stand)
         idx0 = await asyncio.to_thread(index_und_graph or _index_und_graph)
 
+    t0 = time.monotonic()
     neu, offen = await asyncio.to_thread(
         offene_tickets, client, st["bereiche"], st["start"],
         dict(stand["verarbeitet"]), _je_lauf(st))
+    suche_s = time.monotonic() - t0
+    # Die Suche laeuft VOR dem ersten Ticket und stand bis 2026-11-17 in
+    # keiner Zeitangabe – 20 Minuten waren nur aus der Differenz ablesbar.
+    print(f"[Lösungsarchiv] Jira-Suche: {offen} offen, {suche_s:.1f} s", flush=True)
     _lauf_info["gesamt"] = len(neu)
     # Alle offenen Tickets, nicht nur die dieses Laufs – die Uebersicht nennt
     # sie in Klammern, damit der Umfang des Rueckstands sichtbar bleibt.
@@ -1635,11 +1645,12 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
     zeile = zeiten.text(wanduhr, ausgewertet)
     if zeile:
         grund += " · " + zeile
+    grund += f" · Jira-Suche {suche_s:.1f} s".replace(".", ",")
     erg = {"ok": zahl["fehler"] == 0, "grund": grund, **zahl, **sch,
            "offen": rest, "fehler_beispiele": fehler, "fehler_arten": arten,
            "server_aus": server_aus,
            "beendet": bool(_stopp_angefordert),
-           "zeiten": zeiten.als_dict(wanduhr, ausgewertet)}
+           "zeiten": {**zeiten.als_dict(wanduhr, ausgewertet), "suche_s": round(suche_s, 2)}}
     _ergebnis_merken(erg)
     return erg
 

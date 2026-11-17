@@ -6,11 +6,22 @@
  * Sitzung weiter. Der Schluessel hier gilt 15 Minuten und wird ausschliesslich
  * von den Abruf-Endpunkten angenommen (backend/download_key.py).
  *
+ * ⚠ JE ADRESSE EIN SCHLUESSEL (Pentest "Hardening" F-20, 2026-11-17). Bis dahin
+ * galt EIN Schluessel je Benutzer fuer jede Datei, die er laden darf – ein aus
+ * Verlauf oder Proxy-Protokoll abgegriffener Link oeffnete 15 Minuten lang auch
+ * alle anderen. Jetzt bindet der Server jeden Schluessel an genau eine Adresse
+ * (backend/download_key.py, `ziel_kanon`; ohne `token` und den Cache-Buster
+ * `t`). Der Client rechnet dabei NICHTS nach: er schickt die Adresse im
+ * Sammelabruf (POST /api/download-key) und merkt sich die Antwort unter der
+ * Adresse. Ein ungebundener Schluessel wird abgewiesen.
+ *
  * ⚠ ER MUSS SYNCHRON VERFUEGBAR SEIN. Alle Stellen, die eine solche Adresse
  * bauen (chatlib::_withToken, wissen.js, knowledge.js, kbmatrix.js, tracks.js,
- * info_files.js, vision.js, issues.js), tun das MITTEN IM RENDERN. Deshalb wird
- * er einmal je Tab geholt und im sessionStorage gehalten, statt je Link
- * angefordert zu werden.
+ * info_files.js, vision.js, issues.js), tun das MITTEN IM RENDERN. Deshalb gibt
+ * `url()` sofort eine Adresse zurueck – mit dem gemerkten Schluessel dieser
+ * Adresse oder dem Platzhalter – und alle Adressen eines Durchgangs gehen in
+ * EINEM Sammelabruf an den Server. Alle diese Stellen uebergeben die GANZE
+ * Adresse an `url()`; einen Schluessel ohne Adresse gibt es nicht mehr.
  *
  * ⚠ UND GENAU DAHER STAMMT DER FEHLER VOM 2026-09-04: die Adresse wird beim
  * RENDERN gebaut und friert im DOM ein, geklickt wird sie MINUTEN SPAETER. Ein
@@ -42,48 +53,85 @@
 (function () {
     'use strict';
 
-    var LAGER = 'jarvis_dlkey';          // {key, exp, user}
+    var LAGER = 'jarvis_dlkey2';         // {user, keys: {<adresse>: {key, exp}}}
     var VORLAUF_S = 60;                  // so frueh erneuern, dass kein Klick in den Ablauf faellt
     var TAKT_MS = 30000;                 // Pruefintervall; Hintergrund-Tabs drosseln das auf ~1/min
-    var _laeuft = null;                  // laufender Abruf (buendelt parallele Aufrufer)
-    // Platzhalter, solange noch kein Schluessel da ist – JDL1-Form mit Ablauf 0,
-    // damit ablauf()/veraltet() ihn erkennen und das Nachziehen ihn ersetzt.
+    var MAX_ZIELE = 200;                 // = _DLKEY_MAX_ZIELE im Backend
+    // Eintraege im Zwischenspeicher (abgelaufene fliegen zuerst). Gemessen im
+    // echten Chrome (DEV 2026-11-17): /wissen rendert ~1500 Datei-Adressen; ein
+    // Deckel von 500 verdraengte dort Schluessel, und jedes Neuzeichnen der
+    // Liste holte ~1000 neu. 3000 Eintraege sind ~0,8 MB sessionStorage.
+    var MAX_LAGER = 3000;
+    // Platzhalter, solange fuer diese Adresse noch kein Schluessel da ist –
+    // JDL1-Form mit Ablauf 0, damit ablauf()/veraltet() ihn erkennen und das
+    // Nachziehen ihn ersetzt. Der Server weist ihn ab, ohne dass ein
+    // Sitzungstoken die Seite verlaesst.
     var WARTEN = 'JDL1.warten.0.0';
 
-    /* ⚠ NICHT direkt localStorage lesen. Bis zum 2026-10-01 stand hier
-     * `getItem('jarvis_token')` – den Schluessel schreibt aber nur `app.js`
-     * (/settings). Im Chat (`jarvis_chat_token`) und im Benutzer-Chat
-     * (`jarvis_uc_token`) war `tok()` damit leer, und das hatte DREI Folgen
-     * auf einmal: `holen()` brach vor dem Abruf ab, der Takt sprang nie an,
-     * und `DL.url()` gab die Adresse OHNE `?token=` zurueck – 401, vom Browser
-     * als Anmeldefrage angezeigt. Die Kette steht deshalb in sitzung.js. */
+    /* ⚠ NICHT direkt localStorage lesen – die Kette steht in sitzung.js
+     * (Vorfall 2026-10-01: im Chat war der Schluessel dadurch leer). */
     function tok() { return window.JarvisSitzung.token(); }
     function benutzer() { return window.JarvisSitzung.benutzer(); }
     function jetzt() { return Math.floor(Date.now() / 1000); }
 
-    function lesen() {
+    /* ── Die Adresse als Merkschluessel ────────────────────────────────────
+     * Ohne `token` und `t`, Parameter sortiert, ohne eigenen Ursprung: dieselbe
+     * Datei, einmal mit und einmal ohne Cache-Buster gebaut, ist EIN Eintrag.
+     * Das ist nur der Merkschluessel des Clients – das Ziel, an das der Server
+     * den Schluessel bindet, bildet der Server selbst. */
+    function merk(u) {
         try {
-            var roh = sessionStorage.getItem(LAGER);
-            if (!roh) return null;
-            var d = JSON.parse(roh);
-            if (!d || !d.key || !d.exp) return null;
+            var x = new URL(String(u || ''), location.origin);
+            if (x.origin !== location.origin) return '';
+            var q = new URLSearchParams(x.search);
+            q.delete('token'); q.delete('t');
+            q.sort();
+            var s = q.toString();
+            return x.pathname + (s ? '?' + s : '');
+        } catch (e) { return ''; }
+    }
+
+    function ohneToken(u) {
+        return String(u || '').replace(/([?&])token=[^&#]*(&?)/, function (_, a, b) {
+            return b ? a : '';
+        }).replace(/[?&]$/, '');
+    }
+
+    function lager() {
+        try {
+            var d = JSON.parse(sessionStorage.getItem(LAGER) || 'null');
             // An den Benutzer gebunden: nach einem Benutzerwechsel im selben Tab
-            // waere der alte Schluessel der eines Fremden.
-            if (d.user && benutzer() && d.user !== benutzer()) return null;
-            if (d.exp - VORLAUF_S <= jetzt()) return null;
+            // waeren die alten Schluessel die eines Fremden.
+            if (!d || !d.keys || (d.user && benutzer() && d.user !== benutzer())) {
+                return { user: benutzer(), keys: {} };
+            }
             return d;
-        } catch (e) { return null; }
+        } catch (e) { return { user: benutzer(), keys: {} }; }
     }
 
-    function schreiben(d) {
-        try { sessionStorage.setItem(LAGER, JSON.stringify(d)); } catch (e) { /* privater Modus */ }
+    function lagerSchreiben(d) {
+        try {
+            var t = jetzt(), namen = Object.keys(d.keys);
+            namen.forEach(function (k) { if (!(d.keys[k].exp > t)) delete d.keys[k]; });
+            namen = Object.keys(d.keys);
+            if (namen.length > MAX_LAGER) {
+                namen.sort(function (a, b) { return d.keys[a].exp - d.keys[b].exp; });
+                namen.slice(0, namen.length - MAX_LAGER).forEach(function (k) { delete d.keys[k]; });
+            }
+            sessionStorage.setItem(LAGER, JSON.stringify(d));
+        } catch (e) { /* privater Modus */ }
     }
 
-    /* ── Adressen, die den Schluessel schon tragen ──────────────────────────
-     * Angefasst wird AUSSCHLIESSLICH ein Wert der Form `token=JDL1.…`. Ein
-     * Sitzungstoken in ?token= (Alt-Weg der Android-App, /docs von Hand) bleibt
-     * unberuehrt, und fremde Hosts kommen gar nicht erst vor – der Schluessel
-     * wird nur an eigene /api-Pfade angehaengt. */
+    /* Gueltiger (nicht bald ablaufender) Schluessel fuer diese Adresse – oder null. */
+    function gemerkt(u) {
+        var k = merk(u);
+        if (!k) return null;
+        var e = lager().keys[k];
+        return (e && e.key && e.exp - VORLAUF_S > jetzt()) ? e : null;
+    }
+
+    /* ── Adressen, die schon einen Schluessel (oder den Platzhalter) tragen ──
+     * Angefasst wird AUSSCHLIESSLICH ein Wert der Form `token=JDL1.…`. */
     var TOKEN_RE = /([?&]token=)(JDL1(?:\.|%2E)[^&#]*)/i;
 
     function ablauf(u) {
@@ -107,89 +155,128 @@
         return u.replace(TOKEN_RE, function (_, pre) { return pre + encodeURIComponent(neu); });
     }
 
-    /* Schreibt den frischen Schluessel in bereits gerenderte Adressen.
-     * Nur VERALTETE werden angefasst: ein `src`-Tausch startet einen neuen
-     * Netzabruf, und ein bereits geladenes Bild braucht seine Adresse nicht
-     * mehr. Deshalb bleiben fertig geladene <img> aussen vor. */
-    function aktualisiere(neu) {
-        if (!neu || typeof document === 'undefined' || !document.querySelectorAll) return 0;
+    /* ── Sammelabruf ───────────────────────────────────────────────────────
+     * Alles, was in einem Render-Durchgang vorgemerkt wird, geht in EINEM
+     * Aufruf an den Server (setTimeout 0 sammelt den synchronen Durchgang). */
+    var _offen = {};                     // merk -> Adresse (ohne token)
+    var _geplant = false;
+    var _laeuft = null;
+
+    function vormerken(u) {
+        var k = merk(u);
+        if (!k || !tok()) return;
+        _offen[k] = ohneToken(u);
+        if (!_geplant) {
+            _geplant = true;
+            setTimeout(abholen, 0);
+        }
+    }
+
+    function abholen() {
+        _geplant = false;
+        if (_laeuft) return _laeuft.then(function () { if (Object.keys(_offen).length) return abholen(); });
+        var namen = Object.keys(_offen).slice(0, MAX_ZIELE);
+        if (!namen.length || !tok()) return Promise.resolve(null);
+        var ziele = namen.map(function (k) { return _offen[k]; });
+        namen.forEach(function (k) { delete _offen[k]; });
+        _laeuft = fetch('/api/download-key', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + tok(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ziele: ziele })
+        })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.ok || !d.keys) return null;
+                var l = lager();
+                l.user = benutzer();
+                Object.keys(d.keys).forEach(function (adr) {
+                    var k = merk(adr), e = d.keys[adr];
+                    if (k && e && e.key) l.keys[k] = { key: e.key, exp: e.exp };
+                });
+                lagerSchreiben(l);
+                aktualisiere();
+                return d;
+            })
+            .catch(function () { return null; })
+            .then(function (x) {
+                _laeuft = null;
+                // Rest ueber dem Deckel (oder waehrenddessen vorgemerkt): naechster Durchgang.
+                if (Object.keys(_offen).length) setTimeout(abholen, 0);
+                return x;
+            });
+        return _laeuft;
+    }
+
+    /* Schluessel fuer GENAU diese Adresse – aus dem Zwischenspeicher oder vom
+     * Server (Promise auf {key, exp} oder null). */
+    function fuer(u) {
+        var e = gemerkt(u);
+        if (e) return Promise.resolve(e);
+        vormerken(u);
+        return (_laeuft || abholen() || Promise.resolve(null)).then(function () {
+            return gemerkt(u);
+        });
+    }
+
+    /* Schreibt frische Schluessel in bereits gerenderte Adressen – je Adresse
+     * ihren eigenen. Nur VERALTETE werden angefasst (Platzhalter oder bald
+     * ablaufend): ein `src`-Tausch startet einen neuen Netzabruf, und ein
+     * bereits geladenes Bild braucht seine Adresse nicht mehr. Fehlt fuer eine
+     * veraltete Adresse noch ein Schluessel, wird sie vorgemerkt. */
+    function aktualisiere() {
+        if (typeof document === 'undefined' || !document.querySelectorAll) return 0;
         var n = 0;
+        function eins(el, attr) {
+            var h = el.getAttribute(attr);
+            if (!veraltet(h)) return;
+            var e = gemerkt(h);
+            if (e) { el.setAttribute(attr, ersetzen(h, e.key)); n++; }
+            else vormerken(h);
+        }
         try {
             var links = document.querySelectorAll('a[href*="token=JDL1."]');
-            for (var i = 0; i < links.length; i++) {
-                var h = links[i].getAttribute('href');
-                if (!veraltet(h)) continue;
-                links[i].setAttribute('href', ersetzen(h, neu)); n++;
-            }
-            var bilder = document.querySelectorAll('img[src*="token=JDL1."]');
-            for (var j = 0; j < bilder.length; j++) {
-                var b = bilder[j];
-                if (b.complete && b.naturalWidth > 0) continue;   // laengst geladen
-                var s = b.getAttribute('src');
-                if (!veraltet(s)) continue;
-                b.setAttribute('src', ersetzen(s, neu)); n++;
+            for (var i = 0; i < links.length; i++) eins(links[i], 'href');
+            var medien = document.querySelectorAll(
+                'img[src*="token=JDL1."], audio[src*="token=JDL1."], source[src*="token=JDL1."], iframe[src*="token=JDL1."]');
+            for (var j = 0; j < medien.length; j++) {
+                var b = medien[j];
+                if (b.tagName === 'IMG' && b.complete && b.naturalWidth > 0) continue;   // laengst geladen
+                eins(b, 'src');
             }
         } catch (e) { /* eine Anzeige darf an einer Adresse nicht sterben */ }
         return n;
     }
 
-    function holen() {
-        if (_laeuft) return _laeuft;
-        if (!tok()) return Promise.resolve(null);
-        _laeuft = fetch('/api/download-key', { headers: { 'Authorization': 'Bearer ' + tok() } })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) {
-                if (!d || !d.ok || !d.key) return null;
-                var eintrag = { key: d.key, exp: d.exp, user: benutzer() };
-                schreiben(eintrag);
-                aktualisiere(d.key);
-                return eintrag;
-            })
-            .catch(function () { return null; })
-            .then(function (x) { _laeuft = null; return x; });
-        return _laeuft;
-    }
-
     var DL = {
-        /* Haengt den Schluessel an eine Adresse – SYNCHRON, aus dem Zwischenspeicher.
-         * Ist er (noch) nicht da, wird er im Hintergrund geholt und bis dahin der
-         * Platzhalter WARTEN eingesetzt – nie das Sitzungstoken (siehe Kopf).
+        /* Haengt den Schluessel DIESER Adresse an – SYNCHRON. Ist er (noch)
+         * nicht da, steht der Platzhalter WARTEN darin, die Adresse wird zum
+         * Sammelabruf vorgemerkt, und das Nachziehen setzt den echten Schluessel
+         * ein, sobald er da ist. Nie das Sitzungstoken (siehe Kopf).
          * Ohne Anmeldung bleibt die Adresse ohne ?token=. */
         url: function (u) {
             if (!u) return u;
-            var d = lesen();
-            var wert = d ? d.key : '';
+            var e = gemerkt(u);
+            var wert = e ? e.key : '';
             if (!wert) {
                 if (!tok()) return u;
-                holen();
+                vormerken(u);
                 wert = WARTEN;
             }
             return u + (u.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(wert);
         },
-        /* Nur der Schluessel – fuer Stellen, die die Adresse selbst zusammensetzen. */
-        schluessel: function () {
-            var d = lesen();
-            if (d) return d.key;
-            if (!tok()) return '';
-            holen();
-            return WARTEN;
-        },
-        bereit: function () {
-            var d = lesen();
-            return d ? Promise.resolve(d) : holen();
-        },
+        fuer: fuer,
         veraltet: veraltet,
         ersetzen: ersetzen,
         aktualisiere: aktualisiere,
+        _merk: merk,
         _lager: LAGER
     };
 
     /* ── 1. Takt ───────────────────────────────────────────────────────────
-     * `lesen()` liefert bei nahem Ablauf null – das ist zugleich die
-     * Faelligkeitspruefung. Der Sichtbarkeitswechsel ist Pflicht, nicht Kuer:
-     * ein Hintergrund-Tab drosselt Timer auf etwa einen Lauf je Minute, und
-     * beim Zurueckholen soll der Schluessel sofort stimmen. */
-    function takt() { if (tok() && !lesen()) holen(); }
+     * Erneuert, was im DOM bald ablaeuft (aktualisiere merkt es vor). Der
+     * Sichtbarkeitswechsel ist Pflicht: ein Hintergrund-Tab drosselt Timer auf
+     * etwa einen Lauf je Minute, beim Zurueckholen soll alles sofort stimmen. */
+    function takt() { if (tok()) aktualisiere(); }
     if (typeof setInterval === 'function') setInterval(takt, TAKT_MS);
     if (typeof document !== 'undefined' && document.addEventListener) {
         document.addEventListener('visibilitychange', function () {
@@ -197,14 +284,9 @@
         });
 
         /* ── 3. Klick ──────────────────────────────────────────────────────
-         * Capture-Phase, damit eigene Klick-Handler der Seite (Kontextmenue,
-         * Chip-Logik) nicht vorher schon navigieren. Nur wenn die Adresse
-         * WIRKLICH veraltet ist, wird der Klick angehalten – im Normalfall
-         * kostet das nichts. Der Merker verhindert die Endlosschleife beim
-         * erneuten Ausloesen.
-         * Bewusst OHNE Ausnahme fuer Strg-/Mittelklick: der wiederholte Klick
-         * ist ein gewoehnlicher, ein `download`-Link verhaelt sich dabei
-         * ohnehin gleich – und ein 401 waere der teurere Ausgang. */
+         * Capture-Phase, damit eigene Klick-Handler der Seite nicht vorher
+         * navigieren. Nur eine WIRKLICH veraltete Adresse haelt den Klick an;
+         * der Merker verhindert die Endlosschleife beim erneuten Ausloesen. */
         document.addEventListener('click', function (ev) {
             var a = ev.target && ev.target.closest &&
                     ev.target.closest('a[href*="token=JDL1."]');
@@ -213,9 +295,7 @@
             if (!veraltet(h)) return;
             ev.preventDefault();
             ev.stopPropagation();
-            // bereit(), nicht holen(): liegt ein gueltiger Schluessel im
-            // Zwischenspeicher, kostet die Reparatur keinen Serveraufruf.
-            DL.bereit().then(function (d) {
+            fuer(h).then(function (d) {
                 if (d) a.setAttribute('href', ersetzen(h, d.key));
                 a.__dlkNeu = true;
                 try { a.click(); } catch (e) { /* nichts zu retten */ }
@@ -223,20 +303,14 @@
             });
         }, true);
 
-        /* Ziehen (DownloadURL) und Kontextmenue koennen NICHT warten – dort
-         * gibt es kein preventDefault-und-spaeter. Deshalb wird beim Druecken
-         * der Maustaste schon erneuert; bis zum dragstart ist der Schluessel in
-         * aller Regel da. Best effort, kein Ersatz fuer Netz 1 und 2. */
+        /* Ziehen (DownloadURL) und Kontextmenue koennen NICHT warten – beim
+         * Druecken der Maustaste wird schon geholt. Best effort. */
         document.addEventListener('pointerdown', function (ev) {
             var a = ev.target && ev.target.closest &&
                     ev.target.closest('a[href*="token=JDL1."]');
-            if (a && veraltet(a.getAttribute('href'))) DL.bereit();
+            if (a && veraltet(a.getAttribute('href'))) fuer(a.getAttribute('href'));
         }, true);
     }
-
-    // Frueh holen: je eher der Schluessel da ist, desto sicherer greift der
-    // Rueckfall oben nie. Kein await noetig – die Renderer laufen spaeter.
-    if (tok()) holen();
 
     window.JarvisDL = DL;
 })();

@@ -20,12 +20,11 @@
     // Reihenfolge: app.js (index.html), chat.js (chat.html), userchat.js (userchat.html)
     const TOKEN_KEYS = window.JarvisSitzung.tokenSchluessel();
 
-    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
-       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
-       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
-    function _dlk() {
-        return (window.JarvisDL && window.JarvisDL.schluessel())
-            || window.JarvisSitzung.token();
+    /* Abruf-Schluessel GENAU DIESER Adresse in ?token= (frontend/js/dlkey.js,
+       Pentest F-20). Kein Rueckfall auf das Sitzungstoken – der Server weist
+       es ab; ohne das Modul bleibt die Adresse ohne Schluessel. */
+    function _dlUrl(u) {
+        return window.JarvisDL ? window.JarvisDL.url(u) : u;
     }
 
     function _token() {
@@ -447,7 +446,7 @@
         const body = document.getElementById('jv-iss-body');
         const footer = document.getElementById('jv-iss-footer');
         const attHtml = (issue.attachments || []).map(name => {
-            const url = `/api/issues/${encodeURIComponent(issue.id)}/attachments/${encodeURIComponent(name)}?token=${encodeURIComponent(_dlk())}`;
+            const url = _dlUrl(`/api/issues/${encodeURIComponent(issue.id)}/attachments/${encodeURIComponent(name)}`);
             const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name);
             const delBtn = canEdit
                 ? `<button class="jv-iss-attach-del" data-name="${_escape(name)}" title="Loeschen">${JarvisIcons.trash()}</button>`

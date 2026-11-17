@@ -59,8 +59,18 @@ def js(code):
                                      "awaitPromise": True}).get("result") or {}).get("value")
 
 
+import os  # noqa: E402
+DOCS = "/opt/jarvis/data/documents"
+_kand = [f for f in sorted(os.listdir(DOCS)) if "__" in f and not f.startswith(".")
+         and os.path.isfile(os.path.join(DOCS, f))] if os.path.isdir(DOCS) else []
+if len(_kand) < 2:
+    print("ABBRUCH (Exit 2): zwei Dateien in data/documents noetig"); p.kill(); sys.exit(2)
+import urllib.parse  # noqa: E402
+A = "/api/documents/" + urllib.parse.quote(_kand[-1])
+B = "/api/documents/" + urllib.parse.quote(_kand[-2])
+
 try:
-    for seite in ("/chat", "/portal", "/wissen"):
+    for seite in ("/chat", "/portal", "/wissen", "/settings", "/tracks"):
         print("\n\033[1m%s\033[0m" % seite)
         cmd("Page.navigate", {"url": "https://127.0.0.1" + seite})
         time.sleep(1)
@@ -70,32 +80,48 @@ try:
         time.sleep(7)
 
         check("[%s] dlkey.js ist geladen" % seite, js("!!window.JarvisDL") is True)
-        # Der Abruf laeuft beim Laden an – kurz Zeit lassen.
-        for _ in range(10):
-            if js("!!sessionStorage.getItem('jarvis_dlkey')"):
-                break
-            time.sleep(1)
-        lager = js("sessionStorage.getItem('jarvis_dlkey')")
-        check("[%s] der Schluessel liegt im sessionStorage" % seite, bool(lager), lager)
-        check("[%s] und ist ein Abruf-Schluessel, kein Sitzungstoken" % seite,
-              bool(lager) and '"key":"JDL1.' in lager.replace(" ", ""), (lager or "")[:60])
+        check("[%s] die neue Fassung (Schluessel je Adresse, kein schluessel())" % seite,
+              js("typeof window.JarvisDL.fuer === 'function' && "
+                 "typeof window.JarvisDL.schluessel === 'undefined'") is True)
+        # Pentest F-20: beim ersten Bauen steht der Platzhalter darin, nach dem
+        # Sammelabruf der Schluessel GENAU DIESER Adresse.
+        # sessionStorage gilt je TAB ueber alle Seiten: ab der zweiten Seite liegt
+        # der Schluessel fuer A schon bereit (das ist gewollt und wird gemessen),
+        # danach wird geleert, um den Platzhalter-Fall herzustellen.
+        if seite != "/chat":
+            sofort = js("window.JarvisDL.url(%s)" % json.dumps(A))
+            check("[%s] Schluessel der Vorseite wird wiederverwendet (kein neuer Abruf)" % seite,
+                  isinstance(sofort, str) and "token=JDL1." in sofort and "warten" not in sofort, sofort)
+        js("sessionStorage.removeItem(window.JarvisDL._lager)")
+        erst = js("window.JarvisDL.url(%s)" % json.dumps(A))
+        check("[%s] erste Adresse: Platzhalter, nie das Sitzungstoken" % seite,
+              isinstance(erst, str) and "token=JDL1.warten" in erst and "jarvis%3A" not in erst, erst)
+        time.sleep(2)
+        ua = js("window.JarvisDL.url(%s)" % json.dumps(A))
+        ub = js("window.JarvisDL.url(%s)" % json.dumps(B))
+        time.sleep(2)
+        ub = js("window.JarvisDL.url(%s)" % json.dumps(B))
+        check("[%s] danach traegt die Adresse ihren Schluessel" % seite,
+              isinstance(ua, str) and "token=JDL1." in ua and "warten" not in ua, ua)
+        holen = ("fetch(%s).then(function(r){return r.status}).catch(function(e){return 'FEHLER '+e})")
+        st_a = js(holen % json.dumps(ua))
+        check("[%s] Positivkontrolle: Datei A mit ihrem Schluessel -> 200" % seite, st_a == 200, st_a)
+        tok_b = (ub or "").split("token=")[-1]
+        quer = A + "?token=" + tok_b
+        st_q = js(holen % json.dumps(quer))
+        check("[%s] ⚠ Datei A mit dem Schluessel von B -> 401 (F-20)" % seite, st_q == 401, st_q)
 
-        gebaut = js("(function(){try{return window.JarvisDL.url('/api/documents/x.pptx');}"
-                    "catch(e){return 'FEHLER '+e;}})()")
-        check("[%s] JarvisDL.url() baut die Adresse mit dem Schluessel" % seite,
-              isinstance(gebaut, str) and "token=JDL1." in gebaut, gebaut)
-        check("[%s] KEIN Sitzungstoken in der gebauten Adresse" % seite,
-              isinstance(gebaut, str) and "jarvis%3A" not in gebaut and ":" not in gebaut.split("token=")[-1],
-              gebaut)
-
-        # Und was steht wirklich im DOM?
+        # Was steht wirklich im DOM – nach dem Einschwingen?
         roh = js("(function(){var a=[].slice.call(document.querySelectorAll('[href],[src]'))"
                  ".map(function(e){return e.getAttribute('href')||e.getAttribute('src')||'';})"
                  ".filter(function(u){return u.indexOf('token=')>=0;});return a.join(' | ');})()")
-        schlecht = [u for u in (roh or "").split(" | ")
-                    if u and "token=JDL1." not in u and "ws/vnc" not in u]
+        adressen = [u for u in (roh or "").split(" | ") if u]
+        schlecht = [u for u in adressen if "token=JDL1." not in u and "ws/vnc" not in u]
         check("[%s] keine gerenderte Adresse traegt ein Sitzungstoken" % seite,
               not schlecht, " ".join(schlecht[:2]))
+        wartend = [u for u in adressen if "JDL1.warten" in u or "JDL1%2Ewarten" in u]
+        check("[%s] kein Platzhalter bleibt stehen (%d Adressen mit Schluessel)" % (seite, len(adressen)),
+              not wartend, " ".join(wartend[:2]))
 finally:
     try:
         ws.close()

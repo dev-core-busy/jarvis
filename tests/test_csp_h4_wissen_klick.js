@@ -53,7 +53,7 @@ function seite() {
     const w = dom.window;
     w.t = (k) => k;
     w.JarvisSitzung = { token: () => 'tok' };
-    w.JarvisDL = { schluessel: () => 'dlk' };
+    w.JarvisDL = { url: (u) => u + (u.indexOf('?') >= 0 ? '&' : '?') + 'token=dlk' };
     w.fetch = () => new Promise(() => {});   // nie aufloesen: kein Netz, kein Nebenweg
     w.eval(ICONS);
     w.eval(KNOW);

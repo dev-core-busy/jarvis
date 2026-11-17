@@ -15,8 +15,8 @@
         var img = document.getElementById('vis-feed-img');
         var tok = window.JarvisSitzung.token();
         if (img && tok) {
-            img.src = '/api/vision/snapshot?t=' + Date.now() + '&token=' + encodeURIComponent(
-                (window.JarvisDL && window.JarvisDL.schluessel()) || tok);
+            var u = '/api/vision/snapshot?t=' + Date.now();
+            img.src = window.JarvisDL ? window.JarvisDL.url(u) : u;
         }
     }, 500);
 })();

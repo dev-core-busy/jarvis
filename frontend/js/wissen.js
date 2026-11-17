@@ -6,12 +6,11 @@
 
     var $ = function (id) { return document.getElementById(id); };
     var token = window.JarvisSitzung.token();
-    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
-       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
-       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
-    function _dlk() {
-        return (window.JarvisDL && window.JarvisDL.schluessel())
-            || window.JarvisSitzung.token();
+    /* Abruf-Schluessel GENAU DIESER Adresse in ?token= (frontend/js/dlkey.js,
+       Pentest F-20). Kein Rueckfall auf das Sitzungstoken – der Server weist
+       es ab; ohne das Modul bleibt die Adresse ohne Schluessel. */
+    function _dlUrl(u) {
+        return window.JarvisDL ? window.JarvisDL.url(u) : u;
     }
 
     var SCOPE = { groups: [], folders: [], is_editor: false, user: '' };
@@ -899,7 +898,7 @@
             var chips = (f.groups || []).map(function (g) {
                 return '<span class="wi-chip" style="border-color:' + esc(g.color) + ';font-size:0.7rem;">' + esc(g.name) + '</span>';
             }).join('');
-            var url = '/api/wissen/file?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(_dlk());
+            var url = _dlUrl('/api/wissen/file?path=' + encodeURIComponent(f.path));
             var ord = ordnerText(f);
             var gr = groesseText(f.size);
             // Der Ordner steht in einer EIGENEN, sichtbaren Spalte – ein Tooltip

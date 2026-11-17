@@ -478,16 +478,15 @@ window.KbMatrix = (function () {
         }
         const IMG = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'];
         const _tok = () => window.JarvisSitzung.token();
-    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
-       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
-       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
-    function _dlk() {
-        return (window.JarvisDL && window.JarvisDL.schluessel())
-            || window.JarvisSitzung.token();
+    /* Abruf-Schluessel GENAU DIESER Adresse in ?token= (frontend/js/dlkey.js,
+       Pentest F-20). Kein Rueckfall auf das Sitzungstoken – der Server weist
+       es ab; ohne das Modul bleibt die Adresse ohne Schluessel. */
+    function _dlUrl(u) {
+        return window.JarvisDL ? window.JarvisDL.url(u) : u;
     }
 
-        const rawUrl = (p) => '/api/knowledge/file_raw?path=' + encodeURIComponent(p)
-            + '&token=' + encodeURIComponent(_dlk()) + '&disp=inline';
+        const rawUrl = (p) => _dlUrl('/api/knowledge/file_raw?path=' + encodeURIComponent(p)
+            + '&disp=inline');
         function show(cell) {
             cancelHide();
             const path = cell.closest('tr').dataset.path;

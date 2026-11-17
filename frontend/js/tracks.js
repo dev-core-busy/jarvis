@@ -51,12 +51,11 @@
         return (s && s !== key) ? s : fallback;
     }
     function sprache() { return (window._lang === 'en') ? 'en' : 'de'; }
-    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
-       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
-       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot. */
-    function _dlk() {
-        return (window.JarvisDL && window.JarvisDL.schluessel())
-            || window.JarvisSitzung.token();
+    /* Abruf-Schluessel GENAU DIESER Adresse in ?token= (frontend/js/dlkey.js,
+       Pentest F-20). Kein Rueckfall auf das Sitzungstoken – der Server weist
+       es ab; ohne das Modul bleibt die Adresse ohne Schluessel. */
+    function _dlUrl(u) {
+        return window.JarvisDL ? window.JarvisDL.url(u) : u;
     }
 
     function token() {
@@ -689,8 +688,7 @@
             var chips = (j.dateien || []).map(function (f) {
                 // Das Token gehoert an den Link, nicht in gespeicherten Text:
                 // <a download> kann keinen Authorization-Header setzen.
-                return '<a class="st-chip" href="' + esc(f.url) +
-                    (f.url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(_dlk()) +
+                return '<a class="st-chip" href="' + esc(_dlUrl(f.url)) +
                     '" download><span aria-hidden="true">&#10515;</span>' + esc(f.name) + '</a>';
             }).join('');
             var letzter = (j.schritte || [])[(j.schritte || []).length - 1];
@@ -1153,8 +1151,7 @@
             }
             box.innerHTML = '<div class="st-scroll">' + e.map(function (x, idx) {
                 var chips = (x.dateien || []).map(function (f) {
-                    return '<a class="st-chip" href="' + esc(f.url) +
-                        (f.url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(_dlk()) +
+                    return '<a class="st-chip" href="' + esc(_dlUrl(f.url)) +
                         '" download><span aria-hidden="true">&#10515;</span>' + esc(f.name) + '</a>';
                 }).join('');
                 return '<div class="st-log-row' + (x.ok ? '' : ' is-bad') + '">' +

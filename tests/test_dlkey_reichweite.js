@@ -131,39 +131,39 @@ const rel = (p) => path.relative(ROOT, p);
 /* ── Analyse EINER Datei ──────────────────────────────────────────────────── */
 function analysiere(datei) {
     const quelle = fs.readFileSync(datei, 'utf8');
-    if (!/\b_dlk\b/.test(quelle)) return null;      // Datei ohne Schluessel-Helfer
+    if (!/\b_dlUrl\b/.test(quelle)) return null;      // Datei ohne Schluessel-Helfer
     let baum;
     try { baum = acorn.parse(quelle, { ecmaVersion: 2022, locations: true }); }
     catch (e) { return { parseFehler: e.message }; }
 
-    const frei = [];      // Deklarationen, die einen Scope aufspannen: function _dlk(){} / var _dlk = ...
-    const methoden = [];  // this._dlk: Methode bzw. Klassenfeld
+    const frei = [];      // Deklarationen, die einen Scope aufspannen: function _dlUrl(){} / var _dlUrl = ...
+    const methoden = [];  // this._dlUrl: Methode bzw. Klassenfeld
     const refFrei = [];   // Aufrufe als nackter Name
-    const refThis = [];   // Aufrufe als this._dlk
+    const refThis = [];   // Aufrufe als this._dlUrl
 
     lauf(baum, [], (n, eltern) => {
         // ── Deklarationen ──
-        if (n.type === 'FunctionDeclaration' && n.id && n.id.name === '_dlk') {
+        if (n.type === 'FunctionDeclaration' && n.id && n.id.name === '_dlUrl') {
             // Eine Funktionsdeklaration wird in den naechsten Funktions- bzw.
             // Programm-Scope gehoben – ein Block dazwischen ist unerheblich.
             const scope = eltern.slice().reverse()
                 .find((x) => FUNKTIONEN.includes(x.type) || x.type === 'Program');
             frei.push({ zeile: n.loc.start.line, scope });
         }
-        if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === '_dlk') {
+        if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === '_dlUrl') {
             const scope = eltern.slice().reverse()
                 .find((x) => FUNKTIONEN.includes(x.type) || x.type === 'Program');
             frei.push({ zeile: n.loc.start.line, scope });
         }
         if ((n.type === 'MethodDefinition' || n.type === 'PropertyDefinition' || n.type === 'Property')
-            && n.key && (n.key.name === '_dlk' || n.key.value === '_dlk')) {
+            && n.key && (n.key.name === '_dlUrl' || n.key.value === '_dlUrl')) {
             const klasse = eltern.slice().reverse()
                 .find((x) => x.type === 'ClassDeclaration' || x.type === 'ClassExpression'
                           || x.type === 'ObjectExpression');
             methoden.push({ zeile: n.loc.start.line, traeger: klasse });
         }
         // ── Aufrufstellen ──
-        if (n.type === 'Identifier' && n.name === '_dlk') {
+        if (n.type === 'Identifier' && n.name === '_dlUrl') {
             const p = eltern[eltern.length - 1];
             if (!p) return;
             if (p.type === 'FunctionDeclaration' && p.id === n) return;          // der Name selbst
@@ -197,11 +197,11 @@ for (const datei of jsDateien()) {
     // (a) nackter Aufruf `_dlk()` – braucht eine Deklaration im umgebenden Scope
     for (const r of a.refFrei) {
         const sichtbar = a.frei.some((d) => d.scope && r.start >= d.scope.start && r.start < d.scope.end);
-        pruefe(`${name}:${r.zeile}  _dlk() ist in Reichweite`, sichtbar,
+        pruefe(`${name}:${r.zeile}  _dlUrl() ist in Reichweite`, sichtbar,
             a.frei.length
                 ? 'Definition liegt in Zeile ' + a.frei.map((d) => d.zeile).join('/')
                   + ' und spannt diese Stelle nicht ein → ReferenceError'
-                : 'keine Deklaration von _dlk in dieser Datei → ReferenceError');
+                : 'keine Deklaration von _dlUrl in dieser Datei → ReferenceError');
     }
 
     // (b) `this._dlk()` – Traeger muss die Methode haben, und zwischen Aufruf
@@ -210,8 +210,8 @@ for (const datei of jsDateien()) {
     //     Schritt spaeter).
     for (const r of a.refThis) {
         if (!r.istThis) continue;                 // fremdes Objekt – nicht unsere Regel
-        pruefe(`${name}:${r.zeile}  this._dlk() – der Traeger fuehrt die Methode`,
-            a.methoden.length > 0, 'keine Methode/kein Feld _dlk gefunden');
+        pruefe(`${name}:${r.zeile}  this._dlUrl() – der Traeger fuehrt die Methode`,
+            a.methoden.length > 0, 'keine Methode/kein Feld _dlUrl gefunden');
         pruefe(`${name}:${r.zeile}  this ist noch das Objekt (kein function-Rumpf dazwischen)`,
             !thisUmgebunden(r.kette), 'Zeile ' + (thisUmgebunden(r.kette) || {zeile: '?'}).zeile);
     }
@@ -247,9 +247,9 @@ for (const datei of jsDateien()) {
     // vnc.js ist ausgenommen und begruendet: ein WebSocket hat einen eigenen
     // Auth-Weg, und seine Adresse kopiert niemand in eine Mail.
     if (name.endsWith('js/vnc.js')) continue;
-    const hatQuelle = /\b_dlk\s*\(|JarvisDL/.test(quelle);
+    const hatQuelle = /\b_dlUrl\s*\(|JarvisDL/.test(quelle);
     pruefe(`${name}: hat eine Schluessel-Quelle (${zeilen.length} Adress-Stelle(n))`, hatQuelle,
-        'weder _dlk() noch JarvisDL in der Datei');
+        'weder _dlUrl() noch JarvisDL in der Datei');
 }
 
 /* ── Teil 4: der gemeldete Fall, funktional gemessen ─────────────────────────
@@ -388,8 +388,8 @@ const DATEIEN = [
     pruefe('KEINE Fehlermeldung im Rumpf', !fehler,
         fehler ? fehler.textContent : '');
     // Der gemeldete Wortlaut ausdruecklich – damit die Gegenprobe ihn nachweist.
-    pruefe('insbesondere nicht "_dlk is not defined"',
-        !!rumpf && rumpf.innerHTML.indexOf('_dlk is not defined') < 0);
+    pruefe('insbesondere nicht "_dlUrl is not defined"',
+        !!rumpf && rumpf.innerHTML.indexOf('_dlUrl is not defined') < 0);
     const anhaenge = rumpf ? rumpf.querySelectorAll('.jv-iss-attach-item') : [];
     pruefe(`beide Anhaenge sind gezeichnet`, anhaenge.length === MELDUNG.attachments.length,
         'gezeichnet: ' + anhaenge.length);

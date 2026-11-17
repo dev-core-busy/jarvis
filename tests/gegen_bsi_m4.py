@@ -107,8 +107,10 @@ PROBEN = [
      '    tok = request.headers.get("Authorization", "").replace("Bearer ", "") or request.query_params.get("token", "")\n'
      '    return get_redoc_html(openapi_url=f"/openapi.json?token={tok}", title="Jarvis API – ReDoc")\n'),
     ("Schema-Adresse mit Sitzungs- statt Abruf-Schluessel", MA,
+     # Anker seit Pentest F-20 (2026-11-17) mit ``ziel=`` – der Schluessel ist
+     # an /openapi.json gebunden.
      '    key, _exp = _dlkey.erzeugen(user, eingeschraenkt=_sitzung_ohne_admin(user),\n'
-     '                                sitzung=_abruf_sitzung(user))\n'
+     '                                sitzung=_abruf_sitzung(user), ziel="/openapi.json")\n'
      '    return "/openapi.json?token=" + key\n',
      '    key = user\n    return "/openapi.json?token=" + key\n'),
     # ── Oberflaeche ──
@@ -127,15 +129,21 @@ PROBEN = [
     # Rueckfall `?: tok.takeUnless { istSitzung }` nicht mehr – die Zeile heisst
     # `val wert = abrufSchluessel()`. Die Proben bilden dieselben Rueckschritte
     # an der heutigen Form nach.
+    # Anker seit Pentest F-20 (2026-11-17): der Schluessel wird fuer den Pfad der
+    # Anhang-Adresse geholt (``abrufSchluessel(pfad)``, ``authBuilder(pfad)``).
     ("Android: Sitzungstoken wieder in der Adresse", AR,
-     '        val wert = abrufSchluessel()\n',
+     '        val wert = abrufSchluessel(pfad)\n',
      '        val wert = token()\n'),
     ("Android: Rueckfall auf den dauerhaften Schluessel", AR,
-     '        val wert = abrufSchluessel()\n',
-     '        val wert = abrufSchluessel() ?: token()\n'),
+     '        val wert = abrufSchluessel(pfad)\n',
+     '        val wert = abrufSchluessel(pfad) ?: token()\n'),
     ("Android: Schluessel ohne Kopfsatz geholt", AR,
-     '            httpClient.newCall(authBuilder("/api/download-key").get().build()).execute().use { resp ->\n',
-     '            httpClient.newCall(Request.Builder().url("${baseUrl()}/api/download-key").get().build()).execute().use { resp ->\n'),
+     '            httpClient.newCall(authBuilder(pfad).get().build()).execute().use { resp ->\n',
+     '            httpClient.newCall(Request.Builder().url("${baseUrl()}$pfad").get().build()).execute().use { resp ->\n'),
+    # F-20: Schluessel wieder OHNE Ziel geholt (der Zustand vor dem Fix).
+    ("Android: Schluessel ohne Ziel geholt (F-20)", AR,
+     '            val pfad = "/api/download-key?ziel=" + java.net.URLEncoder.encode(ziel, "UTF-8")\n',
+     '            val pfad = "/api/download-key"\n'),
 ]
 
 DATEIEN = [UG, VT, MA, VJ, DK, AR, "tests/test_bsi_m4.py"]

@@ -467,13 +467,19 @@ oa = rumpf_ausfuehren("_openapi_url", ns_d)
 u = oa("anna")
 _wert = u.split("token=", 1)[-1] if "token=" in u else ""
 check("openapi-Adresse traegt einen Abruf-Schluessel fuer den Benutzer",
-      u.startswith("/openapi.json?token=") and DK.ist_abrufschluessel(_wert) and DK.pruefen(_wert) == "anna", u)
+      u.startswith("/openapi.json?token=") and DK.ist_abrufschluessel(_wert)
+      and DK.pruefen(_wert, "/openapi.json") == "anna", u)
+# Pentest F-20: der Schluessel gilt NUR fuer das Schema, nicht fuer andere Abrufe.
+check("… und ist an /openapi.json gebunden (F-20)",
+      DK.pruefen(_wert, "/api/documents/x__y.pdf") is None)
 check("… aus voller Sitzung: Schluessel NICHT eingeschraenkt",
-      DK.pruefen_mit_art(_wert) == ("anna", False), DK.pruefen_mit_art(_wert))
+      DK.pruefen_mit_art(_wert, "/openapi.json") == ("anna", False),
+      DK.pruefen_mit_art(_wert, "/openapi.json"))
 _eingeschraenkt["an"] = True
 _wert2 = oa("anna").split("token=", 1)[-1]
 check("… aus eingeschraenkter Sitzung: Schluessel traegt die Einschraenkung (Review 2026-10-07)",
-      DK.pruefen_mit_art(_wert2) == ("anna", True), DK.pruefen_mit_art(_wert2))
+      DK.pruefen_mit_art(_wert2, "/openapi.json") == ("anna", True),
+      DK.pruefen_mit_art(_wert2, "/openapi.json"))
 _eingeschraenkt["an"] = False
 check("Sitzungstoken in ?token= per Vorgabe abgewiesen (download_key_strict an)", DK.streng() is True)
 for name in ("gated_docs", "gated_redoc"):
@@ -569,9 +575,14 @@ au = kt_rumpf(KT, "suspend fun attachmentUrl(")
 ab = kt_rumpf(KT, "private suspend fun abrufSchluessel(")
 if not au or not ab or "?token=" not in au:
     abbruch("Positivkontrolle: attachmentUrl/abrufSchluessel nicht gefunden oder ohne ?token=")
-check("Abruf-Schluessel wird per Kopfsatz geholt",
-      'authBuilder("/api/download-key")' in ab)
-check("attachmentUrl holt einen Abruf-Schluessel", "abrufSchluessel()" in au)
+# Seit Pentest F-20 (2026-11-17) mit Ziel: der Schluessel gilt nur fuer genau
+# die Anhang-Adresse, fuer die er geholt wird.
+check("Abruf-Schluessel wird per Kopfsatz geholt, MIT Ziel",
+      '"/api/download-key?ziel="' in ab and "authBuilder(pfad)" in ab
+      and "URLEncoder.encode(ziel" in ab)
+check("attachmentUrl holt den Schluessel fuer GENAU die Adresse, die sie baut",
+      "abrufSchluessel(pfad)" in au and re.search(r'val\s+basis\s*=\s*"\$\{baseUrl\(\)\}\$pfad"', au)
+      is not None, au[:240])
 _vorlagen = re.findall(r'\?token=\$\{([^}]*)\}', au)
 check("in die Adresse kommt nur der gepruefte Wert (wert), nie token()/tok",
       bool(_vorlagen) and all("wert" in v and "token()" not in v and not re.search(r"\btok\b", v)
@@ -581,7 +592,7 @@ check("in die Adresse kommt nur der gepruefte Wert (wert), nie token()/tok",
 # bekommt einen Abruf-Schluessel (Art "p"), und der Server nimmt ihn in
 # ?token= nicht mehr an (tests/test_pentest_programm_abruf.py).
 check("kein Rueckfall auf einen dauerhaften Schluessel (weder Sitzung noch Programm)",
-      re.search(r"val\s+wert\s*=\s*abrufSchluessel\(\)\s*$", au, re.M) is not None
+      re.search(r"val\s+wert\s*=\s*abrufSchluessel\(pfad\)\s*$", au, re.M) is not None
       and "token()" not in au and not re.search(r"\btok\b", au), au[:200])
 
 shutil.rmtree(TMP, ignore_errors=True)

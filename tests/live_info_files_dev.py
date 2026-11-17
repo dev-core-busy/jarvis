@@ -160,10 +160,12 @@ try:
     cmd("Page.navigate", {"url": "https://127.0.0.1/settings"})
     time.sleep(8)
     check("der Vision-Manager ist da", js("!!window.visionManager") is True)
-    vs = js("(function(){try{return String(window.visionManager._dlk());}"
+    # Seit Pentest F-20 (2026-11-17) heisst der Helfer _dlUrl(adresse) und gibt
+    # die ganze Adresse mit dem Schluessel GENAU DIESER Adresse zurueck.
+    vs = js("(function(){try{return String(window.visionManager._dlUrl('/api/vision/snapshot?t=1'));}"
             "catch(e){return 'FEHLER '+e;}})()")
-    check("visionManager._dlk() liefert einen Abruf-Schluessel",
-          isinstance(vs, str) and vs.startswith("JDL1."), str(vs)[:80])
+    check("visionManager._dlUrl() setzt einen Abruf-Schluessel (oder den Platzhalter) ein",
+          isinstance(vs, str) and vs.startswith("/api/vision/snapshot?t=1&token=JDL1."), str(vs)[:120])
 
 finally:
     try:

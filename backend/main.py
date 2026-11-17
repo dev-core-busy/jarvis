@@ -3301,6 +3301,12 @@ def _kb_strip_editor_fields(user: str, data: dict) -> dict:
         ]}
 
 
+def _abruf_ziel(request: Request) -> str:
+    """Kanonisches Ziel DIESES Abrufs (Pentest F-20): Pfad + Parameter ohne
+    ``token``/``t``. Ein Abruf-Schluessel gilt nur fuer genau dieses Ziel."""
+    return _dlkey.ziel_kanon(request.url.path, request.query_params.multi_items())
+
+
 def _query_benutzer(request: Request) -> str | None:
     """Benutzer aus ``?token=`` – Abruf-Schluessel ZUERST, Sitzungstoken als Alt-Weg.
 
@@ -3322,7 +3328,7 @@ def _query_benutzer(request: Request) -> str | None:
             # wird nur in require_auth_or_query gegen die gueltigen
             # Programmschluessel geprueft, nie als Konto "api" eingeloest.
             return None
-        name, eingeschraenkt, sitz = _dlkey.pruefen_voll(wert)
+        name, eingeschraenkt, sitz = _dlkey.pruefen_voll(wert, _abruf_ziel(request))
         if name and sitz is not None and (
                 _epoche_widerrufen(name, sitz[0])
                 or not _sitzung.sitzung_besteht(sitz[1], sitz[0])):
@@ -3367,7 +3373,7 @@ def _prot_abruf_abgewiesen(request: Request) -> None:
     """
     try:
         print(f"[AUTH] Datei-Abruf abgewiesen (401): {request.url.path} – "
-              f"{_dlkey.grund(request.query_params.get('token', ''))}"
+              f"{_dlkey.grund(request.query_params.get('token', ''), _abruf_ziel(request))}"
               f"{'' if request.headers.get('Authorization') else ', kein Authorization-Kopfsatz'}",
               flush=True)
     except Exception:  # noqa: BLE001
@@ -3387,7 +3393,8 @@ async def require_auth_or_query(request: Request) -> str:
         # nur, solange der ausstellende Programmschluessel existiert. Er laeuft
         # NIE durch die Konto-Pruefungen darunter – ein AD-Konto "api" bekommt
         # damit nichts, was der Programmschluessel hat.
-        _pk = _dlkey.programm_kennung(request.query_params.get("token", ""))
+        _pk = _dlkey.programm_kennung(request.query_params.get("token", ""),
+                                      _abruf_ziel(request))
         if _pk is not None:
             if _agent_kennung_gueltig(_pk):
                 return "api"
@@ -5189,7 +5196,7 @@ def _openapi_url(user: str) -> str:
     # Der Schluessel traegt die Einschraenkung DIESER Sitzung mit (App/ohne
     # 2FA) – beim Einloesen gilt sie wieder (Code-Review 2026-10-07).
     key, _exp = _dlkey.erzeugen(user, eingeschraenkt=_sitzung_ohne_admin(user),
-                                sitzung=_abruf_sitzung(user))
+                                sitzung=_abruf_sitzung(user), ziel="/openapi.json")
     return "/openapi.json?token=" + key
 
 
@@ -10530,31 +10537,61 @@ async def get_generated_image(name: str, user: str = Depends(require_auth_or_que
                         headers={"Cache-Control": "private, max-age=86400"})
 
 
-@app.get("/api/download-key")
+# Hoechstzahl der Ziele je Sammelabruf. Eine Seite mit vielen Chips/Bildern
+# (Wissensliste, Chatverlauf) bleibt darunter; was darueber liegt, holt der
+# Client im naechsten Durchgang – ein Deckel ohne Datenverlust.
+_DLKEY_MAX_ZIELE = 200
+
+
+@app.api_route("/api/download-key", methods=["GET", "POST"])
 async def download_key_holen(request: Request, user: str = Depends(require_auth_or_agent)):
-    """Kurzlebiger Abruf-Schluessel fuer Datei-Adressen (jeder Angemeldete).
+    """Kurzlebige Abruf-Schluessel fuer Datei-Adressen – je Adresse EIN Schluessel.
 
-    Ersetzt das Sitzungstoken in ``?token=``. Der Client holt ihn EINMAL je
-    Tab und haelt ihn im ``sessionStorage`` – alle vierzehn Stellen, die eine
-    Datei-Adresse bauen, tun das synchron beim Rendern und koennen nicht je
-    Link auf den Server warten (siehe ``backend/download_key.py``).
+    Pentest "Hardening" F-20 (2026-11-17): bis dahin gab es EINEN Schluessel je
+    Benutzer, gueltig fuer jede Datei, die er laden darf. Jetzt ist jeder
+    Schluessel an genau eine Adresse gebunden (``download_key.ziel_kanon``):
 
-    Bewusst OHNE Ziel-Parameter: der Schluessel ist an den Benutzer gebunden,
-    nicht an eine Datei. Ein Ziel entgegenzunehmen wuerde eine Bindung
-    vortaeuschen, die es nicht gibt.
+      * ``GET  /api/download-key?ziel=<adresse>`` – ein Schluessel (Android-App,
+        /docs von Hand).
+      * ``POST /api/download-key`` mit ``{"ziele": [<adresse>, …]}`` – der
+        Sammelabruf des Web-Frontends (``frontend/js/dlkey.js``); Antwort
+        ``{"keys": {<adresse>: {"key", "exp"}}}``, Schluessel = die Adresse,
+        wie der Client sie geschickt hat. Unbrauchbare Adressen fehlen in
+        ``keys`` und stehen mit Grund in ``abgewiesen``.
 
-    Pentest A7 (2026-11-08): auch ein PROGRAMMSCHLUESSEL (native Apps) bekommt
-    einen Abruf-Schluessel – Art "p", gebunden an die Kurzkennung genau dieses
-    Programmschluessels. Vorher bekam er keinen, und die Android-App setzte als
-    Rueckfall den Programmschluessel SELBST in ``?token=`` (Verlauf, Protokolle).
-    Eine Sitzung geht weiterhin durch ``require_auth`` – die Dependency
-    ``require_auth_or_agent`` ist hier nur die Tuer fuer den Programmschluessel,
-    keine Lockerung fuer Sitzungen.
+    Ohne Ziel gibt es keinen Schluessel (400) – ein ungebundener waere genau
+    der Befund. Pentest A7 (2026-11-08): auch ein PROGRAMMSCHLUESSEL (native
+    Apps) bekommt Schluessel der Art "p", gebunden an seine Kurzkennung. Eine
+    Sitzung geht weiterhin durch ``require_auth`` – ``require_auth_or_agent``
+    ist hier nur die Tuer fuer den Programmschluessel.
     """
+    if request.method == "POST":
+        try:
+            body = await _json_objekt(request)
+        except Exception:  # noqa: BLE001
+            body = {}
+        roh = body.get("ziele") if isinstance(body, dict) else None
+        if not isinstance(roh, list) or not roh:
+            return JSONResponse({"ok": False, "error": "ziele fehlt (Liste von Adressen)"},
+                                status_code=400)
+        ziele = [str(z) for z in roh[:_DLKEY_MAX_ZIELE] if isinstance(z, str)]
+        einzeln = False
+    else:
+        z = (request.query_params.get("ziel") or "").strip()
+        if not z:
+            return JSONResponse({"ok": False, "error": "ziel fehlt – ein Abruf-Schluessel "
+                                 "gilt nur fuer eine bestimmte Adresse"}, status_code=400)
+        ziele = [z]
+        einzeln = True
+
     # Zuerst die Sitzung (mit allen Sperren). NUR "nicht angemeldet" (401) fuehrt
     # zum Programmschluessel – ein gesperrtes Konto (403) faellt nicht hinein.
+    aussteller = None
     try:
         user = await require_auth(request)
+        aussteller = lambda kanon: _dlkey.erzeugen(  # noqa: E731
+            user, eingeschraenkt=_sitzung_ohne_admin(user),
+            sitzung=_abruf_sitzung(user), ziel=kanon)
     except HTTPException as e:
         if e.status_code != 401:
             raise
@@ -10562,18 +10599,24 @@ async def download_key_holen(request: Request, user: str = Depends(require_auth_
         kennung = _agent_key_kennung(request.headers.get("X-API-Key", "") or bearer)
         if not kennung:
             raise
+        aussteller = lambda kanon: _dlkey.erzeugen(  # noqa: E731
+            "api", sitzung=(0, kennung), programm=True, ziel=kanon)
+
+    keys, abgewiesen = {}, {}
+    for adresse in ziele:
         try:
-            key, exp = _dlkey.erzeugen("api", sitzung=(0, kennung), programm=True)
-        except Exception as e2:  # noqa: BLE001
-            return JSONResponse({"ok": False, "error": str(e2)}, status_code=500)
-        return JSONResponse({"ok": True, "key": key, "exp": exp,
+            key, exp = aussteller(_dlkey.ziel_aus_adresse(adresse))
+            keys[adresse] = {"key": key, "exp": exp}
+        except Exception as e:  # noqa: BLE001
+            abgewiesen[adresse] = str(e)
+    if einzeln:
+        if not keys:
+            return JSONResponse({"ok": False, "error": abgewiesen.get(ziele[0], "ungueltig")},
+                                status_code=400)
+        k = keys[ziele[0]]
+        return JSONResponse({"ok": True, "key": k["key"], "exp": k["exp"],
                              "ttl_min": _dlkey.ttl_minuten()})
-    try:
-        key, exp = _dlkey.erzeugen(user, eingeschraenkt=_sitzung_ohne_admin(user),
-                                   sitzung=_abruf_sitzung(user))
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True, "key": key, "exp": exp,
+    return JSONResponse({"ok": True, "keys": keys, "abgewiesen": abgewiesen,
                          "ttl_min": _dlkey.ttl_minuten()})
 
 

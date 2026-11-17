@@ -169,7 +169,22 @@ if not hasattr(dk, "grund"):
     abbruch("download_key.grund() fehlt – Punkt 3 des Fixes ist nicht da.")
 
 
-def schluessel(user, exp):
+# Seit Pentest F-20 (2026-11-17) ist jeder Schluessel an EIN Ziel gebunden
+# (7-teilige Form). Gebaut wird hier von Hand – mit derselben Signaturregel wie
+# das Modul, damit eine Abweichung als Exit 2 auffaellt, nicht als Befund.
+Z = "/api/documents/0123abcd__bericht.pdf"
+
+
+def schluessel(user, exp, ziel=Z):
+    b = base64.urlsafe_b64encode(user.encode()).decode().rstrip("=")
+    zh = base64.urlsafe_b64encode(hashlib.sha256(ziel.encode()).digest()[:18]).decode()
+    sig = hmac.new(GEHEIM.encode(), f"jdl1:{user}:{exp}:v:0:{zh}".encode(),
+                   hashlib.sha256).hexdigest()
+    return f"JDL1.{b}.{exp}.v.0.{zh}.{sig}"
+
+
+def alte_form(user, exp):
+    """Ungebunden, gueltig signiert – so wurde bis 2026-11-17 ausgestellt."""
     b = base64.urlsafe_b64encode(user.encode()).decode().rstrip("=")
     sig = hmac.new(GEHEIM.encode(), f"jdl1:{user}:{exp}".encode(),
                    hashlib.sha256).hexdigest()
@@ -181,7 +196,7 @@ GUELTIG = schluessel("m.mustermann", JETZT + 600)
 
 # Positivkontrolle ZUERST: nimmt das Modul einen gueltigen Schluessel an?
 # Ohne sie waeren alle Abweisungs-Pruefungen trivial wahr.
-if dk.pruefen(GUELTIG) != "m.mustermann":
+if dk.pruefen(GUELTIG, Z) != "m.mustermann":
     abbruch("ein gueltiger Abruf-Schluessel wird nicht angenommen – "
             "die Attrappe passt nicht zum Modul, keine Aussage moeglich.")
 check("Positivkontrolle: ein gueltiger Schluessel wird angenommen", True)
@@ -194,17 +209,20 @@ lagen = {
     "Sitzungstoken": "m.mustermann:1790000000:abcdef",
     "abgelaufen": schluessel("m.mustermann", JETZT - 600),
     "Signatur": GUELTIG[:-4] + "0000",
+    # F-20: die beiden neuen Lagen muessen im Journal ebenso unterscheidbar sein.
+    "alte Form": alte_form("m.mustermann", JETZT + 600),
+    "andere Adresse": schluessel("m.mustermann", JETZT + 600, "/api/documents/fremd__x.pdf"),
 }
 gruende = {}
 for lage, wert in lagen.items():
     try:
-        gruende[lage] = dk.grund(wert)
+        gruende[lage] = dk.grund(wert, Z)
     except Exception as e:  # noqa: BLE001
         gruende[lage] = "<wirft: %s>" % e
     check("Lage '%s' ergibt einen Grund (%s)" % (lage, gruende[lage]),
           isinstance(gruende[lage], str) and len(gruende[lage]) > 5)
 
-check("alle vier Lagen sind unterscheidbar", len(set(gruende.values())) == 4,
+check("alle Lagen sind unterscheidbar", len(set(gruende.values())) == len(lagen),
       repr(gruende))
 check("der Grund 'kein Token' nennt die Adresse",
       "Adresse" in gruende["kein Token"], gruende["kein Token"])

@@ -73,16 +73,22 @@ PROBEN = [
      "        gesperrt_bis = 0\n", W_K12),
     ("Freigabecode: Pruefen+Merken ohne Sperre (Wettlauf)", FG,
      "    with _SPERRE:\n", "    if True:\n", W_K12),
+    # Anker 2026-11-17 auf den heutigen Code gezogen (sie trafen schon vorher
+    # nicht mehr: pruefen_voll gibt seit dem 07.10. ein Dreier-Tupel zurueck).
     ("Abruf-Schluessel: Art wird beim Pruefen ignoriert", DK,
-     "        return user, art != \"v\"\n", "        return user, False\n", W_DLK),
-    ("Abruf-Schluessel: alte Form gilt als VOLL", DK,
-     "        return user, art != \"v\"\n", "        return user, art == \"e\"\n", W_DLK),
+     "        return user, art != \"v\", sitzung\n", "        return user, False, sitzung\n", W_DLK),
+    # Ersetzt "alte Form gilt als VOLL": seit Pentest F-20 gilt die alte Form gar
+    # nicht mehr. Die Zusage, die an ihre Stelle tritt: das Ziel wird verglichen.
+    ("Abruf-Schluessel: Ziel-Hash wird nicht verglichen (F-20)", DK,
+     "        if not hmac.compare_digest(zh, ziel_hash(ziel)):\n            return nein\n",
+     "        if False:\n            return nein\n", W_DLK),
     ("Abruf-Schluessel: Einloesen setzt keinen Sitzungskontext", MAIN,
      "            _sitzung_kontext.set((_norm_login(name), not eingeschraenkt, eingeschraenkt))\n",
      "            pass\n", W_DLK),
     ("Abruf-Schluessel: Ausstellen ohne Einschraenkung", MAIN,
-     "        key, exp = _dlkey.erzeugen(user, eingeschraenkt=_sitzung_ohne_admin(user))\n",
-     "        key, exp = _dlkey.erzeugen(user)\n", W_DLK),
+     # Anker 2026-11-17: Ausstellung je Ziel im Sammel-Endpunkt (F-20).
+     "            user, eingeschraenkt=_sitzung_ohne_admin(user),\n",
+     "            user, eingeschraenkt=False,\n", W_DLK),
     ("Confluence: leere Liste loescht wieder den Bestand", CFA,
      "            if not liste and any((a.get(\"space\") or \"\") == key for a in seiten_alt.values()):\n",
      "            if False:\n", W_CFA),

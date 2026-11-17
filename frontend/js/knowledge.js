@@ -639,24 +639,22 @@ class JarvisKnowledgeManager {
         return '📄';
     }
 
-    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
-       Rueckfall auf das Sitzungstoken nur, solange das Modul fehlt oder der
-       Schluessel noch unterwegs ist – sonst waere ein Bild/Download tot.
+    /* Abruf-Schluessel GENAU DIESER Adresse in ?token= (frontend/js/dlkey.js,
+       Pentest F-20). Kein Rueckfall auf das Sitzungstoken – der Server weist es ab.
        ⚠ ALS METHODE, nicht als lokale Funktion in _bindFilePreview: viewFile
        braucht sie seit 2026-10-21 ebenfalls, und eine zweite Fassung liefe beim
        naechsten Feinschliff auseinander. Eine Funktion, die nur in einer
        anderen Funktion steht, ist fuer jeden Aufrufer ausserhalb ein
        ReferenceError – im catch verschluckt also eine leere Anzeige ohne
        Meldung (Register, zweimal bezahlt). */
-    _dlKey() {
-        return (window.JarvisDL && window.JarvisDL.schluessel())
-            || window.JarvisSitzung.token();
+    _dlUrl(u) {
+        return window.JarvisDL ? window.JarvisDL.url(u) : u;
     }
 
     _bindFilePreview(box) {
         if (!box) return;
         const token = () => window.JarvisSitzung.token();
-        const _dlk = () => this._dlKey();
+        const _dlUrl = (u) => this._dlUrl(u);
 
         const T = (k, d) => (window.t && window.t(k)) || d;
         if (!this._filePreviewCache) this._filePreviewCache = {};
@@ -688,8 +686,8 @@ class JarvisKnowledgeManager {
         const IMG = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'];
         // disp=inline: neue URL, damit alte im Browser gecachte attachment-Antwort
         // (die den PDF-Download ausloeste) nicht wiederverwendet wird.
-        const rawUrl = (p) => '/api/knowledge/file_raw?path=' + encodeURIComponent(p)
-            + '&token=' + encodeURIComponent(_dlk()) + '&disp=inline';
+        const rawUrl = (p) => _dlUrl('/api/knowledge/file_raw?path=' + encodeURIComponent(p)
+            + '&disp=inline');
 
         const place = (anchor) => {
             const r = anchor.getBoundingClientRect();
@@ -3005,8 +3003,8 @@ class JarvisKnowledgeManager {
        dem eine neue Endung dazukommt, und die fehlende Zeile meldet sich
        nicht. Den Typ kennt der Server ohnehin – file_raw setzt ihn selbst. */
     _zeigeNichtText(body, filePath, mime) {
-        const url = '/api/knowledge/file_raw?path=' + encodeURIComponent(filePath)
-            + '&token=' + encodeURIComponent(this._dlKey()) + '&disp=inline';
+        const url = this._dlUrl('/api/knowledge/file_raw?path=' + encodeURIComponent(filePath)
+            + '&disp=inline');
         body.style.color = '';
         body.style.whiteSpace = 'normal';
         if (mime.indexOf('image/') === 0) {

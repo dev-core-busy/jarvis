@@ -130,10 +130,16 @@ class IssuesRepository @Inject constructor(
     /**
      * Kurzlebiger Abruf-Schluessel (BSI M4, 2026-10-05) fuer eine Adresse, die die
      * App verlaesst. Per Kopfsatz geholt; null, wenn der Server keinen ausstellt.
+     *
+     * Seit Pentest F-20 (2026-11-17) gilt jeder Schluessel nur fuer GENAU EINE
+     * Adresse: ``ziel`` ist der Pfad (samt Abfrage), fuer den er ausgestellt wird.
+     * Ein Schluessel ohne Ziel wird vom Server nicht mehr ausgestellt (400) und
+     * nicht mehr angenommen.
      */
-    private suspend fun abrufSchluessel(): String? = withContext(Dispatchers.IO) {
+    private suspend fun abrufSchluessel(ziel: String): String? = withContext(Dispatchers.IO) {
         runCatching {
-            httpClient.newCall(authBuilder("/api/download-key").get().build()).execute().use { resp ->
+            val pfad = "/api/download-key?ziel=" + java.net.URLEncoder.encode(ziel, "UTF-8")
+            httpClient.newCall(authBuilder(pfad).get().build()).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
                 JSONObject(resp.body?.string() ?: "{}").optString("key").takeIf { it.isNotBlank() }
             }
@@ -153,8 +159,9 @@ class IssuesRepository @Inject constructor(
      * sichtbar, statt den Schluessel in fremde Verlaeufe zu tragen).
      */
     suspend fun attachmentUrl(id: String, name: String): String {
-        val wert = abrufSchluessel()
-        val basis = "${baseUrl()}/api/issues/$id/attachments/$name"
+        val pfad = "/api/issues/$id/attachments/$name"
+        val wert = abrufSchluessel(pfad)
+        val basis = "${baseUrl()}$pfad"
         return if (wert.isNullOrBlank()) basis
                else "$basis?token=${java.net.URLEncoder.encode(wert, "UTF-8")}"
     }

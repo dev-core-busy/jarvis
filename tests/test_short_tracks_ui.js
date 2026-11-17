@@ -207,6 +207,11 @@ function baue(opt) {
     w.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
     w.eval(SEITE_BREIT);   // wie die Seite: vor tracks.js
     w.eval(require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend/js/sitzung.js'), 'utf8'));
+    // Abruf-Schluessel je Adresse (Pentest F-20): /tracks laedt dlkey.js; die
+    // Attrappe hat die ECHTE Signatur `url(adresse)` und markiert, dass die
+    // Adresse wirklich durch sie lief. (Bis 2026-11-17 pruefte dieser Waechter
+    // den Rueckfall aufs SITZUNGStoken – den weist der Server seit BSI M4 ab.)
+    w.JarvisDL = { url: (u) => u + (u.indexOf('?') >= 0 ? '&' : '?') + 'token=JDL1.probe' };
     w.eval(TR_JS);
     // Die Ruf-Liste zusaetzlich am Fenster ablegen, damit auch Bloecke, die nur
     // `w` festhalten, sie pruefen koennen (siehe rufeVon()).
@@ -482,8 +487,9 @@ abschnitt('3. Auftraege: Zustaende, Warteposition, Chips, Zaehler');
     pruefe(zeilen.some(t => t.indexOf('12.4') > -1), 'mit Laufzeit');
     const chip = box.querySelector('.st-chip');
     pruefe(chip !== null, 'die Ergebnisdatei erscheint als Chip');
-    pruefe(chip.getAttribute('href').indexOf('token=T') > -1,
-        'der Chip traegt das Sitzungstoken (ein <a download> kann keinen Header setzen)');
+    pruefe(chip.getAttribute('href').indexOf('token=JDL1.probe') > -1
+        && chip.getAttribute('href').indexOf('token=T') < 0,
+        'der Chip traegt den Abruf-Schluessel seiner Adresse, nie das Sitzungstoken');
     pruefe(chip.hasAttribute('download'), 'und laedt herunter statt zu navigieren');
     pruefe(chip.textContent.indexOf('Auswertung.xlsx') > -1, 'mit dem Dateinamen');
     const fehler = w.document.querySelector('[data-jobs="bbbbbbbbbbbb"] .st-job');
@@ -851,8 +857,8 @@ abschnitt('5. Protokoll');
     pruefe(w.document.querySelector('#st-log b') !== null, 'Ablage-Name fett');
     pruefe(w.document.querySelector('#st-log .st-log-res b') === null,
         'Fremdtext im Titel wird maskiert (kein <b> aus den Daten)');
-    pruefe(w.document.querySelector('#st-log .st-chip[href*="token=T"]') !== null,
-        'die Chips im Protokoll tragen ebenfalls das Token');
+    pruefe(w.document.querySelector('#st-log .st-chip[href*="token=JDL1.probe"]') !== null,
+        'die Chips im Protokoll tragen ebenfalls den Abruf-Schluessel');
     await schliesse(w);
 }
 {

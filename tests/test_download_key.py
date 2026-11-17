@@ -80,9 +80,27 @@ _bp.__path__ = [str(WURZEL / "backend")]
 sys.modules.setdefault("backend", _bp)
 
 from backend import download_key as dk  # noqa: E402
+import hashlib as _hl  # noqa: E402
+import hmac as _hmac  # noqa: E402
+
+# Pentest F-20 (2026-11-17): jeder Schluessel gilt fuer GENAU EIN Ziel.
+ZIEL = dk.ziel_kanon("/api/documents/0123abcd__bericht.pdf", [])
+
+
+def _sig_7(user, exp, art="v", sitz="0", ziel=ZIEL):
+    """Gueltige Signatur der 7-teiligen Form – fuer selbst gebaute Proben."""
+    return dk._sig(user, exp, art, sitz, dk.ziel_hash(ziel))
+
+
+def _sig_alt(inhalt):
+    """Gueltige Signatur einer ALTEN Form (ohne Ziel) – so, wie sie der Code bis
+    2026-11-17 ausstellte. Ohne gueltige Signatur fiele die alte Form aus dem
+    falschen Grund durch, und die Pruefung "alte Form abgewiesen" waere trivial."""
+    return _hmac.new(_C.SECRET_KEY.encode(), inhalt.encode(), _hl.sha256).hexdigest()
+
 
 print("\n\033[1m1. Der Schluessel ist als Sitzungstoken wertlos\033[0m")
-key, exp = dk.erzeugen("firma\\s.fischer")
+key, exp = dk.erzeugen("firma\\s.fischer", ziel=ZIEL)
 check("erzeugen liefert einen Schluessel", isinstance(key, str) and key.startswith("JDL1."), key[:24])
 check("und einen Ablaufzeitpunkt in der Zukunft", exp > int(time.time()))
 
@@ -128,31 +146,36 @@ if vt:
           ns["verify_token"](f"jarvis:{ts}:{sig}") == "jarvis")
 
 print("\n\033[1m2. Gueltigkeit, Bindung, fail-closed\033[0m")
-check("pruefen gibt den Benutzer zurueck", dk.pruefen(key) == "firma\\s.fischer", dk.pruefen(key))
+check("pruefen gibt den Benutzer zurueck", dk.pruefen(key, ZIEL) == "firma\\s.fischer",
+      dk.pruefen(key, ZIEL))
 check("ein veraenderter Benutzer faellt durch",
-      dk.pruefen(key.replace(dk._b64("firma\\s.fischer"), dk._b64("firma\\fremd"))) is None)
-check("eine veraenderte Signatur faellt durch", dk.pruefen(key[:-1] + ("a" if key[-1] != "a" else "b")) is None)
+      dk.pruefen(key.replace(dk._b64("firma\\s.fischer"), dk._b64("firma\\fremd")), ZIEL) is None)
+check("eine veraenderte Signatur faellt durch",
+      dk.pruefen(key[:-1] + ("a" if key[-1] != "a" else "b"), ZIEL) is None)
 check("ein verlaengerter Ablauf faellt durch",
-      dk.pruefen(key.replace(str(exp), str(exp + 99999))) is None)
+      dk.pruefen(key.replace(str(exp), str(exp + 99999)), ZIEL) is None)
 # ⚠ Der Ablauf muss mit GUELTIGER Signatur geprueft werden. Die erste Fassung
 # ersetzte nur den Zeitstempel – damit stimmte die Signatur nicht mehr, und der
 # Schluessel fiel aus dem falschen Grund durch: die Gegenprobe "Ablaufpruefung
 # entfernt" blieb gruen (0 FAIL). Jetzt wird der abgelaufene Schluessel richtig
 # signiert.
 _exp_alt = int(time.time()) - 10
-abgelaufen = f"{dk.PRAEFIX}.{dk._b64('jarvis')}.{_exp_alt}.{dk._sig('jarvis', _exp_alt)}"
+_zh = dk.ziel_hash(ZIEL)
+abgelaufen = (f"{dk.PRAEFIX}.{dk._b64('jarvis')}.{_exp_alt}.v.0.{_zh}."
+              f"{_sig_7('jarvis', _exp_alt)}")
 check("ein KORREKT signierter, aber abgelaufener Schluessel faellt durch",
-      dk.pruefen(abgelaufen) is None, abgelaufen[:40])
+      dk.pruefen(abgelaufen, ZIEL) is None, abgelaufen[:40])
 # Positivkontrolle: derselbe Bau mit Zukunfts-Ablauf wird angenommen – sonst
 # waere die Zeile darueber trivial wahr (z.B. bei einem Tippfehler im Aufbau).
 _exp_neu = int(time.time()) + 600
 check("… derselbe Aufbau mit Zukunfts-Ablauf wird angenommen (Positivkontrolle)",
-      dk.pruefen(f"{dk.PRAEFIX}.{dk._b64('jarvis')}.{_exp_neu}."
-                 f"{dk._sig('jarvis', _exp_neu)}") == "jarvis")
+      dk.pruefen(f"{dk.PRAEFIX}.{dk._b64('jarvis')}.{_exp_neu}.v.0.{_zh}."
+                 f"{_sig_7('jarvis', _exp_neu)}", ZIEL) == "jarvis")
 check("ein Sitzungstoken ist kein Abruf-Schluessel",
-      dk.pruefen("jarvis:1786692855:abc") is None)
+      dk.pruefen("jarvis:1786692855:abc", ZIEL) is None)
 check("Muell faellt durch, ohne zu werfen",
-      dk.pruefen("JDL1.@@@.x.y") is None and dk.pruefen("") is None and dk.pruefen(None) is None)
+      dk.pruefen("JDL1.@@@.x.y", ZIEL) is None and dk.pruefen("", ZIEL) is None
+      and dk.pruefen(None, ZIEL) is None)
 check("die Form ist erkennbar (fuer die Weiche in der Dependency)",
       dk.ist_abrufschluessel(key) and not dk.ist_abrufschluessel("jarvis:1:2"))
 check("die Lebensdauer ist eine FUNKTION, keine Modulkonstante",
@@ -169,10 +192,13 @@ print("\n\033[1m3. REGEL: keine Adresse mehr mit dem Sitzungstoken\033[0m")
 # vnc.js ist ausgenommen: ein WebSocket hat einen eigenen Auth-Weg und seine
 # Adresse ist nichts, was jemand in eine Mail kopiert.
 AUSNAHMEN = {"dlkey.js", "vnc.js"}
-# ``_dlKey(`` ist die Methode in knowledge.js (seit 2026-10-21, viewFile braucht
-# sie ausserhalb von _bindFilePreview). Ein Name ist keine Wirkung – dass sie
-# wirklich aus JarvisDL liest, prueft die Zeile unter dem Fundstellen-Check.
-SPEISER = re.compile(r"_dlk\s*\(|_dlKey\s*\(|JarvisDL")
+# Seit Pentest F-20 (2026-11-17) gilt ein Schluessel nur fuer EINE Adresse und
+# entsteht in dlkey.js aus der GANZEN Adresse (``JarvisDL.url``). Damit ist die
+# Regel schaerfer als vorher: ausserhalb von dlkey.js wird ueberhaupt KEIN
+# ``?token=`` mehr von Hand gebaut – auch nicht aus einem Schluessel, denn einen
+# Schluessel ohne Adresse gibt es nicht mehr. SPEISER bleibt nur fuer die
+# Gegenprobe des Kommentarfilters unten.
+SPEISER = re.compile(r"JarvisDL\.url")
 
 
 def _leerraum(treffer):
@@ -259,31 +285,35 @@ for datei in sorted(list((WURZEL / "frontend" / "js").glob("*.js"))
     if datei.name in AUSNAHMEN:
         continue
     for fund, wert in token_stellen(gefiltert(datei)):
-        if not SPEISER.search(wert):
-            treffer.append(f"{datei.name}: {fund}")
-check("JEDE ?token=-Adresse wird aus dem Abruf-Schluessel gespeist",
+        treffer.append(f"{datei.name}: {fund}")
+check("KEINE ?token=-Adresse ausserhalb von dlkey.js (F-20: Schluessel je Adresse)",
       not treffer, " | ".join(treffer[:4]))
-# Der Name _dlKey ist oben als Speiser zugelassen – also muss jede Definition
-# davon den Abruf-Schluessel holen. Sonst genuegte es, eine Methode so zu
-# nennen und darin das Sitzungstoken zurueckzugeben.
-_dlkey_rumpf = []
+# Positivkontrolle: dieselbe Suche trifft auf ECHTEN Dateien – ungefiltert stehen
+# dort Begruendungen mit ?token= (jira_addon.js, settings.html). Sonst waere die
+# Zeile darueber gruen, weil das Muster nichts trifft. (Nicht dlkey.js: dort steht
+# kein woertliches ?token=, das Trennzeichen wird berechnet.)
+_roh = sum(len(token_stellen(d.read_text(encoding="utf-8")))
+           for d in sorted(list((WURZEL / "frontend" / "js").glob("*.js"))
+                           + list((WURZEL / "frontend").glob("*.html")))
+           if d.name not in AUSNAHMEN)
+check("die Suche trifft auf echten Dateien (ungefiltert, Positivkontrolle)", _roh >= 2, _roh)
+check("und sie wuerde den Altstand melden (Probe im Test selbst)",
+      len(token_stellen("u = base + '?token=' + encodeURIComponent(_dlk());")) == 1)
+# Jeder Helfer _dlUrl muss wirklich JarvisDL.url rufen – ein Name ist keine Wirkung.
+_dlurl_rumpf = []
 for d in sorted((WURZEL / "frontend" / "js").glob("*.js")):
     _t = gefiltert(d)
-    for m in re.finditer(r"^\s*_dlKey\s*\(\s*\)\s*\{", _t, re.M):
-        _dlkey_rumpf.append((d.name, _t[m.end():_t.find("}", m.end())]))
-check("_dlKey ist definiert (Positivkontrolle zur naechsten Zeile)",
-      bool(_dlkey_rumpf), "keine Definition gefunden")
-check("jede _dlKey-Definition liest JarvisDL.schluessel()",
-      all("JarvisDL.schluessel()" in r for _, r in _dlkey_rumpf),
-      " | ".join(n for n, r in _dlkey_rumpf if "JarvisDL.schluessel()" not in r))
-# Positivkontrolle: die Suche findet ueberhaupt Stellen – sonst waere die
-# Zeile darueber gruen, weil das Muster nichts trifft.
-gefunden = sum(len(token_stellen(gefiltert(d)))
-               for d in (WURZEL / "frontend" / "js").glob("*.js") if d.name not in AUSNAHMEN)
-check("die Suche findet die Adressen ueberhaupt (Positivkontrolle)",
-      gefunden >= 8, f"gefunden={gefunden}")
-check("und sie wuerde den Altstand melden (Gegenprobe im Test selbst)",
-      not SPEISER.search("?token=' + encodeURIComponent(tk)"))
+    for m in re.finditer(r"(?:function\s+|^\s*)_dlUrl\s*\(\s*u\s*\)\s*\{", _t, re.M):
+        _dlurl_rumpf.append((d.name, _t[m.end():_t.find("}", m.end())]))
+check("_dlUrl ist definiert (Positivkontrolle zur naechsten Zeile)",
+      len(_dlurl_rumpf) >= 7, [n for n, _ in _dlurl_rumpf])
+check("jede _dlUrl-Definition ruft JarvisDL.url mit der Adresse",
+      all("JarvisDL.url(u)" in r for _, r in _dlurl_rumpf),
+      " | ".join(n for n, r in _dlurl_rumpf if "JarvisDL.url(u)" not in r))
+_alt_api = [d.name for d in (WURZEL / "frontend" / "js").glob("*.js")
+            if d.name != "dlkey.js" and "JarvisDL.schluessel" in gefiltert(d)]
+check("niemand fragt mehr einen Schluessel OHNE Adresse ab (JarvisDL.schluessel)",
+      not _alt_api, ", ".join(_alt_api))
 
 # ── Der Kommentarfilter selbst ──────────────────────────────────────────────
 # Positivkontrolle zur Regel darueber: sie ist nur dann eine Aussage, wenn der
@@ -312,7 +342,7 @@ PROBE_HTML = (
     '</script>\n'
 )
 _probe_stellen = token_stellen(ohne_kommentare(PROBE_HTML, html=True))
-_probe_offen = [w for _f, w in _probe_stellen if not SPEISER.search(w)]
+_probe_offen = [w for _f, w in _probe_stellen]
 check("der Filter trifft HTML- UND JS-Kommentar, laesst die echte Adresse aber "
       "stehen (Gegenprobe im Test selbst)",
       len(token_stellen(PROBE_HTML)) == 3 and len(_probe_stellen) == 1,
@@ -364,27 +394,42 @@ _EINST.pop("download_key_strict", None)
 # Zweig) und haengt an require_auth_or_agent – ein ZIEL nimmt er weiterhin nicht.
 _dkh = next((k for k in ast.parse(QUELLE).body if isinstance(k, ast.AsyncFunctionDef)
              and k.name == "download_key_holen"), None)
-check("der Endpunkt nimmt KEIN Ziel entgegen (er bindet an den Benutzer, nicht an eine Datei)",
-      _dkh is not None and sorted(a.arg for a in _dkh.args.args) == ["request", "user"]
-      and not _dkh.args.kwonlyargs and _dkh.args.vararg is None and _dkh.args.kwarg is None,
-      _dkh and [a.arg for a in _dkh.args.args])
+# Seit F-20 (2026-11-17) ist es umgekehrt: OHNE Ziel gibt es keinen Schluessel.
+# Am Syntaxbaum: JEDER erzeugen()-Aufruf in main.py traegt ``ziel=``. Die
+# Wirkung (400 ohne Ziel, Bindung) misst live_download_key_dev.py.
+_alle_erz = [c for c in ast.walk(ast.parse(QUELLE)) if isinstance(c, ast.Call)
+             and ast.unparse(c.func) == "_dlkey.erzeugen"]
+check("Positivkontrolle: erzeugen() wird in main.py aufgerufen", len(_alle_erz) >= 3, len(_alle_erz))
+check("JEDER erzeugen()-Aufruf bindet an ein Ziel (ziel=…)",
+      all(any(kw.arg == "ziel" for kw in c.keywords) for c in _alle_erz),
+      [ast.unparse(c)[:80] for c in _alle_erz if not any(kw.arg == "ziel" for kw in c.keywords)])
 
 print("\n\033[1m6. Der Schluessel traegt die Einschraenkung seiner Sitzung (Review 2026-10-07)\033[0m")
 # Vorher galten beim Einloesen die Admin-Rechte des KONTOS: eine App-Sitzung
 # eines Admins (ohne_admin) holte sich einen Schluessel und bekam damit
 # Kamerabild, Gesichtsdaten und die Dokumente aller Benutzer.
-_kv, _ = dk.erzeugen("chef")
-_ke, _ = dk.erzeugen("chef", eingeschraenkt=True)
-check("volle Sitzung -> nicht eingeschraenkt", dk.pruefen_mit_art(_kv) == ("chef", False), dk.pruefen_mit_art(_kv))
-check("eingeschraenkte Sitzung -> eingeschraenkt", dk.pruefen_mit_art(_ke) == ("chef", True), dk.pruefen_mit_art(_ke))
+# Ziel der Einloese-Proben unten: die Attrappen-Anfrage ruft "/x" ab.
+ZX = dk.ziel_kanon("/x", [])
+_kv, _ = dk.erzeugen("chef", ziel=ZX)
+_ke, _ = dk.erzeugen("chef", eingeschraenkt=True, ziel=ZX)
+check("volle Sitzung -> nicht eingeschraenkt", dk.pruefen_mit_art(_kv, ZX) == ("chef", False),
+      dk.pruefen_mit_art(_kv, ZX))
+check("eingeschraenkte Sitzung -> eingeschraenkt", dk.pruefen_mit_art(_ke, ZX) == ("chef", True),
+      dk.pruefen_mit_art(_ke, ZX))
 _teile = _ke.split(".")
 check("Art-Feld von e auf v umgeschrieben -> faellt durch (signiert)",
-      dk.pruefen_mit_art(".".join(_teile[:3] + ["v"] + _teile[4:]))[0] is None)
+      dk.pruefen_mit_art(".".join(_teile[:3] + ["v"] + _teile[4:]), ZX)[0] is None)
 _x = int(time.time()) + 600
-_alt = f"{dk.PRAEFIX}.{dk._b64('chef')}.{_x}.{dk._sig('chef', _x)}"
-check("alte 4-teilige Form (gueltig signiert) gilt als EINGESCHRAENKT (fail-closed)",
-      dk.pruefen_mit_art(_alt) == ("chef", True), dk.pruefen_mit_art(_alt))
-check("unbekannte Art faellt durch", dk.pruefen_mit_art(".".join(_teile[:3] + ["x"] + _teile[4:]))[0] is None)
+# Die ALTEN Formen, gueltig signiert wie bis 2026-11-17 ausgestellt: seit F-20
+# werden sie abgewiesen (vorher galt die 4-teilige als eingeschraenkt).
+_alt = f"{dk.PRAEFIX}.{dk._b64('chef')}.{_x}.{_sig_alt(f'jdl1:chef:{_x}')}"
+_alt6 = f"{dk.PRAEFIX}.{dk._b64('chef')}.{_x}.v.0.{_sig_alt(f'jdl1:chef:{_x}:v:0')}"
+check("alte 4-teilige Form (gueltig signiert) wird ABGEWIESEN (F-20)",
+      dk.pruefen_mit_art(_alt, ZX)[0] is None, dk.pruefen_mit_art(_alt, ZX))
+check("alte 6-teilige Form ohne Ziel (gueltig signiert) wird ABGEWIESEN (F-20)",
+      dk.pruefen_mit_art(_alt6, ZX)[0] is None, dk.pruefen_mit_art(_alt6, ZX))
+check("unbekannte Art faellt durch",
+      dk.pruefen_mit_art(".".join(_teile[:3] + ["x"] + _teile[4:]), ZX)[0] is None)
 
 # Die KETTE in main.py: _query_benutzer setzt den Sitzungskontext, und
 # _sitzung_ohne_admin (daran haengt _user_is_admin) sieht ihn.
@@ -392,10 +437,20 @@ import contextvars as _cv  # noqa: E402
 _fns = {}
 for k in baum.body:
     if isinstance(k, ast.FunctionDef) and k.name in ("_query_benutzer", "_sitzung_ohne_admin",
-                                                       "_admin_2fa_pflicht"):
+                                                       "_admin_2fa_pflicht", "_abruf_ziel"):
         _fns[k.name] = ast.get_source_segment(QUELLE, k)
-check("Positivkontrolle: drei Funktionen aus main.py geschnitten", len(_fns) == 3, sorted(_fns))
-if len(_fns) == 3:
+check("Positivkontrolle: vier Funktionen aus main.py geschnitten", len(_fns) == 4, sorted(_fns))
+
+
+class _Abfrage(dict):
+    """Attrappe von Starlettes QueryParams – mit der ECHTEN Schnittstelle
+    (``get`` und ``multi_items``), die _abruf_ziel benutzt."""
+
+    def multi_items(self):
+        return list(self.items())
+
+
+if len(_fns) == 4:
     _KX = _cv.ContextVar("_sk", default=None)
     _BEENDET = set()        # Kennungen beendeter Sitzungen (Attrappe sitzung_token)
     _ns6 = {"_dlkey": dk, "verify_token": lambda t: None, "_sitzung_kontext": _KX,
@@ -410,7 +465,7 @@ if len(_fns) == 3:
 
     def _einloesen(schluessel):
         def lauf():
-            req = types.SimpleNamespace(query_params={"token": schluessel},
+            req = types.SimpleNamespace(query_params=_Abfrage(token=schluessel),
                                         url=types.SimpleNamespace(path="/x"))
             name = _ns6["_query_benutzer"](req)
             return name, (_ns6["_sitzung_ohne_admin"](name) if name else None)
@@ -423,14 +478,14 @@ if len(_fns) == 3:
     check("… auch wenn die 2FA-Pflicht AUS ist (App-Sitzungen haben nie Admin-Rechte)",
           _einloesen(_ke) == ("chef", True), _einloesen(_ke))
     _EINST.pop("admin_2fa_pflicht", None)
-    check("alter Schluessel -> ebenfalls ohne Admin-Rechte", _einloesen(_alt) == ("chef", True))
+    check("alter Schluessel (ohne Ziel) -> abgewiesen", _einloesen(_alt)[0] is None, _einloesen(_alt))
 
     print("\n\033[1m3. Schluessel endet mit seiner Sitzung (Code-Review 2026-10-07)\033[0m")
     _ts0 = int(time.time()) - 60
-    _ks, _ = dk.erzeugen("chef", sitzung=(_ts0, "a" * 32))
+    _ks, _ = dk.erzeugen("chef", sitzung=(_ts0, "a" * 32), ziel=ZX)
     check("Positivkontrolle: an eine lebende Sitzung gebundener Schluessel gilt",
           _einloesen(_ks) == ("chef", False), _einloesen(_ks))
-    check("die Bindung steht IM Schluessel (6 Teile)", len(_ks.split(".")) == 6, _ks.count("."))
+    check("die Bindung steht IM Schluessel (7 Teile, mit Ziel)", len(_ks.split(".")) == 7, _ks.count("."))
     _BEENDET.add("a" * 32)
     check("⚠ Sitzung abgemeldet -> Schluessel abgewiesen", _einloesen(_ks)[0] is None,
           _einloesen(_ks))
@@ -451,7 +506,7 @@ if len(_fns) == 3:
     _gefaelscht[4] = str(_ts0 + 3600) + "-" + "b" * 32
     check("⚠ ausgetauschte Sitzungsangabe -> Signatur passt nicht",
           _einloesen(".".join(_gefaelscht))[0] is None)
-    _o, _ = dk.erzeugen("api")
+    _o, _ = dk.erzeugen("api", ziel=ZX)
     check("ohne Sitzung (API-Key): Form 0, gilt", _o.split(".")[4] == "0"
           and _einloesen(_o)[0] == "api", _o)
 
@@ -478,6 +533,56 @@ for _n in ("_openapi_url", "download_key_holen"):
           bool(_aufrufe) and all(any(kw.arg == "sitzung" and "_abruf_sitzung" in ast.unparse(kw.value)
                                      for kw in c.keywords) for c in _aufrufe),
           [ast.unparse(c) for c in _aufrufe])
+
+print("\n\033[1m8. Pentest F-20: ein Schluessel gilt fuer GENAU EINE Adresse\033[0m")
+_kd, _ = dk.erzeugen("chef", ziel=ZIEL)
+check("Positivkontrolle: Schluessel gilt fuer sein Ziel", dk.pruefen(_kd, ZIEL) == "chef")
+check("⚠ fuer eine ANDERE Datei abgewiesen",
+      dk.pruefen(_kd, dk.ziel_kanon("/api/documents/fremd__x.pdf", [])) is None)
+_zq = dk.ziel_kanon("/api/wissen/file", [("path", "a/b.pdf")])
+_kq, _ = dk.erzeugen("chef", ziel=_zq)
+check("⚠ gleicher Pfad, anderer Parameter abgewiesen",
+      dk.pruefen(_kq, dk.ziel_kanon("/api/wissen/file", [("path", "a/c.pdf")])) is None)
+check("⚠ OHNE Ziel gibt es keinen Zugang (fail-closed)",
+      dk.pruefen(_kq) is None and dk.pruefen(_kq, "") is None)
+check("Reihenfolge und Kodierung der Parameter sind gleichgueltig",
+      dk.ziel_aus_adresse("/api/wissen/file?x=1&path=a%20b")
+      == dk.ziel_kanon("/api/wissen/file", [("path", "a b"), ("x", "1")]))
+check("token und der Cache-Buster t zaehlen nicht zum Ziel",
+      dk.ziel_aus_adresse("/api/vision/snapshot?t=1&token=JDL1.x")
+      == dk.ziel_aus_adresse("/api/vision/snapshot?t=99"))
+check("… andere Parameter schon (Positivkontrolle)",
+      dk.ziel_aus_adresse("/api/vision/face-crop/0?i=1") != dk.ziel_aus_adresse("/api/vision/face-crop/0?i=2"))
+check("ein kodierter Pfad ist dasselbe Ziel wie der dekodierte (request.url.path)",
+      dk.ziel_aus_adresse("/api/documents/a%20b.pdf") == dk.ziel_kanon("/api/documents/a b.pdf", []))
+for _fremd in ("/etc/passwd", "relativ/api/x", ""):
+    try:
+        dk.ziel_aus_adresse(_fremd)
+        _ok_fremd = False
+    except ValueError:
+        _ok_fremd = True
+    check(f"kein Schluessel fuer eine Adresse ausserhalb der Abruf-Pfade: {_fremd!r}", _ok_fremd)
+try:
+    dk.erzeugen("chef")
+    _ohne_ziel = "ausgestellt"
+except TypeError:
+    _ohne_ziel = "TypeError"
+check("erzeugen() OHNE Ziel ist ein Programmierfehler (TypeError), kein ungebundener Schluessel",
+      _ohne_ziel == "TypeError", _ohne_ziel)
+try:
+    dk.erzeugen("chef", ziel="")
+    _leer = "ausgestellt"
+except ValueError:
+    _leer = "ValueError"
+check("… und ein leeres Ziel ebenso wenig", _leer == "ValueError", _leer)
+check("Grund fuer die alte Form ist benannt", "ohne Zielbindung" in dk.grund(_alt))
+check("Grund fuer eine fremde Adresse ist benannt",
+      "andere Adresse" in dk.grund(_kd, dk.ziel_kanon("/api/documents/fremd__x.pdf", [])))
+_pk, _ = dk.erzeugen("api", sitzung=(0, "abc123"), programm=True, ziel=ZIEL)
+check("Programmschluessel: gilt fuer sein Ziel (Positivkontrolle)",
+      dk.programm_kennung(_pk, ZIEL) == "abc123")
+check("⚠ Programmschluessel: fuer ein anderes Ziel abgewiesen",
+      dk.programm_kennung(_pk, dk.ziel_kanon("/api/documents/fremd__x.pdf", [])) is None)
 
 print(f"\n\033[1mErgebnis: {_ok}/{_ok + _fail}\033[0m")
 sys.exit(1 if _fail else 0)

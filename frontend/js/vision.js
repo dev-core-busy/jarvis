@@ -24,15 +24,14 @@ class JarvisVisionManager {
         this._lastFaceKey = '';         // Letzte erkannte Gesichter (Duplikat-Vermeidung)
     }
 
-    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js).
-       Die Vision-Medien haengen an require_admin_or_query – der Schluessel
+    /* Abruf-Schluessel GENAU DIESER Adresse in ?token= (frontend/js/dlkey.js,
+       Pentest F-20). Die Vision-Medien haengen an require_admin_or_query – der Schluessel
        traegt den Benutzer, die Admin-Pruefung dort arbeitet unveraendert.
        ⚠ METHODE, keine Funktion in _feedTick(): die sechs Aufrufstellen liegen
        in fuenf verschiedenen Methoden. Dort eingeschachtelt waeren fuenf davon
        ausser Reichweite – genau der Fehler vom 2026-09-02. */
-    _dlk() {
-        return (window.JarvisDL && window.JarvisDL.schluessel())
-            || window.JarvisSitzung.token();
+    _dlUrl(u) {
+        return window.JarvisDL ? window.JarvisDL.url(u) : u;
     }
 
     /* ── Lifecycle ──────────────────────────────────────────────────── */
@@ -110,7 +109,7 @@ class JarvisVisionManager {
             const ph = document.getElementById('vis-feed-placeholder');
             if (ph) ph.textContent = window.t('vis.no_cam_image');
         };
-        newImg.src = `/api/vision/snapshot?t=${Date.now()}&token=${this._dlk()}`;
+        newImg.src = this._dlUrl(`/api/vision/snapshot?t=${Date.now()}`);
     }
 
     /* ── Log ──────────────────────────────────────────────────────── */
@@ -247,7 +246,7 @@ class JarvisVisionManager {
             if (this._feedActive) {
                 const img = document.getElementById('vis-feed-img');
                 if (img) {
-                    img.src = `/api/vision/snapshot?t=${Date.now()}&token=${this._dlk()}`;
+                    img.src = this._dlUrl(`/api/vision/snapshot?t=${Date.now()}`);
                     if (this._feedFrame === 0) this._feedFrame = 1;
                 }
             }
@@ -307,7 +306,7 @@ class JarvisVisionManager {
         el.innerHTML = faces.map((f, i) => {
             const conf = f.confidence ? `${(f.confidence * 100).toFixed(0)}%` : '';
             const icon = f.name === 'Unbekannt' ? '👤' : '✅';
-            const cropUrl = `/api/vision/face-crop/${i}?t=${Date.now()}&token=${this._dlk()}`;
+            const cropUrl = this._dlUrl(`/api/vision/face-crop/${i}?t=${Date.now()}`);
             return `<div class="vis-face-badge">
                 <img class="vis-face-crop" src="${cropUrl}" />
                 <span>${icon} ${this._esc(f.name)} <small>${conf}</small></span>
@@ -439,7 +438,7 @@ class JarvisVisionManager {
             // Face-Crop anzeigen
             const cropImg = document.getElementById('vis-wizard-crop');
             if (cropImg) {
-                cropImg.src = `/api/vision/face-crop/0?t=${Date.now()}&token=${this._dlk()}`;
+                cropImg.src = this._dlUrl(`/api/vision/face-crop/0?t=${Date.now()}`);
             }
 
             // Schritt 2: Name eingeben
@@ -713,7 +712,7 @@ class JarvisVisionManager {
             return `
                 <div class="vis-profile-item">
                     <div class="vis-profile-header">
-                        <img class="vis-profile-thumb" src="/api/vision/thumbnail/${encodeURIComponent(p.id)}?t=${Date.now()}&token=${this._dlk()}" />
+                        <img class="vis-profile-thumb" src="${this._dlUrl(`/api/vision/thumbnail/${encodeURIComponent(p.id)}?t=${Date.now()}`)}" />
                         <div class="vis-profile-info">
                             <strong>${this._esc(p.name)}</strong>
                             <small>${p.num_images} ${window.t('vision.images_count')} · ${date}</small>
@@ -797,7 +796,7 @@ class JarvisVisionManager {
     }
 
     async _testGreetAudio(profileId) {
-        const url = `/api/vision/greet-audio/${encodeURIComponent(profileId)}?token=${this._dlk()}`;
+        const url = this._dlUrl(`/api/vision/greet-audio/${encodeURIComponent(profileId)}`);
 
         // Button visuell als "ladend" markieren
         const btn = document.getElementById(`vis-test-${profileId}`);

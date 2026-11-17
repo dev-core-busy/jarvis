@@ -97,7 +97,14 @@ function seite(schluessel, benutzerSchluessel) {
     const exp = Math.floor(Date.now() / 1000) + 900;
     const b64 = Buffer.from('m.mustermann', 'utf8').toString('base64')
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    zustand.key = 'JDL1.' + b64 + '.' + exp + '.' + 'a'.repeat(64);
+    // Seit Pentest F-20 (2026-11-17) ein Schluessel JE ADRESSE: die Zielmarke
+    // ist hier aus der Adresse abgeleitet, damit am Wert ablesbar ist, fuer
+    // welche Adresse er ausgestellt wurde.
+    const schluesselFuer = (adr) => 'JDL1.' + b64 + '.' + exp + '.v.0.'
+        + Buffer.from(adr, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+        + '.' + 'a'.repeat(64);
+    zustand.key = schluesselFuer('/api/documents/' + CAP);
+    zustand.ziele = [];
 
     // Attrappe nach dem PFAD routen, nicht nach der vollen URL – ein spaeter
     // ergaenztes ?lang= verfehlt sonst jede Route (Register).
@@ -106,10 +113,16 @@ function seite(schluessel, benutzerSchluessel) {
         zustand.pfade.push(pfad);
         if (pfad === '/api/download-key') {
             zustand.abrufe++;
-            // Form und Felder wie der echte Endpunkt (main.py: ok/key/exp/ttl_min)
+            // Form und Felder wie der echte Endpunkt (main.py, Sammelabruf:
+            // POST {ziele} -> {ok, keys: {<adresse>: {key, exp}}, abgewiesen, ttl_min}).
+            let ziele = [];
+            try { ziele = JSON.parse((opt && opt.body) || '{}').ziele || []; } catch (e) { ziele = []; }
+            zustand.ziele.push({ methode: (opt && opt.method) || 'GET', ziele: ziele });
+            const keys = {};
+            ziele.forEach((adr) => { keys[adr] = { key: schluesselFuer(adr), exp: exp }; });
             return Promise.resolve({
                 ok: true,
-                json: () => Promise.resolve({ ok: true, key: zustand.key, exp: exp, ttl_min: 15 })
+                json: () => Promise.resolve({ ok: true, keys: keys, abgewiesen: {}, ttl_min: 15 })
             });
         }
         return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
@@ -147,8 +160,10 @@ kopf('1) Positivkontrolle: der Messaufbau stellt den Regelfall her');
     check(typeof win.JarvisDL === 'object' && !!win.JarvisDL, 'dlkey.js ist geladen');
     check(win.JarvisSitzung.token() === 'm.mustermann:1790000000:abcdef',
           'die gemeinsame Quelle findet den gesetzten Schluessel');
-    check(zustand.pfade.indexOf('/api/download-key') >= 0,
-          '/api/download-key wird ueberhaupt angefordert');
+    // Seit F-20 laeuft der Abruf im Sammeldurchgang NACH dem Rendern (setTimeout 0);
+    // synchron messbar ist der Platzhalter, der Abruf selbst in Abschnitt 5.
+    check(/[?&]token=JDL1\.warten/.test(href),
+          'die Adresse traegt synchron den Platzhalter (Abruf vorgemerkt)');
     if (FAIL) { bilanz(); process.exit(2); }   // Messaufbau kaputt = keine Aussage
 }
 
@@ -160,8 +175,6 @@ for (const s of TOKEN_SCHLUESSEL) {
     const { win, render, zustand } = seite(s, null);
     const href = chipHref(win, render(CHIP_MD));
     check(/[?&]token=/.test(href), s + ': die Adresse traegt ein ?token= (sonst 401)');
-    check(zustand.abrufe === 1, s + ': /api/download-key wurde genau einmal gerufen'
-          + ' (gemessen: ' + zustand.abrufe + ')');
     // BSI M4 (2026-10-05): vor dem ersten Schluessel steht der PLATZHALTER in
     // der Adresse, nie das Sitzungstoken (der Server weist es per Vorgabe ab).
     check(href.indexOf('m.mustermann:1790000000') < 0 && href.indexOf('1790000000%3Aabcdef') < 0,
@@ -199,13 +212,19 @@ kopf('5) Nach dem Abruf traegt die Adresse den ABRUF-SCHLUESSEL');
 (async () => {
     for (const s of TOKEN_SCHLUESSEL) {
         const { win, render, zustand } = seite(s, null);
-        await win.JarvisDL.bereit();
+        render(CHIP_MD);                          // merkt die Adresse vor
+        await new Promise(r => setTimeout(r, 30)); // Sammelabruf ist durch
+        check(zustand.abrufe === 1, s + ': /api/download-key wurde genau einmal gerufen'
+              + ' (gemessen: ' + zustand.abrufe + ')');
+        check(zustand.ziele.length === 1 && zustand.ziele[0].methode === 'POST'
+              && JSON.stringify(zustand.ziele[0].ziele) === JSON.stringify(['/api/documents/' + CAP]),
+              s + ': als Sammelabruf MIT der Chip-Adresse als Ziel (F-20)');
         const href = chipHref(win, render(CHIP_MD));
-        check(href.indexOf('token=JDL1.') > 0,
-              s + ': der Link traegt JDL1 (15 Minuten Lesezugriff, nicht 30 Tage Sitzung)');
+        check(href.indexOf('token=JDL1.') > 0 && href.indexOf('warten') < 0,
+              s + ': der Link traegt JDL1 (Minuten, eine Datei – nicht 30 Tage Sitzung)');
         check(href.indexOf(encodeURIComponent(zustand.key)) > 0
               || href.indexOf(zustand.key) > 0,
-              s + ': und zwar genau den Schluessel aus /api/download-key');
+              s + ': und zwar genau den Schluessel, der FUER DIESE ADRESSE ausgestellt wurde');
     }
 
     /* Der Platzhalter wird im DOM ERSETZT, sobald der Schluessel da ist –
@@ -222,7 +241,7 @@ kopf('5) Nach dem Abruf traegt die Adresse den ABRUF-SCHLUESSEL');
         const mitPlatzhalter = /token=JDL1\.warten/.test(vorher);
         check(mitPlatzhalter, 'synchron gerendert: Platzhalter statt Sitzungstoken');
         if (mitPlatzhalter) {
-            await win.JarvisDL.bereit();
+            await new Promise(r => setTimeout(r, 30));   // Sammelabruf + Nachziehen
             const nachher = a.getAttribute('href');
             check(nachher.indexOf('warten') < 0
                   && (nachher.indexOf(encodeURIComponent(zustand.key)) > 0 || nachher.indexOf(zustand.key) > 0),

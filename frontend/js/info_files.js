@@ -26,10 +26,9 @@
     // Token jeder Oberflaeche geoeffnet worden sein.
     var TOKEN_KEYS = window.JarvisSitzung.tokenSchluessel();
 
-    /* Abruf-Schluessel statt Sitzungstoken in ?token= (frontend/js/dlkey.js). */
-    function _dlk() {
-        return (window.JarvisDL && window.JarvisDL.schluessel())
-            || window.JarvisSitzung.token();
+    /* Abruf-Schluessel GENAU DIESER Adresse in ?token= (frontend/js/dlkey.js, F-20). */
+    function _dlUrl(u) {
+        return window.JarvisDL ? window.JarvisDL.url(u) : u;
     }
 
     function token() {
@@ -341,8 +340,7 @@
             // Der Schluessel gehoert NUR ins DOM (wie chatlib.js::_withToken):
             // die Liste wird bei jedem Laden neu gebaut, nichts gespeichert.
             // Seit 2026-09-02 ist das ein Abruf-Schluessel, kein Sitzungstoken.
-            var href = '/api/info_files/' + encodeURIComponent(f.name)
-                     + (_dlk() ? '?token=' + encodeURIComponent(_dlk()) : '');
+            var href = _dlUrl('/api/info_files/' + encodeURIComponent(f.name));
             var inline = !!INLINE[f.kind];
             var attrs = inline
                 ? 'target="_blank" rel="noopener"'

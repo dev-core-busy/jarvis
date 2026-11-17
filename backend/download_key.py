@@ -16,7 +16,7 @@ Ein Token in der Adresse ist unvermeidlich: ``<a download>`` und ``<img src>``
 koennen keinen ``Authorization``-Header setzen. **Dass es das SITZUNGStoken
 ist, ist es nicht.** Dieses Modul stellt ein zweites, schwaecheres Merkmal aus:
 
-    JDL1.<benutzer-b64>.<ablauf>.<art>.<hmac>
+    JDL1.<benutzer-b64>.<ablauf>.<art>.<sitz>.<ziel>.<hmac>
 
 ``<art>`` (seit Code-Review 2026-10-07): ``v`` = volle Sitzung, ``e`` =
 EINGESCHRAENKTE Sitzung (App-Anmeldung oder Admin ohne 2FA unter der Pflicht,
@@ -43,14 +43,22 @@ Formen ohne ``<sitz>`` laufen nur noch bis zu ihrem Ablauf aus.
     ``documents.may_see`` und die Admin-Pruefung in ``require_admin_or_query``
     arbeiten unveraendert weiter.
 
-**Was er NICHT ist: an EINE Datei gebunden.** Das waere strenger, verlangt aber
-einen Server-Aufruf je Link – und alle vierzehn Stellen, die im Frontend eine
-solche Adresse bauen, tun das **synchron beim Rendern** (``chatlib::_withToken``
-und Geschwister). Eine Bindung je Datei haette entweder den Renderer async
-gemacht oder den Schluessel in den gespeicherten Chatverlauf geschrieben, wo er
-nichts zu suchen hat. Der Gewinn ist trotzdem der entscheidende: aus „30 Tage
-volle Sitzung" wird „15 Minuten Lesezugriff auf das, was dieser Benutzer
-ohnehin herunterladen darf".
+``<ziel>`` (seit Pentest "Hardening" F-20, 2026-11-17, 7-teilige Form): der
+Schluessel gilt nur noch fuer GENAU EINE Adresse. Bis dahin oeffnete ein
+abgegriffener Schluessel (Verlauf, Proxy-Protokoll, weitergeleiteter Link) fuer
+seine Laufzeit JEDE Datei, die der Benutzer laden darf. Das Ziel ist ein Hash
+ueber Pfad und Abfrageparameter (``ziel_kanon``); ``token`` und der
+Cache-Buster ``t`` zaehlen nicht mit, Reihenfolge und Kodierung der Parameter
+ebenso wenig. **Die alten Formen ohne Ziel werden abgewiesen**
+(Betreiberentscheid 2026-11-17: sofort, ohne Uebergang).
+
+Die fruehere Begruendung gegen eine Bindung („die Renderer bauen Adressen
+synchron") traegt nicht mehr: ``frontend/js/dlkey.js`` setzt beim Rendern einen
+Platzhalter, holt die Schluessel im Sammelabruf (``POST /api/download-key``)
+und schreibt sie nachtraeglich ins DOM – derselbe Weg, auf dem es seit
+2026-09-04 abgelaufene Schluessel ersetzt. Der Client rechnet dabei keinen Hash
+nach: er schickt die Adresse, der Server bildet das Ziel. Zwei Fassungen
+derselben Kanonisierung (Python und JS) koennten nie auseinanderlaufen.
 
 ``verify_token`` kann diesen Schluessel schon von der Form her nicht annehmen
 (kein ``:``) – die Trennung haengt also nicht an einer Reihenfolge von
@@ -104,14 +112,48 @@ def streng() -> bool:
     return str(v).strip().lower() not in ("false", "0", "nein", "no", "off", "aus")
 
 
-def _sig(user: str, exp: int, art: str | None = None, sitz: str | None = None) -> str:
-    # art=None: Signatur der alten 4-teiligen Form, sitz=None: der alten
-    # 5-teiligen (beide nur noch zum Pruefen).
-    inhalt = f"jdl1:{user}:{exp}" if art is None else f"jdl1:{user}:{exp}:{art}"
-    if sitz is not None:
-        inhalt += f":{sitz}"
+def _sig(user: str, exp: int, art: str, sitz: str, ziel: str) -> str:
+    inhalt = f"jdl1:{user}:{exp}:{art}:{sitz}:{ziel}"
     return hmac.new(config.SECRET_KEY.encode(), inhalt.encode(),
                     hashlib.sha256).hexdigest()
+
+
+# Parameter, die NICHT zum Ziel gehoeren: der Schluessel selbst und der
+# Cache-Buster der Kamerabilder (``?t=<Date.now()>``, wechselt bei jedem
+# Neuladen – mit ihm braeuchte jedes Bild einen eigenen Schluessel). Kein
+# Abruf-Endpunkt wertet ``t`` aus (gemessen 2026-11-17 an allen 16).
+_ZIEL_OHNE = ("token", "t")
+
+
+def ziel_kanon(pfad: str, params) -> str:
+    """Kanonische Form eines Abruf-Ziels: dekodierter Pfad + sortierte Parameter.
+
+    ``params``: Paare (Name, Wert), bereits DEKODIERT – so liefert sie
+    Starlette (``request.query_params.multi_items()``) und ``parse_qsl``.
+    Der Pfad wird ebenfalls dekodiert verglichen (``request.url.path`` ist es),
+    damit ``%20`` und ein Leerzeichen dasselbe Ziel sind."""
+    from urllib.parse import unquote, urlencode
+    p = unquote(str(pfad or ""))
+    paare = sorted((str(k), str(v)) for k, v in (params or ()) if str(k) not in _ZIEL_OHNE)
+    return p + ("?" + urlencode(paare) if paare else "")
+
+
+def ziel_aus_adresse(adresse: str) -> str:
+    """Kanonische Form aus einer Adresse, wie der Client sie baut (relativ
+    oder absolut). Nur Pfade unter ``/api/`` und die Schema-Seiten – ein
+    Schluessel fuer eine beliebige Adresse waere sinnlos."""
+    from urllib.parse import urlsplit, parse_qsl
+    teile = urlsplit(str(adresse or "").strip())
+    pfad = teile.path or ""
+    if not (pfad.startswith("/api/") or pfad in ("/openapi.json", "/docs", "/redoc")):
+        raise ValueError("kein Abruf-Ziel")
+    return ziel_kanon(pfad, parse_qsl(teile.query, keep_blank_values=True))
+
+
+def ziel_hash(kanon: str) -> str:
+    """Kurzform des Ziels im Schluessel (144 Bit, base64url ohne Punkt)."""
+    return base64.urlsafe_b64encode(
+        hashlib.sha256(str(kanon).encode()).digest()[:18]).decode()
 
 
 def _b64(s: str) -> str:
@@ -135,7 +177,7 @@ def _sitz_text(sitzung) -> str:
 def erzeugen(user: str, ttl_min: int | None = None,
              eingeschraenkt: bool = False,
              sitzung: "tuple[int, str] | None" = None,
-             programm: bool = False) -> tuple[str, int]:
+             programm: bool = False, *, ziel: str) -> tuple[str, int]:
     """Schluessel + Ablaufzeitpunkt (Epoche) fuer diesen Benutzer.
 
     Der Benutzername wird base64url kodiert: er kann einen Domaenen-Praefix mit
@@ -144,6 +186,10 @@ def erzeugen(user: str, ttl_min: int | None = None,
     """
     if not user:
         raise ValueError("kein Benutzer")
+    # ``ziel`` ist PFLICHT (keyword-only, ohne Vorgabe): ein Aufrufer, der es
+    # vergisst, bekommt einen TypeError statt eines ungebundenen Schluessels.
+    if not ziel:
+        raise ValueError("kein Ziel")
     ttl = ttl_minuten() if ttl_min is None else max(1, min(int(ttl_min), _TTL_MAX))
     exp = int(time.time()) + ttl * 60
     # Art "p" (Pentest A7, 2026-11-08): Schluessel fuer einen PROGRAMMSCHLUESSEL
@@ -153,7 +199,9 @@ def erzeugen(user: str, ttl_min: int | None = None,
     # steht in der Signatur; ein Sitzungs-Schluessel laesst sich nicht umetikettieren.
     art = "p" if programm else ("e" if eingeschraenkt else "v")
     sitz = _sitz_text(sitzung)
-    return f"{PRAEFIX}.{_b64(user)}.{exp}.{art}.{sitz}.{_sig(user, exp, art, sitz)}", exp
+    zh = ziel_hash(ziel)
+    return (f"{PRAEFIX}.{_b64(user)}.{exp}.{art}.{sitz}.{zh}."
+            f"{_sig(user, exp, art, sitz, zh)}", exp)
 
 
 def ist_abrufschluessel(wert: str) -> bool:
@@ -165,7 +213,7 @@ def ist_abrufschluessel(wert: str) -> bool:
     return bool(wert) and wert.startswith(PRAEFIX + ".")
 
 
-def grund(wert: str) -> str:
+def grund(wert: str, ziel: str | None = None) -> str:
     """Warum wird dieses ``?token=`` nicht angenommen? – fuer die Protokollzeile.
 
     WARUM ES DAS GIBT (bezahlt am 2026-10-01): ein Datei-Abruf ohne gueltiges
@@ -185,40 +233,43 @@ def grund(wert: str) -> str:
         return "kein Token in der Adresse"
     if not ist_abrufschluessel(wert):
         return "Sitzungstoken statt Abruf-Schluessel" if streng() else "ungueltiges Sitzungstoken"
+    teile = wert.split(".")
+    if len(teile) != 7:
+        return "Abruf-Schluessel ohne Zielbindung (alte Form, wird abgewiesen)"
     try:
-        exp = int(wert.split(".", 3)[2])
+        exp = int(teile[2])
     except Exception:  # noqa: BLE001
         return "Abruf-Schluessel unlesbar"
     alter = int(time.time()) - exp
     if alter > 0:
         return f"Abruf-Schluessel seit {alter} s abgelaufen (Laufzeit {ttl_minuten()} min)"
+    if ziel is not None and teile[5] != ziel_hash(ziel):
+        return "Abruf-Schluessel gilt fuer eine andere Adresse"
     return "Abruf-Schluessel: Signatur passt nicht"
 
 
-def pruefen_voll(schluessel: str) -> "tuple[str | None, bool, tuple[int, str] | None]":
+def pruefen_voll(schluessel: str, ziel: str | None = None
+                 ) -> "tuple[str | None, bool, tuple[int, str] | None]":
     """(Benutzername, eingeschraenkt?, Sitzung) oder (None, True, None).
 
+    ``ziel`` = kanonische Form der ABGERUFENEN Adresse (``ziel_kanon``). Ohne
+    Ziel gibt es keinen Zugang (fail-closed) – eine Pruefung, die das Ziel
+    vergisst, darf nicht still zur ungebundenen werden. Die alten Formen
+    (4/5/6 Teile, ohne Ziel) werden abgewiesen (F-20).
+
     Sitzung = ``(ts, kennung)`` der ausstellenden Sitzung oder None (ohne
-    Sitzung bzw. alte Form). Fail-closed: jeder Fehler = kein Zugang; ein
-    Schluessel ohne Art-Feld gilt als eingeschraenkt."""
+    Sitzung)."""
     nein = (None, True, None)
     try:
-        if not ist_abrufschluessel(schluessel):
+        if not ziel or not ist_abrufschluessel(schluessel):
             return nein
         teile = schluessel.split(".")
-        sitz = None
-        if len(teile) == 6:
-            _, b_user, s_exp, art, sitz, sig = teile
-            if art not in ("v", "e", "p"):
-                return nein
-        elif len(teile) == 5:
-            _, b_user, s_exp, art, sig = teile
-            if art not in ("v", "e"):
-                return nein
-        elif len(teile) == 4:
-            _, b_user, s_exp, sig = teile
-            art = None
-        else:
+        if len(teile) != 7:
+            return nein
+        _, b_user, s_exp, art, sitz, zh, sig = teile
+        if art not in ("v", "e", "p"):
+            return nein
+        if not hmac.compare_digest(zh, ziel_hash(ziel)):
             return nein
         exp = int(s_exp)
         if exp < int(time.time()):
@@ -228,10 +279,10 @@ def pruefen_voll(schluessel: str) -> "tuple[str | None, bool, tuple[int, str] | 
             return nein
         # compare_digest: die Laufzeit darf nicht verraten, wie weit die
         # Signatur uebereinstimmt.
-        if not hmac.compare_digest(sig, _sig(user, exp, art, sitz)):
+        if not hmac.compare_digest(sig, _sig(user, exp, art, sitz, zh)):
             return nein
         sitzung = None
-        if sitz is not None and sitz != "0":
+        if sitz != "0":
             s_ts, _, kennung = sitz.partition("-")
             if not kennung:
                 return nein
@@ -241,18 +292,18 @@ def pruefen_voll(schluessel: str) -> "tuple[str | None, bool, tuple[int, str] | 
         return nein
 
 
-def programm_kennung(schluessel: str) -> str | None:
+def programm_kennung(schluessel: str, ziel: str | None = None) -> str | None:
     """Kurzkennung des ausstellenden Programmschluessels – oder None.
 
     None heisst: KEIN gueltiger Schluessel der Art "p" (andere Art, Form,
-    Ablauf oder Signatur falsch). Nur die 6-teilige Form kann Art "p" tragen.
+    Ablauf oder Signatur falsch). Nur die 7-teilige (zielgebundene) Form wird angenommen.
     Der Aufrufer prueft die Kennung gegen die heute gueltigen Programmschluessel
     (ein widerrufener Schluessel nimmt seine Abruf-Schluessel mit)."""
     try:
         teile = (schluessel or "").split(".")
-        if len(teile) != 6 or teile[3] != "p":
+        if len(teile) != 7 or teile[3] != "p":
             return None
-        user, _, sitzung = pruefen_voll(schluessel)
+        user, _, sitzung = pruefen_voll(schluessel, ziel)
         if not user or not sitzung or sitzung[0] != 0:
             return None
         return sitzung[1]
@@ -260,12 +311,12 @@ def programm_kennung(schluessel: str) -> str | None:
         return None
 
 
-def pruefen_mit_art(schluessel: str) -> tuple[str | None, bool]:
+def pruefen_mit_art(schluessel: str, ziel: str | None = None) -> tuple[str | None, bool]:
     """(Benutzername, eingeschraenkt?) oder (None, True) – siehe pruefen_voll."""
-    user, eingeschraenkt, _ = pruefen_voll(schluessel)
+    user, eingeschraenkt, _ = pruefen_voll(schluessel, ziel)
     return user, eingeschraenkt
 
 
-def pruefen(schluessel: str) -> str | None:
+def pruefen(schluessel: str, ziel: str | None = None) -> str | None:
     """Benutzername oder None. Fail-closed: jeder Fehler = kein Zugang."""
-    return pruefen_mit_art(schluessel)[0]
+    return pruefen_mit_art(schluessel, ziel)[0]

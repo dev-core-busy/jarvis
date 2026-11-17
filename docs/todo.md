@@ -106,6 +106,13 @@ Aus der Sicherheitsprüfung vor dem Pentest (2026-11-08):
       Muster von `ssh_haertung.sh`, Ziel nur in `/etc/jarvis/broker.conf`,
       rsyslog per TCP+TLS mit Zertifikatsprüfung und Plattenpuffer, tägliches
       Lebenszeichen der Hash-Kette, journald-Aufbewahrung ein Jahr.
+- [ ] **Pentest „Hardening“ F-14: Nutzerliste mit Klarnamen sichtbar** –
+      wartet auf Klärung, WELCHE Liste gemeint ist. Ausgeschlossen für das
+      Produktivsystem: Benutzer-Chat (Kontaktliste, Verzeichnissuche) und
+      Gesichtserkennung, beide Bereiche sind dort nicht aktiv. Erst nach der
+      Klärung bauen. Nebenbefund dabei (Testsystem, 17.11.2026): die
+      Gesichtserkennungsdaten (`data/vision`, Namen und Ereignisse) liegen mit
+      0644 da – vor einer Aktivierung des Bereichs auf 0750 ziehen.
 - [ ] **CSP erzwingen** (BSI H4, Rest) – von „melden“ auf „erzwingen“
       umstellen und die verbliebenen Inline-Stile entfernen.
 

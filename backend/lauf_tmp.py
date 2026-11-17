@@ -1185,6 +1185,13 @@ class IsolationFehlt(RuntimeError):
 WISSEN_ORTE = ("/mnt/rag", "/mnt/jarvis-kb",
                str(PROJECT_ROOT / "data" / "rag"),
                str(PROJECT_ROOT / "data" / "knowledge"))
+# Innerhalb eines Wissensortes: die interne Ablage der Wissensverwaltung
+# (ungepruefte Extraktor-Entwuerfe, Pentest F-18). Im Lauf ein leeres tmpfs –
+# dieselbe Ablage sperrt sandbox.WISSEN_INTERN_REL fuer das Dateiwerkzeug (der
+# Waechter prueft, dass jeder Ordner dort auch hier steht). Die
+# Gruppenkonfiguration ist eine DATEI und laesst sich nicht verdecken; sie ist
+# per OS-Recht 0640 fuer den Sandbox-Benutzer unlesbar.
+WISSEN_VERDECKT = (str(PROJECT_ROOT / "data" / "knowledge" / "pending"),)
 # Teile von /etc, die im Lauf leer erscheinen: Broker-Konfiguration, Firewall-
 # Regeln, Signierschluessel-Liste (/etc/jarvis) und die SSH-Konfiguration.
 ETC_VERBORGEN = ("/etc/jarvis", "/etc/ssh")
@@ -1235,6 +1242,11 @@ def minimal_wurzel() -> list:
     for w in WISSEN_ORTE:
         if os.path.isdir(w):
             teile += ["--ro-bind", w, w]
+    # NACH den Wissensorten: das tmpfs muss ueber der Bindung liegen.
+    for v in WISSEN_VERDECKT:
+        if os.path.isdir(v) and any(v.startswith(w + "/") for w in WISSEN_ORTE
+                                    if os.path.isdir(w)):
+            teile += ["--tmpfs", v]
     return teile
 
 

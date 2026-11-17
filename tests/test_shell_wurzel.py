@@ -107,6 +107,94 @@ with tempfile.TemporaryDirectory() as tmp:
     pruefe(((baum / ".git").stat().st_mode & 0o777) == 0o750,
            ".git danach 0750", oct((baum / ".git").stat().st_mode & 0o777))
 
+# ─── 3b. F-18: interne Ablage der Wissensverwaltung ─────────────────────────
+print("3b. F-18: Entwuerfe, Gruppenkonfiguration, Suchindex")
+_kn = SB.PROJECT_ROOT / "data" / "knowledge"
+_fall = {
+    "Entwurf": _kn / "pending" / "0123abcd.json",
+    "Entwurfs-Ordner": _kn / "pending",
+    "Gruppenkonfiguration": _kn / ".groups.json",
+    "Gruppen-Sicherung": _kn / ".groups.json.bak",
+}
+_frei = _kn / "extract_1234abcd_Handbuch.md"
+_erl, _ = SB.authorize_fs("read", str(_frei), username="alice")
+pruefe(_erl, "Positivkontrolle: gewoehnliche Wissensdatei bleibt lesbar")
+for name, pfad in _fall.items():
+    erl, grund = SB.authorize_fs("read", str(pfad), username="alice")
+    pruefe(not erl and "Wissensverwaltung" in grund,
+           f"Dateiwerkzeug: {name} gesperrt, mit Begruendung", f"{erl} {grund!r}")
+    pruefe(not SB.fs_target_sensitive(str(pfad)),
+           f"{name}: WEICHE Sperre (kein Angriffsindiz, keine Kontosperre)")
+_ordner = {str(SB.PROJECT_ROOT / r) for r in SB.WISSEN_INTERN_REL
+           if not r.endswith(".json")}
+pruefe(_ordner == set(LT.WISSEN_VERDECKT),
+       "jeder gesperrte Ordner ist in der Shell verdeckt (Gleichstand)",
+       f"Werkzeug {sorted(_ordner)} / Shell {sorted(LT.WISSEN_VERDECKT)}")
+for rel in ("data/knowledge/pending", "data/vector_store"):
+    pruefe(rel in SB.PRIVATE_DIRS, f"{rel} steht in PRIVATE_DIRS")
+pruefe("data/knowledge/.groups.json" in SB.PRIVATE_FILES,
+       "data/knowledge/.groups.json steht in PRIVATE_FILES")
+with tempfile.TemporaryDirectory() as tmp:
+    baum = Path(tmp)
+    for d in ("data/knowledge/pending", "data/vector_store"):
+        (baum / d).mkdir(parents=True)
+        (baum / d).chmod(0o755)
+    for f in ("data/knowledge/.groups.json", "data/knowledge/.groups.json.bak",
+              "data/knowledge/extract_x.md"):
+        (baum / f).write_text("{}", encoding="utf-8")
+        (baum / f).chmod(0o644)
+    alt = SB.PROJECT_ROOT
+    try:
+        SB.PROJECT_ROOT = baum
+        SB.harden_data_dirs()
+    finally:
+        SB.PROJECT_ROOT = alt
+    _m = lambda r: (baum / r).stat().st_mode & 0o777
+    pruefe(_m("data/knowledge/pending") == 0o750, "Entwurfs-Ordner danach 0750",
+           oct(_m("data/knowledge/pending")))
+    pruefe(_m("data/vector_store") == 0o750, "Suchindex-Ordner danach 0750",
+           oct(_m("data/vector_store")))
+    pruefe(_m("data/knowledge/.groups.json") == 0o640, ".groups.json danach 0640",
+           oct(_m("data/knowledge/.groups.json")))
+    pruefe(_m("data/knowledge/.groups.json.bak") == 0o640, ".groups.json.bak danach 0640",
+           oct(_m("data/knowledge/.groups.json.bak")))
+    pruefe(_m("data/knowledge/extract_x.md") == 0o644,
+           "gewoehnliche Wissensdatei bleibt unberuehrt (0644)")
+
+# ─── 3c. F-02 / F-15: Anweisungsdateien und Schwachstellenpruefung ──────────
+print("3c. F-02/F-15: Anweisungen (auch Sicherungen) und CVE-Ergebnis auf 0750")
+with tempfile.TemporaryDirectory() as tmp:
+    baum = Path(tmp)
+    _dirs = ("data/instructions", "data/instructions_default",
+             "data/instructions-safe-20260804-191216", "data/cve")
+    for d in _dirs:
+        (baum / d).mkdir(parents=True)
+        (baum / d).chmod(0o755)
+        (baum / d / "x.md").write_text("x", encoding="utf-8")
+        (baum / d / "x.md").chmod(0o644)
+    # Gegenstuecke, die das Muster NICHT anfassen darf: eine gleichnamige DATEI
+    # und ein Verweis auf ein fremdes Verzeichnis.
+    (baum / "data" / "instructions_notiz.txt").write_text("x", encoding="utf-8")
+    (baum / "data" / "instructions_notiz.txt").chmod(0o644)
+    fremd = baum / "fremd"
+    fremd.mkdir()
+    fremd.chmod(0o755)
+    (baum / "data" / "instructions-verweis").symlink_to(fremd)
+    alt = SB.PROJECT_ROOT
+    try:
+        SB.PROJECT_ROOT = baum
+        SB.harden_data_dirs()
+    finally:
+        SB.PROJECT_ROOT = alt
+    for d in _dirs:
+        m = (baum / d).stat().st_mode & 0o777
+        pruefe(m == 0o750, f"{d} danach 0750", oct(m))
+    pruefe(((baum / "data" / "instructions_notiz.txt").stat().st_mode & 0o777) == 0o644,
+           "gleichnamige DATEI bleibt unberuehrt")
+    pruefe((fremd.stat().st_mode & 0o777) == 0o755,
+           "Verweis-Ziel bleibt unberuehrt (keine Rechte ueber einen Symlink)")
+pruefe("data/cve" in SB.PRIVATE_DIRS, "data/cve steht in PRIVATE_DIRS")
+
 # ─── 4. Echter Lauf ─────────────────────────────────────────────────────────
 print("4. Echter bwrap-Lauf")
 if not os.path.exists(LT.BWRAP):
@@ -117,9 +205,14 @@ else:
     (wissen / "handbuch.txt").write_text("WISSENSINHALT", encoding="utf-8")
     os.chmod(wissen, 0o755)
     os.chmod(wissen / "handbuch.txt", 0o644)
-    alt_orte = LT.WISSEN_ORTE
+    (wissen / "pending").mkdir()
+    (wissen / "pending" / "entwurf.json").write_text("ENTWURFSINHALT", encoding="utf-8")
+    os.chmod(wissen / "pending", 0o755)
+    os.chmod(wissen / "pending" / "entwurf.json", 0o644)
+    alt_orte, alt_verd = LT.WISSEN_ORTE, LT.WISSEN_VERDECKT
     try:
         LT.WISSEN_ORTE = (str(wissen),)
+        LT.WISSEN_VERDECKT = (str(wissen / "pending"),)
 
         def lauf(cmd):
             b = LT.sandbox_befehl("", cmd, lauf_dir, (), _pruefen=True)
@@ -145,8 +238,13 @@ else:
         aus = lauf(f"echo x > {wissen}/neu.txt 2>&1 || echo VERWEIGERT")
         pruefe("VERWEIGERT" in aus and not (wissen / "neu.txt").exists(),
                "Wissensort ist im Lauf NICHT beschreibbar", aus.strip()[:120])
+        # F-18: Positivkontrolle ist die lesbare Datei eine Zeile hoeher; der
+        # Entwurf liegt auf dem Host 0644 – nur das Verdecken haelt ihn fern.
+        aus = lauf(f"cat {wissen}/pending/entwurf.json 2>&1; ls -A {wissen}/pending | wc -l")
+        pruefe("ENTWURFSINHALT" not in aus and aus.strip().endswith("0"),
+               "Entwurfs-Ordner ist im Lauf leer (F-18)", aus.strip()[:160])
     finally:
-        LT.WISSEN_ORTE = alt_orte
+        LT.WISSEN_ORTE, LT.WISSEN_VERDECKT = alt_orte, alt_verd
         shutil.rmtree(lauf_dir, ignore_errors=True)
         shutil.rmtree(wissen, ignore_errors=True)
 

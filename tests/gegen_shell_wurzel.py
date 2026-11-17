@@ -19,6 +19,42 @@ WAECHTER = ROOT / "tests" / "test_shell_wurzel.py"
 
 # (Name, Sabotage-Code, erwartete FAIL-Zeile)
 PROBEN = [
+    ("F-15: data/cve faellt aus PRIVATE_DIRS",
+     "sb.PRIVATE_DIRS = tuple(x for x in sb.PRIVATE_DIRS if x != 'data/cve')",
+     "data/cve danach 0750"),
+    ("F-02: Muster fuer Anweisungs-Verzeichnisse entfaellt",
+     "sb.PRIVATE_DIR_GLOBS = ()",
+     "data/instructions-safe-20260804-191216 danach 0750"),
+    ("F-02: Muster folgt Symlinks",
+     "import pathlib as _pl\n"
+     "_isl = _pl.Path.is_symlink\n"
+     "_pl.Path.is_symlink = lambda self: False",
+     "Verweis-Ziel bleibt unberuehrt"),
+    ("F-18: Dateiwerkzeug sperrt die Wissensverwaltung nicht",
+     "sb.wissen_intern = lambda rp: False",
+     "Dateiwerkzeug: Entwurf gesperrt"),
+    ("F-18: Gruppen-Sicherung (.bak) faellt durch",
+     "_w = sb.wissen_intern\n"
+     "sb.wissen_intern = lambda rp: _w(rp) and not str(rp).endswith('.bak')",
+     "Gruppen-Sicherung gesperrt"),
+    ("F-18: harte Sperre statt weicher (Kontosperre droht)",
+     "_s = sb.is_sensitive\n"
+     "sb.is_sensitive = lambda rp: _s(rp) or sb.wissen_intern(rp)",
+     "WEICHE Sperre"),
+    ("F-18: Shell verdeckt die Entwuerfe nicht",
+     "lt.WISSEN_VERDECKT = ()\n"
+     "_a = lt.minimal_wurzel\n"
+     "def _ohne_verd():\n"
+     "    lt.WISSEN_VERDECKT = ()\n"
+     "    return _a()\n"
+     "lt.minimal_wurzel = _ohne_verd",
+     "Entwurfs-Ordner ist im Lauf leer"),
+    ("F-18: Suchindex faellt aus PRIVATE_DIRS",
+     "sb.PRIVATE_DIRS = tuple(x for x in sb.PRIVATE_DIRS if x != 'data/vector_store')",
+     "Suchindex-Ordner danach 0750"),
+    ("F-18: Gruppenkonfiguration faellt aus PRIVATE_FILES",
+     "sb.PRIVATE_FILES = tuple(x for x in sb.PRIVATE_FILES if 'groups' not in x)",
+     ".groups.json danach 0640"),
     ("Zustand vor dem Fix: --dev-bind / /",
      "lt.minimal_wurzel = lambda: ['--dev-bind', '/', '/']",
      "Projektbaum im Lauf NICHT VORHANDEN"),
@@ -60,9 +96,12 @@ import runpy, sys
 sys.path.insert(0, {root!r})
 import backend.lauf_tmp as lt
 import backend.sandbox as sb
-vorher = (repr(lt.minimal_wurzel()), lt.WISSEN_ORTE, lt.ETC_VERBORGEN, sb.PRIVATE_DIRS)
+_zust = lambda: (repr(lt.minimal_wurzel()), lt.WISSEN_ORTE, lt.ETC_VERBORGEN, sb.PRIVATE_DIRS,
+                 sb.PRIVATE_FILES, lt.WISSEN_VERDECKT, sb.wissen_intern, sb.is_sensitive,
+                 sb.PRIVATE_DIR_GLOBS, __import__('pathlib').Path.is_symlink)
+vorher = _zust()
 {sabotage}
-nachher = (repr(lt.minimal_wurzel()), lt.WISSEN_ORTE, lt.ETC_VERBORGEN, sb.PRIVATE_DIRS)
+nachher = _zust()
 if nachher == vorher:
     print("PROBE-ABBRUCH: Sabotage hat nichts veraendert")
     sys.exit(2)

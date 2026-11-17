@@ -413,7 +413,26 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 # seit F-13 ohnehin nicht mehr; das OS-Recht zieht nach, fuer
                 # jeden anderen lokalen Benutzer. git selbst laeuft als
                 # Dienstbenutzer (Update, dev_reset) und ist davon unberuehrt.
-                ".git")
+                ".git",
+                # Pentest F-18: ungepruefte Extraktor-Entwuerfe (siehe
+                # WISSEN_INTERN_REL) und der Suchindex samt Volltext ALLER
+                # Chunks (faiss_meta.json, DEV 86 MB, war 0644). Beide liest
+                # nur der Dienst selbst – AI-Maus, Add-ins und /wissen gehen
+                # ueber seine API.
+                "data/knowledge/pending", "data/vector_store",
+                # Pentest F-15: Ergebnis der Schwachstellenpruefung (offene CVEs
+                # samt Paketen), Quittungen und Einstellungen – die API zeigt sie
+                # nur Administratoren, die Dateien lagen mit 0644 da (DEV
+                # 2026-11-17 gemessen: 8 Dateien fuer jarvis_sandbox lesbar).
+                "data/cve")
+# Verzeichnisse, deren Namen nicht feststehen (Sicherungen mit Zeitstempel).
+# Pentest F-02: die Anweisungsdateien (Bausteine des Systemprompts) lagen mit
+# 0644 in data/instructions, dazu eine Handsicherung
+# data/instructions-safe-<zeit> – auf ECHT per Shell lesbar. Ein Muster statt
+# einer Liste: die naechste Sicherung heisst wieder anders. Nur VERZEICHNISSE
+# werden angefasst; data/instructions_default ist versioniert (also ohnehin
+# oeffentlich) und faellt hier ungefaehrlich mit.
+PRIVATE_DIR_GLOBS = ("data/instructions*",)
 PRIVATE_MODE = 0o750
 
 # Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das
@@ -474,7 +493,11 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  # Altbestand ohne heutigen Schreibweg (kein Code legt sie mehr
                  # an), auf ECHT am 2026-10-22 gemessen 0644. Benutzerkennung –
                  # der Inhalt wurde nicht gelesen, die Stufe folgt dem Namen.
-                 "data/user_identity.txt")
+                 "data/user_identity.txt",
+                 # Pentest F-18: Gruppenkonfiguration mit Editoren-Konten und
+                 # -Gruppen-DNs (die API filtert sie fuer Nicht-Editoren heraus).
+                 # Die Nebendatei .groups.json.bak erfasst _nebendatei_muster.
+                 "data/knowledge/.groups.json")
 PRIVATE_FILE_MODE = 0o640
 
 # Dateien mit Benutzernamen im Namen – eine feste Liste kann sie nicht kennen.
@@ -554,7 +577,15 @@ def harden_data_dirs() -> list[str]:
     """Setzt Dienst-Verzeichnisse auf 0750 und private Dateien auf 0640.
     Idempotent, Rueckgabe = Aenderungen."""
     geaendert = []
-    for rel in PRIVATE_DIRS:
+    _dir_muster = []
+    for muster in PRIVATE_DIR_GLOBS:
+        try:
+            _dir_muster += [str(p.relative_to(PROJECT_ROOT))
+                            for p in sorted(PROJECT_ROOT.glob(muster))
+                            if p.is_dir() and not p.is_symlink()]
+        except Exception as e:  # noqa: BLE001
+            geaendert.append(f"{muster}: FEHLER {e}")
+    for rel in tuple(PRIVATE_DIRS) + tuple(r for r in _dir_muster if r not in PRIVATE_DIRS):
         d = PROJECT_ROOT / rel
         try:
             if not d.is_dir():
@@ -634,6 +665,35 @@ def is_sensitive(rp: Path) -> bool:
     for rel in _APP_DENY_REL:
         base = str(PROJECT_ROOT / rel)
         if s == base or s.startswith(base + os.sep):
+            return True
+    return False
+
+
+# ── Interne Ablage der Wissensverwaltung (Pentest "Hardening" F-18) ──────────
+# data/knowledge steht in READ_ROOTS (auf nicht umgezogenen Systemen liegt dort
+# Wissen), traegt seit 2026-09-13 aber vor allem Infrastruktur: die Entwuerfe
+# des Informationsextraktors (DEV 2026-11-17: 954 Stueck, 943 ungeprueft, je mit
+# Ersteller) und die Gruppenkonfiguration samt Editoren-Konten – beides zeigt die
+# Oberflaeche nur Admins bzw. Wissens-Editoren (/api/knowledge/pending,
+# _kb_strip_editor_fields). Ueber das Dateiwerkzeug und die Shell kam jeder heran.
+#
+# BEWUSST NICHT in _APP_DENY_REL: das wuerde einen Zugriff zum harten
+# Angriffsindiz machen (drei Treffer sperren das Konto), und der Pfad liegt
+# nahe – `filesystem list data/knowledge` nennt `pending`. Dieselbe Abwaegung
+# wie bei data/generated_images oben. Die Sperre ist weich und nennt den Weg.
+# Die OS-Rechte ziehen nach (PRIVATE_DIRS / PRIVATE_FILES), die Shell sieht
+# `pending` zusaetzlich gar nicht (lauf_tmp.WISSEN_VERDECKT).
+WISSEN_INTERN_REL = ("data/knowledge/pending", "data/knowledge/.groups.json")
+
+
+def wissen_intern(rp: Path) -> bool:
+    """Liegt der Pfad in der internen Ablage der Wissensverwaltung?
+
+    ``.groups.json.bak`` und andere Nebendateien zaehlen mit (gleiche Daten)."""
+    s = str(rp)
+    for rel in WISSEN_INTERN_REL:
+        base = str(PROJECT_ROOT / rel)
+        if s == base or s.startswith(base + os.sep) or s.startswith(base + "."):
             return True
     return False
 
@@ -731,6 +791,10 @@ def authorize_fs(action: str, path: str, username: str | None = None) -> tuple[b
     if not _under(rp, READ_ROOTS):
         return False, ("Lesen ist nur in den Wissens-/Arbeitsverzeichnissen erlaubt – "
                        "System-, Root- und App-interne Bereiche sind gesperrt")
+    if wissen_intern(rp):
+        return False, ("das ist die interne Ablage der Wissensverwaltung (ungeprüfte "
+                       "Entwürfe, Gruppenkonfiguration). Freigegebenes Wissen liefert "
+                       "die Wissenssuche")
     # Eigentuemer-Schranke in data/documents: dort liegen die Ergebnis- und
     # Anhangsdateien ALLER Benutzer. Das VERZEICHNIS bleibt auflistbar (der
     # Inhalt wird in filesystem.py gefiltert), einzelne fremde Dateien nicht.

@@ -10274,6 +10274,43 @@ async def broker_ssh_netze(request: Request, user: str = Depends(require_local_a
     return await _broker_ssh_aktion(request, user, "broker.ssh_netze", ("netze",))
 
 
+@app.get("/api/broker/rdp/status")
+async def broker_rdp_status(request: Request, user: str = Depends(require_local_auth)):
+    """RDP (xrdp, Port 3389): erlaubt (Schalter), installiert, laeuft, im Paketfilter
+    frei (None = Filter nicht eingerichtet bzw. nicht lesbar). Liest nur (Admin)."""
+    from backend import broker_client
+    res = await broker_client.call("broker.rdp_status", {}, user=user, timeout=60)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error", "Broker nicht erreichbar")},
+                            status_code=502)
+    res.pop("type", None)
+    return JSONResponse(res)
+
+
+@app.post("/api/broker/rdp")
+async def broker_rdp(request: Request, user: str = Depends(require_local_auth)):
+    """RDP erlauben/verbieten (Admin). Body: {aktion: an|aus, nachweis}. "an" braucht
+    den Freigabe-Code (der BROKER prueft ihn), "aus" nicht – es schraenkt nur ein."""
+    try:
+        body = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        body = {}
+    aktion = str(body.get("aktion") or "").strip()
+    if aktion not in ("an", "aus"):
+        return JSONResponse({"ok": False, "error": "aktion: an|aus"}, status_code=400)
+    args = {"aktion": aktion, "by": user,
+            "nachweis": str(body.get("nachweis") or "").strip()[:12]}
+    from backend import broker_client
+    res = await broker_client.call("broker.rdp", args, user=user, timeout=180)
+    if not res.get("ok") and res.get("grund"):
+        return JSONResponse({"ok": False, "grund": res.get("grund"),
+                             "error": res.get("error", "")}, status_code=403)
+    return JSONResponse({"ok": bool(res.get("ok")), "rc": res.get("rc"),
+                         "meldung": res.get("meldung") or res.get("error", ""),
+                         "ausgabe": res.get("ausgabe", "")},
+                        status_code=200 if res.get("ok") else 409)
+
+
 @app.post("/api/broker/ssh/schluessel")
 async def broker_ssh_schluessel(request: Request, user: str = Depends(require_local_auth)):
     """Oeffentlichen SSH-Schluessel fuer ein Administrator-Konto hinterlegen oder

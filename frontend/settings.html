@@ -2012,6 +2012,26 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.unattended_desc">Spielt Debian-Sicherheitspatches automatisch ein (unattended-upgrades). Bewusst eng gefasst: nur die Sicherheits-Quelle – keine allgemeinen Versionssprünge unter dem laufenden Dienst, kein automatischer Neustart und kein automatisches Aufräumen von Paketen (Letzteres würde Abhängigkeiten des Agenten entfernen, etwa cmake/boost für die Gesichtserkennung, ffmpeg für die Sprachausgabe oder LibreOffice-Teile). Die tägliche Aktualisierung des Paketindex bleibt beim Ausschalten aktiv – ein veralteter Index lässt Paketinstallationen mit „404 Not Found“ scheitern.</small>
                                 </div>
 
+                                <!-- RDP erlauben (xrdp, Port 3389), Vorgabe AUS (2026-11-17).
+                                     Logik: fernzugang.js (window.RdpSchalter), Broker:
+                                     backend/broker/fernzugang.py (rdp/rdp_status), Regel:
+                                     deploy/security/firewall.sh --rdp. Einschalten braucht
+                                     den Freigabe-Code, Ausschalten nicht. -->
+                                <div class="tuning-group" id="rdp-schalter">
+                                    <h4 class="tuning-group-title" data-i18n="rdp.titel">Fernzugriff auf den Desktop (RDP)</h4>
+                                    <div style="display:flex;align-items:center;gap:10px;margin:4px 0 6px;">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="rdp-erlaubt" disabled />
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <span style="font-size:0.82rem;color:var(--text-secondary);" data-i18n="rdp.schalter">RDP erlauben</span>
+                                    </div>
+                                    <div id="rdp-status" class="kb-hint" style="margin:0 0 4px;" data-i18n="rdp.laedt">Status wird geladen…</div>
+                                    <button type="button" id="rdp-schliessen" class="sec-btn danger" style="display:none;margin-top:4px;" data-i18n="rdp.schliessen">Jetzt schließen</button>
+                                    <div id="rdp-result" class="sec-ssh-result" style="display:none;margin-top:8px;"></div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="rdp.hinweis">Erlaubt die Anmeldung am Server-Desktop mit einem Remote-Desktop-Programm (z. B. „Remotedesktopverbindung“ unter Windows) über Port 3389. Ausgeschaltet ist der Dienst angehalten und der Port in der Firewall geschlossen; eine laufende Remote-Desktop-Sitzung wird dabei getrennt. Zum Einschalten brauchst du den Freigabe-Code der Root-Freigaben. Der Desktop in der Weboberfläche ist davon nicht betroffen.</small>
+                                </div>
+
                                 <!-- Sicherheitslücken-Prüfung (CVE): Vorgaben für die
                                      automatische Behebung. Prüfen/Beheben selbst sitzt im
                                      Fenster „Installierte Pakete" (syspackages.js) und in
@@ -6678,7 +6698,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=493"></script>
+    <script src="/static/js/i18n.js?v=494"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6720,7 +6740,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/branding.js?v=31"></script>
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=45"></script>
-    <script src="/static/js/fernzugang.js?v=3"></script>
+    <script src="/static/js/fernzugang.js?v=4"></script>
     <script src="/static/js/totp_admin.js?v=3"></script>
     <script src="/static/js/ldap_picker.js?v=17"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
@@ -6743,7 +6763,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=5"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=257"></script>
+    <script src="/static/js/app.js?v=258"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

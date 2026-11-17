@@ -317,8 +317,9 @@ function text(w, id) { const el = w.document.getElementById(id); return el ? el.
     check('Eingabefeld und Datei-Feld im Abschnitt', /<textarea[^>]*id="sec-ssh-schl-text"/.test(sek) && /type="file"[^>]*id="sec-ssh-schl-datei"|id="sec-ssh-schl-datei"[^>]*type="file"/.test(sek));
     const js = lies('js/fernzugang.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     const ziele = js.match(/['"]\/api\/[^'"]+['"]/g) || [];
-    check('fernzugang.js ruft nur status/haertung/netze/schluessel',
-          ziele.length > 0 && ziele.every(z => /\/api\/broker\/ssh\/(status|haertung|netze|schluessel)['"]/.test(z)), ziele.join(' '));
+    // Seit 2026-11-17 zusaetzlich der RDP-Schalter (window.RdpSchalter, Abschnitt 10)
+    check('fernzugang.js ruft nur ssh/(status|haertung|netze|schluessel) und rdp(/status)',
+          ziele.length > 0 && ziele.every(z => /\/api\/broker\/(ssh\/(status|haertung|netze|schluessel)|rdp(\/status)?)['"]/.test(z)), ziele.join(' '));
 
     // Testschluessel: ECHTES ed25519-Paar, Fingerabdruck vom ECHTEN ssh-keygen
     const cp = require('child_process'), os = require('os'), nc = require('crypto');
@@ -405,6 +406,110 @@ function text(w, id) { const el = w.document.getElementById(id); return el ? el.
     s.w.document.getElementById('sec-ssh-schl-text').value = pub;
     await s.w.Fernzugang.schluesselHinzu(); await warte(30);
     check('abgewiesener Code: Klartext am Knopf', /Freigabe-Code ist falsch/.test(text(s.w, 'sec-ssh-schl-result')), text(s.w, 'sec-ssh-schl-result'));
+    s.w.close();
+
+    // ════════════════════════════════════════════════════════════════════
+    console.log('\n── 10. RDP erlauben (KI & System → System-Einstellungen)');
+    const tun = html.slice(html.indexOf('id="prof-sect-tuning-body"'), html.indexOf('id="settings-tab-instructions"'));
+    check('Positivkontrolle: System-Einstellungen geschnitten', tun.length > 1000 && tun.indexOf('sec-unatt-setup') > 0);
+    check('Schalter liegt in KI & System → System-Einstellungen', /<input[^>]*id="rdp-erlaubt"/.test(tun));
+    check('Schalter im Markup NICHT vorbelegt (Vorgabe aus)', !/<input[^>]*id="rdp-erlaubt"[^>]*\bchecked\b/.test(tun));
+    check('Beschriftung "RDP erlauben" mit i18n-Key', /data-i18n="rdp.schalter">RDP erlauben</.test(tun));
+    const appJs = lies('js/app.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    check('app.js verdrahtet den Schalter beim Klick UND beim Standard-Reiter',
+          (appJs.match(/window\.RdpSchalter\.onShow\(\)/g) || []).length === 2);
+
+    function rdpStand(teil) {
+        return Object.assign({ ok: true, erlaubt: false, installiert: true, aktiv: false,
+                               freigegeben: false, firewall_eingerichtet: true, port: 3389 }, teil || {});
+    }
+    async function rdpSeite(st, post) {
+        const antw = { '/api/broker/rdp/status': st };
+        if (post) antw['/api/broker/rdp'] = post;
+        const r = await seite(stand(), antw);
+        r.w.__prompts = 0;
+        const altPrompt = r.w.prompt;
+        r.w.prompt = function () { r.w.__prompts++; return altPrompt(); };
+        await r.w.RdpSchalter.onShow(); await warte(10);
+        r.cb = r.w.document.getElementById('rdp-erlaubt');
+        r.rposts = () => r.aufrufe.filter(a => a.pfad === '/api/broker/rdp' && a.methode === 'POST');
+        r.klick = async (wert) => { r.cb.checked = wert; r.cb.dispatchEvent(new r.w.Event('change')); await warte(30); };
+        return r;
+    }
+
+    s = await rdpSeite(rdpStand());
+    check('Positivkontrolle: Status abgefragt', s.aufrufe.some(a => a.pfad === '/api/broker/rdp/status'));
+    check('aus: Schalter aus und bedienbar', s.cb.checked === false && s.cb.disabled === false);
+    check('aus: Text "Nicht erlaubt"', /^Nicht erlaubt – der Dienst ist angehalten/.test(text(s.w, 'rdp-status')), text(s.w, 'rdp-status'));
+    check('aus: kein "Jetzt schließen"', !sichtbar(s.w, 'rdp-schliessen'));
+    // Einschalten: Rueckfrage abgelehnt
+    s.w.__confirm = false;
+    await s.klick(true);
+    check('an, Rückfrage abgelehnt -> KEIN Aufruf, Schalter zurück', s.rposts().length === 0 && s.cb.checked === false);
+    // Code-Abfrage abgebrochen
+    s.w.__confirm = true; s.w.__prompt = null;
+    await s.klick(true);
+    check('an, Code abgebrochen -> KEIN Aufruf, Schalter zurück', s.rposts().length === 0 && s.cb.checked === false);
+    // Mit Code
+    s.w.__prompt = '123456';
+    await s.klick(true);
+    const pa = s.rposts()[0] || {};
+    check('an -> POST {aktion:an, nachweis}', pa.body && pa.body.aktion === 'an' && pa.body.nachweis === '123456', JSON.stringify(pa.body));
+    check('nach dem POST Zustand neu geladen', s.aufrufe.filter(a => a.pfad === '/api/broker/rdp/status').length >= 2);
+    check('Ergebnis am Schalter', /RDP ist erlaubt/.test(text(s.w, 'rdp-result')), text(s.w, 'rdp-result'));
+    s.w.close();
+
+    // Ausschalten ohne Code
+    s = await rdpSeite(rdpStand({ erlaubt: true, aktiv: true, freigegeben: true }));
+    check('an: Schalter an', s.cb.checked === true);
+    check('an: Text "Erlaubt – der Dienst läuft, Port 3389"', /^Erlaubt – der Dienst läuft, Port 3389/.test(text(s.w, 'rdp-status')), text(s.w, 'rdp-status'));
+    const promptsVorher = s.w.__prompts;
+    await s.klick(false);
+    const pb = s.rposts()[0] || {};
+    check('aus -> POST {aktion:aus} OHNE Code-Abfrage',
+          pb.body && pb.body.aktion === 'aus' && !('nachweis' in pb.body) && s.w.__prompts === promptsVorher, JSON.stringify(pb.body));
+    s.w.close();
+
+    // Nicht erlaubt, aber noch erreichbar (Altstand) -> Knopf "Jetzt schließen"
+    s = await rdpSeite(rdpStand({ aktiv: true, freigegeben: true }));
+    check('Altstand: Hinweis "noch erreichbar"', /noch erreichbar/.test(text(s.w, 'rdp-status')), text(s.w, 'rdp-status'));
+    check('Altstand: "Jetzt schließen" sichtbar', sichtbar(s.w, 'rdp-schliessen'));
+    s.w.document.getElementById('rdp-schliessen').click(); await warte(30);
+    check('"Jetzt schließen" -> POST aus', (s.rposts()[0] || {}).body && s.rposts()[0].body.aktion === 'aus');
+    s.w.close();
+
+    // Ohne xrdp: Schalter gesperrt
+    s = await rdpSeite(rdpStand({ installiert: false }));
+    check('ohne xrdp: Schalter gesperrt + Grund', s.cb.disabled === true && /nicht installiert|kein Remote-Desktop-Dienst/.test(text(s.w, 'rdp-status')), text(s.w, 'rdp-status'));
+    s.w.close();
+
+    // Filter nicht eingerichtet: "unbekannt" wird nicht zu "geschlossen"
+    s = await rdpSeite(rdpStand({ erlaubt: true, aktiv: true, freigegeben: null, firewall_eingerichtet: false }));
+    check('ohne Filter: kein "geschlossen", sondern "keine Firewall"', /keine Firewall eingerichtet/.test(text(s.w, 'rdp-status')) && !/geschlossen/.test(text(s.w, 'rdp-status')), text(s.w, 'rdp-status'));
+    s.w.close();
+
+    // Filter eingerichtet, Regelsatz aber nicht lesbar: weder "geschlossen" noch "erreichbar"
+    s = await rdpSeite(rdpStand({ erlaubt: true, aktiv: true, freigegeben: null, firewall_eingerichtet: true }));
+    check('Regelsatz unlesbar: "ließ sich nicht prüfen", nichts behauptet',
+          /ließ sich nicht prüfen/.test(text(s.w, 'rdp-status')) && !/geschlossen|erreichbar/.test(text(s.w, 'rdp-status')), text(s.w, 'rdp-status'));
+    s.w.close();
+
+    // Erlaubt, aber Filter hält zu
+    s = await rdpSeite(rdpStand({ erlaubt: true, aktiv: true, freigegeben: false }));
+    check('erlaubt, Filter zu: eigener Hinweis', /hält Port 3389 noch geschlossen/.test(text(s.w, 'rdp-status')), text(s.w, 'rdp-status'));
+    s.w.close();
+
+    // Abgewiesener Code: Klartext am Schalter, Schalter zeigt wieder den Serverstand
+    s = await rdpSeite(rdpStand(), { ok: false, grund: 'nachweis_falsch', error: 'x' });
+    await s.klick(true);
+    check('abgewiesener Code: Klartext am Schalter', /Freigabe-Code ist falsch/.test(text(s.w, 'rdp-result')), text(s.w, 'rdp-result'));
+    check('abgewiesener Code: Schalter wieder aus (Serverstand)', s.cb.checked === false);
+    check('kein alert', s.w.__alerts.length === 0);
+    s.w.close();
+
+    // Statusfehler
+    s = await rdpSeite({ ok: false, error: 'Broker nicht erreichbar' });
+    check('Status nicht abfragbar: Schalter gesperrt + Text', s.cb.disabled === true && /ließ sich nicht abfragen/.test(text(s.w, 'rdp-status')), text(s.w, 'rdp-status'));
     s.w.close();
 
     fertig();

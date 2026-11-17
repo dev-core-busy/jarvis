@@ -447,6 +447,53 @@ def netze(aktion: str, liste: str = "") -> dict:
     return {"ok": False, "meldung": f"Unbekannte Aktion: {aktion}"}
 
 
+# ── RDP (xrdp, Port 3389) ────────────────────────────────────────────────────
+# Schalter "RDP erlauben" (KI & System -> System-Einstellungen), Vorgabe AUS.
+# Die Regel steht in firewall.sh (--rdp, RDP_ERLAUBT in broker.conf); hier nur
+# Aufruf und Zustand. Einschalten braucht den Freigabe-Code (meta.py), weil es
+# einen Anmeldeweg von aussen oeffnet; Ausschalten nicht – es schraenkt nur ein.
+RDP_PORT = 3389
+# "dport 3389" einzeln oder in einer Menge "dport { 22, 80, 443, 3389 }"
+_RDP_REGEL = re.compile(r"dport\s+(?:\{[^}]*\b%d\b[^}]*\}|%d\b)[^\n]*accept" % (RDP_PORT, RDP_PORT))
+
+
+def _rdp_freigegeben() -> bool | None:
+    """Steht im WIRKSAMEN Regelsatz eine Annahme fuer 3389? None = nicht lesbar."""
+    try:
+        r = _lauf(["nft", "list", "ruleset"], timeout=20)
+    except Exception:  # noqa: BLE001
+        return None
+    if r.returncode != 0:
+        return None
+    return bool(_RDP_REGEL.search(r.stdout))
+
+
+def rdp_status() -> dict:
+    erlaubt = _konf().get("RDP_ERLAUBT", "").strip().lower() == "ja"
+    try:
+        installiert = _lauf(["systemctl", "cat", "xrdp.service"], timeout=15).returncode == 0
+        aktiv = installiert and _lauf(["systemctl", "is-active", "--quiet", "xrdp"],
+                                      timeout=15).returncode == 0
+    except Exception:  # noqa: BLE001
+        installiert = aktiv = False
+    try:
+        fw_ok = _lauf(["bash", str(SKRIPTE / "firewall.sh"), "--eingerichtet"],
+                      timeout=20).returncode == 0
+    except Exception:  # noqa: BLE001
+        fw_ok = False
+    return {"ok": True, "erlaubt": erlaubt, "installiert": installiert, "aktiv": aktiv,
+            "freigegeben": _rdp_freigegeben() if fw_ok else None,
+            "firewall_eingerichtet": fw_ok, "port": RDP_PORT}
+
+
+def rdp(aktion: str) -> dict:
+    """aktion: an | aus."""
+    if aktion not in ("an", "aus"):
+        return {"ok": False, "meldung": f"Unbekannte Aktion: {aktion}"}
+    r = _lauf(["bash", str(SKRIPTE / "firewall.sh"), "--rdp", aktion], timeout=120)
+    return _antwort(r)
+
+
 # ── Schluessel hinterlegen / entfernen ───────────────────────────────────────
 PASSWD_DATEI = Path(os.environ.get("JARVIS_PASSWD", "/etc/passwd"))
 _TYPEN = {

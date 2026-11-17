@@ -668,6 +668,110 @@
         }
     };
 
+    // ── RDP erlauben (KI & System -> System-Einstellungen) ──────────────────
+    // Ein Schalter, Vorgabe AUS. Einschalten mit Freigabe-Code (der BROKER prueft
+    // ihn), Ausschalten ohne. Der Schalter zeigt immer den Stand des SERVERS:
+    // nach jedem Klick wird neu geladen, ein abgebrochener Klick springt zurueck.
+    var Rdp = {
+        _bound: false,
+        _stand: null,
+
+        onShow: function () { this._bind(); this.laden(); },
+
+        _bind: function () {
+            if (this._bound) return;
+            this._bound = true;
+            var self = this;
+            var cb = $('rdp-erlaubt');
+            // Nur auf 'change' hoeren – das <label> schaltet selbst um
+            if (cb) cb.addEventListener('change', function () { self.schalten(cb.checked ? 'an' : 'aus'); });
+            var zu = $('rdp-schliessen');
+            if (zu) zu.addEventListener('click', function () { self.schalten('aus'); });
+        },
+
+        laden: function () {
+            var self = this;
+            return fetch('/api/broker/rdp/status', { headers: authHeaders() })
+                .then(function (r) { return r.json().catch(function () { return null; }); })
+                .then(function (d) { self.zeigen(d && d.ok ? d : null); })
+                .catch(function () { self.zeigen(null); });
+        },
+
+        // Statuszeile aus dem Zustand – "unbekannt" (Filter nicht lesbar) wird
+        // nicht zu "geschlossen" gemacht.
+        statusText: function (d) {
+            if (!d) return { text: T('rdp.st_fehler', 'Der Zustand ließ sich nicht abfragen.'), offenOhneErlaubnis: false };
+            if (!d.installiert && !d.erlaubt) return { text: T('rdp.st_fehlt', 'Auf diesem Server ist kein Remote-Desktop-Dienst (xrdp) installiert.'), offenOhneErlaubnis: false };
+            if (d.erlaubt) {
+                if (!d.aktiv) return { text: T('rdp.st_an_gestoppt', 'Erlaubt, aber der Dienst läuft nicht – schalte RDP einmal aus und wieder ein.'), offenOhneErlaubnis: false };
+                if (!d.firewall_eingerichtet) return { text: T('rdp.st_an_ohne_fw', 'Erlaubt – der Dienst läuft. Auf diesem Server ist keine Firewall eingerichtet.'), offenOhneErlaubnis: false };
+                if (d.freigegeben == null) return { text: T('rdp.st_an_unbekannt', 'Erlaubt – der Dienst läuft. Ob die Firewall Port 3389 freigibt, ließ sich nicht prüfen.'), offenOhneErlaubnis: false };
+                if (d.freigegeben === false) return { text: T('rdp.st_an_zu', 'Erlaubt und der Dienst läuft, aber die Firewall hält Port 3389 noch geschlossen – schalte RDP einmal aus und wieder ein.'), offenOhneErlaubnis: false };
+                return { text: T('rdp.st_an', 'Erlaubt – der Dienst läuft, Port 3389 ist erreichbar.'), offenOhneErlaubnis: false };
+            }
+            if (d.aktiv || d.freigegeben === true) {
+                return { text: T('rdp.st_aus_offen', 'Nicht erlaubt, aber noch erreichbar (Stand von vor dieser Einstellung). Mit „Jetzt schließen“ hältst du den Dienst an und schließt den Port.'), offenOhneErlaubnis: true };
+            }
+            return { text: T('rdp.st_aus', 'Nicht erlaubt – der Dienst ist angehalten, Port 3389 ist geschlossen.'), offenOhneErlaubnis: false };
+        },
+
+        zeigen: function (d) {
+            this._stand = d;
+            var cb = $('rdp-erlaubt');
+            if (cb) {
+                cb.checked = !!(d && d.erlaubt);
+                // Ohne Zustand oder ohne xrdp gibt es nichts einzuschalten;
+                // Ausschalten bleibt moeglich, solange es erlaubt ist.
+                cb.disabled = !d || (!d.installiert && !d.erlaubt);
+            }
+            var st = this.statusText(d);
+            var box = $('rdp-status');
+            if (box) box.textContent = st.text;
+            var zu = $('rdp-schliessen');
+            if (zu) zu.style.display = st.offenOhneErlaubnis ? '' : 'none';
+        },
+
+        _ergebnis: function (ok, text) {
+            var el = $('rdp-result');
+            if (!el) return;
+            el.className = 'sec-ssh-result ' + (ok ? 'ok' : 'fehler');
+            el.textContent = text || '';
+            el.style.display = text ? '' : 'none';
+        },
+
+        schalten: function (aktion) {
+            var self = this;
+            var frage = aktion === 'an'
+                ? T('rdp.an_frage', 'RDP erlauben? Der Server-Desktop ist danach über Port 3389 mit einem Remote-Desktop-Programm erreichbar; angemeldet wird mit dem Benutzerkonto des Servers.')
+                : T('rdp.aus_frage', 'RDP ausschalten? Eine laufende Remote-Desktop-Sitzung wird dabei getrennt.');
+            if (!window.confirm(frage)) { self.zeigen(self._stand); return; }
+            var body = { aktion: aktion };
+            if (aktion === 'an') {
+                var c = Fz._code();
+                if (c === null) { self.zeigen(self._stand); return; }
+                body.nachweis = c;
+            }
+            var cb = $('rdp-erlaubt');
+            if (cb) cb.disabled = true;
+            self._ergebnis(true, T('rdp.laeuft', 'Wird ausgeführt …'));
+            return fetch('/api/broker/rdp', {
+                method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(body)
+            }).then(function (r) { return r.json().catch(function () { return {}; }); })
+              .then(function (d) {
+                  if (d && d.ok) {
+                      self._ergebnis(true, aktion === 'an' ? T('rdp.ok_an', 'RDP ist erlaubt.') : T('rdp.ok_aus', 'RDP ist ausgeschaltet.'));
+                  } else {
+                      var text = (d && d.grund && Fz._codeText(d.grund)) || (d && (d.meldung || d.error)) || '';
+                      self._ergebnis(false, T('rdp.fehler', 'Fehlgeschlagen') + (text ? ': ' + text : ''));
+                  }
+              })
+              .catch(function (e) { self._ergebnis(false, T('rdp.fehler', 'Fehlgeschlagen') + ': ' + (e && e.message || e)); })
+              .then(function () { return self.laden(); });
+        }
+    };
+    window.RdpSchalter = Rdp;
+
     // Rechenhelfer fuer den Waechter (tests/test_fernzugang_ui.js)
     Fz._rechnen = { ipZuZahl: ipZuZahl, netzNormieren: netzNormieren, enthaelt: enthaelt,
                     schluesselLesen: schluesselLesen, fingerabdruck: fingerabdruck };

@@ -29,6 +29,8 @@
 #   --ssh-netze-bestaetigen           Timer weg, Regeln dauerhaft (wie --anwenden)
 #   --rueckfall                       alter Wert zurueck, Regeln neu (macht der Timer)
 #   --eingerichtet                    Exit 0, wenn der Filter dieses Skripts steht
+#   --rdp an|aus                      RDP_ERLAUBT setzen, xrdp starten/anhalten,
+#                                     Filter neu setzen (nur wenn eingerichtet)
 # Voraussetzung ist ein schon EINGERICHTETER Filter: der Rueckfall stellt nur
 # SSH_NETZE zurueck, nicht "kein Filter" – eine Erst-Einrichtung bleibt Konsole.
 #
@@ -59,12 +61,12 @@ TCP_OFFEN=(
 # hatte Maus und Tastatur auf dem Desktop – die x11vnc-Haertung vom 2026-08-11
 # (`-localhost` auf 5900) war damit umgangen. websockify bindet jetzt nur noch
 # 127.0.0.1 (start_jarvis*.sh), der Port braucht also gar keine Freigabe mehr.
-# xrdp (3389) wird nur freigegeben, wenn der Dienst auf DIESEM Host laeuft. Auf
-# DEV ist er aktiv und wird benutzt, auf ECHT gibt es ihn nicht – eine feste
-# Freigabe waere dort ein offener Port fuer nichts.
-if systemctl is-active --quiet xrdp 2>/dev/null || ss -tlnH 2>/dev/null | grep -q ':3389'; then
-    TCP_OFFEN+=(3389)
-fi
+# xrdp (3389): Freigabe nur, wenn der Betreiber RDP ERLAUBT hat (Schalter
+# "RDP erlauben" unter KI & System -> System-Einstellungen, schreibt
+# RDP_ERLAUBT=ja in broker.conf) UND der Dienst auf diesem Host laeuft – siehe
+# unten nach BROKER_CONF. Vorgabe ist AUS (2026-11-17): bis dahin genuegte ein
+# laufendes xrdp, und ein einmal installierter Dienst war damit still von aussen
+# erreichbar.
 # Ausdruecklich NICHT freigegeben, obwohl es lauscht (Befunde vom 2026-08-11):
 #   111  rpcbind – braucht von aussen niemand
 #   3128 SSH-Tunnel auf einen Squid (`ssh -L *:3128 …`, seit Wochen als root).
@@ -82,6 +84,24 @@ RUECKFALL_DATEI="${JARVIS_FW_RUECKFALL:-/etc/jarvis/ssh-netze.rueckfall}"
 
 # ── SSH_NETZE (BSI M7) ───────────────────────────────────────────────────────
 BROKER_CONF="${JARVIS_BROKER_CONF:-/etc/jarvis/broker.conf}"
+
+# ── RDP (xrdp, Port 3389) ────────────────────────────────────────────────────
+# Erlaubt nur bei RDP_ERLAUBT=ja; fehlt die Zeile, gilt "nein". Zusaetzlich muss
+# xrdp laufen – ein erlaubter, aber nicht installierter Dienst waere ein offener
+# Port fuer nichts.
+_rdp_erlaubt() {
+    local wert
+    wert="$(sed -n 's/^[[:space:]]*RDP_ERLAUBT[[:space:]]*=[[:space:]]*//p' "$BROKER_CONF" 2>/dev/null \
+            | tail -1 | tr -d '"'"'" | tr -d '[:space:]')"
+    [ "$wert" = "ja" ]
+}
+_xrdp_laeuft() {
+    systemctl is-active --quiet xrdp 2>/dev/null || ss -tlnH 2>/dev/null | grep -q ':3389\b'
+}
+if _rdp_erlaubt && _xrdp_laeuft; then
+    TCP_OFFEN+=(3389)
+fi
+
 SSH_NETZE_V4=()
 SSH_NETZE_V6=()
 # Liest SSH_NETZE und sortiert nach Familie. Ein ungueltiger Eintrag bricht ab –
@@ -479,6 +499,44 @@ case "${1:---status}" in
             echo "SSH-Netze zurueckgesetzt."
         fi
         ;;
+    --rdp)
+        # RDP erlauben/verbieten (Schalter in der Oberflaeche, fernzugang.rdp).
+        # Kein Rueckfall-Timer wie bei SSH: 3389 zu oeffnen oder zu schliessen
+        # kann den Administrator nicht aussperren (SSH und 443 bleiben).
+        _ist_root
+        case "${2:-}" in
+            an)
+                systemctl cat xrdp.service >/dev/null 2>&1 \
+                    || { echo "ABBRUCH: xrdp ist auf diesem Server nicht installiert." >&2; exit 9; }
+                _konf_setzen RDP_ERLAUBT ja
+                # Erst den Dienst, dann den Filter – die Freigabe verlangt einen
+                # laufenden xrdp. Scheitert der Start, bleibt RDP verboten.
+                if ! systemctl enable --now xrdp.service >/dev/null 2>&1; then
+                    _konf_setzen RDP_ERLAUBT nein
+                    echo "ABBRUCH: xrdp liess sich nicht starten – RDP bleibt verboten." >&2
+                    exit 1
+                fi
+                ;;
+            aus)
+                _konf_setzen RDP_ERLAUBT nein
+                if systemctl cat xrdp.service >/dev/null 2>&1; then
+                    systemctl disable --now xrdp.service xrdp-sesman.service >/dev/null 2>&1 \
+                        || echo "WARNUNG: xrdp liess sich nicht vollstaendig anhalten." >&2
+                fi
+                ;;
+            *)
+                echo "Aufruf: $0 --rdp an|aus" >&2
+                exit 1
+                ;;
+        esac
+        # Ohne eingerichteten Filter gibt es keine Portliste zu pflegen – der
+        # Dienst ist dann der einzige Riegel (Erst-Einrichtung bleibt Konsole).
+        if _fw_eingerichtet; then
+            bash "$SELF" --anwenden >/dev/null \
+                || { echo "FEHLER: Paketfilter nicht neu gesetzt." >&2; exit 1; }
+        fi
+        echo "RDP: ${2}"
+        ;;
     --zeigen)
         # Trockenlauf: was --test/--anwenden setzen wuerde (nft-Form), ohne root
         _ssh_sitzung_pruefen
@@ -542,7 +600,7 @@ case "${1:---status}" in
         status
         ;;
     *)
-        echo "Aufruf: $0 [--status|--zeigen|--test [sekunden]|--anwenden|--ssh-netze-test <netze> [sek]|--ssh-netze-bestaetigen|--rueckfall]"
+        echo "Aufruf: $0 [--status|--zeigen|--test [sekunden]|--anwenden|--ssh-netze-test <netze> [sek]|--ssh-netze-bestaetigen|--rueckfall|--rdp an|aus]"
         exit 1
         ;;
 esac

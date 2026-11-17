@@ -992,6 +992,8 @@
                     // waeren die Knoepfe unverdrahtet und der Status leer, solange
                     // der Sicherheits-Reiter nicht geoeffnet wurde.
                     if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
+                    // Schalter "RDP erlauben" (fernzugang.js) – dieselbe Lage
+                    if (window.RdpSchalter) window.RdpSchalter.onShow();
                     if (window.agentKeysOnShow) window.agentKeysOnShow();
                 } else if (target === 'instructions' && tabInstructions) {
                     tabInstructions.style.display = '';
@@ -1685,6 +1687,8 @@
             // ("Klick macht nichts", 2026-07-28). Deshalb auch hier aufrufen;
             // onShowUnattended/_bind sind idempotent.
             if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
+            // Ebenso der Schalter "RDP erlauben" (fernzugang.js, idempotent)
+            if (window.RdpSchalter) window.RdpSchalter.onShow();
             // Aus demselben Grund die Agent-API-Keys: ist ihr Abschnitt gemerkt
             // aufgeklappt, fiel nie ein Klick auf die Kopfzeile und die Liste blieb
             // auf "Laedt…" (2026-08-12 auf ECHT gemeldet).

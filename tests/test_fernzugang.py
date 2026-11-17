@@ -80,6 +80,10 @@ for d in (BIN, TIMER, SK / "etc", SK / "units", SK / "dropin", SK / "sicherung")
 eingabe=""
 [ "$1" = "-f" ] && eingabe="$(cat)"
 printf 'nft %s\\n%s\\n--ende--\\n' "$*" "$eingabe" >> "{LOG}"
+if [ "$1" = "list" ] && [ "$2" = "ruleset" ]; then
+    cat "{SK}/ruleset" 2>/dev/null
+    exit 0
+fi
 if [ "$1" = "list" ]; then
     [ -f "{SK}/fw_eingerichtet" ] || exit 1
     echo "table inet jarvis_fw {{ }}"
@@ -89,9 +93,23 @@ exit 0
 (BIN / "systemctl").write_text(f"""#!/bin/sh
 printf 'systemctl %s\\n' "$*" >> "{LOG}"
 case "$1" in
-  is-active) for a in "$@"; do case "$a" in *.timer) [ -f "{TIMER}/$a" ] && exit 0 || exit 3;; esac; done; exit 3;;
+  is-active) for a in "$@"; do case "$a" in
+      *.timer) [ -f "{TIMER}/$a" ] && exit 0 || exit 3;;
+      xrdp|xrdp.service) [ -f "{SK}/xrdp_aktiv" ] && exit 0 || exit 3;;
+    esac; done; exit 3;;
   stop) for a in "$@"; do case "$a" in *.timer) rm -f "{TIMER}/$a";; esac; done;;
+  # xrdp-Zustand fuer den RDP-Schalter (Abschnitt 8): installiert, solange
+  # xrdp_fehlt nicht liegt; enable --now startet, disable --now haelt an
+  cat) case "$2" in xrdp*) [ -f "{SK}/xrdp_fehlt" ] && exit 1;; esac;;
+  enable) case "$*" in *xrdp*) [ -f "{SK}/xrdp_startfehler" ] && exit 1; : > "{SK}/xrdp_aktiv";; esac;;
+  disable) case "$*" in *xrdp*) rm -f "{SK}/xrdp_aktiv";; esac;;
 esac
+exit 0
+""")
+# ss: lauschende Sockets aus einer Datei (leer = nichts lauscht) – sonst haenge
+# das Ergebnis am Rechner, auf dem der Waechter laeuft
+(BIN / "ss").write_text(f"""#!/bin/sh
+cat "{SK}/ss_aus" 2>/dev/null
 exit 0
 """)
 (BIN / "systemd-run").write_text(f"""#!/bin/sh
@@ -662,7 +680,8 @@ def admin_pflicht(f: ast.AsyncFunctionDef) -> bool:
 
 
 for meth, pfad in (("get", "/api/broker/ssh/status"), ("post", "/api/broker/ssh/haertung"),
-                   ("post", "/api/broker/ssh/netze"), ("post", "/api/broker/ssh/schluessel")):
+                   ("post", "/api/broker/ssh/netze"), ("post", "/api/broker/ssh/schluessel"),
+                   ("get", "/api/broker/rdp/status"), ("post", "/api/broker/rdp")):
     f = routen.get((meth, pfad))
     check(f"{meth.upper()} {pfad} vorhanden und nur fuer Admins", f is not None and admin_pflicht(f))
 f = routen.get(("get", "/api/broker/ssh/status"))
@@ -684,6 +703,128 @@ direkt = any(
     isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "behandeln"
     for n in ast.walk(dm))
 check("Broker: Meta-Ops im Thread, nicht im Event-Loop", im_thread and not direkt)
+
+# ════════════════════════════════════════════════════════════════════════════
+abschnitt("8. RDP erlauben (xrdp/3389, Vorgabe AUS)")
+FW = ["bash", str(ROOT / "deploy" / "security" / "firewall.sh")]
+KONF.write_text("QUELLE=github\n")
+(SK / "fw_eingerichtet").write_text("x")
+for m in ("xrdp_fehlt", "xrdp_startfehler", "ss_aus", "ruleset"):
+    (SK / m).unlink(missing_ok=True)
+
+
+def zeigen_ports() -> set[str]:
+    r = subprocess.run(FW + ["--zeigen"], capture_output=True, text=True, env=os.environ.copy())
+    return allgemein(r.stdout)
+
+
+def rdp_konf() -> str | None:
+    return konf("RDP_ERLAUBT")
+
+
+# Positivkontrolle: der Trockenlauf liefert ueberhaupt eine Portliste
+(SK / "xrdp_aktiv").unlink(missing_ok=True)
+basis = zeigen_ports()
+if not {"80", "443"} <= basis:
+    abbruch(f"--zeigen liefert keine Portliste ({basis}) – Abschnitt 8 nicht messbar")
+check("ohne Einstellung, xrdp aus: 3389 zu", "3389" not in basis, basis)
+
+# Der Kern: ein LAUFENDES xrdp oeffnet den Port nicht mehr von selbst
+(SK / "xrdp_aktiv").write_text("")
+check("Vorgabe AUS: laufendes xrdp, keine Erlaubnis -> 3389 zu", "3389" not in zeigen_ports())
+(SK / "xrdp_aktiv").unlink()
+(SK / "ss_aus").write_text("LISTEN 0 2 *:3389 *:*\n")
+check("Vorgabe AUS: lauschendes 3389 ohne Erlaubnis -> zu", "3389" not in zeigen_ports())
+KONF.write_text("QUELLE=github\nRDP_ERLAUBT=ja\n")
+check("erlaubt + lauscht -> 3389 offen", "3389" in zeigen_ports())
+(SK / "ss_aus").unlink()
+check("erlaubt, aber xrdp laeuft nicht -> 3389 zu (offener Port fuer nichts)",
+      "3389" not in zeigen_ports())
+(SK / "xrdp_aktiv").write_text("")
+check("erlaubt + laeuft -> 3389 offen", "3389" in zeigen_ports())
+KONF.write_text("QUELLE=github\nRDP_ERLAUBT=nein\n")
+check("RDP_ERLAUBT=nein + laeuft -> zu", "3389" not in zeigen_ports())
+(SK / "xrdp_aktiv").unlink()
+KONF.write_text("QUELLE=github\n")
+
+# Ueber meta.py: einschalten nur mit Code
+log_leeren()
+r = meta.behandeln("broker.rdp", {"aktion": "an", "by": "admin"})
+check("an ohne Code: abgewiesen, nichts gestartet",
+      r.get("grund") == "nachweis_fehlt" and rdp_konf() is None
+      and "enable" not in log() and not (SK / "xrdp_aktiv").exists(), r)
+r = meta.behandeln("broker.rdp", {"aktion": "an", "by": "admin", "nachweis": "000000"})
+check("an mit falschem Code: abgewiesen", r.get("ok") is False and r.get("grund")
+      and rdp_konf() is None, r)
+freigabe.ZUSTAND.unlink(missing_ok=True)
+code = freigabe._code(schluessel, int(time.time() // freigabe.SCHRITT_S))
+log_leeren()
+r = meta.behandeln("broker.rdp", {"aktion": "an", "by": "admin", "nachweis": code})
+check("an mit Code: ok, RDP_ERLAUBT=ja, xrdp gestartet",
+      r.get("ok") is True and rdp_konf() == "ja" and (SK / "xrdp_aktiv").exists()
+      and "enable --now xrdp.service" in log(), r)
+check("an: Filter neu gesetzt MIT 3389", "3389" in allgemein(nft_regeln()), nft_regeln()[-400:])
+check("an: Filter dauerhaft gespeichert", (SK / "etc" / "firewall.nft").is_file())
+
+# Status: Regelsatz in beiden Schreibweisen (Menge wie ECHT, Einzelregel wie DEV)
+(SK / "ruleset").write_text("table inet jarvis_fw {\n chain input {\n"
+                            "  tcp dport { 22, 80, 443, 3389 } ct state new accept\n }\n}\n")
+st = fz.rdp_status()
+check("Status: erlaubt, installiert, laeuft, im Filter frei",
+      st.get("erlaubt") is True and st.get("installiert") is True and st.get("aktiv") is True
+      and st.get("freigegeben") is True and st.get("firewall_eingerichtet") is True, st)
+(SK / "ruleset").write_text("table ip filter {\n chain INPUT {\n"
+                            "  tcp dport 3389 ct state new counter packets 0 bytes 0 accept\n }\n}\n")
+check("Status: Einzelregel (iptables-nft) wird erkannt", fz.rdp_status().get("freigegeben") is True)
+(SK / "ruleset").write_text("table inet jarvis_fw {\n chain input {\n"
+                            "  tcp dport { 22, 80, 443, 33890 } ct state new accept\n"
+                            "  tcp dport 13389 accept\n }\n}\n")
+check("Status: 33890/13389 sind NICHT 3389", fz.rdp_status().get("freigegeben") is False)
+(SK / "ruleset").unlink()
+
+# Ausschalten braucht keinen Code
+log_leeren()
+r = meta.behandeln("broker.rdp", {"aktion": "aus", "by": "admin"})
+check("aus ohne Code: ok, RDP_ERLAUBT=nein, xrdp angehalten",
+      r.get("ok") is True and rdp_konf() == "nein" and not (SK / "xrdp_aktiv").exists()
+      and "disable --now xrdp.service" in log(), r)
+check("aus: Filter neu gesetzt OHNE 3389", nft_regeln() != "" and "3389" not in allgemein(nft_regeln()),
+      nft_regeln()[-400:])
+st = fz.rdp_status()
+check("Status nach aus: nicht erlaubt, laeuft nicht", st.get("erlaubt") is False
+      and st.get("aktiv") is False, st)
+
+# Fehlerfaelle direkt am Skript-Weg
+(SK / "xrdp_fehlt").write_text("")
+r = fz.rdp("an")
+check("xrdp nicht installiert: Abbruch mit Grund, bleibt verboten",
+      r.get("ok") is False and "nicht installiert" in r.get("meldung", "") and rdp_konf() == "nein", r)
+check("Status ohne xrdp: installiert=False", fz.rdp_status().get("installiert") is False)
+(SK / "xrdp_fehlt").unlink()
+(SK / "xrdp_startfehler").write_text("")
+r = fz.rdp("an")
+check("xrdp startet nicht: Abbruch, RDP_ERLAUBT zurueck auf nein",
+      r.get("ok") is False and rdp_konf() == "nein", r)
+(SK / "xrdp_startfehler").unlink()
+(SK / "fw_eingerichtet").unlink()
+log_leeren()
+r = fz.rdp("an")
+check("Filter nicht eingerichtet: nur Dienst, keine Erst-Einrichtung",
+      r.get("ok") is True and rdp_konf() == "ja" and "nft -f" not in log(), r)
+check("Status ohne Filter: freigegeben unbekannt (None), nicht False",
+      fz.rdp_status().get("freigegeben") is None)
+fz.rdp("aus")
+check("unbekannte Aktion abgewiesen", fz.rdp("vielleicht").get("ok") is False)
+r = meta.behandeln("broker.rdp", {"aktion": "vielleicht", "by": "admin"})
+check("meta: unbekannte Aktion abgewiesen", r.get("ok") is False, r)
+audit = [json.loads(z) for z in (SK / "audit.jsonl").read_text().splitlines() if z.strip()]
+check("Audit: an (ausgefuehrt) und abgewiesener Versuch",
+      any(a.get("key") == "broker.rdp:an" and a.get("decision") == "executed" for a in audit)
+      and any(a.get("key") == "broker.rdp:an" and a.get("decision") == "abgewiesen" for a in audit))
+check("Audit: aus", any(a.get("key") == "broker.rdp:aus" and a.get("decision") == "executed"
+                        for a in audit))
+st = meta.behandeln("broker.rdp_status", {})
+check("broker.rdp_status ohne Code", st.get("ok") is True and "erlaubt" in st, st)
 
 shutil.rmtree(SK, ignore_errors=True)
 print("\n" + "=" * 60)

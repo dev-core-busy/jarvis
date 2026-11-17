@@ -105,6 +105,24 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
         policy.audit(by, op, audit_key, "executed", rc=erg.get("rc"),
                      detail=str(erg.get("meldung", ""))[:200], info=info, peer=peer)
         return erg
+    # ── RDP erlauben (xrdp/3389, Schalter unter KI & System) ──
+    if op == "broker.rdp_status":
+        from backend.broker import fernzugang
+        return fernzugang.rdp_status()
+    # Einschalten oeffnet einen Anmeldeweg von aussen -> Freigabe-Code (wie
+    # 'allow'); Ausschalten schraenkt nur ein und braucht ihn nicht (K2).
+    if op == "broker.rdp":
+        from backend.broker import fernzugang
+        aktion = str(args.get("aktion", ""))
+        audit_key = f"{op}:{aktion}"
+        if aktion == "an":
+            fehler = _nachweis(args, by, op, audit_key, peer)
+            if fehler:
+                return fehler
+        erg = fernzugang.rdp(aktion)
+        policy.audit(by, op, audit_key, "executed" if erg.get("ok") else "fehler",
+                     rc=erg.get("rc"), detail=str(erg.get("meldung", ""))[:200], peer=peer)
+        return erg
     # Schluessel hinterlegen/entfernen: IMMER mit Code – ein Schluessel ist ein
     # dauerhafter Weg zu root, der Jarvis ueberlebt (Schranken in fernzugang.py)
     if op == "broker.ssh_schluessel":

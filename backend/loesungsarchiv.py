@@ -797,9 +797,8 @@ def kandidaten(neu: dict, eintraege: dict, kodieren=_kodieren,
                maximal: int = KANDIDATEN_MAX) -> list[str]:
     """Bis zu ``maximal`` Eintrags-IDs ab ``schwelle``, beste zuerst.
 
-    Die Vektoren werden NICHT im Stand gespeichert: ein Modellwechsel machte
-    sie still unvergleichbar. Bei hunderten Eintraegen ist das Neukodieren je
-    Lauf billig (siehe ``_VektorCache``)."""
+    Die Vektoren stehen NICHT im Stand, sondern in einer eigenen Datei, die an
+    den Modellnamen gebunden ist (siehe ``_VektorCache``)."""
     if not eintraege:
         return []
     import numpy as np
@@ -811,21 +810,146 @@ def kandidaten(neu: dict, eintraege: dict, kodieren=_kodieren,
     return [ids[i] for i in reihen[:int(maximal)]]
 
 
-class _VektorCache:
-    """Vektoren der Eintraege fuer EINEN Lauf – sonst kodierte jedes Ticket
-    den ganzen Bestand neu."""
+# ⚠ VEKTOREN AUF PLATTE (2026-11-17, Vorgabe des Betreibers). Bis dahin
+# kodierte JEDER Lauf beim ersten Abgleich den ganzen Bestand neu – auf ECHT
+# bei 43.000 Eintraegen rund 12 Minuten CPU, bei 200 Tickets 4,8 s statt
+# 1,0 s je Ticket. Gespeichert wird je Text (Schluessel = sha256 des Textes),
+# GEBUNDEN AN DEN MODELLNAMEN: die Datei traegt Modell, Praefix und Format;
+# passt eins davon nicht, wird sie verworfen und neu aufgebaut. Damit bleibt
+# die alte Sorge (ein Modellwechsel macht gespeicherte Vektoren still
+# unvergleichbar) erfuellt. Ohne Modellnamen wird nichts gespeichert.
+VEKTOR_DATEI = "vektoren.npz"
+VEKTOR_FORMAT = 1
+VEKTOR_PRAEFIX = "query"          # muss zu ``_kodieren`` passen
+VEKTOR_ZWISCHENSPEICHERN = 2000   # neu kodierte Vektoren, ab denen mitten im Lauf gesichert wird
 
-    def __init__(self, kodieren=_kodieren):
+
+def _modellname() -> str:
+    """Name des Embedding-Modells, an das die gespeicherten Vektoren gebunden sind."""
+    try:
+        import importlib
+        return str(getattr(importlib.import_module("backend.tools.vector_store"),
+                           "MODEL_NAME", "") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _texthash(t: str) -> str:
+    import hashlib
+    return hashlib.sha256(t.encode("utf-8")).hexdigest()
+
+
+class _VektorCache:
+    """Vektoren der Eintraege – im Lauf im Speicher, zwischen Laeufen auf Platte.
+
+    Ohne ``datei`` (oder ohne ``modell``) gilt er nur fuer EINEN Lauf – sonst
+    kodierte jedes Ticket den ganzen Bestand neu."""
+
+    def __init__(self, kodieren=_kodieren, datei: Path | None = None, modell: str = ""):
         self._kod = kodieren
-        self._v: dict[str, object] = {}
+        self._v: dict[str, object] = {}        # Text -> Vektor (dieser Lauf)
+        self._platte: dict[str, object] = {}   # sha256 -> Vektor (aus der Datei)
+        self._datei = datei if (datei is not None and modell) else None
+        self._kennung = f"{modell}|{VEKTOR_PRAEFIX}|{VEKTOR_FORMAT}"
+        self.geladen = 0
+        self.ungespeichert = 0
+        self.verworfen = ""                     # Grund, falls die Datei nicht passte
+        if self._datei is not None:
+            self._laden()
+
+    def _laden(self) -> None:
+        import numpy as np
+        if not self._datei.is_file():
+            return
+        try:
+            with np.load(self._datei, allow_pickle=False) as d:
+                kennung = str(d["kennung"])
+                schluessel = d["schluessel"]
+                vek = d["vektoren"]
+            if kennung != self._kennung:
+                self.verworfen = f"anderes Modell ({kennung.split('|')[0] or '?'})"
+                return
+            if vek.ndim != 2 or len(schluessel) != len(vek):
+                self.verworfen = "unerwartete Form"
+                return
+            vek = np.asarray(vek, dtype=np.float32)
+            self._platte = {k.decode("ascii"): vek[i] for i, k in enumerate(schluessel)}
+            self.geladen = len(self._platte)
+        except Exception as e:  # noqa: BLE001 – eine kaputte Datei kostet nur Rechenzeit
+            self._platte = {}
+            self.verworfen = f"nicht lesbar ({type(e).__name__})"
 
     def __call__(self, texte: list[str]):
         import numpy as np
-        fehlt = [t for t in texte if t not in self._v]
-        if fehlt:
-            for t, v in zip(fehlt, self._kod(fehlt)):
+        fehlt = []
+        for t in texte:
+            if t in self._v:
+                continue
+            v = self._platte.get(_texthash(t)) if self._platte else None
+            if v is None:
+                fehlt.append(t)
+            else:
                 self._v[t] = v
+        if fehlt:
+            fehlt = list(dict.fromkeys(fehlt))
+            neu = self._kod(fehlt)
+            if self._v and len(neu) and np.shape(neu)[-1] != np.shape(next(iter(self._v.values())))[-1]:
+                # Gleicher Name, andere Abmessung: der Datei nicht trauen,
+                # alles mit dem laufenden Modell neu kodieren.
+                self.verworfen = "andere Abmessung"
+                self._platte, self._v = {}, {}
+                return self(texte)
+            for t, v in zip(fehlt, neu):
+                self._v[t] = v
+            self.ungespeichert += len(fehlt)
         return np.vstack([self._v[t] for t in texte])
+
+    def speichern(self, behalten: list[str]) -> int | None:
+        """Schreibt die Vektoren der Texte in ``behalten`` (die aktuellen
+        Eintraege) – Vektoren alter Fassungen und Ticket-Analysen fallen weg,
+        die Datei waechst also nicht ueber den Bestand hinaus. ``None``, wenn
+        nicht gespeichert wird (kein Ort/Modell oder nichts Neues)."""
+        import numpy as np
+        if self._datei is None:
+            return None
+        schl, vek = [], []
+        for t in dict.fromkeys(behalten):
+            h = _texthash(t)
+            v = self._v.get(t)
+            if v is None:
+                v = self._platte.get(h)
+            if v is not None:
+                schl.append(h)
+                vek.append(v)
+        if not self.ungespeichert and len(schl) == self.geladen:
+            return None
+        _ordner_anlegen()
+        tmp = self._datei.with_name(self._datei.name + ".tmp")
+        with open(tmp, "wb") as f:
+            np.savez(f, kennung=np.array(self._kennung),
+                     schluessel=np.array(schl, dtype="S64"),
+                     vektoren=(np.vstack(vek).astype(np.float32) if vek
+                               else np.zeros((0, 0), dtype=np.float32)))
+        try:
+            os.chmod(tmp, 0o640)
+        except Exception:  # noqa: BLE001
+            pass
+        os.replace(tmp, self._datei)
+        self.ungespeichert = 0
+        self.geladen = len(schl)
+        return len(schl)
+
+
+async def _vektoren_sichern(vektoren: "_VektorCache", stand: dict) -> None:
+    """Speichert den Vektorvorrat; ein Fehler kostet nur Rechenzeit im naechsten Lauf."""
+    texte = [_vergleichstext(e) for e in stand.get("eintraege", {}).values()]
+    try:
+        n = await asyncio.to_thread(vektoren.speichern, texte)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Lösungsarchiv] Vektoren nicht gespeichert: {type(e).__name__}: {e}"[:300], flush=True)
+        return
+    if n is not None:
+        print(f"[Lösungsarchiv] {n} Vektoren gespeichert.", flush=True)
 
 
 # ── Jira ────────────────────────────────────────────────────────────────────
@@ -1386,7 +1510,10 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
         if provider is None:
             provider = await asyncio.to_thread(_provider)
         prov, modell = provider
-        vektoren = _VektorCache()
+        vektoren = await asyncio.to_thread(
+            _VektorCache, _kodieren, _wurzel() / VEKTOR_DATEI, _modellname())
+        if vektoren.verworfen:
+            print(f"[Lösungsarchiv] gespeicherte Vektoren verworfen: {vektoren.verworfen}", flush=True)
         # ⚠ PIPELINE (2026-11-04): bis zu ``PARALLEL`` Analysen laufen voraus,
         # eingeordnet wird in der Reihenfolge der Liste und einzeln (siehe
         # ``ticket_einordnen``). Das Fenster ist begrenzt: "Lauf beenden" und
@@ -1452,6 +1579,10 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
                 # Hunderte bereits bezahlte Modellaufrufe wegwerfen.
                 t0 = time.monotonic()
                 await _sichern(stand)
+                if vektoren.ungespeichert >= VEKTOR_ZWISCHENSPEICHERN:
+                    # Der erste Aufbau kostet Minuten – ein Neustart mitten
+                    # im Lauf soll ihn nicht wegwerfen.
+                    await _vektoren_sichern(vektoren, stand)
                 zeiten.plus("speichern", time.monotonic() - t0)
         finally:
             # Vorausgelaufene Analysen abraeumen (beenden, Abbruch, Fehler) –
@@ -1459,6 +1590,7 @@ async def _lauf(client, provider, laden, index_und_graph) -> dict:
             for _, f in vorlauf:
                 f.cancel()
             await asyncio.gather(*(f for _, f in vorlauf), return_exceptions=True)
+            await _vektoren_sichern(vektoren, stand)
     wanduhr = time.monotonic() - t_lauf
 
     # Schwelle und Gruppen NEU lesen: ein Lauf dauert Stunden, und wer sie

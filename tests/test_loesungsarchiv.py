@@ -1687,5 +1687,143 @@ finally:
     la.SERVER_WARTEN, la.SERVER_AUS_SERIE = _alt_warten, _alt_serie
     la.einstellungen_speichern(_vor21, cron_manager=CronAttrappe())
 
+
+# ── 22. Vektoren auf Platte, gebunden an den Modellnamen ───────────────────
+# Bis 2026-11-17 kodierte jeder Lauf den ganzen Bestand neu (ECHT: 12 min).
+print("\n\033[1m22. Vektoren auf Platte, gebunden an den Modellnamen\033[0m")
+import numpy as _np22
+_vdatei = la._wurzel() / la.VEKTOR_DATEI
+_vor22 = la.einstellungen()
+try:
+    # a) Ohne Modellnamen (Attrappe ohne MODEL_NAME) wird nichts gespeichert.
+    check("Positivkontrolle: die Attrappe kennt keinen Modellnamen", la._modellname() == "", la._modellname())
+    check("ohne Modellnamen bisher keine Vektordatei", not _vdatei.exists())
+    check("ohne Modellnamen speichert der Cache nicht",
+          la._VektorCache(_encode, _vdatei, "").speichern(["x"]) is None and not _vdatei.exists())
+
+    # b) Mit Modellnamen: der Lauf legt die Datei an, sie deckt den Bestand.
+    vs.MODEL_NAME = "modell-a"
+    la.einstellungen_speichern({**_vor22, "je_lauf": 50}, cron_manager=CronAttrappe())
+    def _neue22(nr, n=2):
+        ks = []
+        for i in range(1, n + 1):
+            k = f"{BEREICH}-23{nr}{i}"
+            TICKETS[k] = _ticket(k, f"Vektorfall {nr}{i} Drucker", f"Drucker {nr}{i} zieht nicht ein",
+                                 f"Rolle {nr}{i} getauscht")
+            client.keys.append(k)
+            ks.append(k)
+        return ks
+    _neue22(1)
+    with redirect_stdout(io.StringIO()) as _aus22:
+        _e22 = lauf(client, ProviderAttrappe())
+    _st22 = json.loads((la._wurzel() / "stand.json").read_text())
+    _n_eintr = len(_st22["eintraege"])
+    check("Positivkontrolle: Lauf ohne Fehler, Bestand vorhanden", _e22.get("fehler") == 0 and _n_eintr > 5,
+          (_e22.get("grund"), _n_eintr))
+    check("⚠ der Lauf legt die Vektordatei an", _vdatei.is_file(), _aus22.getvalue()[-300:])
+    _kenn, _schl, _vek22 = "", [], None
+    if _vdatei.is_file():
+        with _np22.load(_vdatei, allow_pickle=False) as _d:
+            _kenn, _schl, _vek22 = str(_d["kennung"]), list(_d["schluessel"]), _d["vektoren"]
+    check("⚠ die Datei traegt den Modellnamen", _kenn.startswith("modell-a|"), _kenn)
+    _soll = {la._texthash(la._vergleichstext(e)).encode() for e in _st22["eintraege"].values()}
+    check("die Datei deckt genau die Eintraege (keine Ticket-Analysen, keine alten Fassungen)",
+          set(_schl) == _soll, (len(_schl), len(_soll)))
+    _beisp = next(iter(_st22["eintraege"].values()))
+    _h = la._texthash(la._vergleichstext(_beisp)).encode()
+    _i = _schl.index(_h) if _h in _schl else -1
+    check("gespeicherter Vektor = frisch kodierter Vektor",
+          _i >= 0 and _np22.allclose(_vek22[_i], _encode([la._vergleichstext(_beisp)], prefix="query")[0]))
+    check("Journal nennt die gespeicherten Vektoren", "Vektoren gespeichert" in _aus22.getvalue())
+
+    # c) Naechster Lauf: der Bestand wird NICHT neu kodiert.
+    _neue22(2)
+    KODIERT["n"] = 0
+    with redirect_stdout(io.StringIO()):
+        _e22c = lauf(client, ProviderAttrappe())
+    _kod_c = KODIERT["n"]
+    check("⚠ mit Datei kodiert der Lauf nur Neues, nicht den Bestand",
+          _e22c.get("fehler") == 0 and 0 < _kod_c < _n_eintr, (_kod_c, _n_eintr, _e22c.get("grund")))
+    # Positivkontrolle derselben Messung: ohne Datei wird der Bestand kodiert.
+    if _vdatei.exists():
+        _vdatei.unlink()
+    _neue22(3)
+    KODIERT["n"] = 0
+    with redirect_stdout(io.StringIO()):
+        lauf(client, ProviderAttrappe())
+    check("Positivkontrolle: ohne Datei kodiert der Lauf den ganzen Bestand",
+          KODIERT["n"] >= _n_eintr, (KODIERT["n"], _n_eintr))
+
+    # d) Anderer Modellname: die Datei wird verworfen und neu gebaut.
+    vs.MODEL_NAME = "modell-b"
+    _neue22(4)
+    KODIERT["n"] = 0
+    with redirect_stdout(io.StringIO()) as _aus22d:
+        lauf(client, ProviderAttrappe())
+    _kenn_d = ""
+    if _vdatei.is_file():
+        with _np22.load(_vdatei, allow_pickle=False) as _d:
+            _kenn_d = str(_d["kennung"])
+    check("⚠ Modellwechsel: alle Vektoren neu kodiert", KODIERT["n"] >= _n_eintr, (KODIERT["n"], _n_eintr))
+    check("Modellwechsel: Datei traegt den neuen Namen", _kenn_d.startswith("modell-b|"), _kenn_d)
+    check("Modellwechsel steht im Journal", "verworfen: anderes Modell" in _aus22d.getvalue(),
+          _aus22d.getvalue()[-300:])
+
+    # e) Kaputte Datei: kein Fehler, nur Neukodieren.
+    _vdatei.write_bytes(b"kein npz")
+    _neue22(5)
+    KODIERT["n"] = 0
+    with redirect_stdout(io.StringIO()):
+        _e22e = lauf(client, ProviderAttrappe())
+    check("kaputte Datei: Lauf ohne Fehler, Bestand neu kodiert",
+          _e22e.get("fehler") == 0 and KODIERT["n"] >= _n_eintr, (_e22e.get("grund"), KODIERT["n"]))
+    check("kaputte Datei wird ersetzt", _vdatei.read_bytes()[:2] == b"PK")
+
+    # f) Einheit: Auswahl, kein Schreiben ohne Neues, Abmessung.
+    _ein = SAND / "vek_einheit.npz"
+    _n_kod = {"n": 0}
+    def _kod4(texte, d=4):
+        _n_kod["n"] += len(texte)
+        return _np22.vstack([_np22.full(d, float(len(t)), dtype="float32") for t in texte])
+    _c = la._VektorCache(_kod4, _ein, "m")
+    _c(["a", "bb", "ccc"])
+    check("speichern behaelt nur die genannten Texte", _c.speichern(["a", "bb"]) == 2)
+    _c2 = la._VektorCache(_kod4, _ein, "m")
+    _n_kod["n"] = 0
+    _r = _c2(["a", "bb"])
+    check("⚠ geladene Vektoren werden benutzt, nicht neu kodiert",
+          _n_kod["n"] == 0 and _r.shape == (2, 4) and float(_r[1][0]) == 2.0, (_n_kod["n"], _r))
+    _c2(["ccc"])
+    check("Fehlendes wird kodiert", _n_kod["n"] == 1, _n_kod["n"])
+    _t0 = _ein.stat().st_mtime_ns
+    check("nichts Neues, nichts weg: kein Schreiben",
+          la._VektorCache(_kod4, _ein, "m").speichern(["a", "bb"]) is None and _ein.stat().st_mtime_ns == _t0)
+    _c3 = la._VektorCache(lambda t: _kod4(t, 8), _ein, "m")
+    try:
+        _form3 = _c3(["a", "neu"]).shape
+    except Exception as _x:  # noqa: BLE001 – ein Absturz ist hier der Befund, kein Testabbruch
+        _form3 = f"{type(_x).__name__}: {_x}"
+    check("⚠ gleiche Kennung, andere Abmessung: alles neu kodiert",
+          _form3 == (2, 8) and _c3.verworfen == "andere Abmessung", (_form3, _c3.verworfen))
+    check("anderer Name laedt nichts", la._VektorCache(_kod4, _ein, "x").geladen == 0
+          and la._VektorCache(_kod4, _ein, "m").geladen == 2)
+    # g) Mitten im Lauf sichern: der teure erste Aufbau ueberlebt einen Neustart.
+    _alt_zw = la.VEKTOR_ZWISCHENSPEICHERN
+    try:
+        la.VEKTOR_ZWISCHENSPEICHERN = 1
+        _vdatei.unlink()
+        _neue22(6, n=3)
+        with redirect_stdout(io.StringIO()) as _aus22g:
+            lauf(client, ProviderAttrappe())
+        check("⚠ ab der Schwelle wird schon im Lauf gesichert (nicht erst am Ende)",
+              _aus22g.getvalue().count("Vektoren gespeichert") >= 2, _aus22g.getvalue()[-400:])
+    finally:
+        la.VEKTOR_ZWISCHENSPEICHERN = _alt_zw
+finally:
+    if hasattr(vs, "MODEL_NAME"):
+        del vs.MODEL_NAME
+    la.einstellungen_speichern(_vor22, cron_manager=CronAttrappe())
+
+
 print(f"\n\033[1mErgebnis: {OK}/{OK + FAIL}\033[0m")
 sys.exit(0 if FAIL == 0 else 1)

@@ -249,8 +249,21 @@ pruef("runuser bleibt aussen", befehl.startswith("runuser -u jarvis_sandbox --")
 pruef("setpriv vor bwrap (Ambient-Caps des Dienstes)",
       "setpriv" in befehl and befehl.index("setpriv") < befehl.index("bwrap"),
       "ohne setpriv bricht bwrap IM DIENST ab, bei der Handprobe nicht")
-pruef("--dev-bind / / (nicht --bind)", "--dev-bind / /" in befehl,
-      "eine gewoehnliche Bindung mountet nodev -> 2>/dev/null scheitert")
+# F-13 (Pentest "Hardening", 2026-11-17): eigene Wurzel statt des ganzen
+# Server-Dateisystems. Frueher stand hier "--dev-bind / /" als Pflicht.
+pruef("KEIN --dev-bind / / mehr (F-13: Server-Dateisystem unsichtbar)",
+      "--dev-bind / /" not in befehl)
+pruef("frische Geraeteknoten (--dev /dev) statt nodev-Bindung",
+      "--dev /dev" in befehl,
+      "ohne sie scheitert 2>/dev/null – die Umleitung, die 2026-08-05 Konten sperrte")
+pruef("/usr schreibgeschuetzt eingebunden", "--ro-bind /usr /usr" in befehl)
+pruef("/etc/jarvis im Lauf verdeckt",
+      (not os.path.isdir("/etc/jarvis")) or "--tmpfs /etc/jarvis" in befehl)
+pruef("Wurzel steht VOR der /tmp-Bindung (Reihenfolge der Mounts)",
+      0 <= befehl.find("--ro-bind /usr /usr") < befehl.find("--bind %s /tmp" % (lt.ARBEIT_ROOT / "abcdef01")))
+pruef("ohne Lauf-Verzeichnis (Admin-Sandbox) bleibt das echte Dateisystem",
+      "--dev-bind / /" in lt.sandbox_befehl("jarvis_sandbox", "echo x", None,
+                                            pflicht=True, _pruefen=True))
 pruef("Arbeitsverzeichnis wird auf /tmp gemountet",
       "--bind %s /tmp" % (lt.ARBEIT_ROOT / "abcdef01") in befehl)
 pruef("MPL-Cache braucht KEINE Bindung mehr",
@@ -313,8 +326,8 @@ else:
 
     def lauf(cmd, ro=(), dev=True):
         b = lt.sandbox_befehl("", cmd, lauf_dir, ro, _pruefen=True)
-        if not dev:                     # Gegenprobe: gewoehnliche Bindung
-            b = b.replace("--dev-bind / /", "--bind / /")
+        if not dev:                     # Gegenprobe: ohne eigenes /dev
+            b = b.replace("--dev /dev ", "")
         r = subprocess.run(["/bin/bash", "-c", b], capture_output=True,
                            text=True, timeout=60)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
@@ -333,11 +346,35 @@ else:
           "ohne diese Uebergabe faellt jeder Download-Chip aus")
 
     rc, aus = lauf("echo x 2>/dev/null && echo devnull-ok")
-    pruef("2>/dev/null funktioniert (--dev-bind)", "devnull-ok" in aus, aus.strip()[:120])
+    pruef("2>/dev/null funktioniert (--dev /dev)", "devnull-ok" in aus, aus.strip()[:120])
     rc, aus = lauf("echo x 2>/dev/null && echo devnull-ok", dev=False)
-    pruef("GEGENPROBE: mit --bind / / scheitert genau das",
+    pruef("GEGENPROBE: ohne --dev /dev scheitert genau das",
           "devnull-ok" not in aus,
           "wenn das hier gruen ist, prueft der Test seine eigene Annahme")
+
+    # F-13/F-19 (Pentest "Hardening"): das Server-Dateisystem ist im Lauf NICHT
+    # VORHANDEN. Positivkontrolle zuerst: auf dem Host existiert das Ziel – sonst
+    # waere "im Lauf nicht da" trivial wahr.
+    _projekt = Path(lt.__file__).resolve().parent      # .../backend
+    pruef("Positivkontrolle: Quellcode-Verzeichnis existiert auf dem Host",
+          (_projekt / "lauf_tmp.py").is_file())
+    rc, aus = lauf("test -e %s && echo SICHTBAR || echo WEG" % (_projekt / "lauf_tmp.py"))
+    pruef("Quellcode des Servers ist im Lauf NICHT VORHANDEN (F-13)",
+          "WEG" in aus and "SICHTBAR" not in aus, aus.strip()[:120])
+    rc, aus = lauf("cp %s /tmp/kopie.py 2>&1; test -e /tmp/kopie.py && echo KOPIERT || echo NICHT"
+                   % (_projekt / "lauf_tmp.py"))
+    pruef("… und laesst sich damit nicht ins Arbeitsverzeichnis kopieren (F-19)",
+          "NICHT" in aus and not (lauf_dir / "kopie.py").exists(), aus.strip()[:160])
+    if os.path.isdir("/var/log"):
+        # Nicht ueber `ls | wc -l`: die Fehlermeldung von ls zaehlte als Zeile.
+        rc, aus = lauf("test -e /var/log && echo SICHTBAR || echo WEG")
+        pruef("/var/log ist im Lauf NICHT VORHANDEN",
+              "WEG" in aus and "SICHTBAR" not in aus, aus.strip()[:120])
+    rc, aus = lauf("python3 -c 'import json, ssl, sqlite3; print(\"PY-OK\")'")
+    pruef("Python samt Standardbibliothek laeuft in der eigenen Wurzel",
+          "PY-OK" in aus, aus.strip()[:200])
+    rc, aus = lauf("getent passwd root >/dev/null && echo NSS-OK")
+    pruef("Benutzerauflösung (/etc) funktioniert", "NSS-OK" in aus, aus.strip()[:120])
 
     rc, aus = lauf("cat %s/anhang_0123456789ab_tab.csv" % anh_dir, ro=[str(anh_dir)])
     pruef("eigener Anhang ist im Lauf lesbar", "spalte;wert" in aus, aus.strip()[:120])

@@ -166,6 +166,14 @@ class DokStub:
     def register(self, name, benutzer):
         self.eintraege.append((name, benutzer))
 
+    def may_access(self, fname, username, is_admin=False):
+        """Signatur und Regel wie ``backend/documents.py::may_access``: Admins
+        immer, sonst nur der (zuletzt) eingetragene Ersteller, fail-closed."""
+        if is_admin:
+            return True
+        besitzer = [b for n, b in self.eintraege if n == fname]
+        return bool(besitzer) and besitzer[-1] == username
+
 
 class AgentStub:
     """Nur das, was _deliver_docs von `self` braucht."""
@@ -208,6 +216,11 @@ class LaufTmpStub:
 
     def such_wurzeln(self):
         return [self.arbeit] if self.arbeit else []
+
+    def aktueller_lauf(self):
+        """Wie im Original: ``None`` ohne eigenes Arbeitsverzeichnis
+        (privilegiert oder ohne Isolation), sonst ein Lauf-Objekt."""
+        return object() if self.arbeit else None
 
     def anhang_verzeichnis(self, benutzer, anlegen=False):
         """Signatur wie im Original (``backend/lauf_tmp.py``), inkl. `anlegen`.
@@ -1035,6 +1048,63 @@ def main() -> int:
                _dl_ziel.is_file() and f"/tmp/{_dl_ziel.name}" in _erg, _erg)
         pruefe("confluence_download_attachment meldet die Datei als EINGABE an",
                _LT_ECHT.ist_eingabe(_dl_ziel), _erg)
+
+        abschnitt("15) F-19: fremde Dateien in data/documents gehen NICHT heraus")
+        # Pentest "Hardening" F-19: der Liefer-Marker gab jede Datei unter
+        # data/documents heraus, sobald ihr Name im Text stand – auch die eines
+        # ANDEREN Benutzers (dort liegen die Ablagen aller). Gemessen wird ueber
+        # alle drei Zweige (Marker, Pfad, blosser Name), je mit Positivkontrolle
+        # an der EIGENEN Datei, damit eine Sperre "liefert gar nichts mehr" nicht
+        # als Erfolg durchgeht.
+        docs.mkdir(parents=True, exist_ok=True)
+        arb15 = tmpdir / "jarvis-arbeit" / "f19f19f1"
+        arb15.mkdir(parents=True, exist_ok=True)
+        dok15 = DokStub()
+        deliver15, _c15 = baue(tmpdir, dok15, LaufTmpStub(arb15))
+        _k = uuid.uuid4().hex[:6]
+        fremd15 = docs / f"angebot_bob_{_k}.xlsx"
+        eigen15 = docs / f"angebot_alice_{_k}.xlsx"
+        for _f, _b in ((fremd15, "bob"), (eigen15, "alice")):
+            _f.write_bytes(b"PK\x03\x04" + _b.encode())
+            dok15.register(_f.name, _b)
+
+        def _chips15(s_):
+            return [m for m in s_.gesendet if "/api/documents/" in m]
+
+        for _zweig, _vorlage in (
+                ("Liefer-Marker", "Hier: [[JARVIS_DELIVER:%s]]"),
+                ("Pfad im Text", "Liegt unter %s bereit."),
+                ("blosser Name", "Die Datei %s ist fertig.")):
+            for _f, _soll in ((fremd15, False), (eigen15, True)):
+                _ref = _f.name if _zweig == "blosser Name" else _f.as_posix()
+                s_ = AgentStub(EXT)
+                asyncio.run(deliver15(s_, None, _vorlage % _ref, set(), "alice",
+                                      0.0, True))
+                if _soll:
+                    pruefe(f"{_zweig}: EIGENE Datei wird ausgeliefert (Positivkontrolle)",
+                           len(_chips15(s_)) == 1, str(s_.gesendet))
+                else:
+                    pruefe(f"{_zweig}: FREMDE Datei wird NICHT ausgeliefert",
+                           not _chips15(s_), str(s_.gesendet))
+            # (b) verschiebt die Quelle: die eigene Datei fuer den naechsten
+            # Zweig wiederherstellen.
+            if not eigen15.exists():
+                eigen15.write_bytes(b"PK\x03\x04alice")
+        pruefe("die fremde Datei liegt unberuehrt an ihrem Ort",
+               fremd15.is_file() and fremd15.read_bytes().endswith(b"bob"))
+        s_ = AgentStub(EXT)
+        asyncio.run(deliver15(s_, None, "Hier: [[JARVIS_DELIVER:%s]]" % fremd15.as_posix(),
+                              set(), "alice", 0.0, True))
+        pruefe("der verfehlte Marker auf die fremde Datei wird GEMELDET",
+               any("⚠️" in m for m in s_.gesendet), str(s_.gesendet))
+        # Privilegiert (kein eigenes Arbeitsverzeichnis): Administratoren duerfen
+        # jede Datei laden – die Schranke gilt dort nicht.
+        s_ = AgentStub(EXT)
+        deliver15p, _ = baue(tmpdir, dok15, LaufTmpStub())
+        asyncio.run(deliver15p(s_, None, "Hier: [[JARVIS_DELIVER:%s]]" % fremd15.as_posix(),
+                               set(), "admin", 0.0, True))
+        pruefe("privilegierter Lauf: Marker liefert weiterhin aus",
+               len(_chips15(s_)) == 1, str(s_.gesendet))
 
     print(f"\n{ok} ok, {fehler} Fehler ({ok + fehler} Pruefungen)")
     return 1 if fehler else 0

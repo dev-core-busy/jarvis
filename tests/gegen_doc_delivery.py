@@ -370,6 +370,29 @@ probe("Confluence-Werkzeug meldet die Datei nicht an", "py",
       "                    _lt.eingabe_merken(path)\n",
       "                    pass\n")
 
+# F-19 (Pentest "Hardening"): fremde Dateien in data/documents – je Zweig EINE
+# Probe, weil jeder Zweig die Schranke selbst ruft.
+probe("F-19: Eigentuemer-Schranke im Liefer-Marker entfernt", "py",
+      "backend/agent.py",
+      "            if _fremde_ablage(rp):\n"
+      "                _verfehlt_merken(raw, disp_name, \"Datei gehört einem anderen Benutzer\")\n",
+      "            if False:\n"
+      "                _verfehlt_merken(raw, disp_name, \"Datei gehört einem anderen Benutzer\")\n")
+probe("F-19: Eigentuemer-Schranke im Pfad-Zweig (b) entfernt", "py",
+      "backend/agent.py",
+      "            if _fremde_ablage(rp):\n"
+      "                _log(f\"Pfad-Treffer abgelehnt (fremde Datei): {rp.name}\")\n",
+      "            if False:\n"
+      "                _log(f\"Pfad-Treffer abgelehnt (fremde Datei): {rp.name}\")\n")
+probe("F-19: Eigentuemer-Schranke im Namens-Zweig (c) entfernt", "py",
+      "backend/agent.py",
+      "            if _fremde_ablage(found):\n",
+      "            if False:\n")
+probe("F-19: Schranke prueft gar nicht (immer unprivilegiert gedacht -> nie)", "py",
+      "backend/agent.py",
+      "        _fremd_pruefen = _lauf_tmp.aktueller_lauf() is not None\n",
+      "        _fremd_pruefen = False\n")
+
 
 # ── REGEL statt gepflegter Liste ────────────────────────────────────────────
 _fremd = {rel for _, _, rel, _, _ in PROBEN} - set(DATEIEN)

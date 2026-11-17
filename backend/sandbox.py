@@ -405,7 +405,15 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 # Loesungsarchiv: Auswertungen geschlossener Jira-Tickets –
                 # auch die unter dem Schwellwert, die bewusst NICHT in der
                 # Wissenssuche stehen (backend/loesungsarchiv.py legt 0750 an).
-                "data/loesungsarchiv")
+                "data/loesungsarchiv",
+                # Versionsverlauf (Pentest "Hardening" F-16): .git lag mit 0755
+                # da, der Sandbox-Benutzer las daraus jeden je committeten
+                # Stand – auch an jedem Pfadfilter vorbei (`cd /opt/jarvis &&
+                # git log` nennt den Pfad gar nicht). Die Shell sieht /opt/jarvis
+                # seit F-13 ohnehin nicht mehr; das OS-Recht zieht nach, fuer
+                # jeden anderen lokalen Benutzer. git selbst laeuft als
+                # Dienstbenutzer (Update, dev_reset) und ist davon unberuehrt.
+                ".git")
 PRIVATE_MODE = 0o750
 
 # Einzelne Dateien direkt in data/, die kein Domain-Nutzer lesen darf. Das

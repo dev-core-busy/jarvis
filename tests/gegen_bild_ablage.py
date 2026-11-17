@@ -104,9 +104,11 @@ def probe(label, rel, alt, neu):
 # A – Sandbox-Sperre
 probe("ALTSTAND: generated_images aus PRIVATE_DIRS",
       "backend/sandbox.py",
+      # Anker ohne schliessende Klammer: die Liste ist laengst laenger, die
+      # alte Fassung `"data/generated_images")` traf seitdem nicht mehr.
       'PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",\n'
-      '                "data/generated_images")',
-      'PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs")')
+      '                "data/generated_images",\n',
+      'PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",\n')
 
 probe("Haerte: generated_images DOCH in _APP_DENY_REL (Kontosperre!)",
       "backend/sandbox.py",

@@ -1164,6 +1164,80 @@ class IsolationFehlt(RuntimeError):
     """Der Lauf soll isoliert werden, kann es aber nicht (BSI H10: fail-closed)."""
 
 
+# ── Minimal-Dateisystem fuer isolierte Laeufe (Pentest "Hardening" F-13/F-19) ──
+# Bis 2026-11-17 sah ein Lauf per ``--dev-bind / /`` das GANZE Dateisystem des
+# Servers; die harte Grenze waren allein die OS-Rechte. Auf DEV gemessen las der
+# Sandbox-Benutzer damit 72.722 Dateien unter /opt/jarvis (Quellcode, Tests,
+# .git), dazu /var/log, /etc/jarvis (broker.conf, Firewall-Regeln) und /run.
+# Und weil der Liefer-Marker alles ausliefert, was im Arbeitsverzeichnis liegt,
+# genuegte ``cp /opt/jarvis/<datei> /tmp/`` fuer einen Download (F-19).
+#
+# Jetzt baut der Lauf eine EIGENE Wurzel: Programme und Bibliotheken (/usr samt
+# der Debian-Verweise /bin, /lib ...), /etc ohne die Jarvis- und SSH-Konfiguration,
+# frische /dev und /proc, das eigene /tmp, die eigenen Anhaenge und die
+# Wissensorte, die auch das filesystem-Werkzeug lesen darf (sandbox.READ_ROOTS
+# ohne /tmp und data/documents – Gleichstand prueft der Waechter). Alles andere
+# ist im Lauf NICHT VORHANDEN – nicht "nicht lesbar".
+#
+# Auf DEV gemessen, dass alles Benutzte weiter laeuft: pandas + multiprocessing,
+# matplotlib, openpyxl, LibreOffice-Export, ImageMagick, pdftoppm, tesseract,
+# DNS + curl, ``2>/dev/null``.
+WISSEN_ORTE = ("/mnt/rag", "/mnt/jarvis-kb",
+               str(PROJECT_ROOT / "data" / "rag"),
+               str(PROJECT_ROOT / "data" / "knowledge"))
+# Teile von /etc, die im Lauf leer erscheinen: Broker-Konfiguration, Firewall-
+# Regeln, Signierschluessel-Liste (/etc/jarvis) und die SSH-Konfiguration.
+ETC_VERBORGEN = ("/etc/jarvis", "/etc/ssh")
+# Debian 13 (merged /usr): Verweise. Ein System ohne merged /usr hat echte
+# Verzeichnisse – dann werden sie schreibgeschuetzt eingebunden.
+_WURZEL_VERWEISE = ("bin", "sbin", "lib", "lib32", "lib64", "libx32")
+
+
+def minimal_wurzel() -> list:
+    """bwrap-Argumente fuer die eigene Wurzel eines isolierten Laufs.
+
+    Reihenfolge ist Pflicht: erst die Wurzel, DANACH ``--bind <lauf> /tmp`` und
+    die Anhang-/Zusatzbindungen (sie landen in dieser Wurzel). ``--dev /dev``
+    legt echte Geraeteknoten an – ``2>/dev/null`` funktioniert damit, was mit
+    einer gewoehnlichen Bindung (nodev) nicht der Fall war.
+    """
+    teile = ["--ro-bind", "/usr", "/usr"]
+    for name in _WURZEL_VERWEISE:
+        p = "/" + name
+        if os.path.islink(p):
+            teile += ["--symlink", os.readlink(p), p]
+        elif os.path.isdir(p):
+            teile += ["--ro-bind", p, p]
+    teile += ["--ro-bind", "/etc", "/etc"]
+    for v in ETC_VERBORGEN:
+        # Nur vorhandene: ein fehlender Punkt liesse bwrap im schreibgeschuetzten
+        # /etc einen Einhaengepunkt anlegen wollen und abbrechen.
+        if os.path.isdir(v) and not os.path.islink(v):
+            teile += ["--tmpfs", v]
+    # /etc/resolv.conf ist auf manchen Systemen ein Verweis nach /run – das
+    # Ziel muss mit hinein, sonst gibt es im Lauf keine Namensaufloesung.
+    try:
+        if os.path.islink("/etc/resolv.conf"):
+            ziel = os.path.realpath("/etc/resolv.conf")
+            if os.path.isfile(ziel) and not ziel.startswith("/etc/"):
+                teile += ["--ro-bind", ziel, ziel]
+    except OSError:
+        pass
+    teile += ["--dev", "/dev"]
+    # Kerne/Cache-Topologie fuer numpy/OpenBLAS; sonst nichts aus /sys.
+    if os.path.isdir("/sys/devices/system/cpu"):
+        teile += ["--ro-bind", "/sys/devices/system/cpu", "/sys/devices/system/cpu"]
+    # /var bleibt leer bis auf den Schriftarten-Cache; /var/tmp zeigt ins eigene /tmp.
+    teile += ["--dir", "/var"]
+    if os.path.isdir("/var/cache/fontconfig"):
+        teile += ["--ro-bind", "/var/cache/fontconfig", "/var/cache/fontconfig"]
+    teile += ["--symlink", "../tmp", "/var/tmp"]
+    for w in WISSEN_ORTE:
+        if os.path.isdir(w):
+            teile += ["--ro-bind", w, w]
+    return teile
+
+
 def sandbox_befehl(sandbox_user: str, command: str, lauf_dir=None,
                    ro_binds=(), _pruefen: bool = False, rw_binds=(),
                    *, pflicht: bool = False, ohne_netz: bool = False,
@@ -1192,10 +1266,11 @@ def sandbox_befehl(sandbox_user: str, command: str, lauf_dir=None,
     EINE Fassung fuer beide Wege (Broker-Betrieb und Alt-Betrieb mit
     root-Backend). Zwei Feinheiten, die beide Geld gekostet haben:
 
-    * **``--dev-bind / /`` und nicht ``--bind / /``.** Eine gewoehnliche
-      Bindung mountet mit ``nodev``; damit scheitert ``2>/dev/null`` mit
-      "Keine Berechtigung" – also genau die Umleitung, die 2026-08-05 vier
-      Konten gesperrt hat, weil sie falsch bewertet wurde. Auf DEV gemessen.
+    * **Echte Geraeteknoten.** Eine gewoehnliche Bindung mountet mit
+      ``nodev``; damit scheitert ``2>/dev/null`` mit "Keine Berechtigung" –
+      also genau die Umleitung, die 2026-08-05 vier Konten gesperrt hat. Mit
+      Lauf-Verzeichnis liefert das ``--dev /dev`` der eigenen Wurzel
+      (``minimal_wurzel``), ohne es ``--dev-bind / /``. Auf DEV gemessen.
     * **``setpriv`` davor.** ``jarvis.service`` gibt dem Backend
       ``CAP_NET_BIND_SERVICE`` als Ambient-Capability, und die wird an JEDES
       Kind vererbt – ``bwrap`` bricht dann mit "Unexpected capabilities but not
@@ -1218,15 +1293,17 @@ def sandbox_befehl(sandbox_user: str, command: str, lauf_dir=None,
     teile = []
     if os.path.exists(SETPRIV):
         teile += [SETPRIV, "--inh-caps=-all", "--ambient-caps=-all", "--"]
-    teile += [
-        BWRAP,
-        # Dateisystem bleibt wie es ist – die harte Grenze sind weiter die
-        # OS-Rechte des Sandbox-Benutzers. Eine Whitelist waere hier falsch:
-        # sie wuerde legitime Zugriffe (Wissens-Share, /mnt, /opt/jarvis/skills)
-        # abschneiden, und der Gewinn waere gering, weil der Benutzer ohnehin
-        # nur das lesen kann, was fuer alle lesbar ist.
-        "--dev-bind", "/", "/",
-    ]
+    teile += [BWRAP]
+    if lauf_dir:
+        # Domain-Benutzer: eigene Wurzel statt des Server-Dateisystems
+        # (F-13/F-19, siehe minimal_wurzel). Die fruehere Begruendung fuer
+        # ``--dev-bind / /`` ("eine Whitelist schneidet Wissens-Shares ab")
+        # traegt nicht mehr: die Wissensorte sind ausdruecklich eingebunden.
+        teile += minimal_wurzel()
+    else:
+        # Administratoren mit Schalter "Sandbox auch fuer Administratoren":
+        # echtes Dateisystem wie bisher, nur die privaten Bereiche verdeckt.
+        teile += ["--dev-bind", "/", "/"]
     if lauf_dir:
         # DAS ist die Isolation: /tmp ist ab hier NUR das Arbeitsverzeichnis
         # dieses Benutzers. Der matplotlib-Cache liegt einfach darin (MPL_ZIEL) –

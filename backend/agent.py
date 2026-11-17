@@ -7225,6 +7225,33 @@ KRITISCH – Ausfuehrungs-Regeln:
                 return True
             return any(low == d or low.startswith(d) for d in _DENY_NAME)
 
+        # Eigentuemer-Schranke fuer data/documents (Pentest "Hardening" F-19).
+        # Dort liegen die Dateien ALLER Benutzer; das filesystem-Werkzeug und der
+        # HTTP-Endpunkt zeigen fremde nicht (``may_see_document``) – die drei
+        # Auslieferungszweige unten gaben sie aber heraus, sobald der Name im
+        # Text stand (Liefer-Marker, Pfad oder blosser Name). Eine Capability-
+        # Datei ist ausgenommen: ihr Name IST die Berechtigung, und sie wird
+        # hier nur vermerkt, nicht neu ausgeliefert.
+        # Nur in einem UNPRIVILEGIERTEN Lauf (eigenes Arbeitsverzeichnis aktiv):
+        # Administratoren duerfen jede Datei laden, und eine Pruefung gegen den
+        # Admin-Namen wiese ihre unregistrierten Altdateien faelschlich ab.
+        _fremd_pruefen = _lauf_tmp.aktueller_lauf() is not None
+
+        def _fremde_ablage(pfad) -> bool:
+            if not _fremd_pruefen or _docs_root not in pfad.parents:
+                return False
+            if re.fullmatch(r"[0-9a-f]{32}__.+", pfad.name):
+                return False
+            # Dieselbe Regel wie am HTTP-Endpunkt und in sandbox.may_see_document:
+            # nur der Ersteller, fail-closed ohne Eintrag. Ohne Benutzer keine
+            # Freigabe (ein leerer Name hiesse dort "keine Einschraenkung").
+            if not _owner:
+                return True
+            try:
+                return not _documents.may_access(pfad.name, _owner, is_admin=False)
+            except Exception:  # noqa: BLE001
+                return True          # fail-closed: nicht pruefbar = nicht ausliefern
+
         # (a) Fertige Capability-URLs (Dedup per physischem Pfad)
         _EXT_RE = self._liefer_ext_re()
         for m in re.finditer(r"/api/documents/[0-9a-f]{32}__[A-Za-z0-9_\-]+\.(?:" + _EXT_RE + ")", text):
@@ -7358,6 +7385,9 @@ KRITISCH – Ausfuehrungs-Regeln:
             if _ist_geheim(rp):
                 _verfehlt_merken(raw, disp_name, "Secret")
                 continue
+            if _fremde_ablage(rp):
+                _verfehlt_merken(raw, disp_name, "Datei gehört einem anderen Benutzer")
+                continue
             if key in delivered:
                 continue
             # Schon eine Capability-Datei? -> nur markieren, via (a) erledigt
@@ -7426,6 +7456,9 @@ KRITISCH – Ausfuehrungs-Regeln:
                 continue
             if _ist_geheim(rp):
                 _log(f"Pfad-Treffer abgelehnt (Secret): {rp.name}")
+                continue
+            if _fremde_ablage(rp):
+                _log(f"Pfad-Treffer abgelehnt (fremde Datei): {rp.name}")
                 continue
             if key in delivered:
                 continue
@@ -7612,6 +7645,9 @@ KRITISCH – Ausfuehrungs-Regeln:
                 return
             if _ist_geheim(found):
                 _log(f"Namens-Treffer abgelehnt (Secret): {found.name}")
+                return
+            if _fremde_ablage(found):
+                _log(f"Namens-Treffer abgelehnt (fremde Datei): {found.name}")
                 return
             # Schon eine Capability-Datei? -> via (a) erledigt
             if found.parent == docs_dir and re.fullmatch(r"[0-9a-f]{32}__.+", found.name):

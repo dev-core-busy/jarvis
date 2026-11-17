@@ -224,8 +224,11 @@ check("umask steht VOR dem Befehl",
       0 <= _cmd_iso.find("umask 002") < _cmd_iso.find("echo hallo"))
 check("ohne Isolation KEIN umask (gemeinsames /tmp bleibt streng)",
       "umask" not in _cmd_offen)
-check("bwrap-Aufbau ist unveraendert (--dev-bind bleibt)",
-      "--dev-bind" in _cmd_iso and "--unshare-pid" in _cmd_iso)
+# Seit F-13 (2026-11-17) baut der isolierte Lauf eine EIGENE Wurzel statt
+# `--dev-bind / /`; die Geraeteknoten kommen aus `--dev /dev`.
+check("bwrap-Aufbau: eigene Wurzel mit Geraeteknoten, PID-Trennung",
+      "--dev /dev" in _cmd_iso and "--dev-bind / /" not in _cmd_iso
+      and "--unshare-pid" in _cmd_iso)
 
 # im_lauf / im_lauf_freigeben WIRKLICH ausfuehren
 _lauf = lt.ARBEIT_ROOT / "abcd1234"

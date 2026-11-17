@@ -2006,6 +2006,10 @@ _ACTION_DETAILS = [
     # Microsoft 365 Copilot – jeder Benutzer verbindet sein EIGENES Konto
     ("POST",   r"/api/copilot/device-start",            "Copilot · Verbindung gestartet"),
     ("DELETE", r"/api/copilot/connection",              "Copilot · Verbindung getrennt"),
+    # Eigener Token eines Serverdienstes (Einstellungen -> Zugaenge)
+    ("POST",   rf"/api/dienstzugang/{_ID}/test",        "Einstellungen · Dienstzugang geprüft"),
+    ("POST",   rf"/api/dienstzugang/{_ID}",             "Einstellungen · Dienstzugang hinterlegt"),
+    ("DELETE", rf"/api/dienstzugang/{_ID}",             "Einstellungen · Dienstzugang entfernt"),
 ]
 _ACTION_DETAILS = [(m, re.compile(muster), label) for m, muster, label in _ACTION_DETAILS]
 

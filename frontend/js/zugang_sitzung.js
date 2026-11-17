@@ -50,19 +50,6 @@
             p.hidden = false;
         }
 
-        /* Auf-/Zuklappen nach Bedarf (Vorgabe 2026-11-16): offen nur, wenn
-         * eine Anmeldung NOETIG ist – nicht bei gemeinsamem Zugang und nicht,
-         * wenn schon angemeldet. Gesetzt beim ersten bekannten Zustand; danach
-         * nur noch AUFgeklappt, wenn sie noetig WIRD (ein Zuklappen nach dem
-         * Anmelden verschluckte "✓ Angemeldet" im Container). */
-        var _noetig = null;
-        function klappen(noetig) {
-            var s = $('sect');
-            if (!s) return;
-            if (_noetig === null || (noetig && !_noetig)) s.open = !!noetig;
-            _noetig = !!noetig;
-        }
-
         function zeichnen(a) {
             _acc = a || null;
             var sect = $('sect');
@@ -70,10 +57,6 @@
             // sonst gilt der gespeicherte Token aus "Mein …-Zugang".
             var an = !!(a && a.sitzungs_modus);
             if (sect) sect.style.display = an ? '' : 'none';
-            if (an) {
-                klappen(!!a.server_konfiguriert && !a.angemeldet
-                        && a.sammel_vorhanden === false);
-            }
             // Kopf-Pille wie auf /sap und /vemas: sichtbar NUR, wenn im
             // Sitzungsbetrieb keine Anmeldung besteht; leer blendet sie aus.
             var kopf = $('kopf');

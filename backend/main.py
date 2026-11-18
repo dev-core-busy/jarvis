@@ -6376,6 +6376,10 @@ async def oidc_callback(request: Request):
             schluessel = await asyncio.to_thread(_oidc.jwks, str(doc["jwks_uri"]), ctx, neu=True)
             claims = _oidc.pruefe_id_token(id_token, schluessel, issuer=cfg["issuer"],
                                            client_id=cfg["client_id"], nonce=vorgang["nonce"])
+        # Nur die NAMEN der Claims, keine Werte: zeigt bei der Einrichtung, welches
+        # Feld den Anmeldenamen traegt (DEV 2026-11-18: "sub" war eine Nummer).
+        print("[AUTH] IdP-Token mit den Claims: %s"
+              % ", ".join(sorted(str(k)[:40] for k in claims)[:40]), flush=True)
         konto = _oidc.konto_aus_claims(
             claims, cfg["namensclaim"],
             _oidc.domaenen_aus(config.get_setting("ad_domain", ""), cfg["upn_suffixe"]))

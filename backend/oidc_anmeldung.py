@@ -30,7 +30,7 @@ WAS GEPRUEFT WIRD – UND WARUM JEDER PUNKT NOETIG IST
 * **``exp``/``nbf``/``iat``** mit kleiner Toleranz fuer Uhrenversatz.
 * **``nonce``** gleich der beim Start abgelegten – gegen das Wiedereinspielen
   eines abgefangenen Tokens.
-* **Discovery**: der ``issuer`` im Dokument muss exakt der konfigurierte sein,
+* **Discovery**: der ``issuer`` im Dokument muss der konfigurierte sein,
   alle Endpunkte nur ``https``. TLS wird IMMER geprueft (System-CAs, optional
   zusaetzlich ein hinterlegtes CA-Zertifikat ueber ``mcp_tls``).
 
@@ -54,7 +54,7 @@ import ssl
 import threading
 import time
 from typing import Any
-from urllib.parse import urlencode, urlparse, quote
+from urllib.parse import urlencode, urlparse, urlsplit, quote
 
 # Erlaubte Signaturverfahren. NIE "none", NIE HS* (symmetrisch).
 ALGORITHMEN = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512")
@@ -103,6 +103,39 @@ def _ist_https(url: str) -> bool:
     except Exception:  # noqa: BLE001
         return False
     return teile.scheme == "https" and bool(teile.hostname)
+
+
+def issuer_gleich(a: str, b: str) -> bool:
+    """Gleicher Aussteller? Exakt – bis auf die Schreibweise des RECHNERNAMENS.
+
+    OIDC verlangt fuer ``iss`` den exakten Zeichenvergleich. Ein IdP auf DEV
+    (2026-11-18) meldet sich im Discovery-Dokument aber klein
+    (``https://idp.firma.local/...``) und schreibt ins id_token GROSS
+    (``https://IDP.firma.local/...``) – jede Anmeldung scheiterte mit
+    "Fremder Aussteller". Der Rechnername ist nach RFC 3986 (3.2.2)
+    unabhaengig von Gross-/Kleinschreibung, er bezeichnet denselben Server.
+    Deshalb wird NUR er ohne Schreibweise verglichen; Schema, Port, Pfad,
+    Abfrage und Fragment bleiben Zeichen fuer Zeichen gleich (ein anderer
+    Pfad ist am selben Server ein anderer Aussteller), Anmeldedaten in der
+    Adresse und alles ausser https werden abgewiesen.
+    """
+    a, b = str(a or ""), str(b or "")
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    try:
+        x, y = urlsplit(a), urlsplit(b)
+        x_port, y_port = x.port, y.port
+    except ValueError:
+        return False
+    if x.scheme != "https" or y.scheme != "https":
+        return False
+    if "@" in x.netloc or "@" in y.netloc or not x.hostname:
+        return False
+    # urlsplit liefert hostname bereits in Kleinbuchstaben.
+    return (x.hostname == y.hostname and x_port == y_port and x.path == y.path
+            and x.query == y.query and x.fragment == y.fragment)
 
 
 def ssl_kontext(ca_cert: str | None) -> ssl.SSLContext:
@@ -171,7 +204,7 @@ def discovery_url(issuer: str) -> str:
 
 def pruefe_discovery(doc: dict, issuer: str) -> dict:
     """Prueft ein Discovery-Dokument gegen den konfigurierten Issuer."""
-    if str(doc.get("issuer") or "") != str(issuer or ""):
+    if not issuer_gleich(doc.get("issuer"), issuer):
         raise OidcFehler("Der Issuer im Discovery-Dokument (%r) weicht vom konfigurierten "
                          "(%r) ab." % (doc.get("issuer"), issuer), "konfiguration")
     for feld in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
@@ -407,7 +440,7 @@ def pruefe_id_token(token: str, schluessel: list, *, issuer: str, client_id: str
     if not gueltig:
         raise OidcFehler("Die Signatur des id_token ist ungueltig.")
 
-    if str(rumpf.get("iss") or "") != str(issuer or ""):
+    if not issuer_gleich(rumpf.get("iss"), issuer):
         raise OidcFehler("Fremder Aussteller (iss=%r)." % rumpf.get("iss"))
     aud = rumpf.get("aud")
     empfaenger = aud if isinstance(aud, list) else [aud]

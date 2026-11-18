@@ -170,6 +170,26 @@ abgewiesen(signieren(claims(), kid="unbekannt"), "unbekanntes kid", "kein passen
 abgewiesen(signieren(claims(), alg="RS256", kid="e1"), "RS256 mit EC-Schluessel-kid",
            "")
 abgewiesen(signieren(claims(iss="https://fremd.beispiel.de")), "fremder iss", "aussteller")
+# Rechnername in anderer Schreibweise ist derselbe Aussteller (RFC 3986 3.2.2,
+# IdP auf DEV 2026-11-18: Discovery klein, id_token gross) – alles andere exakt.
+ISS_GROSS = ISS.replace("idp.beispiel.de", "IDP.Beispiel.DE")
+try:
+    _gross = pruefen(signieren(claims(iss=ISS_GROSS))).get("sub")
+    _grund = ""
+except O.OidcFehler as e:  # abgewiesen = FAIL, kein Absturz (sonst fehlt die Bilanz)
+    _gross, _grund = None, str(e)
+pruefe(ISS_GROSS != ISS and _gross == "x1",
+       "iss mit grossgeschriebenem Rechnernamen wird angenommen" + (" – " + _grund if _grund else ""))
+abgewiesen(signieren(claims(iss=ISS.replace("/oidc", "/OIDC"))), "iss mit anderer Schreibweise im PFAD", "aussteller")
+abgewiesen(signieren(claims(iss=ISS + "/")), "iss mit Schraegstrich am Ende", "aussteller")
+abgewiesen(signieren(claims(iss=ISS.replace("https://", "http://"))), "iss ueber http", "aussteller")
+abgewiesen(signieren(claims(iss=ISS.replace("idp.beispiel.de", "idp.beispiel.de:8443"))),
+           "iss mit anderem Port", "aussteller")
+abgewiesen(signieren(claims(iss=ISS.replace("https://", "https://x@"))),
+           "iss mit Anmeldedaten in der Adresse", "aussteller")
+abgewiesen(signieren(claims(iss=ISS.replace("idp.beispiel.de", "idp.beispiel.de.fremd.de"))),
+           "iss mit verlaengertem Rechnernamen", "aussteller")
+abgewiesen(signieren(claims(iss=ISS + "?x=1")), "iss mit Abfrage", "aussteller")
 abgewiesen(signieren(claims(aud="andere-app")), "fremde aud", "andere anwendung")
 abgewiesen(signieren(claims(aud=[CID, "anderer"])), "mehrere aud ohne azp", "azp")
 abgewiesen(signieren(claims(azp="andere-app")), "azp einer anderen App", "azp")
@@ -259,7 +279,14 @@ abschnitt("1f. Discovery und Weiterleitung")
 DOC = {"issuer": ISS, "authorization_endpoint": ISS + "/auth", "token_endpoint": ISS + "/token",
        "jwks_uri": ISS + "/jwks"}
 pruefe(O.pruefe_discovery(dict(DOC), ISS) is not None, "passendes Discovery-Dokument")
+try:
+    _doc_ok = O.pruefe_discovery(dict(DOC, issuer=ISS.replace("idp.beispiel.de", "IDP.beispiel.de")),
+                                 ISS) is not None
+except O.OidcFehler:
+    _doc_ok = False
+pruefe(_doc_ok, "Discovery mit grossgeschriebenem Rechnernamen wird angenommen")
 for aend, text in (({"issuer": ISS + "/"}, "anderer issuer"),
+                   ({"issuer": ISS.replace("/oidc", "/OIDC")}, "issuer mit anderer Schreibweise im Pfad"),
                    ({"token_endpoint": "http://idp.beispiel.de/token"}, "token_endpoint ohne https"),
                    ({"jwks_uri": ""}, "jwks_uri fehlt"),
                    ({"code_challenge_methods_supported": ["plain"]}, "kein PKCE S256")):

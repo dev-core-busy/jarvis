@@ -7,6 +7,11 @@
         Inhalt des Drop-ins, Namensreihenfolge vor 50-*.conf, Aussperr-Schutz
         (kein Admin mit Schluessel, Aufrufer ohne Schluessel), --erzwingen,
         SSH_ROOT, fehlendes Include, --erneuern je SSH_HAERTUNG.
+      - Grenzen aus Haertung B9 (MaxAuthTries, MaxSessions, Weiterleitungen,
+        LogLevel, Banner …) gemessen mit dem ECHTEN ``sshd -T`` gegen die
+        Sandkasten-Konfiguration (laeuft ohne root mit eigenem HostKey) – also
+        die wirkliche Vorrang-Regel, keine Nachbildung. Dazu: eine frueher
+        gelesene Datei, die den Drop-in ueberstimmt, fuehrt zum Abbruch (Exit 7).
       - ``haertung_installieren.sh`` (Broker-Start) erneuert den Drop-in nur
         bei SSH_HAERTUNG=an – ebenfalls ausgefuehrt.
       - ``firewall.sh --zeigen``: mit SSH_NETZE steht 22 NICHT mehr in der
@@ -39,6 +44,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SEC = ROOT / "deploy" / "security"
 SSH_SKRIPT = SEC / "ssh_haertung.sh"
+SSHD = shutil.which("sshd") or ("/usr/sbin/sshd" if os.access("/usr/sbin/sshd", os.X_OK) else "")
 FW_SKRIPT = SEC / "firewall.sh"
 HAERTUNG = SEC / "haertung_installieren.sh"
 NODE_SKRIPT = SEC / "node_aktualisieren.sh"
@@ -90,13 +96,23 @@ class Kasten:
     sshd_config mit Include, broker.conf. Alles unter einem tmp-Verzeichnis."""
 
     def __init__(self, keys: dict[str, int], sudo: list[str], conf: str = "",
-                 include: bool = True):
+                 include: bool = True, echt_sshd: bool = False):
         self.d = Path(tempfile.mkdtemp(prefix="jv_m7_"))
         self.dropin_dir = self.d / "sshd_config.d"
         self.dropin_dir.mkdir()
         self.sshd_config = self.d / "sshd_config"
         inc = f"Include {self.dropin_dir}/*.conf\n" if include else ""
-        self.sshd_config.write_text(inc + "KbdInteractiveAuthentication no\nUsePAM yes\n")
+        # Wie Debian: Include ganz oben, danach die Vorgaben der Hauptdatei –
+        # X11Forwarding yes steht dort und muss vom Drop-in ueberstimmt werden
+        haupt = "KbdInteractiveAuthentication no\nUsePAM yes\nX11Forwarding yes\n"
+        self.extra: dict[str, str] = {}
+        if echt_sshd:
+            hk = self.d / "hostkey"
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(hk)],
+                           check=True, capture_output=True, timeout=30)
+            haupt = f"HostKey {hk}\n" + haupt
+            self.extra["JARVIS_SSHD_BIN"] = SSHD
+        self.sshd_config.write_text(inc + haupt)
         self.broker_conf = self.d / "broker.conf"
         self.broker_conf.write_text("QUELLE=github\n" + conf)
         nutzer = {"root": 0, "admin": 1000, "anna": 1001, "dienst": 999}
@@ -119,8 +135,25 @@ class Kasten:
     def dropin(self) -> Path:
         return self.dropin_dir / "05-jarvis-haertung.conf"
 
+    @property
+    def banner(self) -> Path:
+        return self.d / "jarvis-banner.txt"
+
+    def sshd_t(self) -> dict[str, str]:
+        """Wirksame Werte laut echtem ``sshd -T`` (Schluessel klein)."""
+        p = subprocess.run([SSHD, "-T", "-f", str(self.sshd_config)], capture_output=True,
+                           text=True, timeout=30)
+        erg: dict[str, str] = {}
+        for z in p.stdout.splitlines():
+            teile = z.split(None, 1)
+            if len(teile) == 2:
+                erg.setdefault(teile[0].lower(), teile[1].strip())
+        return erg
+
     def env(self, **extra: str) -> dict:
         e = {k: v for k, v in os.environ.items() if k not in ("SUDO_USER",)}
+        e.pop("JARVIS_SSHD_BIN", None)
+        e.update(self.extra)
         e.update(JARVIS_SSH_TEST="1", JARVIS_SSHD_CONFIG=str(self.sshd_config),
                  JARVIS_SSHD_DROPIN_DIR=str(self.dropin_dir),
                  JARVIS_BROKER_CONF=str(self.broker_conf),
@@ -177,6 +210,17 @@ check("PasswordAuthentication no", w.get("passwordauthentication") == "no", w)
 check("KbdInteractiveAuthentication no", w.get("kbdinteractiveauthentication") == "no", w)
 check("PermitEmptyPasswords no", w.get("permitemptypasswords") == "no", w)
 check("PermitRootLogin no (Vorgabe, BSI)", w.get("permitrootlogin") == "no", w)
+GRENZEN = {"maxauthtries": "3", "maxsessions": "2", "logingracetime": "30",
+           "clientaliveinterval": "300", "clientalivecountmax": "2", "tcpkeepalive": "no",
+           "x11forwarding": "no", "allowagentforwarding": "no", "allowtcpforwarding": "no",
+           "loglevel": "verbose"}
+for _s, _v in GRENZEN.items():
+    check(f"Grenze {_s} {_v} im Drop-in (B9)", (w.get(_s) or "").lower() == _v, w.get(_s))
+check("Banner zeigt auf die eigene Datei neben dem Drop-in-Verzeichnis (nicht /etc/issue.net)",
+      w.get("banner") == str(k.banner), w.get("banner"))
+_bt = k.banner.read_text() if k.banner.is_file() else ""
+check("Banner-Datei geschrieben, nicht leer, nennt kein Betriebssystem",
+      bool(_bt.strip()) and not re.search(r"(?i)debian|ubuntu|linux|\\[nlrsv]", _bt), _bt)
 txt = k.dropin.read_text() if k.dropin.is_file() else ""
 check("kein Match-Block im Drop-in (sonst gilt der Rest nur bedingt)",
       not re.search(r"(?im)^\s*match\b", txt))
@@ -286,6 +330,65 @@ for wert, soll in (("an", True), ("", False)):
     check(f"SSH_HAERTUNG={wert or '(fehlt)'} -> Drop-in {'da' if soll else 'nicht da'}",
           k.dropin.exists() == soll, r.stderr.strip()[-300:])
     k.weg()
+
+abschnitt("M7.9 Wirkung mit echtem sshd -T (B9-Grenzen, Vorrang frueherer Dateien)")
+if not SSHD or not shutil.which("ssh-keygen"):
+    abbruch("sshd oder ssh-keygen fehlt – die Wirkung laesst sich nicht messen (Paket openssh-server)")
+k = Kasten(keys={"admin": 1}, sudo=["admin"], echt_sshd=True)
+vorher = k.sshd_t()
+if vorher.get("x11forwarding") != "yes" or vorher.get("maxauthtries") != "6":
+    print(vorher)
+    abbruch("sshd -T liest die Sandkasten-Konfiguration nicht (Messaufbau)")
+check("Positivkontrolle: ohne Drop-in gelten die Vorgaben (x11forwarding yes, maxauthtries 6)", True)
+r = k.ssh("--anwenden")
+check("--anwenden mit echtem sshd -t/-T: Exit 0", r.returncode == 0, (r.returncode, r.stderr.strip()))
+t = k.sshd_t()
+for _s, _v in GRENZEN.items():
+    check(f"wirksam laut sshd -T: {_s} {_v}", (t.get(_s) or "").lower() == _v, t.get(_s))
+check("wirksam: permitrootlogin no", t.get("permitrootlogin") == "no", t.get("permitrootlogin"))
+check("wirksam: passwordauthentication no", t.get("passwordauthentication") == "no")
+check("wirksam: banner = eigene Datei", t.get("banner") == str(k.banner), t.get("banner"))
+r = k.ssh("--status")
+check("--status: jede Zeile wirksam", "jede Zeile wirksam" in r.stdout, r.stdout[-400:])
+# Eine SPAETER gelesene Datei verliert – darf also keinen Abbruch ausloesen
+(k.dropin_dir / "60-spaeter.conf").write_text("MaxAuthTries 6\nAllowTcpForwarding yes\n")
+k.dropin.unlink(missing_ok=True)
+r = k.ssh("--anwenden")
+check("spaetere Datei mit lockeren Werten: kein Abbruch, Drop-in gewinnt",
+      r.returncode == 0 and k.sshd_t().get("maxauthtries") == "3", (r.returncode, r.stderr.strip()))
+k.weg()
+
+k = Kasten(keys={"admin": 1}, sudo=["admin"], echt_sshd=True)
+(k.dropin_dir / "00-haertung.conf").write_text(
+    "PasswordAuthentication no\nPermitRootLogin prohibit-password\nAllowUsers *@192.0.2.0/24\n")
+r = k.ssh("--test", "60")
+check("frueher gelesene Datei ueberstimmt PermitRootLogin -> --test Exit 7",
+      r.returncode == 7, (r.returncode, r.stderr.strip()))
+check("…Meldung nennt Schluessel und Datei",
+      "permitrootlogin" in r.stderr and "00-haertung.conf" in r.stderr, r.stderr.strip())
+check("…Drop-in und Banner zurueckgenommen", not k.dropin.exists() and not k.banner.exists())
+r = k.ssh("--anwenden")
+check("…--anwenden ebenso Exit 7 und SSH_HAERTUNG nicht gesetzt",
+      r.returncode == 7 and k.konf("SSH_HAERTUNG") is None, (r.returncode, k.konf("SSH_HAERTUNG")))
+k.weg()
+
+k = Kasten(keys={"root": 1}, sudo=[], conf="SSH_ROOT=schluessel\n", echt_sshd=True)
+(k.dropin_dir / "00-haertung.conf").write_text("PermitRootLogin prohibit-password\n")
+r = k.ssh("--anwenden")
+check("gleicher Wert in frueherer Datei (prohibit-password = without-password) -> kein Abbruch",
+      r.returncode == 0 and k.sshd_t().get("permitrootlogin") == "without-password",
+      (r.returncode, r.stderr.strip()))
+k.weg()
+
+k = Kasten(keys={"admin": 1}, sudo=["admin"], conf="SSH_HAERTUNG=an\n", echt_sshd=True)
+k.ssh("--erneuern")
+k.dropin.write_text("PasswordAuthentication no\n")
+(k.dropin_dir / "01-fremd.conf").write_text("MaxSessions 10\n")
+r = k.ssh("--erneuern")
+check("--erneuern (Broker-Start) mit ueberstimmender Datei: alter Stand bleibt, kein Teilzustand",
+      k.dropin.read_text() == "PasswordAuthentication no\n" and "ABBRUCH" in r.stderr
+      and "maxsessions" in r.stderr, (r.returncode, r.stderr.strip()))
+k.weg()
 
 abschnitt("M7.8 firewall.sh: SSH_NETZE")
 

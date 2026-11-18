@@ -49,11 +49,13 @@ jobs:
       # ffmpeg: test_stt_fern wandelt echte Audiodateien um und endet ohne es
       # ehrlich mit Exit 2 (seit 2026-10-25 so, verdeckt bis 2026-10-26 hinter
       # dem pip-audit-Abbruch).
-      - name: Systempakete (OCR/PDF, Wortliste, Sandbox, ffmpeg wie auf den Servern)
+      # openssh-server: test_bsi_m6_m7 misst die SSH-Grenzen mit dem echten
+      # `sshd -T` gegen eine Sandkasten-Konfiguration (ohne sshd -> Exit 2).
+      - name: Systempakete (OCR/PDF, Wortliste, Sandbox, ffmpeg, sshd wie auf den Servern)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
-            tesseract-ocr tesseract-ocr-deu poppler-utils wngerman bubblewrap ffmpeg >/dev/null
+            tesseract-ocr tesseract-ocr-deu poppler-utils wngerman bubblewrap ffmpeg openssh-server >/dev/null
           # Ubuntu 24.04 sperrt unprivilegierte User-Namespaces per AppArmor;
           # Debian (die Server) nicht. unshare -r / bwrap brauchen sie.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true

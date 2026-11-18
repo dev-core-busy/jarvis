@@ -15,6 +15,23 @@
 # Dateien werden in Namensreihenfolge eingelesen – ein spaeteres
 # 50-cloud-init.conf mit "PasswordAuthentication yes" kaeme sonst zuerst.
 #
+# GRENZEN (Haertung B9, 2026-11-18, lynis SSH-7408): MaxAuthTries 3, MaxSessions 2,
+# LoginGraceTime 30, ClientAlive 300 s x 2, TCPKeepAlive no (der ClientAlive-
+# Mechanismus laeuft verschluesselt und ersetzt ihn), keine X11-, Agent- und
+# TCP-Weiterleitung, LogLevel VERBOSE (Fingerabdruck des Schluessels im Log)
+# und ein Hinweis-Banner. Port 22 bleibt – begrenzt wird er ueber SSH_NETZE.
+#   Weiterleitung aus: ein Tunnel, der VON diesem Server ausgeht (ssh -L als
+#   Client), ist davon nicht betroffen – nur Tunnel durch diesen sshd hindurch.
+#   Banner in einer EIGENEN Datei, nicht in /etc/issue.net: das ist eine
+#   Konfigurationsdatei von base-files, und eine geaenderte laesst
+#   unattended-upgrades jedes base-files-Update wegen der Rueckfrage liegen.
+#
+# WIRKUNGSPRUEFUNG: nach dem Schreiben misst `sshd -T`, ob JEDE Zeile des
+# Drop-ins tatsaechlich gilt. Eine frueher gelesene Datei (z. B. eine von Hand
+# angelegte 00-*.conf mit "PermitRootLogin prohibit-password") ueberstimmt ihn
+# sonst still – dann Abbruch mit Exit 7, voriger Stand zurueck, und die Meldung
+# nennt die Datei.
+#
 # WARUM NICHT AUTOMATISCH BEIM BROKER-START (anders als M1): eine falsch
 # gesetzte SSH-Sperre sperrt den Betreiber aus dem Server aus, und das merkt
 # erst, wer sich das naechste Mal anmelden will. Die ERSTE Umstellung macht
@@ -52,7 +69,15 @@ BROKER_CONF="${JARVIS_BROKER_CONF:-/etc/jarvis/broker.conf}"
 PASSWD_DATEI="${JARVIS_PASSWD:-/etc/passwd}"
 GROUP_DATEI="${JARVIS_GROUP:-/etc/group}"
 TEST="${JARVIS_SSH_TEST:-}"
-SSHD_BIN="$(command -v sshd 2>/dev/null || echo /usr/sbin/sshd)"
+# Der Waechter setzt ein echtes sshd fuer -t/-T im Sandkasten (JARVIS_SSHD_BIN)
+SSHD_BIN="${JARVIS_SSHD_BIN:-$(command -v sshd 2>/dev/null || echo /usr/sbin/sshd)}"
+# Neben dem Drop-in-Verzeichnis: /etc/ssh/jarvis-banner.txt, im Sandkasten dessen Wurzel
+BANNER="$(dirname "$DROPIN_DIR")/jarvis-banner.txt"
+
+# sshd -t / -T ausfuehrbar? Im Testmodus nur mit gesetztem JARVIS_SSHD_BIN.
+_sshd_pruefbar() {
+    [ -z "$TEST" ] || [ -n "${JARVIS_SSHD_BIN:-}" ]
+}
 
 _ist_root() {
     [ -n "$TEST" ] && return 0
@@ -91,7 +116,61 @@ _inhalt() {
         "PasswordAuthentication no" \
         "KbdInteractiveAuthentication no" \
         "PermitEmptyPasswords no" \
-        "PermitRootLogin $(_root_modus)"
+        "PermitRootLogin $(_root_modus)" \
+        "MaxAuthTries 3" \
+        "MaxSessions 2" \
+        "LoginGraceTime 30" \
+        "ClientAliveInterval 300" \
+        "ClientAliveCountMax 2" \
+        "TCPKeepAlive no" \
+        "X11Forwarding no" \
+        "AllowAgentForwarding no" \
+        "AllowTcpForwarding no" \
+        "LogLevel VERBOSE" \
+        "Banner $BANNER"
+}
+
+# Hinweis vor der Anmeldung. ASCII, keine Version, kein Produkt- oder Firmenname.
+_banner_text() {
+    printf '%s\n' \
+        "Zugang nur fuer berechtigte Administratoren." \
+        "Anmeldungen und Aktionen werden protokolliert." \
+        "Authorized access only. All activity is logged and monitored."
+}
+
+# Wer setzt <schluessel> sonst noch? Dateien im Drop-in-Verzeichnis ausser unserer.
+_wer_setzt() {
+    local f treffer=""
+    for f in "$DROPIN_DIR"/*.conf; do
+        [ -f "$f" ] && [ "$f" != "$DROPIN" ] || continue
+        grep -qiE "^[[:space:]]*$1[[:space:]]" "$f" && treffer="$treffer $(basename "$f")"
+    done
+    [ -n "$treffer" ] && printf ' (gesetzt auch in:%s)' "$treffer"
+}
+
+# Misst mit sshd -T, ob jede Zeile des Drop-ins wirklich gilt (erster Wert
+# gewinnt – eine frueher gelesene Datei ueberstimmt uns still). Gibt die
+# Abweichungen aus; Rueckgabe 0 = alles wirksam, 7 = Abweichung oder nicht messbar.
+_wirkung_pruefen() {
+    local t k v ist abw=""
+    t="$("$SSHD_BIN" -T -f "$SSHD_CONFIG" 2>/dev/null)"
+    if [ -z "$t" ]; then
+        echo "  sshd -T liefert nichts – Wirkung nicht messbar"
+        return 7
+    fi
+    while read -r k v; do
+        case "$k" in ''|\#*) continue ;; esac
+        k="${k,,}"; v="${v,,}"
+        # sshd -T schreibt prohibit-password unter seinem alten Namen
+        [ "$v" = "prohibit-password" ] && v="without-password"
+        ist="$(printf '%s\n' "$t" | awk -v k="$k" 'tolower($1)==k {sub(/^[^ ]+ /, ""); print; exit}')"
+        if [ "${ist,,}" != "$v" ]; then
+            abw="${abw}  $k: wirksam '${ist:-?}' statt '$v'$(_wer_setzt "$k")"$'\n'
+        fi
+    done < "$DROPIN"
+    [ -z "$abw" ] && return 0
+    printf '%s' "$abw"
+    return 7
 }
 
 # _schluessel_anzahl <home> – Zeilen mit Schluessel in den ueblichen Dateien
@@ -177,6 +256,13 @@ _schreiben() {
         echo "[SSH] ABBRUCH: $SSHD_CONFIG bindet $DROPIN_DIR nicht ein – bitte von Hand umstellen." >&2
         return 4
     fi
+    # Banner zuerst: sshd -t prueft nicht, ob die Datei existiert, sshd zeigt
+    # dann nur nichts an. Steht ausserhalb des Vergleichs unten, damit ein
+    # geloeschter Banner auch bei unveraendertem Drop-in zurueckkommt.
+    if [ "$(cat "$BANNER" 2>/dev/null)" != "$(_banner_text)" ]; then
+        mkdir -p "$(dirname "$BANNER")"
+        _banner_text > "$BANNER.tmp" && chmod 0644 "$BANNER.tmp" && mv "$BANNER.tmp" "$BANNER"
+    fi
     neu="$(_inhalt)"
     if [ -f "$DROPIN" ]; then
         alt="$(cat "$DROPIN")"
@@ -184,10 +270,22 @@ _schreiben() {
     fi
     mkdir -p "$DROPIN_DIR"
     printf '%s\n' "$neu" > "$DROPIN.tmp" && chmod 0644 "$DROPIN.tmp" && mv "$DROPIN.tmp" "$DROPIN"
-    if [ -z "$TEST" ] && ! "$SSHD_BIN" -t -f "$SSHD_CONFIG" 2>/dev/null; then
-        if [ -n "$alt" ]; then printf '%s\n' "$alt" > "$DROPIN"; else rm -f "$DROPIN"; fi
+    if _sshd_pruefbar && ! "$SSHD_BIN" -t -f "$SSHD_CONFIG" 2>/dev/null; then
+        if [ -n "$alt" ]; then printf '%s\n' "$alt" > "$DROPIN"; else rm -f "$DROPIN" "$BANNER"; fi
         echo "[SSH] ABBRUCH: sshd -t lehnt die Einstellung ab – zurueckgenommen." >&2
         return 5
+    fi
+    # Wirkung VOR dem Neuladen messen: sshd -T liest die Dateien, nicht den
+    # laufenden Dienst – bei Abweichung wird also nie neu geladen.
+    if _sshd_pruefbar; then
+        local abw
+        if ! abw="$(_wirkung_pruefen)"; then
+            if [ -n "$alt" ]; then printf '%s\n' "$alt" > "$DROPIN"; else rm -f "$DROPIN" "$BANNER"; fi
+            echo "[SSH] ABBRUCH: der Drop-in wirkt nicht vollstaendig – zurueckgenommen:" >&2
+            printf '%s\n' "$abw" >&2
+            echo "[SSH] Eine frueher gelesene Datei ueberstimmt ihn (sshd nimmt den ersten Wert)." >&2
+            return 7
+        fi
     fi
     _neu_laden
     echo "[SSH] geschrieben: $DROPIN (PermitRootLogin $(_root_modus))"
@@ -199,6 +297,7 @@ _entfernen() {
         _neu_laden
         echo "[SSH] entfernt: $DROPIN"
     fi
+    rm -f "$BANNER"
 }
 
 # Maschinenlesbar fuer die Oberflaeche (backend/broker/fernzugang.py):
@@ -225,11 +324,18 @@ status() {
     echo "── sshd (wirksam) ───────────────────────────────────────"
     if [ -x "$SSHD_BIN" ] && [ -z "$TEST" ]; then
         "$SSHD_BIN" -T 2>/dev/null \
-            | grep -iE '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin|permitemptypasswords|pubkeyauthentication) ' \
+            | grep -iE '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin|permitemptypasswords|pubkeyauthentication|maxauthtries|maxsessions|logingracetime|clientaliveinterval|clientalivecountmax|tcpkeepalive|x11forwarding|allowagentforwarding|allowtcpforwarding|loglevel|banner) ' \
             | sed 's/^/  /'
     fi
     echo "── Drop-in ──────────────────────────────────────────────"
-    if [ -f "$DROPIN" ]; then echo "  $DROPIN vorhanden"; else echo "  $DROPIN fehlt"; fi
+    if [ -f "$DROPIN" ]; then
+        echo "  $DROPIN vorhanden"
+        if _sshd_pruefbar; then
+            _wirkung_pruefen && echo "  jede Zeile wirksam (sshd -T)"
+        fi
+    else
+        echo "  $DROPIN fehlt"
+    fi
     echo "  SSH_HAERTUNG=$(_konf SSH_HAERTUNG)  SSH_ROOT=$(_konf SSH_ROOT)  SSH_NETZE=$(_konf SSH_NETZE)"
     echo "── Konten mit Schluessel, die root werden koennen ───────"
     _zugang_nach_umstellung | sed 's/^/  /' || echo "  (keines – Umstellung wuerde aussperren)"

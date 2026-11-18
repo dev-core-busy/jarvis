@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=65">
+    <link rel="stylesheet" href="/static/css/theme.css?v=66">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
@@ -65,6 +65,20 @@
             </div>
             <h1 class="login-title">JARVIS</h1>
             <p class="login-subtitle" data-i18n="login.subtitle">KI Linux Agent</p>
+            <!-- Anmeldung ueber den IdP, zweiter Schritt: Zwei-Faktor-Code nach der
+                 Rueckkehr vom IdP (nur wenn die MFA des IdP nicht anerkannt ist und das
+                 Konto eine 2FA hat). Eigener Block statt des Formulars: dort sind
+                 Benutzername und Kennwort Pflichtfelder. Logik: idp_anmeldung.js -->
+            <div id="idp-totp" hidden style="width:100%;max-width:380px;margin:0 auto;text-align:left;">
+                <p style="margin:0 0 10px;color:var(--text-secondary);font-size:0.9rem;line-height:1.45;" data-i18n="login.idp_totp_text">Angemeldet über das Firmenkonto. Bitte den 6-stelligen Code aus deiner Authenticator-App eingeben.</p>
+                <input type="text" id="idp-totp-code" placeholder="6-stelliger Code" data-i18n-placeholder="login.totp.ph"
+                    autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                    style="width:100%;box-sizing:border-box;background:rgba(var(--fg-rgb),0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:1.2rem;font-family:var(--font-mono);text-align:center;letter-spacing:8px;font-weight:600;outline:none;margin-bottom:14px;">
+                <button type="button" class="btn-login" id="idp-totp-btn" style="width:100%;">
+                    <span class="btn-text" data-i18n="login.submit">ANMELDEN</span>
+                </button>
+                <p id="idp-totp-error" class="login-error" hidden></p>
+            </div>
             <form id="login-form" class="login-form">
                 <div class="form-group" style="text-align:left;margin-bottom:14px;">
                     <label style="display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;font-weight:500;letter-spacing:0.05em;" data-i18n="login.username.label">BENUTZERNAME</label>
@@ -106,6 +120,17 @@
                     <span class="btn-text" data-i18n="login.submit">ANMELDEN</span>
                 </button>
                 <p id="login-error" class="login-error" hidden></p>
+
+                <!-- Anmeldung ueber den IdP (OpenID Connect). Ein LINK, kein Formular:
+                     die CSP setzt form-action 'self', und Chrome wendet das auch auf die
+                     Weiterleitung nach einem Formularversand an. Sichtbar nur, wenn
+                     /api/login/oidc/status "aktiv" meldet. Logik: idp_anmeldung.js -->
+                <div id="idp-login" hidden>
+                    <div class="idp-trenner"><span data-i18n="login.idp_oder">oder</span></div>
+                    <a id="btn-idp-login" class="btn-link btn-idp" href="/api/login/oidc/start">
+                        <span data-i18n="login.idp_button">Mit Firmenkonto anmelden</span>
+                    </a>
+                </div>
 
                 <div class="login-extras">
                     <button type="button" class="btn-link" id="btn-cert-help">
@@ -6223,6 +6248,55 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                 </details>
 
+                                <!-- ── Unter-Container: Anmeldung ueber den IdP (OpenID Connect) ──
+                                     Logik: settings_idp.js. Plan: docs/plan-oidc-anmeldung.md -->
+                                <details class="sec-sub" data-sub="idp">
+                                    <summary><span data-i18n="security.sub_idp">Anmeldung über den IdP (OpenID Connect)</span><span class="sec-sub-hint" data-i18n="security.sub_idp_hint">– Firmenkonto statt Kennwort</span></summary>
+                                    <div class="sec-sub-body">
+                                <p class="kb-hint" data-i18n="security.idp_hint">Zusätzlicher Anmeldeweg: Benutzer melden sich beim Anmeldedienst des Unternehmens an, {marke} sieht das Kennwort nie. Die Anmeldeberechtigung prüft {marke} weiter im Active Directory (Verbindung oben). Die Anmeldung mit Kennwort bleibt möglich.</p>
+                                <label class="checkbox-group" style="display:inline-flex;gap:8px;align-items:center;margin:4px 0 10px;cursor:pointer;">
+                                    <input type="checkbox" id="idp-aktiv" style="width:16px;height:16px;accent-color:var(--accent);">
+                                    <span data-i18n="security.idp_aktiv">Anmeldung über den IdP anbieten</span>
+                                </label>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                    <div class="form-group" style="margin:0;">
+                                        <label for="idp-issuer" data-i18n="security.idp_issuer">Aussteller-Adresse (Issuer)</label>
+                                        <input type="text" id="idp-issuer" placeholder="https://idp.firma.local/…" style="width:100%;box-sizing:border-box;">
+                                    </div>
+                                    <div class="form-group" style="margin:0;">
+                                        <label for="idp-client-id" data-i18n="security.idp_client_id">Client-ID</label>
+                                        <input type="text" id="idp-client-id" style="width:100%;box-sizing:border-box;">
+                                    </div>
+                                    <div class="form-group" style="margin:0;">
+                                        <label for="idp-client-secret" data-i18n="security.idp_client_secret">Client-Secret</label>
+                                        <input type="password" id="idp-client-secret" autocomplete="new-password" style="width:100%;box-sizing:border-box;">
+                                        <div id="idp-secret-status" class="kb-hint" style="margin:4px 0 0;"></div>
+                                    </div>
+                                    <div class="form-group" style="margin:0;">
+                                        <label for="idp-namensclaim" data-i18n="security.idp_namensclaim">Anmeldename steht im Feld</label>
+                                        <select id="idp-namensclaim" style="width:100%;box-sizing:border-box;"></select>
+                                    </div>
+                                    <div class="form-group" style="margin:0;">
+                                        <label for="idp-upn-suffixe" data-i18n="security.idp_upn_suffixe">Weitere Domänen im Anmeldenamen (optional)</label>
+                                        <input type="text" id="idp-upn-suffixe" placeholder="firma.de" style="width:100%;box-sizing:border-box;">
+                                    </div>
+                                    <div class="form-group" style="margin:0;">
+                                        <label for="idp-redirect-uri" data-i18n="security.idp_redirect_uri">Rückkehr-Adresse (beim IdP einzutragen)</label>
+                                        <input type="text" id="idp-redirect-uri" style="width:100%;box-sizing:border-box;">
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin:0 0 12px;">
+                                    <label for="idp-ca-cert" data-i18n="security.idp_ca_cert">Zertifikat der ausstellenden Stelle (optional, PEM)</label>
+                                    <textarea id="idp-ca-cert" rows="3" style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:0.78rem;"></textarea>
+                                </div>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                    <button type="button" id="idp-speichern" class="sec-btn primary" data-i18n="security.idp_speichern">Speichern</button>
+                                    <button type="button" id="idp-testen" class="sec-btn" data-i18n="security.idp_testen">Verbindung testen</button>
+                                </div>
+                                <div id="idp-msg" role="status" style="font-size:0.85rem;margin-top:8px;color:var(--text-primary);white-space:pre-line;"></div>
+                                    </div>
+                                </details>
+
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_unterklappen.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
                                 <script src="/static/js/settings_unterklappen.js?v=1"></script>
@@ -6235,6 +6309,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_ad.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
                                 <script src="/static/js/settings_ad.js?v=9"></script>
+                                <script src="/static/js/settings_idp.js?v=1"></script>
                             </div>
                         </div>
 
@@ -6279,6 +6354,19 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </label>
                                 <div id="sec-anm-pflicht-msg" role="status" style="font-size:0.85rem;color:var(--text-primary);"></div>
                                 <p class="kb-hint" data-i18n="security.admin_2fa_pflicht_hint">Ein Administrator ohne Zwei-Faktor-Anmeldung richtet sie bei der nächsten Anmeldung ein. Administrator-Rechte gibt es nur nach einer Anmeldung mit Code – über die kennwortlose Outlook-Anmeldung arbeitet ein Administrator mit normalen Rechten.</p>
+
+                                <!-- MFA des IdP als zweiter Faktor (Einstellung, Vorgabe aus). Logik: settings_idp.js -->
+                                <label class="checkbox-group" style="display:inline-flex;gap:8px;align-items:center;margin:10px 0 0;cursor:pointer;">
+                                    <input type="checkbox" id="sec-idp-mfa" style="width:16px;height:16px;accent-color:var(--accent);">
+                                    <span data-i18n="security.idp_mfa">Die Anmeldung über den IdP zählt als zweiter Faktor</span>
+                                </label>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0 0 24px;">
+                                    <label for="sec-idp-mfa-nachweis" style="font-size:0.85rem;" data-i18n="security.idp_mfa_nachweis">Nachweis im Token (optional):</label>
+                                    <input type="text" id="sec-idp-mfa-nachweis" placeholder="amr=otp" style="width:180px;box-sizing:border-box;">
+                                    <button type="button" id="sec-idp-mfa-speichern" class="sec-btn" data-i18n="security.idp_mfa_speichern">Nachweis speichern</button>
+                                </div>
+                                <div id="sec-idp-mfa-msg" role="status" style="font-size:0.85rem;color:var(--text-primary);"></div>
+                                <p class="kb-hint" data-i18n="security.idp_mfa_hint">Eingeschaltet fragt {marke} nach einer Anmeldung über den IdP keinen eigenen Code mehr ab, und Administratoren erhalten ihre vollen Rechte. Nur einschalten, wenn der IdP für {marke} eine Mehrfaktor-Anmeldung erzwingt. Mit Nachweis zählt die Anmeldung nur, wenn das Token den Wert trägt (z. B. amr=otp), sonst fragt {marke} seinen eigenen Code ab. Ohne Nachweis verlässt sich {marke} auf die Einstellung des IdP.</p>
 
                                 <!-- 2FA eines ANDEREN Kontos abschalten (Faktor verloren). Logik: totp_admin.js -->
                                 <h4 style="margin:18px 0 6px;" data-i18n="security.totp_reset_h">Zwei-Faktor-Anmeldung zurücksetzen</h4>
@@ -6716,7 +6804,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=497"></script>
+    <script src="/static/js/i18n.js?v=498"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6759,7 +6847,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=45"></script>
     <script src="/static/js/fernzugang.js?v=4"></script>
-    <script src="/static/js/totp_admin.js?v=3"></script>
+    <script src="/static/js/totp_admin.js?v=4"></script>
     <script src="/static/js/ldap_picker.js?v=17"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
     <script src="/static/js/rechte_matrix.js?v=8"></script>
@@ -6774,6 +6862,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/sysload.js?v=6"></script>
     <script src="/static/js/syspackages.js?v=24"></script>
     <script src="/static/js/zugang_anmeldung.js?v=2"></script>
+    <script src="/static/js/idp_anmeldung.js?v=1"></script>
     <script src="/static/js/agent_roles.js?v=5"></script>
     <script src="/static/js/model_caps.js?v=7"></script>
     <script src="/static/js/alpha_sort.js?v=2"></script>

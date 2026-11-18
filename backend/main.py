@@ -1992,6 +1992,10 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/admin/anmeldeschutz/aufheben",    "Einstellungen · Anmeldesperre aufgehoben"),
     ("POST",   r"/api/auth/hinweise/gelesen",           "Konto · Hinweis gelesen"),
     ("POST",   r"/api/login/windows",                   "Konto · Windows-Anmeldung"),
+    ("POST",   r"/api/login/oidc/einloesen",            "Konto · Anmeldung über den IdP"),
+    ("POST",   r"/api/admin/oidc",                      "Einstellungen · IdP-Anmeldung geändert"),
+    ("POST",   r"/api/admin/oidc/test",                 "Einstellungen · IdP-Verbindung getestet"),
+    ("POST",   r"/api/admin/anmeldeschutz/idp-mfa",     "Einstellungen · MFA des IdP als zweiter Faktor"),
     # Fehleranalyse (Einstellungen -> Fehleranalyse)
     ("POST",   r"/api/fehleranalyse/dossier",           "Einstellungen · Fehleranalyse · Dossier erstellt"),
     ("POST",   r"/api/fehleranalyse/analyse",           "Einstellungen · Fehleranalyse · Analyse angefordert"),
@@ -6189,6 +6193,451 @@ async def _login_windows_ablauf(request: Request):
     return resp
 
 
+# ─── Anmeldung ueber den IdP (OpenID Connect) ────────────────────────────
+# Plan: docs/plan-oidc-anmeldung.md. Pruefung des Tokens: backend/oidc_anmeldung.py.
+#
+# BESTANDSSCHUTZ: Alles hier ist zusaetzlich. Kennwortmaske, Windows-Anmeldung,
+# Outlook-Add-in und Apps bleiben unveraendert, und ohne ``oidc_aktiv`` antworten
+# die Endpunkte nur "nicht eingerichtet".
+#
+# ABLAUF: start (302 zum IdP) -> callback (Token pruefen, Konto, Freigabe ->
+# Einloese-Schein im Cookie, 303 auf /) -> einloesen (fetch der Anmeldeseite:
+# 2FA nach Einstellung, dann Sitzung ueber _sitzung_antwort). Der Umweg ueber
+# den Schein ist noetig, weil das Sitzungs-Cookie SameSite=Strict ist und eine
+# Weiterleitungskette vom IdP dem Browser als seitenfremd gilt; ausserdem
+# erwartet das Frontend das CSRF-Token in der JSON-Antwort der Anmeldung.
+
+_OIDC_COOKIE_VORGANG = "__Host-jarvis_oidc"
+_OIDC_COOKIE_SCHEIN = "__Host-jarvis_oidc_schein"
+
+
+def _oidc_schalter(name: str, vorgabe: bool = False) -> bool:
+    v = config.get_setting(name, vorgabe)
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("true", "1", "ja", "on")
+
+
+def _oidc_konfig() -> dict | None:
+    """Wirksame IdP-Konfiguration – oder None, solange sie aus/unvollstaendig ist."""
+    if not _oidc_schalter("oidc_aktiv"):
+        return None
+    cfg = {
+        "issuer": str(config.get_setting("oidc_issuer", "") or "").strip(),
+        "client_id": str(config.get_setting("oidc_client_id", "") or "").strip(),
+        "client_secret": str(config.get_setting("oidc_client_secret", "") or ""),
+        "namensclaim": str(config.get_setting("oidc_namensclaim", "") or "").strip()
+                       or "preferred_username",
+        "upn_suffixe": str(config.get_setting("oidc_upn_suffixe", "") or ""),
+        "ca_cert": str(config.get_setting("oidc_ca_cert", "") or ""),
+        "redirect_uri": str(config.get_setting("oidc_redirect_uri", "") or "").strip(),
+    }
+    if not (cfg["issuer"] and cfg["client_id"] and cfg["client_secret"]):
+        return None
+    # Ein verpackter Wert ohne Hauptschluessel ist kein Geheimnis, das man senden darf.
+    if cfg["client_secret"].startswith("JGS1:"):
+        return None
+    # Ohne AD keine Freigabepruefung – dann gibt es auch keine IdP-Anmeldung.
+    if not (config.get_setting("ad_server", "") and config.get_setting("ad_domain", "")):
+        return None
+    return cfg
+
+
+def _oidc_redirect_uri(request: Request, cfg: dict | None = None) -> str:
+    """Rueckkehradresse; fest eingetragen oder aus der aufgerufenen Adresse."""
+    fest = (cfg or {}).get("redirect_uri") or str(
+        config.get_setting("oidc_redirect_uri", "") or "").strip()
+    if fest:
+        return fest
+    return str(request.base_url).rstrip("/") + "/api/login/oidc/callback"
+
+
+def _oidc_mfa_anerkennen() -> bool:
+    """Zaehlt die MFA des IdP als zweiter Faktor? Vorgabe: nein."""
+    return _oidc_schalter("oidc_mfa_anerkennen", False)
+
+
+def _oidc_cookie(resp, name: str, wert: str, max_alter: int) -> None:
+    resp.set_cookie(name, wert, max_age=max_alter, path="/", secure=True,
+                    httponly=True, samesite="lax")
+
+
+def _oidc_cookie_weg(resp, name: str) -> None:
+    resp.delete_cookie(name, path="/", secure=True, httponly=True, samesite="lax")
+
+
+def _oidc_zurueck(request: Request, fehler: str = "", konto: str = "", grund: str = ""):
+    """303 auf die Anmeldeseite – mit Fehlerkennung ODER als Erfolg (Schein liegt im Cookie).
+
+    Die Kennung ist kurz und uebersetzbar; der Grund steht nur im Journal und im
+    Sicherheitsprotokoll, nie in der Adresse (Protokolle, Verlauf)."""
+    from urllib.parse import quote
+    from fastapi.responses import RedirectResponse
+    ip = request.client.host if request.client else ""
+    if fehler:
+        print(f"[AUTH] IdP-Anmeldung abgewiesen ({ip}, {konto or '?'}): {fehler} – {grund}",
+              flush=True)
+        try:
+            _sicherheits_log.ereignis("anmeldung_fehlgeschlagen", benutzer=konto, ip=ip,
+                                      ergebnis=fehler, weg="oidc", grund=str(grund)[:200])
+        except Exception:  # noqa: BLE001
+            pass
+        ziel = "/?idp_fehler=" + quote(fehler, safe="")
+    else:
+        ziel = "/?anmeldung=idp"
+    resp = RedirectResponse(ziel, status_code=303)
+    resp.headers["Cache-Control"] = "no-store"
+    _oidc_cookie_weg(resp, _OIDC_COOKIE_VORGANG)
+    return resp
+
+
+@app.get("/api/login/oidc/status")
+async def oidc_status():
+    """Fuer die Anmeldemaske: gibt es den Knopf "Mit Firmenkonto anmelden"?"""
+    return JSONResponse({"aktiv": _oidc_konfig() is not None})
+
+
+@app.get("/api/login/oidc/start")
+async def oidc_start(request: Request):
+    """Anmeldung beim IdP beginnen: state, nonce, PKCE ablegen, 302 zum IdP."""
+    from backend import oidc_anmeldung as _oidc
+    cfg = _oidc_konfig()
+    if cfg is None:
+        return _oidc_zurueck(request, "nicht_eingerichtet", grund="IdP-Anmeldung aus")
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(ip):
+        return _oidc_zurueck(request, "zu_viele", grund="Ratenbegrenzung")
+    try:
+        ctx = _oidc.ssl_kontext(cfg["ca_cert"])
+        doc = await asyncio.to_thread(_oidc.discovery, cfg["issuer"], ctx)
+    except _oidc.OidcFehler as e:
+        return _oidc_zurueck(request, e.code, grund=str(e))
+    verifier, challenge = _oidc.pkce_paar()
+    import secrets as _secrets
+    from fastapi.responses import RedirectResponse
+    nonce = _secrets.token_urlsafe(32)
+    cookie_wert, bindung = _oidc.browser_bindung()
+    redirect_uri = _oidc_redirect_uri(request, cfg)
+    state = _oidc.VORGAENGE.neu({"nonce": nonce, "verifier": verifier, "bindung": bindung,
+                                 "redirect_uri": redirect_uri, "issuer": cfg["issuer"],
+                                 "client_id": cfg["client_id"]})
+    ziel = _oidc.autorisierungs_url(doc, cfg["client_id"], redirect_uri, state, nonce, challenge)
+    resp = RedirectResponse(ziel, status_code=302)
+    resp.headers["Cache-Control"] = "no-store"
+    _oidc_cookie(resp, _OIDC_COOKIE_VORGANG, cookie_wert, _oidc.VORGANG_TTL_S)
+    return resp
+
+
+@app.get("/api/login/oidc/callback")
+async def oidc_callback(request: Request):
+    """Rueckkehr vom IdP: Code tauschen, Token pruefen, Konto, Freigabe -> Einloese-Schein.
+
+    Dieselbe Kette wie die Windows-Anmeldung (``_login_windows_ablauf``): kein
+    lokales Konto, Kontosperre, AD-Freigabe ueber das Dienstkonto (dabei auch
+    "Konto im AD deaktiviert"), Lizenzgrenze. Ein ungueltiges Token zaehlt NICHT
+    als Fehlversuch des Kontos – es ist ein Einrichtungs-, kein Rateindiz."""
+    from backend import oidc_anmeldung as _oidc
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(ip):
+        return _oidc_zurueck(request, "zu_viele", grund="Ratenbegrenzung")
+    q = request.query_params
+    vorgang = _oidc.VORGAENGE.nehmen(q.get("state", ""))
+    if vorgang is None:
+        return _oidc_zurueck(request, "abgelaufen", grund="state unbekannt oder abgelaufen")
+    if not _oidc.bindung_passt(request.cookies.get(_OIDC_COOKIE_VORGANG, ""),
+                               vorgang.get("bindung", "")):
+        return _oidc_zurueck(request, "abgelaufen", grund="Vorgang gehoert nicht zu diesem Browser")
+    if q.get("error"):
+        return _oidc_zurueck(request, "abgebrochen",
+                             grund="IdP meldet %s" % str(q.get("error"))[:60])
+    cfg = _oidc_konfig()
+    if cfg is None or cfg["issuer"] != vorgang.get("issuer") \
+            or cfg["client_id"] != vorgang.get("client_id"):
+        return _oidc_zurueck(request, "nicht_eingerichtet",
+                             grund="Konfiguration waehrend der Anmeldung geaendert")
+    code = q.get("code", "")
+    if not code:
+        return _oidc_zurueck(request, "abgebrochen", grund="kein code")
+    try:
+        ctx = _oidc.ssl_kontext(cfg["ca_cert"])
+        doc = await asyncio.to_thread(_oidc.discovery, cfg["issuer"], ctx)
+        id_token = await asyncio.to_thread(
+            _oidc.code_tauschen, doc, cfg["client_id"], cfg["client_secret"], code,
+            vorgang["redirect_uri"], vorgang["verifier"], ctx)
+        kopf, _r, _s, _g = _oidc.zerlegen(id_token)
+        schluessel = await asyncio.to_thread(_oidc.jwks, str(doc["jwks_uri"]), ctx)
+        try:
+            claims = _oidc.pruefe_id_token(id_token, schluessel, issuer=cfg["issuer"],
+                                           client_id=cfg["client_id"], nonce=vorgang["nonce"])
+        except _oidc.OidcFehler as e:
+            if e.code != "schluessel":
+                raise
+            # Unbekanntes kid: der IdP hat evtl. seinen Schluessel gewechselt.
+            schluessel = await asyncio.to_thread(_oidc.jwks, str(doc["jwks_uri"]), ctx, neu=True)
+            claims = _oidc.pruefe_id_token(id_token, schluessel, issuer=cfg["issuer"],
+                                           client_id=cfg["client_id"], nonce=vorgang["nonce"])
+        konto = _oidc.konto_aus_claims(
+            claims, cfg["namensclaim"],
+            _oidc.domaenen_aus(config.get_setting("ad_domain", ""), cfg["upn_suffixe"]))
+    except _oidc.OidcFehler as e:
+        return _oidc_zurueck(request, e.code, grund=str(e))
+
+    # Lokale Konten (jarvis …) gibt es nur mit Kennwort – ein gleichnamiges
+    # Konto beim IdP darf nicht zu ihnen werden. Normiert verglichen.
+    if konto in {_norm_login(u) for u in ALLOWED_USERS}:
+        return _oidc_zurueck(request, "lokal", konto, "lokales Konto")
+    if _konto_sperre_antwort(konto) is not None:
+        return _oidc_zurueck(request, "gesperrt", konto, "Konto nach Fehlversuchen gesperrt")
+    freigabe = await asyncio.to_thread(_ad_windows_freigabe, konto)
+    if freigabe == "fehler":
+        return _oidc_zurueck(request, "pruefung", konto, "Freigabe nicht pruefbar")
+    if freigabe != "ja":
+        return _oidc_zurueck(request, "keine_freigabe", konto, "keine Freigabe im AD")
+    try:
+        from backend import license_enforce as _lic_enf
+        _lic_ok, _lic_grund = _lic_enf.darf_benutzer_anmelden(konto)
+    except Exception:  # noqa: BLE001
+        _lic_ok, _lic_grund = True, ""
+    if not _lic_ok:
+        return _oidc_zurueck(request, "lizenz", konto, _lic_grund)
+
+    nachweis = str(config.get_setting("oidc_mfa_nachweis", "") or "")
+    schein = _oidc.SCHEINE.neu({"konto": konto,
+                                "mfa_belegt": _oidc.mfa_belegt(claims, nachweis)})
+    resp = _oidc_zurueck(request)
+    _oidc_cookie(resp, _OIDC_COOKIE_SCHEIN, schein, _oidc.SCHEIN_TTL_S)
+    print(f"[AUTH] IdP-Anmeldung geprueft, Schein ausgestellt: {konto} ({ip})", flush=True)
+    return resp
+
+
+@app.post("/api/login/oidc/einloesen")
+@_sprot_keine_aenderung
+async def oidc_einloesen(request: Request):
+    """Einloese-Schein gegen eine Sitzung tauschen (fetch von der Anmeldeseite).
+
+    2FA: Erkennt der Administrator die MFA des IdP an (und belegt das Token sie,
+    falls ein Nachweis eingetragen ist), gilt die Anmeldung als mit zweitem
+    Faktor. Sonst wie bei der Kennwortanmeldung: ein Konto mit eingerichteter
+    2FA gibt seinen Code ein. Ein Administrator ohne 2FA bekommt bei
+    eingeschalteter Pflicht eine Sitzung OHNE Admin-Rechte (wie beim
+    Outlook-SSO) – eingerichtet wird die 2FA ueber die Kennwortanmeldung."""
+    try:
+        resp = await _oidc_einloesen_ablauf(request)
+    except AuthStateUnlesbar:
+        resp = JSONResponse(
+            {"success": False, "error": "Anmeldung ist gerade nicht möglich (Anmeldedaten "
+             "des Servers nicht lesbar). Bitte den Administrator informieren."},
+            status_code=503)
+    await _anmeldung_protokollieren(request, resp, "oidc")
+    return resp
+
+
+async def _oidc_einloesen_ablauf(request: Request):
+    from backend import oidc_anmeldung as _oidc
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(ip):
+        return JSONResponse({"success": False,
+                             "error": "Zu viele Login-Versuche. Bitte warte 5 Minuten."},
+                            status_code=429)
+    schein_id = request.cookies.get(_OIDC_COOKIE_SCHEIN, "")
+    schein = _oidc.SCHEINE.lesen(schein_id)
+    if schein is None or _oidc_konfig() is None:
+        resp = JSONResponse({"success": False, "abgelaufen": True,
+                             "error": "Die Anmeldung über das Firmenkonto ist abgelaufen. "
+                                      "Bitte erneut anmelden."}, status_code=401)
+        _oidc_cookie_weg(resp, _OIDC_COOKIE_SCHEIN)
+        return resp
+    konto = schein["konto"]
+    _gesperrt = _konto_sperre_antwort(konto)
+    if _gesperrt is not None:
+        _oidc.SCHEINE.nehmen(schein_id)
+        _oidc_cookie_weg(_gesperrt, _OIDC_COOKIE_SCHEIN)
+        return _gesperrt
+
+    body = await _json_objekt(request)
+    user_state = _get_user_auth_state(konto)
+    mit_2fa = False
+    if _oidc_mfa_anerkennen() and schein.get("mfa_belegt"):
+        mit_2fa = True
+    elif user_state.get("totp_enabled") and user_state.get("totp_secret"):
+        totp_code = str((body or {}).get("totp_code") or "").strip()
+        if not totp_code:
+            return JSONResponse({"success": False, "requires_totp": True, "username": konto,
+                                 "error": "2FA-Code erforderlich"})
+        if _totp_im_broker(user_state["totp_secret"]):
+            ok, grund = await _totp_broker_pruefen(konto, totp_code)
+            fehler = None if ok else _totp_broker_fehlertext(grund)
+            status = 503 if grund in ("unreachable", "nicht_eingerichtet") else 401
+        elif not _totp_secret_lesbar(user_state["totp_secret"]):
+            return JSONResponse(
+                {"success": False, "requires_totp": True,
+                 "error": "Die Zwei-Faktor-Prüfung ist auf dem Server gerade nicht möglich. "
+                          "Bitte den Administrator verständigen."}, status_code=503)
+        else:
+            erg = _totp_schutz.pruefen(konto, user_state["totp_secret"], totp_code)
+            fehler = None if erg == _totp_schutz.OK else _totp_fehlertext(erg)
+            status = 401
+        if fehler:
+            if status == 401:
+                _record_login_attempt(ip, konto)
+            rest = _oidc.SCHEINE.fehlversuch(schein_id, _oidc.SCHEIN_MAX_VERSUCHE)
+            resp = JSONResponse({"success": False, "requires_totp": rest > 0,
+                                 "abgelaufen": rest <= 0, "error": fehler}, status_code=status)
+            if rest <= 0:
+                _oidc_cookie_weg(resp, _OIDC_COOKIE_SCHEIN)
+            return resp
+        mit_2fa = True
+
+    # Ab hier ist die Anmeldung entschieden: Schein verbrauchen (einmalig).
+    if _oidc.SCHEINE.nehmen(schein_id) is None:
+        return JSONResponse({"success": False, "abgelaufen": True,
+                             "error": "Die Anmeldung über das Firmenkonto ist abgelaufen. "
+                                      "Bitte erneut anmelden."}, status_code=401)
+    token = generate_token(konto, mit_2fa=mit_2fa)
+    _anmelde_schutz.erfolg(konto)
+    try:
+        _user_sessions.record_login(konto, ip, display=_display_name(konto))
+    except Exception:  # noqa: BLE001
+        pass
+    print(f"[AUTH] IdP-Anmeldung erfolgreich: {konto} ({ip}, 2FA={'ja' if mit_2fa else 'nein'})",
+          flush=True)
+    _sitzung_kontext.set((konto, mit_2fa, False))
+    ist_admin = _is_admin_user(konto) and (mit_2fa or not _admin_2fa_pflicht())
+    daten = {"success": True, "token": token, "username": konto,
+             "must_change_password": False, "is_admin": ist_admin}
+    if _is_admin_user(konto) and not ist_admin:
+        daten["hinweis"] = ("Administrator-Rechte gibt es nur nach einer Anmeldung mit "
+                            "Zwei-Faktor-Code. Für Verwaltungsaufgaben bitte mit Kennwort "
+                            "und Code anmelden.")
+    _block = security_guard.get_block(konto)
+    if _block:
+        daten.update({"is_admin": False, "account_blocked": True,
+                      "block_reason": _block.get("reason", ""),
+                      "block_incidents": _block.get("incidents", [])})
+    resp = _sitzung_antwort(request, daten)
+    _oidc_cookie_weg(resp, _OIDC_COOKIE_SCHEIN)
+    return resp
+
+
+# ── Verwaltung der IdP-Anbindung (Einstellungen -> Sicherheit -> Berechtigungen) ──
+
+_OIDC_TEXTFELDER = ("oidc_issuer", "oidc_client_id", "oidc_namensclaim", "oidc_upn_suffixe",
+                    "oidc_ca_cert", "oidc_redirect_uri")
+
+
+@app.get("/api/admin/oidc")
+async def oidc_einstellungen_lesen(request: Request, user: str = Depends(require_local_auth)):
+    """IdP-Einstellungen fuer die Maske. Das Client-Secret wird NIE zurueckgegeben,
+    auch nicht maskiert – nur ob eines hinterlegt ist."""
+    from backend import oidc_anmeldung as _oidc
+    geheim = str(config.get_setting("oidc_client_secret", "") or "")
+    return JSONResponse({
+        "ok": True,
+        "oidc_aktiv": _oidc_schalter("oidc_aktiv"),
+        **{f: str(config.get_setting(f, "") or "") for f in _OIDC_TEXTFELDER},
+        "client_secret_gesetzt": bool(geheim),
+        "client_secret_lesbar": bool(geheim) and not geheim.startswith("JGS1:"),
+        "namensclaims": list(_oidc.NAMENSCLAIMS),
+        "redirect_uri_vorschlag": _oidc_redirect_uri(request, {"redirect_uri": ""}),
+        "bereit": _oidc_konfig() is not None,
+        "ad_eingerichtet": bool(config.get_setting("ad_server", "")
+                                and config.get_setting("ad_domain", "")),
+    })
+
+
+@app.post("/api/admin/oidc")
+async def oidc_einstellungen_setzen(request: Request, user: str = Depends(require_local_auth)):
+    """IdP-Einstellungen speichern. Ein leeres ``client_secret`` laesst das
+    hinterlegte unveraendert; ``client_secret_loeschen: true`` entfernt es."""
+    from backend import oidc_anmeldung as _oidc
+    _note_activity(user, request)
+    body = await _json_objekt(request)
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "JSON-Objekt erwartet."}, status_code=400)
+    neu: dict = {}
+    for f in _OIDC_TEXTFELDER:
+        if f in body:
+            wert = body.get(f)
+            if not isinstance(wert, str) or len(wert) > 20000:
+                return JSONResponse({"ok": False, "error": f"{f}: Text erwartet."},
+                                    status_code=400)
+            neu[f] = wert.strip()
+    if "oidc_namensclaim" in neu and neu["oidc_namensclaim"] \
+            and neu["oidc_namensclaim"] not in _oidc.NAMENSCLAIMS:
+        return JSONResponse({"ok": False, "error": "Unbekannter Namensclaim."}, status_code=400)
+    for f in ("oidc_issuer", "oidc_redirect_uri"):
+        if neu.get(f) and not neu[f].startswith("https://"):
+            return JSONResponse({"ok": False, "error": f"{f}: nur https-Adressen."},
+                                status_code=400)
+    if neu.get("oidc_ca_cert"):
+        try:
+            _oidc.ssl_kontext(neu["oidc_ca_cert"])
+        except _oidc.OidcFehler as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    if "oidc_aktiv" in body:
+        if not isinstance(body["oidc_aktiv"], bool):
+            return JSONResponse({"ok": False, "error": "oidc_aktiv (true/false) erwartet."},
+                                status_code=400)
+        neu["oidc_aktiv"] = body["oidc_aktiv"]
+    geheim = body.get("client_secret")
+    if isinstance(geheim, str) and geheim.strip():
+        neu["oidc_client_secret"] = geheim.strip()
+    elif body.get("client_secret_loeschen") is True:
+        neu["oidc_client_secret"] = ""
+    # Protokoll ohne Geheimnis: nur welche Felder sich aenderten.
+    _sprot_angaben(oidc_felder=",".join(sorted(k for k in neu if k != "oidc_client_secret"))
+                   + (",client_secret" if "oidc_client_secret" in neu else ""))
+    for k, v in neu.items():
+        config.save_setting(k, v)
+    _oidc.caches_leeren()
+    print(f"[AUTH] IdP-Einstellungen geaendert durch {user}: "
+          f"{', '.join(sorted(neu)) or 'nichts'}", flush=True)
+    return await oidc_einstellungen_lesen(request, user)
+
+
+@app.post("/api/admin/oidc/test")
+async def oidc_verbindung_testen(request: Request, user: str = Depends(require_local_auth)):
+    """Discovery und Schluessel des IdP abrufen – ohne Anmeldung, ohne Geheimnis."""
+    from backend import oidc_anmeldung as _oidc
+    issuer = str(config.get_setting("oidc_issuer", "") or "").strip()
+    if not issuer:
+        return JSONResponse({"ok": False, "error": "Kein Issuer eingetragen."}, status_code=400)
+    try:
+        info = await asyncio.to_thread(_oidc.verbindung_testen, issuer,
+                                       config.get_setting("oidc_ca_cert", "") or None)
+    except _oidc.OidcFehler as e:
+        return JSONResponse({"ok": False, "error": str(e), "code": e.code})
+    return JSONResponse({"ok": True, **info})
+
+
+@app.post("/api/admin/anmeldeschutz/idp-mfa")
+async def anmeldeschutz_idp_mfa(request: Request, user: str = Depends(require_local_auth)):
+    """Zaehlt die MFA des IdP als zweiter Faktor? (Bereich "Pflicht fuer Administratoren")
+
+    Body ``{anerkennen: bool, nachweis: "claim=wert" | ""}``."""
+    from backend import oidc_anmeldung as _oidc
+    _note_activity(user, request)
+    body = await _json_objekt(request)
+    if not isinstance(body, dict):
+        body = {}
+    wert = body.get("anerkennen")
+    nachweis = body.get("nachweis", config.get_setting("oidc_mfa_nachweis", "") or "")
+    if not isinstance(wert, bool):
+        return JSONResponse({"ok": False, "error": "anerkennen (true/false) erwartet."},
+                            status_code=400)
+    if not isinstance(nachweis, str) or not _oidc.nachweis_gueltig(nachweis):
+        return JSONResponse({"ok": False, "error": "Nachweis in der Form claim=wert "
+                             "(z. B. amr=otp) oder leer."}, status_code=400)
+    nachweis = nachweis.strip()
+    _sprot_angaben(oidc_mfa_anerkennen=wert, oidc_mfa_nachweis=nachweis or "-")
+    config.save_setting("oidc_mfa_anerkennen", wert)
+    config.save_setting("oidc_mfa_nachweis", nachweis)
+    print(f"[AUTH] MFA des IdP als zweiter Faktor {'ANERKANNT' if wert else 'nicht anerkannt'}"
+          f" (Nachweis: {nachweis or 'keiner'}, durch {user})", flush=True)
+    return JSONResponse({"ok": True, "idp_mfa_anerkennen": _oidc_mfa_anerkennen(),
+                         "idp_mfa_nachweis": nachweis})
+
+
 @app.post("/api/logout")
 async def logout(request: Request, user: str = Depends(require_auth)):
     """Ausdrueckliche Abmeldung: dieses Token widerrufen und festhalten.
@@ -6819,6 +7268,10 @@ async def totp_admin_reset(request: Request, user: str = Depends(require_local_a
 async def anmeldeschutz_status(user: str = Depends(require_local_auth)):
     """Laufende Konto-Sperren nach Fehlversuchen + Schalter der 2FA-Pflicht."""
     return JSONResponse({"ok": True, "admin_2fa_pflicht": _admin_2fa_pflicht(),
+                         "idp_mfa_anerkennen": _oidc_mfa_anerkennen(),
+                         "idp_mfa_nachweis": str(config.get_setting("oidc_mfa_nachweis", "")
+                                                 or ""),
+                         "idp_aktiv": _oidc_schalter("oidc_aktiv"),
                          "sperren": [dict(s, display=_display_name(s["konto"]))
                                      for s in _anmelde_schutz.gesperrte_konten()],
                          "konto_max": _anmelde_schutz.KONTO_MAX,

@@ -164,6 +164,8 @@
                 if (h) quelleZeigen(h, d.schwellen_quelle);
                 if (box) spruehenZeigen(box, d.spruehen || {});
                 if (cb) cb.checked = !!d.admin_2fa_pflicht;
+                // Schalter "MFA des IdP zaehlt als zweiter Faktor" (settings_idp.js)
+                if (window.IdpEinstellungen) window.IdpEinstellungen.mfaZeigen(d);
                 sperrenZeigen(Array.isArray(d.sperren) ? d.sperren : []);
             })
             .catch(function () { if (box) hinweis(box, 'security.totp_load_failed', 'Die Liste konnte nicht geladen werden.'); });

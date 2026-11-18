@@ -1932,3 +1932,28 @@ body .wi-section { margin-bottom: var(--jv-abstand); }
 .pt-ico-archive    { color:var(--warning); }
 .pt-ico-video, .pt-ico-audio { color:var(--accent); }
 .pt-ico-text, .pt-ico-code, .pt-ico-file { color:var(--text-secondary); }
+
+/* ── Anmeldung ueber den IdP (Anmeldemaske, idp_anmeldung.js) ──────────────
+   .btn-link bringt Rahmen/Flaeche mit; hier nur volle Breite und mittig, weil
+   der Knopf unter dem Hauptknopf "Anmelden" steht. */
+.btn-idp {
+    width: 100%;
+    box-sizing: border-box;
+    justify-content: center;
+    text-decoration: none;
+    color: var(--text-primary);
+}
+.idp-trenner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 16px 0 12px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+.idp-trenner::before,
+.idp-trenner::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid var(--border);
+}

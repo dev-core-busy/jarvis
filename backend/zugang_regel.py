@@ -81,6 +81,10 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/verify-token"): ("anmeldung", "Sitzung pruefen (liefert ohne Sitzung nur 'ungueltig')"),
     ("POST", "/api/addin/sso"): ("anmeldung", "Anmeldung des Outlook-Add-ins per Office-SSO"),
     ("POST", "/api/login/windows"): ("anmeldung", "Windows-Anmeldung per Kerberos (AI-Maus)"),
+    ("GET", "/api/login/oidc/status"): ("anmeldung", "Anmeldemaske: gibt es die IdP-Anmeldung?"),
+    ("GET", "/api/login/oidc/start"): ("anmeldung", "IdP-Anmeldung beginnen (Weiterleitung zum IdP)"),
+    ("GET", "/api/login/oidc/callback"): ("anmeldung", "Rueckkehr vom IdP (state + Browser-Cookie)"),
+    ("POST", "/api/login/oidc/einloesen"): ("anmeldung", "Einloese-Schein der IdP-Anmeldung gegen Sitzung"),
     ("GET", "/api/security/my-block"): ("selbst", "eigene Sperr-Info – auch fuer gesperrte Konten, prueft das Token selbst"),
     # ── oeffentlich ──
     ("GET", "/api/health"): ("oeffentlich", "Zustandsabfrage, liefert nur ok"),

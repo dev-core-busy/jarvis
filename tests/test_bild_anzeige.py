@@ -395,6 +395,12 @@ def teil3():
         def _ohne_tool_markup(self, t):
             aufrufe.append("markup"); return t
 
+        # Seit 2026-11-18 (Pentest F-02): woertlich wiedergegebene interne
+        # Anweisungen werden ersetzt – direkt nach der Tool-Syntax, vor allem
+        # anderen (eigener Waechter: tests/test_prompt_schutz.py).
+        def _ohne_prompt_leck(self, t, melden=True):
+            aufrufe.append("leck"); return t
+
         # Seit 2026-08-26 (zweiter Teil): base64-Bilddaten im ANTWORTTEXT
         # werden ausgelagert. Muss VOR _clean_doc_refs laufen, sonst greift die
         # Bereinigung in den Blob. Gemeldet von ECHT als "das Bild wird nur als
@@ -423,8 +429,8 @@ def teil3():
     s = Stub()
 
     aus = s._anzeigetext("Fertig.")
-    check(aufrufe == ["markup", "bergen", "clean", "charts", "tote", "bilder"],
-          "alle sechs Schritte laufen, in dieser Reihenfolge", str(aufrufe))
+    check(aufrufe == ["markup", "leck", "bergen", "clean", "charts", "tote", "bilder"],
+          "alle sieben Schritte laufen, in dieser Reihenfolge", str(aufrufe))
     check("/api/generated/x.png" in aus, "das Bild wird nachgetragen")
 
     aufrufe.clear()
@@ -633,6 +639,9 @@ def teil3b():
         entfernen = True       # ob die Referenz als tot gilt
 
         def _ohne_tool_markup(self, t):
+            return t
+
+        def _ohne_prompt_leck(self, t, melden=True):  # Pentest F-02, durchlaessig
             return t
 
         def _bilddaten_bergen(self, tool_name, t, fuer_anzeige=False):

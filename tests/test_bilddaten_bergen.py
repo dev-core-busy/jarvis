@@ -234,7 +234,10 @@ _attrib = [_segment(n) for n in AGENT_KLS.body
            and any(isinstance(z, ast.Name) and z.id.endswith("_RE") for z in n.targets)]
 if len(_attrib) < 2:
     abbruch(f"nur {len(_attrib)} Regex-Attribute in JarvisAgent – Fix nicht vorhanden?")
+# Pentest F-02: _verlauf_text/_anzeigetext rufen zuerst den Prompt-Schutz – hier
+# durchlaessig, gemessen wird er in tests/test_prompt_schutz.py.
 exec("class Attrappe:\n    agent_id = 'test'\n    tools_map = {}\n\n"
+     "    def _ohne_prompt_leck(self, t, melden=True):\n        return t\n\n"
      + textwrap.indent("\n".join(_attrib), "    ") + "\n\n" + _körper, _ns)
 A = _ns["Attrappe"]()
 

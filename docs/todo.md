@@ -100,14 +100,10 @@ Aus der Sicherheitsprüfung vor dem Pentest (2026-11-08):
       Läuft der hinterlegte Anker ab, ohne dass er vorher erneuert wurde, bricht
       die AD-Anmeldung. Alternative: die interne Zertifizierungsstelle in den
       Systemspeicher aufnehmen und den Domänencontroller per FQDN ansprechen.
-- [ ] **Pentest „Hardening“ F-14: Nutzerliste mit Klarnamen sichtbar** –
-      gemeint sind die Gedächtnisdateien je Benutzer (Klarname im Dateinamen,
-      für jedes lokale Konto auflistbar). Behoben im Arbeitsbaum und auf DEV
-      gemessen (18.11.2026): Ordner `data/gedaechtnis` (0750), Umzug beim
-      Dienststart. Offen: master, danach ECHT. Nebenbefund (Testsystem,
-      17.11.2026): die Gesichtserkennungsdaten (`data/vision`, Namen und
-      Ereignisse) liegen mit 0644 da – vor einer Aktivierung des Bereichs auf
-      0750 ziehen.
+- [ ] **Gesichtserkennung: Datenrechte vor Aktivierung** (Nebenbefund zu
+      Pentest F-14, Testsystem 17.11.2026) – `data/vision` (Namen und
+      Ereignisse) liegt mit 0644 da; vor einer Aktivierung des Bereichs auf
+      0750 ziehen. F-14 selbst ist erledigt (ECHT 18.11.2026).
 - [ ] **CSP erzwingen** (BSI H4, Rest) – von „melden“ auf „erzwingen“
       umstellen und die verbliebenen Inline-Stile entfernen.
 

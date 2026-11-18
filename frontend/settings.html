@@ -6114,6 +6114,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <input type="text" id="ad-domain" data-i18n-placeholder="security.ad_domain_ph" placeholder="z.B. firma.local" style="width:100%;box-sizing:border-box;">
                                     </div>
                                 </div>
+                                <!-- Verbindungsart zum DC (2026-11-18): aus = LDAP mit StartTLS
+                                     (Port 389), an = LDAPS (Port 636). Kein eigenes Einstellungsfeld:
+                                     settings_ad.js schreibt die Art als Schema in ad_server
+                                     ("ldaps://dc…"), und genau so liest sie ldap_tls.ziel. Die
+                                     Beschriftung wechselt mit dem Zustand (zwei Spans, damit
+                                     applyLang beide uebersetzt). -->
+                                <div style="display:flex;align-items:center;gap:10px;margin:0 0 4px;">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="ad-ldaps" />
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <span style="font-size:0.82rem;color:var(--text-secondary);">
+                                        <span id="ad-ldaps-an" hidden data-i18n="security.ad_ldaps_an">LDAPS – von Anfang an verschlüsselt (Port 636)</span>
+                                        <span id="ad-ldaps-aus" data-i18n="security.ad_ldaps_aus">LDAP mit StartTLS – Verschlüsselung nach dem Verbindungsaufbau (Port 389)</span>
+                                    </span>
+                                </div>
+                                <p class="kb-hint" style="margin:0 0 6px;" data-i18n="security.ad_ldaps_hint">Unverschlüsselt wird in keinem Fall angemeldet. LDAPS wählen, wenn der Domain-Controller kein StartTLS anbietet oder Port 389 gesperrt ist.</p>
+                                <p id="ad-ldaps-anker" hidden style="margin:0 0 10px;font-size:0.82rem;color:var(--warning);"></p>
 
                                 <!-- ── Verzeichnis-Suche (Service-Konto, optional) ── -->
                                 <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(var(--fg-rgb),0.09);border-radius:10px;background:rgba(var(--fg-rgb),0.02);">
@@ -6216,7 +6234,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_ad.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
-                                <script src="/static/js/settings_ad.js?v=7"></script>
+                                <script src="/static/js/settings_ad.js?v=8"></script>
                             </div>
                         </div>
 
@@ -6698,7 +6716,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=494"></script>
+    <script src="/static/js/i18n.js?v=496"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->

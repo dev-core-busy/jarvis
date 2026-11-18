@@ -60,6 +60,100 @@
         setzen: function (feld, wert) { _pruefe(feld); _bestand[feld] = String(wert == null ? '' : wert); }
     };
 
+    // ── Verbindungsart: LDAP mit StartTLS oder LDAPS (2026-11-18) ──────────
+    // Es gibt dafuer bewusst KEIN eigenes Einstellungsfeld: die Art steht als
+    // Schema in ad_server ("ldaps://dc.firma.local"), und genau so liest sie
+    // das Backend (ldap_tls.ziel). Ein zweites Feld koennte der Adresse
+    // widersprechen, und dann waere offen, welches gilt. StartTLS wird OHNE
+    // Schema gespeichert – so steht es auf den Bestandsanlagen, ein Speichern
+    // ohne Umschalten laesst den gespeicherten Wert also unveraendert.
+    //
+    // zerlegen: art = 'ldaps' | 'starttls' (Schema stand da) | '' (kein
+    // Schema) | null (fremdes Schema – bleibt stehen, das Backend nennt es).
+    function _adZerlegen(roh) {
+        var s = String(roh == null ? '' : roh).trim();
+        var m = /^([a-z][a-z0-9+.-]*):\/\//i.exec(s);
+        if (!m) return { art: '', rest: s };
+        var schema = m[1].toLowerCase();
+        if (schema === 'ldaps') return { art: 'ldaps', rest: s.slice(m[0].length) };
+        if (schema === 'ldap') return { art: 'starttls', rest: s.slice(m[0].length) };
+        return { art: null, rest: s };
+    }
+    // Adresse fuer Speichern, Test und Zertifikatspruefung aus Feld + Schalter.
+    // Ein ausdruecklich genannter Port bleibt – nur der STANDARDPORT der
+    // anderen Art wird nicht mitgenommen (sonst hiesse "dc:389" + LDAPS ein
+    // TLS-Handshake auf dem StartTLS-Port). Nur bei Host:Port bzw. [IPv6]:Port,
+    // eine nackte IPv6-Adresse endet nicht auf einen Port.
+    function _adAdresseAus(feld, ldaps) {
+        var z = _adZerlegen(feld);
+        if (z.art === null) return z.rest;
+        var rest = z.rest.replace(/\/+$/, '');
+        var p = /^(\[[^\]]*\]|[^:\[\]]+):(\d+)$/.exec(rest);
+        if (p && p[2] === (ldaps ? '389' : '636')) rest = p[1];
+        if (!rest) return '';
+        return ldaps ? 'ldaps://' + rest : rest;
+    }
+    // (host, port) einer Adresse – nur fuer den Vergleich mit dem Anker,
+    // dieselben Regeln wie ldap_tls.ziel (Standardport 636/389).
+    function _adZiel(adresse) {
+        var z = _adZerlegen(adresse);
+        if (z.art === null) return null;
+        var rest = z.rest.replace(/\/+$/, '');
+        var p = /^(\[[^\]]*\]|[^:\[\]]+)(?::(\d+))?$/.exec(rest);
+        if (!p) return null;
+        return { host: p[1].replace(/^\[|\]$/g, '').toLowerCase(),
+                 port: p[2] ? parseInt(p[2], 10) : (z.art === 'ldaps' ? 636 : 389) };
+    }
+    function _adLdapsEl() { return document.getElementById('ad-ldaps'); }
+    function _adAdresse() {
+        _adSchemaUebernehmen();
+        var cb = _adLdapsEl();
+        return _adAdresseAus(document.getElementById('ad-server').value, !!(cb && cb.checked));
+    }
+    // Hat jemand "ldaps://…" ins Feld getippt, gilt das: Schalter umlegen und
+    // das Schema aus dem Feld nehmen – sonst stuenden zwei Aussagen da.
+    function _adSchemaUebernehmen() {
+        var f = document.getElementById('ad-server');
+        var cb = _adLdapsEl();
+        if (!f || !cb) return;
+        var z = _adZerlegen(f.value);
+        if (z.art !== 'ldaps' && z.art !== 'starttls') return;
+        f.value = z.rest;
+        cb.checked = z.art === 'ldaps';
+        _adLdapsAnzeigen();
+    }
+    function _adLdapsAnzeigen() {
+        var cb = _adLdapsEl();
+        var an = document.getElementById('ad-ldaps-an');
+        var aus = document.getElementById('ad-ldaps-aus');
+        if (!cb) return;
+        if (an) an.hidden = !cb.checked;
+        if (aus) aus.hidden = !!cb.checked;
+        _adAnkerWarnung();
+    }
+    // Der Anker gilt fuer host:port (sap_cert.passt). Ein Wechsel der Art
+    // wechselt den Port – dann traegt der Anker nicht mehr, und ohne Eintrag
+    // im Systemspeicher scheitert jede AD-Anmeldung. Das muss VOR dem
+    // Speichern sichtbar sein.
+    function _adAnkerWarnung() {
+        var el = document.getElementById('ad-ldaps-anker');
+        if (!el) return;
+        var a = _adAnker || {};
+        var cb = _adLdapsEl();
+        var neu = _adZiel(_adAdresseAus((document.getElementById('ad-server') || {}).value,
+                                        !!(cb && cb.checked)));
+        var aPort = parseInt(a.port, 10);
+        var abweichend = !!(a.fingerprint && a.host && neu
+                            && (String(a.host).toLowerCase() !== neu.host || aPort !== neu.port));
+        el.hidden = !abweichend;
+        el.textContent = abweichend
+            ? window.t('security.ad_ldaps_anker')
+                .replace('{alt}', a.host + ':' + a.port)
+                .replace('{neu}', neu.host + ':' + neu.port)
+            : '';
+    }
+    window.AdLdaps = { zerlegen: _adZerlegen, adresseAus: _adAdresseAus, ziel: _adZiel };
+
     async function _adLoad() {
         try {
             const r = await fetch('/api/auth/ad_status', {
@@ -69,7 +163,10 @@
             // Bestand – und das naechste Speichern loeschte jede Freigabe.
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const d = await r.json();
-            document.getElementById('ad-server').value        = d.server        || '';
+            // Schema aus der Adresse in den Schalter (siehe _adZerlegen)
+            const _z = _adZerlegen(d.server || '');
+            document.getElementById('ad-server').value        = _z.rest;
+            if (_adLdapsEl()) _adLdapsEl().checked = _z.art === 'ldaps';
             document.getElementById('ad-domain').value        = d.domain        || '';
             document.getElementById('ad-bind-user').value = d.bind_user || '';
             document.getElementById('ad-bind-password').value = '';
@@ -77,6 +174,7 @@
             FREIGABEN.forEach(function (f) { _bestand[f.feld] = d[f.lesen] || ''; });
             _adUpdateStatus(d);
             _adCertMount(d);
+            _adLdapsAnzeigen();
             // Fuer die Berechtigungs-Tabelle (rechte_matrix.js): erst mit
             // geladenem Bestand darf von dort gespeichert werden, sonst gingen
             // leere Listen an den Server.
@@ -114,7 +212,8 @@
         _adCert = window.SapCert.mount(box, {
             basis: '/api/auth/ad_tls',
             kanal: 'ad',
-            ziel: function () { return { server: document.getElementById('ad-server').value.trim() }; },
+            // gewaehlte Art mitnehmen: geprueft wird der Port, den die Anmeldung benutzt
+            ziel: function () { return { server: _adAdresse() }; },
             gebunden: function () { return _adAnker; },
             nachAenderung: function () { _adLoad(); },
             texte: {
@@ -198,7 +297,7 @@
     // deshalb ganz – sonst loeschte "Speichern" an der Verbindung jede Freigabe.
     function _koerper() {
         var k = {
-            ad_server:        document.getElementById('ad-server').value.trim(),
+            ad_server:        _adAdresse(),
             ad_domain:        document.getElementById('ad-domain').value.trim(),
             ad_bind_user:     document.getElementById('ad-bind-user').value.trim(),
             ad_bind_password: document.getElementById('ad-bind-password').value
@@ -234,7 +333,7 @@
 
     window._adTest = async function() {
         const res = document.getElementById('ad-test-result');
-        const srv = document.getElementById('ad-server').value.trim();
+        const srv = _adAdresse();
         const dom = document.getElementById('ad-domain').value.trim();
         if (!srv || !dom) { res.style.color='var(--warning)'; res.textContent=window.t('security.ad_fill_fields'); return; }
         res.style.color='var(--text-muted)'; res.textContent=window.t('security.ad_connecting') + ' ' + srv + '…';
@@ -260,6 +359,13 @@
     document.addEventListener('DOMContentLoaded', function() {
         const secBtn = document.querySelector('[data-settings-tab="security"]');
         if (secBtn) secBtn.addEventListener('click', _adLoad);
+        const cb = _adLdapsEl();
+        if (cb) cb.addEventListener('change', _adLdapsAnzeigen);
+        const srvFeld = document.getElementById('ad-server');
+        if (srvFeld) {
+            srvFeld.addEventListener('change', _adSchemaUebernehmen);
+            srvFeld.addEventListener('input', _adAnkerWarnung);
+        }
     });
     _adLoad();
 })();

@@ -11629,10 +11629,21 @@ async def test_ad_connection(request: Request, _username: str = Depends(require_
         except Exception as e:  # noqa: BLE001
             return False, str(e)[:200], False
     tls_ok, tls_error, ungeprueft = await asyncio.to_thread(_tls_probe)
+    # Das GEMESSENE Ziel zurueckgeben (host, port, ldaps) – die Oberflaeche
+    # nennt Art und Port daraus. Bis 2026-11-18 stand dort fest "LDAP Port 389",
+    # auch nach dem Umstellen auf LDAPS (636). ``ziel`` ist dieselbe Funktion,
+    # die ``verbinden`` oben benutzt hat; eine ungueltige Adresse hat dort schon
+    # tls_ok=False ergeben, dann bleibt das Feld leer.
+    try:
+        _h, _p, _s = ldap_tls.ziel(ad_server)
+        ziel = {"host": _h, "port": _p, "ldaps": _s}
+    except Exception:  # noqa: BLE001
+        ziel = None
     # ungeprueft: verschluesselt, aber nur dank Uebergangsfrist angenommen
     return JSONResponse({"reachable": True, "tls_ok": tls_ok, "tls_error": tls_error,
                          "tls_ungeprueft": ungeprueft,
-                         "tls_uebergang": ldap_tls.uebergang()})
+                         "tls_uebergang": ldap_tls.uebergang(),
+                         "ziel": ziel})
 
 
 async def _ad_tls_ziel(request: Request) -> str:

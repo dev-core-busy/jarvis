@@ -66,7 +66,7 @@ async function seite(opt) {
         const p = String(u).split('?')[0];
         if (p === '/api/auth/ad_status') return json(status);
         if (o && o.body) posts.push({ pfad: p, rumpf: JSON.parse(o.body) });
-        if (p === '/api/auth/ad_test') return json({ reachable: true, tls_ok: true });
+        if (p === '/api/auth/ad_test') return json(opt.adTest || { reachable: true, tls_ok: true });
         if (p === '/api/auth/ad_tls/probe') return json({ ok: false, error: 'Attrappe' }, 400);
         return json({});
     };
@@ -198,6 +198,41 @@ if (knopf) {
     await schlaf(30);
     const p5 = s5.posts.find(x => x.pfad === '/api/auth/ad_tls/probe');
     check('Zertifikatspruefung: server = ldaps://dc.firma.local', p5 && p5.rumpf.server === 'ldaps://dc.firma.local', p5 && JSON.stringify(p5.rumpf));
+}
+
+// ── 5b. Ergebniszeile nennt Art und Port aus der SERVER-Antwort ──────────
+// Bis 2026-11-18 stand dort fest "LDAP Port 389" – auch nach dem Umstellen auf
+// LDAPS (gemeldet von ECHT). Die Antwortform bildet main.test_ad_connection
+// nach: ziel = {host, port, ldaps} aus ldap_tls.ziel.
+section('5b. Verbindungstest: Art und Port aus dem gemessenen Ziel');
+async function testZeile(antwort, ldaps) {
+    const x = await seite({ adTest: antwort });
+    if (ldaps) x.umlegen(true);
+    await x.w._adTest();
+    await schlaf(20);
+    const t = x.$('ad-test-result').textContent;
+    x.w.close();
+    return t;
+}
+let z5 = await testZeile({ reachable: true, tls_ok: true, ziel: { host: 'dc.firma.local', port: 636, ldaps: true } }, true);
+check('LDAPS: Zeile nennt LDAPS und Port 636', z5.includes('LDAPS') && z5.includes('636'), z5);
+check('LDAPS: Zeile nennt NICHT 389', !z5.includes('389'), z5);
+z5 = await testZeile({ reachable: true, tls_ok: true, ziel: { host: 'dc.firma.local', port: 389, ldaps: false } }, false);
+check('StartTLS: Zeile nennt StartTLS und Port 389', z5.includes('StartTLS') && z5.includes('389'), z5);
+z5 = await testZeile({ reachable: true, tls_ok: true, ziel: { host: 'dc.firma.local', port: 3269, ldaps: true } }, true);
+check('eigener Port: die Zahl des Servers (3269), nicht der Standard', z5.includes('3269') && !z5.includes('636'), z5);
+// Formular und Antwort widersprechen sich: es gilt, was der Server gemessen hat
+z5 = await testZeile({ reachable: true, tls_ok: true, ziel: { host: 'dc.firma.local', port: 636, ldaps: true } }, false);
+check('Anzeige folgt der Messung, nicht dem Formular (Schalter aus, Server meldet LDAPS)',
+      z5.includes('LDAPS') && z5.includes('636'), z5);
+z5 = await testZeile({ reachable: true, tls_ok: true }, true);
+check('ohne Ziel (alter Server): kein erfundener Port', !/\b(389|636)\b/.test(z5) && z5.includes(s.w.t('security.ad_tls_ok')), z5);
+const I18N5 = lies('frontend/js/i18n.js');
+check('kein fester Port mehr im Text security.ad_reachable (DE+EN)',
+      !/'security\.ad_reachable':\s*'[^']*\d/.test(I18N5));
+for (const k of ['security.ad_reachable_ldaps', 'security.ad_reachable_starttls']) {
+    const n = (I18N5.match(new RegExp("'" + k.replace(/\./g, '\\.') + "'\\s*:[^\\n]*\\{port\\}", 'g')) || []).length;
+    check(k + ' in DE und EN mit {port}', n === 2, n);
 }
 
 // ── 6. Anker-Warnung ──────────────────────────────────────────────────────

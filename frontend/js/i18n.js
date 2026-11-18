@@ -2514,7 +2514,9 @@ const _I18N = {
         'security.ad_saved':        '✓ Gespeichert',
         'security.ad_fill_fields':  '⚠ Bitte Server und Domain eingeben',
         'security.ad_connecting':   'Verbinde mit',
-        'security.ad_reachable':    'erreichbar (LDAP Port 389)',
+        'security.ad_reachable':    'erreichbar',
+        'security.ad_reachable_ldaps':    'erreichbar (LDAPS, Port {port})',
+        'security.ad_reachable_starttls': 'erreichbar (LDAP mit StartTLS, Port {port})',
         'security.ad_unreachable':  'Nicht erreichbar',
         // Pflicht-TLS zum Domain-Controller (BSI H5)
         'security.ad_tls_ok':       'Verbindung verschlüsselt, Zertifikat geprüft',
@@ -8208,7 +8210,9 @@ const _I18N = {
         'security.ad_saved':        '✓ Saved',
         'security.ad_fill_fields':  '⚠ Please enter server and domain',
         'security.ad_connecting':   'Connecting to',
-        'security.ad_reachable':    'reachable (LDAP port 389)',
+        'security.ad_reachable':    'reachable',
+        'security.ad_reachable_ldaps':    'reachable (LDAPS, port {port})',
+        'security.ad_reachable_starttls': 'reachable (LDAP with StartTLS, port {port})',
         'security.ad_unreachable':  'Not reachable',
         // Pflicht-TLS zum Domaenencontroller (BSI H5)
         'security.ad_tls_ok':       'Connection encrypted, certificate verified',

@@ -349,7 +349,15 @@
             } else if (d.reachable && d.tls_ok === false) {
                 res.style.color='var(--warning)'; res.textContent='⚠ ' + srv + ' – ' + window.t('security.ad_tls_fail').replace('{grund}', d.tls_error || '—');
             } else if (d.reachable) {
-                res.style.color='var(--success)'; res.textContent='✓ ' + srv + ' – ' + window.t('security.ad_reachable') + ' · ' + window.t('security.ad_tls_ok');
+                // Art und Port aus dem GEMESSENEN Ziel des Servers (d.ziel), nicht
+                // aus dem Formular – bis 2026-11-18 stand hier fest "Port 389",
+                // auch bei LDAPS. Ohne Ziel (alter Server) nur "erreichbar".
+                var z = (d.ziel && typeof d.ziel === 'object') ? d.ziel : null;
+                var erreicht = z
+                    ? window.t(z.ldaps ? 'security.ad_reachable_ldaps' : 'security.ad_reachable_starttls')
+                        .replace('{port}', String(z.port))
+                    : window.t('security.ad_reachable');
+                res.style.color='var(--success)'; res.textContent='✓ ' + srv + ' – ' + erreicht + ' · ' + window.t('security.ad_tls_ok');
             } else {
                 res.style.color='var(--danger)'; res.textContent='✗ ' + window.t('security.ad_unreachable') + ': ' + (d.error || 'Timeout');
             }

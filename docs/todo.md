@@ -100,12 +100,6 @@ Aus der Sicherheitsprüfung vor dem Pentest (2026-11-08):
       Läuft der hinterlegte Anker ab, ohne dass er vorher erneuert wurde, bricht
       die AD-Anmeldung. Alternative: die interne Zertifizierungsstelle in den
       Systemspeicher aufnehmen und den Domänencontroller per FQDN ansprechen.
-- [ ] **Sicherheitsprotokoll ans SIEM weiterleiten** (BSI M2 Teil B) – wartet
-      auf die angeforderten Zugangsdaten; vorher nichts bauen, was das Ziel
-      raten müsste. Bauplan: `deploy/security/siem_weiterleitung.sh` nach dem
-      Muster von `ssh_haertung.sh`, Ziel nur in `/etc/jarvis/broker.conf`,
-      rsyslog per TCP+TLS mit Zertifikatsprüfung und Plattenpuffer, tägliches
-      Lebenszeichen der Hash-Kette, journald-Aufbewahrung ein Jahr.
 - [ ] **Pentest „Hardening“ F-14: Nutzerliste mit Klarnamen sichtbar** –
       wartet auf Klärung, WELCHE Liste gemeint ist. Ausgeschlossen für das
       Produktivsystem: Benutzer-Chat (Kontaktliste, Verzeichnissuche) und

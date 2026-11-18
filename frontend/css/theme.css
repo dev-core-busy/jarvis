@@ -1708,6 +1708,16 @@ html:not(.jv-kopf-admin) .jv-kopf-nuradmin { display: none !important; }
    Seite schon vorher zeigen – ohne Namen blendete die Leiste dann mit. */
 header.topbar, .pt-topbar, .wi-topbar, .ad-top, .sa-topbar,
 #settings-modal .modal-header, .jv-kopfzeile { view-transition-name: jv-kopfzeile; }
+/* ⚠ view-transition-name macht die Leiste zu einem EIGENEN STAPELKONTEXT. Ein
+   Popup darin (Update-Pill, "Angemeldete Benutzer") kommt nie hoeher als die
+   Leiste selbst – sein eigener z-index wirkt nur innerhalb. Ohne z-index liegt
+   die Leiste auf Ebene 0, und jeder spaetere Inhalt mit eigener Ebene (z. B.
+   .form-group mit transform aus der fadeIn-Animation) wird darueber gemalt.
+   Gemessen 2026-11-18 im echten Chrome: Einstellungen -> Sicherheit ->
+   Berechtigungen 460 bzw. 120 verdeckte Messpunkte, mit z-index an der Leiste 0.
+   Die uebrigen Leisten oben haben ihren z-index schon (10-30). */
+#settings-modal .modal-header,
+.chat-main > header.topbar { position: relative; z-index: 20; }
 ::view-transition-group(jv-kopfzeile),
 ::view-transition-old(jv-kopfzeile),
 ::view-transition-new(jv-kopfzeile) { animation: none; }

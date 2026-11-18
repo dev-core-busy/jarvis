@@ -7485,6 +7485,20 @@ async def startup_harden_data_dirs():
     Domain-Nutzer die Ergebnisdateien UND die Chat-Verlaeufe aller anderen lesen.
     Bei jedem Start gesetzt, damit es nach einem Neuinstall/Restore nicht driftet.
     """
+    # Pentest "Hardening" F-14: Gedaechtnisse je Benutzer aus data/ in den
+    # 0750-Ordner data/gedaechtnis verschieben – ihre Dateinamen sind die
+    # Benutzerliste. VOR der Haertung (die zieht danach Ordner und Dateien
+    # nach) und VOR startup_benutzer_ablagen (die sucht schon am neuen Ort).
+    try:
+        from backend.tools import memory as _mem_f14
+        u = _mem_f14.umziehen()
+        if u["verschoben"] or u["doppelt"] or u["konflikt"] or u["fehler"]:
+            print(f"[security] Gedaechtnisse nach data/gedaechtnis: {u['verschoben']} "
+                  f"verschoben, {u['doppelt']} doppelt, {u['konflikt']} Konflikt(e) "
+                  f"(als .vor-umzug-* abgelegt), Fehler: {u['fehler'] or 'keine'}",
+                  flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[security] Gedaechtnis-Umzug fehlgeschlagen: {e}", flush=True)
     try:
         from backend import sandbox as _sbx
         aenderungen = _sbx.harden_data_dirs()

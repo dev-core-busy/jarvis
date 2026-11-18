@@ -188,7 +188,8 @@ from backend.tools import memory as mem            # noqa: E402
 mem._DATA_DIR = D
 mem.MEMORY_FILE = D / "memory.json"
 neu = mem._get_memory_path("bert.neu")
-if neu.exists() or neu.parent != D:
+# Seit F-14 liegt das Gedaechtnis je Benutzer in D/gedaechtnis (0750).
+if neu.exists() or neu.parent != D / "gedaechtnis":
     print(f"ABBRUCH: Gedaechtnispfad unerwartet: {neu}")
     sys.exit(2)
 mem._save_memory_dict({"lieblingsfarbe": "blau"}, "bert.neu")

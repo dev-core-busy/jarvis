@@ -316,6 +316,12 @@ _APP_DENY_REL = (
     # eigener Eintrag laesst kuenftige Laeufe unter fremder Kennung starten.
     # Deshalb steht die Datei zusaetzlich in PRIVATE_FILES_STRENG (0600).
     "data/claude_subagent.json",
+    # Gedaechtnisse je Benutzer (tools/memory.py, Pentest "Hardening" F-14):
+    # Dateiname = Klarname, Inhalt = persoenliche Fakten und Vorlieben. Das
+    # Gedaechtnis des Dienstes (data/memory.json) steht oben schon. Den Pfad
+    # nennt dem Modell nichts (memory_manage arbeitet ohne Pfad), ein Zugriff
+    # darauf ist also kein naheliegender Irrtum.
+    "data/gedaechtnis",
     # ⚠ `data/generated_images` STEHT HIER ABSICHTLICH NICHT (geprueft 2026-09-24).
     # Es ist seit demselben Tag in PRIVATE_DIRS (0750) – das schliesst den
     # SHELL-Weg, und der war die Luecke. Der WERKZEUG-Weg ist ohnehin zu: der
@@ -391,6 +397,10 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 "data/short_tracks_ref",
                 # Schema-Dateien und Graph des SQL-Assistenten (siehe _APP_DENY_REL)
                 "data/sql_schema_graph",
+                # Gedaechtnisse je Benutzer, Dateiname = Klarname (Pentest
+                # "Hardening" F-14, siehe tools/memory.py). Erst der geschlossene
+                # Ordner verbirgt die NAMEN – die Dateien waren schon 0640.
+                "data/gedaechtnis",
                 # Persoenliche Support-Anweisungen, eine Datei je Benutzer mit
                 # dem Benutzernamen als Dateinamen. Auf ECHT am 2026-10-22
                 # gemessen: Verzeichnis 0755, Dateien 0644 – fuer jarvis_sandbox
@@ -504,7 +514,11 @@ PRIVATE_FILE_MODE = 0o640
 # Das Gedaechtnis je Benutzer (tools/memory.py) liegt als data/memory_<name>.json
 # direkt in data/, das begehbar bleiben muss (Wissen). Der Name ist erratbar
 # (vorname.nachname), ein 0711 auf data/ wuerde also nicht helfen.
-PRIVATE_FILE_GLOBS = ("data/memory_*.json", "data/memory_*.json.bak",
+# Seit F-14 (2026-11-18) liegen sie in data/gedaechtnis/ (0750); die Muster
+# direkt in data/ bleiben fuer den Altbestand, bis der Umzug beim Start lief.
+PRIVATE_FILE_GLOBS = ("data/gedaechtnis/memory_*.json",
+                      "data/gedaechtnis/memory_*.json.bak",
+                      "data/memory_*.json", "data/memory_*.json.bak",
                       "data/memory.json.bak")
 
 
@@ -943,6 +957,8 @@ SHELL_SECRET_PATHS = re.compile(
     # Claude Subagent: Delegations-Schluessel -> Benutzer. Ein eigener Eintrag
     # laesst kuenftige Laeufe unter fremder Kennung starten.
     r'claude_subagent\.json\b|'
+    # Gedaechtnisse je Benutzer (F-14, siehe _APP_DENY_REL)
+    r'/gedaechtnis\b|'
     # data/chats: fremde Chat-Verlaeufe (in der Shell zusaetzlich per 0750 gesperrt)
     r'data/chats\b|'
     r'/root/|(?:^|\s)/root\b|\.ssh/|\bid_rsa\b|\bid_ed25519\b|\bid_dsa\b|\.netrc\b|'

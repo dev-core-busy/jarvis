@@ -101,12 +101,13 @@ Aus der Sicherheitsprüfung vor dem Pentest (2026-11-08):
       die AD-Anmeldung. Alternative: die interne Zertifizierungsstelle in den
       Systemspeicher aufnehmen und den Domänencontroller per FQDN ansprechen.
 - [ ] **Pentest „Hardening“ F-14: Nutzerliste mit Klarnamen sichtbar** –
-      wartet auf Klärung, WELCHE Liste gemeint ist. Ausgeschlossen für das
-      Produktivsystem: Benutzer-Chat (Kontaktliste, Verzeichnissuche) und
-      Gesichtserkennung, beide Bereiche sind dort nicht aktiv. Erst nach der
-      Klärung bauen. Nebenbefund dabei (Testsystem, 17.11.2026): die
-      Gesichtserkennungsdaten (`data/vision`, Namen und Ereignisse) liegen mit
-      0644 da – vor einer Aktivierung des Bereichs auf 0750 ziehen.
+      gemeint sind die Gedächtnisdateien je Benutzer (Klarname im Dateinamen,
+      für jedes lokale Konto auflistbar). Behoben im Arbeitsbaum und auf DEV
+      gemessen (18.11.2026): Ordner `data/gedaechtnis` (0750), Umzug beim
+      Dienststart. Offen: master, danach ECHT. Nebenbefund (Testsystem,
+      17.11.2026): die Gesichtserkennungsdaten (`data/vision`, Namen und
+      Ereignisse) liegen mit 0644 da – vor einer Aktivierung des Bereichs auf
+      0750 ziehen.
 - [ ] **CSP erzwingen** (BSI H4, Rest) – von „melden“ auf „erzwingen“
       umstellen und die verbliebenen Inline-Stile entfernen.
 

@@ -102,7 +102,9 @@ class Ablage:
 
 def ablagen() -> list[Ablage]:
     return [
-        Ablage("memory", DATA, "memory_{}.json", "json_dict", _alt_memory),
+        # Seit F-14 (2026-11-18) in data/gedaechtnis/; der Umzug laeuft beim
+        # Start VOR dieser Zusammenfuehrung (tools/memory.umziehen).
+        Ablage("memory", DATA / "gedaechtnis", "memory_{}.json", "json_dict", _alt_memory),
         Ablage("chats", DATA / "chats", "{}", "ordner", _alt_chats),
         Ablage("chat_history", DATA / "chat_history", "{}.json", "json_liste", _alt_chat_history),
         Ablage("sap_instructions", DATA / "sap_instructions", "{}.md", "text", _alt_sap, "unbekannt"),

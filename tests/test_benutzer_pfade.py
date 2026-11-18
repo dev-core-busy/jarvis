@@ -287,6 +287,9 @@ try:
     if not str(mig.DATA).startswith(str(sandkasten)):
         print("  ABBRUCH: Sandkasten nicht wirksam"); sys.exit(2)
     D = mig.DATA
+    # Gedaechtnisse je Benutzer liegen seit F-14 in data/gedaechtnis.
+    G = D / "gedaechtnis"
+    G.mkdir(parents=True)
     (D / "chats").mkdir(parents=True)
     (D / "chat_history").mkdir(parents=True)
     (D / "support_instructions").mkdir(parents=True)
@@ -303,10 +306,10 @@ try:
     (D / "settings.json").write_text(json.dumps({"ad_domain": "firma.local"}), encoding="utf-8")
 
     # (a) memory: BEIDE Formen vorhanden -> zusammenfuehren, neuerer gewinnt
-    (D / "memory_firma_k_schmidt.json").write_text(json.dumps({
+    (G / "memory_firma_k_schmidt.json").write_text(json.dumps({
         "alt_und_neu": {"value": "AUS DER DOMAENEN-DATEI", "updated": "2026-09-01T10:00:00"},
         "nur_domaene": {"value": "nur hier", "updated": "2026-05-01T10:00:00"}}), encoding="utf-8")
-    (D / "memory_k.schmidt.json").write_text(json.dumps({
+    (G / "memory_k.schmidt.json").write_text(json.dumps({
         "alt_und_neu": {"value": "ALT", "updated": "2026-01-01T10:00:00"},
         "nur_kanonisch": {"value": "bleibt", "updated": "2026-06-01T10:00:00"}}), encoding="utf-8")
 
@@ -334,10 +337,10 @@ try:
     # Ohne Rekonstruktion blieben sie als "nicht zuordenbar" liegen - und weil
     # der korrigierte Code sie unter dem NEUEN Namen sucht, waere ihr Inhalt
     # still verloren (auf DEV vier Dateien).
-    (D / "memory_api_Audit-Test.json").write_text(
+    (G / "memory_api_Audit-Test.json").write_text(
         json.dumps({"k": {"value": "Kanal-Gedaechtnis", "updated": "2026-01-01T00:00:00"}}),
         encoding="utf-8")
-    (D / "memory___unprivilegiert__.json").write_text(
+    (G / "memory___unprivilegiert__.json").write_text(
         json.dumps({"u": {"value": "anonym", "updated": "2026-01-01T00:00:00"}}),
         encoding="utf-8")
 
@@ -389,9 +392,9 @@ try:
     check("Sicherung wurde angelegt", bool(erg["sicherung"]) and Path(erg["sicherung"]).exists())
 
     # memory zusammengefuehrt, neuerer gewinnt
-    m = sicher(lambda: json.loads((D / "memory_k.schmidt.json").read_text(encoding="utf-8")))
+    m = sicher(lambda: json.loads((G / "memory_k.schmidt.json").read_text(encoding="utf-8")))
     check("memory: Domaenen-Datei ist weg",
-          not (D / "memory_firma_k_schmidt.json").exists())
+          not (G / "memory_firma_k_schmidt.json").exists())
     check(f"memory: alle drei Schluessel da ({sorted(m) if isinstance(m, dict) else m})",
           isinstance(m, dict) and set(m) == {"alt_und_neu", "nur_domaene", "nur_kanonisch"})
     check("memory: bei Konflikt gewinnt der NEUERE",
@@ -418,14 +421,14 @@ try:
           (D / "vemas_instructions" / "k.schmidt.md").exists()
           and not (D / "vemas_instructions" / "firma_k.schmidt.md").exists())
     check("Kanal-Ablage rekonstruiert und umbenannt",
-          (D / "memory_api_audit-test.json").exists()
-          and not (D / "memory_api_Audit-Test.json").exists())
+          (G / "memory_api_audit-test.json").exists()
+          and not (G / "memory_api_Audit-Test.json").exists())
     check("Kanal-Inhalt ist erhalten",
-          "Kanal-Gedaechtnis" in (D / "memory_api_audit-test.json").read_text(encoding="utf-8")
-          if (D / "memory_api_audit-test.json").exists() else False)
+          "Kanal-Gedaechtnis" in (G / "memory_api_audit-test.json").read_text(encoding="utf-8")
+          if (G / "memory_api_audit-test.json").exists() else False)
     check("Sentinel __unprivilegiert__ umbenannt",
-          (D / "memory_unprivilegiert.json").exists()
-          and not (D / "memory___unprivilegiert__.json").exists())
+          (G / "memory_unprivilegiert.json").exists()
+          and not (G / "memory___unprivilegiert__.json").exists())
     check("fremde memory.json unangetastet", (D / "memory.json").read_bytes() == fremd_md5)
 
     # ── Mangel 3: der Praefix-Filter in bekannte_benutzer war ungeprueft.
@@ -448,12 +451,12 @@ try:
     # Ergebnis am 2026-09-07 live: `k_schmidt` galt als eigener
     # kanonischer Benutzer, und die Domaenen-Datei landete unter dem
     # Unterstrich-Namen. Der Fehler war verschoben, nicht behoben.
-    for f in list(D.glob("memory_*.json")):
+    for f in list(G.glob("memory_*.json")):
         f.unlink()
-    (D / "memory_k_schmidt.json").write_text(json.dumps({
+    (G / "memory_k_schmidt.json").write_text(json.dumps({
         "aus_unterstrich": {"value": "alte Form", "updated": "2026-05-01T10:00:00"}}),
         encoding="utf-8")
-    (D / "memory_firma_k_schmidt.json").write_text(json.dumps({
+    (G / "memory_firma_k_schmidt.json").write_text(json.dumps({
         "aus_domaene": {"value": "Domaenen-Form", "updated": "2026-09-01T10:00:00"}}),
         encoding="utf-8")
     b4 = mig.finde()
@@ -465,9 +468,9 @@ try:
           and ziele.get("memory_firma_k_schmidt.json") == "memory_k.schmidt.json")
     mig.anwenden(b4, trocken=False)
     check("keine Unterstrich-Fassung mehr uebrig",
-          not (D / "memory_k_schmidt.json").exists()
-          and not (D / "memory_firma_k_schmidt.json").exists())
-    km = sicher(lambda: json.loads((D / "memory_k.schmidt.json").read_text(encoding="utf-8")))
+          not (G / "memory_k_schmidt.json").exists()
+          and not (G / "memory_firma_k_schmidt.json").exists())
+    km = sicher(lambda: json.loads((G / "memory_k.schmidt.json").read_text(encoding="utf-8")))
     check(f"BEIDE Inhalte sind in der kanonischen Datei ({sorted(km) if isinstance(km, dict) else km})",
           isinstance(km, dict) and set(km) == {"aus_unterstrich", "aus_domaene"})
     check(f"zweiter Lauf findet nichts mehr ({len(mig.finde().vorgaenge)})",
@@ -484,14 +487,14 @@ try:
     # sind aber "max.mueller" bzw. "max_mueller". Wer hier "der letzte
     # gewinnt" spielt, legt die Datei eines Menschen unter dem falschen
     # Namen ab - und ein Zusammenfuehren ist nicht rueckholbar.
-    for f in list(D.glob("memory_*.json")):
+    for f in list(G.glob("memory_*.json")):
         f.unlink()
     (D / "user_sessions.json").write_text(json.dumps(
         {"users": {"max.mueller": {}, "max_mueller": {}}}), encoding="utf-8")
-    (D / "memory_max_mueller.json").write_text(json.dumps(
+    (G / "memory_max_mueller.json").write_text(json.dumps(
         {"k": {"value": "wem gehoert das?", "updated": "2026-01-01T00:00:00"}}),
         encoding="utf-8")
-    roh_vorher = (D / "memory_max_mueller.json").read_bytes()
+    roh_vorher = (G / "memory_max_mueller.json").read_bytes()
     b5 = mig.finde()
     mem5 = [v for v in b5.vorgaenge if v.ablage == "memory"]
     check(f"mehrdeutiger Eintrag steht NICHT in den Vorgaengen "
@@ -500,21 +503,21 @@ try:
           any("max_mueller" in e and "mehrdeutig" in e for _, e in b5.unzuordenbar))
     mig.anwenden(b5, trocken=False)
     check("die Datei ist unangetastet",
-          (D / "memory_max_mueller.json").exists()
-          and (D / "memory_max_mueller.json").read_bytes() == roh_vorher)
+          (G / "memory_max_mueller.json").exists()
+          and (G / "memory_max_mueller.json").read_bytes() == roh_vorher)
 
     # Die ANDERE Mehrdeutigkeit: zwei Kandidaten, zwei VERSCHIEDENE Ziele,
     # und keiner von beiden beansprucht den Eintrag als seinen eigenen.
     # `a.b.c` und `a.b_c` bilden beide auf `a_b_c` ab, ihre Ziele sind aber
     # `a.b.c` bzw. `a.b_c`. Ohne diesen Fall im Bestand blieb die Gegenprobe
     # "der letzte gewinnt" stumm.
-    for f in list(D.glob("memory_*.json")):
+    for f in list(G.glob("memory_*.json")):
         f.unlink()
     (D / "user_sessions.json").write_text(json.dumps(
         {"users": {"a.b.c": {}, "a.b_c": {}}}), encoding="utf-8")
-    (D / "memory_a_b_c.json").write_text(json.dumps(
+    (G / "memory_a_b_c.json").write_text(json.dumps(
         {"k": {"value": "wem?", "updated": "2026-01-01T00:00:00"}}), encoding="utf-8")
-    roh2 = (D / "memory_a_b_c.json").read_bytes()
+    roh2 = (G / "memory_a_b_c.json").read_bytes()
     b6 = mig.finde()
     mem6 = [v for v in b6.vorgaenge if v.ablage == "memory"]
     check(f"zwei verschiedene Ziele -> kein Vorgang "
@@ -522,8 +525,8 @@ try:
     check(f"als mehrdeutig gemeldet ({b6.unzuordenbar})",
           any("a_b_c" in e and "mehrdeutig" in e for _, e in b6.unzuordenbar))
     mig.anwenden(b6, trocken=False)
-    check("Datei unangetastet", (D / "memory_a_b_c.json").exists()
-          and (D / "memory_a_b_c.json").read_bytes() == roh2)
+    check("Datei unangetastet", (G / "memory_a_b_c.json").exists()
+          and (G / "memory_a_b_c.json").read_bytes() == roh2)
 
     print("\n=== 4b. Doppelte dict-Schluessel ===")
     (D / "issues_admin_seen.json").write_text(json.dumps({
@@ -579,7 +582,7 @@ try:
           (D / "chats" / "firmavoellig.fremd" / "aaa000bbb111").is_dir())
 
     print("\n=== 5. Unzuordenbares wird GEMELDET, nicht geraten ===")
-    (D / "memory_voelligUnbekannt_X.json").write_text("{}", encoding="utf-8")
+    (G / "memory_voelligUnbekannt_X.json").write_text("{}", encoding="utf-8")
     b3 = mig.finde()
     check("unbekannter Eintrag wird als unzuordenbar gemeldet",
           any(e == "voelligUnbekannt_X" for _, e in b3.unzuordenbar))

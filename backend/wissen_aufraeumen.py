@@ -84,11 +84,18 @@ def _instructions_geaendert() -> list[tuple[str, Path, str]]:
 
 
 def _gedaechtnis() -> list[tuple[str, Path, str]]:
-    """``data/memory*.json`` – per Definition vom Agenten geschrieben."""
+    """``data/memory.json`` und ``data/gedaechtnis/memory_*.json`` – per
+    Definition vom Agenten geschrieben. ``data/memory_*.json`` bleibt fuer den
+    Altbestand vor dem Umzug (F-14) mit drin. Der Schluessel ist der
+    Dateiname; scheitert der Umzug einer Datei, gibt es ihn an beiden Orten –
+    dann gilt der NEUE Ort (den liest tools/memory), der alte faellt heraus."""
     out = []
-    for d in sorted(DATA.glob("memory*.json")):
-        if d.name.endswith(".bak") or ".bak-" in d.name:
+    gesehen = set()
+    for d in (sorted((DATA / "gedaechtnis").glob("memory_*.json"))
+              + sorted(DATA.glob("memory*.json"))):
+        if d.name.endswith(".bak") or ".bak-" in d.name or d.name in gesehen:
             continue
+        gesehen.add(d.name)
         out.append(("gedaechtnis:" + d.name, d, "vom Agenten"))
     return out
 

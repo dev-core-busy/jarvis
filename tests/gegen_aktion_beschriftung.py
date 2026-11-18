@@ -36,6 +36,14 @@ REGELN DES HARNESS (jede aus einem bezahlten Vorfall):
 Lauf:  python3 tests/gegen_aktion_beschriftung.py
 """
 
+# Schreibschutz (2026-11-18): dieser Harness ueberschreibt keine fremde Arbeit –
+# Regeln und Vorfall in tests/lib/schreibschutz.py.
+import sys as _sys, pathlib as _pathlib  # noqa: E401
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent / "lib"))
+import schreibschutz  # noqa: E402
+schreibschutz.aktivieren(__file__)
+
+
 import hashlib
 import os
 import shutil

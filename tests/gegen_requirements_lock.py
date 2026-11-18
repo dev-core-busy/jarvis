@@ -11,6 +11,14 @@ laufen" (Lock leer / torch-Hinweis fehlt).
 Lauf:  python3 tests/gegen_requirements_lock.py
 Exit 0 = alle Proben wie erwartet, 1 = mindestens eine nicht, 2 = konnte nicht laufen
 """
+
+# Schreibschutz (2026-11-18): dieser Harness ueberschreibt keine fremde Arbeit –
+# Regeln und Vorfall in tests/lib/schreibschutz.py.
+import sys as _sys, pathlib as _pathlib  # noqa: E401
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent / "lib"))
+import schreibschutz  # noqa: E402
+schreibschutz.aktivieren(__file__)
+
 import os
 import re
 import subprocess

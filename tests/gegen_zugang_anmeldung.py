@@ -12,6 +12,14 @@ Gegenprobe deutbar). Jede Probe prueft, dass ihr Anker GENAU EINMAL trifft.
 Exit 0 = alle Proben beissen, 1 = mindestens eine stumm, 2 = konnte nicht laufen.
     python3 tests/gegen_zugang_anmeldung.py
 """
+
+# Schreibschutz (2026-11-18): dieser Harness ueberschreibt keine fremde Arbeit –
+# Regeln und Vorfall in tests/lib/schreibschutz.py.
+import sys as _sys, pathlib as _pathlib  # noqa: E401
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent / "lib"))
+import schreibschutz  # noqa: E402
+schreibschutz.aktivieren(__file__)
+
 import os
 import re
 import shutil

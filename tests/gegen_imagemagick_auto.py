@@ -3,6 +3,14 @@
 Jede Probe verdreht EINE Zusage des Abschnitts 6i in einer KOPIE von
 start_jarvis_root.sh (das echte Skript bleibt unberuehrt) und erwartet FAILs.
 """
+
+# Schreibschutz (2026-11-18): dieser Harness ueberschreibt keine fremde Arbeit –
+# Regeln und Vorfall in tests/lib/schreibschutz.py.
+import sys as _sys, pathlib as _pathlib  # noqa: E401
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent / "lib"))
+import schreibschutz  # noqa: E402
+schreibschutz.aktivieren(__file__)
+
 import os
 import re
 import subprocess

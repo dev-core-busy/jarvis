@@ -19,6 +19,14 @@ ist der Waechter an dieser Stelle zahnlos – nicht der Code in Ordnung.
 ⚠ `Vorgaben.cs` gehoert in die Sicherung, obwohl keine Probe sie anfasst: der
    GEPRUEFTE Lauf schreibt sie selbst (er ruft `paket_bauen`).
 """
+
+# Schreibschutz (2026-11-18): dieser Harness ueberschreibt keine fremde Arbeit –
+# Regeln und Vorfall in tests/lib/schreibschutz.py.
+import sys as _sys, pathlib as _pathlib  # noqa: E401
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent / "lib"))
+import schreibschutz  # noqa: E402
+schreibschutz.aktivieren(__file__)
+
 import atexit
 import pathlib
 import re

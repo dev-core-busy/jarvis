@@ -722,8 +722,16 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     await tippe(w, 'ldap');
     const tLdap = titelTexte(w);
     pruefe('„ldap" findet etwas (der gemeldete Fall)', tLdap.length > 0, String(tLdap.length));
-    pruefe('… und zwar an erster Stelle den AD-Abschnitt',
-           /Active Directory|LDAP/i.test(tLdap[0] || ''), tLdap[0] || '(nichts)');
+    // ⚠ SEIT 2026-11-18 STEHT FUER „ldap" DER LDAPS-SCHALTER VORN (Wortanfang
+    // im Titel, er liegt IM AD-Abschnitt) – die Pruefung auf `tLdap[0]` gegen
+    // /LDAP/ waere damit trivial wahr geworden. Gemessen wird deshalb die
+    // ART: der AD-Abschnitt ist unter den Treffern und steht vor jedem
+    // anderen Abschnitt.
+    const trL = w.SettingsSearch._treffer();
+    const ersterAbs = trL.find(x => x.e.art === 'abschnitt');
+    pruefe('… und der erste Abschnitt darunter ist der AD-Abschnitt',
+           !!ersterAbs && /Active Directory|LDAP/i.test(ersterAbs.e.titel),
+           ersterAbs ? ersterAbs.e.titel : '(kein Abschnitt)');
 
     // Alle drei Arten sind im Index - sonst ist „Einstellungen" eine halbe Zusage.
     const idx = w.SettingsSearch._index() || [];
@@ -777,9 +785,12 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     w.document.querySelectorAll('.settings-tab-btn[data-settings-tab]').forEach(b => {
         b.addEventListener('click', () => geklickt.push(b.getAttribute('data-settings-tab')));
     });
+    // Angesprungen wird der ABSCHNITT unter den Treffern, nicht blind der
+    // erste: fuer „ldap" steht seit 2026-11-18 der LDAPS-Schalter davor.
     await tippe(w, 'ldap');
     const tr = w.SettingsSearch._treffer();
-    const ziel = tr[0] && tr[0].e;
+    const zielNr = tr.findIndex(x => x.e.art === 'abschnitt');
+    const ziel = zielNr >= 0 ? tr[zielNr].e : null;
     pruefe('Treffer vorhanden zum Anspringen', !!ziel && ziel.art === 'abschnitt',
            ziel ? ziel.art : '(keiner)');
 
@@ -788,7 +799,7 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     pruefe('Abschnitt ist VOR dem Klick zu (sonst misst der Test nichts)',
            !!body && body.style.display === 'none', body ? body.style.display : '?');
 
-    klick(w.document.querySelector('.st-such-item'), w);
+    klick(w.document.querySelectorAll('.st-such-item')[zielNr], w);
     await tickCount(4);
 
     // ⚠ DEN REITER SCHALTET app.js UM, und die laedt dieser Lauf bewusst nicht
@@ -809,7 +820,7 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
     // Kopfzeile kehrt den Zustand um - der Treffer haette den Abschnitt dann
     // geschlossen, also genau das Gegenteil bewirkt.
     await tippe(w, 'ldap');
-    klick(w.document.querySelector('.st-such-item'), w);
+    klick(w.document.querySelectorAll('.st-such-item')[zielNr], w);
     await tickCount(4);
     pruefe('ein zweiter Treffer laesst den offenen Abschnitt OFFEN',
            !!body && body.style.display !== 'none', body ? body.style.display : '?');
@@ -1049,6 +1060,79 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
            aussen.map(x => (x.getAttribute('data-sub') || '?') + '=' + x.open).join(' | ')
            + ' / innen=' + (innen ? innen.open : '(fehlt)'));
     sondeA.remove();
+}
+
+// ── Abschnitt 11: Schalter mit Beschriftung NEBEN dem <label> ──────────────
+// Gemeldet 2026-11-18: „LDAPS wird im Admin-Suchfeld nicht gefunden".
+// Der Schalter ist `<label class="toggle-switch">` OHNE eigenen Text, die
+// Beschriftung steht im Geschwister-<span>. Gemessen traf es jeden Schalter
+// dieser Bauform – geprueft wird deshalb die REGEL ueber alle, nicht der eine.
+{
+    const { w } = await seiteVoll(KORPUS);
+    const doc = w.document;
+
+    await tippe(w, 'ldaps');
+    const tL = titelTexte(w);
+    pruefe('„ldaps" findet den Schalter (der gemeldete Fall)',
+           tL.some(x => /^LDAPS/.test(x)), tL.join(' | ') || '(nichts)');
+    const idx11 = w.SettingsSearch._index() || [];
+    const ldapsLab = (doc.getElementById('ad-ldaps') || {}).parentNode;
+    const ldapsEintrag = idx11.find(e => e.el === ldapsLab);
+    pruefe('… und zwar als Eintrag AM Schalter (Sprungziel)', !!ldapsEintrag,
+           '(kein Eintrag mit el = label des #ad-ldaps)');
+
+    await tippe(w, 'starttls');
+    pruefe('„starttls" findet denselben Schalter (zweite Zustandsbeschriftung)',
+           titelTexte(w).some(x => /^LDAPS/.test(x)),
+           titelTexte(w).join(' | ') || '(nichts)');
+
+    // Die Regel: JEDER Schalter dieser Bauform in einem sichtbaren Reiter
+    // steht mit seinem Label-Element im Index.
+    const sichtbareReiter = new Set([].slice.call(
+        doc.querySelectorAll('.settings-tab-btn[data-settings-tab]'))
+        .filter(b => b.style.display !== 'none')
+        .map(b => b.getAttribute('data-settings-tab')));
+    function reiterVon(el) {
+        for (let p = el; p && p !== doc.body; p = p.parentNode) {
+            if ((p.id || '').indexOf('settings-tab-') === 0) return p.id.slice(13);
+        }
+        return '';
+    }
+    const schalter = [].slice.call(doc.querySelectorAll('label.toggle-switch'))
+        .filter(l => !(l.textContent || '').trim() && sichtbareReiter.has(reiterVon(l)));
+    pruefe('Positivkontrolle: mindestens drei textlose Schalter in sichtbaren Reitern',
+           schalter.length >= 3, String(schalter.length));
+    const imIndex = new Set(idx11.map(e => e.el));
+    const ohne = schalter.filter(l => !imIndex.has(l))
+        .map(l => (l.querySelector('input') || {}).id || '?');
+    pruefe('JEDER textlose Schalter ist auffindbar', ohne.length === 0, ohne.join(', '));
+
+    await tippe(w, 'rdp erlauben');
+    pruefe('„rdp erlauben" findet den Schalter',
+           titelTexte(w).indexOf('RDP erlauben') >= 0, titelTexte(w).join(' | ') || '(nichts)');
+    await tippe(w, 'webdav aktivieren');
+    pruefe('„webdav aktivieren" findet den Schalter',
+           titelTexte(w).indexOf('WebDAV aktivieren') >= 0, titelTexte(w).join(' | ') || '(nichts)');
+
+    // ⚠ DIE GRENZE: ein Geschwister, das selbst ein Bedienelement ist, ist
+    // keine Beschriftung. Sonde: textloser Schalter, daneben ein Knopf.
+    const host = doc.getElementById('sec-sect-ad-body');
+    if (!host) { console.log('ABBRUCH: #sec-sect-ad-body fehlt'); bilanz = true; process.exit(2); }
+    const sonde = doc.createElement('div');
+    sonde.innerHTML = '<label class="toggle-switch"><input type="checkbox"><span class="toggle-slider"></span></label>' +
+        '<button type="button">Sondenknopf Daneben</button>' +
+        '<label class="toggle-switch"><input type="checkbox"><span class="toggle-slider"></span></label>' +
+        '<span>Sondenschalter Beschriftet</span>';
+    host.appendChild(sonde);
+    w.SettingsSearch._verwerfen();
+    await tippe(w, 'sondenschalter');
+    pruefe('Positivkontrolle: Sonden-Schalter mit Text daneben ist auffindbar',
+           titelTexte(w).indexOf('Sondenschalter Beschriftet') >= 0, titelTexte(w).join(' | ') || '(nichts)');
+    await tippe(w, 'sondenknopf');
+    pruefe('ein Knopf neben einem Schalter wird NICHT zu dessen Beschriftung',
+           titelTexte(w).indexOf('Sondenknopf Daneben') < 0, titelTexte(w).join(' | '));
+    sonde.remove();
+    w.SettingsSearch._verwerfen();
 }
 
 // ── Abschnitt 10: die Regel steht im Code, nicht als Liste ─────────────────

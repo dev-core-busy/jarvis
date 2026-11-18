@@ -299,10 +299,20 @@ PROBEN = [
      "            else if (p.tagName === 'DETAILS' && !p.open) kette.unshift(p);",
      "            else if (p.tagName === 'DETAILS' && !p.open) { kette.unshift(p); break; }"),
     ("zwei Fassungen der Titel-Trennung", "frontend/js/settings_search.js",
-     "            var zerlegt = teileAuf(lab);\n            if (!zerlegt) continue;",
+     "            var zerlegt = teileAuf(lab) || beschriftungDaneben(lab);\n            if (!zerlegt) continue;",
      "            var zerlegt = (function (x) { var t = (x.textContent || '').trim();\n"
-     "                return t ? { titel: t, zusatz: '' } : null; })(lab);\n"
+     "                return t ? { titel: t, zusatz: '' } : null; })(lab) || beschriftungDaneben(lab);\n"
      "            if (!zerlegt) continue;"),
+
+    # ── Schalter mit Beschriftung NEBEN dem <label> (gemeldet 2026-11-18:
+    # „LDAPS wird nicht gefunden") ──────────────────────────────────────────
+    # ⚠ DIE ERSTE IST DER GEMELDETE ZUSTAND SELBST.
+    ("Schalter: die Beschriftung daneben wird nicht gelesen", "frontend/js/settings_search.js",
+     "            var zerlegt = teileAuf(lab) || beschriftungDaneben(lab);",
+     "            var zerlegt = teileAuf(lab);"),
+    ("Schalter: ein Knopf daneben gilt als Beschriftung", "frontend/js/settings_search.js",
+     "            if (!nb || /^(INPUT|SELECT|TEXTAREA|BUTTON|LABEL)$/.test(nb.tagName)) return null;",
+     "            if (!nb) return null;"),
 
 ]
 

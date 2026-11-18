@@ -317,6 +317,35 @@ subjectAltName = @alt_names
         print(f"❌ Unerwarteter Fehler: {e}")
 
 
+def zertifikat_von_ca(pfad=None):
+    """Ist das ausgelieferte Serverzertifikat von einer Zertifizierungsstelle
+    ausgestellt (Aussteller != Inhaber)?
+
+    True  = von einer CA ausgestellt (Firmen-CA, Let's Encrypt …) – ein
+            Client der Domaene vertraut ihr ohne eigenes Zutun.
+    False = selbstsigniert (das von ``ensure_certificates`` erzeugte „Jarvis
+            CA"-Zertifikat) – der Browser warnt, bis es importiert ist.
+    None  = nicht feststellbar. Die Anmeldemaske behandelt das wie „False"
+            und zeigt den Zertifikathinweis weiter: eine Auskunft, die sie
+            nicht hat, darf den Hinweis nicht wegnehmen.
+
+    WARUM (2026-11-18): Die Anmeldemaske zeigte den Hinweis „SSL Zertifikat &
+    Verbindung Hilfe" auch auf ECHT, das seit 2026-11-11 ein Zertifikat der
+    Firmen-CA traegt. Der Browser kann per JavaScript nicht sagen, ob er der
+    Verbindung vertraut (ein weggeklicktes Warnfenster sieht im Skript genauso
+    aus wie eine gueltige Kette) – der Server weiss aber, was er vorlegt.
+
+    Erstes Zertifikat der Datei = das des Servers (danach ggf. die Kette).
+    """
+    try:
+        from cryptography import x509  # noqa: PLC0415
+        pem = Path(pfad or CERT_FILE).read_bytes()
+        cert = x509.load_pem_x509_certificate(pem)
+        return cert.issuer != cert.subject
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def get_certificate_path():
     """Gibt den Pfad zum DER-Zertifikat zurück (bevorzugt für Windows)."""
     if CERT_DER_FILE.exists():

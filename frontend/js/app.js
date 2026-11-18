@@ -3731,6 +3731,30 @@
         });
     }
 
+    // Zertifikathinweis der Anmeldemaske nur, wenn er gebraucht wird
+    // (gemeldet 2026-11-18). Der Browser kann per Skript nicht sagen, ob er
+    // der Verbindung vertraut – ein weggeklicktes Warnfenster sieht hier
+    // genauso aus wie eine gueltige Kette. Der Server weiss aber, was er
+    // vorlegt: ist sein Zertifikat von einer Zertifizierungsstelle ausgestellt
+    // (Firmen-CA, Let's Encrypt), braucht niemand die Import-Anleitung.
+    // ⚠ NUR EIN ECHTES `true` NIMMT IHN WEG. Unbekannt, Fehler oder ein alter
+    // Server ohne den Endpunkt lassen ihn stehen – eine Auskunft, die die
+    // Seite nicht hat, darf den Hinweis nicht verschwinden lassen.
+    // ⚠ `style.display`, nicht `hidden`: `.btn-link` und `.login-extras`
+    // setzen `display:flex` und ueberstimmen das Attribut.
+    function zertHinweisAnpassen() {
+        fetch('/api/cert/status', { cache: 'no-store' })
+            .then(r => (r && r.ok) ? r.json() : null)
+            .then(d => {
+                if (!d || d.ca_ausgestellt !== true) return;
+                const btn = document.getElementById('btn-cert-help');
+                if (!btn) return;
+                const box = btn.closest('.login-extras');
+                (box || btn).style.display = 'none';
+            })
+            .catch(() => { /* Hinweis bleibt stehen */ });
+    }
+
     function checkSecurity() {
         const banner = document.getElementById('security-banner');
         const bannerText = document.getElementById('security-banner-text');
@@ -3767,6 +3791,7 @@
                 indicator.className = 'security-badge secure';
                 indicator.title = window.t('panel.security_secure');
             }
+            if (isHttps) zertHinweisAnpassen();
         }
 
         if (btnClose) {

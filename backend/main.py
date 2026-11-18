@@ -11020,6 +11020,21 @@ async def download_cert():
     return JSONResponse({"error": "Zertifikat nicht gefunden"}, status_code=404)
 
 
+@app.get("/api/cert/status")
+async def cert_status():
+    """Braucht die Anmeldemaske den Zertifikathinweis? (2026-11-18)
+
+    Liefert nur, ob das Serverzertifikat von einer Zertifizierungsstelle
+    ausgestellt ist – ``true``/``false``/``null`` (nicht feststellbar). Mehr
+    nicht: das Zertifikat selbst legt der Server ohnehin jedem Client im
+    TLS-Handshake vor, eine Ja/Nein-Auskunft darueber hat keinen
+    Schutzbedarf. Ohne Anmeldung, weil sie VOR der Anmeldung gebraucht wird.
+    """
+    from backend.security import zertifikat_von_ca  # noqa: PLC0415
+    return JSONResponse({"ca_ausgestellt": zertifikat_von_ca()},
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/generated/{name}")
 async def get_generated_image(name: str, user: str = Depends(require_auth_or_query)):
     """Liefert ein generiertes/gesuchtes Bild aus – NUR an Angemeldete.

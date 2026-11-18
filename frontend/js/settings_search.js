@@ -289,6 +289,28 @@
             return { titel: saeubere(teile[0]), zusatz: saeubere(teile.slice(1).join(' ')) };
         }
 
+        // ⚠ EIN SCHALTER TRAEGT SEINE BESCHRIFTUNG NEBEN SICH, NICHT IN SICH.
+        // Die Bauform `<label class="toggle-switch"><input type=checkbox>
+        // <span class="toggle-slider"></span></label><span>Text</span>` hat im
+        // <label> keinen Text – `teileAuf` verwirft sie, und der Schalter war
+        // unauffindbar. Gemeldet 2026-11-18 als „LDAPS wird nicht gefunden";
+        // gemessen traf es ALLE Schalter dieser Bauform (LDAPS/StartTLS, „RDP
+        // erlauben", „WebDAV aktivieren").
+        // Regel statt Liste: ein textloses <label> mit Kaestchen nimmt das
+        // DIREKT folgende Geschwister, sofern das selbst kein Bedienelement
+        // ist. Wechselt die Beschriftung mit dem Zustand (zwei Spans, einer
+        // `hidden`), zaehlen beide: der erste ist der Titel, der zweite bleibt
+        // als Erlaeuterung durchsuchbar – „ldaps" und „starttls" finden
+        // denselben Schalter, unabhaengig von seinem Zustand beim Indizieren.
+        function beschriftungDaneben(el) {
+            if (!el.querySelector || !el.querySelector('input[type="checkbox"]')) return null;
+            if ((el.textContent || '').trim()) return null;
+            var nb = el.nextElementSibling;
+            if (!nb || /^(INPUT|SELECT|TEXTAREA|BUTTON|LABEL)$/.test(nb.tagName)) return null;
+            if (nb.querySelector && nb.querySelector('input, select, textarea, button')) return null;
+            return teileAuf(nb);
+        }
+
         // Name des umschliessenden Klappabschnitts (fuer den Pfad).
         function absNameVon(el) {
             var absEl = el.closest ? el.closest('.kb-collapse-body') : null;
@@ -402,7 +424,7 @@
             var lab = labs[m];
             var tab3 = reiterVon(lab);
             if (!tab3 || !knoepfe[tab3]) continue;
-            var zerlegt = teileAuf(lab);
+            var zerlegt = teileAuf(lab) || beschriftungDaneben(lab);
             if (!zerlegt) continue;
             var txt = zerlegt.titel, erlaeuterung = zerlegt.zusatz;
             if (txt.length < 3 || txt.length > 90) continue;

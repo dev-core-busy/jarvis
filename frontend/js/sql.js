@@ -833,8 +833,12 @@
         $('sq-portal-btn').addEventListener('click', toPortal);
         $('sq-logout-btn').addEventListener('click', function () {
             if (window.jarvisLogout) { window.jarvisLogout(); return; }
+            // Erst dem Server sagen, DANN das Token verwerfen (wie /portal). Bis
+            // 2026-11-18 fehlte die Server-Abmeldung: das Sitzungs-Cookie blieb gueltig.
+            var _abmeldung = window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve();
             TOKEN_KEYS.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) { } });
-            window.location.replace('/');
+            Promise.resolve(_abmeldung).catch(function () {})
+                .then(function () { window.location.replace('/'); });
         });
         // Sprachwechsel: Dialekt-Liste und Quellenzeile sind JS-Texte, die
         // applyLang() nicht erreicht. Vergleich, weil das Ereignis bei JEDEM

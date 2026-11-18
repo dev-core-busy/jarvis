@@ -65,6 +65,14 @@ check('Knopf-Bereich ist anfangs verborgen', /<div id="idp-login" hidden>/.test(
 const THEME = lies('frontend/css/theme.css');
 check('theme.css: .idp-trenner[hidden] { display: none } (sonst ueberstimmt display:flex)',
       /\.idp-trenner\[hidden\]\s*\{\s*display:\s*none/.test(THEME));
+{
+    // Hauptknopf-Aussehen: zwei Klassen (gewinnt gegen .btn-link aus dem spaeter
+    // geladenen style.css), Flaeche in der Akzentfarbe, Schrift aus der Variable.
+    const m = THEME.match(/\.btn-idp\.btn-idp-haupt\s*\{([^}]*)\}/);
+    check('theme.css: .btn-idp.btn-idp-haupt mit Akzentflaeche und --text-on-accent',
+          !!m && /background:\s*var\(--accent\)/.test(m[1]) && /color:\s*var\(--text-on-accent\)/.test(m[1]),
+          m ? m[1].trim() : 'Regel fehlt');
+}
 
 // ── B: Verhalten ────────────────────────────────────────────────────────────
 function seite(url, antworten) {
@@ -161,18 +169,21 @@ function seite(url, antworten) {
     // ── Kennwortanmeldung neben dem IdP ──────────────────────────────────
     const sichtbar = (s) => !s.d.getElementById('kennwort-bereich').hidden;
     const trenner = (s) => !s.d.getElementById('idp-trenner').hidden;
+    const haupt = (s) => s.d.getElementById('btn-idp-login').classList.contains('btn-idp-haupt');
 
     s = seite('https://jarvis.test/', { aktiv: true, modus: 'fallback', einloesen: [] });
     await warte(60);
     check('fallback: Kennwort-Bereich und "oder" verborgen, IdP-Knopf sichtbar',
           !sichtbar(s) && !trenner(s) && s.d.getElementById('idp-login').hidden === false);
     check('fallback: Modus im Browser gemerkt', s.w.localStorage.getItem('jarvis_idp_ad_modus') === 'fallback');
+    check('fallback: IdP-Knopf traegt das Hauptknopf-Aussehen (btn-idp-haupt)', haupt(s));
     s.w.close();
 
     s = seite('https://jarvis.test/', { aktiv: true, modus: 'zusaetzlich', einloesen: [] });
     await warte(60);
     check('zusaetzlich: Kennwort-Bereich, "oder" und IdP-Knopf sichtbar',
           sichtbar(s) && trenner(s) && s.d.getElementById('idp-login').hidden === false);
+    check('zusaetzlich: IdP-Knopf bleibt Nebenknopf (Hauptknopf ist "Anmelden")', !haupt(s));
     s.w.close();
 
     s = seite('https://jarvis.test/', { aktiv: false, merk: 'fallback', einloesen: [] });
@@ -190,6 +201,7 @@ function seite(url, antworten) {
     await warte(60);
     check('fallback + IdP-Anmeldung gescheitert: Kennwort sichtbar, Meldung steht da',
           sichtbar(s) && trenner(s) && !s.d.getElementById('login-error').hidden);
+    check('fallback + gescheitert: IdP-Knopf wieder Nebenknopf', !haupt(s));
     s.w.close();
 
     s = seite('https://jarvis.test/?anmeldung=idp', { aktiv: true, modus: 'fallback', einloesen: [

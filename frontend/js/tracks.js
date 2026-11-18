@@ -1189,8 +1189,12 @@
         if ((b = $('st-portal-btn'))) b.addEventListener('click', toPortal);
         if ((b = $('st-logout-btn'))) b.addEventListener('click', function () {
             if (window.jarvisLogout) { window.jarvisLogout(); return; }
+            // Erst dem Server sagen, DANN das Token verwerfen (wie /portal). Bis
+            // 2026-11-18 fehlte die Server-Abmeldung: das Sitzungs-Cookie blieb gueltig.
+            var _abmeldung = window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve();
             TOKEN_KEYS.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) { } });
-            window.location.replace('/');
+            Promise.resolve(_abmeldung).catch(function () {})
+                .then(function () { window.location.replace('/'); });
         });
         if ((b = $('st-file-input'))) b.addEventListener('change', function () {
             if (_dropZiel && b.files && b.files.length) schickeDateien(_dropZiel, b.files);

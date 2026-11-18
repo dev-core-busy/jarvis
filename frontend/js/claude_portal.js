@@ -419,10 +419,14 @@
         var logout = $('cs-logout-btn');
         if (logout) logout.addEventListener('click', function () {
             if (window.jarvisLogout) { window.jarvisLogout(); return; }
+            // Erst dem Server sagen, DANN das Token verwerfen (wie /portal). Bis
+            // 2026-11-18 fehlte die Server-Abmeldung: das Sitzungs-Cookie blieb gueltig.
+            var _abmeldung = window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve();
             TOKEN_KEYS.forEach(function (k) {
                 try { localStorage.removeItem(k); } catch (e) { /* egal */ }
             });
-            location.href = '/';
+            Promise.resolve(_abmeldung).catch(function () {})
+                .then(function () { location.replace('/'); });
         });
 
         // Sprachwechsel: nur neu zeichnen, wenn sich die Sprache WIRKLICH

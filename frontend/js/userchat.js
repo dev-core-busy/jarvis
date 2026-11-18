@@ -1116,14 +1116,17 @@
     if (logoutBtn) {
         logoutBtn.addEventListener('click', () => {
             // Abmeldung melden, SOLANGE das Token noch gilt (siehe sessions.js)
-            if (window.JarvisSession) window.JarvisSession.logout();
+            const _abmeldung = window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve();
             // Global abmelden (SSO): alle Seiten-Token entfernen
             localStorage.removeItem('jarvis_uc_token');
             localStorage.removeItem('jarvis_token');
             localStorage.removeItem('jarvis_chat_token');
             localStorage.removeItem('jarvis_uc_user');
             if (ws) ws.close();
-            location.reload();
+            // Zentrale Anmeldung "/" statt Neuladen dieser Seite: nur dort gibt es
+            // "Mit Firmenkonto anmelden" (wie Portal und Kopfzeile).
+            Promise.resolve(_abmeldung).catch(function () {})
+                .then(function () { location.replace('/'); });
         });
     }
 

@@ -324,12 +324,17 @@
         // Abmelden (global: alle Token-Keys) -> zurueck zum Portal
         var _lo = $('sup-logout-btn');
         if (_lo) _lo.addEventListener('click', function () {
+            // Erst dem Server sagen, DANN das Token verwerfen (wie /portal). Bis
+            // 2026-11-18 fehlte die Server-Abmeldung hier ganz: das Sitzungs-
+            // Cookie blieb gueltig, und /portal war danach weiter angemeldet.
+            var _abmeldung = window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve();
             TOKEN_KEYS.forEach(function (k) { localStorage.removeItem(k); });
             // Benutzernamen aus derselben Quelle: ein kuenftig hinzukommender
             // Schluessel bliebe sonst beim Abmelden stehen.
             window.JarvisSitzung.benutzerSchluessel()
                 .forEach(function (k) { localStorage.removeItem(k); });
-            window.location.href = '/portal';
+            Promise.resolve(_abmeldung).catch(function () {})
+                .then(function () { window.location.replace('/'); });
         });
         // LLM-Status-Pill: nur fuer Admins klickbar -> Einstellungen (LLM-Profile)
         fetch('/api/me', { headers: authHeaders() })

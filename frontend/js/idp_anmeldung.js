@@ -69,9 +69,11 @@
         try { return localStorage.getItem(MERK) || ''; } catch (e) { return ''; }
     }
     function kennwortZeigen(an) {
-        var b = $('kennwort-bereich'), tr = $('idp-trenner');
+        var b = $('kennwort-bereich'), tr = $('idp-trenner'), k = $('btn-idp-login');
         if (b) b.hidden = !an;
         if (tr) tr.hidden = !an;   // "oder" nur, wenn es etwas zu waehlen gibt
+        // Allein auf der Maske ist der IdP-Knopf der Hauptknopf (Aussehen wie "Anmelden").
+        if (k) k.classList.toggle('btn-idp-haupt', !an);
     }
     function ausweichen() {
         ausgewichen = true;

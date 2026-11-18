@@ -528,7 +528,8 @@
         // Abmeldung beim Server melden, SOLANGE das Token noch gilt – danach
         // ist sie nicht mehr authentifizierbar. Ohne dieses Signal kann der
         // Server "abgemeldet" nicht von "still geworden" unterscheiden.
-        if (window.JarvisSession) window.JarvisSession.logout(token);
+        // Rueckgabe: das Abmelde-Signal (der Klick wartet darauf, siehe unten).
+        const _abmeldung = window.JarvisSession ? window.JarvisSession.logout(token) : Promise.resolve();
         token = '';
         // Global abmelden (SSO): alle Seiten-Token entfernen
         localStorage.removeItem('jarvis_chat_token');
@@ -543,9 +544,16 @@
         loginScreen.classList.remove('hidden');
         loginPass.value = '';
         loginError.textContent = '';
+        return _abmeldung;
     }
 
-    logoutBtn.addEventListener('click', logout);
+    // Der KNOPF fuehrt auf die zentrale Anmeldung "/" (wie Portal und Kopfzeile):
+    // nur dort gibt es "Mit Firmenkonto anmelden". Die eigene Maske dieser Seite
+    // kennt nur das Kennwort (gemeldet 2026-11-18: Abmeldung landete auf /chat).
+    logoutBtn.addEventListener('click', function () {
+        Promise.resolve(logout()).catch(function () {})
+            .then(function () { location.replace('/'); });
+    });
 
     // ═════════════════════════════════════════════════════════════
     //  WEBSOCKET

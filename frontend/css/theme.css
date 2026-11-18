@@ -1959,3 +1959,20 @@ body .wi-section { margin-bottom: var(--jv-abstand); }
 }
 /* `display:flex` oben ueberstimmt sonst das hidden-Attribut (Modus "Ausweichweg"). */
 .idp-trenner[hidden] { display: none; }
+/* Einziger Knopf der Maske (Ausweichweg, Kennwort verborgen): Aussehen des
+   Hauptknopfs "Anmelden" (.btn-login in style.css). Zwei Klassen, damit es
+   gegen .btn-link aus style.css (spaeter geladen) gewinnt. idp_anmeldung.js. */
+.btn-idp.btn-idp-haupt {
+    background: var(--accent);
+    color: var(--text-on-accent);
+    border: 1px solid var(--accent);
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.btn-idp.btn-idp-haupt:hover {
+    background: var(--accent-hover);
+    color: var(--text-on-accent);
+    border-color: var(--accent-hover);
+    box-shadow: 0 4px 16px var(--accent-glow);
+    transform: translateY(-1px);
+}

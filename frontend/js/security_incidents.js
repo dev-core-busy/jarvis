@@ -1589,10 +1589,13 @@
     document.addEventListener('DOMContentLoaded', function () {
         var lo = $('blocked-logout');
         if (lo) lo.addEventListener('click', function () {
-            if (window.JarvisSession) window.JarvisSession.logout();
+            var _abmeldung = window.JarvisSession ? window.JarvisSession.logout() : Promise.resolve();
             localStorage.removeItem('jarvis_token');
             localStorage.removeItem('jarvis_user');
-            window.location.reload();
+            // Zentrale Anmeldung "/" statt Neuladen: auf /chat, /userchat oder
+            // /support kaeme sonst deren eigene Maske ohne Firmenanmeldung.
+            Promise.resolve(_abmeldung).catch(function () {})
+                .then(function () { window.location.replace('/'); });
         });
     });
 

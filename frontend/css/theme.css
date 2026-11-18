@@ -1957,3 +1957,5 @@ body .wi-section { margin-bottom: var(--jv-abstand); }
     flex: 1;
     border-top: 1px solid var(--border);
 }
+/* `display:flex` oben ueberstimmt sonst das hidden-Attribut (Modus "Ausweichweg"). */
+.idp-trenner[hidden] { display: none; }

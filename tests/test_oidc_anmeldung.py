@@ -365,7 +365,8 @@ BAUM = ast.parse(MAIN)
 FUNK = {n.name: n for n in BAUM.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
 NOETIG = ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri", "_oidc_mfa_anerkennen",
           "_oidc_cookie", "_oidc_cookie_weg", "_oidc_zurueck", "oidc_callback",
-          "oidc_einloesen", "_oidc_einloesen_ablauf", "oidc_start", "oidc_status")
+          "oidc_einloesen", "_oidc_einloesen_ablauf", "oidc_start", "oidc_status",
+          "_oidc_ad_modus", "oidc_einstellungen_lesen", "oidc_einstellungen_setzen")
 for n in NOETIG:
     pruefe(n in FUNK, "%s existiert in main.py" % n)
 if not all(n in FUNK for n in NOETIG):
@@ -375,6 +376,19 @@ if not all(n in FUNK for n in NOETIG):
 
 def _dek(fn):
     return [ast.unparse(d) for d in fn.decorator_list]
+
+
+def _konstante(name):
+    """Modulkonstante aus main.py per AST – nicht abgetippt (Drift)."""
+    for n in BAUM.body:
+        if isinstance(n, ast.Assign) and any(getattr(z, "id", "") == name for z in n.targets):
+            return ast.literal_eval(n.value)
+    return None
+
+
+AD_MODI = _konstante("_OIDC_AD_MODI")
+pruefe(isinstance(AD_MODI, tuple) and AD_MODI[:1] == ("fallback",) and "zusaetzlich" in AD_MODI,
+       "_OIDC_AD_MODI: Vorgabe 'fallback', daneben 'zusaetzlich'")
 
 
 pruefe("app.get('/api/login/oidc/start')" in _dek(FUNK["oidc_start"])
@@ -437,7 +451,9 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
     log.setdefault("versuche", [])
     log.setdefault("sicherheit", [])
     log.setdefault("kontext", [])
-    cfg = types.SimpleNamespace(get_setting=lambda k, d=None: einst.get(k, d))
+    log.setdefault("gespeichert", {})
+    cfg = types.SimpleNamespace(get_setting=lambda k, d=None: einst.get(k, d),
+                                save_setting=lambda k, v: log["gespeichert"].__setitem__(k, v))
     lic = types.ModuleType("backend.license_enforce")
     lic.darf_benutzer_anmelden = lambda u: (lizenz, "" if lizenz else "Grenze")
     sys.modules["backend.license_enforce"] = lic
@@ -480,10 +496,16 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
         "AuthStateUnlesbar": AuthStateUnlesbar,
         "_OIDC_COOKIE_VORGANG": "__Host-jarvis_oidc",
         "_OIDC_COOKIE_SCHEIN": "__Host-jarvis_oidc_schein",
+        "_OIDC_AD_MODI": AD_MODI,
+        "_OIDC_TEXTFELDER": _konstante("_OIDC_TEXTFELDER"),
+        "Depends": lambda f=None: None, "require_local_auth": None,
+        "_note_activity": lambda u, r: None,
+        "_sprot_angaben": lambda **kw: None,
     }
     for n in ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri", "_oidc_mfa_anerkennen",
               "_oidc_cookie", "_oidc_cookie_weg", "_oidc_zurueck", "oidc_callback",
-              "_oidc_einloesen_ablauf"):
+              "_oidc_einloesen_ablauf", "_oidc_ad_modus", "oidc_status",
+              "oidc_einstellungen_lesen", "oidc_einstellungen_setzen"):
         fn = FUNK[n]
         fn2 = ast.FunctionDef(name=fn.name, args=fn.args, body=fn.body, decorator_list=[],
                               returns=None, type_params=[]) if isinstance(fn, ast.FunctionDef) else \
@@ -611,8 +633,19 @@ pruefe(d.get("success") and log["token"] == [("m.muster", {"mit_2fa": True})],
        "MFA anerkannt und belegt -> kein Code, Sitzung mit zweitem Faktor")
 r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": False}, einst=MFA_AN, auth_state=TOTP)
 pruefe(d.get("requires_totp") and not log["token"], "MFA anerkannt, aber NICHT belegt -> Code verlangt")
-r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, auth_state=TOTP)
-pruefe(d.get("requires_totp"), "MFA belegt, aber Schalter AUS -> Code verlangt")
+MFA_AUS = dict(EINST, oidc_mfa_anerkennen=False)
+r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=MFA_AUS, auth_state=TOTP)
+pruefe(d.get("requires_totp"), "MFA belegt, aber Schalter ausdruecklich AUS -> Code verlangt")
+# Festlegung 2026-11-18: ohne Eintrag zaehlt die IdP-Anmeldung als zweiter Faktor –
+# auch fuer Administratoren bei 2FA-Pflicht, auch fuer ein Konto mit eigenem Code.
+r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, auth_state=TOTP,
+                          admin=True, pflicht=True)
+pruefe(d.get("success") and d.get("is_admin") is True and not d.get("requires_totp")
+       and log["token"] == [("m.muster", {"mit_2fa": True})],
+       "Vorgabe: Admin bei 2FA-Pflicht nach IdP-Anmeldung ohne eigenen Code mit Admin-Rechten")
+r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=MFA_AUS,
+                          admin=True, pflicht=True)
+pruefe(d.get("is_admin") is False, "Schalter AUS: Admin ohne eigenen Code bekommt keine Admin-Rechte")
 
 r, d, log, _ = _einloesen(admin=True, pflicht=True)
 pruefe(d.get("success") and d.get("is_admin") is False and d.get("hinweis")
@@ -644,7 +677,45 @@ ns, _ = _ns(_ohne_schalter)
 pruefe(ns["_oidc_konfig"]() is None, "Vorgabe: IdP-Anmeldung AUS (vollstaendige Konfiguration ohne Schalter)")
 ns, _ = _ns(dict(_ohne_schalter, oidc_aktiv=True))
 pruefe(ns["_oidc_konfig"]() is not None, "Positivkontrolle: mit Schalter ist dieselbe Konfiguration wirksam")
-pruefe(ns["_oidc_mfa_anerkennen"]() is False, "Vorgabe: MFA des IdP zaehlt NICHT als zweiter Faktor")
+pruefe(ns["_oidc_mfa_anerkennen"]() is True,
+       "Vorgabe: Anmeldung ueber den IdP zaehlt als zweiter Faktor (Festlegung 2026-11-18)")
+ns, _ = _ns(dict(EINST, oidc_mfa_anerkennen=False))
+pruefe(ns["_oidc_mfa_anerkennen"]() is False, "ausdruecklich aus bleibt aus")
+
+abschnitt("3b. Kennwortanmeldung neben dem IdP (oidc_ad_modus)")
+for wert, soll in ((None, "fallback"), ("zusaetzlich", "zusaetzlich"), (" Zusaetzlich ", "zusaetzlich"),
+                   ("fallback", "fallback"), ("immer", "fallback"), ("", "fallback")):
+    ns, _ = _ns(dict(EINST, **({} if wert is None else {"oidc_ad_modus": wert})))
+    pruefe(ns["_oidc_ad_modus"]() == soll, "ad_modus %r -> %r" % (wert, soll))
+ns, _ = _ns(EINST)
+d = json.loads(asyncio.run(ns["oidc_status"]()).body)
+pruefe(d == {"aktiv": True, "ad_modus": "fallback"}, "Status: aktiv + Vorgabe fallback", )
+ns, _ = _ns(dict(EINST, oidc_ad_modus="zusaetzlich"))
+d = json.loads(asyncio.run(ns["oidc_status"]()).body)
+pruefe(d == {"aktiv": True, "ad_modus": "zusaetzlich"}, "Status: zusaetzlich")
+ns, _ = _ns(dict(EINST, oidc_aktiv=False, oidc_ad_modus="zusaetzlich"))
+d = json.loads(asyncio.run(ns["oidc_status"]()).body)
+pruefe(d == {"aktiv": False}, "Status bei ausgeschaltetem IdP unveraendert {aktiv: false}")
+
+
+def _setzen(body, einst=None):
+    ns, log = _ns(einst or EINST)
+    r = asyncio.run(ns["oidc_einstellungen_setzen"](_Req(body=body), "admin"))
+    return r, json.loads(r.body), log["gespeichert"]
+
+
+r, d, gesp = _setzen({"oidc_ad_modus": "zusaetzlich"})
+pruefe(r.status_code == 200 and gesp.get("oidc_ad_modus") == "zusaetzlich", "Speichern: zusaetzlich")
+r, d, gesp = _setzen({"oidc_ad_modus": "fallback"})
+pruefe(r.status_code == 200 and gesp.get("oidc_ad_modus") == "fallback", "Speichern: fallback")
+for falsch in ("immer", True, "", None, ["zusaetzlich"]):
+    r, d, gesp = _setzen({"oidc_ad_modus": falsch, "oidc_client_id": "x"})
+    pruefe(r.status_code == 400 and not gesp, "Speichern abgewiesen (nichts geschrieben): %r" % (falsch,))
+r, d, gesp = _setzen({"oidc_client_id": "x"})
+pruefe(r.status_code == 200 and "oidc_ad_modus" not in gesp, "ohne Feld bleibt der Modus unberuehrt")
+ns, _ = _ns(dict(EINST, oidc_ad_modus="zusaetzlich"))
+d = json.loads(asyncio.run(ns["oidc_einstellungen_lesen"](_Req(), "admin")).body)
+pruefe(d.get("oidc_ad_modus") == "zusaetzlich", "Lesen liefert den Modus")
 
 from backend import zugang_regel as Z  # noqa: E402
 for m, p in (("GET", "/api/login/oidc/status"), ("GET", "/api/login/oidc/start"),

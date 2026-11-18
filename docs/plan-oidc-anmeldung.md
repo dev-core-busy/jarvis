@@ -1,7 +1,22 @@
 # Anmeldung über den IdP (OpenID Connect) – Umsetzungsplan
 
-Stand: 2026-11-17 · Status: **Phasen 1–4 umgesetzt, auf DEV eingespielt (IdP-Anmeldung aus).
-Phase 0 (IdP-Client anlegen, Namensformat und `amr`/`acr` messen) steht aus.** · nicht committet
+Stand: 2026-11-18 · Status: **Phasen 0–4 umgesetzt. Auf DEV mit echtem IdP-Client
+angemeldet (2026-11-18). ECHT: IdP-Anmeldung aus, eigener IdP-Client steht aus.**
+
+### Nachtrag 2026-11-18 (Erfahrungen DEV, Festlegungen des Betreibers)
+
+- IdP schrieb den Rechnernamen im id_token gross, im Discovery-Dokument klein → Vergleich des
+  Ausstellers ohne Gross-/Kleinschreibung NUR fuer den Rechnernamen (`issuer_gleich`).
+- `sub` ist beim IdP eine interne Nummer; der Anmeldename steht in `preferred_username`.
+  Die Anmeldung protokolliert seitdem die NAMEN der Claims (keine Werte).
+- **E1 neu entschieden:** Die IdP-Anmeldung zaehlt in der Vorgabe als zweiter Faktor, auch
+  fuer Administratoren. Abschalten nur ausdruecklich.
+- **E2 entschieden:** Schalter „AD-Anmeldung zusaetzlich“ (`oidc_ad_modus`), sichtbar nur bei
+  eingeschaltetem IdP. Vorgabe **Ausweichweg** (`fallback`): die Kennwortmaske erscheint erst,
+  wenn die IdP-Anmeldung scheitert (Fehlerkennung, Einloesen abgelehnt, IdP/Status nicht
+  erreichbar). An (`zusaetzlich`): immer sichtbar. Nur Anzeige – `/api/login` bleibt
+  erreichbar; fail-open bei jedem Zweifel. Notfallkonto `jarvis`: beim IdP „Deny“ waehlen
+  → Ausweichweg.
 
 ### Umsetzung und Abweichungen vom Plan (2026-11-17)
 
@@ -233,6 +248,7 @@ echten Browser** gemessen: Chrome, Edge, Firefox.
 
 - **E1 – Zählt die MFA des IdP als zweiter Faktor?** **Entschieden 2026-11-17:
   einstellbar**, Schalter „MFA des IdP als zweiten Faktor anerkennen“, Vorgabe **aus**.
+  **Geaendert 2026-11-18: Vorgabe AN** (siehe Nachtrag oben).
   - **Aus:** Jarvis fragt nach der IdP-Anmeldung seinen eigenen TOTP wie bei der
     Kennwortanmeldung (Konten mit TOTP, Admin-2FA-Pflicht). Admin-Rechte gibt es nur damit.
   - **An:** Die IdP-Anmeldung gilt als bestandener zweiter Faktor (`mit_2fa=True`), kein
@@ -246,8 +262,8 @@ echten Browser** gemessen: Chrome, Edge, Firefox.
     Umschalten wird im Sicherheitsprotokoll vermerkt.
   - Wächter: Bei „aus“ nie `mit_2fa`; bei „an“ mit Nachweisfeld ergibt ein Token ohne den
     Wert nie `mit_2fa`. Die Gegenprobe beißt, wenn die Bedingung entfernt wird.
-- **E2 – Kennwortmaske später ausblenden?** (Vorgabe: nein. Erst nach stabilem Betrieb
-  entscheiden. `jarvis` behält sie immer.)
+- **E2 – Kennwortmaske später ausblenden?** **Entschieden 2026-11-18:** Ausweichweg als
+  Vorgabe, Schalter „AD-Anmeldung zusaetzlich“ (siehe Nachtrag oben).
 - **E3 – Abmelden auch beim IdP** (RP-initiated Logout)? (Vorgabe: nein, nur Jarvis-Sitzung
   beenden.)
 - **E4 – Gilt die Jarvis-Sitzung unabhängig von der IdP-Sitzung?** (Vorgabe: ja, die

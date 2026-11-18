@@ -6253,8 +6253,27 @@ def _oidc_redirect_uri(request: Request, cfg: dict | None = None) -> str:
 
 
 def _oidc_mfa_anerkennen() -> bool:
-    """Zaehlt die MFA des IdP als zweiter Faktor? Vorgabe: nein."""
-    return _oidc_schalter("oidc_mfa_anerkennen", False)
+    """Zaehlt die MFA des IdP als zweiter Faktor? Vorgabe: JA.
+
+    Festlegung des Betreibers 2026-11-18: eine erfolgreiche Anmeldung ueber den
+    IdP ersetzt den eigenen Code, auch fuer Administratoren (der IdP erzwingt
+    die Mehrfaktor-Anmeldung). Abschalten nur ausdruecklich
+    (``oidc_mfa_anerkennen: false``) – dann gilt wieder der eigene Code.
+    Ein eingetragener Nachweis (``oidc_mfa_nachweis``) bleibt wirksam."""
+    return _oidc_schalter("oidc_mfa_anerkennen", True)
+
+
+# Kennwortanmeldung (AD) neben der IdP-Anmeldung: "fallback" = nur sichtbar,
+# wenn die IdP-Anmeldung scheitert (Vorgabe); "zusaetzlich" = immer sichtbar.
+# Nur die ANZEIGE der Anmeldemaske – /api/login bleibt in beiden Faellen
+# erreichbar (Ausweichweg, Apps, Add-in, Notfallkonto).
+_OIDC_AD_MODI = ("fallback", "zusaetzlich")
+
+
+def _oidc_ad_modus() -> str:
+    """Wie die Kennwortanmeldung neben dem IdP erscheint; Unbekanntes -> Vorgabe."""
+    v = str(config.get_setting("oidc_ad_modus", "") or "").strip().lower()
+    return v if v in _OIDC_AD_MODI else _OIDC_AD_MODI[0]
 
 
 def _oidc_cookie(resp, name: str, wert: str, max_alter: int) -> None:
@@ -6293,8 +6312,12 @@ def _oidc_zurueck(request: Request, fehler: str = "", konto: str = "", grund: st
 
 @app.get("/api/login/oidc/status")
 async def oidc_status():
-    """Fuer die Anmeldemaske: gibt es den Knopf "Mit Firmenkonto anmelden"?"""
-    return JSONResponse({"aktiv": _oidc_konfig() is not None})
+    """Fuer die Anmeldemaske: gibt es den Knopf "Mit Firmenkonto anmelden", und
+    erscheint die Kennwortanmeldung daneben (``ad_modus``)? Bei ausgeschalteter
+    IdP-Anmeldung bleibt die Antwort ``{"aktiv": false}`` wie bisher."""
+    if _oidc_konfig() is None:
+        return JSONResponse({"aktiv": False})
+    return JSONResponse({"aktiv": True, "ad_modus": _oidc_ad_modus()})
 
 
 @app.get("/api/login/oidc/start")
@@ -6538,6 +6561,7 @@ async def oidc_einstellungen_lesen(request: Request, user: str = Depends(require
     return JSONResponse({
         "ok": True,
         "oidc_aktiv": _oidc_schalter("oidc_aktiv"),
+        "oidc_ad_modus": _oidc_ad_modus(),
         **{f: str(config.get_setting(f, "") or "") for f in _OIDC_TEXTFELDER},
         "client_secret_gesetzt": bool(geheim),
         "client_secret_lesbar": bool(geheim) and not geheim.startswith("JGS1:"),
@@ -6583,6 +6607,11 @@ async def oidc_einstellungen_setzen(request: Request, user: str = Depends(requir
             return JSONResponse({"ok": False, "error": "oidc_aktiv (true/false) erwartet."},
                                 status_code=400)
         neu["oidc_aktiv"] = body["oidc_aktiv"]
+    if "oidc_ad_modus" in body:
+        if body["oidc_ad_modus"] not in _OIDC_AD_MODI:
+            return JSONResponse({"ok": False, "error": "oidc_ad_modus: %s erwartet."
+                                 % " oder ".join(_OIDC_AD_MODI)}, status_code=400)
+        neu["oidc_ad_modus"] = body["oidc_ad_modus"]
     geheim = body.get("client_secret")
     if isinstance(geheim, str) and geheim.strip():
         neu["oidc_client_secret"] = geheim.strip()

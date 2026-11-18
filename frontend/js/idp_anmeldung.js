@@ -10,8 +10,17 @@
       Kennwortanmeldung (Sitzungs-Cookie + CSRF-Token in der Antwort).
       Verlangt der Server den Zwei-Faktor-Code, erscheint #idp-totp.
    3. Fehler (/?idp_fehler=<kennung>) stehen in #login-error, uebersetzt.
+   4. Kennwortanmeldung (AD, #kennwort-bereich) neben dem IdP: der Server
+      meldet ad_modus. "zusaetzlich" -> immer sichtbar. "fallback" (Vorgabe)
+      -> verborgen, bis die Anmeldung ueber den IdP scheitert (Fehlerkennung,
+      Einloesen abgelehnt, Server nicht erreichbar). FAIL-OPEN: jeder Zweifel
+      (Status nicht lesbar, keine Antwort binnen SICHERUNG_MS, IdP aus) zeigt
+      sie – ein verstecktes Formular ohne funktionierenden IdP sperrte alle
+      aus. Damit die Maske nicht kurz aufblitzt, merkt sich der Browser den
+      letzten Modus (localStorage) und verbirgt nur dann schon vor dem Status.
 
-   Die Kennwortanmeldung (app.js) bleibt unberuehrt.
+   Die Kennwortanmeldung (app.js) selbst bleibt unberuehrt; /api/login ist in
+   beiden Modi erreichbar (Ausweichweg, Apps, Add-in, Notfallkonto).
    ═══════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';
@@ -48,6 +57,27 @@
         e.hidden = false;
     }
 
+    var MERK = 'jarvis_idp_ad_modus';
+    var SICHERUNG_MS = 4000;
+    var ausgewichen = false;   // IdP-Anmeldung gescheitert -> Kennwort bleibt sichtbar
+
+    function merken(modus) {
+        try { if (modus) localStorage.setItem(MERK, modus); else localStorage.removeItem(MERK); }
+        catch (e) { /* ohne Speicher: nur Aufblitzen moeglich */ }
+    }
+    function gemerkt() {
+        try { return localStorage.getItem(MERK) || ''; } catch (e) { return ''; }
+    }
+    function kennwortZeigen(an) {
+        var b = $('kennwort-bereich'), tr = $('idp-trenner');
+        if (b) b.hidden = !an;
+        if (tr) tr.hidden = !an;   // "oder" nur, wenn es etwas zu waehlen gibt
+    }
+    function ausweichen() {
+        ausgewichen = true;
+        kennwortZeigen(true);
+    }
+
     function adresseAufraeumen() {
         // Kennungen nicht im Verlauf stehen lassen (ein Neuladen wuerde sonst
         // erneut einloesen bzw. den alten Fehler zeigen).
@@ -57,10 +87,24 @@
     function knopfZeigen() {
         var box = $('idp-login');
         if (!box) return;
+        var entschieden = false;
+        var sicherung = setTimeout(function () {
+            if (!entschieden) kennwortZeigen(true);
+        }, SICHERUNG_MS);
+        function fertig(aktiv, modus) {
+            entschieden = true;
+            clearTimeout(sicherung);
+            box.hidden = !aktiv;
+            merken(aktiv ? modus : '');
+            kennwortZeigen(!aktiv || modus !== 'fallback' || ausgewichen);
+        }
         fetch('/api/login/oidc/status', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { box.hidden = !(d && d.aktiv); })
-            .catch(function () { box.hidden = true; });
+            .then(function (d) {
+                var aktiv = !!(d && d.aktiv);
+                fertig(aktiv, aktiv && d.ad_modus === 'zusaetzlich' ? 'zusaetzlich' : 'fallback');
+            })
+            .catch(function () { fertig(false, ''); });
     }
 
     function codeModus(an) {
@@ -114,10 +158,12 @@
                 if (feld) feld.value = '';
             } else {
                 codeModus(false);
+                ausweichen();
                 fehlerZeigen('login-error', data.error || T('login.failed', 'Anmeldung fehlgeschlagen.'));
             }
         } catch (e) {
             codeModus(false);
+            ausweichen();
             fehlerZeigen('login-error', T('login.server_error', 'Server nicht erreichbar.'));
         } finally {
             laeuft = false;
@@ -138,11 +184,16 @@
     }
 
     function start() {
+        var q;
+        try { q = new URLSearchParams(window.location.search); } catch (e) { q = null; }
+        var fehler = q ? q.get('idp_fehler') : '';
+        // Vor dem Status nur verbergen, wenn dieser Browser den Ausweich-Modus
+        // schon kennt (sonst blitzte die Maske bei jedem ohne IdP kurz weg).
+        if (fehler) ausweichen();
+        else if (gemerkt() === 'fallback') kennwortZeigen(false);
         knopfZeigen();
         codeVerdrahten();
-        var q;
-        try { q = new URLSearchParams(window.location.search); } catch (e) { return; }
-        var fehler = q.get('idp_fehler');
+        if (!q) return;
         if (fehler) {
             adresseAufraeumen();
             fehlerZeigen('login-error', T('login.idp_err.' + fehler,
@@ -156,5 +207,5 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
 
-    window.IdpAnmeldung = { _einloesen: einloesen, _FEHLER: FEHLER };
+    window.IdpAnmeldung = { _einloesen: einloesen, _FEHLER: FEHLER, _MERK: MERK };
 })();

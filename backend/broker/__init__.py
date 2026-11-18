@@ -7,7 +7,8 @@ gefuehrt (allow/deny/pending) – unbekannte Root-Befehle des Agenten erscheinen
 als 'pending' und muessen von einem Admin freigegeben werden.
 
 Module:
-- policy.py  – Policy-Datei (/etc/jarvis/broker-policy.json) + Audit-Log
+- policy.py  – Policy-Datei (/etc/jarvis/broker-policy.json), Nutzungszaehler
+               (/var/lib/jarvis-broker/zaehler.json) + Audit-Log
 - ops.py     – Operations-Registry (Validierung + Ausfuehrung) + Dispatch
 - daemon.py  – Unix-Socket-Server (laeuft als root)
 

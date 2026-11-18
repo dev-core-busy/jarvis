@@ -15,6 +15,10 @@ unprivilegierter Benutzer (`jarvis.service`, User=jarvis, Port 443 via
   Systemoperationen: automatisch erlaubt (Admin kann widerrufen).
   `shell_root:<befehl>` (Root-Shell des Agenten): startet als **pending** und
   muss unter *Einstellungen → Sicherheit → Root-Freigaben* erlaubt werden.
+  Die Datei aendert sich NUR beim Anlegen, Entscheiden oder Entfernen eines
+  Eintrags (AIDE meldet sie damit nur bei echten Aenderungen). Die
+  Nutzungszaehler (`count`, `last_used`) stehen getrennt in
+  `/var/lib/jarvis-broker/zaehler.json` (0600 root, gebuendelt alle 30 s).
 - **Audit-Log** `/var/log/jarvis-broker-audit.jsonl` (root-eigen, vom Backend
   nicht manipulierbar). API: `/api/broker/status|ops|ops/decide|ops/remove|audit`.
 

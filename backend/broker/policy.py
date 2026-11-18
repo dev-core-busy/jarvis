@@ -8,8 +8,16 @@ Jede Root-Operation wird beim ERSTEN Auftauchen als Eintrag registriert:
   und muessen von einem Admin explizit freigegeben werden.
 
 Dateien (nur root beschreibbar – das Backend kann sie NICHT direkt aendern):
-- /etc/jarvis/broker-policy.json     – Policy-Eintraege
-- /var/log/jarvis-broker-audit.jsonl – Audit-Log (JSON-Lines)
+- /etc/jarvis/broker-policy.json          – Policy-Eintraege (NUR Entscheidungen)
+- /var/lib/jarvis-broker/zaehler.json     – Nutzungszaehler (count, last_used)
+- /var/log/jarvis-broker-audit.jsonl      – Audit-Log (JSON-Lines)
+
+Warum zwei Dateien (Haertung B7, 18.11.2026): solange count/last_used in der
+Policy-Datei standen, wurde sie im Betrieb alle ZAEHLER_FLUSH_S Sekunden neu
+geschrieben. AIDE meldete die Freigabeliste deshalb bei JEDER Pruefung als
+geaendert – ein deny->allow von Hand waere im Dauerrauschen untergegangen.
+Jetzt aendert sich die Policy-Datei nur noch, wenn ein Eintrag entsteht, eine
+Entscheidung faellt oder ein Eintrag entfernt wird.
 """
 
 import json
@@ -20,6 +28,15 @@ from pathlib import Path
 
 POLICY_FILE = Path(os.environ.get("JARVIS_BROKER_POLICY", "/etc/jarvis/broker-policy.json"))
 AUDIT_FILE = Path(os.environ.get("JARVIS_BROKER_AUDIT", "/var/log/jarvis-broker-audit.jsonl"))
+# Zaehlerdatei: ausdruecklich gesetzt, sonst NEBEN einer umgelenkten Policy-Datei
+# (Tests setzen nur JARVIS_BROKER_POLICY und duerfen nie nach /var/lib schreiben),
+# sonst im root-eigenen Broker-Verzeichnis (0700, existiert seit der Installation).
+ZAEHLER_FILE = Path(
+    os.environ.get("JARVIS_BROKER_ZAEHLER")
+    or (str(POLICY_FILE.with_name("broker-zaehler.json")) if os.environ.get("JARVIS_BROKER_POLICY")
+        else "/var/lib/jarvis-broker/zaehler.json"))
+# Felder, die in die Zaehlerdatei gehoeren und in der Policy-Datei nichts verloren haben
+ZAEHLER_FELDER = ("count", "last_used")
 
 # Entscheidungen
 ALLOW = "allow"
@@ -54,16 +71,34 @@ def _load() -> dict:
     return data
 
 
-def _save(data: dict) -> None:
-    """Atomar schreiben (temp + rename), Datei nur fuer root lesbar."""
-    POLICY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = POLICY_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+def _atomar_schreiben(pfad: Path, data: dict) -> None:
+    """Atomar schreiben (temp + rename), Datei von Anfang an nur fuer root (0600)."""
+    pfad.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = pfad.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(tmp, 0o600)
-    except Exception:  # noqa: BLE001
-        pass
-    os.replace(tmp, POLICY_FILE)
+        os.fchmod(fd, 0o600)      # eine liegengebliebene .tmp mit anderen Rechten
+        with os.fdopen(fd, "w") as f:
+            fd = -1
+            f.write(json.dumps(data, indent=2, ensure_ascii=False))
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    os.replace(tmp, pfad)
+
+
+def _save(data: dict) -> None:
+    """Policy-Datei schreiben. Stehen darin noch Zaehler aus der Zeit vor der
+    Trennung (Altbestand), wandern sie ZUERST in die Zaehlerdatei und werden erst
+    dann aus der Policy entfernt – gelingt das nicht, bleiben sie stehen (kein
+    Verlust). Das ist die einzige Stelle, an der der Altbestand bereinigt wird:
+    nur fuer die Migration wird die Policy-Datei NIE geschrieben."""
+    if any(f in e for e in data["ops"].values() for f in ZAEHLER_FELDER):
+        if _zaehler_flushen(data):
+            for e in data["ops"].values():
+                for f in ZAEHLER_FELDER:
+                    e.pop(f, None)
+    _atomar_schreiben(POLICY_FILE, data)
     _cache_setzen(data)
 
 
@@ -73,7 +108,8 @@ def _save(data: dict) -> None:
 # globalem Lock, O(Eintraege). Jetzt: Lesen ueber einen Zwischenspeicher, der
 # an mtime+Groesse haengt (eine Aenderung von Hand wird gesehen); Zaehler
 # sammeln sich im Speicher und gehen hoechstens alle ZAEHLER_FLUSH_S Sekunden
-# auf die Platte. Ein NEUER Eintrag und jede Entscheidung werden sofort
+# auf die Platte – seit 18.11.2026 in die eigene ZAEHLER_FILE, nicht mehr in
+# die Policy-Datei. Ein NEUER Eintrag und jede Entscheidung werden sofort
 # geschrieben – nur die Statistik darf hinterherhinken.
 ZAEHLER_FLUSH_S = 30
 # Deckel fuer OFFENE Eintraege: eine Prompt-Injection-Schleife konnte sonst
@@ -109,13 +145,63 @@ def _load_cached() -> dict:
     return data
 
 
-def _zaehler_einrechnen(data: dict) -> None:
-    for key, (anzahl, zuletzt) in _offen.items():
-        entry = data["ops"].get(key)
-        if entry is not None:
-            entry["count"] = int(entry.get("count", 0)) + anzahl
-            entry["last_used"] = max(int(entry.get("last_used", 0)), zuletzt)
+def _zahl(wert) -> int:
+    try:
+        return int(wert or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _zaehler_lesen() -> dict:
+    """Zaehlerdatei lesen: key -> {"count", "last_used"}. Bewusst OHNE
+    Zwischenspeicher – sie ist klein, wird hoechstens alle ZAEHLER_FLUSH_S
+    Sekunden gelesen, und ``jarvis-broker-admin`` (eigener Prozess) schreibt sie
+    beim Entfernen mit. Fehlt oder ist sie kaputt, gilt sie als LEER: Zaehler sind
+    Statistik, keine Entscheidung – anders als bei der Policy wird hier nichts
+    abgewiesen (der Altbestand in der Policy-Datei springt dann als Basis ein)."""
+    try:
+        roh = json.loads(ZAEHLER_FILE.read_text())
+    except FileNotFoundError:
+        return {}
+    except Exception as e:  # noqa: BLE001
+        print(f"[Broker-Policy] Zaehlerdatei unlesbar ({str(e)[:120]}) – zaehle neu", flush=True)
+        return {}
+    ops = roh.get("ops") if isinstance(roh, dict) else None
+    if not isinstance(ops, dict):
+        return {}
+    return {k: {"count": _zahl(v.get("count")), "last_used": _zahl(v.get("last_used"))}
+            for k, v in ops.items() if isinstance(v, dict)}
+
+
+def _zaehler_von(key: str, entry: dict, bestand: dict) -> dict:
+    """Wirksame Zaehler eines Eintrags: Zaehlerdatei, sonst der Altbestand aus der
+    Policy-Datei (MIGRATION BEIM LESEN), dazu das noch nicht Geschriebene."""
+    basis = bestand.get(key)
+    if basis is None:
+        basis = {"count": _zahl(entry.get("count")), "last_used": _zahl(entry.get("last_used"))}
+    anzahl, zuletzt = _offen.get(key, (0, 0))
+    return {"count": basis["count"] + anzahl, "last_used": max(basis["last_used"], zuletzt)}
+
+
+def _mit_zaehler(key: str, entry: dict, bestand: dict) -> dict:
+    """Kopie eines Eintrags mit count/last_used – so sehen ALLE Leser (Admin-
+    Konsole, Oberflaeche ueber broker.policy_list) dieselbe Form wie frueher."""
+    return {**entry, **_zaehler_von(key, entry, bestand)}
+
+
+def _zaehler_flushen(data: dict) -> bool:
+    """Zaehlerdatei neu schreiben (nur Eintraege, die es in der Policy gibt).
+    Fehlschlag (Platte, Rechte) wird gemeldet und laesst ``_offen`` stehen –
+    eine Op wird daran nie abgewiesen. Rueckgabe: geschrieben?"""
+    bestand = _zaehler_lesen()
+    neu = {k: _zaehler_von(k, e, bestand) for k, e in data["ops"].items()}
+    try:
+        _atomar_schreiben(ZAEHLER_FILE, {"version": 1, "ops": neu})
+    except Exception as e:  # noqa: BLE001
+        print(f"[Broker-Policy] Zaehler nicht geschrieben: {str(e)[:160]}", flush=True)
+        return False
     _offen.clear()
+    return True
 
 
 def flush() -> None:
@@ -128,8 +214,7 @@ def flush() -> None:
             data = _load()
         except PolicyUnlesbar:
             return
-        _zaehler_einrechnen(data)
-        _save(data)
+        _zaehler_flushen(data)
         _letzter_flush = time.monotonic()
 
 
@@ -151,13 +236,12 @@ def check(key: str, op: str, description: str, user: str,
             z[0] += 1
             z[1] = now
             if user and not entry.get("requested_by"):
+                # Einmal je Eintrag (ein System-Eintrag ohne Anforderer bekommt
+                # seinen ersten) – gehoert zum Anlegen, kein Dauerschreiber.
                 entry["requested_by"] = user
-                _zaehler_einrechnen(data)
                 _save(data)
-                _letzter_flush = time.monotonic()
             elif time.monotonic() - _letzter_flush >= ZAEHLER_FLUSH_S:
-                _zaehler_einrechnen(data)
-                _save(data)
+                _zaehler_flushen(data)
                 _letzter_flush = time.monotonic()
             return entry.get("decision", PENDING)
         if not default_allow:
@@ -177,14 +261,11 @@ def check(key: str, op: str, description: str, user: str,
                 "requested_by": user or "",
                 "decided_by": "auto" if default_allow else "",
                 "decided_at": now if default_allow else 0,
-                "count": 0,
-                "last_used": 0,
             }
             data["ops"][key] = entry
-        entry["count"] = 1
-        entry["last_used"] = now
-        _zaehler_einrechnen(data)
+        _offen[key] = [1, now]
         _save(data)
+        _zaehler_flushen(data)
         _letzter_flush = time.monotonic()
         return entry.get("decision", PENDING)
 
@@ -203,7 +284,7 @@ def decide(key: str, decision: str, by: str) -> dict | None:
         entry["decided_by"] = by or ""
         entry["decided_at"] = int(time.time())
         _save(data)
-        return dict(entry)
+        return _mit_zaehler(key, entry, _zaehler_lesen())
 
 
 def herabstufen(ops_ohne_automatik: set[str]) -> list[str]:
@@ -244,6 +325,8 @@ def remove(key: str) -> bool:
         if key in data["ops"]:
             del data["ops"][key]
             _save(data)
+            _offen.pop(key, None)
+            _zaehler_flushen(data)   # sonst erbte ein neu auftauchender Eintrag den alten Stand
             return True
         return False
 
@@ -251,7 +334,9 @@ def remove(key: str) -> bool:
 def list_ops() -> list[dict]:
     """Alle Eintraege, offene (pending) zuerst, dann nach letzter Nutzung."""
     with _lock:
-        entries = list(_load()["ops"].values())
+        data = _load()
+        bestand = _zaehler_lesen()
+        entries = [_mit_zaehler(k, e, bestand) for k, e in data["ops"].items()]
     order = {PENDING: 0, DENY: 1, ALLOW: 2}
     entries.sort(key=lambda e: (order.get(e.get("decision"), 3),
                                 -int(e.get("last_used", 0))))

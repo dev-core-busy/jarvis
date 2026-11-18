@@ -7,8 +7,10 @@ weiter sofort auf die Platte, und eine Aenderung von Hand wird gesehen.
 
 Gemessen an der echten ``backend/broker/policy.py`` gegen eine Datei im
 Wegwerf-Verzeichnis:
-  [1] neuer Eintrag sofort geschrieben; Wiederholungen schreiben NICHT neu,
-      ``flush()`` bringt die Zaehler vollstaendig auf die Platte
+  [1] neuer Eintrag sofort geschrieben; Wiederholungen schreiben NICHT neu
+      (weder Policy- noch Zaehlerdatei), ``flush()`` bringt die Zaehler
+      vollstaendig auf die Platte – seit 18.11.2026 in die eigene Zaehlerdatei
+      (Trennung selbst: ``test_broker_zaehler.py``)
   [2] ``decide`` wirkt beim naechsten ``check`` sofort; eine Aenderung der
       Datei von Hand ebenso (Zwischenspeicher haengt an mtime/Groesse)
   [3] Deckel fuer offene Eintraege
@@ -52,20 +54,33 @@ def datei():
     return json.loads(P.POLICY_FILE.read_text())
 
 
+def zaehler(key):
+    """count aus der Zaehlerdatei; fehlt etwas, -1 (FAIL statt Absturz)."""
+    try:
+        return json.loads(P.ZAEHLER_FILE.read_text())["ops"][key].get("count", -1)
+    except Exception:  # noqa: BLE001
+        return -1
+
+
 try:
     print("\n[1] Zaehler")
     r = P.check("systemctl:restart:jarvis.service", "systemctl", "d", "jarvis", True)
     check("(Positivkontrolle) neuer Eintrag erlaubt und sofort geschrieben",
           r == P.ALLOW and "systemctl:restart:jarvis.service" in datei()["ops"])
+    check("(Positivkontrolle) Sandkasten auch fuer die Zaehlerdatei",
+          str(P.ZAEHLER_FILE).startswith(str(SK)) and P.ZAEHLER_FILE.exists(), str(P.ZAEHLER_FILE))
     vorher = P.POLICY_FILE.stat().st_mtime_ns
+    vorher_z = P.ZAEHLER_FILE.stat().st_mtime_ns
     time.sleep(0.02)
     for _ in range(50):
         P.check("systemctl:restart:jarvis.service", "systemctl", "d", "jarvis", True)
     check("50 Wiederholungen schreiben die Datei NICHT neu", P.POLICY_FILE.stat().st_mtime_ns == vorher)
+    check("50 Wiederholungen schreiben auch die Zaehlerdatei NICHT neu (gebuendelt)",
+          P.ZAEHLER_FILE.stat().st_mtime_ns == vorher_z)
     P.flush()
     check("flush(): Zaehler vollstaendig (1 + 50)",
-          datei()["ops"]["systemctl:restart:jarvis.service"]["count"] == 51,
-          str(datei()["ops"]["systemctl:restart:jarvis.service"]["count"]))
+          zaehler("systemctl:restart:jarvis.service") == 51,
+          str(zaehler("systemctl:restart:jarvis.service")))
 
     print("\n[2] Entscheidungen sofort")
     k = "shell_root:sha256:" + "a" * 64

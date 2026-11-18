@@ -3610,7 +3610,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <input type="checkbox" id="sap-persoenlich" checked>
                                 <span data-i18n="sap.persoenlich">Speichern persönlicher Zugänge auf Server erlauben</span>
                             </label>
-                            <span class="kb-hint" data-i18n-html="sap.persoenlich_hint">An: Jeder Benutzer kann im Bereich <b>SAP → Mein SAP-Zugang</b> seinen eigenen Zugang samt Kennwort hinterlegen und arbeitet dann mit seinen eigenen Rechten; wer keinen hat, arbeitet über den gemeinsamen Zugang. Aus: Auf dem Server liegt kein SAP-Kennwort mehr – jeder Benutzer meldet sich im Bereich <b>SAP</b> mit seinem Kennwort an; es gilt nur für die laufende Sitzung, der Browser kann es sich merken. Zeitgesteuerte Aufträge erreichen SAP dann nur, solange der Benutzer angemeldet ist. <b>Beim Abschalten werden das Kennwort des gemeinsamen Zugangs und alle persönlichen SAP-Zugänge gelöscht</b>; jeder Benutzer richtet seinen Zugang danach im Bereich SAP ohne Kennwort neu ein.</span>
+                            <span class="kb-hint" data-i18n-html="sap.persoenlich_hint">An: Jeder Benutzer kann im Bereich <b>SAP → Mein SAP-Zugang</b> seinen eigenen Zugang samt Kennwort hinterlegen und arbeitet dann mit seinen eigenen Rechten; wer keinen hat, arbeitet über den gemeinsamen Zugang. Aus: Von den persönlichen Zugängen liegt auf dem Server nur der Benutzername, kein Kennwort – jeder Benutzer meldet sich im Bereich <b>SAP</b> mit seinem Kennwort an (bei der Anmeldung über das Firmenkonto kommt es von dort); es gilt nur für die laufende Sitzung, der Browser kann es sich merken. Wer nicht angemeldet ist, arbeitet über den gemeinsamen Zugang, sofern er vollständig eingetragen ist. <b>Beim Abschalten werden alle persönlichen SAP-Kennwörter gelöscht</b>; Zugänge und Benutzernamen bleiben, ebenso der gemeinsame Zugang.</span>
                         </div>
 
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
@@ -3864,7 +3864,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <input type="checkbox" id="vemas-persoenlich" checked>
                                 <span data-i18n="vemas.persoenlich">Speichern persönlicher Zugänge auf Server erlauben</span>
                             </label>
-                            <span class="kb-hint" data-i18n-html="vemas.persoenlich_hint">An: Jeder Benutzer kann im Bereich <b>VEMAS → Mein VEMAS-Zugang</b> seinen eigenen Zugang samt Kennwort hinterlegen und arbeitet dann mit seinen eigenen Rechten; wer keinen hat, arbeitet über den gemeinsamen Zugang. Aus: Auf dem Server liegt kein VEMAS-Kennwort mehr – jeder Benutzer meldet sich im Bereich <b>VEMAS</b> mit seinem Kennwort an; es gilt nur für die laufende Sitzung, der Browser kann es sich merken. Zeitgesteuerte Aufträge erreichen VEMAS dann nur, solange der Benutzer angemeldet ist. <b>Beim Abschalten werden Kennwort bzw. Token des gemeinsamen Zugangs und alle persönlichen VEMAS-Zugänge gelöscht</b>; jeder Benutzer richtet seinen Zugang danach im Bereich VEMAS ohne Kennwort neu ein.</span>
+                            <span class="kb-hint" data-i18n-html="vemas.persoenlich_hint">An: Jeder Benutzer kann im Bereich <b>VEMAS → Mein VEMAS-Zugang</b> seinen eigenen Zugang samt Kennwort hinterlegen und arbeitet dann mit seinen eigenen Rechten; wer keinen hat, arbeitet über den gemeinsamen Zugang. Aus: Von den persönlichen Zugängen liegt auf dem Server nur der Benutzername, kein Kennwort – jeder Benutzer meldet sich im Bereich <b>VEMAS</b> mit seinem Kennwort an (bei der Anmeldung über das Firmenkonto kommt es von dort); es gilt nur für die laufende Sitzung, der Browser kann es sich merken. Wer nicht angemeldet ist, arbeitet über den gemeinsamen Zugang, sofern er vollständig eingetragen ist. <b>Beim Abschalten werden alle persönlichen VEMAS-Kennwörter gelöscht</b>; Zugänge und Benutzernamen bleiben, ebenso der gemeinsame Zugang.</span>
                         </div>
 
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:6px;">
@@ -6817,7 +6817,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=499"></script>
+    <script src="/static/js/i18n.js?v=500"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6844,8 +6844,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/dienst_zugang.js?v=1"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
     <script src="/static/js/sapcert.js?v=4"></script>
-    <script src="/static/js/sap.js?v=15"></script>
-    <script src="/static/js/vemas.js?v=11"></script>
+    <script src="/static/js/sap.js?v=16"></script>
+    <script src="/static/js/vemas.js?v=12"></script>
     <script src="/static/js/email.js?v=11"></script>
     <script src="/static/js/short_tracks_admin.js?v=3"></script>
     <script src="/static/js/ai_mouse_admin.js?v=13"></script>

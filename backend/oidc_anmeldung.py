@@ -11,9 +11,11 @@ VERFAHREN: Authorization Code mit PKCE (S256), vertraulicher Client
 1. ``/api/login/oidc/start`` legt ``state``, ``nonce`` und PKCE-Verifier ab
    (``VORGAENGE``) und bindet den Vorgang per Cookie an den Browser.
 2. Der IdP schickt den Browser mit ``code`` und ``state`` zurueck.
-3. Der Code wird gegen das ``id_token`` getauscht (``code_tauschen``), das
+3. Der Code wird gegen das ``id_token`` getauscht (``code_tauschen_voll``), das
    Token geprueft (``pruefe_id_token``) und der Kontoname abgeleitet
    (``konto_aus_claims``).
+4. Zugangsdaten fuer Jira/Confluence/SAP/VEMAS, falls der IdP sie als Claims
+   mitliefert (``zugaenge_aus_claims``, sonst ``userinfo``).
 
 WAS GEPRUEFT WIRD – UND WARUM JEDER PUNKT NOETIG IST
 -----------------------------------------------------
@@ -288,7 +290,17 @@ def autorisierungs_url(doc: dict, client_id: str, redirect_uri: str, state: str,
 
 def code_tauschen(doc: dict, client_id: str, client_secret: str, code: str,
                   redirect_uri: str, verifier: str, ctx: ssl.SSLContext) -> str:
-    """Tauscht den Code gegen das ``id_token`` (vertraulicher Client).
+    """Nur das ``id_token`` – siehe ``code_tauschen_voll``."""
+    return code_tauschen_voll(doc, client_id, client_secret, code, redirect_uri,
+                              verifier, ctx)["id_token"]
+
+
+def code_tauschen_voll(doc: dict, client_id: str, client_secret: str, code: str,
+                       redirect_uri: str, verifier: str, ctx: ssl.SSLContext) -> dict:
+    """Tauscht den Code gegen ``id_token`` und ``access_token`` (vertraulicher
+    Client). Rueckgabe ``{"id_token": str, "access_token": str}`` – das
+    Access-Token ist leer, wenn der IdP keines liefert; gebraucht wird es nur
+    fuer ``userinfo`` (Zugangsdaten aus dem IdP).
 
     Client-Authentisierung: ``client_secret_basic``, ausser der IdP nennt nur
     ``client_secret_post``. Keine Weiterleitungen – eine Umleitung des
@@ -324,7 +336,70 @@ def code_tauschen(doc: dict, client_id: str, client_secret: str, code: str,
     tok = d.get("id_token")
     if not isinstance(tok, str) or tok.count(".") != 2:
         raise OidcFehler("Der IdP hat kein id_token geliefert.", "idp")
-    return tok
+    zugang = d.get("access_token")
+    return {"id_token": tok, "access_token": zugang if isinstance(zugang, str) else ""}
+
+
+def userinfo(doc: dict, access_token: str, ctx: ssl.SSLContext, sub: str) -> dict:
+    """Claims vom userinfo-Endpunkt (OIDC Core 5.3).
+
+    **``sub`` muss dem des gepruefte id_token gleichen** (OIDC Core 5.3.2) –
+    sonst koennte eine untergeschobene Antwort die Claims eines anderen
+    Benutzers liefern. Ohne ``sub`` im id_token gibt es keine Antwort ({}).
+    Wie beim Token-Endpunkt: nur https, keine Weiterleitungen (das
+    Access-Token ginge sonst an ein anderes Ziel). Eine signierte Antwort
+    (``application/jwt``) wird nicht ausgewertet – sie waere ohne eigene
+    Pruefung nicht vertrauenswuerdiger als keine."""
+    url = str(doc.get("userinfo_endpoint") or "")
+    if not url or not access_token or not sub:
+        return {}
+    if not _ist_https(url):
+        raise OidcFehler("userinfo-Endpunkt ist nicht https.", "konfiguration")
+    import httpx  # noqa: PLC0415
+    try:
+        with httpx.Client(verify=ctx, timeout=HTTP_FRIST_S, follow_redirects=False) as c:
+            resp = c.get(url, headers={"Accept": "application/json",
+                                       "Authorization": "Bearer " + access_token})
+    except Exception as e:  # noqa: BLE001
+        raise OidcFehler("userinfo nicht erreichbar (%s)." % type(e).__name__,
+                         "nicht_erreichbar") from e
+    if resp.status_code != 200:
+        raise OidcFehler("userinfo antwortet mit HTTP %s." % resp.status_code, "idp")
+    d = _antwort_json(resp)
+    if str(d.get("sub") or "") != sub:
+        raise OidcFehler("userinfo gehoert zu einem anderen Benutzer (sub).", "token")
+    return d
+
+
+# ── Zugangsdaten aus dem IdP (Betreiber 2026-11-18) ─────────────────────────
+#
+# Persoenliche Zugaenge liegen NICHT auf dem Jarvis-Server (Schalter
+# "Persoenliche Zugaenge erlauben" aus bzw. Kachel-Anmeldung bei SAP/VEMAS).
+# Statt sie bei jeder Anmeldung einzutippen, pflegt der Betreiber sie im IdP;
+# der liefert sie als Claims mit. Jarvis meldet damit fuer die SITZUNG an
+# (Arbeitsspeicher, endet mit dem Abmelden) – geschrieben wird nichts.
+# Die Namen sind fest vereinbart; Werte erscheinen nie in einem Protokoll.
+ZUGANGSCLAIMS = {"jira": "jira_pat", "confluence": "confluence_pat",
+                 "sap": "sap_pwd", "vemas": "vemas_pwd"}
+MAX_ZUGANG_LAENGE = 4096
+
+
+def zugaenge_aus_claims(claims: Any) -> dict[str, str]:
+    """``{system: wert}`` fuer jeden vorhandenen, brauchbaren Zugangs-Claim.
+
+    Brauchbar = nicht leere Zeichenkette ohne Zeilenumbruch, hoechstens
+    ``MAX_ZUGANG_LAENGE`` Zeichen. Der Wert bleibt UNVERAENDERT (ein Kennwort
+    darf mit einem Leerzeichen enden); alles andere wird still uebergangen –
+    der Benutzer meldet sich dann wie bisher im zweiten Schritt an."""
+    aus: dict[str, str] = {}
+    if not isinstance(claims, dict):
+        return aus
+    for system, claim in ZUGANGSCLAIMS.items():
+        wert = claims.get(claim)
+        if (isinstance(wert, str) and wert.strip() and len(wert) <= MAX_ZUGANG_LAENGE
+                and "\n" not in wert and "\r" not in wert):
+            aus[system] = wert
+    return aus
 
 
 # ── Token-Pruefung ──────────────────────────────────────────────────────────

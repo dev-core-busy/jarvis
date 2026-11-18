@@ -22,6 +22,8 @@ ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_oidc_anmeldung.py"
 MOD = "backend/oidc_anmeldung.py"
 MAIN = "backend/main.py"
+SAP = "backend/sap_accounts.py"
+VEM = "backend/vemas_accounts.py"
 SICHERUNG = Path.home() / ".gegen_oidc_sicherung"
 
 PROBEN = [
@@ -123,6 +125,59 @@ PROBEN = [
     ("Vorgabe: IdP-Anmeldung an", MAIN,
      '    if not _oidc_schalter("oidc_aktiv"):\n        return None\n',
      '    if not _oidc_schalter("oidc_aktiv", True):\n        return None\n'),
+    # ── Zugangsdaten aus dem IdP (2026-11-18) ──
+    ("userinfo: sub nicht verglichen", MOD,
+     '    if str(d.get("sub") or "") != sub:\n',
+     '    if False:\n'),
+    ("Zugangs-Claim mit Zeilenumbruch erlaubt", MOD,
+     '                and "\\n" not in wert and "\\r" not in wert):\n',
+     '                ):\n'),
+    ("Zugangs-Claim ohne Laengengrenze", MOD,
+     "        if (isinstance(wert, str) and wert.strip() and len(wert) <= MAX_ZUGANG_LAENGE\n",
+     "        if (isinstance(wert, str) and wert.strip()\n"),
+    ("userinfo auch bei Claims im id_token", MAIN,
+     "    if not zug and access_token:\n",
+     "    if access_token:\n"),
+    ("Claim-WERTE im Protokoll", MAIN,
+     '              % ", ".join(sorted(str(k)[:40] for k in claims)[:40]), flush=True)\n',
+     '              % ", ".join(sorted(str(v)[:40] for v in claims.values())[:40]), flush=True)\n'),
+    ("Zugangsdaten auch bei gesperrtem Account", MAIN,
+     "    else:\n        # Zugangsdaten aus dem IdP: erst jetzt, wo die Anmeldung entschieden\n",
+     "    if True:\n        # Zugangsdaten aus dem IdP: erst jetzt, wo die Anmeldung entschieden\n"),
+    ("nicht faellige Systeme angemeldet", MAIN,
+     "        offen = await asyncio.to_thread(_zugang_anmeldungen, konto)\n",
+     "        offen = [{'system': s, 'art': 'token' if s in ('jira', 'confluence') else 'kennwort',"
+     " 'feld': 'password'} for s in zugaenge]\n"),
+    ("SAP-Claim wird nie genutzt", MAIN,
+     '        kennwort("sap", sap_accounts,\n',
+     '        kennwort("sap-aus", sap_accounts,\n'),
+    ("gleiches Kennwort trotzdem neu geschrieben", MAIN,
+     '            if not ziel.get("unveraendert"):\n',
+     '            if True:\n'),
+    ("Freigabe SAP/VEMAS nicht geprueft", MAIN,
+     "            if not darf():\n                return None\n            ziel =",
+     "            if False:\n                return None\n            ziel ="),
+    ("SAP: ausgesetzter Zugang bekommt Kennwort", SAP,
+     '    if k.get("ausgesetzt"):\n        return {"grund": "Zugang ausgesetzt"}\n    ct = (k.get("connection_type") or "").strip().lower()\n    if ct == "hana":\n        if not hana_erlaubt(skill_config()):\n            return {"grund": "HANA gesperrt"}\n',
+     '    ct = (k.get("connection_type") or "").strip().lower()\n    if ct == "hana":\n        if not hana_erlaubt(skill_config()):\n            return {"grund": "HANA gesperrt"}\n'),
+    ("SAP: Kennwort fuellt Bearer-Token", SAP,
+     '        if (k.get("auth_kind") or "").strip().lower() == "bearer":\n            return {"grund": "Bearer-Anmeldung"}\n',
+     ''),
+    ("SAP: ohne Benutzername", SAP,
+     '    if not str(benutzer or "").strip():\n        return {"grund": "kein Benutzername"}\n    if not _vollstaendig(k):\n',
+     '    if not _vollstaendig(k):\n'),
+    ("SAP: Server-Freigabe ignoriert", SAP,
+     '    if not all(host_ok(h) for h in _hosts_im_zugang(k)):\n        return {"grund": "Server nicht freigegeben"}\n    unveraendert = False\n',
+     '    unveraendert = False\n'),
+    ("SAP: Kachel-Anmeldung als unveraendert", SAP,
+     '    if not kachel_pflicht() and (k.get(feld + "_enc") or "").strip():\n',
+     '    if (k.get(feld + "_enc") or "").strip():\n'),
+    ("VEMAS: Kennwort fuellt Token", VEM,
+     '    if (k.get("auth_kind") or "").strip().lower() not in ("basic", "login"):\n        return {"grund": "keine Kennwort-Anmeldung"}\n',
+     ''),
+    ("VEMAS: ausgesetzter Zugang bekommt Kennwort", VEM,
+     '    if k.get("ausgesetzt"):\n        return {"grund": "Zugang ausgesetzt"}\n    if (k.get("auth_kind") or "").strip().lower() not in ("basic", "login"):\n',
+     '    if (k.get("auth_kind") or "").strip().lower() not in ("basic", "login"):\n'),
 ]
 DATEIEN = sorted({p[1] for p in PROBEN})
 

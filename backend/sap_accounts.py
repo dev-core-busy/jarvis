@@ -1192,6 +1192,62 @@ def anmeldung_anbieten(user: str) -> dict:
     return {"feld": feld, "benutzer": benutzer or "", "kanal": ct}
 
 
+def idp_kennwort_ziel(user: str, wert: str) -> dict:
+    """Wohin gehoert ein Kennwort aus dem IdP (Claim ``sap_pwd``)? {} = nirgends.
+
+    Festlegung des Betreibers 2026-11-18: der BENUTZERNAME liegt immer im
+    Zugang auf dem Server, das KENNWORT nur, wenn "Persoenliche Zugaenge
+    erlauben" es zulaesst (sonst Kachel-Anmeldung = Arbeitsspeicher). Bei der
+    IdP-Anmeldung kommt das Kennwort aus dem Claim und wird mit dem
+    gespeicherten Benutzer kombiniert – ``speichern`` legt es dann je nach
+    Schalter in die Sitzung oder verschluesselt auf die Platte.
+
+    Rueckgabe ``{"feld": ..., "benutzer": ..., "unveraendert": bool}`` oder
+    ``{"grund": ...}`` (fuer das Protokoll, nie mit Geheimnis). Kein Ziel, wenn:
+    kein Zugang, inaktiv, ausgesetzt (``speichern`` hoebe den Aussetzer auf, ein
+    falsches Kennwort im IdP kostete sonst bei JEDER Anmeldung einen
+    Fehlversuch – Sperre in SAP), kein Benutzername, Bearer-Anmeldung (ein
+    Kennwort ist kein Token), Server nicht freigegeben. ``unveraendert``: das
+    gespeicherte Kennwort ist schon dieses – dann wird nichts geschrieben
+    (und auch kein Aussetzer zurueckgesetzt)."""
+    un = norm_user(user or "")
+    if not un or ":" in un:
+        return {"grund": "keine Person"}
+    k = _laden().get(un)
+    if not k:
+        return {"grund": "kein Zugang hinterlegt"}
+    if not bool(k.get("aktiv", True)):
+        return {"grund": "Zugang inaktiv"}
+    if k.get("ausgesetzt"):
+        return {"grund": "Zugang ausgesetzt"}
+    ct = (k.get("connection_type") or "").strip().lower()
+    if ct == "hana":
+        if not hana_erlaubt(skill_config()):
+            return {"grund": "HANA gesperrt"}
+        feld, benutzer = "hana_password", k.get("hana_user", "")
+    elif ct == "rfc":
+        feld, benutzer = "rfc_password", k.get("rfc_user", "")
+    elif ct == "odata":
+        if (k.get("auth_kind") or "").strip().lower() == "bearer":
+            return {"grund": "Bearer-Anmeldung"}
+        feld, benutzer = "password", k.get("username", "")
+    else:
+        return {"grund": "Zugangsart fehlt"}
+    if not str(benutzer or "").strip():
+        return {"grund": "kein Benutzername"}
+    if not _vollstaendig(k):
+        return {"grund": "Zugang unvollstaendig"}
+    if not all(host_ok(h) for h in _hosts_im_zugang(k)):
+        return {"grund": "Server nicht freigegeben"}
+    unveraendert = False
+    if not kachel_pflicht() and (k.get(feld + "_enc") or "").strip():
+        try:
+            unveraendert = entschluesseln(k[feld + "_enc"]) == wert
+        except Exception:  # noqa: BLE001
+            unveraendert = False
+    return {"feld": feld, "benutzer": str(benutzer).strip(), "unveraendert": unveraendert}
+
+
 def client_fuer_lauf(user: str | None = None) -> SapClient:
     """Nur der Client – fuer Aufrufer, die den Hinweis nicht brauchen."""
     return aufloesen(user)["client"]
@@ -1217,7 +1273,7 @@ __all__ = [
     "hosts_erlaubt", "hosts_admin", "hosts_implizit", "host_ok",
     "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "QUELLE_KEINE", "AENDERBAR",
     "kachel_pflicht", "sammel_nutzbar", "kennwoerter_entfernen", "alle_entfernen", "sitzung_beenden", "sitzung_bis",
-    "anmeldung_anbieten", "kennwort_gespeichert",
+    "anmeldung_anbieten", "idp_kennwort_ziel", "kennwort_gespeichert",
     "KACHEL_SCHALTER", "TEXTFELDER",
     "GEHEIMFELDER", "KANAELE",
 ]

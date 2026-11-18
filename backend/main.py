@@ -6384,9 +6384,10 @@ async def oidc_callback(request: Request):
     try:
         ctx = _oidc.ssl_kontext(cfg["ca_cert"])
         doc = await asyncio.to_thread(_oidc.discovery, cfg["issuer"], ctx)
-        id_token = await asyncio.to_thread(
-            _oidc.code_tauschen, doc, cfg["client_id"], cfg["client_secret"], code,
+        tausch = await asyncio.to_thread(
+            _oidc.code_tauschen_voll, doc, cfg["client_id"], cfg["client_secret"], code,
             vorgang["redirect_uri"], vorgang["verifier"], ctx)
+        id_token = tausch["id_token"]
         kopf, _r, _s, _g = _oidc.zerlegen(id_token)
         schluessel = await asyncio.to_thread(_oidc.jwks, str(doc["jwks_uri"]), ctx)
         try:
@@ -6429,8 +6430,12 @@ async def oidc_callback(request: Request):
         return _oidc_zurueck(request, "lizenz", konto, _lic_grund)
 
     nachweis = str(config.get_setting("oidc_mfa_nachweis", "") or "")
+    # Zugangsdaten erst NACH allen Pruefungen holen: ein abgewiesenes Konto
+    # bekommt keine Anfrage an userinfo und keinen Schein mit Geheimnissen.
+    zugaenge = await _oidc_zugaenge_holen(claims, doc, tausch.get("access_token", ""), ctx)
     schein = _oidc.SCHEINE.neu({"konto": konto,
-                                "mfa_belegt": _oidc.mfa_belegt(claims, nachweis)})
+                                "mfa_belegt": _oidc.mfa_belegt(claims, nachweis),
+                                "zugaenge": zugaenge})
     resp = _oidc_zurueck(request)
     _oidc_cookie(resp, _OIDC_COOKIE_SCHEIN, schein, _oidc.SCHEIN_TTL_S)
     print(f"[AUTH] IdP-Anmeldung geprueft, Schein ausgestellt: {konto} ({ip})", flush=True)
@@ -6541,9 +6546,119 @@ async def _oidc_einloesen_ablauf(request: Request):
         daten.update({"is_admin": False, "account_blocked": True,
                       "block_reason": _block.get("reason", ""),
                       "block_incidents": _block.get("incidents", [])})
+    else:
+        # Zugangsdaten aus dem IdP: erst jetzt, wo die Anmeldung entschieden
+        # ist. Nur die Namen der Systeme gehen an den Browser.
+        daten["idp_zugaenge"] = await _idp_zugaenge_uebernehmen(
+            konto, schein.get("zugaenge") or {})
     resp = _sitzung_antwort(request, daten)
     _oidc_cookie_weg(resp, _OIDC_COOKIE_SCHEIN)
     return resp
+
+
+async def _oidc_zugaenge_holen(claims: dict, doc: dict, access_token: str, ctx) -> dict:
+    """Zugangs-Claims (``jira_pat`` …) aus dem id_token, sonst von userinfo.
+
+    userinfo nur, wenn das id_token KEINEN der Claims traegt – je IdP stehen
+    eigene Claims mal im Token, mal nur dort. Ein Fehler kostet nie die
+    Anmeldung: dann gibt es eben keine Zugangsdaten, und der zweite Schritt
+    fragt wie bisher. Protokolliert werden nur Claim-NAMEN, nie Werte."""
+    from backend import oidc_anmeldung as _oidc  # noqa: PLC0415
+    zug = _oidc.zugaenge_aus_claims(claims)
+    if not zug and access_token:
+        try:
+            info = await asyncio.to_thread(_oidc.userinfo, doc, access_token, ctx,
+                                           str(claims.get("sub") or ""))
+        except _oidc.OidcFehler as e:
+            print(f"[AUTH] IdP-Zugangsdaten: userinfo nicht nutzbar ({e.code}: {e})", flush=True)
+            info = {}
+        zug = _oidc.zugaenge_aus_claims(info)
+        if info:
+            print("[AUTH] IdP-userinfo mit den Claims: %s"
+                  % ", ".join(sorted(str(k)[:40] for k in info)[:40]), flush=True)
+    return zug
+
+
+async def _idp_zugaenge_uebernehmen(konto: str, zugaenge: dict) -> list[str]:
+    """Meldet ``konto`` mit den Zugangsdaten aus dem IdP an. Rueckgabe: die
+    Systeme, fuer die das gelungen ist.
+
+    **Jira/Confluence** (``*_pat``): Grundlage ist DIESELBE Liste wie beim
+    zweiten Anmeldeschritt (``_zugang_anmeldungen``) – nur wenn der Benutzer
+    den Bereich nutzen darf und keine persoenlichen Zugaenge erlaubt sind.
+    Angemeldet wird per ``sitzung_anmelden`` (prueft den PAT vorher gegen den
+    Server, haelt ihn nur im Arbeitsspeicher). Bei erlaubten persoenlichen
+    Zugaengen bleibt der Claim ungenutzt – dort gilt der gespeicherte Token.
+
+    **SAP/VEMAS** (``*_pwd``, Festlegung 2026-11-18): der BENUTZERNAME liegt
+    immer im Zugang auf dem Server, das Kennwort kommt aus dem Claim und wird
+    damit kombiniert. ``speichern`` legt es je nach "Persoenliche Zugaenge
+    erlauben" verschluesselt auf die Platte (erlaubt) oder nur in die Sitzung
+    (Kachel-Anmeldung). Welches Feld, und ob ueberhaupt, entscheidet das Modul
+    (``idp_kennwort_ziel``): ohne Zugang, ohne Benutzernamen, bei
+    Token-Anmeldung oder AUSGESETZTEM Zugang nicht – ``speichern`` hoebe den
+    Aussetzer auf, und ein falsches Kennwort im IdP kostete sonst bei jeder
+    Anmeldung einen Fehlversuch beim Zielsystem (Kontosperre dort). Ist das
+    gespeicherte Kennwort schon dieses, wird nichts geschrieben."""
+    if not zugaenge:
+        return []
+    from backend import (confluence_accounts, jira_accounts,  # noqa: PLC0415
+                         sap_accounts, vemas_accounts)
+
+    async def pat(e: dict):
+        system = e.get("system")
+        m = {"jira": jira_accounts, "confluence": confluence_accounts}.get(system)
+        wert = zugaenge.get(system)
+        if m is None or not wert or e.get("art") != "token":
+            return None
+        try:
+            await asyncio.to_thread(m.sitzung_anmelden, konto, wert)
+        except Exception as ex:  # noqa: BLE001
+            # Die Fehlertexte der Module nennen nie das Geheimnis.
+            print(f"[AUTH] IdP-Zugangsdaten: {system} fuer {konto} nicht angemeldet "
+                  f"({type(ex).__name__}: {str(ex)[:200]})", flush=True)
+            return None
+        return system
+
+    async def kennwort(system: str, m, darf):
+        wert = zugaenge.get(system)
+        if not wert:
+            return None
+        try:
+            if not darf():
+                return None
+            ziel = await asyncio.to_thread(m.idp_kennwort_ziel, konto, wert) or {}
+            if not ziel.get("feld"):
+                print(f"[AUTH] IdP-Zugangsdaten: {system} fuer {konto} nicht angemeldet "
+                      f"({ziel.get('grund') or 'kein Ziel'})", flush=True)
+                return None
+            if not ziel.get("unveraendert"):
+                await asyncio.to_thread(m.speichern, konto, {ziel["feld"]: wert})
+        except Exception as ex:  # noqa: BLE001
+            print(f"[AUTH] IdP-Zugangsdaten: {system} fuer {konto} nicht angemeldet "
+                  f"({type(ex).__name__}: {str(ex)[:200]})", flush=True)
+            return None
+        return system
+
+    aufgaben = [
+        kennwort("sap", sap_accounts,
+                 lambda: _user_may_use_sap(konto) and _skill_active("sap")),
+        kennwort("vemas", vemas_accounts,
+                 lambda: _user_may_use_vemas(konto) and _skill_active("vemas")),
+    ]
+    if zugaenge.get("jira") or zugaenge.get("confluence"):
+        try:
+            offen = await asyncio.to_thread(_zugang_anmeldungen, konto)
+        except Exception as e:  # noqa: BLE001
+            print(f"[AUTH] IdP-Zugangsdaten fuer {konto}: Liste nicht ermittelbar ({e})",
+                  flush=True)
+            offen = []
+        aufgaben += [pat(e) for e in offen if e.get("system") in ("jira", "confluence")]
+    erg = await asyncio.gather(*aufgaben)
+    fertig = [s for s in erg if s]
+    if fertig:
+        print(f"[AUTH] IdP-Zugangsdaten: {konto} angemeldet bei {', '.join(fertig)}", flush=True)
+    return fertig
 
 
 # ── Verwaltung der IdP-Anbindung (Einstellungen -> Sicherheit -> Berechtigungen) ──
@@ -14103,29 +14218,29 @@ async def update_skill_config(name: str, request: Request, user: str = Depends(r
                 _aktivitaet(user, "skills", "confluence_persoenliche_zugaenge_aus", name,
                             zugaenge_entfernt=_nj)
     if success and sap_kachel:
-        # Beim UMSCHALTEN ("Persoenliche Zugaenge erlauben" wird abgehakt)
-        # gehen ALLE persoenlichen Zugaenge weg (Betreiber 2026-11-15: "Zugaenge
-        # sollen geloescht werden"). Danach legt sich jeder Benutzer fuer die
-        # Kachel-Anmeldung wieder einen Zugang OHNE Kennwort an – deshalb nur im
-        # Umschalt-Moment und nicht bei jedem Speichern. Bei jedem Speichern
-        # dagegen `kennwoerter_entfernen`: idempotent (ohne Rest kein
-        # Schreibzugriff) und heilt einen Bestand, der trotz Schalter noch
-        # Kennwoerter haelt.
+        # "Persoenliche Zugaenge erlauben" abgehakt (= Kachel-Anmeldung): NUR
+        # die KENNWOERTER der persoenlichen Zugaenge gehen weg, die Zugaenge
+        # selbst (Server, Benutzername, Mandant, Zertifikatsanker) BLEIBEN.
+        # Festlegung des Betreibers 2026-11-18 – ersetzt "Zugaenge sollen
+        # geloescht werden" (2026-11-15): der Benutzername darf immer auf dem
+        # Server liegen, nur das Kennwort haengt am Schalter. Mit dem
+        # Benutzernamen kombiniert die IdP-Anmeldung das Kennwort aus dem Claim
+        # ``sap_pwd``/``vemas_pwd``; ohne ihn muesste jeder seinen Zugang neu
+        # anlegen. `kennwoerter_entfernen` bei JEDEM Speichern: idempotent
+        # (ohne Rest kein Schreibzugriff) und heilt einen Bestand, der trotz
+        # Schalter noch Kennwoerter haelt.
         umschalten = not gespeichert.get("kachel_anmeldung")
-        _nz = 0
         try:
-            if umschalten:
-                _nz = _sapacc.alle_entfernen()
             _n = _sapacc.kennwoerter_entfernen()
         except Exception as e:  # noqa: BLE001
-            print(f"[{name}] persoenliche Zugaenge nicht entfernt: {e}", flush=True)
+            print(f"[{name}] persoenliche Kennwoerter nicht entfernt: {e}", flush=True)
             return JSONResponse({"success": False,
                                  "error": "Die Einstellung ist gespeichert, aber die "
-                                          "persönlichen Zugänge ließen sich "
+                                          "persönlichen Kennwörter ließen sich "
                                           f"nicht entfernen: {e}"}, status_code=500)
-        if _n or _nz or umschalten:
+        if _n or umschalten:
             _aktivitaet(user, "skills", "kachel_anmeldung_an", name,
-                        kennwoerter_entfernt=_n, zugaenge_entfernt=_nz)
+                        kennwoerter_entfernt=_n)
 
     # Google-Spezialfall: Client-ID/Secret in .env schreiben
     if name == "google" and success:

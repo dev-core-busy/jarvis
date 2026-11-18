@@ -233,8 +233,8 @@
             // Einschalten der Kachel-Anmeldung loescht Kennwoerter – vorher fragen.
             if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {
                 if (!window.confirm(T('vemas.kachel_pflicht_confirm',
-                    'Achtung: Beim Speichern werden ALLE persönlichen VEMAS-Zugänge gelöscht. Der gemeinsame '
-                    + 'Zugang bleibt erhalten. Fortfahren?'))) {
+                    'Achtung: Beim Speichern werden alle persönlichen VEMAS-Kennwörter vom Server gelöscht. '
+                    + 'Zugänge und Benutzernamen bleiben erhalten, ebenso der gemeinsame Zugang. Fortfahren?'))) {
                     return;
                 }
             }
@@ -381,7 +381,7 @@
                     var kachel = !!d.kachel_pflicht;
                     // Ausdruecklich sagen, dass nichts gespeichert ist.
                     var kopf = kachel ? '<strong>' + esc(T('vemas.adm_kachel_kopf',
-                        'Anmeldung über die Portal-Kachel: Auf dem Server ist kein persönliches VEMAS-Kennwort gespeichert.'))
+                        'Anmeldung über die Portal-Kachel: Von den persönlichen Zugängen sind auf dem Server nur die Benutzernamen gespeichert, keine VEMAS-Kennwörter.'))
                         + '</strong><br>' : '';
                     if (!list.length && kachel) {
                         box.innerHTML = kopf + esc(T('vemas.acc_none_kachel',

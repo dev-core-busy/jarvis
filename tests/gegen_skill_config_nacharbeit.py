@@ -88,22 +88,23 @@ PROBEN = [
        "    body = _sr.leere_geheimfelder_behalten(body, gespeichert)\n"
        "    if sap_kachel:\n        for _f in _sapacc.GEHEIMFELDER:\n            body[_f] = \"\"\n"
        "    success = sm.update_skill_config(name, body)\n")]),
-    ("Zahl der geloeschten Zugaenge nicht protokolliert", "biss", "main",
-     [("                        kennwoerter_entfernt=_n, zugaenge_entfernt=_nz)",
-       "                        kennwoerter_entfernt=_n)")]),
+    ("Zahl der entfernten Kennwoerter nicht protokolliert", "biss", "main",
+     [("                        kennwoerter_entfernt=_n)",
+       "                        )")]),
     ("Fehlschlag des Loeschens wird verschluckt", "biss", "main",
-     [("            print(f\"[{name}] persoenliche Zugaenge nicht entfernt: {e}\", flush=True)\n"
+     [("            print(f\"[{name}] persoenliche Kennwoerter nicht entfernt: {e}\", flush=True)\n"
        "            return JSONResponse({\"success\": False,\n"
        "                                 \"error\": \"Die Einstellung ist gespeichert, aber die \"\n"
-       "                                          \"persönlichen Zugänge ließen sich \"\n"
+       "                                          \"persönlichen Kennwörter ließen sich \"\n"
        "                                          f\"nicht entfernen: {e}\"}, status_code=500)",
        "            _n = 0")]),
-    # 2026-11-15: SAP/VEMAS loeschen beim Umschalten ALLE Zugaenge
-    ("SAP/VEMAS: Zugaenge beim Umschalten nicht geloescht", "biss", "main",
-     [("                _nz = _sapacc.alle_entfernen()", "                _nz = 0")]),
-    ("SAP/VEMAS: Zugaenge bei JEDEM Speichern geloescht", "biss", "main",
-     [('        umschalten = not gespeichert.get("kachel_anmeldung")',
-       "        umschalten = True")]),
+    # 2026-11-18: SAP/VEMAS entfernen beim Umschalten NUR die Kennwoerter
+    ("SAP/VEMAS: beim Umschalten wieder ALLE Zugaenge geloescht", "biss", "main",
+     [("            _n = _sapacc.kennwoerter_entfernen()",
+       "            _n = _sapacc.kennwoerter_entfernen()\n"
+       "            if umschalten:\n                _sapacc.alle_entfernen()")]),
+    ("SAP/VEMAS: Kennwoerter beim Umschalten nicht entfernt", "biss", "main",
+     [("            _n = _sapacc.kennwoerter_entfernen()", "            _n = 0")]),
     # Mess-Sabotagen: die Attrappe spiegelt das Original nicht mehr → Exit 2.
     ("config.save_skill_state merged nicht mehr", "abbruch", "config",
      [("        self._skill_states[name].update(state)",

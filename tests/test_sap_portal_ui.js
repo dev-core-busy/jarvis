@@ -1552,7 +1552,7 @@ function loadScript(dom, rel) {
         const txt = e.$('sap-accounts-list').textContent;
         check('Positivkontrolle: Liste gerendert', /2 Benutzer mit eigenem Zugang/.test(txt), txt);
         check('Kopf sagt: kein persoenliches SAP-Kennwort auf dem Server',
-              /kein persönliches SAP-Kennwort gespeichert/.test(txt), txt);
+              /nur die Benutzernamen gespeichert, keine SAP-Kennwörter/.test(txt), txt);
         check('je Benutzer: kein Kennwort gespeichert',
               (txt.match(/kein Kennwort gespeichert/g) || []).length === 2, txt);
         check('je Benutzer: angemeldet bzw. nicht angemeldet',
@@ -1580,8 +1580,8 @@ function loadScript(dom, rel) {
               accounts: [Object.assign({ kennwort_gespeichert: true }, KONTO)] }, false);
         const txt = e.$('sap-accounts-list').textContent;
         check('ohne Schalter: "Kennwort gespeichert" je Benutzer', /– Kennwort gespeichert/.test(txt), txt);
-        check('ohne Schalter: kein Kopfsatz "kein persoenliches SAP-Kennwort"',
-              !/kein persönliches SAP-Kennwort/.test(txt), txt);
+        check('ohne Schalter: kein Kopfsatz "nur die Benutzernamen gespeichert"',
+              !/nur die Benutzernamen gespeichert/.test(txt), txt);
         check('ohne Schalter: Kennwortfeld frei', e.$('sap-odata-pass').disabled === false);
         check('Kachel aus -> "Persoenliche Zugaenge erlauben" angehakt', e.$('sap-persoenlich').checked === true);
         e.$('sap-persoenlich').checked = false;

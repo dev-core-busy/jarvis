@@ -279,7 +279,7 @@
             // Abhaken loescht alle persoenlichen Zugaenge – vorher fragen.
             if (this._kachelGewaehlt() && !(this._cfg && this._cfg.kachel_anmeldung)) {
                 var frage = window.t ? window.t('sap.kachel_pflicht_confirm') : '';
-                if (!window.confirm(frage || 'Achtung: Beim Speichern werden ALLE persönlichen SAP-Zugänge gelöscht. Der gemeinsame Zugang bleibt erhalten. Fortfahren?')) {
+                if (!window.confirm(frage || 'Achtung: Beim Speichern werden alle persönlichen SAP-Kennwörter vom Server gelöscht. Zugänge und Benutzernamen bleiben erhalten, ebenso der gemeinsame Zugang. Fortfahren?')) {
                     return;
                 }
             }
@@ -326,7 +326,7 @@
                     // Liste sah sonst genauso aus wie mit gespeicherten Kennwoertern.
                     if (kachel) {
                         kopf = '<strong>' + esc(T('sap.adm_kachel_kopf',
-                            'Anmeldung über die Portal-Kachel: Auf dem Server ist kein persönliches SAP-Kennwort gespeichert.'))
+                            'Anmeldung über die Portal-Kachel: Von den persönlichen Zugängen sind auf dem Server nur die Benutzernamen gespeichert, keine SAP-Kennwörter.'))
                             + '</strong><br>' + kopf;
                     }
                     var list = (d.accounts || []);

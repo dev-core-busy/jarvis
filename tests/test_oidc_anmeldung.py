@@ -12,6 +12,9 @@ Drei Teile:
      ``main.py`` GESCHNITTEN und mit Attrappen WIRKLICH ausgefuehrt:
      state/Cookie-Bindung, lokales Konto, Sperre, Freigabe, Einloese-Schein
      einmalig, 2FA nach Einstellung, Admin ohne 2FA ohne Admin-Rechte.
+     Zugangsdaten aus dem IdP (2026-11-18): Claims/userinfo -> Schein ->
+     Sitzungs-Anmeldung nur fuer faellige Systeme, nie ein Geheimnis im
+     Protokoll oder in der Antwort.
   3. Bestandsschutz: die Kennwortanmeldung ist unveraendert erreichbar, die
      neuen Routen stehen in der Freiliste, das Client-Secret ist ein
      Tresor-Feld und wird von keinem Endpunkt herausgegeben.
@@ -358,6 +361,171 @@ pruefe(ctx.verify_mode == __import__("ssl").CERT_REQUIRED and ctx.check_hostname
        "TLS-Pruefung immer an")
 
 
+abschnitt("1h. Zugangsdaten aus dem IdP (Claims, userinfo)")
+ZC = getattr(O, "ZUGANGSCLAIMS", None)
+pruefe(ZC == {"jira": "jira_pat", "confluence": "confluence_pat", "sap": "sap_pwd",
+              "vemas": "vemas_pwd"}, "vereinbarte Claim-Namen (jira_pat, confluence_pat, sap_pwd, vemas_pwd)")
+_za = getattr(O, "zugaenge_aus_claims", lambda c: {})
+# Positivkontrolle: ohne sie waere jede "wird uebergangen"-Pruefung trivial wahr.
+_pos = _za({"jira_pat": "PAT-J", "confluence_pat": "PAT-C", "sap_pwd": "Kw 1 ", "vemas_pwd": "V"})
+if _pos != {"jira": "PAT-J", "confluence": "PAT-C", "sap": "Kw 1 ", "vemas": "V"}:
+    print("ABBRUCH: zugaenge_aus_claims liefert fuer gueltige Claims %r" % (_pos,), file=sys.stderr)
+    sys.exit(1)
+pruefe(True, "Positivkontrolle: alle vier Claims, Wert UNVERAENDERT (Leerzeichen am Ende bleibt)")
+pruefe(_za({"jira_pat": "", "sap_pwd": "   ", "vemas_pwd": None, "confluence_pat": 123}) == {},
+       "leere, nur Leerzeichen, null und Nicht-Text werden uebergangen")
+pruefe(_za({"jira_pat": "a\nb", "sap_pwd": "a\rb"}) == {}, "Zeilenumbruch im Wert wird uebergangen")
+_max = getattr(O, "MAX_ZUGANG_LAENGE", 4096)
+pruefe(_za({"jira_pat": "x" * _max}) == {"jira": "x" * _max}
+       and _za({"jira_pat": "x" * (_max + 1)}) == {}, "Laengengrenze: genau die Grenze geht, eins mehr nicht")
+pruefe(_za({"fremd_pat": "x", "JIRA_PAT": "x"}) == {} and _za(None) == {} and _za(["jira_pat"]) == {},
+       "nur die vereinbarten Namen (exakt), kein Objekt -> nichts")
+
+_ug = {}
+
+
+class _UiClient:
+    def __init__(self, **kw):
+        _ug["kw"] = kw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get(self, url, headers=None):
+        _ug.update(url=url, headers=headers)
+        return _ug.get("antwort", _Antwort(200, {"sub": "x1", "jira_pat": "P"}))
+
+    def post(self, url, data=None, headers=None):
+        _ug.update(url=url, data=data)
+        return _ug.get("antwort_post", _Antwort(200, {"id_token": "a.b.c", "access_token": "AT"}))
+
+
+_alt_client = httpx.Client
+httpx.Client = _UiClient
+try:
+    ctx = O.ssl_kontext(None)
+    UIDOC = dict(DOC, userinfo_endpoint=ISS + "/userinfo")
+    voll = O.code_tauschen_voll(DOC, CID, "g", "C", "https://r/cb", "V", ctx)
+    pruefe(voll == {"id_token": "a.b.c", "access_token": "AT"}, "Code-Tausch liefert auch das Access-Token")
+    _ug["antwort_post"] = _Antwort(200, {"id_token": "a.b.c"})
+    pruefe(O.code_tauschen_voll(DOC, CID, "g", "C", "https://r/cb", "V", ctx)["access_token"] == "",
+           "ohne Access-Token: leer statt Fehler")
+    pruefe(O.code_tauschen(DOC, CID, "g", "C", "https://r/cb", "V", ctx) == "a.b.c",
+           "code_tauschen liefert weiter nur das id_token")
+    d_ui = O.userinfo(UIDOC, "AT", ctx, "x1")
+    pruefe(d_ui.get("jira_pat") == "P", "userinfo liefert die Claims")
+    pruefe(_ug["headers"].get("Authorization") == "Bearer AT", "userinfo mit dem Access-Token als Bearer")
+    pruefe(_ug["kw"].get("follow_redirects") is False and _ug["kw"].get("verify") is ctx,
+           "userinfo: keine Weiterleitungen, TLS-Kontext")
+    _ug["antwort"] = _Antwort(200, {"sub": "anderer", "jira_pat": "P"})
+    try:
+        O.userinfo(UIDOC, "AT", ctx, "x1")
+        pruefe(False, "userinfo mit fremdem sub wird abgewiesen")
+    except O.OidcFehler:
+        pruefe(True, "userinfo mit fremdem sub wird abgewiesen (OIDC Core 5.3.2)")
+    _ug["antwort"] = _Antwort(200, {"jira_pat": "P"})
+    try:
+        O.userinfo(UIDOC, "AT", ctx, "x1")
+        pruefe(False, "userinfo ohne sub wird abgewiesen")
+    except O.OidcFehler:
+        pruefe(True, "userinfo ohne sub wird abgewiesen")
+    _ug.pop("url", None)
+    pruefe(O.userinfo(UIDOC, "AT", ctx, "") == {} and "url" not in _ug,
+           "id_token ohne sub: keine Anfrage, nichts")
+    pruefe(O.userinfo(DOC, "AT", ctx, "x1") == {} and O.userinfo(UIDOC, "", ctx, "x1") == {},
+           "ohne Endpunkt oder ohne Access-Token: nichts")
+    try:
+        O.userinfo(dict(DOC, userinfo_endpoint="http://idp.beispiel.de/ui"), "AT", ctx, "x1")
+        pruefe(False, "userinfo ueber http wird abgewiesen")
+    except O.OidcFehler:
+        pruefe(True, "userinfo ueber http wird abgewiesen")
+    _ug["antwort"] = _Antwort(401, {"error": "invalid_token"})
+    try:
+        O.userinfo(UIDOC, "AT", ctx, "x1")
+        pruefe(False, "userinfo HTTP 401 wirft")
+    except O.OidcFehler as e:
+        pruefe("AT" not in str(e), "userinfo HTTP 401 wirft, ohne das Access-Token zu nennen")
+finally:
+    httpx.Client = _alt_client
+
+
+abschnitt("1i. SAP/VEMAS: wohin gehoert ein Kennwort aus dem IdP (echte Module)")
+from backend import sap_accounts as _SAP, vemas_accounts as _VEM  # noqa: E402
+
+
+def _ziel_mit(mod, zugang, *, kachel=False, **patch):
+    """idp_kennwort_ziel mit EINEM Zugang 'm.muster' – Platte, Schalter und
+    Entschluesselung ersetzt (kein Schluesselzugriff, keine Kontendatei)."""
+    alt = {n: getattr(mod, n) for n in ("_laden", "kachel_pflicht", "entschluesseln")}
+    mod._laden = lambda: {"m.muster": dict(zugang)} if zugang is not None else {}
+    mod.kachel_pflicht = lambda cfg=None: kachel
+    mod.entschluesseln = lambda t: t[4:] if str(t).startswith("ENC:") else "?"
+    alt_p = {n: getattr(mod, n) for n in patch}
+    for n, f in patch.items():
+        setattr(mod, n, f)
+    try:
+        return mod.idp_kennwort_ziel("FIRMA\\M.Muster", "KW")
+    finally:
+        for n, f in list(alt.items()) + list(alt_p.items()):
+            setattr(mod, n, f)
+
+
+SAP_OK = {"connection_type": "odata", "odata_base_url": "https://sap.beispiel.de/o",
+          "username": "SAPUSER", "aktiv": True}
+SAP_PATCH = {"host_ok": lambda h, erlaubt=None: h != "boese.beispiel.de",
+             "skill_config": lambda: {}, "hana_erlaubt": lambda c=None: True}
+_z = _ziel_mit(_SAP, SAP_OK, **SAP_PATCH)
+if _z.get("feld") != "password":
+    print("ABBRUCH: SAP-Positivkontrolle liefert %r" % (_z,), file=sys.stderr)
+    sys.exit(1)
+pruefe(_z == {"feld": "password", "benutzer": "SAPUSER", "unveraendert": False},
+       "SAP OData mit Benutzer: Kennwortfeld, gespeicherter Benutzer (Positivkontrolle, normierter Name)")
+pruefe(_ziel_mit(_SAP, dict(SAP_OK, connection_type="hana", hana_host="h", hana_user="HU"),
+                 **SAP_PATCH).get("feld") == "hana_password", "SAP HANA: hana_password")
+pruefe(_ziel_mit(_SAP, dict(SAP_OK, connection_type="rfc", rfc_ashost="r", rfc_user="RU"),
+                 **SAP_PATCH).get("feld") == "rfc_password", "SAP RFC: rfc_password")
+pruefe(not _ziel_mit(_SAP, None, **SAP_PATCH).get("feld"), "SAP ohne Zugang: kein Ziel")
+pruefe(not _ziel_mit(_SAP, dict(SAP_OK, username=" "), **SAP_PATCH).get("feld"),
+       "SAP ohne Benutzername: kein Ziel")
+pruefe(not _ziel_mit(_SAP, dict(SAP_OK, auth_kind="bearer"), **SAP_PATCH).get("feld"),
+       "SAP Bearer-Anmeldung: ein Kennwort fuellt kein Token")
+pruefe(not _ziel_mit(_SAP, dict(SAP_OK, ausgesetzt=True), **SAP_PATCH).get("feld"),
+       "SAP ausgesetzt: kein Ziel (Aussetzer bleibt)")
+pruefe(not _ziel_mit(_SAP, dict(SAP_OK, aktiv=False), **SAP_PATCH).get("feld"), "SAP inaktiv: kein Ziel")
+pruefe(not _ziel_mit(_SAP, dict(SAP_OK, odata_base_url="https://boese.beispiel.de/o"),
+                     **SAP_PATCH).get("feld"), "SAP Server nicht freigegeben: kein Ziel")
+pruefe(_ziel_mit(_SAP, dict(SAP_OK, password_enc="ENC:KW"), **SAP_PATCH).get("unveraendert") is True,
+       "SAP gespeichertes Kennwort gleich dem Claim: unveraendert (nichts schreiben)")
+pruefe(_ziel_mit(_SAP, dict(SAP_OK, password_enc="ENC:alt"), **SAP_PATCH).get("unveraendert") is False,
+       "SAP anderes gespeichertes Kennwort: wird ersetzt")
+pruefe(_ziel_mit(_SAP, dict(SAP_OK, password_enc="ENC:KW"), kachel=True,
+                 **SAP_PATCH).get("unveraendert") is False,
+       "SAP Kachel-Anmeldung: immer in die Sitzung (nie 'unveraendert')")
+
+VEM_OK = {"auth_kind": "basic", "username": "VUSER", "aktiv": True}
+VEM_PATCH = {"server_konfiguriert": lambda: True}
+_z = _ziel_mit(_VEM, VEM_OK, **VEM_PATCH)
+pruefe(_z == {"feld": "password", "benutzer": "VUSER", "unveraendert": False},
+       "VEMAS basic mit Benutzer: Kennwortfeld, gespeicherter Benutzer")
+pruefe(_ziel_mit(_VEM, dict(VEM_OK, auth_kind="login"), **VEM_PATCH).get("feld") == "password",
+       "VEMAS login: Kennwortfeld")
+pruefe(not _ziel_mit(_VEM, dict(VEM_OK, auth_kind="bearer"), **VEM_PATCH).get("feld"),
+       "VEMAS Token-Anmeldung: ein Kennwort fuellt kein Token")
+pruefe(not _ziel_mit(_VEM, dict(VEM_OK, username=""), **VEM_PATCH).get("feld"),
+       "VEMAS ohne Benutzername: kein Ziel")
+pruefe(not _ziel_mit(_VEM, dict(VEM_OK, ausgesetzt=True), **VEM_PATCH).get("feld"),
+       "VEMAS ausgesetzt: kein Ziel")
+pruefe(not _ziel_mit(_VEM, VEM_OK, server_konfiguriert=lambda: False).get("feld"),
+       "VEMAS ohne Serveradresse: kein Ziel")
+pruefe(_ziel_mit(_VEM, dict(VEM_OK, password_enc="ENC:KW"), **VEM_PATCH).get("unveraendert") is True,
+       "VEMAS gespeichertes Kennwort gleich dem Claim: unveraendert")
+pruefe(not any("KW" in str(v) for v in _ziel_mit(_SAP, dict(SAP_OK, ausgesetzt=True), **SAP_PATCH).values()),
+       "Grund nennt nie das Kennwort")
+
+
 # ═══ 2. main.py: geschnitten und ausgefuehrt ═════════════════════════════════
 abschnitt("2. Endpunkte (geschnitten, ausgefuehrt)")
 MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
@@ -445,13 +613,16 @@ class AuthStateUnlesbar(RuntimeError):
 
 
 def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
-        admin=False, pflicht=True, totp_ok=True, block=None, log=None):
+        admin=False, pflicht=True, totp_ok=True, block=None, log=None,
+        anmeldungen=None, konten=None, darf=True):
     log = log if log is not None else {}
     log.setdefault("token", [])
     log.setdefault("versuche", [])
     log.setdefault("sicherheit", [])
     log.setdefault("kontext", [])
     log.setdefault("gespeichert", {})
+    log.setdefault("ausgaben", [])
+    log.setdefault("zugang", [])
     cfg = types.SimpleNamespace(get_setting=lambda k, d=None: einst.get(k, d),
                                 save_setting=lambda k, v: log["gespeichert"].__setitem__(k, v))
     lic = types.ModuleType("backend.license_enforce")
@@ -468,7 +639,12 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
 
     ns = {
         "config": cfg, "JSONResponse": JSONResponse, "asyncio": asyncio, "Request": _Req,
-        "print": lambda *a, **k: None, "ALLOWED_USERS": {"jarvis"},
+        "print": lambda *a, **k: log["ausgaben"].append(" ".join(str(x) for x in a)),
+        "ALLOWED_USERS": {"jarvis"},
+        "_user_may_use_sap": lambda u: darf, "_user_may_use_vemas": lambda u: darf,
+        "_skill_active": lambda n: True,
+        "_zugang_anmeldungen": lambda u: (log["zugang"].append(("liste", u)),
+                                          list(anmeldungen or []))[1],
         "_norm_login": lambda n: (n or "").split("@")[0].split("\\")[-1].strip().lower(),
         "_check_rate_limit": lambda ip: True,
         "_konto_sperre_antwort": lambda u: gesperrt,
@@ -505,7 +681,8 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
     for n in ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri", "_oidc_mfa_anerkennen",
               "_oidc_cookie", "_oidc_cookie_weg", "_oidc_zurueck", "oidc_callback",
               "_oidc_einloesen_ablauf", "_oidc_ad_modus", "oidc_status",
-              "oidc_einstellungen_lesen", "oidc_einstellungen_setzen"):
+              "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
+              "_oidc_zugaenge_holen", "_idp_zugaenge_uebernehmen"):
         fn = FUNK[n]
         fn2 = ast.FunctionDef(name=fn.name, args=fn.args, body=fn.body, decorator_list=[],
                               returns=None, type_params=[]) if isinstance(fn, ast.FunctionDef) else \
@@ -513,6 +690,33 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
                                  returns=None, type_params=[])
         mod = ast.fix_missing_locations(ast.Module(body=[fn2], type_ignores=[]))
         exec(compile(mod, "main.py", "exec"), ns)  # noqa: S102
+    # Konten-Module als Attrappen mit der ECHTEN Signatur der benutzten Wege
+    import backend
+    for system in ("jira", "confluence", "sap", "vemas"):
+        mod = types.ModuleType("backend.%s_accounts" % system)
+        k = (konten or {}).get(system, {})
+
+        def _anm(user, token, _s=system, _k=k):
+            log["zugang"].append(("sitzung", _s, user, token))
+            if _k.get("fehler"):
+                raise RuntimeError("Server lehnt den Token ab: HTTP 401")
+            return {"angemeldet": True}
+
+        def _spe(user, felder, _s=system):
+            log["zugang"].append(("speichern", _s, user, dict(felder)))
+            return {}
+
+        mod.sitzung_anmelden = _anm
+        mod.speichern = _spe
+        mod.zugang_info = lambda user, _k=k: {"ausgesetzt": bool(_k.get("ausgesetzt"))}
+
+        def _ziel(user, wert, _s=system, _k=k):
+            log["zugang"].append(("ziel", _s, user))
+            return dict(_k.get("ziel", {"feld": "password", "benutzer": "U", "unveraendert": False}))
+
+        mod.idp_kennwort_ziel = _ziel
+        sys.modules[mod.__name__] = mod
+        setattr(backend, mod.__name__.rsplit(".", 1)[1], mod)
     return ns, log
 
 
@@ -522,8 +726,20 @@ EINST = {"oidc_aktiv": True, "oidc_issuer": ISS, "oidc_client_id": CID,
 # Netz des Moduls durch Attrappen ersetzen; die Token-Pruefung bleibt ECHT.
 O.discovery = lambda issuer, ctx, neu=False: DOC
 O.jwks = lambda uri, ctx, neu=False: JWKS
-_tausch = {"tok": None}
-O.code_tauschen = lambda doc, cid, sec, code, ru, ver, ctx: _tausch["tok"]
+_tausch = {"tok": None, "access": "AT"}
+O.code_tauschen_voll = lambda doc, cid, sec, code, ru, ver, ctx: {
+    "id_token": _tausch["tok"], "access_token": _tausch["access"]}
+_ui = {"antwort": {}, "aufrufe": []}
+
+
+def _userinfo_attrappe(doc, access_token, ctx, sub):
+    _ui["aufrufe"].append((access_token, sub))
+    if isinstance(_ui["antwort"], Exception):
+        raise _ui["antwort"]
+    return dict(_ui["antwort"])
+
+
+O.userinfo = _userinfo_attrappe
 
 
 def _vorgang(nonce=NONCE):
@@ -661,6 +877,117 @@ r, d, log, _ = _einloesen(einst=dict(EINST, oidc_aktiv=False))
 pruefe(r.status_code == 401 and not log["token"], "IdP-Anmeldung inzwischen aus -> keine Sitzung")
 r, d, log, _ = _einloesen(block={"reason": "x", "incidents": []}, admin=True, pflicht=False)
 pruefe(d.get("account_blocked") and d.get("is_admin") is False, "gesperrter Account (Sicherheit): nur Sperrhinweis")
+
+
+abschnitt("2b. Zugangsdaten aus dem IdP: Callback und Einloesen")
+GEHEIM = {"jira_pat": "GEH-JIRA-1", "confluence_pat": "GEH-CONF-2", "sap_pwd": "GEH-SAP-3",
+          "vemas_pwd": "GEH-VEMAS-4"}
+
+
+def _schein_aus(r):
+    sid = (r.cookies.get("__Host-jarvis_oidc_schein") or (None,))[0]
+    return O.SCHEINE.lesen(sid) if sid else None
+
+
+_ui.update(antwort={}, aufrufe=[])
+r, log = _callback(tok=signieren(claims(**GEHEIM)))
+sch = _schein_aus(r) or {}
+if _ziel(r) != "/?anmeldung=idp" or not sch:
+    print("ABBRUCH: Callback mit Zugangs-Claims ohne Schein (%s)" % _ziel(r), file=sys.stderr)
+    sys.exit(1)
+pruefe(sch.get("zugaenge") == {"jira": "GEH-JIRA-1", "confluence": "GEH-CONF-2",
+                               "sap": "GEH-SAP-3", "vemas": "GEH-VEMAS-4"},
+       "Claims im id_token -> alle vier im Einloese-Schein")
+pruefe(not _ui["aufrufe"], "Claims im id_token -> KEINE Anfrage an userinfo")
+pruefe(not any(w in a for a in log["ausgaben"] for w in GEHEIM.values()),
+       "kein Geheimnis in einer Protokollzeile des Callbacks")
+pruefe(not any(w in _ziel(r) for w in GEHEIM.values()), "kein Geheimnis in der Weiterleitung")
+
+_ui.update(antwort={"sub": "x1", "jira_pat": "UI-PAT"}, aufrufe=[])
+r, log = _callback()
+sch = _schein_aus(r) or {}
+pruefe(sch.get("zugaenge") == {"jira": "UI-PAT"} and _ui["aufrufe"] == [("AT", "x1")],
+       "id_token ohne Claims -> userinfo mit Access-Token und sub des id_token")
+_ui.update(antwort=O.OidcFehler("weg", "nicht_erreichbar"), aufrufe=[])
+r, log = _callback()
+pruefe(_ziel(r) == "/?anmeldung=idp" and (_schein_aus(r) or {}).get("zugaenge") == {},
+       "userinfo scheitert -> Anmeldung geht trotzdem, ohne Zugangsdaten")
+_ui.update(antwort={"sub": "x1", "jira_pat": "UI-PAT"}, aufrufe=[])
+r, log = _callback(freigabe="nein")
+pruefe(_ziel(r) == "/?idp_fehler=keine_freigabe" and not _ui["aufrufe"]
+       and "__Host-jarvis_oidc_schein" not in r.cookies,
+       "abgewiesenes Konto -> keine userinfo-Anfrage, kein Schein")
+_ui.update(antwort={}, aufrufe=[])
+
+ALLE = [{"system": "sap", "art": "kennwort", "feld": "password"},
+        {"system": "vemas", "art": "kennwort", "feld": "password"},
+        {"system": "jira", "art": "token", "feld": "api_token"},
+        {"system": "confluence", "art": "token", "feld": "api_token"}]
+ZUG = {"jira": "GEH-JIRA-1", "confluence": "GEH-CONF-2", "sap": "GEH-SAP-3", "vemas": "GEH-VEMAS-4"}
+
+
+def _mit_zug(zugaenge=None, **kw):
+    return _einloesen({"konto": "m.muster", "mfa_belegt": True,
+                       "zugaenge": ZUG if zugaenge is None else zugaenge}, einst=MFA_AN, **kw)
+
+
+r, d, log, _ = _mit_zug(anmeldungen=ALLE)
+pruefe(d.get("success") and sorted(d.get("idp_zugaenge") or []) == ["confluence", "jira", "sap", "vemas"],
+       "alle vier faellig -> alle vier angemeldet, Antwort nennt die Systeme")
+pruefe(("sitzung", "jira", "m.muster", "GEH-JIRA-1") in log["zugang"]
+       and ("sitzung", "confluence", "m.muster", "GEH-CONF-2") in log["zugang"],
+       "Jira/Confluence ueber sitzung_anmelden (Pruefung gegen den Server)")
+pruefe(("speichern", "sap", "m.muster", {"password": "GEH-SAP-3"}) in log["zugang"]
+       and ("speichern", "vemas", "m.muster", {"password": "GEH-VEMAS-4"}) in log["zugang"],
+       "SAP/VEMAS: Kennwort aus dem Claim ueber speichern in das Feld des Moduls")
+pruefe(("liste", "m.muster") in log["zugang"], "Jira/Confluence: Grundlage ist die Liste des zweiten Schritts")
+pruefe(not any(w in r.body.decode() for w in ZUG.values()), "kein Geheimnis in der Antwort an den Browser")
+pruefe(not any(w in a for a in log["ausgaben"] for w in ZUG.values()), "kein Geheimnis im Protokoll")
+
+r, d, log, _ = _mit_zug({"jira": "GEH-JIRA-1", "confluence": "GEH-CONF-2"}, anmeldungen=[ALLE[2]])
+pruefe(d.get("idp_zugaenge") == ["jira"]
+       and not any(z[0] == "sitzung" and z[1] == "confluence" for z in log["zugang"]),
+       "Jira/Confluence nur, wenn faellig (erlaubte persoenliche Zugaenge -> PAT-Claim ungenutzt)")
+r, d, log, _ = _mit_zug(anmeldungen=[])
+pruefe(sorted(d.get("idp_zugaenge") or []) == ["sap", "vemas"],
+       "SAP/VEMAS haengen NICHT an der Liste des zweiten Schritts (auch bei erlaubten persoenlichen Zugaengen)")
+r, d, log, _ = _mit_zug(anmeldungen=[], konten={"sap": {"ziel": {"grund": "Zugang ausgesetzt"}}})
+pruefe(d.get("idp_zugaenge") == ["vemas"]
+       and not any(z[:2] == ("speichern", "sap") for z in log["zugang"])
+       and any("Zugang ausgesetzt" in a for a in log["ausgaben"]),
+       "Modul meldet kein Ziel -> nichts gespeichert, Grund im Protokoll")
+r, d, log, _ = _mit_zug(anmeldungen=[], konten={"vemas": {"ziel": {"feld": "password", "benutzer": "U",
+                                                                     "unveraendert": True}}})
+pruefe("vemas" in (d.get("idp_zugaenge") or [])
+       and not any(z[:2] == ("speichern", "vemas") for z in log["zugang"]),
+       "gespeichertes Kennwort schon gleich: angemeldet, aber NICHTS geschrieben")
+r, d, log, _ = _mit_zug(anmeldungen=[], konten={"sap": {"ziel": {"feld": "hana_password", "benutzer": "H",
+                                                                   "unveraendert": False}}})
+pruefe(("speichern", "sap", "m.muster", {"hana_password": "GEH-SAP-3"}) in log["zugang"],
+       "Feld kommt vom Modul (HANA -> hana_password)")
+r, d, log, _ = _mit_zug(anmeldungen=[], darf=False)
+pruefe(not any(z[0] in ("ziel", "speichern") for z in log["zugang"])
+       and not set(d.get("idp_zugaenge") or []) & {"sap", "vemas"},
+       "ohne Freigabe fuer SAP/VEMAS: Claim ungenutzt, Zugang nicht einmal gelesen")
+r, d, log, _ = _mit_zug(anmeldungen=ALLE, konten={"jira": {"fehler": True}})
+pruefe(d.get("success") and "jira" not in (d.get("idp_zugaenge") or [])
+       and "confluence" in (d.get("idp_zugaenge") or []),
+       "abgelehnter PAT: Anmeldung an Jarvis gelingt, nur dieses System fehlt")
+r, d, log, _ = _mit_zug({}, anmeldungen=ALLE)
+pruefe(d.get("success") and d.get("idp_zugaenge") == [] and not log["zugang"],
+       "ohne Zugangsdaten im Schein: nichts angemeldet, Liste nicht einmal abgefragt")
+r, d, log, _ = _mit_zug({"sap": "GEH-SAP-3"}, anmeldungen=ALLE)
+pruefe(d.get("idp_zugaenge") == ["sap"] and ("liste", "m.muster") not in log["zugang"],
+       "nur ein Kennwort-Claim: Liste des zweiten Schritts nicht abgefragt")
+r, d, log, _ = _mit_zug(anmeldungen=ALLE, block={"reason": "x", "incidents": []})
+pruefe(d.get("account_blocked") and not log["zugang"], "gesperrter Account: keine Zugangsdaten uebernommen")
+r, d, log, sid = _einloesen({"konto": "m.muster", "mfa_belegt": False, "zugaenge": ZUG},
+                            auth_state=TOTP, anmeldungen=ALLE)
+pruefe(d.get("requires_totp") and not log["zugang"], "2FA-Code noch offen: noch nichts angemeldet")
+r, d, log, _ = _einloesen(auth_state=TOTP, schein_id=sid, body={"totp_code": "123456"},
+                          anmeldungen=ALLE)
+pruefe(d.get("success") and len(d.get("idp_zugaenge") or []) == 4,
+       "nach richtigem Code: Zugangsdaten aus dem Schein angemeldet")
 
 
 # ═══ 3. Bestandsschutz und Begleitstellen ════════════════════════════════════

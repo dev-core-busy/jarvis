@@ -266,7 +266,7 @@ async function portal(opts) {
             { ok: true, kachel_pflicht: true, accounts: [{ user: 'm.mustermann', auth_kind: 'basic', aktiv: true,
               ausgesetzt: false, kennwort_gespeichert: false, angemeldet: false }] }, true);
         const txt = e.$('vemas-accounts-list').textContent;
-        check(/kein persönliches VEMAS-Kennwort gespeichert/.test(txt) && /kein Kennwort gespeichert · nicht angemeldet/.test(txt),
+        check(/nur die Benutzernamen gespeichert, keine VEMAS-Kennwörter/.test(txt) && /kein Kennwort gespeichert · nicht angemeldet/.test(txt),
               'Liste: kein Kennwort gespeichert, nicht angemeldet', txt);
         check(e.$('vemas-persoenlich').checked === false, 'Kachel an -> "Persoenliche Zugaenge erlauben" nicht angehakt');
         check(e.$('vemas-sect-acc') && e.$('vemas-sect-acc').style.display === 'none',

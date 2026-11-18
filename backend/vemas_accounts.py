@@ -877,6 +877,42 @@ def anmeldung_anbieten(user: str) -> dict:
             "kanal": (k.get("auth_kind") or "").strip().lower()}
 
 
+def idp_kennwort_ziel(user: str, wert: str) -> dict:
+    """Wohin gehoert ein Kennwort aus dem IdP (Claim ``vemas_pwd``)? {} = nirgends.
+
+    Wie ``sap_accounts.idp_kennwort_ziel`` (Festlegung 2026-11-18): der
+    Benutzername liegt im Zugang auf dem Server, das Kennwort aus dem Claim
+    geht ueber ``speichern`` je nach "Persoenliche Zugaenge erlauben" in die
+    Sitzung oder verschluesselt auf die Platte. Kein Ziel bei fehlendem,
+    inaktivem oder ausgesetztem Zugang, ohne Benutzernamen, bei
+    Token-Anmeldung (``bearer``) und ohne Serveradresse.
+    Rueckgabe ``{"feld", "benutzer", "unveraendert"}`` oder ``{"grund"}``."""
+    un = norm_user(user or "")
+    if not un or ":" in un:
+        return {"grund": "keine Person"}
+    k = _laden().get(un)
+    if not k:
+        return {"grund": "kein Zugang hinterlegt"}
+    if not bool(k.get("aktiv", True)):
+        return {"grund": "Zugang inaktiv"}
+    if k.get("ausgesetzt"):
+        return {"grund": "Zugang ausgesetzt"}
+    if (k.get("auth_kind") or "").strip().lower() not in ("basic", "login"):
+        return {"grund": "keine Kennwort-Anmeldung"}
+    benutzer = str(k.get("username") or "").strip()
+    if not benutzer:
+        return {"grund": "kein Benutzername"}
+    if not server_konfiguriert():
+        return {"grund": "keine Serveradresse"}
+    unveraendert = False
+    if not kachel_pflicht() and (k.get("password_enc") or "").strip():
+        try:
+            unveraendert = entschluesseln(k["password_enc"]) == wert
+        except Exception:  # noqa: BLE001
+            unveraendert = False
+    return {"feld": "password", "benutzer": benutzer, "unveraendert": unveraendert}
+
+
 def client_fuer_lauf(user: str | None = None) -> VemasClient:
     """Nur der Client – fuer Aufrufer, die den Hinweis nicht brauchen."""
     return aufloesen(user)["client"]
@@ -901,6 +937,6 @@ __all__ = [
     "aufloesen", "client_fuer_lauf", "quelle_text", "sammel_client",
     "server_konfiguriert", "QUELLE_PERSOENLICH", "QUELLE_SAMMEL", "QUELLE_KEINE",
     "kachel_pflicht", "sammel_nutzbar", "kennwoerter_entfernen", "alle_entfernen", "kennwort_gespeichert",
-    "sitzung_beenden", "sitzung_bis", "anmeldung_anbieten", "KACHEL_SCHALTER",
+    "sitzung_beenden", "sitzung_bis", "anmeldung_anbieten", "idp_kennwort_ziel", "KACHEL_SCHALTER",
     "AENDERBAR", "TEXTFELDER", "GEHEIMFELDER", "ANMELDEARTEN",
 ]

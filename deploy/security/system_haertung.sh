@@ -10,12 +10,13 @@
 #                                         starten (dauert 15-20 Minuten)
 #
 # WAS ES TUT (je Massnahme der Liste):
-#   B1  sudo protokolliert nach /var/log/sudo.log
+#   B1  sudo protokolliert nach /var/log/sudo.log (woechentlich rotiert)
 #   B2  needrestart – nur AUFLISTEN, nie selbst neu starten
 #   B3  nicht benoetigte Kernel-Module gesperrt
 #   B4  Kernel-Werte (/etc/sysctl.d/90-haertung.conf)
 #   B5  keine Speicherabbilder (Limits, coredump.conf, LimitCORE fuer jarvis)
-#   B6  auditd mit Regeln auf Anmeldung, Rechte, Units und den Hauptschluessel
+#   B6  auditd mit Regeln auf Anmeldung, Rechte, Units und den Hauptschluessel;
+#       Speicher 20 x 50 MB statt der Vorgabe 5 x 8 MB (siehe AUDITD_WERTE)
 #   B7  AIDE mit Ausnahmen fuer Netzfreigaben, Pseudo-Dateisysteme und Caches
 #   B8  lynis installiert (der Lauf und seine Bewertung sind Handarbeit)
 #
@@ -68,6 +69,26 @@ Defaults use_pty
 Defaults logfile="/var/log/sudo.log"
 Defaults timestamp_timeout=5
 Defaults passwd_tries=3'
+
+LOGROTATE='# Haertung B1 (Checkliste 75) - deploy/security/system_haertung.sh
+# sudo schreibt mit logfile= in eine eigene Datei, die kein Paket rotiert -
+# ohne diese Regel waechst sie unbegrenzt.
+/var/log/sudo.log {
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0600 root root
+}'
+
+# auditd: Vorgabe sind 5 Dateien zu 8 MB. Gemessen am 18.11.2026: ein einziger
+# lynis-Lauf ueber sudo erzeugte in einer Minute 28.545 root-cmd-Eintraege
+# (jeder Hilfsprozess des Shellskripts zaehlt als Befehl einer Person) - danach
+# reichte das Protokoll nur noch sechs Minuten zurueck, fruehere Ereignisse auf
+# sudoers und den Hauptschluessel waren herausrotiert. 20 x 50 MB = 1 GB.
+AUDITD_WERTE="max_log_file=50 num_logs=20"
 
 NEEDRESTART='# Haertung B2 (Checkliste 69) - deploy/security/system_haertung.sh
 # Nur AUFLISTEN, was neu gestartet werden muss - nie selbst neu starten.
@@ -206,6 +227,29 @@ AIDE='# Haertung B7 (Checkliste 76) - deploy/security/system_haertung.sh
 # Kuerzen oder Ersetzen - genau das, was bei einem Pruefprotokoll auffallen muss.
 /var/log/jarvis-broker-audit\.jsonl$ f Log
 
+# Wachsende Protokolle (gemessen: im ersten Pruefstand taeglich gemeldet).
+# "Log" erlaubt Wachsen und meldet Schrumpfen oder Ersetzen der AKTUELLEN Datei;
+# rotierte Fassungen werden nur noch auf Eigentuemer und Rechte geprueft
+# ("LowLog"), neue und entfernte sind erlaubt - jede Rotation waere sonst ein Fund.
+/var/log/audit/audit\.log$ f Log
+/var/log/audit/audit\.log\.[0-9]+$ f LowLog+ANF+ARF
+/var/log/sudo\.log$ f Log
+/var/log/sudo\.log\.[0-9]+(\.gz)?$ f LowLog+ANF+ARF
+/var/log/aide/aideinit\.(log|errors)$ f Log
+# SentinelOne rotiert seine Logs selbst nach Groesse (name.N.log,
+# old_logs.tar.gz) - auch die aktuelle Datei schrumpft dabei. Der Agent liefert
+# an seine eigene Konsole; hier zaehlen nur Eigentuemer und Rechte.
+/opt/sentinelone/log/[^/]+$ f LowLog+ANF+ARF
+
+# Laufzeit: Arbeitsverzeichnisse und Anhaenge der Sandbox-Laeufe (je Benutzer,
+# fluechtig), Credential-Kopien und Mount-Propagation von systemd (bei jedem
+# Dienststart neu). Die Quelle des Hauptschluessels unter /etc/jarvis bleibt
+# voll geprueft.
+!/tmp/jarvis-arbeit
+!/tmp/jarvis-anhaenge
+!/run/credentials
+!/run/systemd/propagate
+
 # Nutzungszaehler des Root-Brokers (seit Commit 4b4796ab getrennt von der
 # Freigabeliste): aendern sich im Betrieb laufend und werden deshalb als
 # wechselnde Datei gefuehrt - Rechte und Eigentuemer bleiben geprueft, der
@@ -226,6 +270,7 @@ etc/systemd/coredump.conf.d/90-haertung.conf|0644|COREDUMP
 etc/systemd/system/jarvis.service.d/70-coredump.conf|0644|DROPIN
 etc/audit/rules.d/50-haertung.rules|0640|AUDIT
 etc/aide/aide.conf.d/95_jarvis_ausnahmen|0644|AIDE
+etc/logrotate.d/sudo-haertung|0644|LOGROTATE
 "
 
 abweichungen=0
@@ -289,6 +334,34 @@ dateien() {
     done <<< "$ZIELE"
 }
 
+# auditd_konf pruefen|anwenden: einzelne Schluessel in auditd.conf (die Datei
+# gehoert dem Paket - sie wird nicht ersetzt, nur diese Werte werden gesetzt)
+auditd_konf() {
+    local datei="$W/etc/audit/auditd.conf" paar k v ist
+    for paar in $AUDITD_WERTE; do
+        k="${paar%%=*}"; v="${paar#*=}"
+        ist="$(sed -nE "s/^[[:space:]]*$k[[:space:]]*=[[:space:]]*([^[:space:]]+).*/\1/p" "$datei" 2>/dev/null | tail -1)"
+        if [ "$ist" = "$v" ]; then
+            if [ "$1" = "pruefen" ]; then echo "  ok          $datei: $k = $v"
+            else echo "  unveraendert $datei: $k = $v"; fi
+            continue
+        fi
+        if [ "$1" = "pruefen" ]; then
+            echo "  WEICHT AB   $datei: $k = ${ist:-fehlt} (soll $v)"
+            abweichungen=$((abweichungen + 1))
+        else
+            mkdir -p "$(dirname "$datei")"
+            if grep -qE "^[[:space:]]*$k[[:space:]]*=" "$datei" 2>/dev/null; then
+                sed -i -E "s/^[[:space:]]*$k[[:space:]]*=.*/$k = $v/" "$datei"
+            else
+                echo "$k = $v" >> "$datei"
+            fi
+            echo "  geschrieben  $datei: $k = $v"
+            case " $geaendert " in *" AUDITD "*) ;; *) geaendert="$geaendert AUDITD" ;; esac
+        fi
+    done
+}
+
 system_pruefen() {
     [ -n "$TEST" ] && return 0
     local p
@@ -322,6 +395,11 @@ anwenden_system() {
         fi ;;
     esac
     case " $geaendert " in *" AUDIT "*) augenrules --load >/dev/null 2>&1 || echo "WARNUNG: augenrules --load fehlgeschlagen" >&2 ;; esac
+    case " $geaendert " in *" AUDITD "*)
+        # SIGHUP: auditd liest die Konfiguration neu und uebernimmt die Werte
+        systemctl reload auditd >/dev/null 2>&1 || auditctl --signal reload >/dev/null 2>&1 \
+            || echo "WARNUNG: auditd hat die neue Konfiguration nicht uebernommen" >&2 ;;
+    esac
     case " $geaendert " in *" DROPIN "*)
         systemctl daemon-reload
         echo "  HINWEIS: LimitCORE=0 wirkt mit dem naechsten Neustart von jarvis.service" ;;
@@ -335,6 +413,7 @@ case "$MODUS" in
     --pruefen)
         echo "== Dateien"
         dateien pruefen
+        auditd_konf pruefen
         echo "== System"
         system_pruefen
         if [ "$abweichungen" -eq 0 ]; then
@@ -350,6 +429,7 @@ case "$MODUS" in
         fi
         echo "== Dateien"
         dateien anwenden
+        auditd_konf anwenden
         echo "== System"
         anwenden_system
         echo "ERGEBNIS: angewandt (geaendert:${geaendert:- nichts})"

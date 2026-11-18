@@ -127,7 +127,7 @@ try:
     pruefe(rc == 0 and "geschrieben" not in out,
            "zweiter Lauf schreibt nichts (Ausgabe ohne 'geschrieben')")
     pruefe(vorher == nachher, "zweiter Lauf: Inhalt, mtime und Modus aller Dateien gleich")
-    pruefe(len(vorher) == 9, "genau 9 Dateien angelegt (gefunden %d)" % len(vorher))
+    pruefe(len(vorher) == 11, "genau 11 Dateien angelegt – 10 Ziele + auditd.conf (gefunden %d)" % len(vorher))
 
     # ── 3. --pruefen aendert nichts ──────────────────────────────────────────
     print("[3] --pruefen ist rein lesend")
@@ -235,6 +235,30 @@ try:
     pruefe(gruppe("/etc/jarvis/broker-policy.json") is None and not ausgenommen("/etc/jarvis/broker-policy.json"),
            "AIDE lockert die Freigabeliste NICHT (keine Var*-Regel, keine Ausnahme)")
 
+    # 4f'' Wachsende Logs und fluechtige Laufzeitverzeichnisse
+    for p_, g_ in (("/var/log/audit/audit.log", "Log"), ("/var/log/sudo.log", "Log"),
+                   ("/var/log/aide/aideinit.log", "Log"), ("/var/log/aide/aideinit.errors", "Log"),
+                   ("/var/log/audit/audit.log.3", "LowLog+ANF+ARF"), ("/var/log/sudo.log.2.gz", "LowLog+ANF+ARF"),
+                   ("/var/log/sudo.log.1", "LowLog+ANF+ARF"), ("/opt/sentinelone/log/network.1.log", "LowLog+ANF+ARF"),
+                   ("/opt/sentinelone/log/agent.log", "LowLog+ANF+ARF")):
+        pruefe(gruppe(p_) == g_, "AIDE-Gruppe %s fuer %s (ist %s)" % (g_, p_, gruppe(p_)))
+    for p_ in ("/tmp/jarvis-arbeit/0c8b14b2/x", "/tmp/jarvis-anhaenge/0c8b14b2/x",
+               "/run/credentials/jarvis.service/geheimnis", "/run/systemd/propagate/jarvis.service/x"):
+        pruefe(ausgenommen(p_), "AIDE nimmt aus: %s" % p_)
+    for p_ in ("/var/log/auth.log", "/var/log/syslog", "/opt/sentinelone/bin/sentinelctl"):
+        pruefe(not ausgenommen(p_) and gruppe(p_) is None,
+               "AIDE laesst %s bei der Debian-Vorgabe (keine eigene Regel, keine Ausnahme)" % p_)
+
+    # 4j Rotation fuer sudo.log
+    lr = zeilen(W / "etc/logrotate.d/sudo-haertung")
+    pruefe("/var/log/sudo.log {" in lr and any(z.startswith("rotate ") for z in lr)
+           and "create 0600 root root" in lr, "logrotate: sudo.log rotiert, neue Datei 0600 root")
+
+    # 4k auditd-Speicher (Datei im leeren Sandkasten angelegt)
+    ad = {z.split("=")[0].strip(): z.split("=", 1)[1].strip() for z in zeilen(W / "etc/audit/auditd.conf") if "=" in z}
+    pruefe(ad.get("max_log_file") == "50" and ad.get("num_logs") == "20",
+           "auditd: max_log_file = 50, num_logs = 20 (ist %s/%s)" % (ad.get("max_log_file"), ad.get("num_logs")))
+
     # 4g Drop-in, 4h coredump
     di = zeilen(W / "etc/systemd/system/jarvis.service.d/70-coredump.conf")
     pruefe("[Service]" in di and "LimitCORE=0" in di, "Drop-in jarvis.service: [Service] LimitCORE=0")
@@ -250,6 +274,23 @@ try:
         pruefe(r.returncode == 0, "sudoers: visudo -cf akzeptiert die Datei")
     else:
         NICHT_GEPRUEFT.append("visudo -cf (visudo fehlt)")
+
+    # ── 4l. auditd.conf des Pakets: nur zwei Schluessel, Rest bleibt ──────────
+    print("[4l] vorhandene auditd.conf")
+    W3 = sandkasten / "c"
+    (W3 / "etc/audit").mkdir(parents=True)
+    debian = ("local_events = yes\nwrite_logs = yes\nlog_file = /var/log/audit/audit.log\nlog_format = ENRICHED\n"
+              "max_log_file = 8\nnum_logs = 5\nmax_log_file_action = ROTATE\nspace_left_action = SYSLOG\n"
+              "disk_full_action = SUSPEND\n")
+    (W3 / "etc/audit/auditd.conf").write_text(debian, encoding="utf-8")
+    rc, out = lauf("--pruefen", W3)
+    pruefe(rc == 1 and "max_log_file = 8 (soll 50)" in out, "--pruefen meldet die Vorgabe 8 MB als Abweichung")
+    lauf("--anwenden", W3)
+    neu = zeilen(W3 / "etc/audit/auditd.conf")
+    pruefe("max_log_file = 50" in neu and "num_logs = 20" in neu, "auditd.conf: beide Werte gesetzt")
+    pruefe(all(z in neu for z in ("log_format = ENRICHED", "max_log_file_action = ROTATE", "disk_full_action = SUSPEND")),
+           "auditd.conf: uebrige Zeilen des Pakets unveraendert")
+    pruefe(len(neu) == len(debian.strip().splitlines()), "auditd.conf: keine Zeile doppelt angehaengt (%d Zeilen)" % len(neu))
 
     # ── 5. Kein Eingriff in apt ──────────────────────────────────────────────
     print("[5] apt bleibt unberuehrt")

@@ -46,6 +46,11 @@ PROBEN = [
     ("--pruefen schreibt", "        dateien pruefen\n", "        dateien anwenden\n", 1),
     ("Drop-in ohne LimitCORE=0", "LimitCORE=0'", "LimitCORE=infinity'", 1),
     ("Broker-Zaehler voll geprueft", "/var/lib/jarvis-broker/zaehler\\.json$ f VarFile\n", "", 1),
+    ("sudo.log ohne Rotation", "etc/logrotate.d/sudo-haertung|0644|LOGROTATE\n", "", 1),
+    ("sudo.log voll geprueft", "/var/log/sudo\\.log$ f Log\n", "", 1),
+    ("auditd behaelt 5 x 8 MB", 'AUDITD_WERTE="max_log_file=50 num_logs=20"', 'AUDITD_WERTE=""', 1),
+    ("AIDE nimmt ganz /var/log aus", "!/media\n", "!/media\n!/var/log\n", 1),
+    ("Sandbox-Arbeitsverzeichnisse voll geprueft", "!/tmp/jarvis-arbeit\n", "", 1),
     ("Freigabeliste als wechselnd gelockert", "/var/lib/jarvis-broker$ d VarDir\n",
      "/var/lib/jarvis-broker$ d VarDir\n/etc/jarvis/broker-policy\\.json$ f VarFile\n", 1),
 ]

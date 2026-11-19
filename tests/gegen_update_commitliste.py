@@ -31,10 +31,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 UM = ROOT / "backend" / "update_manager.py"
 JS = ROOT / "frontend" / "js" / "update_widget.js"
+CSS = ROOT / "frontend" / "css" / "update_widget.css"
+STYLE = ROOT / "frontend" / "css" / "style.css"
+CHAT = ROOT / "frontend" / "css" / "chat.css"
 W_PY = ROOT / "tests" / "test_update_commitliste.py"
 W_JS = ROOT / "tests" / "test_update_pill_ui.js"
+W_VERL = ROOT / "tests" / "test_update_verlauf_ui.js"
 SICHERUNG = Path.home() / ".gegen_update_commitliste"
-DATEIEN = [UM, JS]
+DATEIEN = [UM, JS, CSS, STYLE, CHAT]
 
 PROBEN = [
     ("alte Liste: letzte N statt HEAD..origin", W_PY, UM, [
@@ -61,21 +65,44 @@ PROBEN = [
     ("Rest wird nicht beziffert", W_PY, UM, [
         ('            "commits_weitere": max(0, gesamt - len(commits))}\n',
          '            "commits_weitere": 0}\n')]),
+    # Anker 2026-11-19 nachgezogen: das Format steht seit dem Umbau in der
+    # Konstante _LOG_FORMAT. Vorher brach der Harness hier mit Exit 2 ab, und
+    # die sechs Proben danach liefen gar nicht erst.
     ("Trenner sind Leerraum (\\x1f/\\x1e)", W_PY, UM, [
-        ('        "--format=%H%x02%s%x02%ai%x02%an%x02%b%x03",\n',
-         '        "--format=%H%x1f%s%x1f%ai%x1f%an%x1f%b%x1e",\n'),
+        ('_LOG_FORMAT = "--format=%H%x02%s%x02%ai%x02%an%x02%b%x03"\n',
+         '_LOG_FORMAT = "--format=%H%x1f%s%x1f%ai%x1f%an%x1f%b%x1e"\n'),
         ('    for satz in log_str.split("\\x03"):\n', '    for satz in log_str.split("\\x1e"):\n'),
         ('        felder = satz.lstrip("\\n").split("\\x02")\n',
          '        felder = satz.lstrip("\\n").split("\\x1f")\n')]),
-    ("UI: Beschreibung ohne esc()", W_JS, JS, [
-        ("'<span class=\"upd-commit-desc\">' + esc(c.beschreibung) + '</span>'",
-         "'<span class=\"upd-commit-desc\">' + c.beschreibung + '</span>'")]),
+    # Zwei Fundstellen seit dem Aenderungsverlauf (Popup und Verlauf), getrennt
+    # ueber die Einrueckung - ein Anker, der beide trifft, bricht den Harness ab.
+    ("UI: Beschreibung ohne esc() (Popup)", W_JS, JS, [
+        ("\n                var desc = c.beschreibung\n                    ? '<span class=\"upd-commit-desc\">' + esc(c.beschreibung)",
+         "\n                var desc = c.beschreibung\n                    ? '<span class=\"upd-commit-desc\">' + (c.beschreibung)")]),
+    ("UI: Beschreibung ohne esc() (Verlauf)", W_VERL, JS, [
+        ("\n            var desc = c.beschreibung\n                ? '<span class=\"upd-commit-desc\">' + esc(c.beschreibung)",
+         "\n            var desc = c.beschreibung\n                ? '<span class=\"upd-commit-desc\">' + (c.beschreibung)")]),
     ("UI: leere Beschreibung erzeugt leere Zeile", W_JS, JS, [
         ("                var desc = c.beschreibung\n", "                var desc = true\n")]),
     ("UI: Rest wird nicht angezeigt", W_JS, JS, [
         ("                + (d.commits_weitere > 0\n", "                + (false\n")]),
     ("UI: Beschreibung ausserhalb der Textspalte", W_JS, JS, [
         ("                    + desc + '</span>'\n", "                    + '</span>' + desc\n")]),
+    # Abschnitt 1b: eine zweite Fassung in einer SPAETER geladenen Datei. Genau
+    # das war der Vorfall vom 2026-11-19 - style.css gewann auf /settings und
+    # /wissen gegen update_widget.css, obwohl dort alles richtig stand.
+    ("CSS: style.css traegt wieder eine Fassung von .upd-commit", W_JS, STYLE, [
+        (".cpu-bar-container {", ".upd-commit { display: flex; }\n.cpu-bar-container {")]),
+    ("CSS: chat.css traegt wieder .security-badge", W_JS, CHAT, [
+        ("/* \u2500\u2500\u2500 Messages Container",
+         ".security-badge { width: 24px; }\n/* \u2500\u2500\u2500 Messages Container")]),
+    # Abschnitt 1c: der Betreff zurueck in die schmale Spalte neben dem Datum.
+    ("CSS: Betreff wieder neben Hash und Datum", W_JS, CSS, [
+        ("grid-column:1 / -1;grid-row:2", "grid-column:2;grid-row:1")]),
+    ("CSS: Umbruch wieder mitten im Wort", W_JS, CSS, [
+        ("overflow-wrap:break-word;min-width:0", "overflow-wrap:anywhere;min-width:0")]),
+    ("CSS: Datum nicht mehr rechts in der Kopfzeile", W_JS, CSS, [
+        ("justify-self:end;white-space:nowrap", "white-space:nowrap")]),
 ]
 
 
@@ -119,7 +146,7 @@ if fremd:
     print("ABBRUCH: Proben auf ungesicherte Dateien: %s" % fremd)
     sys.exit(2)
 
-for w in (W_PY, W_JS):
+for w in (W_PY, W_JS, W_VERL):
     rc, fails, aus = lauf(w)
     if rc != 0 or fails != 0:
         print("ABBRUCH: Basislauf %s nicht gruen (rc=%s)\n%s" % (w.name, rc, aus[-600:]))

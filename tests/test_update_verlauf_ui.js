@@ -137,6 +137,31 @@ const warte = () => new Promise((r) => setTimeout(r, 20));
            && w.document.querySelectorAll('#upd-body span.upd-commit-hash').length === 2,
            '   ohne GitHub-Adresse Hash ohne Link');
 
+    // 8. Markup aus dem Commit-Text landet als TEXT in der Liste. Der Popup-Pfad
+    // hatte diese Pruefung laengst, der Verlauf nicht - eine Gegenprobe, die das
+    // esc() hier entfernt, blieb deshalb stumm (gefunden 2026-11-19).
+    w = starte(Object.assign({}, VERLAUF, {
+        commits: [{ hash: 'ccccccc', hash_voll: 'c'.repeat(40), message: 'Betreff <b>fett</b>',
+                    beschreibung: 'Text <i>kursiv</i> und <script>x</script>',
+                    date: '2026-11-19 06:36', eingespielt: true }],
+    }));
+    w.document.getElementById('version-pill').click(); await warte();
+    w.document.getElementById('upd-verlauf-btn').click(); await warte();
+    {
+        const zeile = w.document.querySelector('#upd-body .upd-commit');
+        const msg = zeile && zeile.querySelector('.upd-commit-msg');
+        const desc = zeile && zeile.querySelector('.upd-commit-desc');
+        // Positivkontrolle zuerst: der Text ist ueberhaupt angekommen.
+        if (!msg || !desc || !/fett/.test(msg.textContent) || !/kursiv/.test(desc.textContent)) {
+            console.log('ABBRUCH: Probezeile nicht gerendert'); process.exit(2);
+        }
+        pruefe(!msg.querySelector('b') && msg.textContent.indexOf('<b>') >= 0,
+               '8. Markup im Betreff bleibt Text', msg.innerHTML.slice(0, 70));
+        pruefe(!desc.querySelector('i') && !desc.querySelector('script')
+               && desc.textContent.indexOf('<script>') >= 0,
+               '   Markup in der Beschreibung bleibt Text', desc.innerHTML.slice(0, 70));
+    }
+
     // i18n DE+EN
     const I18N = lies('frontend/js/i18n.js');
     for (const k of ['verlauf_btn', 'verlauf_zurueck', 'verlauf_ausstehend', 'verlauf_kopf',

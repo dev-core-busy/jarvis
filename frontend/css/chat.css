@@ -652,23 +652,10 @@ body.cs-resizing .chat-sidebar { transition: none; }
 }
 .btn-close-banner:hover { opacity: 1; }
 
-.security-badge {
-    width: 24px; height: 24px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    cursor: pointer;
-    transition: all 0.3s;
-    flex-shrink: 0;
-}
-.security-badge.secure {
-    background: rgba(16, 185, 129, 0.1);
-    color: #10b981;
-    border-color: rgba(16, 185, 129, 0.2);
-}
-.security-badge:hover { transform: scale(1.1); filter: brightness(1.2); }
+/* Sicherheits-Schild: die Regeln stehen in update_widget.css, das JEDE Seite
+   mit der Versions-Pill laedt - chat.css kam danach und hat die dortige
+   Fassung ueberstimmt. Eine zweite Kopie hier waere also nicht nur doppelt,
+   sie waere die wirksame (Waechter test_update_pill_ui.js, Abschnitt 1b). */
 
 /* CPU-Auslastung: die Regeln stehen seit 2026-08-22 als `.jv-cpu-bar`
    in theme.css – sie erscheint auf JEDER Seite, chat.css laedt aber nur

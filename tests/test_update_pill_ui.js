@@ -58,6 +58,129 @@ abschnitt('1. CSS: Popup ist eine Flex-Spalte mit fester Fusszeile');
 }
 
 /* ===================================================================== */
+/* GEMELDET 2026-11-19 ("das update pill popup ist aktuell unlesbar"): auf
+   /settings und /wissen stand der Betreff in einer gut 190 px schmalen Spalte
+   und brach Buchstabe fuer Buchstabe um. Ursache war KEINE Regel in
+   update_widget.css, sondern eine zweite, veraltete Fassung derselben
+   Selektoren in style.css - dort als `display:flex` statt des Rasters. Beide
+   haben die Spezifitaet 0,1,0, style.css wird spaeter eingebunden, also gewann
+   die alte Fassung. Mit ihr war auch die feste Fusszeile aus Abschnitt 1 auf
+   diesen beiden Seiten ausgehebelt: Abschnitt 1 liest NUR update_widget.css
+   und war die ganze Zeit gruen - er misst ein Vorkommen, keine Wirkung.
+   Deshalb hier die Regel darueber: keine Datei, die NACH update_widget.css
+   geladen wird, fasst dessen Klassen an. */
+abschnitt('1b. CSS: keine zweite Fassung in einem spaeter geladenen Stylesheet');
+{
+    // Regelkoepfe einer CSS-Datei, Kommentare zuvor entfernt (sonst liest die
+    // Sonde die Begruendungen mit - die nennen die Klassen beim Namen).
+    const regelkoepfe = (css) => {
+        const rein = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+        const koepfe = [];
+        const re = /([^{}]+)\{/g;
+        let m;
+        while ((m = re.exec(rein)) !== null) {
+            const kopf = m[1].trim();
+            if (kopf && !kopf.startsWith('@')) koepfe.push(kopf);
+        }
+        return koepfe;
+    };
+    const WIDGET_KLASSE = /\.(?:upd-[\w-]+|update-[\w-]+|security-badge)\b/;
+
+    // Positivkontrolle der Sonde VOR den inhaltlichen Pruefungen: sie findet
+    // die Klassen in der Quelle selbst, und ein Kommentar zaehlt ihr nicht.
+    const eigene = regelkoepfe(CSS).filter((k) => WIDGET_KLASSE.test(k));
+    const probe = regelkoepfe('/* .upd-commit und .update-dropdown */\n.foo { color: red; }')
+        .filter((k) => WIDGET_KLASSE.test(k));
+    if (eigene.length < 10 || probe.length !== 0) {
+        console.log('  ABBRUCH Sonde misst nicht: ' + eigene.length
+                    + ' eigene Regelkoepfe, ' + probe.length + ' aus einem Kommentar');
+        process.exit(2);
+    }
+    pruefe(true, 'Sonde findet ' + eigene.length + ' Regelkoepfe in update_widget.css'
+                 + ' und keinen aus einem Kommentar');
+
+    // Je Seite die Einbindungsreihenfolge lesen und nur die Dateien DANACH pruefen.
+    const seiten = [];
+    const sammle = (dir) => {
+        for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+            const rel = dir + '/' + e.name;
+            if (e.isDirectory()) sammle(rel);
+            else if (e.name.endsWith('.html')) seiten.push(rel);
+        }
+    };
+    sammle('frontend');
+    pruefe(seiten.length >= 20, 'HTML-Seiten gefunden', String(seiten.length));
+
+    const cssCache = {};
+    const ladeCss = (rel) => {
+        if (!(rel in cssCache)) {
+            const abs = path.join(ROOT, 'frontend', rel.replace(/^\/static\//, ''));
+            cssCache[rel] = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null;
+        }
+        return cssCache[rel];
+    };
+
+    let mitWidget = 0;
+    const verstoesse = [];
+    for (const seite of seiten) {
+        const html = lies(seite);
+        const links = [];
+        const re = /<link[^>]+rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi;
+        let m;
+        while ((m = re.exec(html)) !== null) links.push(m[1].split('?')[0]);
+        const i = links.findIndex((h) => h.endsWith('/update_widget.css'));
+        if (i < 0) continue;
+        mitWidget++;
+        for (const spaeter of links.slice(i + 1)) {
+            const css = ladeCss(spaeter);
+            if (css === null) continue;          // Fremddatei (vendor/CDN) - nicht unsere
+            for (const kopf of regelkoepfe(css)) {
+                if (WIDGET_KLASSE.test(kopf)) verstoesse.push(seite + ' -> ' + spaeter + ': ' + kopf);
+            }
+        }
+    }
+    pruefe(mitWidget >= 20, 'Seiten mit update_widget.css', String(mitWidget));
+    pruefe(verstoesse.length === 0,
+           'kein spaeter geladenes Stylesheet fasst die Popup-Klassen an',
+           verstoesse.slice(0, 4).join(' | ') + (verstoesse.length > 4
+               ? ' (+' + (verstoesse.length - 4) + ' weitere)' : ''));
+}
+
+/* ===================================================================== */
+/* Dieselbe Meldung, zweite Haelfte: auch mit nur EINER Fassung stand der
+   Betreff in einer Spalte neben Hash und Datum - bei 420 px Popup gut 190 px.
+   Breite ist hier knapp, Hoehe nicht: Hash und Datum bilden eine Kopfzeile,
+   Betreff und Beschreibung bekommen die volle Breite. jsdom rechnet kein
+   Layout, geprueft wird also die Zusage im Regelblock; die Optik ist per
+   Screenshot abgenommen (dunkel und hell, langer Betreff ohne Beschreibung). */
+abschnitt('1c. CSS: Betreff und Beschreibung ueber die volle Breite');
+{
+    const block = (sel) => (CSS.match(new RegExp('^\\.' + sel + ' \\{[\\s\\S]*?\\}', 'm')) || [''])[0];
+    const raster = block('upd-commit');
+    pruefe(/display:\s*grid/.test(raster) && /grid-template-columns:\s*auto 1fr/.test(raster),
+           '.upd-commit ist ein Raster aus zwei Spalten', raster.slice(0, 90));
+
+    for (const sel of ['upd-commit-msg', 'upd-commit-desc']) {
+        const b = block(sel);
+        pruefe(/grid-column:\s*1 \/ -1/.test(b), '.' + sel + ' spannt beide Spalten', b.slice(0, 90));
+    }
+    pruefe(/grid-row:\s*2/.test(block('upd-commit-msg'))
+           && /grid-row:\s*3/.test(block('upd-commit-desc')),
+           '... Betreff in Zeile 2, Beschreibung in Zeile 3');
+
+    const datum = block('upd-commit-date');
+    pruefe(/grid-row:\s*1/.test(datum) && /justify-self:\s*end/.test(datum),
+           '.upd-commit-date steht rechts in der Kopfzeile', datum.slice(0, 90));
+    pruefe(/white-space:\s*nowrap/.test(datum), '... und bricht nicht um');
+
+    // `anywhere` trennt auch dann mitten im Wort, wenn Platz waere - genau das
+    // sah man im gemeldeten Bild (ein bis zwei Buchstaben je Zeile).
+    const umbruch = (CSS.match(/^\.upd-commit-msg, \.upd-commit-desc \{[^}]*\}/m) || [''])[0];
+    pruefe(/overflow-wrap:\s*break-word/.test(umbruch) && !/anywhere/.test(umbruch),
+           'Umbruch ist break-word, nicht anywhere', umbruch.slice(0, 90));
+}
+
+/* ===================================================================== */
 abschnitt('2. JS: der Knopf liegt NICHT im scrollenden Koerper');
 {
     const code = nurCode(JS);

@@ -92,20 +92,17 @@ const SETTINGS = lies('frontend/settings.html');
 
 // ── 1. settings_ad.js ───────────────────────────────────────────────────────
 section('1. Firmenverzeichnis-Status: Theme-Klassen und i18n (echte settings.html)');
-// Seit 2026-11-02 gibt es nur noch EINEN Status-Kasten: den Anmelde-Hinweis
-// #ad-mode-hint unter der Berechtigungs-Tabelle. Die Kaesten je Bereich
-// (ad-knowledge-/sap-/internet-/admins-status) sind mit den Einzellisten
-// ("alte Benutzerberechtigungen") entfallen. Damit alle drei Hinweisarten
-// (warn/ok/info) weiter gemessen werden, laeuft der Kasten in drei Modi.
-const AD_BASIS = { configured: true, reachable: true, server: 'dc.firma.local', domain: 'firma.local',
-                   bind_password_set: true };
+// Gemessen wird die Statuszeile der Verbindung (#ad-status-text). Der
+// Anmelde-Hinweis #ad-mode-hint, an dem dieser Abschnitt bis 2026-11-19 mass,
+// ist auf Vorgabe des Betreibers entfallen (er wiederholte nur die Spalte
+// "Anmeldung" der Tabelle). Zwei Modi, damit beide Klassen (ok/err) laufen.
+const AD_BASIS = { configured: true, server: 'dc.firma.local', domain: 'firma.local',
+                   bind_password_set: true, access_mode: 'users', allowed_users: 'anna', allowed_group: '' };
 const MODI = [
-    ['none',  { access_mode: 'none',  allowed_users: '',     allowed_group: '' },         'jv-hinweis-warn',
-     (t) => t('security.ad_warn_none')],
-    ['users', { access_mode: 'users', allowed_users: 'anna', allowed_group: '' },         'jv-hinweis-ok',
-     (t) => t('security.ad_users_active') + ' anna'],
-    ['group', { access_mode: 'group', allowed_users: '',     allowed_group: 'CN=Login' }, 'jv-hinweis-info',
-     (t) => t('security.ad_group_active') + ' CN=Login'],
+    ['erreichbar',   { reachable: true },  'jv-hinweis-ok',
+     (t) => t('security.ad_active_label') + ' · dc.firma.local · firma.local · ' + t('security.ad_mode_users')],
+    ['unerreichbar', { reachable: false }, 'jv-hinweis-err',
+     (t) => t('security.ad_unreachable_label') + ' · dc.firma.local · firma.local'],
 ];
 for (const lang of ['de', 'en']) for (const [modus, extra, klasse, textVon] of MODI) {
     const AD = Object.assign({}, AD_BASIS, extra);
@@ -115,10 +112,10 @@ for (const lang of ['de', 'en']) for (const [modus, extra, klasse, textVon] of M
     });
     const t = (k) => s.w.t(k);
     const $ = (id) => s.d.getElementById(id);
-    if (!$('ad-mode-hint')) abbruch('settings.html ohne den Anmelde-Hinweis #ad-mode-hint');
+    if (!$('ad-status-text')) abbruch('settings.html ohne die Statuszeile #ad-status-text');
     check(`[${lang}/${modus}] Positivkontrolle: Status geladen (Server im Text)`,
           ($('ad-status-text').textContent || '').includes('dc.firma.local'), $('ad-status-text').textContent);
-    const faelle = [['ad-mode-hint', klasse, textVon(t)]];
+    const faelle = [['ad-status-text', klasse, textVon(t)]];
     for (const [id, klasse, text] of faelle) {
         const el = $(id);
         check(`[${lang}/${modus}] ⚠ ${id}: Klasse ${klasse}, Text aus i18n`,
@@ -141,13 +138,16 @@ for (const lang of ['de', 'en']) for (const [modus, extra, klasse, textVon] of M
         check(`[${lang}/${modus}] ⚠ ${id}: keine Inline-Farbe`,
               [el.style.color, el.style.borderColor, el.style.background].every(ohneFarbe),
               el.getAttribute('style'));
-        check(`[${lang}/${modus}] ${id}: kein Emoji`, emojiIn(el.textContent).length === 0 && !el.textContent.includes('\uFE0F'),
-              el.textContent);
+        // Nur im Modus ohne Modus-Beschriftung: security.ad_mode_* traegt
+        // Emojis (bestehender Zustand, nicht Gegenstand dieses Abschnitts).
+        if (modus === 'unerreichbar')
+            check(`[${lang}/${modus}] ${id}: kein Emoji`, emojiIn(el.textContent).length === 0 && !el.textContent.includes('\uFE0F'),
+                  el.textContent);
     }
     check(`[${lang}/${modus}] ⚠ Kennwort-Hinweis aus i18n`, $('ad-bind-pw-hint').textContent === t('security.ad_pw_saved'),
           $('ad-bind-pw-hint').textContent);
-    if (lang === 'en' && modus === 'users') check('[en] ⚠ englischer Text (nicht der deutsche Festtext)',
-                             /^\S*\s*User list: anna$/.test($('ad-mode-hint').textContent), $('ad-mode-hint').textContent);
+    if (lang === 'en' && modus === 'unerreichbar') check('[en] ⚠ englischer Text (nicht der deutsche Festtext)',
+                             /^Configured – domain controller NOT reachable · /.test($('ad-status-text').textContent), $('ad-status-text').textContent);
     s.w.close();
 }
 const css = lies('frontend/css/theme.css');

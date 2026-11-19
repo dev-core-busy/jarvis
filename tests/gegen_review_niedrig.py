@@ -208,16 +208,14 @@ PROBEN = [
     ("Bild-Vorhaltefrist: Wiederverwendung frischt nicht auf", AG,
      "                        _os.utime(ziel)\n", "                        pass\n", W_BB),
     # ── Oberflaeche ──
-    ("settings_ad: wieder feste Farbe statt Klasse", SAD,
-     "        el.classList.add('jv-hinweis-' + art);\n", "        el.style.color = '#f59e0b';\n", W_UI),
-    # Bis 2026-11-02 zielte diese Probe auf _freigabe() (Kaesten je Bereich);
-    # die sind mit den Einzellisten entfallen, uebrig ist der Anmelde-Hinweis.
-    ("settings_ad: Anmelde-Hinweis wieder fester Text", SAD,
-     "            _hinweis(hint, 'warn', window.t('security.ad_warn_none'));\n",
-     "            _hinweis(hint, 'warn', 'Niemand darf sich anmelden.');\n", W_UI),
-    ("settings_ad: Anmelde-Hinweis bei Benutzerliste fehlt", SAD,
-     "            _hinweis(hint, 'ok', window.t('security.ad_users_active') + ' ' + d.allowed_users);\n",
-     "            _hinweis(hint, null);\n", W_UI),
+    # Bis 2026-11-19 zielten diese Proben auf den Anmelde-Hinweis (_hinweis);
+    # der ist entfallen, gemessen wird die Statuszeile der Verbindung.
+    ("settings_ad: Statuszeile wieder feste Farbe statt Klasse", SAD,
+     "            dot.classList.add('jv-hinweis-err'); txt.classList.add('jv-hinweis-err');\n",
+     "            dot.classList.add('jv-hinweis-err'); txt.style.color = '#ef4444';\n", W_UI),
+    ("settings_ad: Statuszeile wieder fester Text", SAD,
+     "            txt.textContent = window.t('security.ad_unreachable_label') + ' · ' + d.server + ' · ' + d.domain;\n",
+     "            txt.textContent = 'Nicht erreichbar · ' + d.server + ' · ' + d.domain;\n", W_UI),
     ("Sandbox-Kaestchen: Ablehnung stellt nicht zurueck", SEC,
      "                      zurueck();\n                      return;\n", "                      return;\n", W_UI),
     ("Sandbox-Kaestchen: Netzfehler stellt nicht zurueck", SEC,

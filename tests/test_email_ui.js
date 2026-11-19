@@ -982,7 +982,7 @@ abschnitt('5. Verdrahtung und Texte');
         const markup = '<input id="ad-server"><input id="ad-domain"><input id="ad-bind-user">'
             + '<input id="ad-bind-password"><div id="ad-bind-pw-hint"></div>'
             + '<span id="ad-status-dot"></span><span id="ad-status-text"></span>'
-            + '<div id="ad-mode-hint"></div><button data-klick="ad-speichern"></button>'
+            + '<button data-klick="ad-speichern"></button>'
             + '<span class="ad-save-status"></span>';
         const dom = new JSDOM('<!doctype html><body>' + markup + '</body>',
             { url: 'https://x/settings', runScripts: 'outside-only' });

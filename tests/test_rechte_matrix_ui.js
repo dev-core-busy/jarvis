@@ -568,10 +568,8 @@ section('12. Container "alte Benutzerberechtigungen" weg, Speichern fail-closed'
     check('genau EIN Speichern-Knopf (an der Verbindung)',
           s.d.querySelectorAll('[data-klick="ad-speichern"]').length === 1,
           String(s.d.querySelectorAll('[data-klick="ad-speichern"]').length));
-    check('Anmelde-Hinweis steht weiter auf der Seite und ist befuellt',
-          !!s.$('ad-mode-hint') && s.$('ad-mode-hint').style.display === 'block'
-          && s.$('ad-mode-hint').textContent.includes('Bob, carla'),
-          s.$('ad-mode-hint') ? s.$('ad-mode-hint').textContent : 'fehlt');
+    // Der Anmelde-Hinweis ist seit 2026-11-19 entfallen (Vorgabe des Betreibers).
+    check('Anmelde-Hinweis #ad-mode-hint ist entfallen', !s.$('ad-mode-hint'));
     check('Firewall-Sperre bleibt erhalten (eigener Unter-Container)',
           !!s.d.querySelector('details.sec-sub[data-sub="egress"] #sec-egress-setup'));
     // Speichern mit geladenem Bestand: ALLE Freigaben im Koerper. Die Zahl wird

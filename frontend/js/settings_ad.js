@@ -225,27 +225,16 @@
 
     // Farben NUR ueber Klassen aus theme.css (Code-Review 2026-10-07: hier
     // standen feste Hex-Werte und Emojis, aus dem frueheren Inline-Skript
-    // uebernommen). Der Rahmen folgt der Schriftfarbe (border: 1px solid im
-    // Markup = currentColor).
+    // uebernommen).
     var _ART = ['jv-hinweis-warn', 'jv-hinweis-ok', 'jv-hinweis-info', 'jv-hinweis-err'];
-    function _hinweis(el, art, text) {
-        if (!el) return;
-        _ART.forEach(function (k) { el.classList.remove(k); });
-        if (!art) { el.style.display = 'none'; return; }
-        el.style.display = 'block';
-        el.classList.add('jv-hinweis-' + art);
-        el.textContent = text;
-    }
     function _adUpdateStatus(d) {
         const dot  = document.getElementById('ad-status-dot');
         const txt  = document.getElementById('ad-status-text');
-        const hint = document.getElementById('ad-mode-hint');
         _ART.forEach(function (k) { dot.classList.remove(k); txt.classList.remove(k); });
         if (!d.configured) {
             dot.style.background = 'var(--text-muted)';
             txt.style.color      = 'var(--text-muted)';
             txt.textContent      = window.t('security.ad_not_configured');
-            _hinweis(hint, null);
             return;
         }
         const modeLabels = { none: window.t('security.ad_mode_none'), users: window.t('security.ad_mode_users'), group: window.t('security.ad_mode_group'), users_group: window.t('security.ad_mode_users_group') };
@@ -261,21 +250,8 @@
             dot.classList.add('jv-hinweis-ok'); txt.classList.add('jv-hinweis-ok');
             txt.textContent = window.t('security.ad_active_label') + ' · ' + d.server + ' · ' + d.domain + ' · ' + (modeLabels[d.access_mode] || d.access_mode);
         }
-        if (d.access_mode === 'none') {
-            _hinweis(hint, 'warn', window.t('security.ad_warn_none'));
-        } else if (d.access_mode === 'users') {
-            _hinweis(hint, 'ok', window.t('security.ad_users_active') + ' ' + d.allowed_users);
-        } else if (d.access_mode === 'group') {
-            _hinweis(hint, 'info', window.t('security.ad_group_active') + ' ' + d.allowed_group);
-        } else if (d.access_mode === 'users_group') {
-            // Liste UND Gruppe: ODER-verknuepft. Beide Werte nennen, damit
-            // ablesbar ist, dass KEINES der Felder das andere aushebelt.
-            _hinweis(hint, 'info', window.t('security.ad_users_group_active') + ' ' + d.allowed_users +
-                                   ' ' + window.t('security.ad_or_group') + ' ' +
-                                   (d.allowed_group || '').split('\n').join(', '));
-        } else {
-            _hinweis(hint, null);
-        }
+        // Der Anmelde-Hinweis (#ad-mode-hint) ist am 2026-11-19 entfallen –
+        // wer sich anmelden darf, zeigt die Spalte "Anmeldung" der Tabelle.
     }
 
     // Speichern-Knoepfe und Statuszeilen werden ueber Klick-Marke bzw. Klasse

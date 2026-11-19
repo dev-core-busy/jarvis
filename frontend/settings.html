@@ -6214,16 +6214,24 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                      #rmx-host.
                                      Seit 2026-11-02 der EINZIGE Weg: die Einzellisten je Bereich
                                      ("alte Benutzerberechtigungen") sind entfallen, den Bestand
-                                     haelt settings_ad.js (window.AdRechte). -->
-                                <h4 id="rmx-titel" style="font-weight:600;margin:14px 0 4px;" data-i18n="rmx.title">Berechtigungen zuweisen</h4>
+                                     haelt settings_ad.js (window.AdRechte).
+                                     Seit 2026-11-19 ein eigener Unter-Container wie "Verbindung"
+                                     und "Internet-Sperre" (Vorgabe des Betreibers). Das <summary>
+                                     traegt die Ueberschrift – die Suche liest es und klappt den
+                                     Container beim Sprung auf; der Zustand wird ueber data-sub
+                                     gemerkt (settings_unterklappen.js). -->
+                                <details class="sec-sub" data-sub="rechte">
+                                    <summary><span id="rmx-titel" data-i18n="rmx.title">Berechtigungen zuweisen</span><span class="sec-sub-hint" data-i18n="security.sub_rechte_hint">– Wer darf welchen Bereich nutzen</span></summary>
+                                    <div class="sec-sub-body">
                                 <p class="kb-hint" data-i18n="rmx.intro">Jede Zeile ist ein Benutzer oder eine Gruppe, jede Spalte ein Bereich. Ein Häkchen gibt den Bereich frei; ohne Häkchen hat niemand Zugriff – auch Administratoren nicht. Bereiche, deren Funktion ausgeschaltet ist, fehlen hier. Gespeichert wird erst mit „Übernehmen".</p>
                                 <div class="rmx-inline" id="rmx-host"></div>
+                                    </div>
+                                </details>
 
-                                <!-- Anmelde-Hinweis (settings_ad.js): warnt sichtbar, wenn sich
-                                     niemand anmelden darf. Stand bis 2026-11-02 im Unter-Container
-                                     "Anmeldung" der Einzellisten; die sind entfallen (Vorgabe des
-                                     Betreibers), die Tabelle ist seitdem der EINZIGE Weg. -->
-                                <div id="ad-mode-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:0.8rem;margin:10px 0 12px;border:1px solid;"></div>
+                                <!-- Hier stand bis 2026-11-19 der Anmelde-Hinweis #ad-mode-hint
+                                     ("✓ Benutzerliste: …"). Entfernt auf Vorgabe des Betreibers:
+                                     er wiederholte nur die Spalte "Anmeldung" der Tabelle und stand
+                                     ohne Zuordnung zwischen zwei Unter-Containern. -->
 
                                 <!-- ── Unter-Container: Internet-Sperre (Firewall) ──
                                      Lag bis 2026-11-02 im Unter-Container "Internet-Zugang" der
@@ -6321,7 +6329,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_ad.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
-                                <script src="/static/js/settings_ad.js?v=9"></script>
+                                <script src="/static/js/settings_ad.js?v=10"></script>
                                 <script src="/static/js/settings_idp.js?v=2"></script>
                             </div>
                         </div>
@@ -6817,7 +6825,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=500"></script>
+    <script src="/static/js/i18n.js?v=501"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->

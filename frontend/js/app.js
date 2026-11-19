@@ -2283,6 +2283,7 @@
                 if (inputAgentKey) {
                     _agentKeyValue = '';
                     inputAgentKey.value = '';
+                    // tabfill: nein – Punkte fuer ein hinterlegtes Geheimnis
                     inputAgentKey.placeholder = data.agent_api_key ? '••••••••' : '';
                     inputAgentKey.type = 'password';
                     inputAgentKey.readOnly = true;
@@ -2585,7 +2586,9 @@
             // Feld bleibt leer (= unveraendert beim Speichern, Test/Modellsuche
             // nehmen serverseitig den gespeicherten); Sterne zeigen, dass einer
             // da ist. Das Auge holt ihn nach erneuter Anmeldung.
+            // tabfill: nein – Punkte fuer ein hinterlegtes Geheimnis
             inputKey.placeholder = (profile && profile.api_key) ? '••••••••' : '';
+            // tabfill: nein – Punkte fuer ein hinterlegtes Geheimnis
             if (inputSessionKey) inputSessionKey.placeholder = (profile && profile.session_key) ? '••••••••' : '';
 
             // Auth-Methode
@@ -3161,6 +3164,7 @@
                     inputSttToken.removeAttribute('data-i18n-placeholder');
                 } else {
                     inputSttToken.setAttribute('data-i18n-placeholder', 'profile.stt_token_ph');
+                    // tabfill: nein – Beschriftung des leeren Feldes, kein Wert
                     inputSttToken.placeholder = T('profile.stt_token_ph', 'Zugangstoken (optional)');
                 }
             }

@@ -277,6 +277,7 @@
         inp.dataset.pwKennung = kennung || '';
         inp.dataset.pwGesetzt = gesetzt ? '1' : '0';
         inp.dataset.pwGeholt = '';
+        // tabfill: nein – Punkte fuer ein hinterlegtes Kennwort
         inp.placeholder = gesetzt ? PLATZHALTER_STERNE : '';
         inp.title = gesetzt ? t('common.pw_keep',
             'Ein Kennwort ist gespeichert. Leer lassen = unverändert.') : '';
@@ -309,6 +310,7 @@
                 inp.value = e.d.wert;
                 // Der Sterne-Platzhalter hat seinen Zweck erfuellt – er stand
                 // fuer genau den Wert, der jetzt im Feld steht.
+                // tabfill: nein – raeumt die Punkte wieder ab
                 if (/^•+$/.test(inp.placeholder || '')) inp.placeholder = '';
                 // `input` feuern: Zeichenzaehler und Formular-Spiegel haengen
                 // daran (dieselbe Lehre wie beim Uebernehmen-Knopf in /tracks).
@@ -381,6 +383,7 @@
         var hat = inp.dataset.pwGesetzt === '1'
             || /leer|empty|unver|unchanged/i.test(inp.placeholder || '');
         if (hat) {
+            // tabfill: nein – Punkte fuer ein hinterlegtes Kennwort
             inp.placeholder = PLATZHALTER_STERNE;
             if (!inp.title) inp.title = t('common.pw_keep',
                 'Ein Kennwort ist gespeichert. Leer lassen = unverändert.');

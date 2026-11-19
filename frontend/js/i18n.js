@@ -11506,6 +11506,7 @@ window.applyLang = function() {
     });
     // Placeholder
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        // tabfill: nein – der Markup-Weg; ein Vorschlag traegt dort data-tabfill bzw. data-i18n-tabfill
         el.placeholder = window.t(el.dataset.i18nPlaceholder);
     });
     // title-Attribut
@@ -11531,6 +11532,7 @@ window.applyLang = function() {
     // Task-Input Placeholder (wird von app.js dynamisch gesetzt – überschreiben)
     const taskInput = document.getElementById('task-input');
     if (taskInput && !taskInput.dataset.agentActive) {
+        // tabfill: nein – Beschriftung der Chat-Eingabe, kein Wert
         taskInput.placeholder = window.t('input.placeholder');
     }
 

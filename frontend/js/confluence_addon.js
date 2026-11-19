@@ -88,6 +88,7 @@
 
         if (srv) {
             srv.value = a.basis_url || '';
+            // tabfill: nein – Hinweis auf eine fehlende Adresse, kein Wert
             srv.placeholder = a.server_konfiguriert ? ''
                 : T('caddon.acc_no_server', '— keine Adresse hinterlegt —');
         }

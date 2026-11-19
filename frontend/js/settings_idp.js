@@ -64,7 +64,11 @@
         var ru = $('idp-redirect-uri');
         if (ru) {
             ru.value = d.oidc_redirect_uri || '';
-            ru.placeholder = d.redirect_uri_vorschlag || '';
+            // Der Server rechnet die Adresse aus dem eigenen Namen aus – ein
+            // fertiger, richtiger Wert, kein Formbeispiel. Ueber JarvisTabfill,
+            // damit TAB ihn uebernimmt (gemeldet 2026-11-19: er liess sich nur
+            // abtippen, weil die Markierung fehlte).
+            JarvisTabfill.vorschlag(ru, d.redirect_uri_vorschlag);
         }
         var sel = $('idp-namensclaim');
         if (sel) {

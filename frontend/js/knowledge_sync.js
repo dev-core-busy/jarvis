@@ -131,7 +131,16 @@
             // Eine laufende Eingabe nicht ueberschreiben (der Takt laeuft alle 2 s).
             if (site && document.activeElement !== site && !still) {
                 site.value = r.data.site_name || '';
-                site.placeholder = r.data.hostname || 'Standort';
+                // Der Rechnername ist ein brauchbarer Standortname und wird per
+                // TAB uebernommen; der Rueckfall 'Standort' ist nur eine
+                // Beschriftung und darf deshalb NICHT uebernehmbar sein.
+                if (r.data.hostname) {
+                    JarvisTabfill.vorschlag(site, r.data.hostname);
+                } else {
+                    // tabfill: nein – Beschriftung des leeren Feldes, kein Wert
+                    site.placeholder = 'Standort';
+                    site.removeAttribute('data-tabfill');
+                }
             }
             const lic = $('kbsync-license');
             if (lic) {
@@ -253,6 +262,7 @@
             $('kbsync-probe-result').style.display = 'none';
             $('kbsync-f-url').value = peer ? peer.url : '';
             $('kbsync-f-token').value = '';
+            // tabfill: nein – Hinweis bzw. Formbeispiel des Tokens, kein uebernehmbarer Wert
             $('kbsync-f-token').placeholder = peer
                 ? T('kbsync.f_token_keep', 'leer lassen = unverändert')
                 : 'JARVIS-KBS-1.…';

@@ -16,6 +16,35 @@
    "vorname.nachname@firma.de" oder ein Beispiel-DN duerfen NIE uebernommen
    werden, sonst speichert jemand versehentlich das Beispiel.
 
+   ⚠ EIN ZUR LAUFZEIT GESETZTER VORSCHLAG GEHT UEBER `JarvisTabfill.vorschlag`,
+   NIE UEBER `el.placeholder = …`. Im Markup stehen Vorschlag und Markierung
+   nebeneinander und werden zusammen gelesen; im JavaScript nicht – dort setzt
+   eine Zeile den Platzhalter, und die Markierung muss jemand DARAN denken.
+   Genau das ist 2026-11-19 gemeldet worden: die vom Server berechnete
+   Rueckkehr-Adresse des Anmelde-Anbieters (settings_idp.js) stand als fertiger,
+   richtiger Wert im Platzhalter und liess sich nur abtippen – TAB tat nichts,
+   weil `data-tabfill` fehlte. Es war nicht der einzige Fall: Zeitstempeldienst,
+   Key-Vault-Anmeldung, jsign-Quelle, Aufbewahrungsfrist und Standortname hatten
+   dasselbe. Sechs Stellen, sechsmal dieselbe vergessene Zeile.
+
+     JarvisTabfill.vorschlag(el, text)   // Platzhalter UND Markierung
+     JarvisTabfill.vorschlag(el, '')     // beides wieder weg
+
+   Damit ist "Vorschlag setzen" EINE Handlung statt zweier, und ein leerer Text
+   raeumt die Markierung mit ab – sonst bliebe sie an einem Feld haengen, das
+   inzwischen keinen Vorschlag mehr hat, und der Hinweis versprach etwas, das
+   TAB nicht liefert. Gesetzt wird ein LEERES Attribut: der Vorschlag ist dann
+   der Platzhalter selbst, also EINE Quelle – ein Attribut mit eigener Kopie des
+   Textes liefe auseinander, sobald jemand anders den Platzhalter anfasst
+   (`branding.js` ersetzt darin den Markennamen).
+
+   Ein Platzhalter, der KEIN uebernehmbarer Wert ist (Kennwort-Punkte,
+   "leer lassen = unveraendert", "Lade…", ein Formbeispiel), bleibt eine
+   gewoehnliche Zuweisung und traegt die Begruendung als Marke im Kommentar
+   direkt davor: `tabfill: nein – <Grund>`. Waechter `tests/test_tabfill_ui.js`
+   prueft beides als REGEL ueber alle Module, damit die naechste neue Stelle
+   auffaellt statt still durchzufallen.
+
    TAB IST DIE FOKUS-WEITERSCHALTUNG – dieser Eingriff ist deshalb eng:
    * nur bei LEEREM Feld (danach schaltet TAB wieder normal weiter),
    * nie bei Shift+TAB (rueckwaerts navigieren muss immer gehen),
@@ -34,6 +63,22 @@
     function T(key, fallback) {
         var s = window.t ? window.t(key) : null;
         return (s && s !== key) ? s : fallback;
+    }
+
+    /** Einen berechneten Vorschlag setzen: Platzhalter UND Markierung in einem
+     *  Zug. Leerer Text raeumt beides ab (siehe Kopf). */
+    function vorschlagSetzen(el, text) {
+        if (!el || !el.setAttribute) return;
+        var s = (text === null || text === undefined) ? '' : String(text);
+        s = s.trim();
+        el.placeholder = s;
+        // Leeres Attribut: der Vorschlag IST der Platzhalter – eine Quelle.
+        if (s) el.setAttribute('data-tabfill', '');
+        else el.removeAttribute('data-tabfill');
+        // Steht der Zeiger gerade in diesem Feld, muss der Hinweis sofort
+        // nachziehen – die Felder werden oft waehrend der Eingabe neu versorgt.
+        if (document.activeElement === el) hinweisZeigen(el);
+        return el;
     }
 
     function vorschlag(el) {
@@ -82,6 +127,8 @@
         el.dispatchEvent(new Event('input', { bubbles: true }));
         hinweisWeg();
     }, true);
+
+    window.JarvisTabfill = { vorschlag: vorschlagSetzen };
 
     document.addEventListener('focusin', function (e) { hinweisZeigen(e.target); });
     document.addEventListener('focusout', function () { hinweisWeg(); });

@@ -101,6 +101,7 @@
             u.className = 'zg-input zg-benutzer';
             u.autocomplete = 'off';
             u.value = e.benutzer || '';
+            // tabfill: nein – Beschriftung des Feldes, kein Wert
             u.placeholder = T('zg.benutzer_ph', 'Benutzer');
             u.setAttribute('aria-label', sys.name + ' – ' + T('zg.benutzer_ph', 'Benutzer'));
             felder.appendChild(u);
@@ -112,6 +113,7 @@
         var ph = (e.art === 'token' || e.feld === 'bearer_token' || e.feld === 'api_token')
             ? T('zg.token_ph', 'Persönlicher Token (PAT)')
             : T('zg.kennwort_ph', 'Kennwort');
+        // tabfill: nein – Beschriftung (Kennwort bzw. Token), kein Wert
         g.placeholder = ph;
         g.setAttribute('aria-label', sys.name + ' – ' + ph);
         felder.appendChild(g);

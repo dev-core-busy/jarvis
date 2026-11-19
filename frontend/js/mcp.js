@@ -395,6 +395,7 @@
                     window.JarvisPwEye.geheim($('[data-f="key"]'), 'mcp',
                                               cfg.id + ':api_key', !!cfg.api_key_gesetzt);
                 } else if (cfg.api_key_gesetzt) {
+                    // tabfill: nein – 'leer lassen = unveraendert', kein Wert
                     $('[data-f="key"]').placeholder = _tt('mcp.key_keep_ph', 'hinterlegt – leer lassen = unverändert');
                 }
                 if (cfg.api_key_gesetzt) {
@@ -403,10 +404,12 @@
                 if (cfg.ca_cert_art === 'pfad') {
                     $('[data-f="ca"]').value = cfg.ca_cert_pfad || '';
                 } else if (cfg.ca_cert_art === 'pem') {
+                    // tabfill: nein – 'leer lassen = unveraendert', kein Wert
                     $('[data-f="ca"]').placeholder = _tt('mcp.ca_keep_ph', 'Eigenes Zertifikat hinterlegt – leer lassen = unverändert');
                     $('[data-f="ca-weg-zeile"]').style.display = '';
                 }
                 if ((cfg.env_namen || []).length) {
+                    // tabfill: nein – 'leer lassen = unveraendert', kein Wert
                     $('[data-f="env"]').placeholder = _tt('mcp.env_keep_ph', 'Hinterlegt: {namen} – leer lassen = unverändert, eine Eingabe ersetzt alle')
                         .replace('{namen}', cfg.env_namen.join(', '));
                 }

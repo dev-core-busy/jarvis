@@ -197,6 +197,7 @@
         document.querySelectorAll('[placeholder]').forEach(function (el) {
             if (/jarvis/i.test(el.placeholder)) {
                 if (el.dataset.brandOrigPh === undefined) el.dataset.brandOrigPh = el.placeholder;
+                // tabfill: nein – schreibt einen VORHANDENEN Platzhalter um, setzt keinen neuen
                 el.placeholder = el.placeholder.replace(/jarvis/ig, name);
             }
         });
@@ -255,6 +256,7 @@
             delete el.dataset.brandOrig;
         });
         document.querySelectorAll('[data-brand-orig-ph]').forEach(function (el) {
+            // tabfill: nein – stellt den vorgefundenen Platzhalter wieder her
             el.placeholder = el.dataset.brandOrigPh;
             delete el.dataset.brandOrigPh;
         });

@@ -2457,6 +2457,7 @@
     function loadCfSpaces(force) {
         var tabBtn = $('wi-tab-cf'), input = $('wi-cf-space-search');
         if (_cfSpaces && !force) { if (_ddOpen) renderCfSpaceDropdown(); return; }
+        // tabfill: nein – Ladezustand, kein Wert
         if (input) input.placeholder = t('common.loading');
         fetch('/api/wissen/confluence/spaces', { headers: authH() })
             .then(function (r) { return r.json(); })
@@ -2471,6 +2472,7 @@
                 }
                 _cfSpaces = spaces;
                 if (tabBtn) tabBtn.style.display = '';
+                // tabfill: nein – Beschriftung mit Trefferzahl, kein Wert
                 if (input) input.placeholder = t('wissen.cf_space_search') + ' (' + spaces.length + ')';
                 if (_ddOpen) renderCfSpaceDropdown();
                 // EINE Quelle fuer die Bereichsliste: der Einbindungs-Container

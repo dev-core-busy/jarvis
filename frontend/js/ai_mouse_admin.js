@@ -512,7 +512,9 @@
             var tsa = $('amsign-tsa');
             if (tsa && document.activeElement !== tsa) {
                 tsa.value = d.tsa || '';
-                tsa.placeholder = d.tsa_standard || 'http://timestamp.digicert.com';
+                // Die Vorgabe ist eine benutzbare Adresse, kein Muster – TAB
+                // uebernimmt sie, statt sie abtippen zu lassen.
+                JarvisTabfill.vorschlag(tsa, d.tsa_standard || 'http://timestamp.digicert.com');
             }
             // Key-Vault-Felder: alles ausser dem Secret kommt zurueck. Ein
             // gespeichertes Secret wird NIE angezeigt – der Platzhalter sagt,
@@ -528,11 +530,12 @@
             // Die Vorgaben kommen vom Server (eine Quelle) und stehen als
             // Platzhalter da – ein leeres Feld heisst „Vorgabe".
             var auth = $('amsign-kv-auth');
-            if (auth && kv.anmeldung_standard) { auth.placeholder = kv.anmeldung_standard; }
+            if (auth) { JarvisTabfill.vorschlag(auth, kv.anmeldung_standard); }
             var jq = $('amsign-kv-jsign');
-            if (jq && kv.jsign_quelle_standard) { jq.placeholder = kv.jsign_quelle_standard; }
+            if (jq) { JarvisTabfill.vorschlag(jq, kv.jsign_quelle_standard); }
             var sec = $('amsign-kv-secret');
             if (sec) {
+                // tabfill: nein – Hinweis zum gespeicherten Geheimnis, kein Wert
                 sec.placeholder = kv.secret_gesetzt
                     ? t('amsign.kv_secret_keep', 'gespeichert – leer lassen = unverändert')
                     : t('amsign.pw_ph', 'wird verschlüsselt gespeichert');

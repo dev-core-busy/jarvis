@@ -543,6 +543,7 @@ class JarvisVisionManager {
         } else {
             wrap.style.display = '';
             if (input) {
+                // tabfill: nein – Formbeispiel einer Adresse
                 input.placeholder = type === 'url' ? 'https://example.com/webhook' : window.t('vision.prompt_ph');
             }
         }
@@ -1009,6 +1010,7 @@ class JarvisVisionManager {
         } else {
             wrap.style.display = '';
             if (label) label.textContent = type === 'url' ? 'Webhook URL' : 'Text / Prompt';
+            // tabfill: nein – Formbeispiel einer Adresse
             if (input) input.placeholder = type === 'url' ? 'https://...' : window.t('vision.prompt_ph');
         }
     }

@@ -485,6 +485,7 @@
         var addInp = document.createElement('input');
         addInp.type = 'text';
         addInp.className = 'token-add-input';
+        // tabfill: nein – Beispiel-DN; uebernommen wuerde hier ein Beispiel gespeichert
         addInp.placeholder = cfg.kind === 'groups' ? window.t('ldap.ph_group_dn') : window.t('ldap.ph_login_manual');
         var addBtn = document.createElement('button');
         addBtn.type = 'button';

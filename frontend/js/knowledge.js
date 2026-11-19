@@ -3758,6 +3758,7 @@ class JarvisKnowledgeManager {
             const setzePlatzhalter = () => {
                 const q = document.getElementById('kb-mount-source');
                 const b = JarvisKnowledgeManager.MOUNT_BEISPIEL[typEl.value];
+                // tabfill: nein – Formbeispiel des Quellpfads (//server/freigabe), kein Wert
                 if (q && b) q.placeholder = b;
             };
             typEl.addEventListener('change', setzePlatzhalter);
@@ -3903,6 +3904,7 @@ class JarvisKnowledgeManager {
         const form = selectEl && selectEl.closest('.kb-mount-edit-form');
         const q = form && form.querySelector('.kb-mount-edit-source');
         const b = JarvisKnowledgeManager.MOUNT_BEISPIEL[selectEl.value];
+        // tabfill: nein – Formbeispiel des Quellpfads (//server/freigabe), kein Wert
         if (q && b) q.placeholder = b;
     }
 

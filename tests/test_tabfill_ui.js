@@ -11,6 +11,14 @@
  * Teil 1  Verhalten der Taste (leer/gefuellt, Shift, Opt-in, input-Ereignis)
  * Teil 2  Hinweis, der das Feature ueberhaupt auffindbar macht
  * Teil 3  Verdrahtung: Einbindung je Seite, markierte Felder, i18n
+ * Teil 4  JarvisTabfill.vorschlag – die zentrale Stelle fuer berechnete Vorschlaege
+ * Teil 5  Die REGEL darueber: keine rohe placeholder-Zuweisung ohne Entscheidung
+ *
+ * Teil 4+5 kamen am 2026-11-19 dazu. Gemeldet war EIN Feld (die Rueckkehr-Adresse
+ * des Anmelde-Anbieters), gemessen waren es SECHS: im Markup stehen Vorschlag und
+ * Markierung nebeneinander, im JavaScript setzt eine Zeile den Platzhalter und die
+ * Markierung muss jemand DARAN denken. Teil 5 misst das deshalb als Regel ueber
+ * alle Module – eine neue Stelle faellt auf, statt still durchzufallen.
  *
  *   node tests/test_tabfill_ui.js
  */
@@ -198,6 +206,216 @@ pruefe(CSS.indexOf('.jv-tabfill-hint') > -1,
     'die Hinweis-Regel steht in theme.css (nicht style.css – das laedt nur /settings und /wissen)');
 pruefe(!/\.jv-tabfill-hint[^{]*\{[^}]*#[0-9a-fA-F]{3}/.test(CSS),
     'keine harten Farben im Hinweis');
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('4. JarvisTabfill.vorschlag: Platzhalter UND Markierung in einem Zug');
+{
+    const { window: w } = baue();
+    const d = w.document;
+    const da = !!(w.JarvisTabfill && typeof w.JarvisTabfill.vorschlag === 'function');
+    pruefe(da, 'tabfill.js stellt JarvisTabfill.vorschlag bereit');
+    // Fehlt sie, darf dieser Abschnitt FEHLSCHLAGEN, nicht ABSTUERZEN: ein Lauf
+    // ohne Bilanzzeile ist von "nicht gelaufen" nicht zu unterscheiden, und die
+    // Gegenprobe "zentrale Funktion nicht ausgestellt" meldete dadurch Exit 2
+    // statt eines Bisses (Register).
+    const setzen = (el, t) => { if (da) w.JarvisTabfill.vorschlag(el, t); };
+
+    // Ein Feld OHNE Markierung bekommt sie mit dem Vorschlag zusammen – genau
+    // der gemeldete Fall (Platzhalter gesetzt, data-tabfill vergessen).
+    const c = d.getElementById('c');
+    c.value = '';
+    c.removeAttribute('data-tabfill');
+    setzen(c, 'https://host/auth/callback');
+    pruefe(c.placeholder === 'https://host/auth/callback', 'der Platzhalter steht', c.placeholder);
+    pruefe(c.hasAttribute('data-tabfill'), 'und das Feld ist markiert');
+    const ev = tab(w, c);
+    pruefe(ev.defaultPrevented && c.value === 'https://host/auth/callback',
+        'TAB uebernimmt den so gesetzten Vorschlag', c.value);
+
+    // EINE Quelle: das Attribut traegt KEINE zweite Kopie des Textes, sonst
+    // liefe es auseinander, sobald jemand anders den Platzhalter anfasst
+    // (branding.js ersetzt darin den Markennamen).
+    c.value = '';
+    c.placeholder = 'Marke-ersetzt https://host/x';
+    pruefe(tab(w, c) && c.value === 'Marke-ersetzt https://host/x',
+        'uebernommen wird der AKTUELLE Platzhalter, keine Kopie im Attribut', c.value);
+
+    // Leerer Text raeumt beides ab – sonst verspraeche der Hinweis etwas, das
+    // TAB nicht mehr liefert.
+    c.value = '';
+    setzen(c, '');
+    pruefe(c.placeholder === '' && !c.hasAttribute('data-tabfill'),
+        'ein leerer Vorschlag nimmt Platzhalter UND Markierung zurueck');
+    pruefe(!tab(w, c).defaultPrevented && c.value === '',
+        'danach schaltet TAB wieder normal weiter');
+
+    // null/undefined sind der Regelfall bei einem Serverfeld, das fehlt.
+    setzen(c, undefined);
+    pruefe(!c.hasAttribute('data-tabfill'), 'undefined wirkt wie ein leerer Vorschlag');
+    setzen(c, '   ');
+    pruefe(!c.hasAttribute('data-tabfill'), 'reiner Leerraum ebenfalls');
+
+    let warf = false;
+    try { setzen(null, 'x'); } catch (e) { warf = true; }
+    pruefe(!warf, 'ein fehlendes Element wirft nicht (die Felder sind oft optional)');
+    w.close();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('5. REGEL: jede placeholder-Zuweisung ist eine Entscheidung');
+{
+    // Gemessen am SYNTAXBAUM, nicht am Text: ein `.placeholder` in einer
+    // Zeichenkette oder einem Kommentar ist keine Zuweisung (Register: ein
+    // Teilstring ist keine Identitaet).
+    const acorn = require('./lib/acorn_laden')();
+
+    // tabfill.js selbst IST die zentrale Funktion; vnc.js setzt eine
+    // Objekt-Eigenschaft `this.placeholder` (ein <div>), keinen Feld-Platzhalter –
+    // deshalb zaehlen `this.<x> = …`-Ziele grundsaetzlich nicht mit.
+    const EIGEN = 'frontend/js/tabfill.js';
+    const MARKE = /tabfill:\s*nein/i;
+
+    function jsDateien(dir, out) {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            const voll = path.join(dir, e.name);
+            if (e.isDirectory()) jsDateien(voll, out);
+            else if (e.name.endsWith('.js')) out.push(voll);
+        }
+        return out;
+    }
+
+    /** Alle `X.placeholder = …` einer Datei, mit Zeilennummer. */
+    function zuweisungen(src) {
+        const fund = [];
+        let ast;
+        try { ast = acorn.parse(src, { ecmaVersion: 2022, locations: true }); }
+        catch (e) { return null; }
+        (function lauf(n) {
+            if (!n || typeof n !== 'object') return;
+            if (n.type === 'AssignmentExpression' && n.left &&
+                n.left.type === 'MemberExpression' && !n.left.computed &&
+                n.left.property && n.left.property.name === 'placeholder' &&
+                n.left.object && n.left.object.type !== 'ThisExpression') {
+                fund.push(n.loc.start.line);
+            }
+            for (const k in n) {
+                if (k === 'loc') continue;
+                const v = n[k];
+                if (Array.isArray(v)) v.forEach(lauf);
+                else if (v && typeof v.type === 'string') lauf(v);
+            }
+        })(ast);
+        return fund;
+    }
+
+    /** Traegt der ZUSAMMENHAENGENDE Kommentar unmittelbar vor `zeile` die Marke?
+     *  Ein Fenster fester Groesse waere die bekannte Zeitbombe – es griffe in den
+     *  Nachbarblock. Gelesen wird deshalb rueckwaerts, bis eine Zeile kein
+     *  Kommentar mehr ist. */
+    function markiert(zeilen, zeile) {
+        for (let i = zeile - 2; i >= 0; i--) {
+            const z = zeilen[i].trim();
+            if (z === '') return false;
+            if (!z.startsWith('//') && !z.startsWith('*') && !z.startsWith('/*')) return false;
+            if (MARKE.test(z)) return true;
+        }
+        return false;
+    }
+
+    // Positivkontrolle der Messvorrichtung, VOR den inhaltlichen Pruefungen:
+    // ohne sie waere jede Aussage darunter trivial wahr (Register).
+    const probe = [
+        'el.placeholder = "a";',            // 1  roh, ohne Marke
+        '// tabfill: nein – Grund',          // 2
+        'el.placeholder = "b";',            // 3  markiert
+        'this.placeholder = x;',            // 4  Objekt-Eigenschaft
+        'var s = "el.placeholder = c";',    // 5  Zeichenkette
+        'JarvisTabfill.vorschlag(el, "d");' // 6  zentraler Weg
+    ].join('\n');
+    const pz = zuweisungen(probe);
+    const pzeilen = probe.split('\n');
+    const pOhne = pz && pz.filter(z => !markiert(pzeilen, z));
+    const kontrolleOk = pz && pz.length === 2 && pz[0] === 1 && pz[1] === 3 &&
+                        pOhne.length === 1 && pOhne[0] === 1;
+    pruefe(kontrolleOk,
+        'Positivkontrolle: die Sonde findet genau die rohen Zuweisungen',
+        pz ? ('gefunden ' + JSON.stringify(pz) + ', ohne Marke ' + JSON.stringify(pOhne)) : 'Parse-Fehler');
+    if (!kontrolleOk) {
+        console.log('\n  ABBRUCH: die Messvorrichtung ist unbrauchbar – ' +
+                    'ohne sie waere die Regel darunter trivial wahr.');
+        console.log('  ' + ok + ' OK, ' + fail + ' FAIL');
+        process.exit(2);
+    }
+
+    const WURZELN = ['frontend/js', 'frontend/addin'];
+    const alle = [];
+    WURZELN.forEach(w => {
+        const abs = path.join(ROOT, w);
+        if (!fs.existsSync(abs)) {
+            console.log('\n  ABBRUCH: Wurzel fehlt – ' + w);
+            process.exit(2);
+        }
+        jsDateien(abs, alle);
+    });
+    pruefe(alle.length >= 50, 'die Regel laeuft ueber alle Frontend-Module (' + alle.length + ')');
+
+    const offen = [];
+    let kaputt = 0, gezaehlt = 0;
+    alle.forEach(f => {
+        const rel = path.relative(ROOT, f).split(path.sep).join('/');
+        if (rel === EIGEN) return;
+        const src = fs.readFileSync(f, 'utf8');
+        const z = zuweisungen(src);
+        if (z === null) { kaputt++; return; }
+        const zeilen = src.split('\n');
+        z.forEach(n => {
+            gezaehlt++;
+            if (!markiert(zeilen, n)) offen.push(rel + ':' + n + ': ' + zeilen[n - 1].trim());
+        });
+    });
+    pruefe(kaputt === 0, 'jedes Modul laesst sich parsen', String(kaputt) + ' nicht parsebar');
+    pruefe(gezaehlt > 0, 'es gibt ueberhaupt markierte Zuweisungen zu pruefen (' + gezaehlt + ')');
+    pruefe(offen.length === 0,
+        'keine rohe placeholder-Zuweisung ohne Marke "tabfill: nein – <Grund>"',
+        offen.join(' | '));
+
+    // Die Gegenrichtung: der zentrale Weg wird wirklich benutzt. Ohne diese
+    // Pruefung waere "alles markiert" auch dann erfuellt, wenn jemand JEDE
+    // Stelle mit einer Marke stillstellt statt einen Vorschlag zu setzen.
+    let nutzer = 0;
+    const nutzerDateien = [];
+    alle.forEach(f => {
+        const rel = path.relative(ROOT, f).split(path.sep).join('/');
+        if (rel === EIGEN) return;
+        const src = fs.readFileSync(f, 'utf8');
+        const n = (src.match(/JarvisTabfill\.vorschlag\s*\(/g) || []).length;
+        if (n) { nutzer += n; nutzerDateien.push(rel); }
+    });
+    pruefe(nutzer >= 6,
+        'berechnete Vorschlaege laufen ueber JarvisTabfill.vorschlag (' + nutzer + ')',
+        nutzerDateien.join(', '));
+
+    // Der gemeldete Fall namentlich – er darf nicht still zurueckfallen.
+    const IDP = fs.readFileSync(path.join(ROOT, 'frontend/js/settings_idp.js'), 'utf8');
+    pruefe(/JarvisTabfill\.vorschlag\s*\(\s*ru\s*,/.test(IDP),
+        'die Rueckkehr-Adresse (idp-redirect-uri) setzt ihren Vorschlag zentral');
+
+    // Jede Seite, die ein solches Modul einbindet, braucht tabfill.js – sonst
+    // ist JarvisTabfill undefined und der Renderer bricht mit TypeError ab.
+    const HTML = fs.readdirSync(path.join(ROOT, 'frontend'))
+        .filter(n => n.endsWith('.html'))
+        .concat(fs.existsSync(path.join(ROOT, 'frontend/addin'))
+            ? fs.readdirSync(path.join(ROOT, 'frontend/addin')).filter(n => n.endsWith('.html'))
+                .map(n => 'addin/' + n) : []);
+    const fehlt = [];
+    HTML.forEach(n => {
+        const s2 = fs.readFileSync(path.join(ROOT, 'frontend', n), 'utf8');
+        const braucht = nutzerDateien.some(m => s2.indexOf(m.replace('frontend/', '')) > -1);
+        if (braucht && s2.indexOf('tabfill.js') < 0) fehlt.push(n);
+    });
+    pruefe(fehlt.length === 0,
+        'jede Seite mit einem solchen Modul bindet tabfill.js ein', fehlt.join(', '));
+}
 
 console.log('\n' + '='.repeat(62));
 console.log('  ' + ok + ' OK, ' + fail + ' FAIL');

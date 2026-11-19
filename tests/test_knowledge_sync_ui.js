@@ -61,6 +61,10 @@ const ICONS_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8'
 // Signatur und wuerde `tokenSchluessel()`/`benutzer()`/`kopfsatz()` nicht
 // kennen. In settings.html ist es das erste Skript der Seite, hier ebenso.
 const SITZUNG = fs.readFileSync(path.join(ROOT, 'frontend/js/sitzung.js'), 'utf8');
+// Die ECHTE tabfill.js, keine Attrappe: knowledge_sync.js setzt den
+// Standortnamen ueber JarvisTabfill.vorschlag, und eine Teil-Attrappe
+// stirbt beim naechsten Symbol, das dazukommt (Register).
+const TABFILL = fs.readFileSync(path.join(ROOT, 'frontend/js/tabfill.js'), 'utf8');
 
 const PEERS = [
     {
@@ -137,6 +141,7 @@ function bauen(opt) {
     w.eval(SITZUNG);   // vor allen Modulen – wie das erste <script> der Seite
     w.eval(I18N);
     w.eval(ICONS_JS);
+    w.eval(TABFILL);   // nach i18n.js – wie in der Seite (Hinweistext aus window.t)
     w.eval(SYNC);
     return { dom, w, rufe, KS: w.KnowledgeSync };
 }

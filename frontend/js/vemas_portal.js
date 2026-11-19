@@ -814,6 +814,7 @@
             // wieder "leer = unveraendert", und das stimmt hier nicht.
             var key = an ? 'vemas.acc_pass_kachel_ph' : 'vemas.acc_pass_ph';
             e.setAttribute('data-i18n-placeholder', key);
+            // tabfill: nein – Kennwort-Hinweis, kein Wert
             e.placeholder = an ? T(key, 'Kennwort – wird nicht gespeichert') : T(key, 'leer = unverändert');
         });
         var s = $('vm-acc-save');

@@ -41,7 +41,9 @@
         inp.id = 'lk-wert-' + art;
         inp.className = 'lk-wert';
         inp.dataset.art = art;
-        inp.placeholder = String(f.vorgabe);
+        // Die Vorgabe ist der Wert, der ohne Eintrag gilt – TAB uebernimmt sie,
+        // wer sie festschreiben will, muss sie nicht abtippen.
+        JarvisTabfill.vorschlag(inp, String(f.vorgabe));
         if (f.quelle === 'einstellung') inp.value = String(f.tage);
         var info = el('span', 'lk-info');
         var wirksam = f.tage === 0 ? T('lk.dauerhaft') : T('lk.tage').replace('{n}', f.tage);

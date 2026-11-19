@@ -310,6 +310,7 @@
                 var lab = document.createElement('label');
                 lab.innerHTML = esc(p.name) + ' <span class="ad-in">(' + esc(p.in) + (p.required ? esc(T('api.required_suffix')) : '') + ')</span>';
                 var inp = document.createElement('input'); inp.className = 'ad-input';
+                // tabfill: nein – Typangabe des Schemas, kein Beispielwert
                 inp.placeholder = (resolveRef(p.schema).type) || '';
                 f.appendChild(lab); f.appendChild(inp); box.appendChild(f);
                 inputs[p.name] = { el: inp, in: p.in };
@@ -323,6 +324,7 @@
                 bl.innerHTML = esc(T('api.body_label')) + (bs ? '' : '<span class="ad-in">' + esc(T('api.body_free')) + '</span>');
                 bodyEl = document.createElement('textarea'); bodyEl.className = 'ad-textarea';
                 bodyEl.value = bs ? JSON.stringify(exampleBody, null, 2) : '';
+                // tabfill: nein – Formbeispiel fuer den Rumpf, kein Inhalt
                 if (!bs) bodyEl.placeholder = '{ }';
                 bf.appendChild(bl); bf.appendChild(bodyEl); box.appendChild(bf);
             }

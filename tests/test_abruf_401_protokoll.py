@@ -123,14 +123,75 @@ def prot_zeilen(fn):
     return zeilen
 
 
+def ist_prot_anweisung(stmt):
+    """``_prot_abruf_abgewiesen(...)`` als eigene Anweisung (nicht verschachtelt)."""
+    return (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+            and getattr(stmt.value.func, "id", getattr(stmt.value.func, "attr", "")) == PROT)
+
+
+def prot_auf_dem_pfad(fn, ziel):
+    """Liegt ein Protokollaufruf auf JEDEM Weg zu ``ziel`` davor?
+
+    ⚠ WARUM NICHT „irgendein Aufruf mit kleinerer Zeilennummer" (bis 2026-11-19):
+    seit Pentest A7 steht im Programmschluessel-Zweig von require_auth_or_query
+    ein eigener Aufruf WEITER OBEN. Er erfuellte die Zeilen-Regel auch fuer den
+    letzten 401 der Funktion – dessen eigene Protokollzeile liess sich entfernen,
+    ohne dass der Waechter anschlug (gegen_sitzung_eine_quelle: stumm). Genau
+    der „kuenftige dritte Rueckgabe-Pfad", den der Kopf verspricht, war blind.
+
+    Gemessen wird deshalb strukturell: vom raise aus jede umschliessende
+    Anweisungsliste hinauf bis zur Funktion; ein Treffer zaehlt nur, wenn er
+    dort als eigene Anweisung VOR dem Weg zum raise steht – dann wird er auf
+    diesem Weg sicher durchlaufen. Ein Aufruf in einem Nachbarzweig zaehlt nicht.
+    """
+    eltern = {}
+    for k in ast.walk(fn):
+        for kind in ast.iter_child_nodes(k):
+            eltern[kind] = k
+    knoten = ziel
+    while knoten is not fn:
+        vater = eltern.get(knoten)
+        if vater is None:
+            return False
+        for feld in ("body", "orelse", "finalbody"):
+            liste = getattr(vater, feld, None)
+            if not isinstance(liste, list):
+                continue
+            for s in liste:
+                if s is knoten:
+                    break
+                if ist_prot_anweisung(s):
+                    return True
+        knoten = vater
+    return False
+
+
+# Positivkontrolle des MESSWERKZEUGS an einem Kunststueck: der Fall, der bis
+# 2026-11-19 durchrutschte (Aufruf nur im Nachbarzweig), muss als „fehlt"
+# erkannt werden, der richtige Fall als „da". Sonst ist Abschnitt 2 nicht deutbar.
+_probe = ast.parse(
+    "def f(a):\n"
+    "    if a:\n"
+    "        %s(r)\n"
+    "        raise HTTPException(status_code=401)\n"
+    "    if a > 1:\n"
+    "        x = 1\n"
+    "    raise HTTPException(status_code=401)\n" % PROT).body[0]
+_r = raise_401(_probe)
+if len(_r) != 2:
+    abbruch("Kunststueck fuer das Messwerkzeug nicht wie gebaut (%d raise)" % len(_r))
+_r.sort(key=lambda k: k.lineno)
+if not prot_auf_dem_pfad(_probe, _r[0]) or prot_auf_dem_pfad(_probe, _r[1]):
+    abbruch("Messwerkzeug prot_auf_dem_pfad unterscheidet Pfad und Nachbarzweig nicht")
+check("Messwerkzeug: Aufruf im Nachbarzweig zaehlt nicht, auf dem Weg zaehlt", True)
+
 for name in DEPENDENCIES:
     fn = funktionen[name][0]
     prot = prot_zeilen(fn)
     check("%s: ruft %s ueberhaupt" % (name, PROT), len(prot) > 0)
     for r in alle_401[name]:
-        davor = [z for z in prot if z < r.lineno]
-        check("%s: der 401 in Zeile %d hat die Protokollzeile davor"
-              % (name, r.lineno), len(davor) > 0,
+        check("%s: der 401 in Zeile %d hat die Protokollzeile auf seinem Weg davor"
+              % (name, r.lineno), prot_auf_dem_pfad(fn, r),
               "Protokoll-Aufrufe in Zeilen %s" % (prot or "keine"))
 
 

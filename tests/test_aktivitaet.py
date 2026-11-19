@@ -341,7 +341,36 @@ mw = FN.get("_sicherheits_protokoll_mw")
 pruefe(mw is not None and re.search(r"halter\s*:\s*dict\s*=\s*\{'ip'", ast.unparse(mw)) is not None,
        "die Middleware legt die IP in den Halter")
 RET = (ROOT / "backend" / "log_retention.py").read_text(encoding="utf-8")
-pruefe('("aktivitaet", _prune_aktivitaet)' in RET and "aktivitaet.prune_older_than" in RET,
+# ⚠ AM SYNTAXBAUM, nicht als Teilstring (bis 2026-11-19): der Teilstring
+# '("aktivitaet", _prune_aktivitaet)' ueberlebte ein Auskommentieren der Zeile.
+# Gemessen wird: das Paar steht als Tupel im Iterator einer for-Schleife, und
+# _prune_aktivitaet ruft aktivitaet.prune_older_than wirklich auf.
+try:
+    RET_BAUM = ast.parse(RET)
+except SyntaxError as e:
+    abbruch("log_retention.py parst nicht: %s" % e)
+
+
+def _ist_paar(k):
+    return (isinstance(k, ast.Tuple) and len(k.elts) == 2
+            and isinstance(k.elts[0], ast.Constant) and k.elts[0].value == "aktivitaet"
+            and isinstance(k.elts[1], ast.Name) and k.elts[1].id == "_prune_aktivitaet")
+
+
+_schleifen = [k for k in ast.walk(RET_BAUM) if isinstance(k, ast.For)
+              and isinstance(k.iter, (ast.Tuple, ast.List)) and len(k.iter.elts) > 1]
+# Positivkontrolle: die Frist-Schleife selbst muss gefunden werden, sonst waere
+# „Paar fehlt" auch dann wahr, wenn nur der Umbau das Messwerkzeug blind macht.
+if not any(isinstance(e, ast.Tuple) and e.elts and isinstance(e.elts[0], ast.Constant)
+           and e.elts[0].value == "conv_log" for s in _schleifen for e in s.iter.elts):
+    abbruch("Frist-Schleife in log_retention.py nicht gefunden (conv_log fehlt) – umgebaut?")
+_prune_fn = [k for k in RET_BAUM.body
+             if isinstance(k, ast.FunctionDef) and k.name == "_prune_aktivitaet"]
+_ruft = bool(_prune_fn) and any(
+    isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+    and c.func.attr == "prune_older_than" and isinstance(c.func.value, ast.Name)
+    and c.func.value.id == "aktivitaet" for c in ast.walk(_prune_fn[0]))
+pruefe(any(_ist_paar(e) for s in _schleifen for e in s.iter.elts) and _ruft,
        "Aktivitaetsprotokoll unterliegt der Aufbewahrungsfrist")
 HTML = (ROOT / "frontend" / "settings.html").read_text(encoding="utf-8")
 pruefe('data-plog="akt"' in HTML and 'id="plog-akt-tbody"' in HTML and 'id="plog-akt-bereich"' in HTML,

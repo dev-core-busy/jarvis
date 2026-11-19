@@ -164,13 +164,24 @@ PROBEN = [
     ("⚠ RAM-Kontext der geloeschten Sitzungen bleibt stehen", PY,
      "            geloescht.append(sid)\n            _chat_kontext_vergessen(user, sid)\n",
      "            geloescht.append(sid)\n", BE),
+    # ⚠ Anker seit 2026-11-19 auf der Thread-Form (``for sid, ok in ergebnis``):
+    # die alte Form ``if cs.delete_session(...)`` gibt es seit dem Code-Review
+    # 2026-10-07 nicht mehr, die Probe traf nichts („0x").
     ("⚠ RAM-Kontext wird auch fuer NICHT geloeschte Ids verworfen", PY,
-     "        if cs.delete_session(user, sid):\n"
+     "        if ok:\n"
      "            geloescht.append(sid)\n"
      "            _chat_kontext_vergessen(user, sid)\n",
      "        _chat_kontext_vergessen(user, sid)\n"
-     "        if cs.delete_session(user, sid):\n"
+     "        if ok:\n"
      "            geloescht.append(sid)\n", BE),
+    ("⚠ RAM-Kontext ZUSAETZLICH fuer jede Id verworfen (Zweig bleibt)", PY,
+     "        if ok:\n"
+     "            geloescht.append(sid)\n"
+     "            _chat_kontext_vergessen(user, sid)\n",
+     "        _chat_kontext_vergessen(user, sid)\n"
+     "        if ok:\n"
+     "            geloescht.append(sid)\n"
+     "            _chat_kontext_vergessen(user, sid)\n", BE),
     ("⚠ die Einzelloeschung verliert den Helfer wieder (Lehre 2026-08-30)", PY,
      '    ok = cs.delete_session(user, sid)\n    _chat_kontext_vergessen(user, sid)\n',
      '    ok = cs.delete_session(user, sid)\n', BE),

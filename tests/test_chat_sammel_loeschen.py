@@ -169,16 +169,20 @@ check(bool(rufe(EINZEL, "_chat_kontext_vergessen")),
       "die Einzel-Loeschung benutzt DENSELBEN Helfer (eine Stelle, nicht zwei)")
 # ⚠ Der Aufruf muss im ERFOLGS-Zweig der Schleife stehen. Steht er daneben,
 # wuerde auch fuer eine nicht geloeschte Sitzung der Kontext verworfen.
-im_zweig = False
+# ⚠ JEDER Aufruf, nicht EINER (bis 2026-11-19 genuegte einer im Zweig): ein
+# zusaetzlicher Aufruf vor dem ``if`` verwirft den Kontext fuer jede Id und
+# liess die alte Pruefung gruen.
+im_zweig_ids = set()
 for s in schleifen:
     for n in ast.walk(s):
-        if isinstance(n, ast.If) and rufe(n, "_chat_kontext_vergessen"):
-            treffer = [c for c in ast.walk(ast.Module(body=n.body, type_ignores=[]))
-                       if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
-                       and c.func.id == "_chat_kontext_vergessen"]
-            if treffer:
-                im_zweig = True
-check(im_zweig, "⚠ und zwar nur im ERFOLGS-Zweig, nicht fuer jede Id")
+        if isinstance(n, ast.If):
+            for c in rufe(ast.Module(body=n.body, type_ignores=[]), "_chat_kontext_vergessen"):
+                im_zweig_ids.add(id(c))
+alle_vergessen = rufe(SAMMEL, "_chat_kontext_vergessen")
+ausserhalb = [c.lineno for c in alle_vergessen if id(c) not in im_zweig_ids]
+check(bool(im_zweig_ids) and not ausserhalb,
+      "⚠ und zwar nur im ERFOLGS-Zweig, nicht fuer jede Id",
+      "Aufrufe ausserhalb eines Erfolgs-Zweigs in Zeile(n) %s" % ausserhalb)
 check(bool(attribut_rufe(SAMMEL, "delete_session")),
       "geloescht wird ueber chat_sessions.delete_session (die Pfadpruefung dort gilt)")
 

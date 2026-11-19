@@ -76,8 +76,17 @@ PROBEN = [
      'if v is not None and v != ""}', "if v}", PY),
     ("Kappung fehlt", AK,
      'return s if len(s) <= WERT_MAX else s[:WERT_MAX] + "…"', "return s", PY),
+    # ⚠ Anker ist die EINE Zeile, nicht ihr Platz in der Liste: bis 2026-11-19
+    # stand hier ``...)):`` (letzter Eintrag) – seit token_verbrauch dahinter
+    # kam, traf die Probe nichts mehr („Anker 0x").
     ("ohne Aufbewahrungsfrist", LR,
-     '                     ("aktivitaet", _prune_aktivitaet)):', '                     ):', PY),
+     '                     ("aktivitaet", _prune_aktivitaet),\n', '', PY),
+    ("Frist-Eintrag nur auskommentiert", LR,
+     '                     ("aktivitaet", _prune_aktivitaet),\n',
+     '                     # ("aktivitaet", _prune_aktivitaet),\n', PY),
+    ("Frist ruft das Aktivitaetsprotokoll nicht auf", LR,
+     '    from backend import aktivitaet\n    return aktivitaet.prune_older_than(cut)\n',
+     '    return 0\n', PY),
     ("EN-Text einer Aktion fehlt", I18,
      "        'plog.akt.a_ordner_angelegt': 'Knowledge folder created',\n", "", PY),
 ]

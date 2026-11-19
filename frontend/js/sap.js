@@ -368,7 +368,10 @@
 
         test: function () {
             status('Teste Verbindung…');
-            fetch('/api/sap/test', { headers: authHeaders() })
+            // Getestet wird der SAMMELZUGANG, den diese Maske bearbeitet –
+            // /api/sap/test nimmt den persoenlichen Zugang mit Vorrang und
+            // meldete mit dessen altem Kennwort einen Fehler (DEV 2026-11-19).
+            fetch('/api/sap/test/sammel', { headers: authHeaders() })
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
                     if (d && d.ok) {

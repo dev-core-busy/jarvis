@@ -16,7 +16,8 @@ nachbildet – keine ``requests``-Attrappe, denn genau die echte Anfrage
   3. Fehlerfall: der Bericht steht trotz Ausnahme (Status, Adresse, Variante)
   4. Kein Kennwort, kein Token, keine Anmeldung aus der Adresse im Bericht
   5. Bearer-Token geht auch beim $metadata-Abruf mit (vorher fehlte er dort)
-  6. Endpunkt ``/api/sap/test`` reicht den Bericht in BEIDEN Zweigen durch (AST)
+  6. Endpunkte ``/api/sap/test`` und ``/api/sap/test/sammel`` reichen den
+     Bericht in BEIDEN Zweigen durch (AST, gemeinsame ``_sap_test_antwort``)
   7. Abfrage-Konsole: Katalog als Service-Pfade RELATIV zur Basis-URL – ein
      fremder Host aus den Katalogdaten wird nie uebernommen
   8. Endpunkte der Konsole: Service-Liste, EntitySets ohne Service (AST)
@@ -372,10 +373,24 @@ check(all(a["auth"] == "" for a in ZUSTAND["anfragen"]),
 # ══ 5. Endpunkt reicht den Bericht durch (AST) ══════════════════════
 section("5. /api/sap/test")
 baum = ast.parse(Path(ARGS.main).read_text(encoding="utf-8"))
-fn = [n for n in ast.walk(baum) if isinstance(n, ast.AsyncFunctionDef) and n.name == "sap_test"]
+# Seit 2026-11-19 antworten ZWEI Endpunkte (/api/sap/test fuer den geltenden,
+# /api/sap/test/sammel fuer den Sammelzugang) ueber EINE Hilfsfunktion – die
+# Antworten werden dort gemessen, und beide Endpunkte muessen sie benutzen.
+fn = [n for n in ast.walk(baum)
+      if isinstance(n, ast.AsyncFunctionDef) and n.name == "_sap_test_antwort"]
 if len(fn) != 1:
-    print(f"  ABBRUCH: sap_test nicht eindeutig gefunden ({len(fn)}) – Test kann nicht laufen.")
+    print(f"  ABBRUCH: _sap_test_antwort nicht eindeutig gefunden ({len(fn)}) – Test kann nicht laufen.")
     sys.exit(2)
+for endpunkt in ("sap_test", "sap_test_sammel"):
+    ep = [n for n in ast.walk(baum)
+          if isinstance(n, ast.AsyncFunctionDef) and n.name == endpunkt]
+    ruft = len(ep) == 1 and any(
+        isinstance(n, ast.Return) and isinstance(n.value, ast.Await)
+        and isinstance(n.value.value, ast.Call)
+        and isinstance(n.value.value.func, ast.Name)
+        and n.value.value.func.id == "_sap_test_antwort"
+        for n in ast.walk(ep[0]))
+    check(ruft, f"{endpunkt} antwortet ueber _sap_test_antwort", f"{len(ep)} Definition(en)")
 antworten = []
 for n in ast.walk(fn[0]):
     if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "JSONResponse"

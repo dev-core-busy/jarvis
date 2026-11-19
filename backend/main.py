@@ -15769,14 +15769,38 @@ async def sap_test(user: str = Depends(require_sap_access)):
     Vorrang. ``trotz_aussetzer=True``, weil dies eine Handlung des Menschen ist:
     ohne die Ausnahme testete der Knopf nach einem Aussetzer den Sammelzugang,
     meldete "ok" und der Aussetzer liesse sich nie aufloesen."""
-    from backend.sap_client import SapError
     z = _sap_zugang(user, trotz_aussetzer=True)
-    c = z["client"]
-    quelle = z.get("quelle") or "sammel"
+    return await _sap_test_antwort(z["client"], z.get("quelle") or "sammel",
+                                   z.get("hinweis") or "", user)
+
+
+@app.get("/api/sap/test/sammel")
+async def sap_test_sammel(user: str = Depends(require_local_auth)):
+    """Prueft den SAMMELZUGANG – fuer "Verbindung testen" in der
+    Administrator-Konfiguration des SAP-Skills.
+
+    ⚠ WARUM (DEV 2026-11-19): der Knopf rief ``/api/sap/test``, und das testet
+    den Zugang, der beim Auswerten gilt – den persoenlichen mit Vorrang. Der
+    Administrator hatte das neue Kennwort des Sammelzugangs gespeichert, sein
+    eigener persoenlicher Zugang trug noch das alte: der Test meldete
+    "Anmeldung fehlgeschlagen" fuer eine Konfiguration, die einwandfrei war,
+    und jeder Klick war ein weiterer Fehlversuch gegen die Sperrgrenze des
+    SAP-Benutzers. Getestet wird hier deshalb genau das, was der Administrator
+    bearbeitet; der persoenliche Zugang wird weder benutzt noch gezaehlt."""
+    from backend.sap_client import SapClient
+    return await _sap_test_antwort(SapClient(), "sammel", "", user)
+
+
+async def _sap_test_antwort(c, quelle: str, hinweis: str, user: str):
+    """Fuehrt ``c.test`` aus und baut die Antwort beider Test-Endpunkte.
+
+    Erfolg und Anmeldefehler werden NUR beim persoenlichen Zugang gemerkt –
+    sonst rechnete man dem Benutzer einen Fehler des Sammelzugangs an."""
+    from backend.sap_client import SapError
     if not c.configured:
         return JSONResponse({"ok": False, "configured": False,
                              "type": c.connection_type, "quelle": quelle,
-                             "hinweis": z.get("hinweis") or "",
+                             "hinweis": hinweis,
                              "error": "Nicht konfiguriert (Zugangsdaten fehlen)."})
     try:
         res = await asyncio.to_thread(c.test)
@@ -15807,7 +15831,7 @@ async def sap_test(user: str = Depends(require_sap_access)):
             pass
     return JSONResponse({"ok": True, "configured": True,
                          "type": res.get("type"), "product": c.product,
-                         "quelle": quelle, "hinweis": z.get("hinweis") or "",
+                         "quelle": quelle, "hinweis": hinweis,
                          "detail": res.get("detail"), "info": res.get("info")})
 
 

@@ -1024,6 +1024,37 @@ def _cfg_aus_zugang(k: dict) -> dict:
     return cfg
 
 
+# ⚠ WARUM (ECHT 2026-11-19): "Verbindung testen" zeigte die rohe HTML-Seite
+# "Anmeldung fehlgeschlagen" des SAP-Servers. Der persoenliche Zugang trug nur
+# noch den Benutzernamen – seit 39f7c626 nimmt das Einschalten der
+# Kachel-Anmeldung nur die Kennwoerter weg, die Zugaenge bleiben. Nach dem
+# Zurueckschalten galt er wieder als vorrangig, denn ``_vollstaendig`` prueft
+# nur die Adresse (absichtlich: ``idp_kennwort_ziel`` braucht genau solche
+# Zugaenge). Jarvis schickte den Benutzer mit LEEREM Kennwort an SAP – jeder
+# Klick ein Fehlversuch gegen ``login/fails_to_user_lock``, auf ECHT zudem
+# derselbe SAP-Benutzer wie der Sammelzugang. Deshalb prueft die Aufloesung
+# ohne Kachelpflicht das Geheimnis der AKTIVEN Anmeldeart selbst.
+KEIN_KENNWORT_TEXT = ("Für deinen persönlichen SAP-Zugang ist kein Kennwort hinterlegt – "
+                      "bitte unter 'Mein SAP-Zugang' eintragen. Bis dahin gilt der "
+                      "gemeinsame Lesezugang.")
+
+
+def _geheimnis_fehlt(cfg: dict) -> bool:
+    """Fehlt das Geheimnis, das die AKTIVE Anmeldeart tatsaechlich mitschickt?
+
+    Dieselbe Entscheidung wie ``_ODataClient.anmeldeart``: Basic ohne
+    Benutzernamen geht anonym raus (kein Fehlversuch an einem Benutzer) und
+    zaehlt deshalb nicht als fehlend."""
+    ct = (cfg.get("connection_type") or "").strip().lower()
+    if ct == "hana":
+        return not str(cfg.get("hana_password") or "")
+    if ct == "rfc":
+        return not str(cfg.get("rfc_password") or "")
+    if (cfg.get("auth_kind") or "basic").strip().lower() == "bearer":
+        return not str(cfg.get("bearer_token") or "").strip()
+    return bool(str(cfg.get("username") or "").strip()) and not str(cfg.get("password") or "")
+
+
 def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
     """Welcher SAP-Zugang gilt? Rueckgabe:
     ``{client, quelle, hinweis, benutzer, ausgesetzt}``.
@@ -1079,11 +1110,14 @@ def aufloesen(user: str | None = None, trotz_aussetzer: bool = False) -> dict:
                     hinweis = "%s Es gilt vorerst der gemeinsame Lesezugang." % e
                 else:
                     c = SapClient(cfg)
-                    if c.configured:
+                    if c.configured and _geheimnis_fehlt(cfg):
+                        hinweis = KEIN_KENNWORT_TEXT
+                    elif c.configured:
                         return {"client": c, "quelle": QUELLE_PERSOENLICH,
                                 "hinweis": "", "benutzer": un, "ausgesetzt": False}
-                    hinweis = ("Dein persoenlicher SAP-Zugang ist unvollstaendig – "
-                               "es gilt der gemeinsame Lesezugang.")
+                    else:
+                        hinweis = ("Dein persoenlicher SAP-Zugang ist unvollstaendig – "
+                                   "es gilt der gemeinsame Lesezugang.")
     return {"client": SapClient(), "quelle": QUELLE_SAMMEL, "hinweis": hinweis,
             "benutzer": un, "ausgesetzt": bool(hinweis)}
 

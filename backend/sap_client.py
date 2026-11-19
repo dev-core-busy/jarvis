@@ -150,6 +150,41 @@ class SapError(Exception):
         super().__init__(message)
 
 
+def http_fehlertext(status: int, text: str) -> str:
+    """Lesbarer Fehlertext aus einer NICHT-JSON-Fehlerantwort.
+
+    ⚠ WARUM (ECHT 2026-11-19): eine abgelehnte Anmeldung beantwortet der
+    SAP-ICF mit einer HTML-Seite ("Anmeldung fehlgeschlagen", windows-1252).
+    Die ersten 300 Zeichen davon standen roh unter "Verbindung testen" –
+    Kopfzeilen und CSS, die eigentliche Aussage war abgeschnitten. Bei HTML
+    zaehlt der ``<title>`` (sonst die erste Ueberschrift), bei einer
+    XML-Fehlerantwort des Gateways das ``<message>``-Element; alles andere
+    bleibt wie bisher gekuerzt stehen. Der HTTP-Status steht immer dabei."""
+    roh = (text or "").strip()
+    kennung = "HTTP %s" % status
+    if not roh:
+        return kennung
+    kopf = roh[:600].lower()
+    if kopf.startswith("<?xml") or "<error" in kopf:
+        m = re.search(r"<message[^>]*>(.*?)</message>", roh, flags=re.S | re.I)
+        if m and m.group(1).strip():
+            return "%s (%s)" % (_html_text(m.group(1)), kennung)
+    if "<html" in kopf or kopf.startswith("<!doctype"):
+        for muster in (r"<title[^>]*>(.*?)</title>", r"<h[1-3][^>]*>(.*?)</h[1-3]>"):
+            m = re.search(muster, roh, flags=re.S | re.I)
+            if m and _html_text(m.group(1)):
+                return "SAP meldet: %s (%s)" % (_html_text(m.group(1)), kennung)
+        return "SAP hat mit einer HTML-Fehlerseite geantwortet (%s)" % kennung
+    return roh[:300]
+
+
+def _html_text(fragment: str) -> str:
+    """Tags weg, Entitaeten aufloesen, Leerraum zusammenziehen, gekuerzt."""
+    import html as _html
+    t = _html.unescape(re.sub(r"<[^>]+>", " ", fragment or ""))
+    return re.sub(r"\s+", " ", t).strip()[:200]
+
+
 # ── Read-Only-Wache ──────────────────────────────────────────────────
 def _strip_sql_comments(sql: str) -> str:
     """Entfernt -- Zeilen- und /* */ Blockkommentare (fuer die Pruefung)."""
@@ -388,7 +423,7 @@ class _ODataClient:
                     m = err.get("message")
                     msg = m.get("value") if isinstance(m, dict) else (m or "")
             except ValueError:
-                msg = (r.text or "")[:300]
+                msg = http_fehlertext(r.status_code, r.text)
             raise SapError(r.status_code, msg or ("HTTP %s" % r.status_code))
         try:
             return r.json()
@@ -414,7 +449,7 @@ class _ODataClient:
             raise SapError(0, "Netzwerkfehler: %s" % e)
         self._merke(r.url, r.status_code, t0)
         if r.status_code >= 400:
-            raise SapError(r.status_code, (r.text or "")[:300] or ("HTTP %s" % r.status_code))
+            raise SapError(r.status_code, http_fehlertext(r.status_code, r.text))
         return r.text
 
     def entity_sets(self, service: str = "") -> list[str]:

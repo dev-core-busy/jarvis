@@ -478,7 +478,7 @@
                     + '<span class="sqadm-kopf-re"><span class="sqadm-kopfinfo"></span>'
                     + '<span class="sk-openclaw-toggle">' + (zu ? '▶' : '▼') + '</span></span></div>';
                 var nameHtml = '<div class="sqadm-kopf">'
-                    + '<input type="text" class="config-input sqadm-name" maxlength="80" autocomplete="off" value="'
+                    + '<input data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" type="text" class="config-input sqadm-name" maxlength="80" autocomplete="off" value="'
                     + esc(s.name) + '" placeholder="' + esc(t('sqladm.name_ph', 'Name, z. B. ERP-Datenbank')) + '"'
                     + ' aria-label="' + esc(t('sqladm.name', 'Name des Schemas')) + '">'
                     + '<button type="button" class="am-vorg-act" data-akt="del-schema" data-i="' + i + '" title="'

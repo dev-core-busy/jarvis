@@ -1262,7 +1262,7 @@
             '<input type="text" id="ad-f-name" value="' + esc(r.name || '') + '"></div>' +
 
             '<div class="ad-field"><label>' + esc(T('mail.f_prompt', 'Prompt')) + '</label>' +
-            '<textarea id="ad-f-prompt" placeholder="' +
+            '<textarea data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" id="ad-f-prompt" placeholder="' +
             esc(T('mail.f_prompt_ph', 'Beschreibe, was mit passenden Nachrichten geschehen soll…')) +
             '">' + esc(r.prompt || '') + '</textarea>' +
             '<span class="ad-hint">' + esc(T('mail.f_prompt_hint',
@@ -1560,7 +1560,7 @@
         f.innerHTML =
             '<div class="ad-field" style="margin-top:8px;"><label>' +
             esc(T('mail.style_name', 'Name des Stils')) + '</label>' +
-            '<input type="text" id="ad-s-name" maxlength="' + (g.stil_name_max || 60) +
+            '<input data-tabfill type="text" id="ad-s-name" maxlength="' + (g.stil_name_max || 60) +
             '" value="' + esc(e.name || '') + '" placeholder="' +
             esc(T('mail.style_name_ph', 'z. B. Förmlich')) + '"></div>' +
             '<div class="ad-field"><label>' + esc(T('mail.style_text', 'Stil und Signatur')) +
@@ -1770,11 +1770,11 @@
         f.innerHTML =
             '<div class="ad-field" style="margin-top:8px;"><label>' +
             esc(T('mail.sig_name', 'Name der Signatur')) + '</label>' +
-            '<input type="text" id="ad-g-name" maxlength="' + (g.sig_name_max || 60) +
+            '<input data-tabfill-nein="Aufzaehlung mehrerer Beispiele – als Feldinhalt Unsinn" type="text" id="ad-g-name" maxlength="' + (g.sig_name_max || 60) +
             '" value="' + esc(e.name || '') + '" placeholder="' +
             esc(T('mail.sig_name_ph', 'z. B. Standard, Kurz, Englisch')) + '"></div>' +
             '<div class="ad-field"><label>' + esc(T('mail.sig_text', 'Signatur (Text)')) +
-            '</label><textarea id="ad-g-text" rows="7" maxlength="' + tmax +
+            '</label><textarea data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="ad-g-text" rows="7" maxlength="' + tmax +
             '" placeholder="' + esc(T('mail.sig_text_ph',
                 'Mit freundlichen Grüßen\nVorname Nachname\nFirma · Telefon')) + '">' +
             esc(e.text || '') + '</textarea>' +
@@ -1782,7 +1782,7 @@
                 'Wird wörtlich angehängt – die KI ändert daran nichts.')) +
             ' <span id="ad-g-count"></span></span></div>' +
             '<div class="ad-field"><label>' + esc(T('mail.sig_html', 'HTML-Fassung (optional)')) +
-            '</label><textarea id="ad-g-html" rows="6" maxlength="' + hmax +
+            '</label><textarea data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="ad-g-html" rows="6" maxlength="' + hmax +
             '" placeholder="&lt;p&gt;Mit freundlichen Grüßen&lt;br&gt;&lt;b&gt;Vorname Nachname&lt;/b&gt;&lt;/p&gt;">' +
             esc(e.html || '') + '</textarea>' +
             '<span class="ad-hint">' + esc(T('mail.sig_html_hint',

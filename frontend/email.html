@@ -309,12 +309,12 @@
                 <div class="em-grid">
                     <div class="em-field">
                         <label data-i18n="mail.acct_address">E-Mail-Adresse</label>
-                        <input type="email" id="em-adresse" placeholder="vorname.nachname@firma.de" autocomplete="off">
+                        <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" type="email" id="em-adresse" placeholder="vorname.nachname@firma.de" autocomplete="off">
                     </div>
                     <div class="em-field">
                         <label><span data-i18n="mail.acct_login">Anmeldename (falls abweichend)</span> <button type="button" class="em-info" data-help="em-help-login" aria-expanded="false"
                                 data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
-                        <input type="text" id="em-benutzer" placeholder="FIRMA\vorname.nachname" autocomplete="off">
+                        <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" type="text" id="em-benutzer" placeholder="FIRMA\vorname.nachname" autocomplete="off">
                         <div class="em-help" id="em-help-login" data-i18n="mail.help_login">Nur ausfüllen, wenn du dich am Exchange anders anmeldest als mit deiner E-Mail-Adresse – meist in der Form FIRMA\vorname.nachname. Sind Adresse und Anmeldename gleich, lass das Feld leer.</div>
                     </div>
                     <div class="em-field">
@@ -338,15 +338,15 @@
                     <div class="em-field">
                         <label><span data-i18n="mail.acct_inbox">Posteingang</span> <button type="button" class="em-info" data-help="em-help-folders" aria-expanded="false"
                                 data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
-                        <input type="text" id="em-ord-eingang" placeholder="INBOX">
+                        <input data-tabfill type="text" id="em-ord-eingang" placeholder="INBOX">
                     </div>
                     <div class="em-field">
                         <label data-i18n="mail.acct_drafts">Entwürfe</label>
-                        <input type="text" id="em-ord-entwuerfe" placeholder="Standardordner" data-i18n-placeholder="mail.default_ph">
+                        <input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="text" id="em-ord-entwuerfe" placeholder="Standardordner" data-i18n-placeholder="mail.default_ph">
                     </div>
                     <div class="em-field">
                         <label data-i18n="mail.acct_sent">Gesendet</label>
-                        <input type="text" id="em-ord-gesendet" placeholder="Standardordner" data-i18n-placeholder="mail.default_ph">
+                        <input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="text" id="em-ord-gesendet" placeholder="Standardordner" data-i18n-placeholder="mail.default_ph">
                     </div>
                 </div>
                 <div class="em-help" id="em-help-folders" data-i18n="mail.help_folders">Nur ausfüllen, wenn deine Ordner anders heißen als üblich. Bleibt ein Feld leer, benutzt {marke} den Standardordner deines Postfachs.</div>
@@ -547,7 +547,7 @@
 </div>
 
 <script src="/static/js/sitzung.js?v=3"></script>
-<script src="/static/js/kopfzeile.js?v=2"></script>
+<script src="/static/js/kopfzeile.js?v=3"></script>
 <script src="/static/js/update_widget.js?v=10"></script>
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/dlkey.js?v=5"></script>
@@ -555,17 +555,17 @@
 <script src="/static/js/konto_hinweise.js?v=2"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/cpubar.js?v=4"></script>
-<script src="/static/js/syspackages.js?v=24"></script>
+<script src="/static/js/syspackages.js?v=25"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
 <script src="/static/js/i18n.js?v=503"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
-<script src="/static/js/tabfill.js?v=3"></script>
+<script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/sessions.js?v=10"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
-<script src="/static/js/email_portal.js?v=19"></script>
+<script src="/static/js/email_portal.js?v=20"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der
@@ -573,7 +573,7 @@
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
 <script src="/static/js/stt.js?v=3"></script>
-<script src="/static/js/avatar.js?v=19"></script>
+<script src="/static/js/avatar.js?v=20"></script>
 <script src="/static/js/activity.js?v=3"></script>
 <script src="/static/js/issues.js?v=17"></script>
 </body>

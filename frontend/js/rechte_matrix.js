@@ -323,7 +323,7 @@
                 '<div class="rmx-leiste">' +
                   '<button type="button" class="kb-btn-secondary" id="rmx-add-users" data-i18n="rmx.add_users">' + esc(T('rmx.add_users')) + '</button>' +
                   '<button type="button" class="kb-btn-secondary" id="rmx-add-groups" data-i18n="rmx.add_groups">' + esc(T('rmx.add_groups')) + '</button>' +
-                  '<input type="text" id="rmx-filter" class="input-field rmx-filter" autocomplete="off" data-i18n-placeholder="rmx.filter_ph" placeholder="' + esc(T('rmx.filter_ph')) + '">' +
+                  '<input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="text" id="rmx-filter" class="input-field rmx-filter" autocomplete="off" data-i18n-placeholder="rmx.filter_ph" placeholder="' + esc(T('rmx.filter_ph')) + '">' +
                   '<label class="rmx-schalter"><input type="checkbox" id="rmx-mitglieder"><span id="rmx-mitglieder-lbl"></span></label>' +
                 '</div>' +
                 // Ziel-Felder fuer den Verzeichnis-Picker (nie sichtbar)

@@ -317,7 +317,7 @@
                     : T('caddon.probe_head', 'Bereiche, die dein Zugang lesen darf:'))
                 + ' ' + ges + '</p>'
                 + '<div class="ja-probe-filterzeile">'
-                + '<input type="search" class="ja-acc-input ja-probe-filter" id="ca-acc-probe-filter"'
+                + '<input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="search" class="ja-acc-input ja-probe-filter" id="ca-acc-probe-filter"'
                 + ' autocomplete="off" placeholder="'
                 + probeEsc(T('caddon.probe_filter_ph', 'Bereiche filtern (Schlüssel oder Name)'))
                 + '"><span class="ja-probe-zahl" id="ca-acc-probe-zahl"></span></div>'

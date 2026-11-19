@@ -456,7 +456,7 @@
                     <label class="sk-openclaw-label">${window.t('skills.mkt_label') || 'Welchen Skill suchst du?'}
                         <small>${window.t('skills.mkt_label_hint') || '(leer = populäre Skills anzeigen)'}</small>
                     </label>
-                    <textarea id="sk-oc-description" class="sk-openclaw-textarea"
+                    <textarea data-tabfill-nein="Aufzaehlung mehrerer Beispiele – als Feldinhalt Unsinn" id="sk-oc-description" class="sk-openclaw-textarea"
                         placeholder='${window.t('skills.mkt_ph') || 'z. B. "Skill für Telegram" oder "PDF-Analyse"'}'
                         rows="2"></textarea>
                     <button id="sk-oc-search-btn" class="sk-openclaw-btn">
@@ -622,7 +622,7 @@
                         </div>
                     </div>
                     <div class="sk-import-input-row">
-                        <textarea id="sk-import-input" class="sk-import-input"
+                        <textarea data-tabfill-nein="Eingabezeile fuer Nachricht/Frage – der Platzhalter ist eine Aufforderung" id="sk-import-input" class="sk-import-input"
                             placeholder="Antwort eingeben (Enter = Senden, Shift+Enter = Zeilenumbruch)…"
                             rows="2"></textarea>
                         <button id="sk-import-send" class="sk-import-send-btn" title="Senden">➤</button>

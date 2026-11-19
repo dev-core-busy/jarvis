@@ -361,7 +361,7 @@
             + '  <div class="jav-input">'
             + '    <button id="jav-mic" class="jav-ibtn" title="' + esc(T('avatar.mic', 'Sprechen')) + '">🎤</button>'
             + '    <button id="jav-speak" class="jav-ibtn" aria-pressed="false"></button>'
-            + '    <input id="jav-text" type="text" autocomplete="off" placeholder="' + esc(T('avatar.placeholder', 'Frag mich etwas…')) + '">'
+            + '    <input data-tabfill-nein="Eingabezeile fuer Nachricht/Frage – der Platzhalter ist eine Aufforderung" id="jav-text" type="text" autocomplete="off" placeholder="' + esc(T('avatar.placeholder', 'Frag mich etwas…')) + '">'
             + '    <button id="jav-send" class="jav-ibtn" title="' + esc(T('avatar.send', 'Senden')) + '">➤</button>'
             + '    <button id="jav-stop" class="jav-ibtn jav-hidden" title="' + esc(T('avatar.stop', 'Abbrechen')) + '">■</button>'
             + '  </div>'

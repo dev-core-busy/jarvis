@@ -69,11 +69,11 @@
               '<div class="modal-body" style="overflow-y:auto;">' +
                 '<div id="ldap-picker-cred" style="display:none;margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:rgba(var(--fg-rgb),0.03);">' +
                   '<div style="font-size:0.84rem;margin-bottom:8px;">' + window.t('ldap.cred_hint') + '</div>' +
-                  '<input type="text" id="ldap-picker-user" placeholder="' + window.t('ldap.ph_user') + '" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
+                  '<input data-tabfill-nein="Anmeldemaske – der Platzhalter beschreibt, was hineingehoert" type="text" id="ldap-picker-user" placeholder="' + window.t('ldap.ph_user') + '" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
                   '<input type="password" id="ldap-picker-pass" placeholder="' + window.t('ldap.ph_pass') + '" style="width:100%;box-sizing:border-box;margin-bottom:8px;">' +
                   '<button type="button" id="ldap-picker-connect" style="padding:6px 14px;border-radius:8px;border:1px solid rgba(var(--accent-rgb),0.5);background:rgba(var(--accent-rgb),0.15);color:var(--text-primary,#e2e8f0);cursor:pointer;font-size:0.84rem;">' + window.t('ldap.connect_search') + '</button>' +
                 '</div>' +
-                '<input type="text" id="ldap-picker-search" placeholder="' + window.t('ldap.ph_search') + '" autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
+                '<input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="text" id="ldap-picker-search" placeholder="' + window.t('ldap.ph_search') + '" autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:6px;">' +
                 '<div id="ldap-picker-info" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em;margin-bottom:6px;"></div>' +
                 '<div id="ldap-picker-list" style="max-height:46vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px;"></div>' +
                 '<div id="ldap-picker-actions" style="display:none;justify-content:flex-end;gap:8px;margin-top:12px;">' +

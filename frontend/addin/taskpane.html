@@ -477,15 +477,15 @@
             <div class="ad-field">
                 <label><span data-i18n="mail.acct_inbox">Posteingang</span> <button type="button" class="ad-info" data-help="ad-help-folders" aria-expanded="false"
                         data-i18n-title="mail.help" title="Erklärung anzeigen">&#9432;</button></label>
-                <input type="text" id="ad-ord-eingang" placeholder="INBOX">
+                <input data-tabfill type="text" id="ad-ord-eingang" placeholder="INBOX">
             </div>
             <div class="ad-field">
                 <label data-i18n="mail.acct_drafts">Entwürfe</label>
-                <input type="text" id="ad-ord-entwuerfe" data-i18n-placeholder="mail.default_ph" placeholder="Standardordner">
+                <input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="text" id="ad-ord-entwuerfe" data-i18n-placeholder="mail.default_ph" placeholder="Standardordner">
             </div>
             <div class="ad-field">
                 <label data-i18n="mail.acct_sent">Gesendet</label>
-                <input type="text" id="ad-ord-gesendet" data-i18n-placeholder="mail.default_ph" placeholder="Standardordner">
+                <input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="text" id="ad-ord-gesendet" data-i18n-placeholder="mail.default_ph" placeholder="Standardordner">
                 <div class="ad-help" id="ad-help-folders" data-i18n="mail.help_folders">Nur ausfüllen, wenn deine Ordner anders heißen als üblich. Bleibt ein Feld leer, benutzt {marke} den Standardordner deines Postfachs.</div>
             </div>
             <!-- Vorgabe-Format des Postfachs. Sie gilt ueberall, wo nichts
@@ -559,13 +559,13 @@
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/i18n.js?v=503"></script>
-<script src="/static/js/tabfill.js?v=3"></script>
+<script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das
      Firmenlogo (.topbar-avatar) – dieselbe Einbindung wie auf allen uebrigen
      Seiten. `/api/branding` haengt an KEINER Anmeldung, die Marke steht also
      schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=31"></script>
-<script src="/static/addin/addin.js?v=21"></script>
+<script src="/static/addin/addin.js?v=22"></script>
 </body>
 </html>

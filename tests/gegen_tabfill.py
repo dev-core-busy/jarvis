@@ -39,6 +39,9 @@ AIM = "frontend/js/ai_mouse_admin.js"
 LK = "frontend/js/loeschkonzept.js"
 KBS = "frontend/js/knowledge_sync.js"
 MCP = "frontend/js/mcp.js"
+SAP = "frontend/sap.html"
+EMAIL = "frontend/email.html"
+CRON = "frontend/js/cron.js"
 
 PROBEN = [
     # ── Teil 4: die zentrale Funktion ──
@@ -82,6 +85,28 @@ PROBEN = [
      "                    // tabfill: nein – 'leer lassen = unveraendert', kein Wert\n"
      "                    $('[data-f=\"key\"]').placeholder = _tt('mcp.key_keep_ph',",
      "                    $('[data-f=\"key\"]').placeholder = _tt('mcp.key_keep_ph',"),
+
+    # ── Teil 1b: Ablehnung, Kennwort, Beispiel-Vorsatz (2026-11-19) ──
+    ("Ablehnung wird ignoriert", TF,
+     "        if (el.hasAttribute('data-tabfill-nein')) return false;\n", ""),
+    ("Kennwortfeld nimmt den Vorschlag", TF,
+     "        if ((el.getAttribute('type') || '').toLowerCase() === 'password') return false;\n", ""),
+    ("'z. B.' bleibt im Feld stehen", TF,
+     "        var t = (s || '').trim().replace(BEISPIEL_VORSATZ, '').trim();\n",
+     "        var t = (s || '').trim();\n"),
+
+    # ── Teil 6: das Markup (der zweite gemeldete Fall) ──
+    ("Basis-URL wieder ohne Markierung (gemeldet)", SAP,
+     '<input data-tabfill class="sp-input" id="sp-acc-od-url"',
+     '<input class="sp-input" id="sp-acc-od-url"'),
+    ("Formvorgabe verliert ihre Ablehnung", EMAIL,
+     ' data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" type="email" id="em-adresse"',
+     ' type="email" id="em-adresse"'),
+
+    # ── Teil 7: von einem Modul erzeugtes Feld ──
+    ("erzeugtes Feld ohne Entscheidung", CRON,
+     ' data-tabfill-nein="Beispielnummer – keine echte Rufnummer" id="watcher-wa-to"',
+     ' id="watcher-wa-to"'),
 ]
 DATEIEN = sorted({p[1] for p in PROBEN})
 

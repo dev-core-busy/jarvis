@@ -530,7 +530,7 @@
                 }).join('');
                 return '<div class="fb-sp" data-id="sp' + i + '" data-idx="' + i + '">'
                     + griffMarkup(t('fbadm.drag_col', 'Spalte verschieben (ziehen oder Strg+Pfeil)'))
-                    + '<input type="text" class="fb-sp-name" maxlength="60" aria-label="'
+                    + '<input data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" type="text" class="fb-sp-name" maxlength="60" aria-label="'
                     + esc(t('fbadm.col_name', 'Überschrift')) + '" placeholder="'
                     + esc(t('fbadm.col_name', 'Überschrift')) + '">'
                     + '<select class="fb-sp-typ" aria-label="'
@@ -632,7 +632,7 @@
             }
             box.innerHTML = (this._zeilen || []).map(function (z, i) {
                 var felder = feste.map(function (sp) {
-                    return '<input type="text" class="fb-z-wert" maxlength="2000" '
+                    return '<input data-tabfill-nein="Spaltenname als Beschriftung – kein Wert" type="text" class="fb-z-wert" maxlength="2000" '
                         + 'data-sp="' + esc(sp.id) + '" data-idx="' + i + '" aria-label="'
                         + esc((sp.name || t('fbadm.col_name', 'Überschrift'))
                             + ' – ' + t('fbadm.row_n', 'Zeile {n}').replace('{n}', i + 1))

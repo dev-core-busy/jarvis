@@ -215,7 +215,7 @@
                     <span class="pt-usr-count" id="pt-usr-count"></span>
                 </div>
                 <div class="pt-usr-filter" id="pt-usr-filter">
-                    <input type="search" id="pt-usr-search" autocomplete="off" spellcheck="false"
+                    <input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="search" id="pt-usr-search" autocomplete="off" spellcheck="false"
                            placeholder="Benutzer filtern…" data-i18n-placeholder="sessions.search_ph"
                            aria-label="Benutzerliste filtern" data-i18n-aria="sessions.search_aria">
                 </div>
@@ -511,7 +511,7 @@
                  (POST /api/auth/totp/show) – das Kennwortfeld darueber gilt fuer
                  beide Knoepfe. Logik: portal_seite.js -->
             <p class="totp-info" data-i18n="totp.show_hint">Auf einem weiteren Gerät einrichten: Kennwort und aktuellen Code aus deiner App eingeben. Der bisherige Eintrag bleibt gültig.</p>
-            <input type="text" id="totp-show-code" placeholder="000000"
+            <input data-tabfill-nein="Einmalcode – nur das Format, kein Wert" type="text" id="totp-show-code" placeholder="000000"
                    inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
             <button class="btn-login" id="btn-totp-show" data-i18n="totp.show">QR-Code für weiteres Gerät anzeigen</button>
             <div id="totp-show-result" class="hidden" style="margin-bottom:20px;">
@@ -533,7 +533,7 @@
                 <p class="totp-secret-label" data-i18n="totp.manual">Oder manuell eingeben:</p>
                 <code id="totp-secret-code" class="totp-secret-code"></code>
                 <p class="totp-info" style="margin-top:16px" data-i18n="totp.enter_code">Gib den 6-stelligen Code aus der App ein:</p>
-                <input type="text" id="totp-verify-code" placeholder="000000" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
+                <input data-tabfill-nein="Einmalcode – nur das Format, kein Wert" type="text" id="totp-verify-code" placeholder="000000" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code">
                 <button class="btn-login" id="btn-totp-verify" data-i18n="totp.verify">Bestätigen &amp; aktivieren</button>
             </div>
         </div>
@@ -589,16 +589,17 @@ sudo update-ca-certificates</code></pre>
 </div>
 
 <script src="/static/js/sitzung.js?v=3"></script>
-<script src="/static/js/kopfzeile.js?v=2"></script>
+<script src="/static/js/kopfzeile.js?v=3"></script>
 <script src="/static/js/konto_hinweise.js?v=2"></script>
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/dlkey.js?v=5"></script>
 <script src="/static/js/cpubar.js?v=4"></script>
-<script src="/static/js/syspackages.js?v=24"></script>
+<script src="/static/js/syspackages.js?v=25"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
 <script src="/static/js/i18n.js?v=503"></script>
+<script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/security_incidents.js?v=46"></script>
@@ -616,7 +617,7 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
 <script src="/static/js/stt.js?v=3"></script>
-<script src="/static/js/avatar.js?v=19"></script>
+<script src="/static/js/avatar.js?v=20"></script>
 <script src="/static/js/activity.js?v=3"></script>
 </body>
 </html>

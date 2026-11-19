@@ -536,12 +536,12 @@
                     <div class="sp-row">
                         <div class="sp-field">
                             <label class="sp-label" for="sp-acc-od-url" data-i18n="sap.acc_odata_url">Basis-URL</label>
-                            <input class="sp-input" id="sp-acc-od-url" type="text" autocomplete="off"
+                            <input data-tabfill class="sp-input" id="sp-acc-od-url" type="text" autocomplete="off"
                                    placeholder="https://s4.firma.de:44300/sap/opu/odata">
                         </div>
                         <div class="sp-field">
                             <label class="sp-label" for="sp-acc-od-service" data-i18n="sap.acc_odata_service">Standard-Service (optional)</label>
-                            <input class="sp-input" id="sp-acc-od-service" type="text" autocomplete="off"
+                            <input data-tabfill class="sp-input" id="sp-acc-od-service" type="text" autocomplete="off"
                                    placeholder="sap/API_SALES_ORDER_SRV" list="sp-acc-od-service-list">
                             <datalist id="sp-acc-od-service-list"></datalist>
                             <span class="sp-note sp-od-hint" id="sp-acc-od-service-hint"></span>
@@ -557,7 +557,7 @@
                         </div>
                         <div class="sp-field">
                             <label class="sp-label" for="sp-acc-od-client" data-i18n="sap.acc_mandant">Mandant (optional)</label>
-                            <input class="sp-input" id="sp-acc-od-client" type="text" autocomplete="off" placeholder="100">
+                            <input data-tabfill class="sp-input" id="sp-acc-od-client" type="text" autocomplete="off" placeholder="100">
                         </div>
                     </div>
                     <!-- Benutzer/Kennwort und Token schliessen sich aus: sichtbar ist
@@ -593,7 +593,7 @@
                     <div class="sp-row">
                         <div class="sp-field">
                             <label class="sp-label" for="sp-acc-hana-host" data-i18n="sap.acc_hana_host">Host</label>
-                            <input class="sp-input" id="sp-acc-hana-host" type="text" autocomplete="off"
+                            <input data-tabfill class="sp-input" id="sp-acc-hana-host" type="text" autocomplete="off"
                                    placeholder="hana.firma.de">
                         </div>
                         <div class="sp-field" style="flex:0 0 120px;">
@@ -602,7 +602,7 @@
                         </div>
                         <div class="sp-field">
                             <label class="sp-label" for="sp-acc-hana-schema" data-i18n="sap.acc_hana_schema">Schema (optional)</label>
-                            <input class="sp-input" id="sp-acc-hana-schema" type="text" autocomplete="off" placeholder="SAPHANADB">
+                            <input data-tabfill class="sp-input" id="sp-acc-hana-schema" type="text" autocomplete="off" placeholder="SAPHANADB">
                         </div>
                     </div>
                     <div class="sp-row">
@@ -624,20 +624,20 @@
                     <div class="sp-row">
                         <div class="sp-field">
                             <label class="sp-label" for="sp-acc-rfc-host" data-i18n="sap.acc_rfc_host">Anwendungsserver</label>
-                            <input class="sp-input" id="sp-acc-rfc-host" type="text" autocomplete="off"
+                            <input data-tabfill class="sp-input" id="sp-acc-rfc-host" type="text" autocomplete="off"
                                    placeholder="ecc.firma.de">
                         </div>
                         <div class="sp-field" style="flex:0 0 110px;">
                             <label class="sp-label" for="sp-acc-rfc-sysnr" data-i18n="sap.acc_rfc_sysnr">Systemnr.</label>
-                            <input class="sp-input" id="sp-acc-rfc-sysnr" type="text" autocomplete="off" placeholder="00">
+                            <input data-tabfill class="sp-input" id="sp-acc-rfc-sysnr" type="text" autocomplete="off" placeholder="00">
                         </div>
                         <div class="sp-field" style="flex:0 0 110px;">
                             <label class="sp-label" for="sp-acc-rfc-client" data-i18n="sap.acc_mandant">Mandant</label>
-                            <input class="sp-input" id="sp-acc-rfc-client" type="text" autocomplete="off" placeholder="100">
+                            <input data-tabfill class="sp-input" id="sp-acc-rfc-client" type="text" autocomplete="off" placeholder="100">
                         </div>
                         <div class="sp-field" style="flex:0 0 110px;">
                             <label class="sp-label" for="sp-acc-rfc-lang" data-i18n="sap.acc_rfc_lang">Sprache</label>
-                            <input class="sp-input" id="sp-acc-rfc-lang" type="text" autocomplete="off" placeholder="DE">
+                            <input data-tabfill class="sp-input" id="sp-acc-rfc-lang" type="text" autocomplete="off" placeholder="DE">
                         </div>
                     </div>
                     <div class="sp-row">
@@ -762,14 +762,14 @@
                     <div class="sp-row">
                         <div class="sp-field">
                             <label class="sp-label" for="sp-od-entity" data-i18n="sap.entityset">EntitySet</label>
-                            <input class="sp-input" id="sp-od-entity" type="text" placeholder="z. B. A_JournalEntry"
+                            <input data-tabfill class="sp-input" id="sp-od-entity" type="text" placeholder="z. B. A_JournalEntry"
                                    list="sp-od-entity-list" autocomplete="off">
                             <datalist id="sp-od-entity-list"></datalist>
                             <span class="sp-note sp-od-hint" id="sp-od-entity-hint"></span>
                         </div>
                         <div class="sp-field">
                             <label class="sp-label" for="sp-od-service" data-i18n="sap.service">Service (optional)</label>
-                            <input class="sp-input" id="sp-od-service" type="text" placeholder="sap/API_JOURNALENTRYITEMBASIC_SRV"
+                            <input data-tabfill class="sp-input" id="sp-od-service" type="text" placeholder="sap/API_JOURNALENTRYITEMBASIC_SRV"
                                    list="sp-od-service-list" autocomplete="off">
                             <datalist id="sp-od-service-list"></datalist>
                             <span class="sp-note sp-od-hint" id="sp-od-svc-hint"></span>
@@ -782,7 +782,7 @@
                     <div class="sp-row">
                         <div class="sp-field">
                             <label class="sp-label" for="sp-od-expand" data-i18n="sap.od_expand">Mitladen (optional)</label>
-                            <input class="sp-input" id="sp-od-expand" type="text" placeholder="z. B. to_Text"
+                            <input data-tabfill class="sp-input" id="sp-od-expand" type="text" placeholder="z. B. to_Text"
                                    data-i18n-placeholder="sap.od_expand_ph" list="sp-od-expand-list" autocomplete="off">
                             <datalist id="sp-od-expand-list"></datalist>
                             <span class="sp-note sp-od-hint" id="sp-od-expand-hint"></span>
@@ -795,7 +795,7 @@
 
                 <div class="sp-console-pane hidden" id="sp-pane-sql">
                     <label class="sp-label" for="sp-sql" data-i18n="sap.sql">SELECT-Abfrage</label>
-                    <textarea id="sp-sql" placeholder="SELECT TOP 20 * FROM SCHEMA.TABELLE"></textarea>
+                    <textarea data-tabfill id="sp-sql" placeholder="SELECT TOP 20 * FROM SCHEMA.TABELLE"></textarea>
                     <div class="sp-actions">
                         <button class="sp-btn" id="sp-sql-run" type="button" data-i18n="sap.execute">Ausführen</button>
                         <label class="sp-note" style="display:flex;align-items:center;gap:6px;">
@@ -812,7 +812,7 @@
 </div>
 
 <script src="/static/js/sitzung.js?v=3"></script>
-<script src="/static/js/kopfzeile.js?v=2"></script>
+<script src="/static/js/kopfzeile.js?v=3"></script>
 <script src="/static/js/update_widget.js?v=10"></script>
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/dlkey.js?v=5"></script>
@@ -820,12 +820,12 @@
 <script src="/static/js/konto_hinweise.js?v=2"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/cpubar.js?v=4"></script>
-<script src="/static/js/syspackages.js?v=24"></script>
+<script src="/static/js/syspackages.js?v=25"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
 <script src="/static/js/i18n.js?v=503"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
-<script src="/static/js/tabfill.js?v=3"></script>
+<script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/issues.js?v=17"></script>
@@ -849,7 +849,7 @@
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
 <script src="/static/js/stt.js?v=3"></script>
-<script src="/static/js/avatar.js?v=19"></script>
+<script src="/static/js/avatar.js?v=20"></script>
 <script src="/static/js/activity.js?v=3"></script>
 </body>
 </html>

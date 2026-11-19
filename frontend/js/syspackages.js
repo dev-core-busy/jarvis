@@ -465,7 +465,7 @@
                 + esc(T('pkg.download', 'JSON herunterladen')) + '</button>')
             + '<div class="jv-pkg-meta">' + meta + '</div>'
             + cveBlock()
-            + '<input type="search" id="jv-pkg-suche" class="jv-pkg-suche" autocomplete="off"'
+            + '<input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="search" id="jv-pkg-suche" class="jv-pkg-suche" autocomplete="off"'
             + ' placeholder="' + esc(T('pkg.search', 'Paket, Version, Beschreibung oder CVE suchen …'))
             + '" value="' + esc(q) + '">'
             + kennHtml

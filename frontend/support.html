@@ -367,7 +367,7 @@
         <div class="sup-login-avatar login-avatar">J</div>
         <h1><span class="brand-app-name">Jarvis</span> <span data-i18n="sup.assistant">Support Assistent</span></h1>
         <form id="sup-login-form">
-            <input type="text" id="sup-login-user" data-i18n-placeholder="sup.login_user" placeholder="Benutzername" autocomplete="username" required>
+            <input data-tabfill-nein="Anmeldemaske – der Platzhalter beschreibt, was hineingehoert" type="text" id="sup-login-user" data-i18n-placeholder="sup.login_user" placeholder="Benutzername" autocomplete="username" required>
             <input type="password" id="sup-login-pass" data-i18n-placeholder="sup.login_pass" placeholder="Passwort" autocomplete="current-password" required>
             <button class="sup-btn" type="submit" style="width:100%;padding:11px;" data-i18n="sup.login_submit">Anmelden</button>
             <div class="sup-login-err" id="sup-login-err"></div>
@@ -458,7 +458,7 @@
         </div>
         <div class="sup-search-card">
             <div class="sup-search-row">
-                <textarea id="sup-input" data-i18n-placeholder="sup.input_ph" placeholder="Anfrage eingeben … (mehrzeilig möglich)"></textarea>
+                <textarea data-tabfill-nein="Eingabezeile fuer Nachricht/Frage – der Platzhalter ist eine Aufforderung" id="sup-input" data-i18n-placeholder="sup.input_ph" placeholder="Anfrage eingeben … (mehrzeilig möglich)"></textarea>
                 <button class="sup-btn" id="sup-search-btn" type="button" data-i18n="sup.search">Suchen</button>
             </div>
             <div class="sup-opts">
@@ -547,7 +547,7 @@
         <div class="sup-meta-row">
             <div id="sup-meta" class="sup-meta hidden"></div>
             <button class="sup-btn-cancel hidden" id="sup-cancel-btn" type="button" data-i18n="sup.cancel">Abbrechen</button>
-            <input type="search" id="sup-filter-text" class="sup-filter-text hidden" autocomplete="off"
+            <input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="search" id="sup-filter-text" class="sup-filter-text hidden" autocomplete="off"
                    data-i18n-placeholder="sup.filter_ph" placeholder="Ergebnisse filtern …"
                    data-i18n-title="sup.filter_title" title="Angezeigte Treffer nach eingegebenem Text filtern (Volltext). Leeren zeigt wieder alle.">
         </div>
@@ -593,7 +593,7 @@
 </div>
 
 <script src="/static/js/sitzung.js?v=3"></script>
-<script src="/static/js/kopfzeile.js?v=2"></script>
+<script src="/static/js/kopfzeile.js?v=3"></script>
 <script src="/static/js/update_widget.js?v=10"></script>
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/dlkey.js?v=5"></script>
@@ -601,12 +601,12 @@
 <script src="/static/js/konto_hinweise.js?v=2"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/cpubar.js?v=4"></script>
-<script src="/static/js/syspackages.js?v=24"></script>
+<script src="/static/js/syspackages.js?v=25"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
 <script src="/static/js/i18n.js?v=503"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
-<script src="/static/js/tabfill.js?v=3"></script>
+<script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/issues.js?v=17"></script>
@@ -632,7 +632,7 @@
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
 <script src="/static/js/stt.js?v=3"></script>
-<script src="/static/js/avatar.js?v=19"></script>
+<script src="/static/js/avatar.js?v=20"></script>
 <script src="/static/js/activity.js?v=3"></script>
 </body>
 </html>

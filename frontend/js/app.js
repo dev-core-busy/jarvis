@@ -2447,9 +2447,9 @@
                     <div class="modal-body" style="overflow-y:auto;">
                         <p class="kb-hint" style="margin-top:0;" data-i18n="profile.perm_hint">${T('profile.perm_hint', 'Leer lassen = alle dürfen dieses Profil nutzen und darauf wechseln. Sonst nur die genannten Benutzer/Gruppen (plus Administratoren).')}</p>
                         <label class="kb-form-label" style="display:block;margin:12px 0 4px;" data-i18n="profile.perm_users">${T('profile.perm_users', 'Erlaubte AD-Benutzer')}</label>
-                        <input type="text" id="llm-perm-users" class="kb-input" style="width:100%;box-sizing:border-box;" data-i18n-placeholder="profile.perm_users_ph" placeholder="${T('profile.perm_users_ph', 'Benutzer (kommagetrennt)')}">
+                        <input data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" type="text" id="llm-perm-users" class="kb-input" style="width:100%;box-sizing:border-box;" data-i18n-placeholder="profile.perm_users_ph" placeholder="${T('profile.perm_users_ph', 'Benutzer (kommagetrennt)')}">
                         <label class="kb-form-label" style="display:block;margin:16px 0 4px;" data-i18n="profile.perm_groups">${T('profile.perm_groups', 'Erlaubte AD-Gruppen')}</label>
-                        <textarea id="llm-perm-groups" class="kb-input" rows="2" style="width:100%;box-sizing:border-box;" data-i18n-placeholder="profile.perm_groups_ph" placeholder="${T('profile.perm_groups_ph', 'AD-Gruppen (eine pro Zeile)')}"></textarea>
+                        <textarea data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" id="llm-perm-groups" class="kb-input" rows="2" style="width:100%;box-sizing:border-box;" data-i18n-placeholder="profile.perm_groups_ph" placeholder="${T('profile.perm_groups_ph', 'AD-Gruppen (eine pro Zeile)')}"></textarea>
                         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
                             <button type="button" id="llm-perm-cancel" class="btn-secondary" data-i18n="profile.cancel">${T('profile.cancel', 'Abbrechen')}</button>
                             <button type="button" id="llm-perm-save" class="btn-primary" data-i18n="profile.save">${T('profile.save', 'Speichern')}</button>

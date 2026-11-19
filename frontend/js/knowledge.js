@@ -135,7 +135,7 @@ class JarvisKnowledgeManager {
         el.innerHTML = `
             <div class="kb-grp-manage">
                 <div class="kb-grp-add-row">
-                    <input type="text" id="kb-grp-new-name" class="kb-input" placeholder="${T('kbgroups.new_ph', 'Neue Gruppe…')}">
+                    <input data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" type="text" id="kb-grp-new-name" class="kb-input" placeholder="${T('kbgroups.new_ph', 'Neue Gruppe…')}">
                     <input type="color" id="kb-grp-new-color" class="kb-grp-color-input" value="#3b82f6" title="${T('kbgroups.color', 'Farbe')}">
                     <button id="kb-grp-add-btn" class="kb-btn-action">${T('kbgroups.add', '+ Hinzufügen')}</button>
                 </div>
@@ -1504,7 +1504,7 @@ class JarvisKnowledgeManager {
                             window.t('knowledge.cleanup.anw_v_' + k))}</option>`).join('')}
                 </select>
             </div>
-            <textarea id="kb-cl-anw-text" class="kb-cl-anw-text" rows="3" spellcheck="false"
+            <textarea data-tabfill-nein="Aufzaehlung mehrerer Beispiele – als Feldinhalt Unsinn" id="kb-cl-anw-text" class="kb-cl-anw-text" rows="3" spellcheck="false"
                       placeholder="${this._escHtml(window.t('knowledge.cleanup.anw_ph'))}"></textarea>
             <div class="kb-cl-aktion">
                 <button class="btn-secondary" id="kb-cl-anw-start" disabled
@@ -3817,8 +3817,8 @@ class JarvisKnowledgeManager {
                         <option value="nfs" ${m.type==='nfs'?'selected':''}>NFS</option>
                         <option value="webdav" ${m.type==='webdav'?'selected':''}>WebDAV</option>
                     </select>
-                    <input type="text" class="kb-input kb-mount-edit-source" value="${this._escHtml(m.source||'')}" placeholder="${JarvisKnowledgeManager.MOUNT_BEISPIEL[m.type] || JarvisKnowledgeManager.MOUNT_BEISPIEL.smb}" />
-                    <input type="text" class="kb-input kb-mount-edit-user" value="${this._escHtml(m.username||'')}" placeholder="${window.t('knowledge.share_user_ph')}" />
+                    <input data-tabfill type="text" class="kb-input kb-mount-edit-source" value="${this._escHtml(m.source||'')}" placeholder="${JarvisKnowledgeManager.MOUNT_BEISPIEL[m.type] || JarvisKnowledgeManager.MOUNT_BEISPIEL.smb}" />
+                    <input data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" type="text" class="kb-input kb-mount-edit-user" value="${this._escHtml(m.username||'')}" placeholder="${window.t('knowledge.share_user_ph')}" />
                     <input type="password" class="kb-input kb-mount-edit-pass" data-pw-gesetzt="${m.has_password ? '1' : '0'}" data-pw-quelle="mount" data-pw-kennung="${i}" placeholder="${m.has_password ? window.t('knowledge.share_pass_unchanged_ph') : window.t('knowledge.share_pass_ph')}" />
                     <div class="kb-mount-actions">
                         <button class="kb-btn-action" data-kb-aktion="saveEditMount" data-kb-idx="${i}">${window.t('knowledge.share_save_btn')}</button>

@@ -470,7 +470,7 @@
         f.innerHTML =
             '<div class="em-field" style="margin-top:12px;"><label>'
             + T('mail.style_name', 'Name des Stils') + '</label>'
-            + '<input type="text" id="em-s-name" maxlength="' + (g.stil_name_max || 60)
+            + '<input data-tabfill type="text" id="em-s-name" maxlength="' + (g.stil_name_max || 60)
             + '" placeholder="' + esc(T('mail.style_name_ph', 'z. B. Förmlich')) + '"></div>'
             + '<div class="em-field" style="margin-top:10px;"><label>'
             + T('mail.style_text', 'Stil und Signatur') + '</label>'
@@ -649,7 +649,7 @@
         f.innerHTML =
             '<div class="em-field" style="margin-top:12px;"><label>'
             + T('mail.sig_name', 'Name der Signatur') + '</label>'
-            + '<input type="text" id="em-g-name" maxlength="' + (g.sig_name_max || 60)
+            + '<input data-tabfill-nein="Aufzaehlung mehrerer Beispiele – als Feldinhalt Unsinn" type="text" id="em-g-name" maxlength="' + (g.sig_name_max || 60)
             + '" placeholder="' + esc(T('mail.sig_name_ph', 'z. B. Standard, Kurz, Englisch'))
             + '"></div>'
             + '<div class="em-field" style="margin-top:10px;"><label>'
@@ -1031,7 +1031,7 @@
             + '<div class="em-field"><label>' + T('mail.f_name', 'Name der Regel') + '</label>'
             + '<input type="text" id="em-f-name" maxlength="120"></div>'
             + '<div class="em-field"><label>' + T('mail.f_folder', 'Ordner') + '</label>'
-            + '<input type="text" id="em-f-ordner" list="em-ordner-liste" placeholder="INBOX">'
+            + '<input data-tabfill type="text" id="em-f-ordner" list="em-ordner-liste" placeholder="INBOX">'
             + '<datalist id="em-ordner-liste"></datalist></div>'
             + '</div>'
             + '<div class="em-field" style="margin-top:12px;">'
@@ -1075,7 +1075,7 @@
             + '<div class="em-field"><label>' + T('mail.f_max', 'Nachrichten je Durchgang') + '</label>'
             + '<input type="number" id="em-f-max" min="1" max="' + (g.max_je_lauf || 10) + '"></div>'
             + '<div class="em-field"><label>' + T('mail.f_from', 'Nur von diesen Absendern') + '</label>'
-            + '<input type="text" id="em-f-von" placeholder="rechnung@, @lieferant.de, name@*"></div>'
+            + '<input data-tabfill-nein="Filtermuster – die Beispiele zeigen nur die Schreibweise" type="text" id="em-f-von" placeholder="rechnung@, @lieferant.de, name@*"></div>'
             + '</div>'
             // Der Hinweis ist nicht Kosmetik: am 2026-08-17 stand eine
             // Absender-Bedingung NUR im Prompt, das Feld war leer - die Regel
@@ -1088,7 +1088,7 @@
                 + '* als Platzhalter. Leer = alle Absender.') + '</span>'
             + '<div class="em-grid" style="margin-top:12px;">'
             + '<div class="em-field"><label>' + T('mail.f_subject', 'Nur Betreff enthält (optional)') + '</label>'
-            + '<input type="text" id="em-f-betreff" placeholder="Rechnung, Invoice, AW:*"></div>'
+            + '<input data-tabfill-nein="Filtermuster – die Beispiele zeigen nur die Schreibweise" type="text" id="em-f-betreff" placeholder="Rechnung, Invoice, AW:*"></div>'
             + '<div class="em-field" style="justify-content:flex-end;gap:8px;">'
             + '<label><input type="checkbox" id="em-f-unread" style="width:auto;margin-right:8px;">'
             + T('mail.f_unread', 'nur ungelesene Nachrichten') + '</label>'

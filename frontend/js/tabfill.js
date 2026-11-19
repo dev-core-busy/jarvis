@@ -52,6 +52,17 @@
      ein weiteres TAB springt weiter. Wer nur durchtabben wollte, verliert
      dadurch nichts als einen Tastendruck.
 
+   ⚠ AUCH IM MARKUP IST JEDES PLATZHALTERFELD EINE ENTSCHEIDUNG (2026-11-19,
+   zweite Meldung am selben Tag): die Regel oben galt nur fuer JavaScript, und
+   gemeldet wurde danach prompt ein Feld im HTML – die Basis-URL unter
+   "Mein SAP-Zugang" (sap.html). 220 statische Platzhalterfelder waren nie
+   angesehen worden. Seitdem traegt jedes <input>/<textarea> mit Platzhalter
+   ENTWEDER `data-tabfill` ODER `data-tabfill-nein="<Grund>"` (Suchfeld,
+   Einmalcode, "leer = …", Formmuster mit Platzhalterteilen). Ausgenommen ist
+   nur type=password – das nimmt nie einen Vorschlag. Dasselbe gilt fuer
+   Felder, die ein Modul als HTML-Text erzeugt. Waechter: Teil 6 und 7 in
+   `tests/test_tabfill_ui.js`.
+
    Ein Feld, das niemand als uebernehmbar erkennt, nuetzt nichts – deshalb
    erscheint bei Fokus auf einem leeren Feld ein dezenter Hinweis darunter.
    ═══════════════════════════════════════════════════════════════════════ */
@@ -81,16 +92,33 @@
         return el;
     }
 
+    // "z. B. Projekte" ist als Platzhalter richtig, als Feldinhalt nicht: das
+    // Beispiel-Kennwort davor und Anfuehrungszeichen darum fallen beim
+    // Uebernehmen weg.
+    var BEISPIEL_VORSATZ = /^(?:z\.\s*B\.|e\.\s*g\.|zum Beispiel|for example)[\s:,]*/i;
+    var ANFUEHRUNG = /^[\u201E\u201C\u201D"'\u00AB\u00BB](.*)[\u201C\u201D"'\u00AB\u00BB]$/;
+
+    function bereinigt(s) {
+        var t = (s || '').trim().replace(BEISPIEL_VORSATZ, '').trim();
+        var m = ANFUEHRUNG.exec(t);
+        return (m ? m[1] : t).trim();
+    }
+
     function vorschlag(el) {
         if (!el || !el.getAttribute) return '';
         var eigen = el.getAttribute('data-tabfill');
         // Ein gesetztes Attribut mit Text gewinnt; leeres Attribut = Platzhalter.
-        if (eigen && eigen.trim()) return eigen.trim();
-        return (el.getAttribute('placeholder') || '').trim();
+        if (eigen && eigen.trim()) return bereinigt(eigen);
+        return bereinigt(el.getAttribute('placeholder'));
     }
 
     function passt(el) {
         if (!el || !el.hasAttribute || !el.hasAttribute('data-tabfill')) return false;
+        // Die ausdrueckliche Ablehnung gewinnt immer (siehe Kopf), und ein
+        // Kennwortfeld nimmt NIE einen Vorschlag – dort ist der Platzhalter
+        // bestenfalls "leer = unveraendert".
+        if (el.hasAttribute('data-tabfill-nein')) return false;
+        if ((el.getAttribute('type') || '').toLowerCase() === 'password') return false;
         if (el.disabled || el.readOnly) return false;
         var tag = (el.tagName || '').toLowerCase();
         if (tag !== 'textarea' && tag !== 'input') return false;

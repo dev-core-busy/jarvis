@@ -688,9 +688,9 @@ class JarvisVisionManager {
             // Aktions-Wert (URL/Prompt/nichts)
             const valueType = this._actionValueType(p.action);
             const valueField = valueType === 'url'
-                ? `<input type="url" class="vis-input vis-action-value" data-profile="${this._escAttr(p.id)}" value="${this._esc(p.action_value || '')}" placeholder="https://example.com/webhook" />`
+                ? `<input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" type="url" class="vis-input vis-action-value" data-profile="${this._escAttr(p.id)}" value="${this._esc(p.action_value || '')}" placeholder="https://example.com/webhook" />`
                 : valueType === 'prompt'
-                ? `<textarea class="vis-input vis-action-value" data-profile="${this._escAttr(p.id)}" rows="2" placeholder="${window.t('vis.action_value_ph')}">${this._esc(p.action_value || '')}</textarea>`
+                ? `<textarea data-tabfill class="vis-input vis-action-value" data-profile="${this._escAttr(p.id)}" rows="2" placeholder="${window.t('vis.action_value_ph')}">${this._esc(p.action_value || '')}</textarea>`
                 : '';
 
             // Lautsprecher-Auswahl bei "greet"
@@ -743,9 +743,9 @@ class JarvisVisionManager {
         const wrap = document.getElementById(`vis-av-${pid}`);
         if (!wrap) return;
         if (type === 'url') {
-            wrap.innerHTML = `<input type="url" class="vis-input vis-action-value" data-profile="${this._escAttr(pid)}" placeholder="https://example.com/webhook" />`;
+            wrap.innerHTML = `<input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" type="url" class="vis-input vis-action-value" data-profile="${this._escAttr(pid)}" placeholder="https://example.com/webhook" />`;
         } else if (type === 'prompt') {
-            wrap.innerHTML = `<textarea class="vis-input vis-action-value" data-profile="${this._escAttr(pid)}" rows="2" placeholder="${window.t('vis.action_value_ph')}"></textarea>`;
+            wrap.innerHTML = `<textarea data-tabfill class="vis-input vis-action-value" data-profile="${this._escAttr(pid)}" rows="2" placeholder="${window.t('vis.action_value_ph')}"></textarea>`;
         } else {
             wrap.innerHTML = '';
         }

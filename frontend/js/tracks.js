@@ -313,7 +313,7 @@
                 // keine Frage (gleiche Regel wie die Drop-Flaeche).
                 ((d.fragen && d.enabled)
                     ? '<div class="st-ask">' +
-                          '<textarea class="st-note st-ask-text" rows="2" data-act="ask-text" ' +
+                          '<textarea data-tabfill-nein="Eingabezeile fuer Nachricht/Frage – der Platzhalter ist eine Aufforderung" class="st-note st-ask-text" rows="2" data-act="ask-text" ' +
                             'maxlength="' + (_grenzen.frage_max || 4000) + '" ' +
                             'placeholder="' + esc(T('tracks.ask_ph', 'Frage stellen …')) + '" ' +
                             'data-i18n-placeholder="tracks.ask_ph" ' +
@@ -831,7 +831,7 @@
                   '<button type="button" class="st-info" data-help="st-help-types" ' +
                     'aria-expanded="false" data-i18n-title="tracks.help" title="Erklärung anzeigen">&#9432;</button>' +
                 '</label>' +
-                '<input type="text" id="st-f-types" placeholder="' +
+                '<input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="text" id="st-f-types" placeholder="' +
                   esc(T('tracks.f_types_ph', 'leer = alle lesbaren')) + '" ' +
                   'data-i18n-placeholder="tracks.f_types_ph">' +
                 '<div class="st-help" id="st-help-types" data-i18n="tracks.help_types">Kommagetrennt, ohne Punkt – zum Beispiel: pdf, xlsx. Eine Datei mit anderer Endung wird beim Ablegen abgewiesen, ohne einen Lauf zu starten. Leer heißt: alles, was gelesen werden kann.</div>' +
@@ -883,7 +883,7 @@
             '<div class="st-grid st-grid-3">' +
               '<div class="st-field">' +
                 '<label data-i18n="tracks.f_profile">LLM-Profil (optional)</label>' +
-                '<input type="text" id="st-f-profile" placeholder="' +
+                '<input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="text" id="st-f-profile" placeholder="' +
                   esc(T('tracks.f_profile_ph', 'leer = wie im Chat')) + '" ' +
                   'data-i18n-placeholder="tracks.f_profile_ph">' +
               '</div>' +

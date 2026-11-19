@@ -753,7 +753,7 @@
         <h1 class="login-title">Jarvis</h1>
         <p class="login-subtitle" data-i18n="uc.title">Benutzer-Chat</p>
         <form id="login-form" autocomplete="off">
-            <input type="text" id="login-user" data-i18n-placeholder="chat.domain_ph" placeholder="Benutzername" autocomplete="username" required>
+            <input data-tabfill-nein="Anmeldemaske – der Platzhalter beschreibt, was hineingehoert" type="text" id="login-user" data-i18n-placeholder="chat.domain_ph" placeholder="Benutzername" autocomplete="username" required>
             <div class="password-wrap">
                 <input type="password" id="login-pass" data-i18n-placeholder="chat.password_ph" placeholder="Kennwort" autocomplete="current-password" required>
                 <button type="button" class="eye-btn" id="eye-btn" tabindex="-1">
@@ -764,7 +764,7 @@
                 </button>
             </div>
             <div id="totp-row" class="totp-row hidden">
-                <input type="text" id="login-totp" data-i18n-placeholder="chat.totp_ph" placeholder="6-stelliger Code" autocomplete="one-time-code"
+                <input data-tabfill-nein="Einmalcode – nur das Format, kein Wert" type="text" id="login-totp" data-i18n-placeholder="chat.totp_ph" placeholder="6-stelliger Code" autocomplete="one-time-code"
                        inputmode="numeric" pattern="[0-9]*" maxlength="6">
             </div>
             <button type="submit" class="btn-login" id="btn-login" data-i18n="chat.submit">Anmelden</button>
@@ -819,7 +819,7 @@
     </header>
     <!-- Direkt hinter der Leiste statt am Seitenende: so ergaenzt
          kopfzeile.js sie, bevor der Browser zum ersten Mal zeichnet. -->
-    <script src="/static/js/kopfzeile.js?v=2"></script>
+    <script src="/static/js/kopfzeile.js?v=3"></script>
 
     <div class="uc-layout" style="flex:1;overflow:hidden;">
 
@@ -829,7 +829,7 @@
                 <span data-i18n="uc.title">Benutzer-Chat</span>
             </div>
             <div class="uc-search-wrap">
-                <input type="text" id="uc-search" class="uc-search-input" autocomplete="off"
+                <input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="text" id="uc-search" class="uc-search-input" autocomplete="off"
                        data-i18n-placeholder="uc.search_ph" placeholder="Benutzer suchen…">
                 <div class="uc-search-results" id="uc-search-results"></div>
             </div>
@@ -870,7 +870,7 @@
                     <!-- Emoji Picker Popup -->
                     <div id="uc-emoji-picker" class="uc-emoji-picker" style="display:none;">
                         <div class="uc-emoji-search-wrap">
-                            <input type="text" id="uc-emoji-search" class="uc-emoji-search" placeholder="Emoji suchen…" autocomplete="off">
+                            <input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="text" id="uc-emoji-search" class="uc-emoji-search" placeholder="Emoji suchen…" autocomplete="off">
                         </div>
                         <div class="uc-emoji-cats" id="uc-emoji-cats"></div>
                         <div class="uc-emoji-grid" id="uc-emoji-grid"></div>
@@ -884,7 +884,7 @@
                         </svg>
                     </button>
                     <input type="file" id="uc-attach-input" multiple accept="image/*,audio/*,video/*,application/pdf" style="display:none">
-                    <textarea class="uc-input" id="uc-input" data-i18n-placeholder="uc.placeholder" placeholder="Nachricht schreiben…" rows="1"></textarea>
+                    <textarea data-tabfill-nein="Eingabezeile fuer Nachricht/Frage – der Platzhalter ist eine Aufforderung" class="uc-input" id="uc-input" data-i18n-placeholder="uc.placeholder" placeholder="Nachricht schreiben…" rows="1"></textarea>
                     <button class="uc-send-btn" id="uc-send-btn" data-i18n-title="input.send" title="Senden">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="22" y1="2" x2="11" y2="13"/>
@@ -953,9 +953,10 @@
 <script src="/static/js/konto_hinweise.js?v=2"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/cpubar.js?v=4"></script>
-<script src="/static/js/syspackages.js?v=24"></script>
+<script src="/static/js/syspackages.js?v=25"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/i18n.js?v=503"></script>
+<script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/issues.js?v=17"></script>
 <script src="/static/js/chatlib.js?v=27"></script>
 <script src="/static/js/branding.js?v=31"></script>
@@ -975,7 +976,7 @@
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
 <script src="/static/js/stt.js?v=3"></script>
-<script src="/static/js/avatar.js?v=19"></script>
+<script src="/static/js/avatar.js?v=20"></script>
 <script src="/static/js/activity.js?v=3"></script>
 </body>
 </html>

@@ -266,7 +266,7 @@ window.KbMatrix = (function () {
                         <input type="checkbox" class="kbm-nogrp"${_nurUngruppiert ? ' checked' : ''}>
                         <span>${_esc(T('kbmatrix.only_ungrouped', 'nicht zugeordnet'))}</span>
                     </label>
-                    <input type="text" class="kbm-filter" placeholder="${T('kbmatrix.filter', 'Filter…')}">
+                    <input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="text" class="kbm-filter" placeholder="${T('kbmatrix.filter', 'Filter…')}">
                     <button class="kbm-close" title="${T('common.close', 'Schließen')}">✕</button>
                 </div>
                 <div class="kbm-table-wrap">

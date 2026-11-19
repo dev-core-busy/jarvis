@@ -141,7 +141,7 @@ class JarvisGoogleManager {
                         <div class="gog-form">
                             <div class="gog-form-row">
                                 <label class="gog-label">${window.t('google.label_client_id')}</label>
-                                <input id="gog-client-id" class="gog-input" type="text"
+                                <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="gog-client-id" class="gog-input" type="text"
                                     placeholder="1234….apps.googleusercontent.com" autocomplete="off">
                             </div>
                             <div class="gog-form-row">
@@ -151,7 +151,7 @@ class JarvisGoogleManager {
                             </div>
                             <div class="gog-form-row">
                                 <label class="gog-label">${window.t('google.label_gmail_account')}</label>
-                                <input id="gog-email" class="gog-input" type="email"
+                                <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="gog-email" class="gog-input" type="email"
                                     placeholder="deine@gmail.com" autocomplete="off">
                             </div>
 
@@ -279,7 +279,7 @@ class JarvisGoogleManager {
                 </div>
 
                 <div class="gog-form-row" style="margin-top:0.5rem">
-                    <input id="gog-redirect-url" class="gog-input" type="text"
+                    <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="gog-redirect-url" class="gog-input" type="text"
                         placeholder="http://localhost:…?code=…&scope=…" autocomplete="off">
                 </div>
 

@@ -284,7 +284,7 @@
                 <p class="sq-hint" data-i18n="sql.ask_hint">Stelle eine Frage in Alltagssprache. Der Assistent sucht die passenden Tabellen, verbindet sie über die Beziehungen des Schemas und schreibt daraus eine lesende SQL-Abfrage, die auf Syntax und gegen das Schema geprüft wird. Die Abfrage wird nicht ausgeführt.</p>
                 <div class="sq-quellen" id="sq-quellen"></div>
                 <div class="sq-row">
-                    <textarea class="sq-textarea" id="sq-frage" maxlength="2000"
+                    <textarea data-tabfill class="sq-textarea" id="sq-frage" maxlength="2000"
                               data-i18n-placeholder="sql.ask_ph"
                               placeholder="z. B. Wie hoch war der Nettoumsatz je Land im Jahr 2025?"></textarea>
                 </div>
@@ -306,7 +306,7 @@
                     <ul class="sq-befunde hidden" id="sq-befunde"></ul>
                     <div class="sq-syntax" id="sq-syntax"></div>
                     <!-- Bearbeitbar: "Syntax prüfen" prueft genau diesen Text neu -->
-                    <textarea class="sq-code" id="sq-sql" spellcheck="false" autocomplete="off"
+                    <textarea data-tabfill-nein="Eingabezeile fuer Nachricht/Frage – der Platzhalter ist eine Aufforderung" class="sq-code" id="sq-sql" spellcheck="false" autocomplete="off"
                               data-i18n-placeholder="sql.sql_ph" placeholder="SQL hier einfügen oder bearbeiten …"></textarea>
                     <div class="sq-row" style="margin-top:0">
                         <button class="sq-btn" id="sq-pruefen" type="button" data-i18n="sql.check_btn"
@@ -335,7 +335,7 @@
             <div class="sq-card-body">
                 <p class="sq-hint" data-i18n="sql.search_hint">Findet Tabellen und Sichten über Name, Beschreibung und Spaltennamen. Mehrere Begriffe kommagetrennt.</p>
                 <div class="sq-row">
-                    <input type="text" class="sq-input" id="sq-suchfeld" autocomplete="off"
+                    <input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="text" class="sq-input" id="sq-suchfeld" autocomplete="off"
                            data-i18n-placeholder="sql.search_ph" placeholder="z. B. kunde, lieferadresse">
                     <button class="sq-btn" id="sq-suchen" type="button" data-i18n="common.search">Suchen</button>
                     <span class="sq-status" id="sq-such-status"></span>
@@ -354,8 +354,8 @@
             <div class="sq-card-body">
                 <p class="sq-hint" data-i18n="sql.path_hint">Zeigt den kürzesten Weg über die Beziehungen des Schemas und die Join-Bedingung je Schritt.</p>
                 <div class="sq-row">
-                    <input type="text" class="sq-input" id="sq-von" autocomplete="off" data-i18n-placeholder="sql.path_from" placeholder="erste Tabelle">
-                    <input type="text" class="sq-input" id="sq-nach" autocomplete="off" data-i18n-placeholder="sql.path_to" placeholder="zweite Tabelle">
+                    <input data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" type="text" class="sq-input" id="sq-von" autocomplete="off" data-i18n-placeholder="sql.path_from" placeholder="erste Tabelle">
+                    <input data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" type="text" class="sq-input" id="sq-nach" autocomplete="off" data-i18n-placeholder="sql.path_to" placeholder="zweite Tabelle">
                     <button class="sq-btn" id="sq-pfad-los" type="button" data-i18n="sql.path_btn">Weg suchen</button>
                     <span class="sq-status" id="sq-pfad-status"></span>
                 </div>
@@ -366,7 +366,7 @@
 </div>
 
 <script src="/static/js/sitzung.js?v=3"></script>
-<script src="/static/js/kopfzeile.js?v=2"></script>
+<script src="/static/js/kopfzeile.js?v=3"></script>
 <script src="/static/js/update_widget.js?v=10"></script>
 <script src="/static/js/sessions.js?v=10"></script>
 <script src="/static/js/icons.js?v=11"></script>
@@ -375,14 +375,15 @@
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
 <script src="/static/js/stt.js?v=3"></script>
-<script src="/static/js/avatar.js?v=19"></script>
+<script src="/static/js/avatar.js?v=20"></script>
 <script src="/static/js/konto_hinweise.js?v=2"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/cpubar.js?v=4"></script>
-<script src="/static/js/syspackages.js?v=24"></script>
+<script src="/static/js/syspackages.js?v=25"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
 <script src="/static/js/i18n.js?v=503"></script>
+<script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/logo_home.js?v=1"></script>

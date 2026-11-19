@@ -73,13 +73,13 @@ window.cronManager = new (class JarvisCronManager {
                         <div class="kb-form-grid-2">
                             <div class="kb-form-field">
                                 <label class="kb-label" for="cron-label">${window.t('cron.label_label')}</label>
-                                <input id="cron-label" type="text" placeholder="z.B. Täglicher Server-Report" class="kb-input">
+                                <input data-tabfill id="cron-label" type="text" placeholder="z.B. Täglicher Server-Report" class="kb-input">
                             </div>
                             <div class="kb-form-field">
                                 <label class="kb-label" for="cron-schedule">
                                     ${window.t('cron.schedule_label')} &ensp;<a href="https://crontab.guru" target="_blank" style="color:var(--accent);">Hilfe ↗</a>
                                 </label>
-                                <input id="cron-schedule" type="text" placeholder="0 8 * * *" class="kb-input">
+                                <input data-tabfill id="cron-schedule" type="text" placeholder="0 8 * * *" class="kb-input">
                                 <small id="cron-schedule-preview" style="display:block;margin-top:4px;font-size:.75rem;opacity:.6;min-height:1em;"></small>
                             </div>
                         </div>
@@ -118,7 +118,7 @@ window.cronManager = new (class JarvisCronManager {
 
                         <div class="kb-form-row" id="cron-task-row">
                             <label class="kb-label" for="cron-task">${window.t('cron.task_label')}</label>
-                            <textarea id="cron-task" rows="3" class="kb-input"
+                            <textarea data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" id="cron-task" rows="3" class="kb-input"
                                 placeholder="${window.t('cron.task_ph')}"></textarea>
                             <label class="kb-form-checkbox-label" style="margin-top:6px;">
                                 <input id="cron-aussenwirkung" type="checkbox"> ${window.t('cron.aussenwirkung')}
@@ -173,7 +173,7 @@ window.cronManager = new (class JarvisCronManager {
                         <div class="kb-form-grid-2">
                             <div class="kb-form-field">
                                 <label class="kb-label" for="watcher-label">${window.t('cron.label_label')}</label>
-                                <input id="watcher-label" type="text" placeholder="z.B. PDF Inbox" class="kb-input">
+                                <input data-tabfill id="watcher-label" type="text" placeholder="z.B. PDF Inbox" class="kb-input">
                             </div>
                             <div class="kb-form-field">
                                 <label class="kb-label" for="watcher-trigger-type">Trigger (Ereignis)</label>
@@ -190,11 +190,11 @@ window.cronManager = new (class JarvisCronManager {
                             <div class="kb-form-grid-2">
                                 <div class="kb-form-field">
                                     <label class="kb-label" for="watcher-path">${window.t('cron.watcher_path')}</label>
-                                    <input id="watcher-path" type="text" placeholder="/home/jarvis/inbox" class="kb-input">
+                                    <input data-tabfill id="watcher-path" type="text" placeholder="/home/jarvis/inbox" class="kb-input">
                                 </div>
                                 <div class="kb-form-field">
                                     <label class="kb-label" for="watcher-pattern">${window.t('cron.watcher_pattern')}</label>
-                                    <input id="watcher-pattern" type="text" placeholder="*.pdf" class="kb-input">
+                                    <input data-tabfill id="watcher-pattern" type="text" placeholder="*.pdf" class="kb-input">
                                 </div>
                             </div>
                             <div class="kb-form-field">
@@ -224,7 +224,7 @@ window.cronManager = new (class JarvisCronManager {
                         <!-- Aktion: Agenten-Aufgabe -->
                         <div id="watcher-action-agent" class="kb-form-row">
                             <label class="kb-label" for="watcher-task">${window.t('cron.task_label')}</label>
-                            <textarea id="watcher-task" rows="3" class="kb-input"
+                            <textarea data-tabfill id="watcher-task" rows="3" class="kb-input"
                                 placeholder="Fasse die neu eingetroffene Datei {filename} zusammen."></textarea>
                             <label class="kb-form-checkbox-label" style="margin-top:6px;">
                                 <input id="watcher-aussenwirkung" type="checkbox"> ${window.t('cron.aussenwirkung')}
@@ -236,11 +236,11 @@ window.cronManager = new (class JarvisCronManager {
                         <div id="watcher-action-whatsapp" style="display:none;">
                             <div class="kb-form-field">
                                 <label class="kb-label" for="watcher-wa-to">WhatsApp-Empfänger (z.B. +49170…)</label>
-                                <input id="watcher-wa-to" type="text" placeholder="+491701234567" class="kb-input">
+                                <input data-tabfill-nein="Beispielnummer – keine echte Rufnummer" id="watcher-wa-to" type="text" placeholder="+491701234567" class="kb-input">
                             </div>
                             <div class="kb-form-row">
                                 <label class="kb-label" for="watcher-wa-message">Nachricht</label>
-                                <textarea id="watcher-wa-message" rows="2" class="kb-input"
+                                <textarea data-tabfill id="watcher-wa-message" rows="2" class="kb-input"
                                     placeholder="${window.t('cron.wa_message_ph')}"></textarea>
                             </div>
                         </div>
@@ -249,11 +249,11 @@ window.cronManager = new (class JarvisCronManager {
                         <div id="watcher-action-webhook" style="display:none;">
                             <div class="kb-form-field">
                                 <label class="kb-label" for="watcher-webhook-url">Webhook-URL</label>
-                                <input id="watcher-webhook-url" type="text" placeholder="https://hooks.example.com/…" class="kb-input">
+                                <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="watcher-webhook-url" type="text" placeholder="https://hooks.example.com/…" class="kb-input">
                             </div>
                             <div class="kb-form-row">
                                 <label class="kb-label" for="watcher-webhook-body">Nachricht/Body (als JSON-Feld &quot;text&quot;)</label>
-                                <textarea id="watcher-webhook-body" rows="2" class="kb-input"
+                                <textarea data-tabfill id="watcher-webhook-body" rows="2" class="kb-input"
                                     placeholder="LLM down: {event}"></textarea>
                             </div>
                             <label class="kb-form-checkbox-label" style="margin-top:6px;">
@@ -267,16 +267,16 @@ window.cronManager = new (class JarvisCronManager {
                             <div class="kb-form-grid-2">
                                 <div class="kb-form-field">
                                     <label class="kb-label" for="watcher-email-to">Empfänger (E-Mail)</label>
-                                    <input id="watcher-email-to" type="text" placeholder="empfaenger@example.com" class="kb-input">
+                                    <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="watcher-email-to" type="text" placeholder="empfaenger@example.com" class="kb-input">
                                 </div>
                                 <div class="kb-form-field">
                                     <label class="kb-label" for="watcher-email-subject">Betreff</label>
-                                    <input id="watcher-email-subject" type="text" placeholder="${window.t('cron.email_subject_ph')}" class="kb-input">
+                                    <input data-tabfill id="watcher-email-subject" type="text" placeholder="${window.t('cron.email_subject_ph')}" class="kb-input">
                                 </div>
                             </div>
                             <div class="kb-form-row">
                                 <label class="kb-label" for="watcher-email-body">Nachricht</label>
-                                <textarea id="watcher-email-body" rows="2" class="kb-input"
+                                <textarea data-tabfill id="watcher-email-body" rows="2" class="kb-input"
                                     placeholder="Das aktive LLM ist nicht erreichbar ({event})."></textarea>
                             </div>
                             <p class="kb-hint" style="margin-top:4px;">Versand über das verbundene Google-Konto (Einstellungen → Google).</p>

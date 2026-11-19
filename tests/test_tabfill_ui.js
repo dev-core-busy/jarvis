@@ -13,6 +13,12 @@
  * Teil 3  Verdrahtung: Einbindung je Seite, markierte Felder, i18n
  * Teil 4  JarvisTabfill.vorschlag – die zentrale Stelle fuer berechnete Vorschlaege
  * Teil 5  Die REGEL darueber: keine rohe placeholder-Zuweisung ohne Entscheidung
+ * Teil 6  Dieselbe Regel fuer das MARKUP (jede Seite, geparstes DOM)
+ * Teil 7  ... und fuer Felder, die ein Modul als HTML-Text erzeugt (Syntaxbaum)
+ *
+ * Teil 6+7 kamen am selben Tag dazu, nach der zweiten Meldung (Basis-URL unter
+ * "Mein SAP-Zugang"): Teil 5 sah nur JavaScript-Zuweisungen an, 290 Felder
+ * im Markup bzw. in erzeugtem Markup hatte niemand entschieden.
  *
  * Teil 4+5 kamen am 2026-11-19 dazu. Gemeldet war EIN Feld (die Rueckkehr-Adresse
  * des Anmelde-Anbieters), gemessen waren es SECHS: im Markup stehen Vorschlag und
@@ -50,6 +56,14 @@ function baue() {
           <input id="c" placeholder="vorname.nachname@firma.de"></div>
         <div class="f"><label>Gesperrt</label>
           <textarea id="d" data-tabfill placeholder="z. B. etwas" readonly></textarea></div>
+        <div class="f"><label>Abgelehnt</label>
+          <input id="n" data-tabfill data-tabfill-nein="Grund" placeholder="leer = unveraendert"></div>
+        <div class="f"><label>Kennwort</label>
+          <input id="p" type="password" data-tabfill placeholder="geheim"></div>
+        <div class="f"><label>Beispiel-Vorsatz</label>
+          <input id="z" data-tabfill placeholder="z.\u202fB. Projekte"></div>
+        <div class="f"><label>Beispiel in Anfuehrung</label>
+          <input id="q" data-tabfill placeholder="z. B. \u201Enur Buchungskreis 1000\u201C"></div>
         <div class="f"><label>i18n</label>
           <textarea id="e" data-i18n-tabfill="common.tabfill_hint" placeholder="x"></textarea></div>
         </body></html>`, { url: 'https://x/', runScripts: 'outside-only' });
@@ -72,13 +86,13 @@ abschnitt('1. Verhalten der Taste');
     const a = d.getElementById('a');
 
     let ev = tab(w, a);
-    pruefe(a.value === 'z. B. Antworte knapp.', 'TAB im leeren Feld uebernimmt den Platzhalter', a.value);
+    pruefe(a.value === 'Antworte knapp.', 'TAB im leeren Feld uebernimmt den Platzhalter (ohne "z. B.")', a.value);
     pruefe(ev.defaultPrevented, 'der Fokus bleibt (preventDefault) – der Text soll bearbeitbar sein');
 
     // Zweites TAB muss normal weiterschalten, sonst sitzt man fest.
     ev = tab(w, a);
     pruefe(!ev.defaultPrevented, 'zweites TAB schaltet normal weiter (Feld ist nicht mehr leer)');
-    pruefe(a.value === 'z. B. Antworte knapp.', 'und haengt den Text nicht ein zweites Mal an');
+    pruefe(a.value === 'Antworte knapp.', 'und haengt den Text nicht ein zweites Mal an');
 
     // Rueckwaerts navigieren muss immer moeglich bleiben.
     const b = d.getElementById('b');
@@ -183,12 +197,18 @@ pruefe(markiert >= 8, 'die Vorschlagsfelder sind markiert (' + markiert + ')');
 // Beispiel zu speichern (Adresse, Anmeldename, Ordner, Filter).
 const EMAIL_HTML = fs.readFileSync(path.join(ROOT, 'frontend/email.html'), 'utf8');
 const PORTAL_JS = fs.readFileSync(path.join(ROOT, 'frontend/js/email_portal.js'), 'utf8');
-[['em-adresse', EMAIL_HTML], ['em-benutzer', EMAIL_HTML], ['em-ord-eingang', EMAIL_HTML],
+// Seit 2026-11-19 tragen solche Felder die AUSDRUECKLICHE Ablehnung
+// `data-tabfill-nein="<Grund>"` (Teil 6/7) – geprueft wird hier, dass sie nicht
+// stattdessen uebernehmbar markiert sind. Gelesen am Tag selbst, nicht an
+// einem Textfenster dahinter. ('INBOX' stand bis dahin auch in dieser Liste –
+// es ist aber ein echter, brauchbarer Wert und seitdem uebernehmbar.)
+const { tagsIn } = require('./lib/platzhalter_sonde');
+[['em-adresse', EMAIL_HTML], ['em-benutzer', EMAIL_HTML],
  ['em-f-von', PORTAL_JS], ['em-f-betreff', PORTAL_JS]].forEach(([id, s]) => {
-    const i = s.indexOf('id="' + id + '"');
-    const stelle = i > -1 ? s.slice(i, i + 220) : '';
-    pruefe(i > -1 && stelle.indexOf('data-tabfill') < 0,
-        id + ' ist NICHT markiert (Formvorgabe bzw. Filter)');
+    const t = tagsIn(s).filter(f => f.tag.indexOf('id="' + id + '"') > -1);
+    pruefe(t.length === 1 && t[0].entscheidung === 'nein',
+        id + ' ist ausdruecklich NICHT uebernehmbar (Formvorgabe bzw. Filter)',
+        t.map(f => f.entscheidung).join(','));
 });
 
 const I18NTXT = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
@@ -206,6 +226,30 @@ pruefe(CSS.indexOf('.jv-tabfill-hint') > -1,
     'die Hinweis-Regel steht in theme.css (nicht style.css – das laedt nur /settings und /wissen)');
 pruefe(!/\.jv-tabfill-hint[^{]*\{[^}]*#[0-9a-fA-F]{3}/.test(CSS),
     'keine harten Farben im Hinweis');
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('1b. Ablehnung, Kennwort, Beispiel-Vorsatz');
+{
+    const { window: w } = baue();
+    const d = w.document;
+    const n = d.getElementById('n');
+    pruefe(!tab(w, n).defaultPrevented && n.value === '',
+        'data-tabfill-nein gewinnt gegen data-tabfill', n.value);
+    const p = d.getElementById('p');
+    pruefe(!tab(w, p).defaultPrevented && p.value === '',
+        'ein Kennwortfeld nimmt NIE einen Vorschlag', p.value);
+    const z = d.getElementById('z');
+    tab(w, z);
+    pruefe(z.value === 'Projekte', '"z. B." (auch mit schmalem Leerzeichen) faellt beim Uebernehmen weg', z.value);
+    const q = d.getElementById('q');
+    tab(w, q);
+    pruefe(q.value === 'nur Buchungskreis 1000', 'Anfuehrungszeichen um das Beispiel ebenfalls', q.value);
+    const a = d.getElementById('a');
+    a.value = '';
+    tab(w, a);
+    pruefe(a.value === 'Antworte knapp.', 'auch beim bisherigen Beispielfeld', a.value);
+    w.close();
+}
 
 /* ═══════════════════════════════════════════════════════════════════════ */
 abschnitt('4. JarvisTabfill.vorschlag: Platzhalter UND Markierung in einem Zug');
@@ -415,6 +459,142 @@ abschnitt('5. REGEL: jede placeholder-Zuweisung ist eine Entscheidung');
     });
     pruefe(fehlt.length === 0,
         'jede Seite mit einem solchen Modul bindet tabfill.js ein', fehlt.join(', '));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('6. REGEL: jedes Platzhalterfeld im MARKUP ist eine Entscheidung');
+{
+    // Gemeldet 2026-11-19 (zweites Mal am selben Tag): "Mein SAP-Zugang" →
+    // Basis-URL nahm den Vorschlag nicht. Teil 5 galt nur fuer JavaScript; die
+    // 220 Felder im HTML hatte niemand angesehen. Gemessen am geparsten DOM,
+    // nicht am Text.
+    const entscheidung = (el) => {
+        const nein = el.getAttribute('data-tabfill-nein');
+        const ja = el.hasAttribute('data-tabfill') || el.hasAttribute('data-i18n-tabfill');
+        if (nein !== null) return (nein.trim() && !ja) ? 'nein' : 'widerspruch';
+        if (ja) return 'tabfill';
+        if ((el.getAttribute('type') || '').toLowerCase() === 'password') return 'kennwort';
+        return 'offen';
+    };
+    const felder = (html) => {
+        const dom = new JSDOM(html);
+        const r = Array.from(dom.window.document.querySelectorAll('input[placeholder], textarea[placeholder]'))
+            .map(el => ({ id: el.id || el.className, e: entscheidung(el) }));
+        dom.window.close();
+        return r;
+    };
+    // Positivkontrolle der Messvorrichtung.
+    const probe = felder('<input id="a" placeholder="x"><input id="b" data-tabfill placeholder="x">' +
+        '<textarea id="c" data-tabfill-nein="Grund" placeholder="x"></textarea>' +
+        '<input id="d" type="password" placeholder="x"><input id="e" data-tabfill data-tabfill-nein="G" placeholder="x">' +
+        '<input id="f" data-tabfill-nein="" placeholder="x"><input id="g">');
+    const pk = probe.map(f => f.id + ':' + f.e).join(' ');
+    const pkOk = pk === 'a:offen b:tabfill c:nein d:kennwort e:widerspruch f:widerspruch';
+    pruefe(pkOk, 'Positivkontrolle: die Sonde unterscheidet alle Faelle', pk);
+    if (!pkOk) { console.log('\n  ABBRUCH: Messvorrichtung unbrauchbar.'); process.exit(2); }
+
+    const seiten = fs.readdirSync(path.join(ROOT, 'frontend')).filter(n => n.endsWith('.html'))
+        .concat(fs.readdirSync(path.join(ROOT, 'frontend/addin')).filter(n => n.endsWith('.html'))
+            .map(n => 'addin/' + n));
+    const offen = [];
+    let gesamt = 0, ja = 0;
+    seiten.forEach(n => {
+        felder(fs.readFileSync(path.join(ROOT, 'frontend', n), 'utf8')).forEach(f => {
+            gesamt++;
+            if (f.e === 'tabfill') ja++;
+            if (f.e === 'offen' || f.e === 'widerspruch') offen.push(n + '#' + f.id + '(' + f.e + ')');
+        });
+    });
+    pruefe(gesamt >= 200, 'es werden alle Seiten gelesen (' + gesamt + ' Platzhalterfelder)');
+    pruefe(ja >= 80, 'davon uebernehmbar markiert: ' + ja);
+    pruefe(offen.length === 0,
+        'jedes Platzhalterfeld traegt data-tabfill ODER data-tabfill-nein="<Grund>"',
+        offen.join(' | '));
+
+    // Eine Markierung ohne geladene tabfill.js bewirkt NICHTS – sechs Seiten
+    // (sql, wissen, portal, userchat, api, wissensgraph) hatten beim Anlegen
+    // dieser Regel markierte Felder, aber kein Skript.
+    const ohneSkript = seiten.filter(n => {
+        const html = fs.readFileSync(path.join(ROOT, 'frontend', n), 'utf8');
+        return felder(html).some(f => f.e === 'tabfill') && html.indexOf('/tabfill.js') < 0;
+    });
+    pruefe(ohneSkript.length === 0, 'jede Seite mit uebernehmbarem Feld laedt tabfill.js',
+        ohneSkript.join(', '));
+
+    // Der gemeldete Fall namentlich – samt Nachbarfeldern derselben Maske.
+    const SAP = felder(fs.readFileSync(path.join(ROOT, 'frontend/sap.html'), 'utf8'));
+    ['sp-acc-od-url', 'sp-acc-od-service', 'sp-acc-od-client', 'sp-acc-hana-host',
+     'sp-acc-hana-schema', 'sp-acc-rfc-host', 'sp-acc-rfc-client'].forEach(id => {
+        const f = SAP.filter(x => x.id === id);
+        pruefe(f.length === 1 && f[0].e === 'tabfill', 'Mein SAP-Zugang: ' + id + ' ist uebernehmbar',
+            f.map(x => x.e).join(','));
+    });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════ */
+abschnitt('7. REGEL: auch Felder, die ein Modul als HTML-Text erzeugt');
+{
+    const acorn = require('./lib/acorn_laden')();
+    const { sonde } = require('./lib/platzhalter_sonde');
+    const probe = [
+        "var a = '<input id=\"a\" placeholder=\"' + x + '\">';",
+        "var b = `<textarea data-tabfill placeholder=\"${x}\"></textarea>`;",
+        "var c = '<input data-tabfill-nein=\"Grund\" ' + 'placeholder=\"' + x + '\">';",
+        "var d = '<input type=\"password\" placeholder=\"x\">';",
+        "var e = '<input placeholder=\"' + x;",
+        "var f = '<input id=\"f\" value=\"1\">';",
+    ].join('\n');
+    const pf = sonde(acorn, probe);
+    const pk = pf ? pf.map(f => f.zeile + ':' + f.entscheidung).join(' ') : 'Parse-Fehler';
+    const pkOk = pk === '1:offen 2:tabfill 3:nein 4:kennwort 5:unentscheidbar';
+    pruefe(pkOk, 'Positivkontrolle: die Sonde liest Ketten und Templates', pk);
+    if (!pkOk) { console.log('\n  ABBRUCH: Messvorrichtung unbrauchbar.'); process.exit(2); }
+
+    const liste = [];
+    (function d(dir) {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            const v = path.join(dir, e.name);
+            if (e.isDirectory()) d(v); else if (e.name.endsWith('.js')) liste.push(v);
+        }
+    })(path.join(ROOT, 'frontend/js'));
+    (function d(dir) {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            const v = path.join(dir, e.name);
+            if (e.isDirectory()) d(v); else if (e.name.endsWith('.js')) liste.push(v);
+        }
+    })(path.join(ROOT, 'frontend/addin'));
+    const offen = [], kaputt = [], erzeugend = [];
+    let gesamt = 0;
+    liste.forEach(f => {
+        const rel = path.relative(ROOT, f).split(path.sep).join('/');
+        const r = sonde(acorn, fs.readFileSync(f, 'utf8'));
+        if (r === null) { kaputt.push(rel); return; }
+        if (r.some(x => x.entscheidung === 'tabfill')) erzeugend.push(path.basename(rel));
+        r.forEach(x => {
+            gesamt++;
+            if (x.entscheidung === 'offen' || x.entscheidung === 'unentscheidbar') {
+                offen.push(rel + ':' + x.zeile + ' (' + x.entscheidung + ') ' + x.tag.slice(0, 80));
+            }
+        });
+    });
+    pruefe(kaputt.length === 0, 'jedes Modul laesst sich parsen', kaputt.join(', '));
+    pruefe(gesamt >= 60, 'es werden erzeugte Felder gefunden (' + gesamt + ')');
+    pruefe(offen.length === 0,
+        'jedes erzeugte Platzhalterfeld traegt data-tabfill ODER data-tabfill-nein="<Grund>"',
+        offen.join(' | '));
+
+    // Jede Seite, die ein solches Modul einbindet, braucht tabfill.js.
+    const seiten = fs.readdirSync(path.join(ROOT, 'frontend')).filter(n => n.endsWith('.html'))
+        .concat(fs.readdirSync(path.join(ROOT, 'frontend/addin')).filter(n => n.endsWith('.html'))
+            .map(n => 'addin/' + n));
+    const fehlt = [];
+    seiten.forEach(n => {
+        const html = fs.readFileSync(path.join(ROOT, 'frontend', n), 'utf8');
+        const m = erzeugend.filter(b => new RegExp('/' + b.replace('.', '\\.') + '\\?v=').test(html));
+        if (m.length && html.indexOf('/tabfill.js') < 0) fehlt.push(n + ' (' + m.join(', ') + ')');
+    });
+    pruefe(erzeugend.length >= 5, 'Module mit erzeugten Vorschlagsfeldern erkannt (' + erzeugend.length + ')');
+    pruefe(fehlt.length === 0, 'jede Seite mit einem solchen Modul laedt tabfill.js', fehlt.join(' | '));
 }
 
 console.log('\n' + '='.repeat(62));

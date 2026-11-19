@@ -49,7 +49,7 @@
         <h1 class="login-title">Jarvis</h1>
         <p class="login-subtitle" data-i18n="chat.domain_login">Domain-Anmeldung</p>
         <form id="login-form">
-            <input type="text" id="login-user" name="username" placeholder="DOMAIN\benutzername" data-i18n-placeholder="chat.domain_ph" autocomplete="username" required>
+            <input data-tabfill-nein="Anmeldemaske – der Platzhalter beschreibt, was hineingehoert" type="text" id="login-user" name="username" placeholder="DOMAIN\benutzername" data-i18n-placeholder="chat.domain_ph" autocomplete="username" required>
             <div class="password-wrap">
                 <input type="password" id="login-pass" name="password" placeholder="Kennwort" data-i18n-placeholder="chat.password_ph" autocomplete="current-password" required>
                 <button type="button" class="eye-btn" id="eye-btn" tabindex="-1">
@@ -61,7 +61,7 @@
             </div>
             <!-- TOTP-Eingabe (erscheint nach Passwort-Check wenn 2FA aktiv) -->
             <div id="totp-row" class="totp-row hidden">
-                <input type="text" id="login-totp" placeholder="6-stelliger Code" data-i18n-placeholder="chat.totp_ph" autocomplete="one-time-code"
+                <input data-tabfill-nein="Einmalcode – nur das Format, kein Wert" type="text" id="login-totp" placeholder="6-stelliger Code" data-i18n-placeholder="chat.totp_ph" autocomplete="one-time-code"
                        inputmode="numeric" pattern="[0-9]*" maxlength="6">
             </div>
             <button type="submit" class="btn-login" id="btn-login" data-i18n="chat.submit">Anmelden</button>
@@ -201,7 +201,7 @@
     </header>
     <!-- Direkt hinter der Leiste statt am Seitenende: so ergaenzt
          kopfzeile.js sie, bevor der Browser zum ersten Mal zeichnet. -->
-    <script src="/static/js/kopfzeile.js?v=2"></script>
+    <script src="/static/js/kopfzeile.js?v=3"></script>
 
     <!-- Auswahl-Aktionsleiste -->
     <div id="msg-select-bar" class="msg-select-bar" hidden>
@@ -246,7 +246,7 @@
                 </svg>
             </button>
             <input type="file" id="attach-input" multiple accept="*/*" style="display:none">
-            <textarea id="msg-input" data-i18n-placeholder="chat.input_ph" placeholder="Nachricht eingeben…" rows="1" maxlength="10000"></textarea>
+            <textarea data-tabfill-nein="Eingabezeile fuer Nachricht/Frage – der Platzhalter ist eine Aufforderung" id="msg-input" data-i18n-placeholder="chat.input_ph" placeholder="Nachricht eingeben…" rows="1" maxlength="10000"></textarea>
             <button class="btn-mic" id="btn-mic" data-i18n-title="chat.mic" title="Spracheingabe">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -435,10 +435,10 @@ sudo update-ca-certificates</code></pre>
 <script src="/static/js/konto_hinweise.js?v=2"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/cpubar.js?v=4"></script>
-<script src="/static/js/syspackages.js?v=24"></script>
+<script src="/static/js/syspackages.js?v=25"></script>
 <script src="/static/js/sysload.js?v=6"></script>
 <script src="/static/js/i18n.js?v=503"></script>
-<script src="/static/js/tabfill.js?v=3"></script>
+<script src="/static/js/tabfill.js?v=5"></script>
 <!-- Gemeinsame Chat-Helfer (escapeHtml, renderMarkdown, History, Edit-Workflow) -->
 <script src="/static/js/chatlib.js?v=27"></script>
 <script src="/static/js/issues.js?v=17"></script>
@@ -469,7 +469,7 @@ sudo update-ca-certificates</code></pre>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
-<script src="/static/js/avatar.js?v=19"></script>
+<script src="/static/js/avatar.js?v=20"></script>
 <script src="/static/js/activity.js?v=3"></script>
 </body>
 </html>

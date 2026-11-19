@@ -481,7 +481,7 @@
                 '<button class="' + kl + '" id="pt-usr-btn" type="button" title="Angemeldete Benutzer" data-i18n-title="sessions.title" aria-haspopup="true" aria-expanded="false">' + SVG.leute + '</button>'
                 + '<div class="pt-usr-panel" id="pt-usr-panel" hidden>'
                 + '<div class="pt-usr-head"><span data-i18n="sessions.title">Angemeldete Benutzer</span><span class="pt-usr-count" id="pt-usr-count"></span></div>'
-                + '<div class="pt-usr-filter" id="pt-usr-filter"><input type="search" id="pt-usr-search" autocomplete="off" spellcheck="false" placeholder="Benutzer filtern…" data-i18n-placeholder="sessions.search_ph" aria-label="Benutzerliste filtern" data-i18n-aria="sessions.search_aria"></div>'
+                + '<div class="pt-usr-filter" id="pt-usr-filter"><input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="search" id="pt-usr-search" autocomplete="off" spellcheck="false" placeholder="Benutzer filtern…" data-i18n-placeholder="sessions.search_ph" aria-label="Benutzerliste filtern" data-i18n-aria="sessions.search_aria"></div>'
                 + '<div class="pt-usr-list" id="pt-usr-list"></div><div class="pt-usr-hint" id="pt-usr-hint"></div>'
                 + '</div>');
             var doc = document.getElementById('pt-info-wrap');

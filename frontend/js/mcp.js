@@ -280,7 +280,7 @@
                 <h4 data-f="titel"></h4>
                 <div class="mcp-form-row">
                     <label>Name</label>
-                    <input type="text" data-f="name" placeholder="${window.t('mcp.name_ph')}" class="mcp-input">
+                    <input data-tabfill type="text" data-f="name" placeholder="${window.t('mcp.name_ph')}" class="mcp-input">
                 </div>
                 <div class="mcp-form-row">
                     <label>Transport</label>
@@ -293,11 +293,11 @@
                 <div data-f="stdio-fields">
                     <div class="mcp-form-row">
                         <label>Command</label>
-                        <input type="text" data-f="command" placeholder="${window.t('mcp.command_ph')}" class="mcp-input">
+                        <input data-tabfill-nein="Aufzaehlung mehrerer Beispiele – als Feldinhalt Unsinn" type="text" data-f="command" placeholder="${window.t('mcp.command_ph')}" class="mcp-input">
                     </div>
                     <div class="mcp-form-row">
                         <label>${window.t('mcp.args_label')}</label>
-                        <textarea data-f="args" class="mcp-input" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea>
+                        <textarea data-tabfill data-f="args" class="mcp-input" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea>
                     </div>
                     <label class="mcp-toggle">
                         <input type="checkbox" data-f="sandbox" checked>
@@ -306,13 +306,13 @@
                     <div class="mcp-hint">${window.t('mcp.sandbox_hint')}</div>
                     <div class="mcp-form-row">
                         <label>${window.t('mcp.sandbox_paths_label')}</label>
-                        <textarea data-f="sandbox-paths" class="mcp-input" rows="2" placeholder="/daten/freigabe"></textarea>
+                        <textarea data-tabfill data-f="sandbox-paths" class="mcp-input" rows="2" placeholder="/daten/freigabe"></textarea>
                     </div>
                 </div>
                 <div data-f="sse-fields" style="display:none;">
                     <div class="mcp-form-row">
                         <label>URL</label>
-                        <input type="text" data-f="url" placeholder="https://host/mcp" class="mcp-input">
+                        <input data-tabfill type="text" data-f="url" placeholder="https://host/mcp" class="mcp-input">
                     </div>
                     <div class="mcp-form-row">
                         <label>${_tt('mcp.key_label', 'API-Schlüssel (optional)')}</label>
@@ -324,12 +324,12 @@
                     </label>
                     <div class="mcp-form-row">
                         <label>${_tt('mcp.key_header_label', 'Header-Name')}</label>
-                        <input type="text" data-f="key-header" class="mcp-input" placeholder="Authorization">
+                        <input data-tabfill type="text" data-f="key-header" class="mcp-input" placeholder="Authorization">
                     </div>
                     <div class="mcp-form-hint">${_esc(_tt('mcp.key_header_hint', 'Leer = „Authorization: Bearer <Schlüssel>“. Erwartet der Server einen eigenen Header (z. B. X-API-Key), hier dessen Namen eintragen.'))}</div>
                     <div class="mcp-form-row">
                         <label>${window.t('mcp.ca_label')}</label>
-                        <textarea data-f="ca" class="mcp-input" rows="3"
+                        <textarea data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" data-f="ca" class="mcp-input" rows="3"
                                   placeholder="-----BEGIN CERTIFICATE-----"></textarea>
                     </div>
                     <label class="mcp-toggle" data-f="ca-weg-zeile" style="display:none;">
@@ -340,13 +340,13 @@
                 </div>
                 <div class="mcp-form-row">
                     <label>${_tt('mcp.ergebnis_max_label', 'Max. Zeichen je Ergebnis')}</label>
-                    <input type="number" min="0" step="1000" data-f="ergebnis-max" class="mcp-input"
+                    <input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="number" min="0" step="1000" data-f="ergebnis-max" class="mcp-input"
                            placeholder="${_esc(_tt('mcp.ergebnis_max_ph', 'unbegrenzt'))}">
                 </div>
                 <div class="mcp-form-hint">${_esc(_tt('mcp.ergebnis_max_hint', 'Leer oder 0 = unbegrenzt: Werkzeug-Ergebnisse dieses Servers gehen vollständig an das Modell. Eine Zahl kürzt längere Ergebnisse auf so viele Zeichen (mit Hinweis).'))}</div>
                 <div class="mcp-form-row">
                     <label>${window.t('mcp.env_label')}</label>
-                    <textarea data-f="env" class="mcp-input" rows="2" placeholder="API_KEY=xxx"></textarea>
+                    <textarea data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" data-f="env" class="mcp-input" rows="2" placeholder="API_KEY=xxx"></textarea>
                 </div>
                 <div class="mcp-cert-fehler" data-f="fehler" role="alert"></div>
                 <div class="mcp-form-buttons">

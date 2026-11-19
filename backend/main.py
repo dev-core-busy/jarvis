@@ -6320,6 +6320,45 @@ async def oidc_status():
     return JSONResponse({"aktiv": True, "ad_modus": _oidc_ad_modus()})
 
 
+def _oidc_ursprung(url: str) -> tuple[str, str, int] | None:
+    """(Schema, Host, Port) einer Adresse, Port ohne Angabe = Standardport."""
+    from urllib.parse import urlsplit
+    try:
+        t = urlsplit(str(url or ""))
+        schema = (t.scheme or "").lower()
+        host = (t.hostname or "").lower()
+        port = t.port or {"https": 443, "http": 80}.get(schema, 0)
+    except ValueError:
+        return None
+    if not schema or not host:
+        return None
+    return schema, host, port
+
+
+def _oidc_start_umleitung(request: Request, redirect_uri: str) -> str | None:
+    """Adresse, unter der die Anmeldung beginnen MUSS – oder None, wenn sie hier passt.
+
+    Das Bindungs-Cookie (``__Host-``) gilt nur fuer den Host, unter dem
+    ``/start`` lief. Ist die Rueckkehradresse fest auf einen ANDEREN Namen
+    eingetragen (DEV 2026-11-19: Knopf unter einem Hostnamen, Rueckkehr auf die
+    IP), kommt der Browser ohne Cookie zurueck, und die erste Anmeldung
+    scheitert als "abgelaufen"; der zweite Klick gelingt nur, weil der Browser
+    danach schon unter der Rueckkehradresse steht. Deshalb beginnt die
+    Anmeldung zuerst dort. ``umgeleitet=1`` verhindert eine Schleife, falls der
+    Server sich selbst unter anderem Namen sieht (Proxy) – dann wie bisher."""
+    ziel = _oidc_ursprung(redirect_uri)
+    hier = _oidc_ursprung(str(request.base_url))
+    if ziel is None or hier is None or ziel == hier:
+        return None
+    if request.query_params.get("umgeleitet"):
+        print(f"[AUTH] IdP-Start: Aufruf unter {hier[1]}:{hier[2]} passt auch nach der "
+              f"Umleitung nicht zur Rueckkehradresse {ziel[1]}:{ziel[2]}", flush=True)
+        return None
+    port = "" if ziel[2] == {"https": 443, "http": 80}.get(ziel[0]) else f":{ziel[2]}"
+    host = f"[{ziel[1]}]" if ":" in ziel[1] else ziel[1]
+    return f"{ziel[0]}://{host}{port}/api/login/oidc/start?umgeleitet=1"
+
+
 @app.get("/api/login/oidc/start")
 async def oidc_start(request: Request):
     """Anmeldung beim IdP beginnen: state, nonce, PKCE ablegen, 302 zum IdP."""
@@ -6327,6 +6366,12 @@ async def oidc_start(request: Request):
     cfg = _oidc_konfig()
     if cfg is None:
         return _oidc_zurueck(request, "nicht_eingerichtet", grund="IdP-Anmeldung aus")
+    umleitung = _oidc_start_umleitung(request, _oidc_redirect_uri(request, cfg))
+    if umleitung:
+        from fastapi.responses import RedirectResponse
+        resp = RedirectResponse(umleitung, status_code=302)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
     ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(ip):
         return _oidc_zurueck(request, "zu_viele", grund="Ratenbegrenzung")
@@ -6367,9 +6412,16 @@ async def oidc_callback(request: Request):
     vorgang = _oidc.VORGAENGE.nehmen(q.get("state", ""))
     if vorgang is None:
         return _oidc_zurueck(request, "abgelaufen", grund="state unbekannt oder abgelaufen")
-    if not _oidc.bindung_passt(request.cookies.get(_OIDC_COOKIE_VORGANG, ""),
-                               vorgang.get("bindung", "")):
-        return _oidc_zurueck(request, "abgelaufen", grund="Vorgang gehoert nicht zu diesem Browser")
+    _bindung_cookie = request.cookies.get(_OIDC_COOKIE_VORGANG, "")
+    if not _oidc.bindung_passt(_bindung_cookie, vorgang.get("bindung", "")):
+        # Fehlt das Cookie ganz, lief der Start meist unter einem anderen Namen
+        # als die Rueckkehr (siehe _oidc_start_umleitung) – das gehoert ins Journal.
+        return _oidc_zurueck(
+            request, "abgelaufen",
+            grund=("Vorgang gehoert nicht zu diesem Browser (Cookie passt nicht)"
+                   if _bindung_cookie else
+                   "Vorgang gehoert nicht zu diesem Browser (kein Cookie unter %s)"
+                   % str(request.base_url).rstrip("/")))
     if q.get("error"):
         return _oidc_zurueck(request, "abgebrochen",
                              grund="IdP meldet %s" % str(q.get("error"))[:60])

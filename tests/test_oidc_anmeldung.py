@@ -534,7 +534,8 @@ FUNK = {n.name: n for n in BAUM.body if isinstance(n, (ast.FunctionDef, ast.Asyn
 NOETIG = ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri", "_oidc_mfa_anerkennen",
           "_oidc_cookie", "_oidc_cookie_weg", "_oidc_zurueck", "oidc_callback",
           "oidc_einloesen", "_oidc_einloesen_ablauf", "oidc_start", "oidc_status",
-          "_oidc_ad_modus", "oidc_einstellungen_lesen", "oidc_einstellungen_setzen")
+          "_oidc_ad_modus", "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
+          "_oidc_ursprung", "_oidc_start_umleitung")
 for n in NOETIG:
     pruefe(n in FUNK, "%s existiert in main.py" % n)
 if not all(n in FUNK for n in NOETIG):
@@ -682,7 +683,8 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
               "_oidc_cookie", "_oidc_cookie_weg", "_oidc_zurueck", "oidc_callback",
               "_oidc_einloesen_ablauf", "_oidc_ad_modus", "oidc_status",
               "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
-              "_oidc_zugaenge_holen", "_idp_zugaenge_uebernehmen"):
+              "_oidc_zugaenge_holen", "_idp_zugaenge_uebernehmen",
+              "_oidc_ursprung", "_oidc_start_umleitung"):
         fn = FUNK[n]
         fn2 = ast.FunctionDef(name=fn.name, args=fn.args, body=fn.body, decorator_list=[],
                               returns=None, type_params=[]) if isinstance(fn, ast.FunctionDef) else \
@@ -798,6 +800,41 @@ pruefe(_ziel(r) == "/?idp_fehler=gesperrt", "gesperrtes Konto -> abgewiesen")
 r, log = _callback(freigabe="fehler")
 pruefe(_ziel(r) == "/?idp_fehler=pruefung" and "__Host-jarvis_oidc_schein" not in r.cookies,
        "Freigabe nicht pruefbar -> kein Schein (fail-closed)")
+
+# Start unter einem anderen Namen als die Rueckkehradresse (DEV 2026-11-19):
+# das __Host-Cookie gilt nur fuer den Start-Host, die Rueckkehr kaeme ohne
+# Cookie an. Gemessen wird die ENTSCHEIDUNG, ausgefuehrt, nicht ihr Text.
+ns, _ = _ns(EINST)
+_um = ns["_oidc_start_umleitung"]
+_rq = _Req()   # base_url https://jarvis.beispiel.de/
+pruefe(_um(_rq, "https://jarvis.beispiel.de/api/login/oidc/callback") is None,
+       "Positivkontrolle: gleicher Ursprung -> keine Umleitung")
+pruefe(_um(_rq, "https://JARVIS.beispiel.de:443/api/login/oidc/callback") is None,
+       "gleicher Ursprung mit Standardport und Grossschreibung -> keine Umleitung")
+pruefe(_um(_rq, "https://192.0.2.30/api/login/oidc/callback")
+       == "https://192.0.2.30/api/login/oidc/start?umgeleitet=1",
+       "anderer Host -> Start zuerst unter der Rueckkehradresse")
+pruefe(_um(_rq, "https://jarvis.beispiel.de:8443/cb")
+       == "https://jarvis.beispiel.de:8443/api/login/oidc/start?umgeleitet=1",
+       "anderer Port -> Umleitung samt Port")
+pruefe(_um(_rq, "https://[2001:db8::1]/cb") == "https://[2001:db8::1]/api/login/oidc/start?umgeleitet=1",
+       "IPv6-Rueckkehradresse in Klammern")
+pruefe(_um(_Req(query={"umgeleitet": "1"}), "https://192.0.2.30/cb") is None,
+       "nach einer Umleitung keine zweite (Schleifenschutz)")
+pruefe(_um(_rq, "") is None and _um(_rq, "kaputt") is None,
+       "leere/unbrauchbare Rueckkehradresse -> keine Umleitung")
+pruefe(any(isinstance(c, ast.Call) and ast.unparse(c.func) == "_oidc_start_umleitung"
+           for c in ast.walk(FUNK["oidc_start"])),
+       "oidc_start fragt die Umleitung ab")
+_st_baum = ast.unparse(FUNK["oidc_start"])
+pruefe(0 <= _st_baum.find("_oidc_start_umleitung(") < _st_baum.find("VORGAENGE.neu("),
+       "Umleitung VOR dem Anlegen des Vorgangs (kein verwaister state)")
+r, log = _callback(cookie=False)
+pruefe(any("kein Cookie" in str(kw.get("grund", "")) for _a, kw in log["sicherheit"]),
+       "fehlendes Cookie wird im Grund benannt")
+r, log = _callback(cookie=True)
+pruefe(not any("kein Cookie" in str(kw.get("grund", "")) for _a, kw in log["sicherheit"]),
+       "Gegenkontrolle: mit passendem Cookie kein solcher Grund")
 r, log = _callback(freigabe="nein")
 pruefe(_ziel(r) == "/?idp_fehler=keine_freigabe", "keine Freigabe -> abgewiesen")
 r, log = _callback(lizenz=False)

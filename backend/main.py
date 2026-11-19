@@ -6263,11 +6263,13 @@ def _oidc_mfa_anerkennen() -> bool:
     return _oidc_schalter("oidc_mfa_anerkennen", True)
 
 
-# Kennwortanmeldung (AD) neben der IdP-Anmeldung: "fallback" = nur sichtbar,
-# wenn die IdP-Anmeldung scheitert (Vorgabe); "zusaetzlich" = immer sichtbar.
-# Nur die ANZEIGE der Anmeldemaske – /api/login bleibt in beiden Faellen
-# erreichbar (Ausweichweg, Apps, Add-in, Notfallkonto).
-_OIDC_AD_MODI = ("fallback", "zusaetzlich")
+# Kennwortanmeldung (AD) neben der IdP-Anmeldung: "zusaetzlich" = immer
+# sichtbar (Vorgabe, Festlegung des Betreibers 2026-11-19 – bis dahin war es
+# "fallback"); "fallback" = nur sichtbar, wenn die IdP-Anmeldung scheitert.
+# Der ERSTE Eintrag ist die Vorgabe (_oidc_ad_modus). Nur die ANZEIGE der
+# Anmeldemaske – /api/login bleibt in beiden Faellen erreichbar (Ausweichweg,
+# Apps, Add-in, Notfallkonto). Ein gespeicherter Wert bleibt, wie er ist.
+_OIDC_AD_MODI = ("zusaetzlich", "fallback")
 
 
 def _oidc_ad_modus() -> str:
@@ -6312,12 +6314,25 @@ def _oidc_zurueck(request: Request, fehler: str = "", konto: str = "", grund: st
 
 @app.get("/api/login/oidc/status")
 async def oidc_status():
-    """Fuer die Anmeldemaske: gibt es den Knopf "Mit Firmenkonto anmelden", und
-    erscheint die Kennwortanmeldung daneben (``ad_modus``)? Bei ausgeschalteter
-    IdP-Anmeldung bleibt die Antwort ``{"aktiv": false}`` wie bisher."""
-    if _oidc_konfig() is None:
+    """Fuer die Anmeldemaske: gibt es den Knopf "Mit Firmenkonto anmelden (SSO)",
+    und erscheint die Kennwortanmeldung daneben (``ad_modus``)? Bei ausgeschalteter
+    IdP-Anmeldung bleibt die Antwort ``{"aktiv": false}`` wie bisher.
+
+    ``ursprung`` (nur bei FEST eingetragener Rueckkehradresse): unter diesem
+    Ursprung endet jede IdP-Anmeldung. Die Maske wechselt vorab dorthin, damit
+    Haken "Automatisch anmelden" (localStorage, je Ursprung), Anmeldung und
+    Sitzung unter EINEM Namen liegen (DEV 2026-11-19: Haken unter dem
+    Hostnamen gesetzt, nach dem Abmelden unter der IP leer). Eine aus der
+    Anfrage abgeleitete Adresse wird bewusst NICHT gemeldet – hinter einem
+    Proxy waere das der interne Name."""
+    cfg = _oidc_konfig()
+    if cfg is None:
         return JSONResponse({"aktiv": False})
-    return JSONResponse({"aktiv": True, "ad_modus": _oidc_ad_modus()})
+    antwort = {"aktiv": True, "ad_modus": _oidc_ad_modus()}
+    ursprung = _oidc_ursprung_adresse(cfg.get("redirect_uri", ""))
+    if ursprung:
+        antwort["ursprung"] = ursprung
+    return JSONResponse(antwort)
 
 
 def _oidc_ursprung(url: str) -> tuple[str, str, int] | None:
@@ -6333,6 +6348,19 @@ def _oidc_ursprung(url: str) -> tuple[str, str, int] | None:
     if not schema or not host:
         return None
     return schema, host, port
+
+
+def _oidc_ursprung_adresse(url: str) -> str:
+    """``schema://host[:port]`` einer Adresse (Standardport weggelassen, IPv6 in
+    Klammern, Kleinschreibung) – leer, wenn sie unbrauchbar ist. Gleiche Form wie
+    ``location.origin`` im Browser, damit die Maske sie direkt vergleichen kann."""
+    u = _oidc_ursprung(url)
+    if u is None or u[0] not in ("http", "https"):
+        return ""
+    schema, host, port = u
+    teil = "" if port == {"https": 443, "http": 80}[schema] else f":{port}"
+    host = f"[{host}]" if ":" in host else host
+    return f"{schema}://{host}{teil}"
 
 
 def _oidc_start_umleitung(request: Request, redirect_uri: str) -> str | None:
@@ -6354,9 +6382,8 @@ def _oidc_start_umleitung(request: Request, redirect_uri: str) -> str | None:
         print(f"[AUTH] IdP-Start: Aufruf unter {hier[1]}:{hier[2]} passt auch nach der "
               f"Umleitung nicht zur Rueckkehradresse {ziel[1]}:{ziel[2]}", flush=True)
         return None
-    port = "" if ziel[2] == {"https": 443, "http": 80}.get(ziel[0]) else f":{ziel[2]}"
-    host = f"[{ziel[1]}]" if ":" in ziel[1] else ziel[1]
-    return f"{ziel[0]}://{host}{port}/api/login/oidc/start?umgeleitet=1"
+    adresse = _oidc_ursprung_adresse(redirect_uri)
+    return f"{adresse}/api/login/oidc/start?umgeleitet=1" if adresse else None
 
 
 @app.get("/api/login/oidc/start")

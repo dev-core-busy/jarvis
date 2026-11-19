@@ -11,7 +11,7 @@
       Verlangt der Server den Zwei-Faktor-Code, erscheint #idp-totp.
    3. Fehler (/?idp_fehler=<kennung>) stehen in #login-error, uebersetzt.
    4. Kennwortanmeldung (AD, #kennwort-bereich) neben dem IdP: der Server
-      meldet ad_modus. "zusaetzlich" -> immer sichtbar. "fallback" (Vorgabe)
+      meldet ad_modus. "zusaetzlich" (Vorgabe) -> immer sichtbar. "fallback"
       -> verborgen, bis die Anmeldung ueber den IdP scheitert (Fehlerkennung,
       Einloesen abgelehnt, Server nicht erreichbar). FAIL-OPEN: jeder Zweifel
       (Status nicht lesbar, keine Antwort binnen SICHERUNG_MS, IdP aus) zeigt
@@ -36,6 +36,19 @@
       dann nur, wenn app.js die Maske wegen eines ungueltigen Tokens zeigt
       (Ereignis 'jarvis-anmeldemaske') – sonst liefen Weiterleitung aufs
       Portal und zum IdP um die Wette.
+
+   6. EIN Servername (wechselGrund): meldet der Status einen `ursprung` (die
+      fest eingetragene Rueckkehradresse) und steht die Seite unter einem
+      anderen, wechselt "/" vorab dorthin – bevor Maske und Haken erscheinen.
+      Sonst laege der Haken (localStorage gilt je Ursprung) unter dem einen
+      Namen und Anmeldung samt Sitzung unter dem anderen; nach dem Abmelden
+      stand er leer da (DEV 2026-11-19). Dieselben Schranken wie in Punkt 5
+      (Pfad, Rueckkehr vom IdP, mitgebrachtes Token). Die Adresse traegt
+      `umgeleitet=1` bzw. `=2` (= kam von einer Jarvis-Seite, also vom
+      Abmelden): der Referrer geht ueber den Ursprungswechsel verloren
+      (Referrer-Policy same-origin), die Marke nimmt seine Aussage mit. Und
+      sie ist der Schleifenschutz: wer schon umgeleitet wurde, wechselt nicht
+      noch einmal (Server sieht sich hinter einem Proxy unter anderem Namen).
 
    Die Kennwortanmeldung (app.js) selbst bleibt unberuehrt; /api/login ist in
    beiden Modi erreichbar (Ausweichweg, Apps, Add-in, Notfallkonto).
@@ -108,7 +121,8 @@
     var AUTO = 'jarvis_idp_auto';              // localStorage: '1' = Haken gesetzt
     var AUTO_ZEIT = 'jarvis_idp_auto_zeit';    // sessionStorage: letzter Start in diesem Tab
     var AUTO_SPERRE_MS = 60000;
-    var autoLage = { aktiv: null, maske: false, rueckkehr: false, erledigt: false };
+    var autoLage = { aktiv: null, maske: false, rueckkehr: false, erledigt: false,
+                     ursprung: '', umgeleitet: '' };
     var navigieren = function (url) { window.location.assign(url); };
 
     function autoGewuenscht() {
@@ -119,10 +133,23 @@
         catch (e) { /* ohne Speicher gibt es keinen Haken ueber den Besuch hinaus */ }
     }
     function vonJarvis() {
+        // Ueber einen Ursprungswechsel (Punkt 6) mitgebracht: dort war es eine Jarvis-Seite.
+        if (autoLage.umgeleitet === '2') return true;
         // Referrer-Policy ist same-origin (sicherheits_kopf.py): von einer
         // Jarvis-Seite kommt der volle Ursprung mit, von aussen nichts.
         try { return !!document.referrer && new URL(document.referrer).origin === window.location.origin; }
         catch (e) { return false; }
+    }
+
+    // Leer = jetzt auf den Ursprung der Rueckkehradresse wechseln (Punkt 6).
+    function wechselGrund(l) {
+        if (!l.ursprung) return 'kein_ursprung';
+        if (l.ursprung === l.hier) return 'gleicher_ursprung';
+        if (l.pfad !== '/') return 'nicht_wurzel';
+        if (l.rueckkehr) return 'idp_rueckkehr';
+        if (l.umgeleitet) return 'schon_umgeleitet';
+        if (!l.maske) return 'token_pruefung';
+        return '';
     }
     function letzterStart() {
         try { return parseInt(sessionStorage.getItem(AUTO_ZEIT) || '0', 10) || 0; } catch (e) { return 0; }
@@ -141,11 +168,28 @@
         return '';
     }
 
+    // Rueckgabe true = die Seite verlaesst sich gerade (Wechsel oder Start).
     function autoVersuchen() {
         // `erledigt` und die Schleifenbremse decken sich, solange sessionStorage
         // geht. Bei gesperrtem Speicher (privater Modus) traegt nur diese Marke:
         // ein zweites Ereignis von app.js startete sonst ein zweites Mal.
-        if (autoLage.erledigt || autoLage.aktiv === null) return;
+        if (autoLage.erledigt || autoLage.aktiv === null) return false;
+        if (autoLage.aktiv) {
+            var wg = wechselGrund({
+                ursprung: autoLage.ursprung,
+                hier: window.location.origin,
+                pfad: window.location.pathname,
+                rueckkehr: autoLage.rueckkehr,
+                umgeleitet: autoLage.umgeleitet,
+                maske: autoLage.maske
+            });
+            if (wg === 'token_pruefung') return false;   // app.js prueft noch das Token
+            if (!wg) {
+                autoLage.erledigt = true;
+                navigieren(autoLage.ursprung + '/?umgeleitet=' + (vonJarvis() ? '2' : '1'));
+                return true;
+            }
+        }
         var grund = autoGrund({
             gewuenscht: autoGewuenscht(),
             aktiv: autoLage.aktiv,
@@ -156,12 +200,13 @@
             jetzt: Date.now(),
             maske: autoLage.maske
         });
-        if (grund === 'maske') return;   // app.js prueft noch das Token – spaeter erneut
+        if (grund === 'maske') return false;   // app.js prueft noch das Token – spaeter erneut
         autoLage.erledigt = true;
-        if (grund) return;
+        if (grund) return false;
         try { sessionStorage.setItem(AUTO_ZEIT, String(Date.now())); } catch (e) { /* Bremse fehlt dann */ }
         var k = $('btn-idp-login');
         navigieren((k && k.getAttribute('href')) || '/api/login/oidc/start');
+        return true;
     }
 
     function autoHakenVerdrahten() {
@@ -185,20 +230,25 @@
         var sicherung = setTimeout(function () {
             if (!entschieden) kennwortZeigen(true);
         }, SICHERUNG_MS);
-        function fertig(aktiv, modus) {
+        function fertig(aktiv, modus, ursprung) {
             entschieden = true;
             clearTimeout(sicherung);
-            box.hidden = !aktiv;
             merken(aktiv ? modus : '');
-            kennwortZeigen(!aktiv || modus !== 'fallback' || ausgewichen);
             autoLage.aktiv = !!aktiv;
-            autoVersuchen();
+            autoLage.ursprung = aktiv ? (ursprung || '') : '';
+            // Verlaesst die Seite sich gleich, bleibt die Maske, wie sie ist –
+            // sonst blitzen Knopf und Haken unter dem falschen Namen kurz auf.
+            if (autoVersuchen()) return;
+            box.hidden = !aktiv;
+            kennwortZeigen(!aktiv || modus !== 'fallback' || ausgewichen);
         }
         fetch('/api/login/oidc/status', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 var aktiv = !!(d && d.aktiv);
-                fertig(aktiv, aktiv && d.ad_modus === 'zusaetzlich' ? 'zusaetzlich' : 'fallback');
+                // Nur ein ausdrueckliches "fallback" verbirgt das Kennwort (fail-open).
+                fertig(aktiv, aktiv && d.ad_modus === 'fallback' ? 'fallback' : 'zusaetzlich',
+                       aktiv && typeof d.ursprung === 'string' ? d.ursprung : '');
             })
             .catch(function () { fertig(false, ''); });
     }
@@ -295,6 +345,12 @@
         if (fehler) ausweichen();
         else if (gemerkt() === 'fallback') kennwortZeigen(false);
         autoLage.rueckkehr = !!(fehler || (q && q.get('anmeldung') === 'idp'));
+        // Marke eines Ursprungswechsels (Punkt 6): merken, dann aus der Adresse nehmen.
+        var um = q ? (q.get('umgeleitet') || '') : '';
+        if (um) {
+            autoLage.umgeleitet = um === '2' ? '2' : '1';
+            if (!autoLage.rueckkehr) adresseAufraeumen();
+        }
         // Dieselbe Bedingung wie in app.js (`if (token)` -> erst pruefen).
         autoLage.maske = autoLage.maske || !window.JarvisSitzung.token();
         autoHakenVerdrahten();
@@ -316,7 +372,7 @@
 
     window.IdpAnmeldung = {
         _einloesen: einloesen, _FEHLER: FEHLER, _MERK: MERK,
-        _AUTO: AUTO, _AUTO_ZEIT: AUTO_ZEIT, _autoGrund: autoGrund,
+        _AUTO: AUTO, _AUTO_ZEIT: AUTO_ZEIT, _autoGrund: autoGrund, _wechselGrund: wechselGrund,
         // Nur fuer Pruefstaende: jsdom kann nicht navigieren und verraet das Ziel nicht.
         _navigation: function (fn) { navigieren = fn; }
     };

@@ -12,9 +12,10 @@ angemeldet (2026-11-18). ECHT: IdP-Anmeldung aus, eigener IdP-Client steht aus.*
 - **E1 neu entschieden:** Die IdP-Anmeldung zaehlt in der Vorgabe als zweiter Faktor, auch
   fuer Administratoren. Abschalten nur ausdruecklich.
 - **E2 entschieden:** Schalter „AD-Anmeldung zusaetzlich“ (`oidc_ad_modus`), sichtbar nur bei
-  eingeschaltetem IdP. Vorgabe **Ausweichweg** (`fallback`): die Kennwortmaske erscheint erst,
-  wenn die IdP-Anmeldung scheitert (Fehlerkennung, Einloesen abgelehnt, IdP/Status nicht
-  erreichbar). An (`zusaetzlich`): immer sichtbar. Nur Anzeige – `/api/login` bleibt
+  eingeschaltetem IdP. Vorgabe seit 2026-11-19 **an** (`zusaetzlich`): die Kennwortmaske steht
+  immer neben dem Knopf (bis dahin war die Vorgabe `fallback`). Aus (`fallback`): sie erscheint
+  erst, wenn die IdP-Anmeldung scheitert (Fehlerkennung, Einloesen abgelehnt, IdP/Status nicht
+  erreichbar). Ein gespeicherter Wert bleibt bestehen. Nur Anzeige – `/api/login` bleibt
   erreichbar; fail-open bei jedem Zweifel. Notfallkonto `jarvis`: beim IdP „Deny“ waehlen
   → Ausweichweg.
 

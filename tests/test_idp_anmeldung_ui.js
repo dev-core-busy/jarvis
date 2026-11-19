@@ -20,6 +20,12 @@
  *     und bei mitgebrachtem Token erst, wenn app.js es verworfen hat. Dazu
  *     am Syntaxbaum von app.js: das Ereignis kommt NUR aus der gescheiterten
  *     Tokenpruefung, nicht aus showLoginScreen().
+ *  E  EIN SERVERNAME (2026-11-19): meldet der Status einen `ursprung` und
+ *     steht die Seite unter einem anderen, wechselt "/" vorab dorthin – vor
+ *     dem Haken (localStorage gilt je Ursprung) und vor dem IdP-Start. Nicht
+ *     bei gleichem Ursprung, nicht unter /settings, nicht bei Rueckkehr vom
+ *     IdP, nicht ein zweites Mal (Marke umgeleitet), bei Token erst nach dem
+ *     Ereignis. "Kam vom Abmelden" reist als umgeleitet=2 mit.
  *
  * Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
  */
@@ -106,6 +112,8 @@ function seite(url, antworten) {
             if (antworten.status === 'nie') return new Promise(() => {});
             if (antworten.status === 'fehler') return Promise.reject(new Error('offline'));
             const body = antworten.aktiv ? { aktiv: true, ad_modus: antworten.modus || 'fallback' } : { aktiv: false };
+            if (antworten.ohneModus) delete body.ad_modus;
+            if (antworten.aktiv && antworten.ursprung) body.ursprung = antworten.ursprung;
             const ant = { ok: true, status: 200, json: () => Promise.resolve(body) };
             // w.setTimeout: verfaellt mit w.close(), sonst traefe die Antwort ein geschlossenes Fenster.
             return antworten.statusMs ? new Promise(r => w.setTimeout(() => r(ant), antworten.statusMs)) : Promise.resolve(ant);
@@ -202,6 +210,13 @@ function seite(url, antworten) {
     check('zusaetzlich: IdP-Knopf bleibt Nebenknopf (Hauptknopf ist "Anmelden")', !haupt(s));
     s.w.close();
 
+    // Vorgabe seit 2026-11-19 "zusaetzlich": nur ein AUSDRUECKLICHES fallback verbirgt.
+    s = seite('https://jarvis.test/', { aktiv: true, ohneModus: true, einloesen: [] });
+    await warte(60);
+    check('Status ohne ad_modus: Kennwort-Bereich sichtbar (Vorgabe zusaetzlich, fail-open)',
+          sichtbar(s) && s.w.localStorage.getItem('jarvis_idp_ad_modus') === 'zusaetzlich');
+    s.w.close();
+
     s = seite('https://jarvis.test/', { aktiv: false, merk: 'fallback', einloesen: [] });
     await warte(60);
     check('IdP aus (trotz altem Merker): Kennwort sichtbar, Merker entfernt',
@@ -255,7 +270,9 @@ function seite(url, antworten) {
             if (init && init.method === 'POST') posts.push(JSON.parse(init.body || '{}'));
             return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, oidc_aktiv: true, oidc_ad_modus: 'zusaetzlich', namensclaims: [] }) });
         };
-        for (const f of ['i18n.js', 'sitzung.js', 'settings_idp.js']) w.eval(lies('frontend/js/' + f));
+        // tabfill.js wie in settings.html: settings_idp.js setzt den Vorschlag der
+        // Rueckkehradresse ueber JarvisTabfill (2026-11-19).
+        for (const f of ['i18n.js', 'sitzung.js', 'tabfill.js', 'settings_idp.js']) w.eval(lies('frontend/js/' + f));
         d.dispatchEvent(new w.Event('DOMContentLoaded'));
         const E = w.IdpEinstellungen, zeile = d.getElementById('idp-ad-modus-zeile');
         const cb = d.getElementById('idp-ad-zusaetzlich'), aktiv = d.getElementById('idp-aktiv');
@@ -321,11 +338,10 @@ function seite(url, antworten) {
     if (!s.w.IdpAnmeldung || !s.w.IdpAnmeldung._autoGrund) {
         console.log('ABBRUCH (Exit 2): Automatik nicht im Modul'); bilanz = true; process.exit(2);
     }
-    if (s.z.ziele.length !== 1) {
-        console.log('ABBRUCH (Exit 2): Positivkontrolle – mit Haken kein Start (' + JSON.stringify(s.z.ziele) + ')');
-        bilanz = true; process.exit(2);
-    }
-    check('Haken + IdP an + frischer Aufruf -> genau EIN Start zum IdP', s.z.ziele[0] === START, s.z.ziele[0]);
+    // Bewusst FAIL statt Exit 2: kein Start ist ein PRODUKTbefund (eine Sabotage
+    // der Automatik), kein kaputter Messaufbau – der ist oben schon belegt.
+    check('Positivkontrolle: Haken + IdP an + frischer Aufruf -> genau EIN Start zum IdP',
+          s.z.ziele.length === 1 && s.z.ziele[0] === START, JSON.stringify(s.z.ziele));
     check('Start merkt die Zeit (Schleifenbremse)', +s.w.sessionStorage.getItem('jarvis_idp_auto_zeit') > Date.now() - 5000);
     check('Haken erscheint gesetzt', s.d.getElementById('idp-auto').checked === true);
     s.w.close();
@@ -462,6 +478,66 @@ function seite(url, antworten) {
         });
         check('... gerufen aus .then UND .catch der Tokenpruefung (/api/verify-token)', zweige === 2, 'Zweige: ' + zweige);
     }
+
+    // ── E: Ein Servername ───────────────────────────────────────────────────
+    console.log('E  Ein Servername');
+    const DORT = 'https://192.0.2.30';
+    s = await lauf('https://jarvis.test/', { ursprung: DORT });
+    if (!s.w.IdpAnmeldung._wechselGrund) { console.log('ABBRUCH (Exit 2): Wechsel nicht im Modul'); bilanz = true; process.exit(2); }
+    // FAIL statt Exit 2 (wie in D): ein fehlender Wechsel ist ein Produktbefund.
+    check('Positivkontrolle: anderer Ursprung -> Wechsel auf "/" dort, Marke umgeleitet=1',
+          s.z.ziele.length === 1 && s.z.ziele[0] === DORT + '/?umgeleitet=1', JSON.stringify(s.z.ziele));
+    check('... Knopf und Haken bleiben verborgen (kein Aufblitzen unter dem falschen Namen)',
+          s.d.getElementById('idp-login').hidden === true);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { ursprung: DORT, auto: true });
+    check('Wechsel geht dem automatischen Start vor (nur EIN Ziel: der Wechsel)',
+          s.z.ziele.length === 1 && s.z.ziele[0] === DORT + '/?umgeleitet=1', JSON.stringify(s.z.ziele));
+    check('... und merkt keine Startzeit (gestartet wird erst drueben)', s.w.sessionStorage.getItem('jarvis_idp_auto_zeit') === null);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { ursprung: DORT, referrer: 'https://jarvis.test/portal' });
+    check('vom Abmelden (Jarvis-Seite) -> Marke umgeleitet=2', s.z.ziele[0] === DORT + '/?umgeleitet=2', s.z.ziele[0]);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { ursprung: 'https://jarvis.test' });
+    check('gleicher Ursprung -> kein Wechsel, Knopf sichtbar',
+          s.z.ziele.length === 0 && s.d.getElementById('idp-login').hidden === false);
+    s.w.close();
+    s = await lauf('https://jarvis.test/', { ursprung: DORT, aktiv: false });
+    check('IdP aus -> kein Wechsel', s.z.ziele.length === 0);
+    s.w.close();
+    s = await lauf('https://jarvis.test/settings', { ursprung: DORT });
+    check('unter /settings -> kein Wechsel', s.z.ziele.length === 0);
+    s.w.close();
+    s = await lauf('https://jarvis.test/?idp_fehler=abgebrochen', { ursprung: DORT });
+    check('Rueckkehr mit Fehler -> kein Wechsel, Meldung steht', s.z.ziele.length === 0
+          && !s.d.getElementById('login-error').hidden);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/?umgeleitet=1', { ursprung: DORT });
+    check('schon umgeleitet und Ursprung passt trotzdem nicht -> kein zweiter Wechsel (Schleife)',
+          s.z.ziele.length === 0 && s.d.getElementById('idp-login').hidden === false);
+    check('... Marke aus der Adresse genommen', s.w.location.search === '', s.w.location.href);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/?umgeleitet=1', { ursprung: 'https://jarvis.test', auto: true });
+    check('angekommen (=1) mit Haken -> automatischer Start', s.z.ziele.length === 1 && s.z.ziele[0] === START,
+          JSON.stringify(s.z.ziele));
+    s.w.close();
+    s = await lauf('https://jarvis.test/?umgeleitet=2', { ursprung: 'https://jarvis.test', auto: true });
+    check('angekommen vom Abmelden (=2) mit Haken -> KEIN automatischer Start', s.z.ziele.length === 0);
+    check('... Haken steht drueben, wie dort gespeichert', s.d.getElementById('idp-auto').checked === true);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { ursprung: DORT, token: 'ALT' });
+    check('mit Token: kein Wechsel, solange app.js prueft', s.z.ziele.length === 0);
+    s.d.dispatchEvent(new s.w.CustomEvent('jarvis-anmeldemaske'));
+    await warte(20);
+    check('... Token verworfen (Ereignis) -> Wechsel', s.z.ziele.length === 1 && s.z.ziele[0] === DORT + '/?umgeleitet=1',
+          JSON.stringify(s.z.ziele));
+    s.w.close();
 
     bilanz = true;
     console.log('\nErgebnis: ' + ok + ' OK, ' + fail + ' FAIL');

@@ -535,7 +535,7 @@ NOETIG = ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri", "_oidc_mfa_ane
           "_oidc_cookie", "_oidc_cookie_weg", "_oidc_zurueck", "oidc_callback",
           "oidc_einloesen", "_oidc_einloesen_ablauf", "oidc_start", "oidc_status",
           "_oidc_ad_modus", "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
-          "_oidc_ursprung", "_oidc_start_umleitung")
+          "_oidc_ursprung", "_oidc_ursprung_adresse", "_oidc_start_umleitung")
 for n in NOETIG:
     pruefe(n in FUNK, "%s existiert in main.py" % n)
 if not all(n in FUNK for n in NOETIG):
@@ -556,8 +556,8 @@ def _konstante(name):
 
 
 AD_MODI = _konstante("_OIDC_AD_MODI")
-pruefe(isinstance(AD_MODI, tuple) and AD_MODI[:1] == ("fallback",) and "zusaetzlich" in AD_MODI,
-       "_OIDC_AD_MODI: Vorgabe 'fallback', daneben 'zusaetzlich'")
+pruefe(isinstance(AD_MODI, tuple) and AD_MODI[:1] == ("zusaetzlich",) and "fallback" in AD_MODI,
+       "_OIDC_AD_MODI: Vorgabe 'zusaetzlich' (Festlegung 2026-11-19), daneben 'fallback'")
 
 
 pruefe("app.get('/api/login/oidc/start')" in _dek(FUNK["oidc_start"])
@@ -684,7 +684,7 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
               "_oidc_einloesen_ablauf", "_oidc_ad_modus", "oidc_status",
               "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
               "_oidc_zugaenge_holen", "_idp_zugaenge_uebernehmen",
-              "_oidc_ursprung", "_oidc_start_umleitung"):
+              "_oidc_ursprung", "_oidc_ursprung_adresse", "_oidc_start_umleitung"):
         fn = FUNK[n]
         fn2 = ast.FunctionDef(name=fn.name, args=fn.args, body=fn.body, decorator_list=[],
                               returns=None, type_params=[]) if isinstance(fn, ast.FunctionDef) else \
@@ -1047,19 +1047,49 @@ ns, _ = _ns(dict(EINST, oidc_mfa_anerkennen=False))
 pruefe(ns["_oidc_mfa_anerkennen"]() is False, "ausdruecklich aus bleibt aus")
 
 abschnitt("3b. Kennwortanmeldung neben dem IdP (oidc_ad_modus)")
-for wert, soll in ((None, "fallback"), ("zusaetzlich", "zusaetzlich"), (" Zusaetzlich ", "zusaetzlich"),
-                   ("fallback", "fallback"), ("immer", "fallback"), ("", "fallback")):
+for wert, soll in ((None, "zusaetzlich"), ("zusaetzlich", "zusaetzlich"), (" Zusaetzlich ", "zusaetzlich"),
+                   ("fallback", "fallback"), (" Fallback ", "fallback"),
+                   ("immer", "zusaetzlich"), ("", "zusaetzlich")):
     ns, _ = _ns(dict(EINST, **({} if wert is None else {"oidc_ad_modus": wert})))
     pruefe(ns["_oidc_ad_modus"]() == soll, "ad_modus %r -> %r" % (wert, soll))
 ns, _ = _ns(EINST)
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
-pruefe(d == {"aktiv": True, "ad_modus": "fallback"}, "Status: aktiv + Vorgabe fallback", )
+pruefe(d == {"aktiv": True, "ad_modus": "zusaetzlich"}, "Status: aktiv + Vorgabe zusaetzlich", )
+ns, _ = _ns(dict(EINST, oidc_ad_modus="fallback"))
+d = json.loads(asyncio.run(ns["oidc_status"]()).body)
+pruefe(d == {"aktiv": True, "ad_modus": "fallback"}, "Status: gespeichertes fallback bleibt fallback")
 ns, _ = _ns(dict(EINST, oidc_ad_modus="zusaetzlich"))
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
 pruefe(d == {"aktiv": True, "ad_modus": "zusaetzlich"}, "Status: zusaetzlich")
 ns, _ = _ns(dict(EINST, oidc_aktiv=False, oidc_ad_modus="zusaetzlich"))
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
 pruefe(d == {"aktiv": False}, "Status bei ausgeschaltetem IdP unveraendert {aktiv: false}")
+
+# Ursprung der festen Rueckkehradresse (2026-11-19): die Maske wechselt vorab
+# dorthin, damit Haken, Anmeldung und Sitzung unter EINEM Namen liegen. Die
+# Form muss location.origin entsprechen, sonst wechselt die Maske nie oder immer.
+_RU = "https://192.0.2.30/api/login/oidc/callback"
+ns, _ = _ns(dict(EINST, oidc_redirect_uri=_RU))
+d = json.loads(asyncio.run(ns["oidc_status"]()).body)
+pruefe(d.get("ursprung") == "https://192.0.2.30",
+       "Positivkontrolle: feste Rueckkehradresse -> Status nennt ihren Ursprung (%s)" % d)
+pruefe(d.get("aktiv") is True and d.get("ad_modus") == "zusaetzlich", "... neben aktiv und ad_modus")
+ns, _ = _ns(EINST)
+d = json.loads(asyncio.run(ns["oidc_status"]()).body)
+pruefe("ursprung" not in d, "ohne feste Rueckkehradresse kein Ursprung (abgeleitet waere hinter Proxy intern)")
+ns, _ = _ns(dict(EINST, oidc_aktiv=False, oidc_redirect_uri=_RU))
+d = json.loads(asyncio.run(ns["oidc_status"]()).body)
+pruefe(d == {"aktiv": False}, "IdP aus: kein Ursprung, auch bei eingetragener Adresse")
+ns, _ = _ns(dict(EINST, oidc_redirect_uri="kaputt"))
+d = json.loads(asyncio.run(ns["oidc_status"]()).body)
+pruefe("ursprung" not in d, "unbrauchbare Rueckkehradresse -> kein Ursprung")
+_ua = ns["_oidc_ursprung_adresse"]
+for roh, soll in (("https://JARVIS.Beispiel.de:443/cb", "https://jarvis.beispiel.de"),
+                  ("https://jarvis.beispiel.de:8443/cb", "https://jarvis.beispiel.de:8443"),
+                  ("http://jarvis.beispiel.de:80/cb", "http://jarvis.beispiel.de"),
+                  ("https://[2001:db8::1]/cb", "https://[2001:db8::1]"),
+                  ("ftp://jarvis.beispiel.de/cb", ""), ("", "")):
+    pruefe(_ua(roh) == soll, "Ursprung %r -> %r (Form wie location.origin), ist %r" % (roh, soll, _ua(roh)))
 
 
 def _setzen(body, einst=None):

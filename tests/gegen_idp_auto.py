@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Gegenprobe zu tests/test_idp_anmeldung_ui.js, Abschnitt D ("Automatisch anmelden").
+"""Gegenprobe zu tests/test_idp_anmeldung_ui.js, Abschnitte D ("Automatisch anmelden")
+und E (ein Servername).
 
 Jede Probe dreht EINE Regel zurueck (Ersetzung ganzer Zeilen), laesst den
 Waechter laufen und erwartet mindestens einen FAIL (Exit 1). Exit 2 des
@@ -52,8 +53,8 @@ PROBEN = [
      "        autoLage.maske = autoLage.maske || !window.JarvisSitzung.token();\n",
      "        autoLage.maske = true;\n"),
     ("mehrfacher Start", MOD,
-     "        if (autoLage.erledigt || autoLage.aktiv === null) return;\n",
-     "        if (autoLage.aktiv === null) return;\n"),
+     "        if (autoLage.erledigt || autoLage.aktiv === null) return false;\n",
+     "        if (autoLage.aktiv === null) return false;\n"),
     ("Startzeit nicht gemerkt", MOD,
      "        try { sessionStorage.setItem(AUTO_ZEIT, String(Date.now())); } catch (e) { /* Bremse fehlt dann */ }\n",
      ""),
@@ -68,6 +69,31 @@ PROBEN = [
      "        if (window.JarvisSession) window.JarvisSession.logout(token);\n"
      "        document.dispatchEvent(new CustomEvent('jarvis-anmeldemaske'));\n"
      "        mainScreen.classList.remove('active');\n"),
+    ("fehlender Modus verbirgt das Kennwort (alte Vorgabe)", MOD,
+     "                fertig(aktiv, aktiv && d.ad_modus === 'fallback' ? 'fallback' : 'zusaetzlich',\n",
+     "                fertig(aktiv, aktiv && d.ad_modus === 'zusaetzlich' ? 'zusaetzlich' : 'fallback',\n"),
+    # ── Ein Servername (Abschnitt E) ──
+    ("Wechsel auch bei gleichem Ursprung", MOD,
+     "        if (l.ursprung === l.hier) return 'gleicher_ursprung';\n", "        if (false) return 'gleicher_ursprung';\n"),
+    ("Wechsel auch unter /settings", MOD,
+     "        if (l.pfad !== '/') return 'nicht_wurzel';\n", "        if (false) return 'nicht_wurzel';\n"),
+    ("Wechsel trotz Rueckkehr vom IdP", MOD,
+     "        if (l.rueckkehr) return 'idp_rueckkehr';\n", "        if (false) return 'idp_rueckkehr';\n"),
+    ("Wechsel-Schleife", MOD,
+     "        if (l.umgeleitet) return 'schon_umgeleitet';\n", "        if (false) return 'schon_umgeleitet';\n"),
+    ("Wechsel, waehrend app.js das Token prueft", MOD,
+     "        if (!l.maske) return 'token_pruefung';\n", "        if (false) return 'token_pruefung';\n"),
+    ("Abmelden geht beim Wechsel verloren", MOD,
+     "                navigieren(autoLage.ursprung + '/?umgeleitet=' + (vonJarvis() ? '2' : '1'));\n",
+     "                navigieren(autoLage.ursprung + '/?umgeleitet=1');\n"),
+    ("mitgebrachtes Abmelden nicht ausgewertet", MOD,
+     "        if (autoLage.umgeleitet === '2') return true;\n", ""),
+    ("Maske blitzt vor dem Wechsel auf", MOD,
+     "            if (autoVersuchen()) return;\n", "            autoVersuchen();\n"),
+    ("Ursprung aus dem Status nicht uebernommen", MOD,
+     "            autoLage.ursprung = aktiv ? (ursprung || '') : '';\n", "            autoLage.ursprung = '';\n"),
+    ("Marke bleibt in der Adresse", MOD,
+     "            if (!autoLage.rueckkehr) adresseAufraeumen();\n", ""),
     ("Tokenpruefung: Netzfehler ohne Ereignis", APP,
      "        }).catch(() => {\n            _maskeNachTokenpruefung();\n",
      "        }).catch(() => {\n            showLoginScreen();\n"),

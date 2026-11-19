@@ -307,9 +307,15 @@ schreibe() {
     printf '%s\n' "$inhalt" > "$tmp"
     chmod "$modus" "$tmp"
     if [ "$name" = "SUDOERS" ] && command -v visudo >/dev/null 2>&1; then
-        if ! visudo -cf "$tmp" >/dev/null 2>&1; then
+        local visudo_sagt
+        if ! visudo_sagt="$(LC_ALL=C visudo -cf "$tmp" 2>&1)"; then
             rm -f "$tmp"
+            # Die Begruendung von visudo MITNEHMEN. Bis 2026-11-19 verschwand sie
+            # in /dev/null, und uebrig blieb "fehlgeschlagen" ohne Zeile, ohne
+            # Grund und ohne naechsten Schritt - auf einem Laeufer mit anderer
+            # sudo-Fassung war damit nicht zu sagen, WAS sie beanstandet.
             echo "FEHLER: sudoers-Pruefung (visudo -cf) fehlgeschlagen - nichts eingespielt" >&2
+            echo "FEHLER: visudo ($(visudo -V 2>/dev/null | head -1)) sagt: ${visudo_sagt:-(keine Ausgabe)}" >&2
             exit 3
         fi
     fi

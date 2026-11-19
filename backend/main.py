@@ -3307,8 +3307,12 @@ def _kb_strip_editor_fields(user: str, data: dict) -> dict:
 
 def _abruf_ziel(request: Request) -> str:
     """Kanonisches Ziel DIESES Abrufs (Pentest F-20): Pfad + Parameter ohne
-    ``token``/``t``. Ein Abruf-Schluessel gilt nur fuer genau dieses Ziel."""
-    return _dlkey.ziel_kanon(request.url.path, request.query_params.multi_items())
+    ``token``/``t``. Ein Abruf-Schluessel gilt nur fuer genau dieses Ziel.
+
+    Der Pfad kommt aus ``_routing_pfad`` (Routing-Pfad), nicht aus
+    ``request.url.path`` – sonst entschiede der Host-Header mit, welche
+    Datei ein Schluessel oeffnet (siehe dort)."""
+    return _dlkey.ziel_kanon(_routing_pfad(request), request.query_params.multi_items())
 
 
 def _query_benutzer(request: Request) -> str | None:

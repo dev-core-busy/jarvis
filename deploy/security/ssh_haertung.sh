@@ -148,6 +148,19 @@ _wer_setzt() {
     [ -n "$treffer" ] && printf ' (gesetzt auch in:%s)' "$treffer"
 }
 
+# Schreibweisen, die DASSELBE bedeuten, auf eine Form bringen. "sshd -T" gibt
+# PermitRootLogin je nach OpenSSH-Fassung unter dem alten Namen
+# "without-password" (Debian 13) oder unter dem heutigen "prohibit-password"
+# aus. Wer nur EINE Seite umschreibt, haelt dieselbe Einstellung fuer eine
+# Abweichung und nimmt seinen eigenen Drop-in zurueck - gemessen 2026-11-19 auf
+# einem Laeufer mit neuerem OpenSSH, wo die Haertung deshalb nie griff.
+_gleichwertig() {
+    case "$1" in
+        without-password) echo "prohibit-password" ;;
+        *) echo "$1" ;;
+    esac
+}
+
 # Misst mit sshd -T, ob jede Zeile des Drop-ins wirklich gilt (erster Wert
 # gewinnt – eine frueher gelesene Datei ueberstimmt uns still). Gibt die
 # Abweichungen aus; Rueckgabe 0 = alles wirksam, 7 = Abweichung oder nicht messbar.
@@ -161,10 +174,8 @@ _wirkung_pruefen() {
     while read -r k v; do
         case "$k" in ''|\#*) continue ;; esac
         k="${k,,}"; v="${v,,}"
-        # sshd -T schreibt prohibit-password unter seinem alten Namen
-        [ "$v" = "prohibit-password" ] && v="without-password"
         ist="$(printf '%s\n' "$t" | awk -v k="$k" 'tolower($1)==k {sub(/^[^ ]+ /, ""); print; exit}')"
-        if [ "${ist,,}" != "$v" ]; then
+        if [ "$(_gleichwertig "${ist,,}")" != "$(_gleichwertig "$v")" ]; then
             abw="${abw}  $k: wirksam '${ist:-?}' statt '$v'$(_wer_setzt "$k")"$'\n'
         fi
     done < "$DROPIN"

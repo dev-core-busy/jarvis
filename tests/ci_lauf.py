@@ -138,7 +138,13 @@ def lauf(datei: Path, zeitdeckel: int) -> tuple[str, int | None, float, str]:
     return datei.name, rc, time.monotonic() - t0, ausgabe
 
 
-_FEHLZEILE = re.compile(r"(\u2717|\u274c|\bFAIL\b|ABBRUCH|Traceback|Error)")
+# ⚠ "Error" ist ENGLISCH - die Meldungen dieses Projekts sind deutsch. Am
+# 2026-11-19 hat deshalb der Auszug zu test_system_haertung.py die einzige
+# Zeile verschluckt, die den Abbruch erklaert ("FEHLER: sudoers-Pruefung
+# (visudo -cf) fehlgeschlagen"): sie traf kein Muster und lag ausserhalb der
+# letzten 15 Zeilen. Zurueck blieb ein Exit 3 ohne Grund, und die Fehlersuche
+# begann bei der Frage, welcher Zweig ueberhaupt abgebrochen hat.
+_FEHLZEILE = re.compile(r"(\u2717|\u274c|\bFAIL\b|ABBRUCH|FEHLER|Traceback|Error)")
 
 
 def _auszug(ausgabe: str) -> str:

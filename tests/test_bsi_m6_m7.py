@@ -139,9 +139,13 @@ class Kasten:
     def banner(self) -> Path:
         return self.d / "jarvis-banner.txt"
 
-    def sshd_t(self) -> dict[str, str]:
-        """Wirksame Werte laut echtem ``sshd -T`` (Schluessel klein)."""
-        p = subprocess.run([SSHD, "-T", "-f", str(self.sshd_config)], capture_output=True,
+    def sshd_t(self, binaer: str = "") -> dict[str, str]:
+        """Wirksame Werte laut echtem ``sshd -T`` (Schluessel klein).
+
+        ``binaer`` liest mit einem anderen sshd als dem des Systems - gebraucht
+        fuer das nachgestellte neuere OpenSSH weiter unten."""
+        p = subprocess.run([binaer or SSHD, "-T", "-f", str(self.sshd_config)],
+                           capture_output=True,
                            text=True, timeout=30)
         erg: dict[str, str] = {}
         for z in p.stdout.splitlines():
@@ -375,9 +379,41 @@ k.weg()
 k = Kasten(keys={"root": 1}, sudo=[], conf="SSH_ROOT=schluessel\n", echt_sshd=True)
 (k.dropin_dir / "00-haertung.conf").write_text("PermitRootLogin prohibit-password\n")
 r = k.ssh("--anwenden")
+_wirksam = k.sshd_t().get("permitrootlogin")
 check("gleicher Wert in frueherer Datei (prohibit-password = without-password) -> kein Abbruch",
-      r.returncode == 0 and k.sshd_t().get("permitrootlogin") == "without-password",
-      (r.returncode, r.stderr.strip()))
+      r.returncode == 0 and _wirksam in ("without-password", "prohibit-password"),
+      (r.returncode, _wirksam, r.stderr.strip()))
+k.weg()
+
+# Dieselbe Lage, aber sshd -T schreibt PermitRootLogin unter der ANDEREN
+# Schreibweise. Debian 13 gibt den alten Namen aus (without-password), neuere
+# OpenSSH-Fassungen den heutigen (prohibit-password) - das Skript muss beide als
+# gleichwertig nehmen. Am 2026-11-19 auf einem Laeufer mit neuerem OpenSSH
+# gemessen: es nahm dort seinen eigenen Drop-in bei JEDEM Lauf zurueck, die
+# Haertung griff nie, und auf Debian war davon nichts zu sehen.
+k = Kasten(keys={"root": 1}, sudo=[], conf="SSH_ROOT=schluessel\n", echt_sshd=True)
+_anders = k.d / "sshd_andere_schreibweise"
+_anders.write_text(
+    "#!/bin/bash\n"
+    "for a in \"$@\"; do\n"
+    "    [ \"$a\" = \"-T\" ] || continue\n"
+    f"    \"{SSHD}\" \"$@\" | sed -e 's/^permitrootlogin without-password$/permitrootlogin prohibit-password/'"
+    " -e 't' -e 's/^permitrootlogin prohibit-password$/permitrootlogin without-password/'\n"
+    "    exit ${PIPESTATUS[0]}\n"
+    "done\n"
+    f"exec \"{SSHD}\" \"$@\"\n", encoding="utf-8")
+_anders.chmod(0o755)
+_echt_wert = k.sshd_t().get("permitrootlogin")
+_anders_wert = k.sshd_t(str(_anders)).get("permitrootlogin")
+if not _echt_wert or not _anders_wert or _echt_wert == _anders_wert:
+    abbruch(f"das nachgestellte sshd schreibt PermitRootLogin nicht anders ({_echt_wert} / {_anders_wert})")
+check(f"Positivkontrolle: nachgestelltes sshd -T schreibt '{_anders_wert}' statt '{_echt_wert}'", True)
+k.extra["JARVIS_SSHD_BIN"] = str(_anders)
+(k.dropin_dir / "00-haertung.conf").write_text("PermitRootLogin prohibit-password\n")
+r = k.ssh("--anwenden")
+check("andere Schreibweise in sshd -T: gleicher Wert bleibt gleichwertig, kein Abbruch",
+      r.returncode == 0, (r.returncode, r.stderr.strip()))
+check("…und der Drop-in bleibt liegen", k.dropin.exists())
 k.weg()
 
 k = Kasten(keys={"admin": 1}, sudo=["admin"], conf="SSH_HAERTUNG=an\n", echt_sshd=True)
@@ -851,6 +887,15 @@ check("CI-Lauf: keine gegen_/live_ (patchen bzw. brauchen Dienst)",
 ausn = ci_mod.ausnahmen_laden()
 check("ci_ausnahmen.txt laedt, jeder Eintrag mit Grund", all(ausn.values()) and len(ausn) > 0)
 check("dieser Waechter ist nicht ausgenommen", "test_bsi_m6_m7.py" not in ausn)
+# Der Auszug eines roten Waechters muss die Zeile mitnehmen, die den Abbruch
+# ERKLAERT - und die ist hier deutsch ("FEHLER:"), nicht englisch ("Error").
+# Die Fuellzeilen schieben sie aus den letzten 15 Zeilen heraus, sonst kaeme sie
+# ueber das Ende mit und die Pruefung waere trivial wahr.
+_fuell = "\n".join(f"  ok Zeile {_i}" for _i in range(40))
+_aus = ci_mod._auszug(_fuell + "\nFEHLER: sudoers-Pruefung (visudo -cf) fehlgeschlagen\n" + _fuell)
+check("CI-Auszug nimmt eine deutsche FEHLER-Zeile mit", "visudo -cf" in _aus, _aus[-200:])
+check("…und nicht jede beliebige Zeile (sonst misst die Pruefung darueber nichts)",
+      "ok Zeile 5" not in _aus)
 tmpd = Path(tempfile.mkdtemp(prefix="jv_ci_"))
 alt_a = ci_mod.AUSNAHMEN
 try:

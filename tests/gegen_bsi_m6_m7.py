@@ -206,8 +206,26 @@ PROBEN = [
     ("Go-SBOM ohne Standardbibliothek", WF,
      '            "$(go env GOPATH)/bin/cyclonedx-gomod" app -json -std -licenses=false \\\n',
      '            "$(go env GOPATH)/bin/cyclonedx-gomod" app -json -licenses=false \\\n'),
+    # Anker 2026-11-19 nachgezogen: der Aufruf steht seit der JDK-Festlegung in
+    # einem mehrzeiligen run-Block, die alte einzeilige Form gibt es nicht mehr.
     ("Android-SBOM entfernt", WF,
-     '        run: ./gradlew --no-daemon -q :app:cyclonedxDirectBom\n', '        run: "true"\n'),
+     '          ./gradlew --no-daemon -q --stacktrace :app:cyclonedxDirectBom\n',
+     '          true\n'),
+    ("Android-SBOM erbt das JDK des Runners", WF,
+     '          export JAVA_HOME="$JAVA_HOME_17_X64"\n', ''),
+    ("fehlendes JDK 17 im Image faellt still auf das Standard-JDK zurueck", WF,
+     '          : "${JAVA_HOME_17_X64:?FEHLER: Runner-Image setzt JAVA_HOME_17_X64 nicht'
+     ' - kein JDK 17 vorhanden}"\n',
+     '          : "${JAVA_HOME_17_X64:-}"\n'),
+    ("Gradle-Fehler ohne Quelle (kein --stacktrace)", WF,
+     '          ./gradlew --no-daemon -q --stacktrace :app:cyclonedxDirectBom\n',
+     '          ./gradlew --no-daemon -q :app:cyclonedxDirectBom\n'),
+    # Die JDK-Fassung im Workflow ist an sourceCompatibility gekoppelt: wandert
+    # die App auf 21, muss der Workflow mitwandern (sonst baut die CI mit einem
+    # anderen JDK als die App erwartet).
+    ("App auf JDK 21, Workflow bleibt bei 17", AGR,
+     '        sourceCompatibility = JavaVersion.VERSION_17\n',
+     '        sourceCompatibility = JavaVersion.VERSION_21\n'),
     ("Android-SBOM mit Test-Konfigurationen", AGR,
      '    includeConfigs.set(listOf("releaseRuntimeClasspath"))\n', ''),
     ("Gradle-Distribution ohne Pruefsumme", GWP,

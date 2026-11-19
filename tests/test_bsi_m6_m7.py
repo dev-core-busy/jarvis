@@ -786,6 +786,40 @@ check("Gradle-Wrapper prueft die Distribution (distributionSha256Sum)",
       re.search(r"(?m)^distributionSha256Sum=[0-9a-f]{64}\s*$",
                 (ROOT / "android/gradle/wrapper/gradle-wrapper.properties").read_text(encoding="utf-8")) is not None)
 
+# Das JDK des Android-Jobs wird FESTGELEGT, nicht vom Runner geerbt: am
+# 2026-11-17 wechselte "ubuntu-latest" von Ubuntu 24.04 auf 26.04, dessen
+# Standard-JDK 25.0.5 ist. Gradle 8.11.1/AGP 8.10.1 brachen damit ab - mit
+# "25.0.5" als einziger Fehlerzeile, zwei Tage lang. Die Fassung kommt aus
+# build.gradle.kts und steht hier NICHT als Konstante: wandert
+# sourceCompatibility, muss der Workflow mitwandern.
+_sc = re.search(r"sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+)", _app_gradle)
+if not _sc:
+    abbruch("android/app/build.gradle.kts ohne sourceCompatibility = JavaVersion.VERSION_<n> – "
+            "die erwartete JDK-Fassung des Workflows ist nicht ableitbar")
+_jdk = _sc.group(1)
+_sbom_job = job_mit(r"gradlew\b.*:app:cyclonedxDirectBom\b")
+# Gemessen an JEDEM Schritt, der den SBOM-Task AUSFUEHRT, und ohne Kommentarzeilen:
+# eine Begruendung im Text ist keine Wirkung.
+_sbom_schritte = [ohne_kommentare(s.get("run") or "") for s in schritte(_sbom_job[1])
+                  if re.search(r"gradlew\b.*:app:cyclonedxDirectBom\b", s.get("run") or "")] \
+    if _sbom_job else []
+# "bool(...) and all(...)" statt abbruch(): ohne SBOM-Schritt waere all() trivial
+# wahr, aber ein FEHLENDER Schritt ist ein Befund (die Pruefung "Schritt: SBOM
+# Android" oben meldet ihn) und kein "konnte nicht laufen" – gleiche Form wie bei
+# govulncheck und pip-audit.
+check(f"Android-SBOM baut mit festgelegtem JDK {_jdk} (JAVA_HOME_{_jdk}_X64 exportiert), "
+      "nicht mit dem Standard-JDK des Runners",
+      bool(_sbom_schritte)
+      and all(re.search(r'export\s+JAVA_HOME="?\$\{?JAVA_HOME_%s_X64\}?"?(\s|$)' % _jdk, r)
+              for r in _sbom_schritte), _sbom_schritte)
+check("…und bricht ab, wenn das Runner-Image diese Variable nicht mehr setzt",
+      bool(_sbom_schritte)
+      and all(re.search(r"\$\{JAVA_HOME_%s_X64:\?" % _jdk, r) for r in _sbom_schritte),
+      _sbom_schritte)
+# Eine Gradle-Meldung ohne Quelle ("25.0.5") kostet einen halben Tag Suche.
+check("Gradle nennt im Fehlerfall die Quelle (--stacktrace)",
+      bool(_sbom_schritte) and all("--stacktrace" in r for r in _sbom_schritte), _sbom_schritte)
+
 
 def toolchain_aus_gomod(run: str) -> bool:
     """GOTOOLCHAIN bekommt GENAU die Variable, die aus der toolchain-Zeile von go.mod

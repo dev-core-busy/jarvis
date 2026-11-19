@@ -288,10 +288,22 @@ jobs:
 
   # ── Android: SBOM der App ───────────────────────────────────────────────────
   # Nur die AUSGELIEFERTE App (releaseRuntimeClasspath, in app/build.gradle.kts
-  # festgelegt) – ohne die Grenze kaemen junit/hamcrest aus den Tests mit. Der
-  # Runner bringt JDK 17 und das Android-SDK (ANDROID_HOME) mit; die Gradle-
-  # Distribution prueft der Wrapper gegen distributionSha256Sum. Eine fehlende
+  # festgelegt) – ohne die Grenze kaemen junit/hamcrest aus den Tests mit. Das
+  # Android-SDK bringt der Runner mit (ANDROID_HOME); die Gradle-Distribution
+  # prueft der Wrapper gegen distributionSha256Sum. Eine fehlende
   # Release-Signatur (keystore.properties ist gitignored) ist nur eine Warnung.
+  #
+  # ⚠ Das JDK wird FESTGELEGT und nicht vom Runner geerbt. Hier stand "Der
+  # Runner bringt JDK 17 mit" – am 2026-11-17 um 18:26 Uhr wechselte
+  # "ubuntu-latest" von Ubuntu 24.04 auf 26.04, dessen Standard-JDK 25.0.5 ist
+  # (JDK 17 und 21 liegen weiter im Image, nur nicht als Vorgabe). Gradle 8.11.1
+  # mit AGP 8.10.1 kommt damit nicht zurecht und brach ab mit "What went wrong:"
+  # und als einziger Zeile der nackten Versionsnummer "25.0.5" – zwei Tage rot,
+  # ohne dass die Meldung ihre Ursache nannte. Dass der Commit davor noch gruen
+  # war, hat die Suche zusaetzlich auf den Code gelenkt: geaendert hatte sich
+  # nicht das Repo, sondern der Laeufer.
+  # Die JDK-Fassung muss zu sourceCompatibility/jvmTarget der App passen
+  # (JavaVersion.VERSION_17) – Waechter test_bsi_m6_m7 liest beide Seiten.
   android:
     name: Android – SBOM (App)
     runs-on: ubuntu-latest
@@ -302,7 +314,16 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6 (Commit gepinnt, Code-Review 2026-10-18)
       - name: SBOM (CycloneDX)
-        run: ./gradlew --no-daemon -q :app:cyclonedxDirectBom
+        run: |
+          # Fehlt die Variable, bricht der Schritt MIT GRUND ab, statt still auf
+          # das Standard-JDK des Images zurueckzufallen (Begruendung oben).
+          : "${JAVA_HOME_17_X64:?FEHLER: Runner-Image setzt JAVA_HOME_17_X64 nicht - kein JDK 17 vorhanden}"
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          # Steht im Log, womit gebaut wurde - sonst ist die JDK-Fassung geraten.
+          "$JAVA_HOME/bin/java" -version
+          # --stacktrace: eine Gradle-Meldung ohne Quelle (siehe "25.0.5") kostet
+          # einen halben Tag Suche; der Stacktrace erscheint nur im Fehlerfall.
+          ./gradlew --no-daemon -q --stacktrace :app:cyclonedxDirectBom
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5 (Commit gepinnt, Code-Review 2026-10-18)
         if: always()
         with:

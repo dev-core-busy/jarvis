@@ -1107,6 +1107,17 @@ console.log('\n7. Regeln (Drift, Verdrahtung, i18n)');
         .map(l => (l.querySelector('input') || {}).id || '?');
     pruefe('JEDER textlose Schalter ist auffindbar', ohne.length === 0, ohne.join(', '));
 
+    // Festlegung 2026-11-19: der Container der IdP-Anmeldung heisst
+    // „SSO Anmeldung ueber den IdP …" und muss ueber „sso" auffindbar sein –
+    // und zwar mit dem <summary> des Containers als Sprungziel.
+    await tippe(w, 'sso');
+    pruefe('„sso" findet den Container der IdP-Anmeldung',
+           titelTexte(w).some(x => /^SSO /.test(x)), titelTexte(w).join(' | ') || '(nichts)');
+    const idpSum = doc.querySelector('details.sec-sub[data-sub="idp"] > summary');
+    pruefe('… als Eintrag AM <summary> des Containers (Sprungziel)',
+           !!idpSum && idx11.some(e => e.el === idpSum && /^SSO /.test(e.titel || '')),
+           idpSum ? '(kein Eintrag mit el = summary von data-sub=idp)' : '(Container fehlt)');
+
     await tippe(w, 'rdp erlauben');
     pruefe('„rdp erlauben" findet den Schalter',
            titelTexte(w).indexOf('RDP erlauben') >= 0, titelTexte(w).join(' | ') || '(nichts)');

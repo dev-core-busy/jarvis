@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════
    Anmeldung ueber den IdP (OpenID Connect) – Anmeldemaske auf "/"
 
-   1. Zeigt den Knopf "Mit Firmenkonto anmelden", wenn der Server die
+   1. Zeigt den Knopf "Mit Firmenkonto anmelden (SSO)", wenn der Server die
       IdP-Anmeldung meldet (/api/login/oidc/status). Der Knopf ist ein Link
       auf /api/login/oidc/start; der Server leitet zum IdP weiter.
    2. Nach der Rueckkehr (/?anmeldung=idp) liegt ein kurzlebiger Einloese-
@@ -18,6 +18,24 @@
       sie – ein verstecktes Formular ohne funktionierenden IdP sperrte alle
       aus. Damit die Maske nicht kurz aufblitzt, merkt sich der Browser den
       letzten Modus (localStorage) und verbirgt nur dann schon vor dem Status.
+
+   5. Haken "Automatisch anmelden" (#idp-auto, je Browser in localStorage):
+      gesetzt, startet die Seite "/" die Anmeldung ueber den IdP ohne Klick.
+      NICHT, wenn (autoGrund):
+        - die Seite von einer anderen Jarvis-Seite aus geoeffnet wurde
+          (gleicher Ursprung im Referrer). So endet jedes Abmelden – alle
+          Abmeldeknoepfe fuehren per location.replace('/') hierher (Waechter
+          test_abmelden_ziel.js). Wer sich abmeldet, will nicht sofort wieder
+          angemeldet sein; und es braucht keine Marke an jedem Abmeldeweg.
+        - die Adresse eine Rueckkehr vom IdP traegt (anmeldung=idp, idp_fehler):
+          ein Fehler bleibt stehen, statt in eine Schleife zu laufen.
+        - in diesem Tab schon vor weniger als AUTO_SPERRE_MS automatisch
+          gestartet wurde (Schleifenbremse, falls die Anmeldung zwar gelingt,
+          die Folgeseite aber wieder auf "/" zurueckfuehrt).
+      Liegt beim Laden ein Token vor, prueft app.js es erst; gestartet wird
+      dann nur, wenn app.js die Maske wegen eines ungueltigen Tokens zeigt
+      (Ereignis 'jarvis-anmeldemaske') – sonst liefen Weiterleitung aufs
+      Portal und zum IdP um die Wette.
 
    Die Kennwortanmeldung (app.js) selbst bleibt unberuehrt; /api/login ist in
    beiden Modi erreichbar (Ausweichweg, Apps, Add-in, Notfallkonto).
@@ -86,6 +104,80 @@
         try { history.replaceState(null, '', '/'); } catch (e) { /* egal */ }
     }
 
+    // ── Automatisch anmelden (Punkt 5 im Kopf) ─────────────────────────────
+    var AUTO = 'jarvis_idp_auto';              // localStorage: '1' = Haken gesetzt
+    var AUTO_ZEIT = 'jarvis_idp_auto_zeit';    // sessionStorage: letzter Start in diesem Tab
+    var AUTO_SPERRE_MS = 60000;
+    var autoLage = { aktiv: null, maske: false, rueckkehr: false, erledigt: false };
+    var navigieren = function (url) { window.location.assign(url); };
+
+    function autoGewuenscht() {
+        try { return localStorage.getItem(AUTO) === '1'; } catch (e) { return false; }
+    }
+    function autoMerken(an) {
+        try { if (an) localStorage.setItem(AUTO, '1'); else localStorage.removeItem(AUTO); }
+        catch (e) { /* ohne Speicher gibt es keinen Haken ueber den Besuch hinaus */ }
+    }
+    function vonJarvis() {
+        // Referrer-Policy ist same-origin (sicherheits_kopf.py): von einer
+        // Jarvis-Seite kommt der volle Ursprung mit, von aussen nichts.
+        try { return !!document.referrer && new URL(document.referrer).origin === window.location.origin; }
+        catch (e) { return false; }
+    }
+    function letzterStart() {
+        try { return parseInt(sessionStorage.getItem(AUTO_ZEIT) || '0', 10) || 0; } catch (e) { return 0; }
+    }
+
+    // Leer = automatisch starten, sonst der Grund dagegen. EINE Entscheidung,
+    // damit jede Regel einzeln messbar ist (tests/test_idp_anmeldung_ui.js).
+    function autoGrund(l) {
+        if (!l.gewuenscht) return 'aus';
+        if (!l.aktiv) return 'idp_aus';
+        if (l.pfad !== '/') return 'pfad';
+        if (l.rueckkehr) return 'rueckkehr';
+        if (l.vonJarvis) return 'von_jarvis';
+        if (l.letzter && l.jetzt - l.letzter >= 0 && l.jetzt - l.letzter < AUTO_SPERRE_MS) return 'schleife';
+        if (!l.maske) return 'maske';
+        return '';
+    }
+
+    function autoVersuchen() {
+        // `erledigt` und die Schleifenbremse decken sich, solange sessionStorage
+        // geht. Bei gesperrtem Speicher (privater Modus) traegt nur diese Marke:
+        // ein zweites Ereignis von app.js startete sonst ein zweites Mal.
+        if (autoLage.erledigt || autoLage.aktiv === null) return;
+        var grund = autoGrund({
+            gewuenscht: autoGewuenscht(),
+            aktiv: autoLage.aktiv,
+            pfad: window.location.pathname,
+            rueckkehr: autoLage.rueckkehr,
+            vonJarvis: vonJarvis(),
+            letzter: letzterStart(),
+            jetzt: Date.now(),
+            maske: autoLage.maske
+        });
+        if (grund === 'maske') return;   // app.js prueft noch das Token – spaeter erneut
+        autoLage.erledigt = true;
+        if (grund) return;
+        try { sessionStorage.setItem(AUTO_ZEIT, String(Date.now())); } catch (e) { /* Bremse fehlt dann */ }
+        var k = $('btn-idp-login');
+        navigieren((k && k.getAttribute('href')) || '/api/login/oidc/start');
+    }
+
+    function autoHakenVerdrahten() {
+        var cb = $('idp-auto');
+        if (!cb) return;
+        cb.checked = autoGewuenscht();
+        // Nur auf change hoeren: das <label> schaltet selbst um.
+        cb.addEventListener('change', function () { autoMerken(cb.checked); });
+    }
+
+    // Vor app.js geladen (settings.html) – das Ereignis kann also nicht verpasst werden.
+    document.addEventListener('jarvis-anmeldemaske', function () {
+        autoLage.maske = true;
+        autoVersuchen();
+    });
+
     function knopfZeigen() {
         var box = $('idp-login');
         if (!box) return;
@@ -99,6 +191,8 @@
             box.hidden = !aktiv;
             merken(aktiv ? modus : '');
             kennwortZeigen(!aktiv || modus !== 'fallback' || ausgewichen);
+            autoLage.aktiv = !!aktiv;
+            autoVersuchen();
         }
         fetch('/api/login/oidc/status', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -185,7 +279,14 @@
         });
     }
 
+    var gestartet = false;
     function start() {
+        // Genau einmal: ein zweiter Lauf saehe die schon aufgeraeumte Adresse,
+        // hielte eine Rueckkehr vom IdP fuer einen frischen Aufruf und startete
+        // "Automatisch anmelden" (jsdom feuert DOMContentLoaded nach einem
+        // haendischen Ausloesen noch einmal – so gesehen, 2026-11-19).
+        if (gestartet) return;
+        gestartet = true;
         var q;
         try { q = new URLSearchParams(window.location.search); } catch (e) { q = null; }
         var fehler = q ? q.get('idp_fehler') : '';
@@ -193,6 +294,10 @@
         // schon kennt (sonst blitzte die Maske bei jedem ohne IdP kurz weg).
         if (fehler) ausweichen();
         else if (gemerkt() === 'fallback') kennwortZeigen(false);
+        autoLage.rueckkehr = !!(fehler || (q && q.get('anmeldung') === 'idp'));
+        // Dieselbe Bedingung wie in app.js (`if (token)` -> erst pruefen).
+        autoLage.maske = autoLage.maske || !window.JarvisSitzung.token();
+        autoHakenVerdrahten();
         knopfZeigen();
         codeVerdrahten();
         if (!q) return;
@@ -209,5 +314,10 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
 
-    window.IdpAnmeldung = { _einloesen: einloesen, _FEHLER: FEHLER, _MERK: MERK };
+    window.IdpAnmeldung = {
+        _einloesen: einloesen, _FEHLER: FEHLER, _MERK: MERK,
+        _AUTO: AUTO, _AUTO_ZEIT: AUTO_ZEIT, _autoGrund: autoGrund,
+        // Nur fuer Pruefstaende: jsdom kann nicht navigieren und verraet das Ziel nicht.
+        _navigation: function (fn) { navigieren = fn; }
+    };
 })();

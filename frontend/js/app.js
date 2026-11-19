@@ -3687,11 +3687,19 @@
                     window.location.replace('/portal');
                 }
             } else {
-                showLoginScreen();
+                _maskeNachTokenpruefung();
             }
         }).catch(() => {
-            showLoginScreen();
+            _maskeNachTokenpruefung();
         });
+    }
+    // Das mitgebrachte Token gilt nicht (mehr): Maske zeigen und das melden –
+    // idp_anmeldung.js startet dann ggf. "Automatisch anmelden". Bewusst NICHT
+    // in showLoginScreen(): das laeuft auch beim Abbruch der Pflicht-
+    // Kennwortaenderung, und dort waere ein Sprung zum IdP eine Ueberraschung.
+    function _maskeNachTokenpruefung() {
+        showLoginScreen();
+        document.dispatchEvent(new CustomEvent('jarvis-anmeldemaske'));
     }
     function setupModal() {
         const modal = document.getElementById('cert-modal');

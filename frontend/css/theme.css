@@ -1969,6 +1969,26 @@ body .wi-section { margin-bottom: var(--jv-abstand); }
 }
 /* `display:flex` oben ueberstimmt sonst das hidden-Attribut (Modus "Ausweichweg"). */
 .idp-trenner[hidden] { display: none; }
+/* Haken "Automatisch anmelden" unter dem IdP-Knopf. Breite und Rand des
+   Kaestchens ausdruecklich, damit keine Feldregel es auf Zeilenbreite zieht. */
+.idp-auto {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 10px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.idp-auto input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    flex: 0 0 auto;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
 /* Einziger Knopf der Maske (Ausweichweg, Kennwort verborgen): Aussehen des
    Hauptknopfs "Anmelden" (.btn-login in style.css). Zwei Klassen, damit es
    gegen .btn-link aus style.css (spaeter geladen) gewinnt. idp_anmeldung.js. */

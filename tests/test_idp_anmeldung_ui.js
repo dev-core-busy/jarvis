@@ -12,7 +12,14 @@
  *     requires_totp -> Code-Block statt Formular, 6 Ziffern -> zweiter POST
  *     mit Code, Erfolg -> Token gespeichert + Weiterleitung auf /portal.
  *  C  TEXTE: jeder login.idp_* / security.idp_* / security.sub_idp*-Schluessel
- *     aus Markup und Modulen steht in DE und EN.
+ *     aus Markup und Modulen steht in DE und EN; der Knopf nennt "(SSO)".
+ *  D  AUTOMATISCH ANMELDEN (Haken #idp-auto, 2026-11-19): startet die
+ *     IdP-Anmeldung ohne Klick – aber nicht ohne Haken, nicht ohne IdP, nicht
+ *     von einer Jarvis-Seite aus (Abmelden), nicht bei Rueckkehr vom IdP,
+ *     nicht zweimal binnen einer Minute (Schleife), nicht unter /settings,
+ *     und bei mitgebrachtem Token erst, wenn app.js es verworfen hat. Dazu
+ *     am Syntaxbaum von app.js: das Ereignis kommt NUR aus der gescheiterten
+ *     Tokenpruefung, nicht aus showLoginScreen().
  *
  * Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
  */
@@ -80,10 +87,18 @@ function seite(url, antworten) {
     const vc = new VirtualConsole();
     const z = { posts: [], koepfe: [], nav: [], fehler: [] };
     vc.on('jsdomError', (e) => { if (/navigation/i.test(String(e && e.message))) z.nav.push(e.message); else z.fehler.push(String(e && e.message)); });
-    const dom = new JSDOM(html, { runScripts: 'outside-only', url, virtualConsole: vc });
+    const dom = new JSDOM(html, { runScripts: 'outside-only', url, virtualConsole: vc,
+                                  referrer: antworten.referrer || undefined });
     const w = dom.window;
+    z.ziele = [];
     w.addEventListener('error', (e) => z.fehler.push(String(e.message)));
     if (antworten.merk) w.localStorage.setItem('jarvis_idp_ad_modus', antworten.merk);
+    if (antworten.auto) w.localStorage.setItem('jarvis_idp_auto', '1');
+    if (antworten.token) w.localStorage.setItem('jarvis_token', antworten.token);
+    if (antworten.autoZeit) w.sessionStorage.setItem('jarvis_idp_auto_zeit', String(antworten.autoZeit));
+    if (antworten.ohneSitzungsspeicher) {
+        Object.defineProperty(w, 'sessionStorage', { configurable: true, get() { throw new w.DOMException('gesperrt', 'SecurityError'); } });
+    }
     w.fetch = (u, init) => {
         const pfad = String(u).split('?')[0];
         let a = { status: 404, body: {} };
@@ -104,6 +119,7 @@ function seite(url, antworten) {
     };
     for (const f of ['i18n.js', 'sitzung.js']) w.eval(lies('frontend/js/' + f));
     w.eval(MODUL);
+    if (w.IdpAnmeldung && w.IdpAnmeldung._navigation) w.IdpAnmeldung._navigation((u) => z.ziele.push(u));
     w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
     ALLE_FEHLER.push(z.fehler);
     return { w, z, d: w.document, dom };
@@ -282,6 +298,170 @@ function seite(url, antworten) {
     check('Positivkontrolle: Schluessel gefunden (' + schluessel.size + ')', schluessel.size >= 40);
     const fehlt = [...schluessel].filter(k => vorkommen(k) !== 2);
     check('jeder Schluessel steht genau zweimal (DE + EN)', fehlt.length === 0, fehlt.join(', '));
+    {
+        const wert = (k) => [...I18N.matchAll(new RegExp("'" + k.replace(/\./g, '\\.') + "'\\s*:\\s*'([^']*)'", 'g'))].map(m => m[1]);
+        const knopfTexte = wert('login.idp_button');
+        check('Knopf: DE und EN nennen "(SSO)"', knopfTexte.length === 2 && knopfTexte.every(t => /\(SSO\)$/.test(t)),
+              JSON.stringify(knopfTexte));
+        const vorgabe = (SETTINGS.match(/data-i18n="login\.idp_button">([^<]*)</) || [])[1];
+        check('Knopf: Vorgabetext im Markup = DE-Wert', vorgabe === knopfTexte[0], vorgabe);
+        const zitat = wert('security.idp_ad_zusaetzlich_hint');
+        check('Einstellungshinweis zitiert den Knopf mit dem neuen Text (DE + EN)',
+              zitat.length === 2 && zitat[0].includes('„' + knopfTexte[0] + '“') && zitat[1].includes('“' + knopfTexte[1] + '”'));
+    }
+
+    // ── D: Automatisch anmelden ─────────────────────────────────────────────
+    console.log('D  Automatisch anmelden');
+    const START = '/api/login/oidc/start';
+    const lauf = async (url, a, ms) => { const x = seite(url, Object.assign({ aktiv: true, einloesen: [] }, a)); await warte(ms || 60); return x; };
+
+    // Positivkontrolle: der gemeinte Weg fuehrt wirklich zum IdP – sonst sind
+    // alle "startet NICHT"-Pruefungen unten trivial wahr.
+    s = await lauf('https://jarvis.test/', { auto: true });
+    if (!s.w.IdpAnmeldung || !s.w.IdpAnmeldung._autoGrund) {
+        console.log('ABBRUCH (Exit 2): Automatik nicht im Modul'); bilanz = true; process.exit(2);
+    }
+    if (s.z.ziele.length !== 1) {
+        console.log('ABBRUCH (Exit 2): Positivkontrolle – mit Haken kein Start (' + JSON.stringify(s.z.ziele) + ')');
+        bilanz = true; process.exit(2);
+    }
+    check('Haken + IdP an + frischer Aufruf -> genau EIN Start zum IdP', s.z.ziele[0] === START, s.z.ziele[0]);
+    check('Start merkt die Zeit (Schleifenbremse)', +s.w.sessionStorage.getItem('jarvis_idp_auto_zeit') > Date.now() - 5000);
+    check('Haken erscheint gesetzt', s.d.getElementById('idp-auto').checked === true);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', {});
+    check('ohne Haken: kein Start', s.z.ziele.length === 0);
+    const cb = s.d.getElementById('idp-auto');
+    check('ohne Haken: Kaestchen leer und im IdP-Bereich', !cb.checked && s.d.getElementById('idp-login').contains(cb));
+    cb.checked = true; cb.dispatchEvent(new s.w.Event('change'));
+    check('Haken setzen speichert ihn im Browser', s.w.localStorage.getItem('jarvis_idp_auto') === '1');
+    check('... und startet NICHT sofort', s.z.ziele.length === 0);
+    cb.checked = false; cb.dispatchEvent(new s.w.Event('change'));
+    check('Haken entfernen loescht ihn', s.w.localStorage.getItem('jarvis_idp_auto') === null);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { auto: true, aktiv: false });
+    check('IdP aus: kein Start', s.z.ziele.length === 0);
+    s.w.close();
+    s = await lauf('https://jarvis.test/', { auto: true, status: 'fehler' });
+    check('Status nicht abrufbar: kein Start', s.z.ziele.length === 0);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { auto: true, referrer: 'https://jarvis.test/portal' });
+    check('von einer Jarvis-Seite (Abmelden): kein Start', s.z.ziele.length === 0);
+    s.w.close();
+    s = await lauf('https://jarvis.test/', { auto: true, referrer: 'https://intranet.beispiel.de/start' });
+    check('von einer fremden Seite (Lesezeichen im Intranet): Start', s.z.ziele.length === 1);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/?idp_fehler=abgebrochen', { auto: true });
+    check('Rueckkehr mit Fehler: kein Start, Meldung bleibt stehen',
+          s.z.ziele.length === 0 && !s.d.getElementById('login-error').hidden);
+    s.w.close();
+    s = await lauf('https://jarvis.test/?anmeldung=idp', { auto: true, einloesen: [
+        { status: 401, body: { success: false, abgelaufen: true, error: 'abgelaufen' } }] }, 80);
+    check('Rueckkehr zum Einloesen (abgelehnt): kein erneuter Start', s.z.ziele.length === 0 && s.z.posts.length === 1);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { auto: true, autoZeit: Date.now() - 5000 });
+    check('vor 5 s schon gestartet: kein Start (Schleife)', s.z.ziele.length === 0);
+    s.w.close();
+    s = await lauf('https://jarvis.test/', { auto: true, autoZeit: Date.now() - 120000 });
+    check('vor 2 min gestartet: Start', s.z.ziele.length === 1);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/settings', { auto: true });
+    check('unter /settings: kein Start', s.z.ziele.length === 0);
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { auto: true, token: 'ALT' });
+    check('mit Token: kein Start, solange app.js prueft', s.z.ziele.length === 0);
+    s.d.dispatchEvent(new s.w.CustomEvent('jarvis-anmeldemaske'));
+    await warte(20);
+    check('... Token verworfen (Ereignis) -> Start', s.z.ziele.length === 1 && s.z.ziele[0] === START);
+    s.d.dispatchEvent(new s.w.CustomEvent('jarvis-anmeldemaske'));
+    await warte(20);
+    check('... ein zweites Ereignis startet nicht noch einmal', s.z.ziele.length === 1);
+    s.w.close();
+
+    // Gesperrter Sitzungsspeicher (privater Modus): dann fehlt die Schleifenbremse,
+    // und nur die Marke "erledigt" verhindert den zweiten Start.
+    s = await lauf('https://jarvis.test/', { auto: true, token: 'ALT', ohneSitzungsspeicher: true });
+    let gesperrt = false;
+    try { s.w.sessionStorage; } catch (e) { gesperrt = true; }
+    if (!gesperrt) { console.log('ABBRUCH (Exit 2): Sitzungsspeicher liess sich nicht sperren'); bilanz = true; process.exit(2); }
+    s.d.dispatchEvent(new s.w.CustomEvent('jarvis-anmeldemaske'));
+    await warte(20);
+    check('Speicher gesperrt: trotzdem ein Start', s.z.ziele.length === 1);
+    s.d.dispatchEvent(new s.w.CustomEvent('jarvis-anmeldemaske'));
+    await warte(20);
+    check('Speicher gesperrt: ein zweites Ereignis startet nicht noch einmal', s.z.ziele.length === 1, JSON.stringify(s.z.ziele));
+    s.w.close();
+
+    s = await lauf('https://jarvis.test/', { auto: true, token: 'ALT', statusMs: 200 });
+    s.d.dispatchEvent(new s.w.CustomEvent('jarvis-anmeldemaske'));
+    await warte(20);
+    check('Ereignis VOR der Statusantwort: noch kein Start', s.z.ziele.length === 0);
+    await warte(300);
+    check('... nach der Antwort: Start', s.z.ziele.length === 1);
+    s.w.close();
+
+    // app.js: woher kommt das Ereignis? Am Syntaxbaum, nicht am Text.
+    {
+        const acorn = require('./lib/acorn_laden')();
+        const APP = lies('frontend/js/app.js');
+        const baum = acorn.parse(APP, { ecmaVersion: 'latest', sourceType: 'script' });
+        const laufe = (n, cb, eltern) => {
+            if (!n || typeof n.type !== 'string') return;
+            cb(n, eltern || []);
+            for (const k of Object.keys(n)) {
+                const v = n[k];
+                const nx = (eltern || []).concat([n]);
+                if (Array.isArray(v)) v.forEach(x => laufe(x, cb, nx));
+                else if (v && typeof v.type === 'string') laufe(v, cb, nx);
+            }
+        };
+        const istFn = (n) => /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/.test(n.type);
+        const ausloeser = [];   // [Name der umschliessenden Funktion]
+        const aufrufe = {};     // Name -> Anzahl Aufrufe
+        laufe(baum, (n, eltern) => {
+            if (n.type !== 'CallExpression') return;
+            const c = n.callee;
+            if (c.type === 'Identifier') aufrufe[c.name] = (aufrufe[c.name] || 0) + 1;
+            if (c.type === 'MemberExpression' && !c.computed && c.property.name === 'dispatchEvent') {
+                const arg = n.arguments[0];
+                const lit = arg && arg.type === 'NewExpression' && arg.arguments[0] && arg.arguments[0].value;
+                if (lit === 'jarvis-anmeldemaske') {
+                    const fn = [...eltern].reverse().find(istFn);
+                    ausloeser.push(fn && fn.id ? fn.id.name : '(anonym)');
+                }
+            }
+        });
+        check('app.js loest das Ereignis an GENAU einer Stelle aus', ausloeser.length === 1, JSON.stringify(ausloeser));
+        check('... nicht in showLoginScreen (laeuft auch beim Abbruch der Pflicht-Kennwortaenderung)',
+              !ausloeser.includes('showLoginScreen'));
+        // Die Funktion wird aus dem .then- UND dem .catch-Zweig der Tokenpruefung gerufen.
+        let zweige = 0;
+        laufe(baum, (n) => {
+            if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression') return;
+            const m = n.callee.property && n.callee.property.name;
+            if (m !== 'then' && m !== 'catch') return;
+            let kette = n.callee.object, istPruefung = false;
+            while (kette && kette.type === 'CallExpression') {
+                const a0 = kette.arguments[0];
+                if (kette.callee.type === 'Identifier' && kette.callee.name === 'fetch' && a0 && a0.value === '/api/verify-token') istPruefung = true;
+                kette = kette.callee.type === 'MemberExpression' ? kette.callee.object : null;
+            }
+            if (!istPruefung) return;
+            let ruft = false;
+            n.arguments.forEach(arg => laufe(arg, (x) => {
+                if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && x.callee.name === ausloeser[0]) ruft = true;
+            }));
+            if (ruft) zweige++;
+        });
+        check('... gerufen aus .then UND .catch der Tokenpruefung (/api/verify-token)', zweige === 2, 'Zweige: ' + zweige);
+    }
 
     bilanz = true;
     console.log('\nErgebnis: ' + ok + ' OK, ' + fail + ' FAIL');

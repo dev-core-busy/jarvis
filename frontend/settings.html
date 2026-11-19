@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=69">
+    <link rel="stylesheet" href="/static/css/theme.css?v=70">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=8">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
@@ -129,12 +129,20 @@
                 <!-- Anmeldung ueber den IdP (OpenID Connect). Ein LINK, kein Formular:
                      die CSP setzt form-action 'self', und Chrome wendet das auch auf die
                      Weiterleitung nach einem Formularversand an. Sichtbar nur, wenn
-                     /api/login/oidc/status "aktiv" meldet. Logik: idp_anmeldung.js -->
+                     /api/login/oidc/status "aktiv" meldet. Logik: idp_anmeldung.js
+                     Der Haken "Automatisch anmelden" gilt je Browser (localStorage) und
+                     startet die Anmeldung beim naechsten Oeffnen von "/" ohne Klick –
+                     nicht nach dem Abmelden (Regeln: idp_anmeldung.js, autoGrund). -->
                 <div id="idp-login" hidden>
                     <div class="idp-trenner" id="idp-trenner"><span data-i18n="login.idp_oder">oder</span></div>
                     <a id="btn-idp-login" class="btn-link btn-idp" href="/api/login/oidc/start">
-                        <span data-i18n="login.idp_button">Mit Firmenkonto anmelden</span>
+                        <span data-i18n="login.idp_button">Mit Firmenkonto anmelden (SSO)</span>
                     </a>
+                    <label class="idp-auto" data-i18n-title="login.idp_auto_hint"
+                           title="Beim nächsten Öffnen dieser Seite läuft die Anmeldung über das Firmenkonto ohne Klick – direkt nach dem Abmelden nicht.">
+                        <input type="checkbox" id="idp-auto">
+                        <span data-i18n="login.idp_auto">Automatisch anmelden</span>
+                    </label>
                 </div>
 
                 <div class="login-extras">
@@ -6264,7 +6272,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <!-- ── Unter-Container: Anmeldung ueber den IdP (OpenID Connect) ──
                                      Logik: settings_idp.js. Plan: docs/plan-oidc-anmeldung.md -->
                                 <details class="sec-sub" data-sub="idp">
-                                    <summary><span data-i18n="security.sub_idp">Anmeldung über den IdP (OpenID Connect)</span><span class="sec-sub-hint" data-i18n="security.sub_idp_hint">– Firmenkonto statt Kennwort</span></summary>
+                                    <summary><span data-i18n="security.sub_idp">SSO Anmeldung über den IdP (OpenID Connect)</span><span class="sec-sub-hint" data-i18n="security.sub_idp_hint">– Firmenkonto statt Kennwort</span></summary>
                                     <div class="sec-sub-body">
                                 <p class="kb-hint" data-i18n="security.idp_hint">Zusätzlicher Anmeldeweg: Benutzer melden sich beim Anmeldedienst des Unternehmens an, {marke} sieht das Kennwort nie. Die Anmeldeberechtigung prüft {marke} weiter im Active Directory (Verbindung oben). Die Anmeldung mit Kennwort bleibt als Ausweichweg möglich.</p>
                                 <label class="checkbox-group" style="display:inline-flex;gap:8px;align-items:center;margin:4px 0 10px;cursor:pointer;">
@@ -6825,7 +6833,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=501"></script>
+    <script src="/static/js/i18n.js?v=502"></script>
 <script src="/static/js/tabfill.js?v=2"></script>
     <script src="/static/js/cron.js?v=37"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6883,7 +6891,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/sysload.js?v=6"></script>
     <script src="/static/js/syspackages.js?v=24"></script>
     <script src="/static/js/zugang_anmeldung.js?v=2"></script>
-    <script src="/static/js/idp_anmeldung.js?v=3"></script>
+    <script src="/static/js/idp_anmeldung.js?v=4"></script>
     <script src="/static/js/agent_roles.js?v=5"></script>
     <script src="/static/js/model_caps.js?v=7"></script>
     <script src="/static/js/alpha_sort.js?v=2"></script>
@@ -6891,7 +6899,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=2"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=259"></script>
+    <script src="/static/js/app.js?v=260"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

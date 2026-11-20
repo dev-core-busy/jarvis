@@ -43,6 +43,14 @@ function check(name, cond, detail) {
 process.on('exit', (code) => { if (!bilanz && code === 0) process.exitCode = 1; });
 const ALLE_FEHLER = [];
 const warte = (ms) => new Promise(r => setTimeout(r, ms || 30));
+// Wartet, BIS die Bedingung erfuellt ist (Deckel als Obergrenze, nicht als
+// Prueffenster): unter Last dauert ein Schritt laenger, und eine feste
+// Wartezeit gegen einen Timer ist dann ein Rennen - siehe die Stelle mit
+// statusHalten weiter unten.
+const warteBis = async (fn, ms) => {
+    for (let i = 0; i < (ms || 5000) / 10; i++) { if (fn()) return true; await warte(10); }
+    return !!fn();
+};
 
 const SETTINGS = lies('frontend/settings.html');
 const MODUL = lies('frontend/js/idp_anmeldung.js');
@@ -91,7 +99,7 @@ check('theme.css: .idp-trenner[hidden] { display: none } (sonst ueberstimmt disp
 function seite(url, antworten) {
     const html = SETTINGS.replace(/<script[\s\S]*?<\/script>/g, '');
     const vc = new VirtualConsole();
-    const z = { posts: [], koepfe: [], nav: [], fehler: [] };
+    const z = { posts: [], koepfe: [], nav: [], fehler: [], statusFreigeben: null };
     vc.on('jsdomError', (e) => { if (/navigation/i.test(String(e && e.message))) z.nav.push(e.message); else z.fehler.push(String(e && e.message)); });
     const dom = new JSDOM(html, { runScripts: 'outside-only', url, virtualConsole: vc,
                                   referrer: antworten.referrer || undefined });
@@ -115,6 +123,9 @@ function seite(url, antworten) {
             if (antworten.ohneModus) delete body.ad_modus;
             if (antworten.aktiv && antworten.ursprung) body.ursprung = antworten.ursprung;
             const ant = { ok: true, status: 200, json: () => Promise.resolve(body) };
+            // statusHalten: die Antwort haengt, bis die Probe sie FREIGIBT - ohne
+            // Timer und damit ohne Rennen mit der Wanduhr.
+            if (antworten.statusHalten) return new Promise(r => { z.statusFreigeben = () => r(ant); });
             // w.setTimeout: verfaellt mit w.close(), sonst traefe die Antwort ein geschlossenes Fenster.
             return antworten.statusMs ? new Promise(r => w.setTimeout(() => r(ant), antworten.statusMs)) : Promise.resolve(ant);
         }
@@ -415,12 +426,24 @@ function seite(url, antworten) {
     check('Speicher gesperrt: ein zweites Ereignis startet nicht noch einmal', s.z.ziele.length === 1, JSON.stringify(s.z.ziele));
     s.w.close();
 
-    s = await lauf('https://jarvis.test/', { auto: true, token: 'ALT', statusMs: 200 });
+    // ⚠ Die Statusantwort wird GEHALTEN, nicht verzoegert. Vorher stand hier
+    // "statusMs: 200" gegen "await warte(20)": auf einem ausgelasteten Laeufer
+    // dauerte das Warten laenger als die 200 ms, die Antwort war also schon da,
+    // der Start erfolgt - und die Probe war falsch rot (CI-Lauf 2026-11-19,
+    // 95 OK / 1 FAIL, lokal gruen). Gehalten kann die Antwort NICHT eintreffen,
+    // also ist "noch kein Start" unabhaengig von der Uhr; die Freigabe darunter
+    // ist zugleich die Positivkontrolle: derselbe Aufbau startet, sobald sie da ist.
+    s = await lauf('https://jarvis.test/', { auto: true, token: 'ALT', statusHalten: true });
     s.d.dispatchEvent(new s.w.CustomEvent('jarvis-anmeldemaske'));
     await warte(20);
+    if (typeof s.z.statusFreigeben !== 'function') {
+        console.log('ABBRUCH (Exit 2): Statusabfrage wurde nicht gestellt – die Probe darueber '
+                    + 'waere trivial wahr'); bilanz = true; process.exit(2);
+    }
     check('Ereignis VOR der Statusantwort: noch kein Start', s.z.ziele.length === 0);
-    await warte(300);
-    check('... nach der Antwort: Start', s.z.ziele.length === 1);
+    s.z.statusFreigeben();
+    check('... nach der Antwort: Start', await warteBis(() => s.z.ziele.length === 1),
+          JSON.stringify(s.z.ziele));
     s.w.close();
 
     // app.js: woher kommt das Ereignis? Am Syntaxbaum, nicht am Text.

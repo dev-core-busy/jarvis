@@ -43,6 +43,12 @@ PROBEN = [
     ("Sicherheits-Kopfzeilen waehlen wieder nach request.url.path",
      '            _routing_pfad(request), request.url.scheme == "https").items():',
      '            request.url.path, request.url.scheme == "https").items():', 1),
+    # Seit d246ae87 (Pentest F-20) entscheidet auch das Ziel des Abruf-Schluessels
+    # ueber den Routing-Pfad: sonst bestimmte der Host-Header mit, welche Datei
+    # ein Schluessel oeffnet. Die Probe fehlte, als die Stelle umgestellt wurde.
+    ("Ziel des Abruf-Schluessels kommt wieder aus request.url.path",
+     "    return _dlkey.ziel_kanon(_routing_pfad(request), request.query_params.multi_items())\n",
+     "    return _dlkey.ziel_kanon(request.url.path, request.query_params.multi_items())\n", 1),
     ("Helfer liest raw_path statt path",
      '    return request.scope["path"]\n', '    return request.scope["raw_path"].decode()\n', 1),
     ("Helfer umgangen ueber str(request.url)",

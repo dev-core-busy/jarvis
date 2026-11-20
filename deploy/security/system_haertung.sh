@@ -63,6 +63,19 @@ fi
 
 PAKETE="needrestart auditd audispd-plugins aide aide-common lynis"
 
+# Werkzeug fuer die sudoers-Pruefung. Im Produktivlauf IMMER das visudo des
+# Systems - die Variable wird dort nicht gelesen, sonst waehlte die Umgebung das
+# Pruefwerkzeug fuer eine Datei, die sudo fuer alle sperren kann.
+# Im Testmodus darf der Waechter eines vorgeben: auf einem CI-Laeufer ist das
+# vorhandene visudo nicht dasselbe wie auf dem Zielsystem. Am 2026-11-19 lehnte
+# das visudo von Ubuntu 26.04 "Defaults logfile=" ab ("unknown setting:
+# 'logfile'"), waehrend dieselbe Datei auf Debian 13 mit visudo 1.9.16p2
+# "Analyse OK" ist (auf DEV gemessen) - die Sonde war falsch, nicht die Datei.
+VISUDO="visudo"
+if [ -n "$TEST" ] && [ -n "${JARVIS_VISUDO:-}" ]; then
+    VISUDO="$JARVIS_VISUDO"
+fi
+
 # ── Inhalte ──────────────────────────────────────────────────────────────────
 SUDOERS='# Haertung B1 (Checkliste 37, 75) - deploy/security/system_haertung.sh
 Defaults use_pty
@@ -306,16 +319,16 @@ schreibe() {
     tmp="$(mktemp "$(dirname "$ziel")/.haertung.XXXXXX")" || return 1
     printf '%s\n' "$inhalt" > "$tmp"
     chmod "$modus" "$tmp"
-    if [ "$name" = "SUDOERS" ] && command -v visudo >/dev/null 2>&1; then
+    if [ "$name" = "SUDOERS" ] && command -v "$VISUDO" >/dev/null 2>&1; then
         local visudo_sagt
-        if ! visudo_sagt="$(LC_ALL=C visudo -cf "$tmp" 2>&1)"; then
+        if ! visudo_sagt="$(LC_ALL=C "$VISUDO" -cf "$tmp" 2>&1)"; then
             rm -f "$tmp"
             # Die Begruendung von visudo MITNEHMEN. Bis 2026-11-19 verschwand sie
             # in /dev/null, und uebrig blieb "fehlgeschlagen" ohne Zeile, ohne
             # Grund und ohne naechsten Schritt - auf einem Laeufer mit anderer
             # sudo-Fassung war damit nicht zu sagen, WAS sie beanstandet.
             echo "FEHLER: sudoers-Pruefung (visudo -cf) fehlgeschlagen - nichts eingespielt" >&2
-            echo "FEHLER: visudo ($(visudo -V 2>/dev/null | head -1)) sagt: ${visudo_sagt:-(keine Ausgabe)}" >&2
+            echo "FEHLER: $VISUDO ($("$VISUDO" -V 2>/dev/null | head -1)) sagt: ${visudo_sagt:-(keine Ausgabe)}" >&2
             exit 3
         fi
     fi

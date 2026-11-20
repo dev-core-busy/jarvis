@@ -49,7 +49,16 @@ PROBEN = [
     ("needrestart startet selbst neu", "'\"'\"'l'\"'\"'", "'\"'\"'a'\"'\"'", 1),
     ("Skript schreibt in apt", "etc/aide/aide.conf.d/95_jarvis_ausnahmen|0644|AIDE",
      "etc/aide/aide.conf.d/95_jarvis_ausnahmen|0644|AIDE\netc/apt/apt.conf.d/52haertung|0644|LIMITS", 1),
-    ("sudoers ohne visudo-Pruefung", 'if ! visudo -cf "$tmp" >/dev/null 2>&1; then', "if false; then", 1),
+    # Anker 2026-11-20 nachgezogen: die Schranke nimmt seit d246ae87 die
+    # Begruendung von visudo mit und benutzt seit aec7baaf+1 $VISUDO. Die alte
+    # Zeile gab es nicht mehr - die Probe war stumm und haette es erst beim
+    # naechsten Lauf dieses Harness gemeldet ("PROBE KAPUTT").
+    ("sudoers ohne visudo-Pruefung",
+     'if ! visudo_sagt="$(LC_ALL=C "$VISUDO" -cf "$tmp" 2>&1)"; then', "if false; then", 1),
+    # Der Schalter fuer das Pruefwerkzeug darf nur im Testmodus wirken.
+    ("JARVIS_VISUDO wirkt auch im Produktivlauf",
+     'if [ -n "$TEST" ] && [ -n "${JARVIS_VISUDO:-}" ]; then',
+     'if [ -n "${JARVIS_VISUDO:-}" ]; then', 1),
     ("schreibt immer (nicht idempotent)", 'echo "  unveraendert $ziel"\n        return 0', "true", 1),
     ("--pruefen schreibt", "        dateien pruefen\n", "        dateien anwenden\n", 1),
     ("Drop-in ohne LimitCORE=0", "LimitCORE=0'", "LimitCORE=infinity'", 1),

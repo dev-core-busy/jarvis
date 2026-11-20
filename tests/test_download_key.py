@@ -435,11 +435,17 @@ check("unbekannte Art faellt durch",
 # _sitzung_ohne_admin (daran haengt _user_is_admin) sieht ihn.
 import contextvars as _cv  # noqa: E402
 _fns = {}
+# _routing_pfad gehoert MIT in den Schnitt: seit d246ae87 holt _abruf_ziel den
+# Pfad dort und nicht mehr aus request.url.path. Ohne sie lief der Namensraum in
+# einen NameError - als Absturz, nicht als FAIL (gefunden erst im CI-Lauf
+# 2026-11-19, lokal nicht mitgemessen).
+_GESCHNITTEN = ("_query_benutzer", "_sitzung_ohne_admin", "_admin_2fa_pflicht",
+                "_abruf_ziel", "_routing_pfad")
 for k in baum.body:
-    if isinstance(k, ast.FunctionDef) and k.name in ("_query_benutzer", "_sitzung_ohne_admin",
-                                                       "_admin_2fa_pflicht", "_abruf_ziel"):
+    if isinstance(k, ast.FunctionDef) and k.name in _GESCHNITTEN:
         _fns[k.name] = ast.get_source_segment(QUELLE, k)
-check("Positivkontrolle: vier Funktionen aus main.py geschnitten", len(_fns) == 4, sorted(_fns))
+check(f"Positivkontrolle: {len(_GESCHNITTEN)} Funktionen aus main.py geschnitten",
+      len(_fns) == len(_GESCHNITTEN), sorted(_fns))
 
 
 class _Abfrage(dict):
@@ -450,7 +456,7 @@ class _Abfrage(dict):
         return list(self.items())
 
 
-if len(_fns) == 4:
+if len(_fns) == len(_GESCHNITTEN):
     _KX = _cv.ContextVar("_sk", default=None)
     _BEENDET = set()        # Kennungen beendeter Sitzungen (Attrappe sitzung_token)
     _ns6 = {"_dlkey": dk, "verify_token": lambda t: None, "_sitzung_kontext": _KX,
@@ -465,8 +471,13 @@ if len(_fns) == 4:
 
     def _einloesen(schluessel):
         def lauf():
+            # scope["path"] = der Routing-Pfad (/x, dafuer ist ZX erzeugt);
+            # url.path traegt bewusst einen ANDEREN Wert: wer den nimmt, bildet
+            # ein anderes Ziel und loest den Schluessel nicht ein. So misst die
+            # Probe, WOHER der Pfad kommt (BadHost, CVE-2026-48710).
             req = types.SimpleNamespace(query_params=_Abfrage(token=schluessel),
-                                        url=types.SimpleNamespace(path="/x"))
+                                        scope={"path": "/x"},
+                                        url=types.SimpleNamespace(path="/aus-dem-host-header"))
             name = _ns6["_query_benutzer"](req)
             return name, (_ns6["_sitzung_ohne_admin"](name) if name else None)
         return _cv.Context().run(lauf)

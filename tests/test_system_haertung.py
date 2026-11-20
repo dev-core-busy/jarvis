@@ -55,10 +55,18 @@ def pruefe(bed, t):
 def lauf(modus, wurzel, skript=None, test=True):
     env = {k: v for k, v in os.environ.items()
            if k not in ("JARVIS_HAERTUNG_TEST", "JARVIS_SYS_WURZEL")}
+    env.pop("JARVIS_VISUDO", None)
     if test:
         env["JARVIS_HAERTUNG_TEST"] = "1"
         if wurzel is not None:
             env["JARVIS_SYS_WURZEL"] = str(wurzel)
+        # Das in [0] als tauglich GEMESSENE visudo, nicht irgendeines aus dem PATH.
+        # Ist keines tauglich, bekommt das Skript einen Namen, den "command -v"
+        # nicht aufloest: es ueberspringt die Schranke dann auf dem Weg, der fuer
+        # "visudo fehlt" schon vorgesehen ist - sonst fiele es mit dem
+        # untauglichen Werkzeug auf Exit 3 und JEDE folgende Pruefung waere ein
+        # Folgefehler (CI-Lauf 2026-11-19).
+        env["JARVIS_VISUDO"] = globals().get("VISUDO") or "visudo-keines-tauglich-siehe-waechter"
     p = subprocess.run(["bash", str(skript or SKRIPT), modus], env=env,
                        capture_output=True, text=True, timeout=60)
     return p.returncode, p.stdout + p.stderr
@@ -95,6 +103,83 @@ if subprocess.run(["bash", "-n", str(SKRIPT)]).returncode != 0:
     sys.exit(1)
 ok("Syntax gueltig (bash -n)")
 
+# Die sudoers-Schranke des Skripts prueft mit visudo. Ein visudo, das die
+# KORREKTE Vorlage ablehnt, ist fuer diese Messung untauglich - eine falsche
+# Sonde. Am 2026-11-19 wechselte "ubuntu-latest" auf Ubuntu 26.04, dessen visudo
+# "Defaults logfile=" nicht kennt ("unknown setting: 'logfile'"); auf dem
+# Zielsystem (Debian 13, visudo 1.9.16p2) ist dieselbe Datei "Analyse OK" (auf
+# DEV gemessen). Der Waechter meldete daraufhin vier FAILs und stuerzte danach
+# ab - ueber das SKRIPT sagte davon kein einziger etwas.
+# Die Vorlage wird aus dem Skript GELESEN, nicht hier wiederholt: eine Kopie
+# wuerde beim ersten Satz, der dort dazukommt, still an der Wirklichkeit
+# vorbeimessen.
+_vorlage = re.search(r"(?ms)^SUDOERS='(.*?)'$", SKRIPT.read_text(encoding="utf-8"))
+if not _vorlage:
+    print("ABBRUCH: SUDOERS-Vorlage in %s nicht gefunden" % SKRIPT.name)
+    sys.exit(2)
+_probe = Path(tempfile.mkdtemp(prefix="sys_haertung_visudo_"))
+VISUDO = None
+_abgelehnt = []
+try:
+    _pf = _probe / "sudoers_probe"
+    _pf.write_text(_vorlage.group(1) + "\n", encoding="utf-8")
+    _pf.chmod(0o440)
+    # Breit suchen und nach dem WIRKLICHEN Pfad entdoppeln: liegen klassisches
+    # sudo und sudo-rs nebeneinander, heisst nur eines von beiden "visudo" - das
+    # taugliche kann "visudo.sudo", "visudo-classic" o.ae. heissen. Welches es
+    # ist, entscheidet die Probe unten, nicht eine Vermutung ueber Paketnamen.
+    _kandidaten, _gesehen = [], set()
+    for _k in [shutil.which("visudo")] + sorted(
+            str(q) for d in ("/usr/sbin", "/usr/bin", "/sbin", "/bin")
+            for q in Path(d).glob("visudo*") if Path(d).is_dir()):
+        if not _k or not os.access(_k, os.X_OK):
+            continue
+        _echt = os.path.realpath(_k)
+        if _echt in _gesehen:
+            continue
+        _gesehen.add(_echt)
+        _kandidaten.append(_k)
+    for _kand in _kandidaten:
+        _p = subprocess.run([_kand, "-cf", str(_pf)], capture_output=True, text=True,
+                            env=dict(os.environ, LC_ALL="C"))
+        if _p.returncode == 0:
+            VISUDO = _kand
+            break
+        _fassung = subprocess.run([_kand, "-V"], capture_output=True, text=True)
+        _abgelehnt.append("%s (%s): %s" % (_kand, (_fassung.stdout.splitlines() or [""])[0].strip(),
+                                           (_p.stdout + _p.stderr).strip()[:200]))
+finally:
+    shutil.rmtree(_probe, ignore_errors=True)
+if VISUDO is None:
+    # Kein FAIL und kein Exit 2: der Waechter laeuft, nur ZWEI seiner Pruefungen
+    # koennen auf diesem Rechner nichts ueber das Skript sagen. Dieselbe
+    # Entscheidung wie beim schon vorgesehenen Fall "visudo fehlt" - sie steht
+    # namentlich unter NICHT GEPRUEFT, statt als Befund ueber das Skript
+    # aufzutreten (am 2026-11-19 waren es vier FAILs und ein Absturz).
+    print("  HINWEIS kein visudo auf diesem Rechner beurteilt die sudoers-Vorlage des "
+          "Zielsystems:")
+    for _z in _abgelehnt or ["(kein visudo gefunden)"]:
+        print("          abgelehnt von " + _z)
+    NICHT_GEPRUEFT.append("visudo -cf und sudoers-Schranke (vorhandenes visudo beurteilt "
+                          "die Zielsyntax nicht: %s)" % "; ".join(_abgelehnt) or "visudo fehlt")
+else:
+    ok("Positivkontrolle: %s beurteilt die sudoers-Vorlage des Zielsystems" % VISUDO)
+
+# JARVIS_VISUDO darf das Pruefwerkzeug NUR im Testmodus bestimmen - sonst
+# entschiede die Umgebung, womit eine Datei geprueft wird, die sudo fuer alle
+# sperren kann. Das ist hier am TEXT gemessen, nicht an der Wirkung: ein Lauf
+# ohne Testmodus verlangt root und das echte "/", also gerade das, was dieser
+# Waechter niemals anfassen darf. Die Grenze ist damit benannt und nicht
+# verschwiegen; die Gegenprobe (gegen_system_haertung.py) entfernt die
+# TEST-Bedingung und erwartet hier einen Befund.
+_sk = SKRIPT.read_text(encoding="utf-8")
+# Nur die Zeile UNMITTELBAR vor der Zuweisung ([^\n]*, kein DOTALL): mit einem
+# Muster ueber mehrere Zeilen traf "-n \"$TEST\"" auch eine frueher stehende
+# Bedingung, und die Probe der Gegenprobe blieb stumm (2026-11-20 gemessen).
+_zuweisung = re.search(r'(?m)^(?P<bed>if [^\n]*)\n\s*VISUDO="\$JARVIS_VISUDO"', _sk)
+pruefe(bool(_zuweisung) and '-n "$TEST"' in _zuweisung.group("bed"),
+       "JARVIS_VISUDO wird nur im Testmodus gelesen (Produktivlauf nimmt das visudo des Systems)")
+
 sandkasten = Path(tempfile.mkdtemp(prefix="sys_haertung_"))
 try:
     W = sandkasten / "a"
@@ -107,9 +192,16 @@ try:
     pruefe(not any(W.rglob("*")), "--pruefen hat im leeren Sandkasten nichts angelegt")
     rc, out = lauf("--anwenden", W)
     if rc != 0 or not (W / "etc").is_dir():
-        fail("--anwenden laeuft (Exit %d): %s" % (rc, out.strip()[-200:]))
-    else:
-        ok("--anwenden laeuft (Exit 0)")
+        fail("--anwenden laeuft (Exit %d): %s" % (rc, out.strip()[-400:]))
+        # Alles danach setzt den geschriebenen Baum voraus. Ohne ihn sind die
+        # folgenden Pruefungen Folgefehler, und [3] starb am fehlenden
+        # Verzeichnis (FileNotFoundError, CI-Lauf 2026-11-19) - ein Absturz
+        # verdeckt die eine Zeile, die den Grund traegt.
+        print("ABBRUCH der weiteren Pruefungen: ohne gelaufenes --anwenden "
+              "waeren sie Folgefehler des Abbruchs oben")
+        print("ERGEBNIS: %d OK, %d FAIL" % (OK, FAIL))
+        sys.exit(1)
+    ok("--anwenden laeuft (Exit 0)")
     rc, _ = lauf("--pruefen", W)
     pruefe(rc == 0, "nach --anwenden meldet --pruefen 'alles umgesetzt' (Exit %d)" % rc)
     rc, _ = lauf("--unsinn", W)
@@ -268,12 +360,13 @@ try:
     sud = W / "etc/sudoers.d/10-haertung"
     pruefe(sud.is_file() and oct(sud.stat().st_mode & 0o777) == "0o440", "sudoers: Datei mit Modus 0440")
     pruefe('Defaults logfile="/var/log/sudo.log"' in zeilen(sud), "sudoers: Protokoll nach /var/log/sudo.log")
-    visudo = shutil.which("visudo") or ("/usr/sbin/visudo" if os.path.exists("/usr/sbin/visudo") else None)
-    if visudo:
-        r = subprocess.run([visudo, "-cf", str(sud)], capture_output=True, text=True)
-        pruefe(r.returncode == 0, "sudoers: visudo -cf akzeptiert die Datei")
-    else:
-        NICHT_GEPRUEFT.append("visudo -cf (visudo fehlt)")
+    # Das in [0] als tauglich gemessene Werkzeug - nicht erneut irgendeines aus
+    # dem PATH: ein visudo, das die korrekte Vorlage ablehnt, wuerde hier einen
+    # Befund ueber das Skript melden, der keiner ist.
+    if VISUDO:
+        r = subprocess.run([VISUDO, "-cf", str(sud)], capture_output=True, text=True,
+                           env=dict(os.environ, LC_ALL="C"))
+        pruefe(r.returncode == 0, "sudoers: visudo -cf akzeptiert die Datei (%s)" % VISUDO)
 
     # ── 4l. auditd.conf des Pakets: nur zwei Schluessel, Rest bleibt ──────────
     print("[4l] vorhandene auditd.conf")
@@ -300,8 +393,9 @@ try:
 
     # ── 6. Ungueltige sudoers-Datei wird NICHT eingespielt ───────────────────
     print("[6] sudoers-Schranke")
-    if not visudo:
-        NICHT_GEPRUEFT.append("sudoers-Schranke (visudo fehlt)")
+    if not VISUDO:
+        print("  HINWEIS uebersprungen - ohne taugliches visudo misst diese Probe "
+              "das Werkzeug (siehe [0])")
     else:
         text = SKRIPT.read_text(encoding="utf-8")
         anker = "Defaults passwd_tries=3"

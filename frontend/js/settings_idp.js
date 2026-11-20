@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════
    Einstellungen -> Sicherheit: Anmeldung ueber den IdP (OpenID Connect)
 
-   Zwei Stellen:
+   Eine Stelle:
    * Unter-Container "Anmeldung ueber den IdP" im Bereich Berechtigungen
      (GET/POST /api/admin/oidc, POST /api/admin/oidc/test). Darin der Schalter
      "AD-Anmeldung minimiert anzeigen" (oidc_ad_modus: an = "fallback", aus =
@@ -12,10 +12,10 @@
      ersten Aufklappen. Das Client-Secret kommt nie zurueck – das Feld bleibt
      leer, darunter steht nur, ob eines hinterlegt ist; leer speichern laesst
      es unveraendert.
-   * Schalter "Die Anmeldung ueber den IdP zaehlt als zweiter Faktor" im
-     Bereich "Pflicht fuer Administratoren" (POST /api/admin/anmeldeschutz/idp-mfa).
-     Den Zustand liefert GET /api/admin/anmeldeschutz; totp_admin.js reicht
-     ihn ueber IdpEinstellungen.mfaZeigen() weiter.
+   Den Schalter "Die Anmeldung ueber den IdP zaehlt als zweiter Faktor" samt
+   Nachweis gibt es seit 2026-11-20 nicht mehr: die IdP-Anmeldung fragt nie
+   einen Code ab, und Admin-Rechte gibt es nur am Zahnrad mit dem eigenen Code
+   – er haette nichts mehr bewirkt.
    ═══════════════════════════════════════════════════════════════════ */
 (function () {
     'use strict';
@@ -175,53 +175,9 @@
         if ($('idp-aktiv')) $('idp-aktiv').addEventListener('change', modusZeile);
     }
 
-    // ── Schalter "MFA des IdP zaehlt als zweiter Faktor" ─────────────────
-
-    function mfaZeigen(d) {
-        var cb = $('sec-idp-mfa'), f = $('sec-idp-mfa-nachweis');
-        if (cb) cb.checked = !!(d && d.idp_mfa_anerkennen);
-        if (f && d && typeof d.idp_mfa_nachweis === 'string') f.value = d.idp_mfa_nachweis;
-    }
-
-    function mfaSenden(anerkennen, alt) {
-        var cb = $('sec-idp-mfa'), btn = $('sec-idp-mfa-speichern');
-        var nachweis = (($('sec-idp-mfa-nachweis') || {}).value || '').trim();
-        if (cb) cb.disabled = true;
-        if (btn) btn.disabled = true;
-        meldung('sec-idp-mfa-msg', '');
-        return anfrage('/api/admin/anmeldeschutz/idp-mfa', 'POST',
-                       { anerkennen: anerkennen, nachweis: nachweis }).then(function (res) {
-            if (cb) cb.disabled = false;
-            if (btn) btn.disabled = false;
-            if (res.ok && res.d.ok) {
-                mfaZeigen({ idp_mfa_anerkennen: res.d.idp_mfa_anerkennen,
-                            idp_mfa_nachweis: res.d.idp_mfa_nachweis });
-                meldung('sec-idp-mfa-msg', T('security.idp_gespeichert', 'Gespeichert.'));
-                return;
-            }
-            if (cb) cb.checked = alt;
-            meldung('sec-idp-mfa-msg', res.d.detail || res.d.error ||
-                T('security.pflicht_failed', 'Die Einstellung konnte nicht gespeichert werden.'), true);
-        }).catch(function () {
-            if (cb) { cb.disabled = false; cb.checked = alt; }
-            if (btn) btn.disabled = false;
-            meldung('sec-idp-mfa-msg', T('security.pflicht_failed', 'Die Einstellung konnte nicht gespeichert werden.'), true);
-        });
-    }
-
-    function mfaVerdrahten() {
-        var cb = $('sec-idp-mfa'), btn = $('sec-idp-mfa-speichern');
-        // Nur auf "change" hoeren – der Browser schaltet im <label> selbst um.
-        if (cb) cb.addEventListener('change', function () { mfaSenden(cb.checked, !cb.checked); });
-        if (btn) btn.addEventListener('click', function () {
-            var an = !!(cb && cb.checked);
-            mfaSenden(an, an);
-        });
-    }
-
-    function start() { containerVerdrahten(); mfaVerdrahten(); }
+    function start() { containerVerdrahten(); }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
 
-    window.IdpEinstellungen = { mfaZeigen: mfaZeigen, _zeigen: zeigen, _laden: laden };
+    window.IdpEinstellungen = { _zeigen: zeigen, _laden: laden };
 })();

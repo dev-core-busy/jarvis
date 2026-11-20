@@ -6366,7 +6366,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_ad.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
                                 <script src="/static/js/settings_ad.js?v=10"></script>
-                                <script src="/static/js/settings_idp.js?v=5"></script>
+                                <script src="/static/js/settings_idp.js?v=6"></script>
                             </div>
                         </div>
 
@@ -6405,19 +6405,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                      (settings_btn.js), Zuruecksetzen fremder Konten (totp_admin.js) -->
                                 <h4 style="margin:18px 0 6px;" data-i18n="security.admin_zahnrad_h">Administrator-Rechte</h4>
                                 <p class="kb-hint" data-i18n="security.admin_zahnrad_hint">Administratoren werden bei der Anmeldung nicht nach dem Zwei-Faktor-Code gefragt. Ihre Rechte erhalten sie erst mit einem Klick auf das Zahnrad und dem Code – beim ersten Mal wird die Zwei-Faktor-Anmeldung dort eingerichtet. Die Rechte gelten bis zur Abmeldung oder bis „Administration beenden“. In der App und über die kennwortlose Outlook- bzw. Windows-Anmeldung gibt es keine Administrator-Rechte.</p>
-
-                                <!-- MFA des IdP als zweiter Faktor (Einstellung, Vorgabe an). Logik: settings_idp.js -->
-                                <label class="checkbox-group" style="display:inline-flex;gap:8px;align-items:center;margin:10px 0 0;cursor:pointer;">
-                                    <input type="checkbox" id="sec-idp-mfa" style="width:16px;height:16px;accent-color:var(--accent);">
-                                    <span data-i18n="security.idp_mfa">Die Anmeldung über den IdP zählt als zweiter Faktor</span>
-                                </label>
-                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0 0 24px;">
-                                    <label for="sec-idp-mfa-nachweis" style="font-size:0.85rem;" data-i18n="security.idp_mfa_nachweis">Nachweis im Token (optional):</label>
-                                    <input data-tabfill type="text" id="sec-idp-mfa-nachweis" placeholder="amr=otp" style="width:180px;box-sizing:border-box;">
-                                    <button type="button" id="sec-idp-mfa-speichern" class="sec-btn" data-i18n="security.idp_mfa_speichern">Nachweis speichern</button>
-                                </div>
-                                <div id="sec-idp-mfa-msg" role="status" style="font-size:0.85rem;color:var(--text-primary);"></div>
-                                <p class="kb-hint" data-i18n="security.idp_mfa_hint">Vorgabe: eingeschaltet. Eingeschaltet fragt {marke} nach einer Anmeldung über den IdP keinen eigenen Code mehr ab, und Administratoren erhalten ihre vollen Rechte. Nur einschalten, wenn der IdP für {marke} eine Mehrfaktor-Anmeldung erzwingt. Mit Nachweis zählt die Anmeldung nur, wenn das Token den Wert trägt (z. B. amr=otp), sonst fragt {marke} seinen eigenen Code ab. Ohne Nachweis verlässt sich {marke} auf die Einstellung des IdP.</p>
 
                                 <!-- 2FA eines ANDEREN Kontos abschalten (Faktor verloren). Logik: totp_admin.js -->
                                 <h4 style="margin:18px 0 6px;" data-i18n="security.totp_reset_h">Zwei-Faktor-Anmeldung zurücksetzen</h4>
@@ -6855,7 +6842,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=509"></script>
+    <script src="/static/js/i18n.js?v=510"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=38"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6898,7 +6885,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=46"></script>
     <script src="/static/js/fernzugang.js?v=4"></script>
-    <script src="/static/js/totp_admin.js?v=5"></script>
+    <script src="/static/js/totp_admin.js?v=6"></script>
     <script src="/static/js/ldap_picker.js?v=18"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
     <script src="/static/js/rechte_matrix.js?v=9"></script>

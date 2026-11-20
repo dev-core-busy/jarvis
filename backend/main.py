@@ -1628,9 +1628,8 @@ def generate_token(username: str, ts: int | None = None, mit_2fa: bool = False,
 
     ``ts`` nur fuer den Kennwortwechsel: das Ersatz-Token muss NACH der
     Widerrufs-Epoche liegen (siehe change_password).
-    ``mit_2fa``: die Anmeldung hat einen zweiten Faktor bestanden (Code eines
-    Nicht-Admins, MFA des IdP). Gibt KEINE Admin-Rechte und ersetzt auch den
-    Code am Zahnrad nicht.
+    ``mit_2fa``: die Anmeldung hat den Code eines Nicht-Admins mit eigener 2FA
+    bestanden. Gibt KEINE Admin-Rechte und ersetzt auch den Code am Zahnrad nicht.
     ``ohne_admin``: Sitzung ohne Admin-Rechte, auch fuer ein Admin-Konto (App).
     ``nur_ai_maus``: gilt nur fuer die Schnittstellen der AI-Maus (ohne 2FA).
     ``admin_erhoeht``: nur fuer den Kennwortwechsel (Ersatz-Token erbt den Stand)."""
@@ -2017,7 +2016,6 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/login/oidc/einloesen",            "Konto · Anmeldung über den IdP"),
     ("POST",   r"/api/admin/oidc",                      "Einstellungen · IdP-Anmeldung geändert"),
     ("POST",   r"/api/admin/oidc/test",                 "Einstellungen · IdP-Verbindung getestet"),
-    ("POST",   r"/api/admin/anmeldeschutz/idp-mfa",     "Einstellungen · MFA des IdP als zweiter Faktor"),
     # Fehleranalyse (Einstellungen -> Fehleranalyse)
     ("POST",   r"/api/fehleranalyse/dossier",           "Einstellungen · Fehleranalyse · Dossier erstellt"),
     ("POST",   r"/api/fehleranalyse/analyse",           "Einstellungen · Fehleranalyse · Analyse angefordert"),
@@ -6274,17 +6272,6 @@ def _oidc_redirect_uri(request: Request, cfg: dict | None = None) -> str:
     return str(request.base_url).rstrip("/") + "/api/login/oidc/callback"
 
 
-def _oidc_mfa_anerkennen() -> bool:
-    """Zaehlt die MFA des IdP als zweiter Faktor? Vorgabe: JA.
-
-    Festlegung des Betreibers 2026-11-18: eine erfolgreiche Anmeldung ueber den
-    IdP ersetzt den eigenen Code, auch fuer Administratoren (der IdP erzwingt
-    die Mehrfaktor-Anmeldung). Abschalten nur ausdruecklich
-    (``oidc_mfa_anerkennen: false``) – dann gilt wieder der eigene Code.
-    Ein eingetragener Nachweis (``oidc_mfa_nachweis``) bleibt wirksam."""
-    return _oidc_schalter("oidc_mfa_anerkennen", True)
-
-
 # Kennwortanmeldung (AD) neben der IdP-Anmeldung: "fallback" = eingeklappt
 # (Schalter "AD-Anmeldung minimiert anzeigen"), per Link aufklappbar
 # (Notfall-Anmeldung) und von selbst offen, wenn die IdP-Anmeldung scheitert –
@@ -6534,13 +6521,10 @@ async def oidc_callback(request: Request):
     if not _lic_ok:
         return _oidc_zurueck(request, "lizenz", konto, _lic_grund)
 
-    nachweis = str(config.get_setting("oidc_mfa_nachweis", "") or "")
     # Zugangsdaten erst NACH allen Pruefungen holen: ein abgewiesenes Konto
     # bekommt keine Anfrage an userinfo und keinen Schein mit Geheimnissen.
     zugaenge = await _oidc_zugaenge_holen(claims, doc, tausch.get("access_token", ""), ctx)
-    schein = _oidc.SCHEINE.neu({"konto": konto,
-                                "mfa_belegt": _oidc.mfa_belegt(claims, nachweis),
-                                "zugaenge": zugaenge})
+    schein = _oidc.SCHEINE.neu({"konto": konto, "zugaenge": zugaenge})
     resp = _oidc_zurueck(request)
     _oidc_cookie(resp, _OIDC_COOKIE_SCHEIN, schein, _oidc.SCHEIN_TTL_S)
     print(f"[AUTH] IdP-Anmeldung geprueft, Schein ausgestellt: {konto} ({ip})", flush=True)
@@ -6555,9 +6539,8 @@ async def oidc_einloesen(request: Request):
     2FA (Betreiberentscheid 2026-11-20): bei der Anmeldung ueber das
     Firmenkonto wird fuer NIEMANDEN ein Code abgefragt. Die Sitzung beginnt
     ohne Admin-Rechte; ein Administrator holt sie am Zahnrad, IMMER mit dem
-    eigenen Code. Erkennt der Betreiber die MFA des IdP an (und belegt das Token
-    sie, falls ein Nachweis eingetragen ist), traegt die Sitzung das Merkmal
-    "mit zweitem Faktor" – am Zahnrad ersetzt das den Code nicht."""
+    eigenen Code. Den Schalter "MFA des IdP zaehlt als zweiter Faktor" samt
+    Nachweis gibt es seit 2026-11-20 nicht mehr – er haette nichts mehr bewirkt."""
     try:
         resp = await _oidc_einloesen_ablauf(request)
     except AuthStateUnlesbar:
@@ -6591,21 +6574,18 @@ async def _oidc_einloesen_ablauf(request: Request):
         _oidc_cookie_weg(_gesperrt, _OIDC_COOKIE_SCHEIN)
         return _gesperrt
 
-    mit_2fa = bool(_oidc_mfa_anerkennen() and schein.get("mfa_belegt"))
-
     # Ab hier ist die Anmeldung entschieden: Schein verbrauchen (einmalig).
     if _oidc.SCHEINE.nehmen(schein_id) is None:
         return JSONResponse({"success": False, "abgelaufen": True,
                              "error": "Die Anmeldung über das Firmenkonto ist abgelaufen. "
                                       "Bitte erneut anmelden."}, status_code=401)
-    token = generate_token(konto, mit_2fa=mit_2fa)
+    token = generate_token(konto)
     _anmelde_schutz.erfolg(konto)
     try:
         _user_sessions.record_login(konto, ip, display=_display_name(konto))
     except Exception:  # noqa: BLE001
         pass
-    print(f"[AUTH] IdP-Anmeldung erfolgreich: {konto} ({ip}, 2FA={'ja' if mit_2fa else 'nein'})",
-          flush=True)
+    print(f"[AUTH] IdP-Anmeldung erfolgreich: {konto} ({ip})", flush=True)
     # Frisch angemeldet: keine Admin-Rechte – die gibt es erst am Zahnrad.
     _sitzung_kontext.set((konto, False, False))
     daten = {"success": True, "token": token, "username": konto,
@@ -6826,34 +6806,6 @@ async def oidc_verbindung_testen(request: Request, user: str = Depends(require_l
     except _oidc.OidcFehler as e:
         return JSONResponse({"ok": False, "error": str(e), "code": e.code})
     return JSONResponse({"ok": True, **info})
-
-
-@app.post("/api/admin/anmeldeschutz/idp-mfa")
-async def anmeldeschutz_idp_mfa(request: Request, user: str = Depends(require_local_auth)):
-    """Zaehlt die MFA des IdP als zweiter Faktor? (Bereich "Pflicht fuer Administratoren")
-
-    Body ``{anerkennen: bool, nachweis: "claim=wert" | ""}``."""
-    from backend import oidc_anmeldung as _oidc
-    _note_activity(user, request)
-    body = await _json_objekt(request)
-    if not isinstance(body, dict):
-        body = {}
-    wert = body.get("anerkennen")
-    nachweis = body.get("nachweis", config.get_setting("oidc_mfa_nachweis", "") or "")
-    if not isinstance(wert, bool):
-        return JSONResponse({"ok": False, "error": "anerkennen (true/false) erwartet."},
-                            status_code=400)
-    if not isinstance(nachweis, str) or not _oidc.nachweis_gueltig(nachweis):
-        return JSONResponse({"ok": False, "error": "Nachweis in der Form claim=wert "
-                             "(z. B. amr=otp) oder leer."}, status_code=400)
-    nachweis = nachweis.strip()
-    _sprot_angaben(oidc_mfa_anerkennen=wert, oidc_mfa_nachweis=nachweis or "-")
-    config.save_setting("oidc_mfa_anerkennen", wert)
-    config.save_setting("oidc_mfa_nachweis", nachweis)
-    print(f"[AUTH] MFA des IdP als zweiter Faktor {'ANERKANNT' if wert else 'nicht anerkannt'}"
-          f" (Nachweis: {nachweis or 'keiner'}, durch {user})", flush=True)
-    return JSONResponse({"ok": True, "idp_mfa_anerkennen": _oidc_mfa_anerkennen(),
-                         "idp_mfa_nachweis": nachweis})
 
 
 @app.post("/api/logout")
@@ -7610,12 +7562,8 @@ async def totp_admin_reset(request: Request, user: str = Depends(require_local_a
 
 @app.get("/api/admin/anmeldeschutz")
 async def anmeldeschutz_status(user: str = Depends(require_local_auth)):
-    """Laufende Konto-Sperren nach Fehlversuchen + Lage der IdP-Anmeldung."""
+    """Laufende Konto-Sperren nach Fehlversuchen."""
     return JSONResponse({"ok": True,
-                         "idp_mfa_anerkennen": _oidc_mfa_anerkennen(),
-                         "idp_mfa_nachweis": str(config.get_setting("oidc_mfa_nachweis", "")
-                                                 or ""),
-                         "idp_aktiv": _oidc_schalter("oidc_aktiv"),
                          "sperren": [dict(s, display=_display_name(s["konto"]))
                                      for s in _anmelde_schutz.gesperrte_konten()],
                          "konto_max": _anmelde_schutz.KONTO_MAX,

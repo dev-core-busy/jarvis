@@ -7,7 +7,7 @@ Drei Teile:
      manipulierte Merkmal (alg, Signatur, iss, aud/azp, exp/nbf/iat, nonce,
      kid) abgewiesen wird – mit Positivkontrolle VORHER (ein gueltiges Token
      muss durchgehen, sonst ist jede Abweisung trivial wahr -> Exit 2).
-     Dazu Kontoname, MFA-Nachweis, Ablagen, PKCE, Discovery, Code-Tausch.
+     Dazu Kontoname, Ablagen, PKCE, Discovery, Code-Tausch.
   2. ``oidc_callback`` und ``_oidc_einloesen_ablauf`` werden per AST aus
      ``main.py`` GESCHNITTEN und mit Attrappen WIRKLICH ausgefuehrt:
      state/Cookie-Bindung, lokales Konto, Sperre, Freigabe, Einloese-Schein
@@ -244,17 +244,12 @@ try:
 except O.OidcFehler:
     pruefe(True, "Liste statt Text abgewiesen")
 
-abschnitt("1d. MFA-Nachweis")
-pruefe(O.mfa_belegt({}, ""), "leerer Nachweis = keiner verlangt")
-pruefe(O.mfa_belegt({"amr": ["pwd", "otp"]}, "amr=otp"), "amr-Liste enthaelt otp")
-pruefe(not O.mfa_belegt({"amr": ["pwd"]}, "amr=otp"), "amr ohne otp -> nicht belegt")
-pruefe(not O.mfa_belegt({}, "amr=otp"), "fehlender Claim -> nicht belegt")
-pruefe(O.mfa_belegt({"acr": "mfa"}, "acr=mfa"), "acr gleich")
-pruefe(not O.mfa_belegt({"acr": "mfa2"}, "acr=mfa"), "acr ungleich -> nicht belegt")
-pruefe(not O.mfa_belegt({"amr": ["otp"]}, "kaputt"), "unlesbarer Nachweis -> nicht belegt")
-pruefe(O.nachweis_gueltig("") and O.nachweis_gueltig("amr=otp")
-       and not O.nachweis_gueltig("amr") and not O.nachweis_gueltig("a=b c"),
-       "Eingabepruefung des Nachweises")
+abschnitt("1d. Kein MFA-Nachweis mehr (2026-11-20)")
+# Die MFA des IdP ersetzt nirgends mehr einen Code (Zahnrad: immer der eigene
+# Code; IdP-Anmeldung: nie ein Code). Schalter, Nachweis und Auswertung sind
+# entfernt – ein Rest waere eine Zusage ohne Wirkung.
+pruefe(not hasattr(O, "mfa_belegt") and not hasattr(O, "nachweis_gueltig"),
+       "oidc_anmeldung kennt keine MFA-Auswertung mehr")
 
 abschnitt("1e. Ablagen, PKCE, Browser-Bindung")
 A = O.Ablage(ttl_s=60, max_eintraege=3)
@@ -531,7 +526,7 @@ abschnitt("2. Endpunkte (geschnitten, ausgefuehrt)")
 MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 BAUM = ast.parse(MAIN)
 FUNK = {n.name: n for n in BAUM.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-NOETIG = ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri", "_oidc_mfa_anerkennen",
+NOETIG = ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri",
           "_oidc_cookie", "_oidc_cookie_weg", "_oidc_zurueck", "oidc_callback",
           "oidc_einloesen", "_oidc_einloesen_ablauf", "oidc_start", "oidc_status",
           "_oidc_ad_modus", "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
@@ -679,7 +674,7 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
         "_note_activity": lambda u, r: None,
         "_sprot_angaben": lambda **kw: None,
     }
-    for n in ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri", "_oidc_mfa_anerkennen",
+    for n in ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri",
               "_oidc_cookie", "_oidc_cookie_weg", "_oidc_zurueck", "oidc_callback",
               "_oidc_einloesen_ablauf", "_oidc_ad_modus", "oidc_status",
               "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
@@ -851,55 +846,44 @@ pruefe(any(a == "anmeldung_fehlgeschlagen" and kw.get("weg") == "oidc" for a, kw
 
 def _einloesen(schein_daten=None, body=None, einst=None, schein_id=None, **kw):
     ns, log = _ns(einst or EINST, **kw)
-    sid = schein_id or O.SCHEINE.neu(schein_daten or {"konto": "m.muster", "mfa_belegt": False})
+    sid = schein_id or O.SCHEINE.neu(schein_daten or {"konto": "m.muster"})
     resp = asyncio.run(ns["_oidc_einloesen_ablauf"](
         _Req(cookies={"__Host-jarvis_oidc_schein": sid}, body=body)))
     return resp, json.loads(resp.body), log, sid
 
 
 r, d, log, sid = _einloesen()
-pruefe(r.status_code == 200 and d.get("success") and log["token"] == [("m.muster", {"mit_2fa": False})],
-       "ohne 2FA-Konto: Sitzung ohne zweiten Faktor")
+pruefe(r.status_code == 200 and d.get("success") and log["token"] == [("m.muster", {})],
+       "Sitzung ohne jedes Merkmal (kein 'mit 2FA', kein 'erhoeht')")
 r, d, log, _ = _einloesen(schein_id=sid)
 pruefe(r.status_code == 401 and d.get("abgelaufen") and not log["token"], "Schein ist einmalig")
 r, d, log, _ = _einloesen(schein_id="erfunden")
 pruefe(r.status_code == 401 and not log["token"], "unbekannter Schein -> 401")
 
 # Betreiberentscheid 2026-11-20: bei der Anmeldung ueber das Firmenkonto wird fuer
-# NIEMANDEN ein Code abgefragt; Admin-Rechte gibt es erst am Zahnrad. Die MFA des
-# IdP entscheidet nur noch ueber das Merkmal "mit zweitem Faktor" der Sitzung
-# (dann genuegt am Zahnrad der Klick).
+# NIEMANDEN ein Code abgefragt, und sie zaehlt nie als zweiter Faktor – auch
+# nicht mit einem alten Eintrag "oidc_mfa_anerkennen" in settings.json oder
+# einem alten Schein mit "mfa_belegt" (Vorfall DEV: ein Admin ohne 2FA kam
+# darueber mit einem Klick am Zahnrad an die Rechte).
 TOTP = {"totp_enabled": True, "totp_secret": "S"}
 r, d, log, sid = _einloesen(auth_state=TOTP)
-pruefe(d.get("success") and not d.get("requires_totp")
-       and log["token"] == [("m.muster", {"mit_2fa": False})],
-       "Konto mit eigener 2FA, MFA nicht belegt: KEIN Code, Sitzung ohne zweiten Faktor")
+pruefe(d.get("success") and not d.get("requires_totp") and log["token"] == [("m.muster", {})],
+       "Konto mit eigener 2FA: KEIN Code, Sitzung ohne Merkmal")
 r, d, log, _ = _einloesen(auth_state=TOTP, body={"totp_code": "000000"})
 pruefe(d.get("success") and not log["versuche"],
        "ein mitgeschickter (falscher) Code wird nicht ausgewertet – kein Fehlversuch")
-
-MFA_AN = dict(EINST, oidc_mfa_anerkennen=True)
-r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=MFA_AN, auth_state=TOTP)
-pruefe(d.get("success") and log["token"] == [("m.muster", {"mit_2fa": True})],
-       "MFA anerkannt und belegt -> Sitzung mit zweitem Faktor")
-r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": False}, einst=MFA_AN, auth_state=TOTP)
-pruefe(d.get("success") and log["token"] == [("m.muster", {"mit_2fa": False})],
-       "MFA anerkannt, aber NICHT belegt -> ohne zweiten Faktor (aber ohne Code-Abfrage)")
-MFA_AUS = dict(EINST, oidc_mfa_anerkennen=False)
-r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=MFA_AUS, auth_state=TOTP)
-pruefe(d.get("success") and log["token"] == [("m.muster", {"mit_2fa": False})],
-       "MFA belegt, aber Schalter ausdruecklich AUS -> ohne zweiten Faktor")
-# Vorgabe (kein Eintrag): die MFA des IdP zaehlt – auch fuer Administratoren.
-r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, auth_state=TOTP, admin=True)
-pruefe(d.get("success") and d.get("is_admin") is False and d.get("admin_konto") is True
-       and log["token"] == [("m.muster", {"mit_2fa": True})]
+ALT = dict(EINST, oidc_mfa_anerkennen=True, oidc_mfa_nachweis="")
+r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=ALT, auth_state=TOTP,
+                          admin=True)
+pruefe(d.get("success") and log["token"] == [("m.muster", {})]
+       and d.get("is_admin") is False and d.get("admin_konto") is True
        and log["kontext"] == [("m.muster", False, False)],
-       "Admin mit anerkannter MFA: Sitzung mit zweitem Faktor, Admin-Rechte aber erst am Zahnrad")
+       "alter Schalter + alter Schein 'mfa_belegt': trotzdem KEIN 'mit 2FA', keine Admin-Rechte")
 r, d, log, _ = _einloesen(admin=True)
 pruefe(d.get("success") and d.get("is_admin") is False and d.get("admin_konto") is True
        and not d.get("requires_totp") and not d.get("requires_totp_setup")
        and log["kontext"] == [("m.muster", False, False)],
-       "Admin ohne MFA: keine Code-Abfrage, keine Einrichtung, Sitzung ohne Admin-Rechte")
+       "Admin: keine Code-Abfrage, keine Einrichtung, Sitzung ohne Admin-Rechte")
 r, d, log, _ = _einloesen()
 pruefe(d.get("admin_konto") is False, "Nicht-Admin: kein Zahnrad (admin_konto false)")
 r, d, log, _ = _einloesen(gesperrt=JSONResponse({"error": "gesperrt"}, 423))
@@ -958,8 +942,8 @@ ZUG = {"jira": "GEH-JIRA-1", "confluence": "GEH-CONF-2", "sap": "GEH-SAP-3", "ve
 
 
 def _mit_zug(zugaenge=None, **kw):
-    return _einloesen({"konto": "m.muster", "mfa_belegt": True,
-                       "zugaenge": ZUG if zugaenge is None else zugaenge}, einst=MFA_AN, **kw)
+    return _einloesen({"konto": "m.muster",
+                       "zugaenge": ZUG if zugaenge is None else zugaenge}, **kw)
 
 
 r, d, log, _ = _mit_zug(anmeldungen=ALLE)
@@ -1012,7 +996,7 @@ pruefe(d.get("idp_zugaenge") == ["sap"] and ("liste", "m.muster") not in log["zu
        "nur ein Kennwort-Claim: Liste des zweiten Schritts nicht abgefragt")
 r, d, log, _ = _mit_zug(anmeldungen=ALLE, block={"reason": "x", "incidents": []})
 pruefe(d.get("account_blocked") and not log["zugang"], "gesperrter Account: keine Zugangsdaten uebernommen")
-r, d, log, sid = _einloesen({"konto": "m.muster", "mfa_belegt": False, "zugaenge": ZUG},
+r, d, log, sid = _einloesen({"konto": "m.muster", "zugaenge": ZUG},
                             auth_state=TOTP, anmeldungen=ALLE)
 pruefe(d.get("success") and len(d.get("idp_zugaenge") or []) == 4,
        "Konto mit eigener 2FA: ohne Code-Abfrage, Zugangsdaten aus dem Schein angemeldet")
@@ -1032,10 +1016,9 @@ ns, _ = _ns(_ohne_schalter)
 pruefe(ns["_oidc_konfig"]() is None, "Vorgabe: IdP-Anmeldung AUS (vollstaendige Konfiguration ohne Schalter)")
 ns, _ = _ns(dict(_ohne_schalter, oidc_aktiv=True))
 pruefe(ns["_oidc_konfig"]() is not None, "Positivkontrolle: mit Schalter ist dieselbe Konfiguration wirksam")
-pruefe(ns["_oidc_mfa_anerkennen"]() is True,
-       "Vorgabe: Anmeldung ueber den IdP zaehlt als zweiter Faktor (Festlegung 2026-11-18)")
-ns, _ = _ns(dict(EINST, oidc_mfa_anerkennen=False))
-pruefe(ns["_oidc_mfa_anerkennen"]() is False, "ausdruecklich aus bleibt aus")
+pruefe("_oidc_mfa_anerkennen" not in FUNK and "anmeldeschutz_idp_mfa" not in FUNK
+       and "oidc_mfa" not in MAIN and "mfa_belegt" not in MAIN,
+       "REGEL: Schalter, Endpunkt und Auswertung der IdP-MFA sind aus main.py entfernt")
 
 abschnitt("3b. Kennwortanmeldung neben dem IdP (oidc_ad_modus)")
 for wert, soll in ((None, "fallback"), ("zusaetzlich", "zusaetzlich"), (" Zusaetzlich ", "zusaetzlich"),
@@ -1108,8 +1091,7 @@ for m, p in (("GET", "/api/login/oidc/status"), ("GET", "/api/login/oidc/start")
     pruefe(Z.AUSNAHMEN.get((m, p), ("",))[0] == "anmeldung", "%s %s ist ein Anmeldeweg" % (m, p))
 pruefe(not any(p.startswith("/api/admin/oidc") for _, p in Z.AUSNAHMEN),
        "Verwaltungsrouten stehen NICHT in der Freiliste")
-for n in ("oidc_einstellungen_lesen", "oidc_einstellungen_setzen", "oidc_verbindung_testen",
-          "anmeldeschutz_idp_mfa"):
+for n in ("oidc_einstellungen_lesen", "oidc_einstellungen_setzen", "oidc_verbindung_testen"):
     fn = FUNK.get(n)
     pruefe(fn is not None and any(isinstance(a, ast.Call) and ast.unparse(a) == "Depends(require_local_auth)"
                                   for a in ast.walk(fn)), "%s nur fuer Administratoren" % n)

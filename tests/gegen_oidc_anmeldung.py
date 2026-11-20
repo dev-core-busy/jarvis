@@ -77,9 +77,6 @@ PROBEN = [
     ("fremde Domaene im Namen erlaubt", MOD,
      '        if "@" in name or dom.strip().lower() not in erlaubte_domaenen:\n',
      '        if "@" in name:\n'),
-    ("leerer MFA-Nachweis nicht noetig: kaputter Nachweis gilt als belegt", MOD,
-     "    if not sep or not claim or not wert:\n        return False\n",
-     "    if not sep or not claim or not wert:\n        return True\n"),
     ("Ablage nicht einmalig", MOD,
      "            ein = self._d.pop(str(schluessel or \"\"), None)\n",
      "            ein = self._d.get(str(schluessel or \"\"), None)\n"),
@@ -97,15 +94,14 @@ PROBEN = [
      '    if freigabe != "ja":\n',
      '    if freigabe == "fehler":\n        pass\n'
      '    if freigabe not in ("ja", "fehler"):\n'),
-    ("MFA-Schalter ignoriert (immer anerkannt)", MAIN,
-     '    mit_2fa = bool(_oidc_mfa_anerkennen() and schein.get("mfa_belegt"))\n',
-     '    mit_2fa = bool(schein.get("mfa_belegt"))\n'),
-    ("Nachweis ignoriert (Schalter genuegt)", MAIN,
-     '    mit_2fa = bool(_oidc_mfa_anerkennen() and schein.get("mfa_belegt"))\n',
-     '    mit_2fa = bool(_oidc_mfa_anerkennen())\n'),
     ("Schein nicht verbraucht", MAIN,
      "    if _oidc.SCHEINE.nehmen(schein_id) is None:\n",
      "    if _oidc.SCHEINE.lesen(schein_id) is None:\n"),
+    # Seit 2026-11-20 zaehlt die IdP-Anmeldung nie als zweiter Faktor (Schalter
+    # und Nachweis entfernt) – die Sabotage stellt ein Token "mit 2FA" aus.
+    ("IdP-Sitzung wieder 'mit 2FA'", MAIN,
+     "    token = generate_token(konto)\n    _anmelde_schutz.erfolg(konto)\n",
+     "    token = generate_token(konto, mit_2fa=True)\n    _anmelde_schutz.erfolg(konto)\n"),
     # Zahnrad (2026-11-20): die IdP-Anmeldung fragt keinen Code mehr ab; die
     # Sitzung beginnt ohne Admin-Rechte, das Zahnrad wird angeboten.
     ("IdP-Sitzung startet mit Admin-Rechten", MAIN,
@@ -119,9 +115,6 @@ PROBEN = [
     ("IdP-Antwort bietet kein Zahnrad an", MAIN,
      '             "admin_konto": _konto_ist_admin(konto)}\n',
      '             "admin_konto": False}\n'),
-    ("Vorgabe MFA wieder aus", MAIN,
-     '    return _oidc_schalter("oidc_mfa_anerkennen", True)\n',
-     '    return _oidc_schalter("oidc_mfa_anerkennen", False)\n'),
     ("AD-Modus: Vorgabe wieder zusaetzlich", MAIN,
      '_OIDC_AD_MODI = ("fallback", "zusaetzlich")\n',
      '_OIDC_AD_MODI = ("zusaetzlich", "fallback")\n'),

@@ -24,7 +24,8 @@ Buchhaltung JE TOKEN daneben:
 
 **Merkmal "mit 2FA"** (BSI M3, 2026-10-04) – ``neu(..., mit_2fa=True)`` fuer
 Sitzungen, deren Anmeldung einen zweiten Faktor bestanden hat: der Code eines
-Nicht-Admins mit eigener 2FA oder die vom Firmen-IdP bestaetigte MFA. Seit der
+Nicht-Admins mit eigener 2FA (die MFA des Firmen-IdP zaehlt seit 2026-11-20
+nicht mehr). Seit der
 Admin-Erhoehung am Zahnrad (Betreiberentscheid 2026-11-20) gibt das Merkmal
 KEINE Admin-Rechte mehr und ersetzt auch den Code am Zahnrad nicht.
 

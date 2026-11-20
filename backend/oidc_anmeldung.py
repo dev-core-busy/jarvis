@@ -594,36 +594,6 @@ def konto_aus_claims(claims: dict, claim: str, erlaubte_domaenen: set[str]) -> s
     return konto
 
 
-def mfa_belegt(claims: dict, nachweis: str) -> bool:
-    """Belegt das Token den zweiten Faktor?
-
-    ``nachweis`` hat die Form ``claim=wert`` (z. B. ``amr=otp``, ``acr=mfa``).
-    Ist der Claim eine Liste, muss sie den Wert enthalten, sonst muss er
-    gleich sein. **Leer heisst: kein Nachweis verlangt** – dann vertraut
-    Jarvis der Zusage des Administrators, dass der IdP MFA erzwingt (die
-    Maske sagt das ausdruecklich). Ein unlesbarer Eintrag gilt als NICHT
-    belegt (fail-closed)."""
-    roh = str(nachweis or "").strip()
-    if not roh:
-        return True
-    claim, sep, wert = roh.partition("=")
-    claim, wert = claim.strip(), wert.strip()
-    if not sep or not claim or not wert:
-        return False
-    vorhanden = claims.get(claim)
-    if isinstance(vorhanden, list):
-        return wert in [str(v) for v in vorhanden]
-    return vorhanden is not None and str(vorhanden) == wert
-
-
-def nachweis_gueltig(nachweis: str) -> bool:
-    """Form ``claim=wert`` oder leer – fuer die Eingabepruefung der Maske."""
-    roh = str(nachweis or "").strip()
-    if not roh:
-        return True
-    return bool(re.match(r"^[A-Za-z0-9_.:-]{1,64}=[^\s=]{1,128}$", roh))
-
-
 # ── Kurzlebige Ablagen (Vorgaenge und Einloese-Scheine) ─────────────────────
 
 class Ablage:

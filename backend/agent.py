@@ -449,6 +449,34 @@ def _lauf_platz_belegen(benutzer: str, privilegiert: bool):
     return _freigeben, ""
 
 
+def _auftraggeber(agent, username: str) -> tuple[str, bool]:
+    """Benutzer und Privileg eines ``run_task``-Laufs – EINE Herleitung.
+
+    Benutzt von der Lauf-Huelle (Deckel je Benutzer) UND von ``run_task``
+    selbst. Vorher stand die Regel an beiden Stellen getrennt – zwei
+    Herleitungen derselben Frage laufen auseinander (Register).
+
+    **Hauptagent ohne Namen: NIE privilegiert, erbt NICHTS** (2026-11-20,
+    live auf DEV gemessen). Eine Chat-Verbindung, die nur mit Programmschluessel
+    angemeldet war, rief ``run_task(username="")`` – der geteilte Hauptagent
+    nahm dann den zuletzt gesetzten Benutzer, und ein leerer Name galt ueber
+    ``_LOCAL_PRIVILEGED_USERS`` als privilegiert: ein API-Schluessel bekam den
+    Root-Weg der Shell (Karte der Klasse "shell", per Selbstbestaetigung
+    ausfuehrbar). main.py gibt solchen Verbindungen jetzt einen festen
+    Auftraggeber; diese Zeile ist die zweite Schranke fuer jeden kuenftigen
+    Aufrufer ohne Namen. Ausserhalb des WebSocket ruft nur ``run_sub_agent``
+    ``run_task`` ohne Namen – fuer UNTER-Agenten, die den Namen ihres
+    Erzeugers absichtlich erben (dort bleibt die alte Regel).
+    """
+    if not username and not getattr(agent, "is_sub_agent", False):
+        return "", False
+    benutzer = username or getattr(agent, "_current_username", "") or ""
+    vererbt = getattr(agent, "_current_actor_privileged", None)
+    if vererbt is not None:
+        return benutzer, bool(vererbt)
+    return benutzer, (not benutzer) or benutzer in _LOCAL_PRIVILEGED_USERS
+
+
 def _mit_lauf_kontext(fn):
     """Dekorator: ``run_task`` laeuft in einem EIGENEN Lauf-Kontext (siehe _LaufWert).
 
@@ -467,17 +495,13 @@ def _mit_lauf_kontext(fn):
     @functools.wraps(fn)
     async def huelle(self, *args, rechte: dict | None = None, **kwargs):
         # Pentest C7: Deckel je Benutzer – VOR jedem Zustand des Laufs, damit
-        # eine Abweisung nichts aufzuraeumen hat. Benutzer und Privileg wie in
-        # run_task: der uebergebene Name, sonst der geerbte; leer/lokal = privilegiert.
+        # eine Abweisung nichts aufzuraeumen hat. Benutzer und Privileg aus
+        # derselben Herleitung wie run_task (_auftraggeber).
         try:
             _gebunden = _sig.bind_partial(self, *args, **kwargs).arguments
         except TypeError:
             _gebunden = {}
-        _benutzer = (_gebunden.get("username") or getattr(self, "_current_username", "")
-                     or "")
-        _vererbt = getattr(self, "_current_actor_privileged", None)
-        _priv = (bool(_vererbt) if _vererbt is not None
-                 else ((not _benutzer) or _benutzer in _LOCAL_PRIVILEGED_USERS))
+        _benutzer, _priv = _auftraggeber(self, _gebunden.get("username") or "")
         _freigeben, _meldung = _lauf_platz_belegen(_benutzer, _priv)
         if _meldung:
             _ws = _gebunden.get("ws")
@@ -3159,7 +3183,10 @@ KRITISCH – Ausfuehrungs-Regeln:
         _log(f"run_task gestartet: {task_text[:100]}... (sub={self.is_sub_agent})")
         # Sub-Agents werden ohne username gestartet – dann den vom Eltern-Agent
         # geerbten Namen behalten (nicht mit "" ueberschreiben), damit LDAP-Gating greift.
-        self._current_username = username or getattr(self, '_current_username', '')
+        # Der HAUPTagent ohne Namen erbt dagegen nichts und ist nie privilegiert
+        # (_auftraggeber, Befund 2026-11-20: API-Schluessel am Chat-WebSocket).
+        _ag_name, _ag_priv = _auftraggeber(self, username)
+        self._current_username = _ag_name
         # Effektives LLM-Profil dieses Benutzers aufloesen (benutzerbezogene Wahl)
         self._resolve_profile_for_user()
         # Vom Benutzer gewaehlter Wissensgruppen-Filter (fuer knowledge_search):
@@ -3231,10 +3258,7 @@ KRITISCH – Ausfuehrungs-Regeln:
         # verhindert, dass die Rechte zweier gleichzeitiger Nutzer am GETEILTEN
         # Hauptagenten sich vermischen. Eine geerbte Bindung (Sub-Agent eines
         # unprivilegierten Laufs) hat Vorrang vor der Namens-Heuristik.
-        _inherited = getattr(self, "_current_actor_privileged", None)
-        _lauf_privilegiert = (bool(_inherited) if _inherited is not None
-                              else ((not self._current_username)
-                                    or self._current_username in _LOCAL_PRIVILEGED_USERS))
+        _lauf_privilegiert = _ag_priv
         _actor_token = _actor_cv.set((self._current_username, _lauf_privilegiert))
         # Token-Statistik: Kanal des AEUSSERSTEN Laufs; Unter-Laeufe erben ihn.
         from backend import token_verbrauch as _tv

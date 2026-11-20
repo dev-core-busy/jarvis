@@ -361,8 +361,10 @@ class _Guard:
         return u == "gesperrt"
 
 
-def _agent_key_ok(k):
-    return k == "agent-key"
+def _agent_key_ok(k, bereich="feedback"):
+    """Attrappe mit der ECHTEN Signatur (Schluessel, Bereich) – seit 2026-11-20
+    ist der Bereich Pflicht; der Feedback-Weg fragt nach "feedback"."""
+    return k == "agent-key" and bereich == "feedback"
 
 
 class _ReqF(_Req):

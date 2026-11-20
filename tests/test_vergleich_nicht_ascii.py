@@ -19,6 +19,9 @@ import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# Der geschnittene Helfer importiert backend.agent_schluessel (keine weiteren
+# Abhaengigkeiten, kein backend.config) – das Repo muss im Importpfad stehen.
+sys.path.insert(0, str(ROOT))
 ok = fail = 0
 
 
@@ -67,7 +70,9 @@ ns = {"hmac": hmac,
       "config": types.SimpleNamespace(AGENT_API_KEY="legacy-key-123"),
       "_load_agent_keys": lambda: [{"key": "benannt-456"}]}
 exec(code, ns)
-f = ns["_is_valid_agent_key"]
+# Seit 2026-11-20 nimmt die Pruefung einen BEREICH (backend/agent_schluessel.py,
+# vom Helfer selbst importiert); "agent" haben Legacy- und Bestandsschluessel.
+f = lambda w: ns["_is_valid_agent_key"](w, "agent")  # noqa: E731
 for eingabe in ("ä", "schlüssel-ä", "\udcff", "€" * 40):
     r = sicher(f, eingabe)
     check(f"{eingabe[:12]!r} -> False (kein Wurf)", r is False, str(r))

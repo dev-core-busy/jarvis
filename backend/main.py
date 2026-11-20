@@ -803,6 +803,23 @@ def _get_ws_username(ws) -> str:
     return _ws_usernames.get(id(ws), "")
 
 
+# Auftraggeber einer Chat-Verbindung, die NUR mit Programmschluessel (kein
+# Login-Token) angemeldet ist. Befund 2026-11-20, live auf DEV gemessen: ohne
+# Namen rief der Chat ``run_task(username="")``, der geteilte Hauptagent erbte
+# den zuletzt gesetzten Benutzer, und "" galt als privilegiert – ein
+# API-Schluessel bekam den Root-Weg der Shell. Der feste Name ist kein Konto:
+# er steht in keiner Freigabe (Internet, SAP, VEMAS, Admin – alle fail-closed),
+# ist nicht in ``_LOCAL_PRIVILEGED_USERS`` und hat ein eigenes Gedaechtnis.
+# Der Doppelpunkt kann in keinem Login-Namen vorkommen. Zweite Schranke:
+# ``agent._auftraggeber`` (Hauptagent ohne Namen ist nie privilegiert).
+WS_SCHLUESSEL_AKTEUR = "api:schluessel"
+
+
+def _ws_nur_schluessel(ws) -> bool:
+    """Ist diese Verbindung nur mit Programmschluessel angemeldet?"""
+    return _ws_usernames.get(id(ws), "") == WS_SCHLUESSEL_AKTEUR
+
+
 # ─── Chat-Anhaenge: Ablage und Ausfuehrbarkeits-Sperre ────────────────
 # Bis 2026-08-12 nahm der Anhang-Block eine ZULASSUNGSLISTE von 20 Endungen an;
 # alles andere fiel wortlos heraus (fuer den Benutzer nicht von "Dokument wird
@@ -13080,7 +13097,10 @@ async def agent_keys_list(user: str = Depends(require_local_auth)):
 
     Anzeigen per Auge: ``POST /api/secret/reveal`` mit ``bereich: agentkey``,
     ``kennung: <id>`` (nach erneuter Anmeldung)."""
-    return JSONResponse({"keys": [_agent_key_maskiert(k) for k in _load_agent_keys()],
+    from backend import agent_schluessel as _aks
+    return JSONResponse({"keys": [{**_agent_key_maskiert(k), **_aks.anzeige(k)}
+                                  for k in _load_agent_keys()],
+                         "bereiche": list(_aks.BEREICHE),
                          "legacy": bool(config.AGENT_API_KEY),
                          "aussenwirkung": _wirkung_h9.agent_api_freigabe()})
 
@@ -13109,11 +13129,19 @@ async def agent_api_aussenwirkung_setzen(request: Request, user: str = Depends(r
 async def agent_keys_create(request: Request, user: str = Depends(require_local_auth)):
     """Erzeugt einen neuen benannten API-Key."""
     import secrets, uuid
+    from backend import agent_schluessel as _aks
     body = await _json_objekt(request)
     name = (body.get("name") or "").strip() or "Unbenannt"
+    # Neue Schluessel: nur die VORGABE-Bereiche, falls nichts mitkommt
+    # (agent_schluessel.py – im Zweifel weniger).
+    bereiche, fehler = _aks.bereiche_pruefen(body.get("bereiche", list(_aks.VORGABE)))
+    ablauf, fehler2 = _aks.ablauf_pruefen(body.get("ablauf", ""))
+    if fehler or fehler2:
+        return JSONResponse({"ok": False, "error": fehler or fehler2}, status_code=400)
     keys = _load_agent_keys()
     entry = {"id": uuid.uuid4().hex[:8], "name": name,
-             "key": secrets.token_urlsafe(32), "created": int(time.time())}
+             "key": secrets.token_urlsafe(32), "created": int(time.time()),
+             "bereiche": bereiche, "ablauf": ablauf}
     keys.append(entry)
     _save_agent_keys(keys)
     return JSONResponse({"ok": True, "key": entry})
@@ -13155,13 +13183,31 @@ def _agent_key_eigener_fehler(wert, keys: list, kid: str) -> str:
 @app.put("/api/agent/keys/{kid}")
 async def agent_keys_update(kid: str, request: Request, user: str = Depends(require_local_auth)):
     """Benennt einen Key um, generiert ihn neu oder setzt einen selbst
-    gewaehlten (body: ``name`` und/oder ``regenerate`` bzw. ``key``)."""
+    gewaehlten (body: ``name`` und/oder ``regenerate`` bzw. ``key``), setzt
+    ``bereiche`` (Liste) und ``ablauf`` ("" oder JJJJ-MM-TT)."""
     import secrets
+    from backend import agent_schluessel as _aks
     body = await _json_objekt(request)
     keys = _load_agent_keys()
     found = None
     for k in keys:
         if k.get("id") == kid:
+            # Bereiche/Ablauf ZUERST pruefen: ein Fehler soll nichts halb
+            # geaendert zurueckschreiben.
+            if "bereiche" in body:
+                bereiche, fehler = _aks.bereiche_pruefen(body.get("bereiche"))
+                if fehler:
+                    return JSONResponse({"ok": False, "error": fehler}, status_code=400)
+                k["bereiche"] = bereiche
+                print(f"[SECURITY] Agent-API-Key '{k.get('name', kid)}': Bereiche "
+                      f"{bereiche} (durch {user})", flush=True)
+            if "ablauf" in body:
+                ablauf, fehler = _aks.ablauf_pruefen(body.get("ablauf"))
+                if fehler:
+                    return JSONResponse({"ok": False, "error": fehler}, status_code=400)
+                k["ablauf"] = ablauf
+                print(f"[SECURITY] Agent-API-Key '{k.get('name', kid)}': gueltig bis "
+                      f"{ablauf or 'unbefristet'} (durch {user})", flush=True)
             if "name" in body:
                 k["name"] = (body.get("name") or "").strip() or k.get("name", "Unbenannt")
             if body.get("regenerate"):
@@ -13181,8 +13227,9 @@ async def agent_keys_update(kid: str, request: Request, user: str = Depends(requ
     _save_agent_keys(keys)
     # Nur ein NEU erzeugter Schluessel geht einmal im Klartext zurueck (der
     # Administrator hat ihn gerade angefordert); ein Umbenennen gibt ihn nicht heraus.
-    return JSONResponse({"ok": True, "key": found if body.get("regenerate")
-                         else _agent_key_maskiert(found)})
+    return JSONResponse({"ok": True, "key": {**(found if body.get("regenerate")
+                                                else _agent_key_maskiert(found)),
+                                             **_aks.anzeige(found)}})
 
 
 @app.delete("/api/agent/keys/{kid}")
@@ -13762,7 +13809,7 @@ async def api_feedback(request: Request):
         if _user_must_change(user) or security_guard.is_blocked(user) \
                 or not _login_still_allowed(user):
             return JSONResponse({"success": False, "error": "Nicht berechtigt"}, status_code=403)
-    elif _is_valid_agent_key(token_str) or _verify_agent_api_key(request):
+    elif _is_valid_agent_key(token_str, "feedback") or _verify_agent_api_key(request):
         user = "api"
     else:
         return JSONResponse({"success": False, "error": "Nicht authentifiziert"}, status_code=401)
@@ -23641,14 +23688,14 @@ async def support_history_delete_entry(request: Request, user: str = Depends(req
 
 # ─── Agent Task API (extern, z.B. für Vision-Aktionen) ───────────────
 
-def _agent_key_kandidaten() -> list:
+def _agent_key_kandidaten(bereich: "str | None" = None) -> list:
     """Alle heute gueltigen Programmschluessel (Legacy + benannte) – EINE Liste
-    fuer Pruefung und Kurzkennung, damit beide nie auseinanderlaufen."""
-    candidates = []
-    if config.AGENT_API_KEY:
-        candidates.append(config.AGENT_API_KEY)
-    candidates.extend(k.get("key", "") for k in _load_agent_keys() if k.get("key"))
-    return [c for c in candidates if c]
+    fuer Pruefung und Kurzkennung, damit beide nie auseinanderlaufen.
+
+    Abgelaufene fallen heraus; mit ``bereich`` nur die, die ihn haben
+    (backend/agent_schluessel.py – ``""`` heisst: Pfad ohne Zuordnung, keiner)."""
+    from backend import agent_schluessel as _aks
+    return _aks.kandidaten(_load_agent_keys(), config.AGENT_API_KEY or "", bereich)
 
 
 def _agent_key_hash(wert: str) -> str:
@@ -23658,8 +23705,9 @@ def _agent_key_hash(wert: str) -> str:
 def _agent_key_kennung(presented: str) -> str:
     """Kurzkennung eines GUELTIGEN Programmschluessels (sonst ''), fuer den
     Abruf-Schluessel der Art "p" (Pentest A7). Ein Hash, nicht der Schluessel:
-    die Kennung steht in einer Adresse und darf ihn nicht verraten."""
-    return _agent_key_hash(presented) if _is_valid_agent_key(presented) else ""
+    die Kennung steht in einer Adresse und darf ihn nicht verraten.
+    Abruf-Schluessel oeffnen Dateien – also nur mit Bereich "dateien"."""
+    return _agent_key_hash(presented) if _is_valid_agent_key(presented, "dateien") else ""
 
 
 def _agent_kennung_gueltig(kennung: str) -> bool:
@@ -23668,16 +23716,19 @@ def _agent_kennung_gueltig(kennung: str) -> bool:
     if not kennung:
         return False
     k = str(kennung).encode()
-    return any(hmac.compare_digest(k, _agent_key_hash(c).encode()) for c in _agent_key_kandidaten())
+    return any(hmac.compare_digest(k, _agent_key_hash(c).encode())
+               for c in _agent_key_kandidaten("dateien"))
 
 
-def _is_valid_agent_key(presented: str) -> bool:
+def _is_valid_agent_key(presented: str, bereich: str) -> bool:
     """Prüft einen präsentierten Key timing-sicher gegen den Legacy-Key
-    (AGENT_API_KEY) ODER einen der benannten Keys. Genutzt von HTTP- UND
-    WebSocket-Auth (Konsistenz: benannte Keys gelten ueberall)."""
+    (AGENT_API_KEY) ODER einen der benannten Keys – nur die, die ``bereich``
+    haben und nicht abgelaufen sind. ``bereich`` ist PFLICHT (kein Vorgabewert):
+    ein Aufrufer ohne Bereich soll beim Bauen auffallen, nicht still alles
+    erlauben. Genutzt von HTTP- UND WebSocket-Auth."""
     if not presented:
         return False
-    candidates = _agent_key_kandidaten()
+    candidates = _agent_key_kandidaten(bereich)
     # Als BYTES vergleichen: compare_digest wirft bei str mit Nicht-ASCII-Zeichen
     # einen TypeError – ein solcher Schluessel im Kopf ergab auf ECHT einen 500er
     # (8x in 14 Tagen, gemessen 2026-10-11). Falsche Eingabe = nein, kein Fehler.
@@ -23690,10 +23741,23 @@ def _is_valid_agent_key(presented: str) -> bool:
 
 def _verify_agent_api_key(request: Request) -> bool:
     """Prüft API-Key aus X-API-Key Header oder Bearer Token gegen Legacy- ODER
-    benannte Keys."""
+    benannte Keys – fuer den BEREICH, der zum Pfad der Anfrage gehoert
+    (backend/agent_schluessel.PFADE; ohne Zuordnung: kein Schluessel gilt)."""
+    from backend import agent_schluessel as _aks
     presented = request.headers.get("X-API-Key", "") \
         or request.headers.get("Authorization", "").replace("Bearer ", "")
-    return _is_valid_agent_key(presented)
+    if not presented:
+        return False
+    # Routing-Pfad, NICHT request.url.path: den baut Starlette aus dem
+    # Host-Header (BadHost) – ein falscher Host koennte sonst einen anderen
+    # Bereich vortaeuschen als den des Endpunkts, der wirklich laeuft.
+    pfad = _routing_pfad(request)
+    bereich = _aks.bereich_fuer_pfad(pfad)
+    if not bereich:
+        print(f"[SECURITY] Programmschluessel an {pfad} abgewiesen: "
+              "Pfad keinem Bereich zugeordnet (agent_schluessel.PFADE)", flush=True)
+        return False
+    return _is_valid_agent_key(presented, bereich)
 
 
 @app.post("/api/agent/task")
@@ -31715,7 +31779,7 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         token_username = verify_token(token)
         is_login_token = token_username is not None
         # Login-Token ODER ein gueltiger Agent-API-Key (Legacy ODER benannt).
-        is_api_key = _is_valid_agent_key(token)
+        is_api_key = _is_valid_agent_key(token, "chat")
         if not is_login_token and not is_api_key:
             # Hilfreiche Unterscheidung: sieht es wie ein (abgelaufener/ungueltiger)
             # Login-Token aus (user:ts:sig), oder fehlt eine gueltige Credential ganz?
@@ -31742,6 +31806,21 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
             if not _login_still_allowed(token_username):
                 await ws.send_json({"type": "session_invalid",
                                     "message": "Keine Anmeldeberechtigung mehr – bitte neu anmelden."})
+                return
+        elif is_api_key:
+            # Nur Programmschluessel: fester, unprivilegierter Auftraggeber statt
+            # "kein Name" (siehe WS_SCHLUESSEL_AKTEUR). Gesetzt bei JEDER
+            # Nachricht, wie der Login-Name oben – auch ein frueherer Login-Name
+            # derselben Verbindung gilt fuer eine Nachricht mit Schluessel nicht.
+            _ws_usernames[id(ws)] = WS_SCHLUESSEL_AKTEUR
+            # Mit Namen laeuft die Eingabe jetzt auch durch die Injektions-
+            # pruefung (vorher: leerer Name = keine Pruefung). Eine Sperre des
+            # Schluessel-Auftraggebers muss dann auch WIRKEN – sonst wiese sie
+            # nur den einen Auftrag ab. Aufheben wie jede Kontosperre.
+            if security_guard.is_blocked(WS_SCHLUESSEL_AKTEUR):
+                await ws.send_json({"type": "security_blocked",
+                                    "message": "Programmzugang wegen eines Sicherheitsverstosses "
+                                               "gesperrt. Bitte an einen lokalen Administrator wenden."})
                 return
         # Erst HIER (alle Pruefungen bestanden) bekommt die Verbindung Rundsendungen.
         _ws_angemeldet.add(id(ws))
@@ -31774,7 +31853,13 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
         # bestaetigen? Nur der Browser-Chat sagt das ausdruecklich; ein Client
         # ohne die Angabe (Windows-/Android-App) bekommt solche Aktionen mit
         # Hinweis abgewiesen – fail-closed, siehe backend/wirkung.py.
-        _kann_bestaetigen = msg.get("bestaetigung") is True
+        # Eine Schluessel-Verbindung bestaetigt NICHTS: hinter ihr steht kein
+        # angemeldeter Mensch, und die Karte ginge an dieselbe Verbindung, die
+        # sie sich selbst freigeben koennte (Befund 2026-11-20). Aussen-/
+        # Loeschwirkung unterbleibt dort wie bei jedem Client ohne Dialog.
+        # EINE Zuweisung (test_bsi_h9 prueft das): zwei Stellen fuer dieselbe
+        # Entscheidung laufen auseinander.
+        _kann_bestaetigen = msg.get("bestaetigung") is True and not _ws_nur_schluessel(ws)
 
         # Spracheingabe von Windows/Desktop-Client: [Voice]\n<audio>BASE64</audio>
         # → Whisper transkribiert das Audio, task_text wird durch das Transkript ersetzt

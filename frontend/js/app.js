@@ -3328,6 +3328,25 @@
             const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
             const api = (path, opts) => fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token } }, opts || {}));
 
+            // Bereiche und Ablaufdatum je Schluessel (backend/agent_schluessel.py,
+            // 2026-11-20). Der Katalog kommt vom Server, die Beschriftungen aus i18n.
+            let _katalog = [];
+            function rechteZeile(k, _tt) {
+                const hat = new Set(k.bereiche || []);
+                const kaesten = _katalog.map(b =>
+                    '<label style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap;">' +
+                    '<input type="checkbox" class="ak-bereich" value="' + esc(b) + '"' + (hat.has(b) ? ' checked' : '') + '>' +
+                    esc(_tt('app.key_b_' + b, b)) + '</label>').join('');
+                return '<div class="ak-rechte" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:.78rem;">' +
+                    '<span style="opacity:.75;">' + esc(_tt('app.key_bereiche', 'Gilt für:')) + '</span>' + kaesten +
+                    '<label style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap;">' +
+                    esc(_tt('app.key_ablauf', 'Gültig bis')) +
+                    ' <input type="date" class="ak-ablauf" value="' + esc(k.ablauf || '') + '"></label>' +
+                    // Zustand als TEXT, nicht nur als Farbe (Register).
+                    (k.abgelaufen ? '<b class="ak-abgelaufen">' + esc(_tt('app.key_abgelaufen', 'abgelaufen – gilt nirgends mehr')) + '</b>' : '') +
+                    '</div>';
+            }
+
             function render(keys) {
                 if (!keys.length) { listEl.innerHTML = `<div style="opacity:.6;font-size:.8rem;">${window.t('app.no_keys')}</div>`; return; }
                 listEl.innerHTML = '';
@@ -3355,6 +3374,7 @@
                         '<button class="btn-icon btn-small ak-copy" title="' + esc(_tt('common.copy', 'Kopieren')) + '">' + COPY + '</button>' +
                         '<button class="btn-icon btn-small ak-regen" title="' + esc(_tt('app.key_regen', 'Neu generieren')) + '">' + JarvisIcons.refresh() + '</button>' +
                         '<button class="btn-icon btn-small ak-del" title="' + esc(_tt('common.delete', 'Löschen')) + '">' + JarvisIcons.trash() + '</button>' +
+                        rechteZeile(k, _tt) +
                         // Fehler bleibt stehen, bis die naechste Eingabe gelingt (ein
                         // Fehler darf nicht von selbst verschwinden).
                         '<div class="ak-fehler" role="alert"></div>';
@@ -3372,6 +3392,7 @@
             function load() {
                 api('/api/agent/keys').then(r => r.json()).then(d => {
                     if (aussenCb) aussenCb.checked = !!(d && d.aussenwirkung === true);
+                    _katalog = (d && d.bereiche) || [];
                     render((d && d.keys) || []);
                 })
                     .catch(() => { listEl.innerHTML = `<div style="opacity:.6;font-size:.8rem;color:var(--danger);">${window.t('app.load_error')}</div>`; });
@@ -3436,7 +3457,34 @@
                     api('/api/agent/keys/' + id, { method: 'DELETE' }).then(() => load());
                 }
             });
+            // Bereiche/Ablauf: eigener Speicherweg mit Fehleranzeige an der Zeile.
+            function rechteSpeichern(row, daten) {
+                const fehlerEl = row.querySelector('.ak-fehler');
+                const _tt3 = (k, d) => (window.t && window.t(k) !== k ? window.t(k) : d);
+                api('/api/agent/keys/' + row.dataset.id, { method: 'PUT', body: JSON.stringify(daten) })
+                    .then(r => r.json().catch(() => ({})).then(d => ({ ok: r.ok, d: d || {} })))
+                    .then(({ ok, d }) => {
+                        if (!ok || d.ok === false) {
+                            if (fehlerEl) fehlerEl.textContent = d.error || _tt3('app.key_save_error', 'Speichern fehlgeschlagen.');
+                            return;
+                        }
+                        if (fehlerEl) fehlerEl.textContent = '';
+                        load();
+                    })
+                    .catch(() => { if (fehlerEl) fehlerEl.textContent = _tt3('app.key_save_error', 'Speichern fehlgeschlagen.'); });
+            }
             listEl.addEventListener('change', e => {
+                if (e.target.classList.contains('ak-bereich')) {
+                    const row = e.target.closest('[data-id]');
+                    const gewaehlt = Array.from(row.querySelectorAll('.ak-bereich'))
+                        .filter(cb => cb.checked).map(cb => cb.value);
+                    rechteSpeichern(row, { bereiche: gewaehlt });
+                    return;
+                }
+                if (e.target.classList.contains('ak-ablauf')) {
+                    rechteSpeichern(e.target.closest('[data-id]'), { ablauf: e.target.value || '' });
+                    return;
+                }
                 if (e.target.classList.contains('ak-name')) {
                     const row = e.target.closest('[data-id]');
                     api('/api/agent/keys/' + row.dataset.id, { method: 'PUT', body: JSON.stringify({ name: e.target.value }) });

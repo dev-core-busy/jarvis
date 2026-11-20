@@ -1050,8 +1050,19 @@ def _ist_is_true(knoten, schluessel):
 
 zuw = [n for n in ast.walk(hwm or MB) if isinstance(n, ast.Assign)
        and any(isinstance(z, ast.Name) and z.id == "_kann_bestaetigen" for z in n.targets)]
-pruefe(len(zuw) == 1 and _ist_is_true(zuw[0].value, "bestaetigung"),
+# Seit 2026-11-20: `… is True and not _ws_nur_schluessel(ws)` – eine Verbindung,
+# die nur mit Programmschluessel angemeldet ist, bekommt KEINE Karte (sie koennte
+# sie sich selbst freigeben). Beide Haelften werden einzeln verlangt.
+_kb = zuw[0].value if len(zuw) == 1 else None
+_kb_teile = (_kb.values if isinstance(_kb, ast.BoolOp) and isinstance(_kb.op, ast.And)
+             else [_kb])
+pruefe(len(zuw) == 1 and _ist_is_true(_kb_teile[0], "bestaetigung"),
        "_kann_bestaetigen = msg.get('bestaetigung') is True (nur ausdrueckliches true)",
+       ast.unparse(zuw[0].value) if zuw else "fehlt")
+pruefe(any(isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not)
+           and isinstance(t.operand, ast.Call) and isinstance(t.operand.func, ast.Name)
+           and t.operand.func.id == "_ws_nur_schluessel" for t in _kb_teile[1:]),
+       "… und NICHT fuer eine Verbindung, die nur mit Programmschluessel angemeldet ist",
        ast.unparse(zuw[0].value) if zuw else "fehlt")
 rufe = [n for n in ast.walk(MB) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
         and n.func.attr == "run_task"]

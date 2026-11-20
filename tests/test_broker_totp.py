@@ -180,6 +180,10 @@ AUSNAHMEN = {
     # laufende EINRICHTUNG). Daran steht die Marke nie: solange 2FA aktiv ist,
     # verweigert /totp/setup eine neue, und uebernehmen() raeumt pending ab.
     "totp_verify": "prueft nur das vorgemerkte Secret einer Einrichtung",
+    # Zahnrad (2026-11-20): direkt prueft admin_erhoehen nur das VORGEMERKTE
+    # Secret der Einrichtung (wie /totp/verify); das AKTIVE geht ueber
+    # _totp_code_pruefen – dass es diesen Weg nimmt, prueft Teil 3 unten.
+    "admin_erhoehen": "prueft direkt nur das vorgemerkte Secret der Einrichtung am Zahnrad",
 }
 
 # Wege, die den Broker-Fall ERKENNEN muessen, ihn aber bewusst NICHT fragen.
@@ -363,10 +367,27 @@ fn_login = next((k for k in ast.walk(BAUM)
 if fn_login is None:
     abbruch("_login_ablauf fehlt in main.py")
 quelle_login = ast.get_source_segment(MAIN, fn_login) or ""
-p("der Login antwortet bei unerreichbarem Broker mit 503",
-  "503 if _brk_grund in" in quelle_login)
-p("der Login setzt _mit_2fa erst NACH der Broker-Pruefung",
-  quelle_login.index("_totp_broker_pruefen") < quelle_login.rindex("_mit_2fa = True"))
+# Seit 2026-11-20 pruefen Kennwortanmeldung und Admin-Erhoehung den Code ueber
+# EINE Stelle (_totp_code_pruefen) – dort steht der Broker-Zweig samt 503.
+fn_code = next((k for k in ast.walk(BAUM)
+                if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and k.name == "_totp_code_pruefen"), None)
+if fn_code is None:
+    abbruch("_totp_code_pruefen fehlt in main.py")
+quelle_code = ast.get_source_segment(MAIN, fn_code) or ""
+p("die Code-Pruefung antwortet bei unerreichbarem Broker mit 503",
+  '503 if grund in ("unreachable", "nicht_eingerichtet")' in quelle_code)
+p("die Code-Pruefung laesst nur bei 'ok' durch (sonst ein Fehler-Tupel)",
+  _ruft(fn_code, "_totp_broker_pruefen") and "if ok:\n            return None" in quelle_code)
+_pos_pruef = quelle_login.find("_totp_code_pruefen(")
+_pos_merk = quelle_login.rfind("_mit_2fa = True")
+p("der Login setzt _mit_2fa erst NACH der Code-Pruefung",
+  0 <= _pos_pruef < _pos_merk)
+for _name in ("_login_ablauf", "admin_erhoehen"):
+    _f = next((k for k in ast.walk(BAUM)
+               if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == _name), None)
+    p(f"{_name} prueft das aktive Geheimnis ueber _totp_code_pruefen",
+      _f is not None and _ruft(_f, "_totp_code_pruefen"))
 
 
 # ──────────────── Teil 4: der Notweg existiert ────────────────

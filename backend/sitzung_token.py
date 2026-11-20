@@ -23,12 +23,17 @@ Buchhaltung JE TOKEN daneben:
   die Epoche ``main._revoked_logins``.
 
 **Merkmal "mit 2FA"** (BSI M3, 2026-10-04) – ``neu(..., mit_2fa=True)`` fuer
-Sitzungen, deren Anmeldung den zweiten Faktor bestanden hat (bzw. die 2FA
-gerade eingerichtet hat). Admin-Rechte gibt es bei eingeschalteter Pflicht nur
-in solchen Sitzungen (``main._user_is_admin``). Unbekannt = OHNE 2FA:
-Sitzungen von vor dem Ausrollen, Add-in-SSO und App-Anmeldungen bekommen damit
-von selbst keine Admin-Rechte. Sofort auf Platte, sonst verloere ein Admin
-seine Rechte bei jedem Neustart des Dienstes.
+Sitzungen, deren Anmeldung einen zweiten Faktor bestanden hat: der Code eines
+Nicht-Admins mit eigener 2FA oder die vom Firmen-IdP bestaetigte MFA. Seit der
+Admin-Erhoehung am Zahnrad (Betreiberentscheid 2026-11-20) gibt das Merkmal
+KEINE Admin-Rechte mehr und ersetzt auch den Code am Zahnrad nicht.
+
+**Merkmal "Admin erhoeht"** (2026-11-20) – Admin-Rechte gibt es nur in einer
+Sitzung, in der der Administrator sie am Zahnrad ausdruecklich geholt hat
+(``setze_admin_erhoeht``), und nur bis er sie dort wieder abgibt oder die
+Sitzung endet (``main._user_is_admin``). Unbekannt = NICHT erhoeht: jede
+Sitzung beginnt ohne Admin-Rechte. Sofort auf Platte, sonst verloere ein
+Admin seine Rechte bei jedem Neustart des Dienstes.
 
 **Merkmal "ohne Admin"** (BSI M3, Entscheidung des Betreibers 2026-10-04) –
 Anmeldungen ueber die Android-/Windows-App: die Apps koennen keinen zweiten
@@ -88,6 +93,7 @@ _widerrufen: dict[str, int] = {}     # Schluessel -> Ausstellungszeit (zum Aufra
 _mit_2fa: dict[str, int] = {}        # Schluessel -> Ausstellungszeit (zum Aufraeumen)
 _ohne_admin: dict[str, int] = {}     # Schluessel -> Ausstellungszeit (zum Aufraeumen)
 _nur_ai_maus: dict[str, int] = {}    # Schluessel -> Ausstellungszeit (zum Aufraeumen)
+_admin_erhoeht: dict[str, int] = {}  # Schluessel -> Ausstellungszeit (zum Aufraeumen)
 
 # Pfad der laufenden Anfrage (``scope["path"]``), gesetzt von der Middleware in
 # ``main``. None = unbekannt -> eine AI-Maus-Sitzung gilt dann nicht.
@@ -185,10 +191,13 @@ def _laden_unlocked() -> None:
                 _ohne_admin[str(k)] = int(v)
             for k, v in (d.get("nur_ai_maus") or {}).items():
                 _nur_ai_maus[str(k)] = int(v)
+            for k, v in (d.get("admin_erhoeht") or {}).items():
+                _admin_erhoeht[str(k)] = int(v)
     except Exception as e:  # noqa: BLE001 – kaputte Datei darf den Start nicht kippen
         print(f"[Sitzung] Speicherstand nicht lesbar ({e}) – alle vorher "
               f"ausgestellten Tokens gelten als widerrufen", flush=True)
-        for d_ in (_zuletzt, _widerrufen, _mit_2fa, _ohne_admin, _nur_ai_maus):
+        for d_ in (_zuletzt, _widerrufen, _mit_2fa, _ohne_admin, _nur_ai_maus,
+                   _admin_erhoeht):
             d_.clear()
         _alle_vor = int(time.time())
         try:
@@ -207,7 +216,7 @@ def _aufraeumen_unlocked(jetzt: float, max_s: int, idle_s: int) -> None:
     global _alle_vor
     for k in [k for k, ts in _widerrufen.items() if jetzt - ts > max_s + ZUKUNFT_TOLERANZ]:
         _widerrufen.pop(k, None)
-    for d in (_mit_2fa, _ohne_admin, _nur_ai_maus):
+    for d in (_mit_2fa, _ohne_admin, _nur_ai_maus, _admin_erhoeht):
         for k in [k for k, ts in d.items() if jetzt - ts > max_s + ZUKUNFT_TOLERANZ]:
             d.pop(k, None)
     for k in [k for k, t in _zuletzt.items() if jetzt - t > idle_s]:
@@ -224,6 +233,7 @@ def _schreiben_unlocked() -> None:
         tmp.write_text(json.dumps({"zuletzt": _zuletzt, "widerrufen": _widerrufen,
                                    "mit_2fa": _mit_2fa, "ohne_admin": _ohne_admin,
                                    "nur_ai_maus": _nur_ai_maus,
+                                   "admin_erhoeht": _admin_erhoeht,
                                    "alle_vor": _alle_vor}),
                        encoding="utf-8")
         try:
@@ -295,12 +305,14 @@ def sitzung_besteht(kennung: str, ts: int, jetzt: float | None = None) -> bool:
 
 
 def neu(sig: str, ts: int, mit_2fa: bool = False, ohne_admin: bool = False,
-        nur_ai_maus: bool = False) -> None:
+        nur_ai_maus: bool = False, admin_erhoeht: bool = False) -> None:
     """Frisch ausgestelltes Token: zuletzt gesehen = Ausstellung. Nur der
     Vollstaendigkeit halber (unbekannt heisst ohnehin Ausstellungszeit) –
     aber so steht es sofort in der Datei, falls der Dienst gleich neu startet.
-    ``mit_2fa``/``ohne_admin``/``nur_ai_maus`` siehe Modulkopf; dann sofort
-    geschrieben."""
+    ``mit_2fa``/``ohne_admin``/``nur_ai_maus``/``admin_erhoeht`` siehe
+    Modulkopf; dann sofort geschrieben. ``admin_erhoeht`` stellt nur der
+    Kennwortwechsel aus (das Ersatz-Token erbt den Stand der Sitzung) – eine
+    Anmeldung beginnt immer ohne."""
     global _dirty
     with _lock:
         _laden_unlocked()
@@ -312,7 +324,9 @@ def neu(sig: str, ts: int, mit_2fa: bool = False, ohne_admin: bool = False,
             _ohne_admin[schluessel(sig)] = int(ts)
         if nur_ai_maus:
             _nur_ai_maus[schluessel(sig)] = int(ts)
-        if mit_2fa or ohne_admin or nur_ai_maus:
+        if admin_erhoeht and not ohne_admin and not nur_ai_maus:
+            _admin_erhoeht[schluessel(sig)] = int(ts)
+        if mit_2fa or ohne_admin or nur_ai_maus or admin_erhoeht:
             _schreiben_unlocked()
 
 
@@ -323,6 +337,34 @@ def setze_mit_2fa(sig: str, ts: int) -> None:
         _laden_unlocked()
         _mit_2fa[schluessel(sig)] = int(ts)
         _schreiben_unlocked()
+
+
+def setze_admin_erhoeht(kennung: str, ts: int, an: bool) -> bool:
+    """Admin-Rechte der Sitzung mit dieser Kennung (``schluessel(sig)``) holen
+    (``an``) oder abgeben. Eine App- oder AI-Maus-Sitzung wird NIE erhoeht
+    (Rueckgabe False) – die Schranke steht hier und nicht nur beim Aufrufer,
+    weil sie fuer jeden Weg gilt. Sofort auf Platte."""
+    k = str(kennung or "")
+    if not k:
+        return False
+    with _lock:
+        _laden_unlocked()
+        if an:
+            if k in _ohne_admin or k in _nur_ai_maus:
+                return False
+            _admin_erhoeht[k] = int(ts)
+        else:
+            _admin_erhoeht.pop(k, None)
+        _schreiben_unlocked()
+        return True
+
+
+def admin_erhoeht(sig: str) -> bool:
+    """Hat der Administrator in dieser Sitzung die Admin-Rechte geholt?"""
+    with _lock:
+        _laden_unlocked()
+        k = schluessel(sig)
+        return k in _admin_erhoeht and k not in _ohne_admin and k not in _nur_ai_maus
 
 
 def ohne_admin(sig: str) -> bool:
@@ -370,6 +412,7 @@ def widerrufe(sig: str, ts: int) -> None:
         _mit_2fa.pop(k, None)
         _ohne_admin.pop(k, None)
         _nur_ai_maus.pop(k, None)
+        _admin_erhoeht.pop(k, None)
         _dirty = True
         _schreiben_unlocked()
 
@@ -383,6 +426,7 @@ def _zuruecksetzen_fuer_test() -> None:
         _mit_2fa.clear()
         _ohne_admin.clear()
         _nur_ai_maus.clear()
+        _admin_erhoeht.clear()
         _geladen = False
         _dirty = False
         _letzter_flush = 0.0

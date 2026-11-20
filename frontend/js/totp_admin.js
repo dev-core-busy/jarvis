@@ -10,8 +10,10 @@
    ein Kennwortfeld, und das Ergebnis steht direkt am Knopf. Ein Fehler bleibt
    stehen (verschwindet nicht von selbst), ein Erfolg laedt die Liste neu.
 
-   Dazu (BSI M3) der Anmeldeschutz: Schalter "2FA-Pflicht fuer Administratoren"
-   und die Konten, die gerade nach Fehlversuchen gesperrt sind (aufhebbar).
+   Dazu (BSI M3) der Anmeldeschutz: die Konten, die gerade nach Fehlversuchen
+   gesperrt sind (aufhebbar). Den Schalter "2FA-Pflicht fuer Administratoren"
+   gibt es seit 2026-11-20 nicht mehr – Admin-Rechte gibt es nur noch am
+   Zahnrad mit Code (settings_btn.js).
 
    Aufruf: app.js ruft TotpAdmin.onShow() beim Oeffnen des Sicherheits-Reiters.
    ═══════════════════════════════════════════════════════════════════ */
@@ -136,8 +138,8 @@
         return row;
     }
 
-    // ── Anmeldeschutz (BSI M3): 2FA-Pflicht fuer Admins + Konto-Sperren ──
-    // GET/POST /api/admin/anmeldeschutz, POST /api/admin/anmeldeschutz/aufheben.
+    // ── Anmeldeschutz (BSI M3): Konto-Sperren ──
+    // GET /api/admin/anmeldeschutz, POST /api/admin/anmeldeschutz/aufheben.
     // Ergebnis/Fehler steht am Bedienelement und verschwindet nicht von selbst.
 
     function fuellen(text, werte) {
@@ -147,9 +149,8 @@
     }
 
     function schutzLaden() {
-        var cb = document.getElementById('sec-admin-2fa-pflicht');
         var box = document.getElementById('sec-anm-sperren');
-        if (!cb && !box) return;
+        if (!box) return;
         fetch('/api/admin/anmeldeschutz', { headers: { 'Authorization': 'Bearer ' + token() } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -163,7 +164,6 @@
                     { max: d.konto_max, fenster: d.konto_fenster_min, sperre: d.konto_sperre_min });
                 if (h) quelleZeigen(h, d.schwellen_quelle);
                 if (box) spruehenZeigen(box, d.spruehen || {});
-                if (cb) cb.checked = !!d.admin_2fa_pflicht;
                 // Schalter "MFA des IdP zaehlt als zweiter Faktor" (settings_idp.js)
                 if (window.IdpEinstellungen) window.IdpEinstellungen.mfaZeigen(d);
                 sperrenZeigen(Array.isArray(d.sperren) ? d.sperren : []);
@@ -249,39 +249,8 @@
         });
     }
 
-    function pflichtVerdrahten() {
-        var cb = document.getElementById('sec-admin-2fa-pflicht');
-        if (!cb || cb.dataset.verdrahtet) return;
-        cb.dataset.verdrahtet = '1';
-        // Nur auf "change" hoeren – der Browser schaltet im <label> selbst um.
-        cb.addEventListener('change', function () {
-            var msg = document.getElementById('sec-anm-pflicht-msg');
-            var soll = cb.checked;
-            cb.disabled = true;
-            if (msg) msg.textContent = '';
-            fetch('/api/admin/anmeldeschutz', {
-                method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + token(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ admin_2fa_pflicht: soll })
-            }).then(function (r) {
-                return r.json().catch(function () { return {}; })
-                    .then(function (d) { return { ok: r.ok, d: d || {} }; });
-            }).then(function (res) {
-                cb.disabled = false;
-                if (res.ok && res.d.ok) { cb.checked = !!res.d.admin_2fa_pflicht; return; }
-                cb.checked = !soll;
-                if (msg) msg.textContent = res.d.detail || res.d.error || T('security.pflicht_failed', 'Die Einstellung konnte nicht gespeichert werden.');
-            }).catch(function () {
-                cb.disabled = false;
-                cb.checked = !soll;
-                if (msg) msg.textContent = T('security.pflicht_failed', 'Die Einstellung konnte nicht gespeichert werden.');
-            });
-        });
-    }
-
     function onShow() {
         load();
-        pflichtVerdrahten();
         schutzLaden();
     }
 

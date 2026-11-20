@@ -186,10 +186,10 @@ _ns2 = {"JSONResponse": _Antwort, "Depends": lambda x: None, "require_auth": Non
         "Request": object, "asyncio": asyncio, "__name__": "waechter",
         "_get_user_auth_state": _get_state, "_set_user_auth_state": _set_state,
         "authenticate_linux_user": _auth,
-        # BSI M3: Pflicht-Pruefung in totp_disable (hier: kein Admin) und der
-        # Sitzungskontext; QR-Erzeugung liegt seit M3 in _totp_vormerken.
+        # BSI M3: Pflicht-Pruefung in totp_disable (hier: kein Admin-Konto) und
+        # der Sitzungskontext; QR-Erzeugung liegt seit M3 in _totp_vormerken.
         "_sitzung_kontext": __import__("contextvars").ContextVar("_sk", default=None),
-        "_is_admin_user": lambda u: False, "_admin_2fa_pflicht": lambda: True,
+        "_is_admin_user": lambda u: False, "_konto_ist_admin": lambda u: False,
         # seit b46fee6b ruft totp_verify ihn (Ruecksetz-Hinweis abraeumen)
         "_konto_hinweis_abraeumen": lambda u: None,
         # BSI N3/N4: Code nur einmal, Kennwortpruefung mit Anmeldeschutz

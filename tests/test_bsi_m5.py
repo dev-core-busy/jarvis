@@ -970,10 +970,12 @@ check("⚠ … und gilt als NICHT lesbar (Anmeldung meldet es statt eines 500)",
 mit_haupt()
 check("lesbar mit Hauptschluessel",
       ns_a["_totp_secret_lesbar"](ns_a["_load_auth_state"]()["users"]["jarvis"]["totp_secret"]))
-lg = FN["_login_ablauf"]
+# Seit 2026-11-20 prueft die Kennwortanmeldung (und das Zahnrad) den Code
+# ueber _totp_code_pruefen – dort steht die Reihenfolge.
+lg = FN["_totp_code_pruefen"]
 z_guard = erste_zeile(lg, lambda s: s.startswith("_totp_secret_lesbar("))
 # seit BSI N3 prueft _totp_schutz.pruefen den Code (pyotp liegt dahinter)
-z_totp = erste_zeile(lg, lambda s: s.startswith("_totp_schutz.pruefen(") and "user_state" in s)
+z_totp = erste_zeile(lg, lambda s: s.startswith("_totp_schutz.pruefen("))
 check("⚠ Anmeldung prueft die Lesbarkeit VOR pyotp", z_guard and z_totp and z_guard < z_totp,
       (z_guard, z_totp))
 

@@ -70,8 +70,10 @@ const knopf = SETTINGS.match(/<a id="btn-idp-login"[^>]*>/);
 check('Knopf ist ein Link auf /api/login/oidc/start', !!knopf && /href="\/api\/login\/oidc\/start"/.test(knopf[0]));
 const formStart = SETTINGS.indexOf('<form id="login-form"');
 const formEnde = SETTINGS.indexOf('</form>', formStart);
-const totpPos = SETTINGS.indexOf('id="idp-totp"');
-check('Code-Block steht AUSSERHALB des Anmeldeformulars', totpPos > 0 && (totpPos < formStart || totpPos > formEnde));
+// Die Code-Maske nach der IdP-Anmeldung ist seit 2026-11-20 entfernt (der
+// Server fragt dort nie mehr nach dem Code); das Formular selbst bleibt.
+check('Anmeldeformular vorhanden, keine IdP-Code-Maske mehr',
+      formStart > 0 && formEnde > formStart && !SETTINGS.includes('id="idp-totp"'));
 check('Knopf-Bereich ist anfangs verborgen', /<div id="idp-login" hidden>/.test(SETTINGS));
 {
     // Struktur am DOM, nicht am Text: was gehoert zur Kennwortanmeldung?
@@ -79,8 +81,10 @@ check('Knopf-Bereich ist anfangs verborgen', /<div id="idp-login" hidden>/.test(
     const kb = d0.getElementById('kennwort-bereich');
     check('#kennwort-bereich existiert im Anmeldeformular und ist anfangs SICHTBAR',
           !!kb && kb.closest('#login-form') !== null && !kb.hidden);
+    // #totp-setup (Admin-Einrichtung an der Maske) gibt es seit 2026-11-20 nicht
+    // mehr – eingerichtet wird am Zahnrad.
     check('Benutzername, Kennwort, Code und Anmeldeknopf liegen im Kennwort-Bereich',
-          !!kb && ['login-username', 'login-password', 'totp-row', 'totp-setup', 'login-btn']
+          !!kb && ['login-username', 'login-password', 'totp-row', 'login-btn']
               .every(id => kb.contains(d0.getElementById(id))));
     check('Fehlerzeile und IdP-Knopf liegen NICHT im Kennwort-Bereich',
           !!kb && !kb.contains(d0.getElementById('login-error')) && !kb.contains(d0.getElementById('idp-login')));
@@ -182,24 +186,31 @@ function seite(url, antworten) {
           && s.d.getElementById('login-error').textContent.length > 0);
     s.w.close();
 
+    // Seit 2026-11-20 fragt der Server nach der IdP-Anmeldung NIE nach einem
+    // Code (Admin-Rechte gibt es am Zahnrad) – die Code-Maske ist entfernt.
     s = seite('https://jarvis.test/?anmeldung=idp', { aktiv: true, einloesen: [
-        { status: 200, body: { success: false, requires_totp: true, error: '2FA-Code erforderlich' } },
-        { status: 200, body: { success: true, token: 'CSRF', username: 'm.muster', is_admin: false } }] });
+        { status: 200, body: { success: true, token: 'CSRF', username: 'm.muster',
+                               is_admin: false, admin_konto: true } }] });
     await warte(80);
     check('anmeldung=idp -> POST einloesen ohne Code', s.z.posts.length === 1 && !('totp_code' in s.z.posts[0]));
     check('Einloesen mit Sitzungs-Kopf (Cookie-Verfahren)', (s.z.koepfe[0] || {})['X-Jarvis-Sitzung'] === 'cookie',
           JSON.stringify(s.z.koepfe[0]));
-    check('requires_totp -> Code-Block sichtbar, Formular verborgen',
-          s.d.getElementById('idp-totp').hidden === false && s.d.getElementById('login-form').hidden === true);
-    const feld = s.d.getElementById('idp-totp-code');
-    feld.value = '12 34 56';
-    feld.dispatchEvent(new s.w.Event('input'));
-    await warte(80);
-    check('6 Ziffern -> zweiter POST mit Code', s.z.posts.length === 2 && s.z.posts[1].totp_code === '123456',
-          JSON.stringify(s.z.posts));
+    check('keine Code-Maske mehr im Markup', s.d.getElementById('idp-totp') === null
+          && s.d.getElementById('idp-totp-code') === null);
     check('Erfolg -> Token gespeichert', s.w.localStorage.getItem('jarvis_token') === 'CSRF'
           && s.w.localStorage.getItem('jarvis_user') === 'm.muster');
     check('Erfolg -> Weiterleitung (Navigation) ausgeloest', s.z.nav.length >= 1);
+    s.w.close();
+
+    // Ein (veralteter) Server, der doch nach dem Code fragt: kein toter Zustand,
+    // sondern die Kennwortmaske mit der Meldung des Servers.
+    s = seite('https://jarvis.test/?anmeldung=idp', { aktiv: true, einloesen: [
+        { status: 200, body: { success: false, requires_totp: true, error: '2FA-Code erforderlich' } }] });
+    await warte(80);
+    check('Code-Anforderung -> Kennwortmaske sichtbar, Meldung steht da, nichts gespeichert',
+          s.d.getElementById('login-form').hidden === false
+          && /2FA-Code/.test(s.d.getElementById('login-error').textContent)
+          && !s.w.localStorage.getItem('jarvis_token'));
     s.w.close();
 
     s = seite('https://jarvis.test/?anmeldung=idp', { aktiv: true, einloesen: [

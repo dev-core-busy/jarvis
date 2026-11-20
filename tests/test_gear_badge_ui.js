@@ -104,10 +104,14 @@ abschnitt('1. Struktur');
     // ohnehin abruft. /api/broker/status hier waere ein Roundtrip je Seite.
     pruefe(/admin_badge/.test(SBTN_CODE),
            'die Zahlen kommen aus dem Feld admin_badge');
-    const fremde = (SBTN_CODE.match(/fetch\('([^']+)'/g) || [])
-        .map((m) => m.replace(/fetch\('|'/g, ''))
-        .filter((u) => u !== '/api/me');
-    pruefe(fremde.length === 0, 'settings_btn.js ruft ausschliesslich /api/me',
+    // Gemessen ueber JEDE Pfad-Zeichenkette, nicht nur `fetch('...')`: seit dem
+    // Zahnrad (2026-11-20) laufen POSTs ueber einen Helfer mit Variablen-Pfad.
+    const ERLAUBT = new Set(['/api/me', '/api/admin/erhoehen', '/api/admin/erhoehung/beenden']);
+    const fremde = (SBTN_CODE.match(/'\/api\/[^']*'/g) || [])
+        .map((m) => m.replace(/'/g, ''))
+        .filter((u) => !ERLAUBT.has(u));
+    pruefe(fremde.length === 0,
+           'settings_btn.js ruft fuer die Badge nur /api/me (daneben nur die Zahnrad-Endpunkte)',
            fremde.join(', '));
 
     // CSS gehoert in theme.css: das Zahnrad sitzt auf elf Seiten, style.css
@@ -515,9 +519,11 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
                'security_incidents.js ruft keinen toten Haken mehr');
         pruefe(!/_setBrokerBadge|gear-broker-badge/.test(APPJS_CODE),
                'app.js hat keine zweite Badge-Fassung');
-        // /settings selbst hat kein Zahnrad - dort waere eine Badge sinnlos.
-        pruefe(!/data-jarvis-settings/.test(lies('frontend/settings.html')),
-               'settings.html traegt kein Zahnrad (Begruendung fuer Teil 3)');
+        // Seit 2026-11-20 traegt /settings ein Zahnrad ("Administration
+        // beenden") – aber ueber DIESELBE Fassung, keine eigene Badge.
+        pruefe(/data-jarvis-settings/.test(lies('frontend/settings.html'))
+               && !/jv-gear-badge|gear-broker-badge/.test(nurCode(lies('frontend/settings.html'))),
+               'settings.html traegt das gemeinsame Zahnrad, keine eigene Badge');
         // Der Sprung in den Reiter wird in app.js ausgewertet, und zwar EINMALIG.
         pruefe(/jarvis_settings_tab/.test(APPJS_CODE),
                'app.js wertet jarvis_settings_tab aus');

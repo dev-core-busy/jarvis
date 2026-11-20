@@ -28,34 +28,75 @@ ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_bsi_m3_ui.js"
 APP = "frontend/js/app.js"
 MOD = "frontend/js/totp_admin.js"
+SBTN = "frontend/js/settings_btn.js"
+SET = "frontend/settings.html"
+I18N = "frontend/js/i18n.js"
 
 PROBEN = [
-    ("Login ignoriert requires_totp_setup", APP,
-     "            } else if (data.requires_totp_setup) {\n",
-     "            } else if (false) {\n"),
-    ("Einrichtung zeigt den QR nicht", APP,
-     "                    totpSetup.hidden = false;\n", ""),
-    ("Einrichtung zeigt den Server-Hinweis als Fehler", APP,
-     "                    totpSetup.hidden = false;\n                    loginError.hidden = true;\n",
-     "                    totpSetup.hidden = false;\n                    loginError.textContent = data.error; loginError.hidden = false;\n"),
-    ("Erfolg laesst die Einrichtung stehen", APP,
-     "                if (totpSetup) totpSetup.hidden = true;\n", ""),
+    # ── Anmeldemaske (Admins ohne 2FA-Abfrage, 2026-11-20) ──
+    ("Erfolg blendet das Codefeld ein", APP,
+     "                if (totpRow) totpRow.style.display = 'none';\n",
+     "                if (totpRow) totpRow.style.display = '';\n"),
+    ("requires_totp blendet das Codefeld nicht ein", APP,
+     "                if (totpRow) totpRow.style.display = '';\n                if (totpInput) totpInput.focus();\n",
+     "                if (totpInput) totpInput.focus();\n"),
+    ("Einrichtungszweig an der Maske kehrt zurueck", APP,
+     "            } else if (data.requires_totp) {\n",
+     "            } else if (data.requires_totp_setup) {\n            } else if (data.requires_totp) {\n"),
+    # ── Sicherheits-Reiter ──
     ("Sperrliste: Name als HTML", MOD,
      "            row.appendChild(el('strong', { 'style': 'color:var(--text-primary);' }, s.display || s.konto));\n",
      "            var _s = el('strong', {}); _s.innerHTML = s.display || s.konto; row.appendChild(_s);\n"),
     ("Aufheben laedt nicht neu", MOD,
      "                    if ((res.status === 200 && res.d.ok) || res.status === 404) { schutzLaden(); return; }\n",
      "                    if ((res.status === 200 && res.d.ok) || res.status === 404) { return; }\n"),
-    ("Schalter: Fehlschlag wird nicht zurueckgenommen", MOD,
-     "                cb.checked = !soll;\n                if (msg) msg.textContent = res.d.detail",
-     "                if (msg) msg.textContent = res.d.detail"),
-    ("Schalter doppelt verdrahtet", MOD,
-     "        if (!cb || cb.dataset.verdrahtet) return;\n", "        if (!cb) return;\n"),
     ("onShow laedt den Anmeldeschutz nicht", MOD,
-     "        pflichtVerdrahten();\n        schutzLaden();\n", "        pflichtVerdrahten();\n"),
+     "        load();\n        schutzLaden();\n", "        load();\n"),
+    # ── Zahnrad ──
+    ("Zahnrad nur mit Rechten statt fuer das Admin-Konto", SBTN,
+     "                var an = _konto;\n", "                var an = _admin;\n"),
+    ("Klick wechselt direkt nach /settings (alte Fassung)", SBTN,
+     "            b.addEventListener('click', function () { klick(b); });\n",
+     "            b.addEventListener('click', function () { location.href = '/settings'; });\n"),
+    ("sechs Ziffern schicken nicht ab", SBTN,
+     "                if (c.length === 6 && !pwFeld && !ok.disabled) { codeFeld.value = c; abschicken(); }\n",
+     "                if (false) { codeFeld.value = c; abschicken(); }\n"),
+    ("Einrichtung schickt schon ohne Kennwort ab", SBTN,
+     "                if (c.length === 6 && !pwFeld && !ok.disabled) { codeFeld.value = c; abschicken(); }\n",
+     "                if (c.length === 6 && !ok.disabled) { codeFeld.value = c; abschicken(); }\n"),
+    ("Kennwort-Pflicht im Dialog fehlt", SBTN,
+     "                    if (!pwFeld.value) {\n", "                    if (false) {\n"),
+    ("QR verschwindet bei falscher Eingabe", SBTN,
+     "                && !d.qr_code) {\n", "                && false) {\n"),
+    ("Server-Aufforderung steht als Fehler da", SBTN,
+     "        if (!codeFeld) meldung(d.error || '');\n", "        meldung(d.error || '');\n"),
+    ("Escape schliesst den Dialog nicht", SBTN,
+     "        if (ev.key === 'Escape') { ev.preventDefault(); dialogZu(); }\n",
+     "        if (ev.key === 'Escape') { ev.preventDefault(); }\n"),
+    ("Rueckweg wird nicht gemerkt", SBTN,
+     "                rueckwegMerken(b);\n                // Auf /settings selbst",
+     "                // Auf /settings selbst"),
+    ("Markierung mit Rechten fehlt", SBTN,
+     "            b.classList.toggle('jv-gear-erhoeht', !!_admin);\n", ""),
+    ("Menue bietet auf /settings auch 'Einstellungen'", SBTN,
+     "        if (!aufEinstellungen()) {\n            eintrag(",
+     "        if (true) {\n            eintrag("),
+    ("Beenden fragt den Server nicht", SBTN,
+     "        return senden('/api/admin/erhoehung/beenden', {}).then(function (res) {\n",
+     "        return Promise.resolve({ d: { ok: true } }).then(function (res) {\n"),
+    ("Schliessen-Knopf ohne Symbol", SBTN,
+     "        x.innerHTML = (window.JarvisIcons && window.JarvisIcons.close) ? window.JarvisIcons.close() : '';\n", ""),
+    # ── Markup / i18n ──
+    ("Zahnrad auf /settings fehlt", SET,
+     '                            data-jarvis-settings="/settings"\n', ""),
+    ("Pflicht-Schalter kehrt ins Markup zurueck", SET,
+     '<h4 style="margin:18px 0 6px;" data-i18n="security.admin_zahnrad_h">',
+     '<input type="checkbox" id="sec-admin-2fa-pflicht"><h4 style="margin:18px 0 6px;" data-i18n="security.admin_zahnrad_h">'),
+    ("EN-Text eines Zahnrad-Schluessels fehlt", I18N,
+     "        'gear.menue_beenden':   'End administration',\n", ""),
 ]
 
-DATEIEN = [APP, MOD, "tests/test_bsi_m3_ui.js"]
+DATEIEN = [APP, MOD, SBTN, SET, I18N, "tests/test_bsi_m3_ui.js"]
 
 
 def md5(pfad: str) -> str:

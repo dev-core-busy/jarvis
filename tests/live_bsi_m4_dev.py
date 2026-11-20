@@ -56,8 +56,11 @@ def check(cond, label, detail=""):
         print("  FAIL %s%s" % (label, (" – %s" % str(detail)[:300]) if detail else ""))
 
 
-def ruf(pfad, token=None, methode="GET"):
-    r = urllib.request.Request(BASIS + pfad, method=methode, data=b"" if methode == "POST" else None)
+def ruf(pfad, token=None, methode="GET", koerper=None):
+    daten = json.dumps(koerper).encode() if koerper is not None else (b"" if methode == "POST" else None)
+    r = urllib.request.Request(BASIS + pfad, method=methode, data=daten)
+    if koerper is not None:
+        r.add_header("Content-Type", "application/json")
     if token:
         r.add_header("Authorization", "Bearer " + token)
     try:
@@ -108,14 +111,37 @@ from backend import main as M  # noqa: E402
 
 ADMIN = ziele.wert("JARVIS_DEV_TESTUSER")
 START = time.strftime("%Y-%m-%d %H:%M:%S")
-TOK_2FA = M.generate_token(ADMIN, mit_2fa=True)
-TOK_OHNE = M.generate_token(ADMIN, mit_2fa=False)
+# Seit 2026-11-20 haengen Admin-Rechte an der Erhoehung am Zahnrad, nicht mehr
+# an "mit 2FA". Die Namen bleiben, die Bedeutung ist "Sitzung MIT bzw. OHNE
+# Admin-Rechte". Eine Sekunde Abstand: zwei Tokens derselben Sekunde waeren
+# identisch (Register).
+#
+# ⚠ Ein hier mit "erhoeht" ausgestelltes Token kennt der LAUFENDE Dienst nicht –
+# er fuehrt die Merkmale im eigenen Speicher (gemessen 2026-11-20: 403 "erst
+# nach einem Klick auf das Zahnrad"). Die Rechte holt die Probe deshalb ueber
+# den ECHTEN Weg: POST /api/admin/erhoehen mit einem Code aus dem 2FA-Geheimnis
+# des Testkontos. Ohne lesbare 2FA des Testkontos ist Teil A nicht messbar
+# (Exit 2) – eine 2FA dafuer EINZURICHTEN waere eine Zustandsaenderung am Konto.
+TOK_2FA = M.generate_token(ADMIN)
+time.sleep(1.1)
+TOK_OHNE = M.generate_token(ADMIN)
 M._sitzung.flush()
 geheim = [TOK_2FA, TOK_OHNE]
 
 print("Live DEV: BSI M4 (Konto %s)" % ADMIN)
 try:
     # ── A ──
+    _st = M._get_user_auth_state(ADMIN)
+    _geh = _st.get("totp_secret")
+    if not (_st.get("totp_enabled") and M._totp_secret_lesbar(_geh)) or M._totp_im_broker(_geh):
+        print("NICHT PRUEFBAR: Testkonto %s hat keine lesbare 2FA – ohne Code gibt es keine "
+              "Admin-Sitzung (Zahnrad). Die Erhoehung selbst prueft tests/test_bsi_m3.py [E]." % ADMIN)
+        sys.exit(2)
+    import pyotp
+    st, roh, _ = ruf("/api/admin/erhoehen", TOK_2FA, "POST", {"code": pyotp.TOTP(_geh).now()})
+    if st != 200 or not json.loads(roh or b"{}").get("erhoeht"):
+        print("NICHT PRUEFBAR: Erhoehung am Zahnrad gelang nicht -> %s %s" % (st, roh[:200]))
+        sys.exit(2)
     st, roh, kopf = ruf("/api/vnc/ticket", TOK_2FA, "POST")
     if st != 200:
         print("NICHT PRUEFBAR: /api/vnc/ticket mit 2FA-Admin-Sitzung -> %s %s" % (st, roh[:200]))
@@ -127,12 +153,8 @@ try:
           "Ticket-Antwort nicht cachebar")
     st, _, _ = ruf("/api/vnc/ticket", None, "POST")
     check(st == 401, "ohne Anmeldung: 401", st)
-    pflicht = M._admin_2fa_pflicht()
     st, roh2, _ = ruf("/api/vnc/ticket", TOK_OHNE, "POST")
-    if pflicht:
-        check(st == 403, "Sitzung ohne 2FA bekommt kein Ticket (2FA-Pflicht an)", st)
-    else:
-        print("  --   2FA-Pflicht auf DEV aus – Fall 'ohne 2FA' nicht pruefbar")
+    check(st == 403, "Sitzung ohne Admin-Rechte (nicht am Zahnrad erhoeht) bekommt kein Ticket", st)
 
     # ── B ──
     art, wert = ws_versuch("/ws/vnc?token=" + TOK_2FA)
@@ -178,6 +200,11 @@ try:
         check(not any(s and s in j.stdout for s in sig_teile),
               "Journal seit Probenbeginn: kein Token, kein Ticket")
 finally:
+    # Erhoehung zuruecknehmen (Zustand wie vorgefunden), dann die Sitzungen ueber
+    # den Dienst beenden – ein Widerruf in DIESEM Prozess erreicht ihn nicht.
+    ruf("/api/admin/erhoehung/beenden", TOK_2FA, "POST")
+    for t in (TOK_2FA, TOK_OHNE):
+        ruf("/api/logout", t, "POST")
     for t in (TOK_2FA, TOK_OHNE):
         try:
             u, ts, sig = t.split(":", 2)

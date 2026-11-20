@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=71">
+    <link rel="stylesheet" href="/static/css/theme.css?v=72">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=9">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
@@ -65,20 +65,6 @@
             </div>
             <h1 class="login-title">JARVIS</h1>
             <p class="login-subtitle" data-i18n="login.subtitle">KI Linux Agent</p>
-            <!-- Anmeldung ueber den IdP, zweiter Schritt: Zwei-Faktor-Code nach der
-                 Rueckkehr vom IdP (nur wenn die MFA des IdP nicht anerkannt ist und das
-                 Konto eine 2FA hat). Eigener Block statt des Formulars: dort sind
-                 Benutzername und Kennwort Pflichtfelder. Logik: idp_anmeldung.js -->
-            <div id="idp-totp" hidden style="width:100%;max-width:380px;margin:0 auto;text-align:left;">
-                <p style="margin:0 0 10px;color:var(--text-secondary);font-size:0.9rem;line-height:1.45;" data-i18n="login.idp_totp_text">Angemeldet über das Firmenkonto. Bitte den 6-stelligen Code aus deiner Authenticator-App eingeben.</p>
-                <input data-tabfill-nein="Einmalcode – nur das Format, kein Wert" type="text" id="idp-totp-code" placeholder="6-stelliger Code" data-i18n-placeholder="login.totp.ph"
-                    autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
-                    style="width:100%;box-sizing:border-box;background:rgba(var(--fg-rgb),0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:1.2rem;font-family:var(--font-mono);text-align:center;letter-spacing:8px;font-weight:600;outline:none;margin-bottom:14px;">
-                <button type="button" class="btn-login" id="idp-totp-btn" style="width:100%;">
-                    <span class="btn-text" data-i18n="login.submit">ANMELDEN</span>
-                </button>
-                <p id="idp-totp-error" class="login-error" hidden></p>
-            </div>
             <form id="login-form" class="login-form">
                 <!-- Kennwortanmeldung (AD). Bei eingeschalteter IdP-Anmeldung im Modus
                      "minimiert" eingeklappt, bis die Anmeldung ueber den IdP scheitert
@@ -108,18 +94,6 @@
                     <input data-tabfill-nein="Einmalcode – nur das Format, kein Wert" type="text" id="login-totp" placeholder="6-stelliger Code" data-i18n-placeholder="login.totp.ph"
                         autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                         style="width:100%;box-sizing:border-box;background:rgba(var(--fg-rgb),0.05);border:1px solid var(--border);border-radius:var(--radius-md);padding:11px 14px;color:var(--text-primary);font-size:1.2rem;font-family:var(--font-mono);text-align:center;letter-spacing:8px;font-weight:600;outline:none;transition:border-color 0.2s,box-shadow 0.2s;">
-                </div>
-                <!-- 2FA-Pflicht fuer Administratoren (BSI M3): Einrichtung vor dem ersten Token.
-                     Erscheint UEBER dem Codefeld (app.js stellt es davor). Logik: app.js -->
-                <div id="totp-setup" class="form-group" hidden
-                     style="text-align:left;margin-bottom:14px;color:var(--text-secondary);font-size:0.85rem;line-height:1.45;">
-                    <p style="margin:0 0 10px;" data-i18n="login.totp_setup.text">Für Administratoren ist die Zwei-Faktor-Anmeldung Pflicht. Scanne den Code mit deiner Authenticator-App und gib darunter den angezeigten 6-stelligen Code ein.</p>
-                    <div style="text-align:center;margin-bottom:8px;">
-                        <img id="totp-setup-qr" alt="QR-Code für die Authenticator-App"
-                             style="max-width:100%;border-radius:8px;background:var(--bg-secondary);">
-                    </div>
-                    <p style="margin:0;"><span data-i18n="login.totp_setup.manual">Oder den Schlüssel von Hand eintragen:</span>
-                        <code id="totp-setup-secret" style="word-break:break-all;color:var(--text-primary);user-select:all;"></code></p>
                 </div>
                 <button type="submit" class="btn-login" id="login-btn" style="width:100%;">
                     <span class="btn-text" data-i18n="login.submit">ANMELDEN</span>
@@ -1672,6 +1646,17 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <polyline points="9 22 9 12 15 12 15 22"/>
                         </svg>
                     </a>
+                    <!-- Zahnrad auch hier (2026-11-20): /settings sieht nur, wer die
+                         Admin-Rechte am Zahnrad geholt hat – hier traegt es deshalb
+                         die Markierung und bietet "Administration beenden".
+                         Logik: settings_btn.js -->
+                    <button type="button" class="btn-icon" id="btn-settings-gear"
+                            data-jarvis-settings="/settings"
+                            data-i18n-title="nav.settings" title="Einstellungen" style="display:none;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round" width="18" height="18"
+                             aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </button>
                     <!-- Kein Schliessen-Kreuz mehr (Vorgabe 2026-11-16): /settings ist
                          eine eigene Seite, das Haus fuehrt zurueck – ein zweites
                          Symbol fuer denselben Weg war doppelt.
@@ -6416,16 +6401,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 </div>
                                 <p id="totp-settings-error" style="color:var(--danger);font-size:0.85rem;margin-top:8px;min-height:20px;"></p>
 
-                                <!-- Admin-Teil der 2FA (BSI M3): Pflicht fuer Administratoren und
-                                     Zuruecksetzen fremder Konten. Logik: totp_admin.js -->
-                                <h4 style="margin:18px 0 6px;" data-i18n="security.admin_2fa_pflicht_h">Pflicht für Administratoren</h4>
-                                <label class="checkbox-group" style="display:inline-flex;gap:8px;align-items:center;margin:4px 0 0;cursor:pointer;">
-                                    <input type="checkbox" id="sec-admin-2fa-pflicht"
-                                           style="width:16px;height:16px;accent-color:var(--accent);">
-                                    <span data-i18n="security.admin_2fa_pflicht">Administratoren müssen die Zwei-Faktor-Anmeldung nutzen</span>
-                                </label>
-                                <div id="sec-anm-pflicht-msg" role="status" style="font-size:0.85rem;color:var(--text-primary);"></div>
-                                <p class="kb-hint" data-i18n="security.admin_2fa_pflicht_hint">Ein Administrator ohne Zwei-Faktor-Anmeldung richtet sie bei der nächsten Anmeldung ein. Administrator-Rechte gibt es nur nach einer Anmeldung mit Code – über die kennwortlose Outlook-Anmeldung arbeitet ein Administrator mit normalen Rechten.</p>
+                                <!-- Admin-Teil der 2FA (BSI M3): Administrator-Rechte nur am Zahnrad
+                                     (settings_btn.js), Zuruecksetzen fremder Konten (totp_admin.js) -->
+                                <h4 style="margin:18px 0 6px;" data-i18n="security.admin_zahnrad_h">Administrator-Rechte</h4>
+                                <p class="kb-hint" data-i18n="security.admin_zahnrad_hint">Administratoren werden bei der Anmeldung nicht nach dem Zwei-Faktor-Code gefragt. Ihre Rechte erhalten sie erst mit einem Klick auf das Zahnrad und dem Code – beim ersten Mal wird die Zwei-Faktor-Anmeldung dort eingerichtet. Die Rechte gelten bis zur Abmeldung oder bis „Administration beenden“. In der App und über die kennwortlose Outlook- bzw. Windows-Anmeldung gibt es keine Administrator-Rechte.</p>
 
                                 <!-- MFA des IdP als zweiter Faktor (Einstellung, Vorgabe an). Logik: settings_idp.js -->
                                 <label class="checkbox-group" style="display:inline-flex;gap:8px;align-items:center;margin:10px 0 0;cursor:pointer;">
@@ -6876,7 +6855,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=508"></script>
+    <script src="/static/js/i18n.js?v=509"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=38"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6919,13 +6898,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=46"></script>
     <script src="/static/js/fernzugang.js?v=4"></script>
-    <script src="/static/js/totp_admin.js?v=4"></script>
+    <script src="/static/js/totp_admin.js?v=5"></script>
     <script src="/static/js/ldap_picker.js?v=18"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
     <script src="/static/js/rechte_matrix.js?v=9"></script>
     <script src="/static/js/excel_admin.js?v=9"></script>
     <script src="/static/js/modal_expand.js?v=3"></script>
     <script src="/static/js/sessions.js?v=10"></script>
+    <script src="/static/js/settings_btn.js?v=8"></script>
     <!-- Gemeinsame Titelleiste (kopfzeile.js, oben hinter sitzung.js): /settings
          hat seit 2026-11-16 dieselben Kernelemente wie jede Bereichsseite –
          Update-Pille, CPU (samt Systemauslastung) und ⓘ fuer Admins. -->
@@ -6934,7 +6914,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/sysload.js?v=6"></script>
     <script src="/static/js/syspackages.js?v=25"></script>
     <script src="/static/js/zugang_anmeldung.js?v=2"></script>
-    <script src="/static/js/idp_anmeldung.js?v=6"></script>
+    <script src="/static/js/idp_anmeldung.js?v=7"></script>
     <script src="/static/js/agent_roles.js?v=5"></script>
     <script src="/static/js/model_caps.js?v=7"></script>
     <script src="/static/js/alpha_sort.js?v=2"></script>
@@ -6942,7 +6922,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=3"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=265"></script>
+    <script src="/static/js/app.js?v=266"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

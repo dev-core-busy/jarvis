@@ -33,29 +33,20 @@ CLIENT = "ai-mouse/src/AiMouse/Vision/JarvisClient.cs"
 
 PROBEN = [
     # ── Konto-Sperre ──
+    # Seit 2026-11-05 (A1) prueft und belegt der Login in EINEM Schritt
+    # (_anmelde_reservierung); der alte Anker traf nichts mehr ("Anker 0x").
     ("Login prueft die Konto-Sperre nicht", MAIN,
-     "    _gesperrt = _konto_sperre_antwort(username)\n    if _gesperrt is not None:\n        return _gesperrt\n",
-     "    _gesperrt = _konto_sperre_antwort(username)\n"),
+     "    _gesperrt = _anmelde_reservierung(request, client_ip, username)\n"
+     "    if _gesperrt is not None:\n        return _gesperrt\n",
+     "    _gesperrt = _anmelde_reservierung(request, client_ip, username)\n"),
     ("Fehlversuch nur noch je IP", MAIN,
      '    if _anmelde_schutz.fehlversuch(ip, _norm_login(username) if username else ""):\n',
      '    if _anmelde_schutz.fehlversuch(ip, ""):\n'),
-    # ⚠ Die Einrueckung ist seit 2026-10-20 um eine Stufe tiefer: der Zweig liegt
-    # jetzt im ``else`` der Weiche "Geheimnis im Broker?" (ein Authenticator-
-    # Eintrag fuer Anmeldung UND Root-Freigaben). Der alte Anker mit acht
-    # Leerzeichen traf nichts mehr, und der Harness meldete dafuer
-    # "Anker 0x gefunden" – das sah in der Bilanz wie eine stumme Probe aus und
-    # hat eine halbe Stunde Fehlersuche am falschen Ende gekostet. Ein kuerzerer
-    # Anker geht nicht: ``_record_login_attempt(client_ip, username)`` kommt
-    # mehrfach vor (gemessen: 2x mit dieser, 5x mit geringerer Einrueckung).
+    # Seit 2026-11-20 prueft der Login den Code ueber _totp_code_pruefen und
+    # bucht den Fehlversuch selbst – der Anker ist diese Buchung.
     ("Falscher 2FA-Code zaehlt nur fuer die IP", MAIN,
-     "            if _totp_erg != _totp_schutz.OK:\n"
-     "                _record_login_attempt(client_ip, username)\n"
-     "                return JSONResponse(\n"
-     "                    {\"success\": False, \"requires_totp\": True,\n",
-     "            if _totp_erg != _totp_schutz.OK:\n"
-     "                _record_login_attempt(client_ip)\n"
-     "                return JSONResponse(\n"
-     "                    {\"success\": False, \"requires_totp\": True,\n"),
+     "            if _zaehlt:\n                _record_login_attempt(client_ip, username)\n",
+     "            if _zaehlt:\n                _record_login_attempt(client_ip)\n"),
     ("Erfolg setzt den Konto-Zaehler nicht zurueck", MAIN,
      "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin,\n"
      "                           nur_ai_maus=_ai_maus)\n"
@@ -68,27 +59,21 @@ PROBEN = [
     ("Sperre laeuft nie ab", AS,
      "        return max(1, int(bis - jetzt) + 1) if bis > jetzt else 0\n",
      "        return max(1, int(bis - jetzt) + 1) if bis else 0\n"),
-    # ── 2FA-Pflicht beim Login ──
-    ("Keine Pflicht-Einrichtung fuer Admins", MAIN,
-     "    elif _admin_2fa_pflicht() and _is_admin_user(username):\n",
-     "    elif False:\n"),
-    ("Einrichtung prueft den Code nicht", MAIN,
-     "        if _totp_erg != _totp_schutz.OK:\n"
-     "            _record_login_attempt(client_ip, username)\n"
-     "            return JSONResponse({\"success\": False, \"requires_totp_setup\": True,\n",
-     "        if False:\n"
-     "            _record_login_attempt(client_ip, username)\n"
-     "            return JSONResponse({\"success\": False, \"requires_totp_setup\": True,\n"),
-    ("Token nach 2FA ohne Merkmal", MAIN,
+    # ── Anmeldung (Zahnrad, 2026-11-20) ──
+    ("Admins werden bei der Anmeldung wieder nach dem Code gefragt", MAIN,
+     "    elif _konto_ist_admin(username):\n", "    elif False:\n"),
+    ("Token nach 2FA (Nicht-Admin) ohne Merkmal", MAIN,
      "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin,\n",
      "    token = generate_token(username, ohne_admin=_ohne_admin,\n"),
-    ("Pflicht-Schalter wird ignoriert (immer an)", MAIN,
-     '    return not (v is False or str(v).strip().lower() in ("false", "0", "nein", "off"))\n',
-     "    return True\n"),
     # ── Admin-Rechte an der Sitzung ──
     ("verify_token setzt keinen Sitzungskontext", MAIN,
-     "            _sitzung_kontext.set((_norm_login(username), _sitzung.mit_2fa(sig),\n"
+     "            _sitzung_kontext.set((_norm_login(username), _sitzung.admin_erhoeht(sig),\n"
      "                                  _sitzung.ohne_admin(sig)))\n", ""),
+    ("verify_token nimmt 'mit 2FA' als Admin-Rechte", MAIN,
+     "            _sitzung_kontext.set((_norm_login(username), _sitzung.admin_erhoeht(sig),\n",
+     "            _sitzung_kontext.set((_norm_login(username), _sitzung.mit_2fa(sig),\n"),
+    ("ohne Erhoehung gilt die Sitzung trotzdem als Admin", MAIN,
+     "    return not kx[1]\n", "    return False\n"),
     ("_user_is_admin ignoriert die Sitzung", MAIN,
      "    if _sitzung_ohne_admin(u):\n        return False\n", ""),
     ("_is_admin_user wieder mit ALLOWED_USERS-Abkuerzung", MAIN,
@@ -99,23 +84,69 @@ PROBEN = [
      "        raise HTTPException(status_code=403, detail=_admin_verweigert_text(username))\n",
      "    if username not in ALLOWED_USERS and not _user_is_admin(username):\n"
      "        raise HTTPException(status_code=403, detail=_admin_verweigert_text(username))\n"),
-    ("Kennwortwechsel erbt das Merkmal nicht", MAIN,
+    ("Kennwortwechsel erbt 'mit 2FA' nicht", MAIN,
      "            mit_2fa = _sitzung.mit_2fa(_sig)\n", "            mit_2fa = False\n"),
+    ("Kennwortwechsel erbt die Erhoehung nicht", MAIN,
+     "            erhoeht = _sitzung.admin_erhoeht(_sig)\n", "            erhoeht = False\n"),
     ("Kennwortwechsel macht JEDE Sitzung zu 'mit 2FA'", MAIN,
-     "    return generate_token(username, ts=rev + 1, mit_2fa=mit_2fa, ohne_admin=ohne_admin)\n",
-     "    return generate_token(username, ts=rev + 1, mit_2fa=True, ohne_admin=ohne_admin)\n"),
-    ("totp_disable ohne Pflicht-Pruefung", MAIN,
-     "    if _konto_admin and _admin_2fa_pflicht():\n", "    if False:\n"),
-    ("Add-in-SSO stellt Token 'mit 2FA' aus", MAIN,
-     "    token = generate_token(username)\n"
-     "    try:\n"
-     "        _user_sessions.record_login(username, client_ip, display=_display_name(username))\n",
-     "    token = generate_token(username, mit_2fa=True)\n"
-     "    try:\n"
-     "        _user_sessions.record_login(username, client_ip, display=_display_name(username))\n"),
-    ("Merkmal wird nicht gespeichert", ST,
+     "    return generate_token(username, ts=rev + 1, mit_2fa=mit_2fa, ohne_admin=ohne_admin,\n",
+     "    return generate_token(username, ts=rev + 1, mit_2fa=True, ohne_admin=ohne_admin,\n"),
+    ("Kennwortwechsel macht JEDE Sitzung zur erhoehten", MAIN,
+     "                          admin_erhoeht=erhoeht)\n", "                          admin_erhoeht=True)\n"),
+    ("totp_disable ohne Admin-Pruefung", MAIN,
+     "    if _konto_ist_admin(username):\n        return JSONResponse({\"success\": False, \"error\": \"Für Administratoren ist die \"\n",
+     "    if False:\n        return JSONResponse({\"success\": False, \"error\": \"Für Administratoren ist die \"\n"),
+    ("Add-in-SSO-Token nicht 'ohne Admin'", MAIN,
+     "    token = generate_token(username, ohne_admin=True)\n",
+     "    token = generate_token(username)\n"),
+    ("Merkmal 'mit 2FA' wird nicht gespeichert", ST,
      '"mit_2fa": _mit_2fa, "ohne_admin": _ohne_admin,',
      '"ohne_admin": _ohne_admin,'),
+    ("Merkmal 'Admin erhoeht' wird nicht gespeichert", ST,
+     '                                   "admin_erhoeht": _admin_erhoeht,\n', ""),
+    ("Abmelden nimmt die Erhoehung nicht mit", ST,
+     "        _nur_ai_maus.pop(k, None)\n        _admin_erhoeht.pop(k, None)\n        _dirty = True",
+     "        _nur_ai_maus.pop(k, None)\n        _dirty = True"),
+    ("App-Sitzung laesst sich direkt erhoehen", ST,
+     "            if k in _ohne_admin or k in _nur_ai_maus:\n                return False\n", ""),
+    # ── Erhoehung am Zahnrad ──
+    ("Zahnrad prueft den Code nicht", MAIN,
+     "        fehler = await _totp_code_pruefen(username, st[\"totp_secret\"], code)\n",
+     "        fehler = None\n"),
+    ("Zahnrad prueft das Admin-Konto nicht", MAIN,
+     "    if not _konto_ist_admin(username):\n        _erhoehung_protokoll(",
+     "    if False:\n        _erhoehung_protokoll("),
+    ("Zahnrad: Fehlversuch zaehlt nicht fuers Konto", MAIN,
+     "            if zaehlt:\n                _record_login_attempt(ip, username)\n",
+     "            if zaehlt:\n                pass\n"),
+    ("Zahnrad ohne Sperr-Schranke vor dem Code", MAIN,
+     "        schranke = _kennwort_schranke(request, username)\n        if schranke is not None:\n"
+     "            return schranke\n        fehler = await _totp_code_pruefen(",
+     "        fehler = await _totp_code_pruefen("),
+    ("Zahnrad-Einrichtung ohne Kennwort-Pflicht", MAIN,
+     "        if not password:\n            return JSONResponse({\"ok\": False, \"requires_totp_setup\": True,\n",
+     "        if False:\n            return JSONResponse({\"ok\": False, \"requires_totp_setup\": True,\n"),
+    ("Zahnrad-Einrichtung prueft das Kennwort nicht", MAIN,
+     "        if not await asyncio.to_thread(authenticate_linux_user, username, password):\n"
+     "            _kennwort_fehlversuch(request, username, \"admin_erhoehung\")\n",
+     "        if False:\n"
+     "            _kennwort_fehlversuch(request, username, \"admin_erhoehung\")\n"),
+    ("Zahnrad-Einrichtung prueft den Code nicht", MAIN,
+     "        erg = _totp_schutz.pruefen(_norm_login(username), vorgemerkt, code)\n"
+     "        if erg != _totp_schutz.OK:\n",
+     "        erg = _totp_schutz.pruefen(_norm_login(username), vorgemerkt, code)\n"
+     "        if False:\n"),
+    # Der Vorfall vom 2026-11-20 (DEV) als Sabotage: die IdP-MFA ersetzt den
+    # Code wieder.
+    ("Zahnrad: IdP-MFA ersetzt den Code wieder", MAIN,
+     "    if st.get(\"totp_enabled\") and st.get(\"totp_secret\"):\n        if not code:\n"
+     "            return JSONResponse({\"ok\": False, \"requires_totp\": True,\n",
+     "    if _sitzung.mit_2fa(request.headers.get(\"Authorization\", \"\").rsplit(\":\", 1)[-1]):\n"
+     "        weg = \"code\"\n"
+     "    elif st.get(\"totp_enabled\") and st.get(\"totp_secret\"):\n        if not code:\n"
+     "            return JSONResponse({\"ok\": False, \"requires_totp\": True,\n"),
+    ("Beenden nimmt die Rechte nicht zurueck", MAIN,
+     "    _sitzung.setze_admin_erhoeht(kennung, ts, False)\n", ""),
     # ── Apps ──
     ("Merkmal 'ohne Admin' wird nicht gespeichert", ST,
      '"mit_2fa": _mit_2fa, "ohne_admin": _ohne_admin,',
@@ -132,10 +163,8 @@ PROBEN = [
     ("App-Token ohne Merkmal", MAIN,
      "    token = generate_token(username, mit_2fa=_mit_2fa, ohne_admin=_ohne_admin,\n",
      "    token = generate_token(username, mit_2fa=_mit_2fa,\n"),
-    ("Merkmal 'ohne Admin' wird bei der Pruefung ignoriert", MAIN,
-     "    if len(kx) > 2 and kx[2]:\n        return True\n", ""),
     ("Login-Antwort meldet die Konto- statt der Sitzungsrechte", MAIN,
-     "    _sitzung_kontext.set((_norm_login(username), _mit_2fa, _ohne_admin))\n", ""),
+     "    _sitzung_kontext.set((_norm_login(username), False, _ohne_admin))\n", ""),
     ("Kennwortwechsel verliert 'ohne Admin'", MAIN,
      "            ohne_admin = _sitzung.ohne_admin(_sig)\n", ""),
     # ── AI-Maus (2026-10-27): ohne 2FA, nur eigene Schnittstellen ──
@@ -164,6 +193,17 @@ PROBEN = [
     ("AI-Maus schickt keine Kennung", CLIENT,
      '            ["client"] = "ai-mouse",\n', ""),
 ]
+
+# BEWUSST OHNE PROBE (doppelte Schranken, Register: "zwei Schranken fuer dieselbe
+# Frage machen jede Gegenprobe stumm"): admin_erhoehen weist eine App-Sitzung
+# selbst ab (kx[2]) UND setze_admin_erhoeht verweigert sie; ebenso prueft
+# sitzung_token.admin_erhoeht() beim LESEN noch einmal "ohne Admin"/"nur AI-Maus".
+# Beides ist Tiefenverteidigung fuer jeden Weg ausser dem Endpunkt; gemessen wird
+# die tragende Schranke (setze_admin_erhoeht direkt, Probe oben).
+# Aus demselben Grund ohne Probe: das "ohne Admin" in main._sitzung_ohne_admin
+# (kx[2]) – eine App-Sitzung traegt nie "erhoeht" (sitzung_token), die Zeile
+# allein zu entfernen aendert also nichts Messbares (gemessen 2026-11-20:
+# 0 FAIL). Der Grund steht auch an der Zeile.
 
 DATEIEN = [MAIN, AS, ST, CLIENT, "tests/test_bsi_m3.py"]
 

@@ -196,7 +196,7 @@ const warte = (ms) => new Promise(r => setTimeout(r, ms || 20));
         w.eval(MODUL);
         return { w, d: w.document };
     }
-    const basis = { ok: true, admin_2fa_pflicht: true, sperren: [], konto_max: 2,
+    const basis = { ok: true, sperren: [], konto_max: 2,
                     konto_fenster_min: 30, konto_sperre_min: 15, schwellen_quelle: 'domaene' };
     let s = schutzUmgebung(Object.assign({}, basis, { spruehen: { aktiv: true, konten: 12, bis: 2000000000 } }));
     s.w.TotpAdmin.onShow(); await warte(50);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Waechter: BSI M3 – Anmeldeschutz je Konto (dauerhaft) und 2FA-Pflicht fuer Admins.
+"""Waechter: BSI M3 – Anmeldeschutz je Konto (dauerhaft) und Admin-Rechte nur mit 2FA.
 
 Befund (BSI-Abgleich 2026-09-29): Fehlversuche nur je IP und nur im Speicher;
 2FA fuer Administratoren freiwillig.
@@ -9,14 +9,18 @@ Gemessen an der WIRKUNG:
       Sperre je Konto ueber wechselnde IPs, Ueberleben eines Neustarts, Ablauf,
       Ruecksetzen bei Erfolg, Aufheben, IP-Grenze.
   [B] der echte Login-Endpunkt (per AST aus main.py, Attrappen in echter
-      Signatur, echtes ``sitzung_token``): Sperre VOR der Kennwortpruefung,
-      Pflicht-Einrichtung fuer Admins (ohne Token bis zum Code), kein Zwang
-      fuer Nicht-Admins und bei abgeschalteter Pflicht.
+      Signatur, echtes ``sitzung_token``): Sperre VOR der Kennwortpruefung;
+      seit dem Zahnrad (Betreiberentscheid 2026-11-20) fragt die Anmeldung
+      Administratoren NICHT nach der 2FA (auch keine Einrichtung), Nicht-Admins
+      mit eigener 2FA weiterhin; jede Sitzung beginnt ohne Admin-Rechte.
   [C] Admin-Rechte haengen an der SITZUNG: ``_user_is_admin``/``require_local_auth``
-      nach ``verify_token`` – ohne 2FA kein Admin, fremde Konten unberuehrt,
-      ausserhalb einer Anfrage unveraendert; Kennwortwechsel erbt das Merkmal;
-      ``totp_disable`` verweigert Admins unter der Pflicht; Add-in-SSO stellt
-      kein Token "mit 2FA" aus.
+      nach ``verify_token`` – ohne Erhoehung am Zahnrad kein Admin (auch nicht
+      mit IdP-MFA), fremde Konten unberuehrt, ausserhalb einer Anfrage
+      unveraendert; Kennwortwechsel erbt die Merkmale; ``totp_disable``
+      verweigert Admin-Konten; Add-in-SSO stellt nur Tokens "ohne Admin" aus.
+  [E] die Erhoehung selbst (``admin_erhoehen``/``admin_erhoehung_beenden``):
+      Code, Einrichtung mit Kennwort, IdP-MFA ohne Code, App/AI-Maus/Nicht-Admin
+      abgewiesen, Fehlversuche zaehlen, Beenden nimmt nur DIESER Sitzung die Rechte.
   [D] AI-Maus (Betreiberentscheid 2026-10-27): keine 2FA-Abfrage fuer IRGENDEIN
       Konto, dafuer gilt die Sitzung nur auf /api/ai-mouse/* und /api/generated/*
       (ohne Admin-Seiten) und nie als Admin.
@@ -229,7 +233,7 @@ def _funktionen(*namen):
 
 
 ADMINS = {"jarvis", "andreas"}
-EINST = {"admin_2fa_pflicht": True}
+EINST: dict = {}
 STATE: dict = {}
 AUTH_AUFRUFE: list = []
 
@@ -284,7 +288,9 @@ EINST.update({"ad_admins": "andreas", "ad_server": "dc.firma.local", "ad_domain"
 # BSI H4: Token-Antworten laufen ueber _sitzung_antwort – mit dem ECHTEN Modul
 NS["_sitzung_cookie"] = __import__("backend.sitzung_cookie", fromlist=["x"])
 NS.setdefault("_json_objekt", _json_objekt_aus_main(NS.get("HTTPException")))
-exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "_admin_2fa_pflicht", "_sitzung_ohne_admin",
+exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "_konto_ist_admin",
+                 "_sitzung_ohne_admin", "_abruf_sitzung", "_totp_code_pruefen",
+                 "admin_erhoehen", "admin_erhoehung_beenden", "_erhoehung_protokoll",
                  "_ist_app_anmeldung", "_ist_ai_maus_anmeldung", "_user_is_admin",
                  "_is_admin_user", "_admin_verweigert_text", "require_local_auth",
                  "_check_rate_limit", "_record_login_attempt", "_konto_sperre_antwort",
@@ -315,7 +321,6 @@ def _neu():
     ST._zuruecksetzen_fuer_test()
     STATE.clear()
     AUTH_AUFRUFE.clear()
-    EINST["admin_2fa_pflicht"] = True
     TS._zuruecksetzen_fuer_test()
     TS.STORE_PATH.unlink(missing_ok=True)
     TS._zuruecksetzen_fuer_test()
@@ -370,64 +375,59 @@ for i in range(AS.KONTO_MAX):
     anmelden("bert", code="falsch", ip="203.0.113.%d" % i)
 check("falsche 2FA-Codes zaehlen fuer das Konto", AS.konto_wartezeit("bert") > 0)
 
-# Pflicht-Einrichtung
+# Zahnrad (2026-11-20): Administratoren werden bei der Anmeldung nicht gefragt
 _neu()
 r = anmelden("andreas")
-check("Admin ohne 2FA: kein Token, requires_totp_setup",
-      not r.inhalt.get("token") and r.inhalt.get("requires_totp_setup") is True)
-check("…mit QR und Schluessel", bool(r.inhalt.get("qr_code")) and bool(r.inhalt.get("secret")))
-check("…und einem Hinweis fuer Clients ohne Einrichtungsmaske", "Pflicht" in str(r.inhalt.get("error")))
-geheim = str(r.inhalt.get("secret") or "")
-check("…Secret ist nur vorgemerkt (2FA noch aus)",
-      _get_state("andreas").get("totp_pending_secret") == geheim and not _get_state("andreas").get("totp_enabled"))
-r = anmelden("andreas", code="code-FALSCH")
-check("falscher Einrichtungs-Code: 401, kein Token",
-      r.status_code == 401 and not r.inhalt.get("token") and r.inhalt.get("requires_totp_setup"))
-check("…zaehlt als Fehlversuch",
-      len((json.loads(AS.STORE_PATH.read_text()) if AS.STORE_PATH.exists() else {})
-          .get("konto", {}).get("andreas", [])) == 1)
-r = anmelden("andreas", code="code-" + geheim)
 tok = r.inhalt.get("token") or ""
-check("richtiger Code: Token", r.status_code == 200 and r.inhalt.get("success") and bool(tok))
-check("…2FA ist danach aktiv mit dem vorgemerkten Secret",
-      _get_state("andreas").get("totp_enabled") and _get_state("andreas").get("totp_secret") == geheim
-      and not _get_state("andreas").get("totp_pending_secret"))
-check("…Sitzung traegt das Merkmal 'mit 2FA'", ST.mit_2fa(tok.split(":", 2)[2]) if tok else False)
+check("Admin ohne 2FA: Token ohne Einrichtung",
+      r.status_code == 200 and bool(tok) and "requires_totp_setup" not in r.inhalt)
+check("…Antwort: is_admin false, admin_konto true (das Zahnrad wird angeboten)",
+      r.inhalt.get("is_admin") is False and r.inhalt.get("admin_konto") is True)
+check("…Sitzung beginnt OHNE Admin-Rechte", bool(tok) and not ST.admin_erhoeht(tok.split(":", 2)[2]))
+check("…bei der Anmeldung wird nichts vorgemerkt",
+      not _get_state("andreas").get("totp_pending_secret"))
+_neu()
+STATE["andreas"] = {"totp_enabled": True, "totp_secret": "AS"}
 r = anmelden("andreas")
-check("naechste Anmeldung verlangt den Code (requires_totp)", r.inhalt.get("requires_totp") is True
-      and not r.inhalt.get("token"))
-r = anmelden("andreas", code="code-" + geheim)
+check("Admin MIT 2FA: kein Code verlangt, Token",
+      bool(r.inhalt.get("token")) and "requires_totp" not in r.inhalt)
+r = anmelden("andreas", code="code-FALSCH")
+check("…ein mitgeschickter falscher Code wird nicht ausgewertet (kein Fehlversuch)",
+      bool(r.inhalt.get("token"))
+      and not (json.loads(AS.STORE_PATH.read_text()) if AS.STORE_PATH.exists() else {})
+      .get("konto", {}).get("andreas"))
+check("…Sitzung ohne Merkmal 'mit 2FA' und ohne Admin-Rechte",
+      not ST.mit_2fa(_sig(r)) and not ST.admin_erhoeht(_sig(r)))
+_neu()
+r = anmelden("jarvis")
+check("lokaler Admin jarvis: ebenfalls ohne 2FA-Abfrage, Zahnrad angeboten",
+      bool(r.inhalt.get("token")) and r.inhalt.get("admin_konto") is True)
+
+# Nicht-Admins mit eigener 2FA: weiterhin der Code bei der Anmeldung
+_neu()
+STATE["bert"] = {"totp_enabled": True, "totp_secret": "BS"}
+r = anmelden("bert")
+check("Nicht-Admin mit 2FA: Code verlangt, kein Token",
+      r.inhalt.get("requires_totp") is True and not r.inhalt.get("token"))
+r = anmelden("bert", code="code-BS")
+check("…mit Code: Token 'mit 2FA', aber ohne Zahnrad", bool(r.inhalt.get("token"))
+      and ST.mit_2fa(_sig(r)) and r.inhalt.get("admin_konto") is False)
+r = anmelden("bert", code="code-BS")
 check("…derselbe Code gleich noch einmal: abgewiesen (BSI N3)",
       r.status_code == 401 and not r.inhalt.get("token")
       and "bereits verwendet" in str(r.inhalt.get("error")))
-# ein Zeitfenster spaeter (die Attrappe kennt keine Zeit – der Merker wird geleert)
-TS._zuruecksetzen_fuer_test()
-TS.STORE_PATH.unlink(missing_ok=True)
-TS._zuruecksetzen_fuer_test()
-AS.erfolg("andreas")
-r = anmelden("andreas", code="code-" + geheim)
-check("…mit Code: Token 'mit 2FA'", bool(r.inhalt.get("token"))
-      and ST.mit_2fa(r.inhalt["token"].split(":", 2)[2]))
-
-_neu()
-r = anmelden("jarvis")
-check("lokaler Admin jarvis faellt ebenfalls unter die Pflicht", r.inhalt.get("requires_totp_setup") is True)
-
-_neu()
-EINST["admin_2fa_pflicht"] = False
-r = anmelden("andreas")
-check("Pflicht AUS: Admin ohne 2FA bekommt ein Token",
-      r.status_code == 200 and bool(r.inhalt.get("token")))
-check("…aber ohne Merkmal 'mit 2FA'",
-      not ST.mit_2fa(r.inhalt.get("token", "x:1:x").split(":", 2)[2]))
 
 # ── [B2] Android-/Windows-App ───────────────────────────────────────────────
 print("\n[B2] App-Anmeldung: Admin-Konto ohne Admin-Rechte")
 _neu()
 STATE["andreas"] = {"totp_enabled": True, "totp_secret": "AS"}
 r = anmelden("andreas")
-if r.inhalt.get("requires_totp") is not True:
-    abbruch("Positivkontrolle: Admin mit 2FA im Browser wird nicht nach dem Code gefragt")
+# Positivkontrolle als PRUEFUNG, nicht als Abbruch: faellt sie, ist das eine
+# Produktaenderung (z. B. Admins werden wieder nach dem Code gefragt) – ein
+# Abbruch wuerde sie als "konnte nicht laufen" verstecken (Register).
+check("Positivkontrolle: Admin-Konto im Browser bekommt ein Token mit Zahnrad (admin_konto)",
+      r.inhalt.get("admin_konto") is True and bool(r.inhalt.get("token"))
+      and not ST.ohne_admin(_sig(r)))
 for name, kw in (("client=android", {"client": "android"}),
                  ("client=windows", {"client": "windows"}),
                  ("bestehende Android-App (OkHttp)", {"ua": "okhttp/4.12.0"}),
@@ -437,15 +437,12 @@ for name, kw in (("client=android", {"client": "android"}),
           r.status_code == 200 and bool(r.inhalt.get("token")))
     check("…Sitzung 'ohne Admin', nicht 'mit 2FA'",
           ST.ohne_admin(_sig(r)) and not ST.mit_2fa(_sig(r)))
-    check("…Antwort meldet is_admin false", r.inhalt.get("is_admin") is False)
+    check("…Antwort meldet is_admin false und KEIN Zahnrad",
+          r.inhalt.get("is_admin") is False and r.inhalt.get("admin_konto") is False)
 STATE.pop("andreas")
 r = anmelden("andreas", client="android")
-check("App: Admin OHNE 2FA unter der Pflicht – keine Einrichtung, Token ohne Admin",
+check("App: Admin OHNE 2FA – keine Einrichtung, Token ohne Admin",
       bool(r.inhalt.get("token")) and "requires_totp_setup" not in r.inhalt and ST.ohne_admin(_sig(r)))
-EINST["admin_2fa_pflicht"] = False
-r = anmelden("andreas", client="windows")
-check("App bei Pflicht AUS: trotzdem 'ohne Admin'", ST.ohne_admin(_sig(r)))
-EINST["admin_2fa_pflicht"] = True
 STATE["bert"] = {"totp_enabled": True, "totp_secret": "BS"}
 r = anmelden("bert", client="android")
 check("App: Nicht-Admin mit 2FA braucht weiter den Code (kein 2FA-Umweg)",
@@ -453,9 +450,13 @@ check("App: Nicht-Admin mit 2FA braucht weiter den Code (kein 2FA-Umweg)",
 r = anmelden("carla", client="android")
 check("App: Nicht-Admin ohne 2FA – normales Token, kein Merkmal",
       bool(r.inhalt.get("token")) and not ST.ohne_admin(_sig(r)))
+# Eine Sekunde Abstand: die App-Anmeldungen darueber haben fuer "andreas" in
+# derselben Sekunde ein IDENTISCHES Token ausgestellt – samt Merkmal "ohne Admin".
+time.sleep(1.1)
 r = anmelden("andreas", ua="Mozilla/5.0 okhttp-Nachahmer")
 check("Browser mit 'okhttp' irgendwo im Text gilt NICHT als App",
-      r.inhalt.get("requires_totp_setup") is True)
+      bool(r.inhalt.get("token")) and not ST.ohne_admin(_sig(r))
+      and r.inhalt.get("admin_konto") is True)
 
 # ── [C] Admin-Rechte an der Sitzung ─────────────────────────────────────────
 print("\n[C] Admin-Rechte haengen an der Sitzung")
@@ -473,24 +474,28 @@ def in_kontext(fn):
 # sind IDENTISCH (gleiche Signatur) – das Merkmal des einen gaelte fuer beide.
 _jetzt = int(time.time())
 ohne = NS["generate_token"]("andreas", ts=_jetzt - 30)
-mit = NS["generate_token"]("andreas", ts=_jetzt - 20, mit_2fa=True)
+idp = NS["generate_token"]("andreas", ts=_jetzt - 25, mit_2fa=True)
+erh = NS["generate_token"]("andreas", ts=_jetzt - 20, admin_erhoeht=True)
 j_ohne = NS["generate_token"]("jarvis", ts=_jetzt - 30)
-if not in_kontext(lambda: verify(mit) == "andreas" and is_admin("andreas")):
-    abbruch("Positivkontrolle: Admin-Sitzung mit 2FA ist kein Admin")
-check("Sitzung OHNE 2FA: _is_admin_user False",
+check("Positivkontrolle: am Zahnrad erhoehte Admin-Sitzung ist Admin",
+      in_kontext(lambda: verify(erh) == "andreas" and is_admin("andreas")))
+check("Sitzung OHNE Erhoehung: _is_admin_user False",
       in_kontext(lambda: verify(ohne) == "andreas" and not is_admin("andreas")))
-check("Sitzung OHNE 2FA: auch _user_is_admin False",
+check("Sitzung OHNE Erhoehung: auch _user_is_admin False",
       in_kontext(lambda: (verify(ohne), user_is_admin("andreas"))[1]) is False)
-check("lokaler jarvis OHNE 2FA: kein Admin (keine ALLOWED_USERS-Abkuerzung)",
+check("Sitzung mit IdP-MFA ('mit 2FA'), aber nicht erhoeht: kein Admin",
+      in_kontext(lambda: (verify(idp), is_admin("andreas"))[1]) is False)
+check("lokaler jarvis ohne Erhoehung: kein Admin (keine ALLOWED_USERS-Abkuerzung)",
       in_kontext(lambda: (verify(j_ohne), is_admin("jarvis"))[1]) is False)
 check("Pruefung eines FREMDEN Kontos bleibt unberuehrt",
       in_kontext(lambda: (verify(ohne), is_admin("jarvis"))[1]) is True)
 check("ausserhalb einer Anfrage (kein Kontext): Konto-Rechte unveraendert",
       in_kontext(lambda: is_admin("andreas")) is True)
-EINST["admin_2fa_pflicht"] = False
-check("Pflicht AUS: Sitzung ohne 2FA hat Admin-Rechte",
-      in_kontext(lambda: (verify(ohne), is_admin("andreas"))[1]) is True)
-EINST["admin_2fa_pflicht"] = True
+check("_konto_ist_admin fragt das KONTO, nicht die Sitzung",
+      in_kontext(lambda: (verify(ohne), NS["_konto_ist_admin"]("andreas"))[1]) is True)
+check("…und laesst den Sitzungskontext danach unveraendert",
+      in_kontext(lambda: (verify(ohne), NS["_konto_ist_admin"]("andreas"),
+                          is_admin("andreas"))[2]) is False)
 
 
 def _local(tok):
@@ -503,26 +508,29 @@ def _local(tok):
 
 
 e = _local(ohne)
-check("require_local_auth: Sitzung ohne 2FA -> 403",
+check("require_local_auth: Sitzung ohne Erhoehung -> 403",
       isinstance(e, _HTTPException) and e.status_code == 403)
-check("…mit einem Text, der die fehlende 2FA nennt",
-      isinstance(e, _HTTPException) and "Zwei-Faktor" in str(e.detail))
-check("require_local_auth: Sitzung mit 2FA -> durch", _local(mit) == "andreas")
+check("…mit einem Text, der den Weg ueber das Zahnrad nennt",
+      isinstance(e, _HTTPException) and "Zahnrad" in str(e.detail))
+check("require_local_auth: erhoehte Sitzung -> durch", _local(erh) == "andreas")
+e = _local(idp)
+check("require_local_auth: Sitzung mit IdP-MFA, nicht erhoeht -> 403",
+      isinstance(e, _HTTPException) and e.status_code == 403)
 e = _local(j_ohne)
-check("require_local_auth: lokaler jarvis OHNE 2FA -> 403",
+check("require_local_auth: lokaler jarvis ohne Erhoehung -> 403",
       isinstance(e, _HTTPException) and e.status_code == 403)
-e = _local(NS["generate_token"]("bert", ts=_jetzt - 20, mit_2fa=True))
-check("require_local_auth: Nicht-Admin -> 403 mit dem Rechte-Text",
-      isinstance(e, _HTTPException) and "Zwei-Faktor" not in str(e.detail))
+e = _local(NS["generate_token"]("bert", ts=_jetzt - 20, admin_erhoeht=True))
+check("require_local_auth: Nicht-Admin (selbst mit Merkmal) -> 403 mit dem Rechte-Text",
+      isinstance(e, _HTTPException) and "Zahnrad" not in str(e.detail))
 
-# App-Sitzung: nie Admin, unabhaengig von 2FA und Pflicht
+# App-Sitzung: nie Admin, auch nicht mit dem Merkmal
 app_tok = NS["generate_token"]("andreas", ts=_jetzt - 50, ohne_admin=True)
 check("App-Sitzung: _is_admin_user False",
       in_kontext(lambda: (verify(app_tok), is_admin("andreas"))[1]) is False)
-EINST["admin_2fa_pflicht"] = False
-check("App-Sitzung bei Pflicht AUS: weiterhin kein Admin",
-      in_kontext(lambda: (verify(app_tok), is_admin("andreas"))[1]) is False)
-EINST["admin_2fa_pflicht"] = True
+app_erh = NS["generate_token"]("andreas", ts=_jetzt - 55, ohne_admin=True, admin_erhoeht=True)
+check("App-Sitzung mit erbetenem Merkmal: wird NICHT erhoeht",
+      not ST.admin_erhoeht(app_erh.split(":", 2)[2])
+      and in_kontext(lambda: (verify(app_erh), is_admin("andreas"))[1]) is False)
 e = _local(app_tok)
 check("require_local_auth: App-Sitzung -> 403 mit Hinweis auf die Weboberflaeche",
       isinstance(e, _HTTPException) and e.status_code == 403 and "App" in str(e.detail))
@@ -530,37 +538,51 @@ neu_app = NS["_sitzungen_nach_kennwortwechsel"]("andreas", _Req(token=app_tok))
 check("Kennwortwechsel in der App-Sitzung: Ersatz-Token bleibt 'ohne Admin'",
       ST.ohne_admin(neu_app.split(":", 2)[2]))
 
-# Kennwortwechsel erbt das Merkmal
-neu_mit = NS["_sitzungen_nach_kennwortwechsel"]("andreas", _Req(token=mit))
+# Kennwortwechsel erbt die Merkmale. Eine Sekunde Abstand zum Wechsel in der
+# App-Sitzung darueber: beide stellen das Ersatz-Token fuer "andreas" mit
+# ts = Epoche + 1 aus, in derselben Sekunde waeren sie IDENTISCH (Register).
+time.sleep(1.1)
+neu_erh = NS["_sitzungen_nach_kennwortwechsel"]("andreas", _Req(token=erh))
+neu_idp = NS["_sitzungen_nach_kennwortwechsel"]("jarvis", _Req(token=NS["generate_token"](
+    "jarvis", ts=_jetzt - 45, mit_2fa=True)))
 neu_ohne = NS["_sitzungen_nach_kennwortwechsel"]("bert", _Req(token=NS["generate_token"]("bert", ts=_jetzt - 40)))
-check("Kennwortwechsel in einer Sitzung mit 2FA: Ersatz-Token 'mit 2FA'",
-      ST.mit_2fa(neu_mit.split(":", 2)[2]))
-check("Kennwortwechsel ohne 2FA: Ersatz-Token ohne Merkmal",
-      not ST.mit_2fa(neu_ohne.split(":", 2)[2]))
+check("Kennwortwechsel in einer erhoehten Sitzung: Ersatz-Token bleibt erhoeht",
+      ST.admin_erhoeht(neu_erh.split(":", 2)[2]))
+check("Kennwortwechsel in einer Sitzung 'mit 2FA': Ersatz-Token 'mit 2FA', nicht erhoeht",
+      ST.mit_2fa(neu_idp.split(":", 2)[2]) and not ST.admin_erhoeht(neu_idp.split(":", 2)[2]))
+check("Kennwortwechsel ohne Merkmale: Ersatz-Token ohne Merkmale",
+      not ST.mit_2fa(neu_ohne.split(":", 2)[2]) and not ST.admin_erhoeht(neu_ohne.split(":", 2)[2]))
 
-# Merkmal ueberlebt einen Neustart
+# Merkmale ueberleben einen Neustart
 ST._zuruecksetzen_fuer_test()
-check("Merkmal 'mit 2FA' ueberlebt einen Neustart", ST.mit_2fa(mit.split(":", 2)[2]))
+check("Merkmal 'Admin erhoeht' ueberlebt einen Neustart", ST.admin_erhoeht(erh.split(":", 2)[2]))
+check("Merkmal 'mit 2FA' ueberlebt einen Neustart", ST.mit_2fa(idp.split(":", 2)[2]))
 check("Merkmal 'ohne Admin' ueberlebt einen Neustart", ST.ohne_admin(app_tok.split(":", 2)[2]))
+ST.widerrufe(erh.split(":", 2)[2], _jetzt - 20)
+check("Abmelden nimmt das Merkmal 'Admin erhoeht' mit", not ST.admin_erhoeht(erh.split(":", 2)[2]))
 
 # totp_disable
 STATE["andreas"] = {"totp_enabled": True, "totp_secret": "S"}
 STATE["bert"] = {"totp_enabled": True, "totp_secret": "S"}
 dis = NS["totp_disable"]
 r = in_kontext(lambda: asyncio.run(dis(_Req({"password": "richtig"}), "andreas")))
-check("totp_disable: Admin unter der Pflicht -> 403, 2FA bleibt an",
+check("totp_disable: Admin-Konto -> 403, 2FA bleibt an",
       r.status_code == 403 and _get_state("andreas").get("totp_enabled"))
 r = in_kontext(lambda: asyncio.run(dis(_Req({"password": "richtig"}), "bert")))
 check("totp_disable: Nicht-Admin darf weiterhin abschalten",
       r.status_code == 200 and not _get_state("bert").get("totp_enabled"))
 
-# Add-in-SSO: Token nie "mit 2FA" (REGEL am Syntaxbaum – der Endpunkt braucht
-# ein echtes Exchange-Token und ist hier nicht ausfuehrbar)
+# Add-in-SSO: Token nie Admin (REGEL am Syntaxbaum – der Endpunkt braucht ein
+# echtes Exchange-Token und ist hier nicht ausfuehrbar)
 sso = _fn("_addin_sso_ablauf")
 gen_aufrufe = [k for k in ast.walk(sso) if isinstance(k, ast.Call)
                and isinstance(k.func, ast.Name) and k.func.id == "generate_token"]
 check("addin_sso stellt genau ein Token aus", len(gen_aufrufe) == 1)
-check("…ohne mit_2fa", all(not any(kw.arg == "mit_2fa" for kw in k.keywords) for k in gen_aufrufe))
+check("…ohne mit_2fa und ohne admin_erhoeht",
+      all(not any(kw.arg in ("mit_2fa", "admin_erhoeht") for kw in k.keywords) for k in gen_aufrufe))
+check("…und ausdruecklich 'ohne Admin' (Zahnrad-Erhoehung dort abgewiesen)",
+      all(any(kw.arg == "ohne_admin" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+              for kw in k.keywords) for k in gen_aufrufe))
 
 # ── [D] AI-Maus: ohne 2FA, nur eigene Schnittstellen ────────────────────────
 print("\n[D] AI-Maus-Anmeldung")
@@ -587,8 +609,9 @@ check("AI-Maus: falsches Kennwort bleibt 401 ohne Token",
       r.status_code == 401 and not r.inhalt.get("token"))
 STATE.pop("andreas")
 r = anmelden("andreas", client="ai-mouse")
-check("AI-Maus: Admin OHNE 2FA unter der Pflicht – keine Einrichtung, Token",
-      bool(r.inhalt.get("token")) and "requires_totp_setup" not in r.inhalt)
+check("AI-Maus: Admin OHNE 2FA – keine Einrichtung, Token, nicht erhoeht",
+      bool(r.inhalt.get("token")) and "requires_totp_setup" not in r.inhalt
+      and not ST.admin_erhoeht(_sig(r)))
 r = anmelden("bert", client="android")
 check("andere App: Nicht-Admin mit 2FA braucht weiter den Code",
       r.inhalt.get("requires_totp") is True and not r.inhalt.get("token"))
@@ -694,6 +717,156 @@ check("jede Schicht ausserhalb ist auffindbar und fragt die Sitzung NICHT %s"
       all(q is not None and not _fragt_sitzung(q) for _, q in _aussen_q))
 
 shutil.rmtree(TMP, ignore_errors=True)
+# ── [E] Admin-Rechte am Zahnrad ─────────────────────────────────────────────
+print("\n[E] Erhoehung am Zahnrad")
+EREIGNISSE: list = []
+NS["_sicherheits_log"] = types.SimpleNamespace(
+    ereignis=lambda art, **k: (EREIGNISSE.append((art, k)), {})[1])
+
+
+def zahnrad(tok, body=None, beenden=False):
+    """Eine Anfrage wie unter uvicorn: require_auth (verify_token) setzt den
+    Sitzungskontext, dann der Endpunkt."""
+    async def f():
+        u = verify(tok)
+        if not u:
+            return None
+        fn = NS["admin_erhoehung_beenden"] if beenden else NS["admin_erhoehen"]
+        return await (fn(_Req(token=tok), u) if beenden else fn(_Req(body or {}, token=tok), u))
+    return in_kontext(lambda: asyncio.run(f()))
+
+
+def admin_in(tok, wer="andreas"):
+    return in_kontext(lambda: (verify(tok), is_admin(wer))[1])
+
+
+def _versuche(konto):
+    return len((json.loads(AS.STORE_PATH.read_text()) if AS.STORE_PATH.exists() else {})
+               .get("konto", {}).get(konto, []))
+
+
+_neu()
+NS["_revoked_logins"].clear()
+STATE["andreas"] = {"totp_enabled": True, "totp_secret": "AS"}
+_jetzt = int(time.time())
+t1 = NS["generate_token"]("andreas", ts=_jetzt - 10)
+t2 = NS["generate_token"]("andreas", ts=_jetzt - 9)
+check("Positivkontrolle: frische Sitzung hat KEINE Admin-Rechte (sonst waere die "
+      "Erhoehung nicht messbar)", not admin_in(t1))
+r = zahnrad(t1)
+check("Zahnrad ohne Code: requires_totp, keine Rechte",
+      r is not None and r.inhalt.get("requires_totp") is True and not admin_in(t1))
+r = zahnrad(t1, {"code": "code-FALSCH"})
+check("falscher Code: 401, keine Rechte", r.status_code == 401 and not admin_in(t1))
+check("…zaehlt als Fehlversuch des Kontos", _versuche("andreas") == 1)
+check("…und steht im Sicherheitsprotokoll",
+      ("admin_erhoehung", "fehlgeschlagen") in [(a, k.get("ergebnis")) for a, k in EREIGNISSE])
+r = zahnrad(t1, {"code": "code-AS"})
+check("richtiger Code: ok, erhoeht", r.status_code == 200 and r.inhalt.get("erhoeht") is True)
+check("…die Sitzung hat danach Admin-Rechte (naechste Anfrage)", admin_in(t1))
+check("…require_local_auth laesst sie durch", _local(t1) == "andreas")
+check("…eine ANDERE Sitzung desselben Kontos bleibt ohne Rechte", not admin_in(t2))
+check("…Protokoll: admin_erhoehung ok, weg=code",
+      any(a == "admin_erhoehung" and k.get("ergebnis") == "ok" and k.get("weg") == "code"
+          for a, k in EREIGNISSE))
+r = zahnrad(t2, {"code": "code-AS"})
+check("derselbe Code in der zweiten Sitzung: abgewiesen (BSI N3)",
+      r.status_code == 401 and "bereits verwendet" in str(r.inhalt.get("error")) and not admin_in(t2))
+r = zahnrad(t1, beenden=True)
+check("Administration beenden: ok", r.status_code == 200 and r.inhalt.get("erhoeht") is False)
+check("…danach keine Admin-Rechte mehr, die Sitzung gilt weiter",
+      not admin_in(t1) and in_kontext(lambda: verify(t1)) == "andreas")
+check("…Protokoll: admin_beendet", any(a == "admin_beendet" for a, _ in EREIGNISSE))
+_n = len(EREIGNISSE)
+zahnrad(t1, beenden=True)
+check("zweites Beenden ohne Rechte: kein weiterer Protokolleintrag", len(EREIGNISSE) == _n)
+
+# Fehlversuche am Zahnrad sperren wie an der Anmeldung
+_neu()
+STATE["andreas"] = {"totp_enabled": True, "totp_secret": "AS"}
+t3 = NS["generate_token"]("andreas", ts=int(time.time()) - 5)
+for i in range(AS.KONTO_MAX):
+    zahnrad(t3, {"code": "code-FALSCH%d" % i})
+r = zahnrad(t3, {"code": "code-AS"})
+check("nach KONTO_MAX falschen Codes: 429, auch der richtige Code hilft nicht",
+      r.status_code == 429 and not admin_in(t3))
+
+# Einrichtung am Zahnrad: QR, dann Code UND Kennwort
+_neu()
+t4 = NS["generate_token"]("andreas", ts=int(time.time()) - 5)
+r = zahnrad(t4)
+geheim = str(r.inhalt.get("secret") or "")
+check("ohne 2FA: requires_totp_setup mit QR und Schluessel",
+      r.inhalt.get("requires_totp_setup") is True and bool(r.inhalt.get("qr_code")) and bool(geheim))
+check("…Secret ist nur vorgemerkt (2FA noch aus)",
+      _get_state("andreas").get("totp_pending_secret") == geheim
+      and not _get_state("andreas").get("totp_enabled"))
+r = zahnrad(t4, {"code": "code-" + geheim})
+check("Code OHNE Kennwort: 400, nichts eingerichtet, keine Rechte",
+      r.status_code == 400 and not _get_state("andreas").get("totp_enabled") and not admin_in(t4))
+r = zahnrad(t4, {"code": "code-" + geheim, "password": "falsch"})
+check("falsches Kennwort: 401, nichts eingerichtet, keine Rechte",
+      r.status_code == 401 and not _get_state("andreas").get("totp_enabled") and not admin_in(t4))
+r = zahnrad(t4, {"code": "code-FALSCH", "password": "richtig"})
+check("falscher Code mit richtigem Kennwort: 401, nichts eingerichtet",
+      r.status_code == 401 and not _get_state("andreas").get("totp_enabled"))
+r = zahnrad(t4, {"code": "code-" + geheim, "password": "richtig"})
+check("richtiger Code + Kennwort: eingerichtet und erhoeht",
+      r.status_code == 200 and r.inhalt.get("erhoeht") is True and admin_in(t4)
+      and _get_state("andreas").get("totp_enabled")
+      and _get_state("andreas").get("totp_secret") == geheim
+      and not _get_state("andreas").get("totp_pending_secret"))
+
+# IdP-MFA ersetzt den Code NICHT (Vorfall DEV 2026-11-20: ein Admin ohne 2FA
+# kam nach der Firmenkonto-Anmeldung mit einem Klick an die Rechte – das Token
+# trug keinen MFA-Nachweis, die Sitzung galt trotzdem als "mit 2FA").
+_neu()
+STATE["andreas"] = {"totp_enabled": True, "totp_secret": "AS"}
+t5 = NS["generate_token"]("andreas", ts=int(time.time()) - 5, mit_2fa=True)
+r = zahnrad(t5)
+check("Sitzung mit IdP-MFA, 2FA eingerichtet: Zahnrad verlangt trotzdem den Code",
+      r.inhalt.get("requires_totp") is True and not admin_in(t5))
+r = zahnrad(t5, {"code": "code-AS"})
+check("…mit dem Code: erhoeht", r.inhalt.get("erhoeht") is True and admin_in(t5))
+_neu()
+t6 = NS["generate_token"]("andreas", ts=int(time.time()) - 5, mit_2fa=True)
+r = zahnrad(t6)
+check("Sitzung mit IdP-MFA, KEINE 2FA (der DEV-Fall): Einrichtung statt Rechte",
+      r.inhalt.get("requires_totp_setup") is True and not admin_in(t6))
+check("REGEL: kein Weg 'idp_mfa' mehr in admin_erhoehen",
+      "idp_mfa" not in ast.unparse(_fn("admin_erhoehen")))
+
+# Wer NIE erhoeht wird
+_neu()
+STATE["andreas"] = {"totp_enabled": True, "totp_secret": "AS"}
+STATE["bert"] = {"totp_enabled": True, "totp_secret": "BS"}
+t_app = NS["generate_token"]("andreas", ts=int(time.time()) - 5, ohne_admin=True)
+r = zahnrad(t_app, {"code": "code-AS"})
+check("App-/SSO-Sitzung: 403 auch mit richtigem Code", r.status_code == 403 and not admin_in(t_app))
+_sig_app = t_app.split(":", 2)[2]
+check("setze_admin_erhoeht verweigert eine App-/SSO-Sitzung auch direkt",
+      ST.setze_admin_erhoeht(ST.schluessel(_sig_app), int(time.time()), True) is False
+      and not ST.admin_erhoeht(_sig_app))
+t_maus = NS["generate_token"]("andreas", ts=int(time.time()) - 6, ohne_admin=True, nur_ai_maus=True)
+r = zahnrad(t_maus, {"code": "code-AS"})
+check("AI-Maus-Sitzung: erreicht das Zahnrad gar nicht (Pfad) und wird nie erhoeht",
+      (r is None or r.status_code == 403) and not ST.admin_erhoeht(t_maus.split(":", 2)[2]))
+t_bert = NS["generate_token"]("bert", ts=int(time.time()) - 5)
+r = zahnrad(t_bert, {"code": "code-BS"})
+check("Nicht-Admin: 403, Code wird nicht verbraucht",
+      r.status_code == 403 and not admin_in(t_bert, "bert"))
+check("…Protokoll: abgewiesen (kein_admin)",
+      any(a == "admin_erhoehung" and k.get("grund") == "kein_admin" for a, k in EREIGNISSE))
+t_j = NS["generate_token"]("jarvis", ts=int(time.time()) - 5)
+STATE["jarvis"] = {"totp_enabled": True, "totp_secret": "JS"}
+r = zahnrad(t_j, {"code": "code-JS"})
+check("lokaler jarvis: gleiche Regel, mit Code erhoeht", r.inhalt.get("erhoeht") is True
+      and admin_in(t_j, "jarvis"))
+
+# Den Schalter gibt es nicht mehr
+check("REGEL: kein _admin_2fa_pflicht / admin_2fa_pflicht mehr in main.py",
+      "admin_2fa_pflicht" not in MAIN_SRC)
+
 print("\n" + "=" * 60)
 print("Ergebnis: %d OK, %d FAIL" % (OK, FAIL))
 sys.exit(0 if FAIL == 0 else 1)

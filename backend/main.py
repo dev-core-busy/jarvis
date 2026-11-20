@@ -1349,11 +1349,12 @@ def _wa_bridge_request_safe(path: str) -> dict:
 _sitzung.einstellungen_quelle(config.get_setting)
 
 
-# Sitzung der laufenden Anfrage: (normalisierter Benutzer, mit 2FA?, ohne
-# Admin?) – letzteres fuer App-Anmeldungen. Gesetzt
-# von verify_token; gelesen von _user_is_admin (BSI M3: Admin-Rechte nur in
-# Sitzungen mit bestandener 2FA). Ausserhalb einer Anfrage (Cron, Hintergrund)
-# None – dort gilt die Rechtelage des Kontos unveraendert.
+# Sitzung der laufenden Anfrage: (normalisierter Benutzer, Admin-Rechte geholt?,
+# ohne Admin?) – das zweite Feld ist seit 2026-11-20 "am Zahnrad erhoeht"
+# (``_sitzung.admin_erhoeht``), das dritte steht fuer App-/SSO-Sitzungen, die
+# nie Admin werden. Gesetzt von verify_token; gelesen von _user_is_admin
+# (BSI M3: Admin-Rechte nur nach Code am Zahnrad). Ausserhalb einer Anfrage
+# (Cron, Hintergrund) None – dort gilt die Rechtelage des Kontos unveraendert.
 import contextvars as _contextvars
 _sitzung_kontext: _contextvars.ContextVar = _contextvars.ContextVar(
     "_sitzung_kontext", default=None)
@@ -1621,14 +1622,18 @@ def _aktivitaet(user: str, bereich: str, aktion: str, objekt: str = "", *,
 
 
 def generate_token(username: str, ts: int | None = None, mit_2fa: bool = False,
-                   ohne_admin: bool = False, nur_ai_maus: bool = False) -> str:
+                   ohne_admin: bool = False, nur_ai_maus: bool = False,
+                   admin_erhoeht: bool = False) -> str:
     """Token aus Benutzername + Timestamp erzeugen.
 
     ``ts`` nur fuer den Kennwortwechsel: das Ersatz-Token muss NACH der
     Widerrufs-Epoche liegen (siehe change_password).
-    ``mit_2fa``: die Anmeldung hat den zweiten Faktor bestanden (BSI M3).
+    ``mit_2fa``: die Anmeldung hat einen zweiten Faktor bestanden (Code eines
+    Nicht-Admins, MFA des IdP). Gibt KEINE Admin-Rechte und ersetzt auch den
+    Code am Zahnrad nicht.
     ``ohne_admin``: Sitzung ohne Admin-Rechte, auch fuer ein Admin-Konto (App).
-    ``nur_ai_maus``: gilt nur fuer die Schnittstellen der AI-Maus (ohne 2FA)."""
+    ``nur_ai_maus``: gilt nur fuer die Schnittstellen der AI-Maus (ohne 2FA).
+    ``admin_erhoeht``: nur fuer den Kennwortwechsel (Ersatz-Token erbt den Stand)."""
     ts = str(int(time.time()) if ts is None else int(ts))
     sig = hmac.new(
         config.SECRET_KEY.encode(),
@@ -1636,7 +1641,7 @@ def generate_token(username: str, ts: int | None = None, mit_2fa: bool = False,
         hashlib.sha256,
     ).hexdigest()
     _sitzung.neu(sig, int(ts), mit_2fa=mit_2fa, ohne_admin=ohne_admin,
-                 nur_ai_maus=nur_ai_maus)
+                 nur_ai_maus=nur_ai_maus, admin_erhoeht=admin_erhoeht)
     return f"{username}:{ts}:{sig}"
 
 
@@ -1709,7 +1714,7 @@ def verify_token(token: str) -> str | None:
                 return None
             if not _sitzung.pruefe_und_beruehre(sig, int(ts)):
                 return None
-            _sitzung_kontext.set((_norm_login(username), _sitzung.mit_2fa(sig),
+            _sitzung_kontext.set((_norm_login(username), _sitzung.admin_erhoeht(sig),
                                   _sitzung.ohne_admin(sig)))
             _sitzung_herkunft.set((_norm_login(username), int(ts), _sitzung.schluessel(sig)))
             _halter = _admin_anfrage.get()
@@ -2337,21 +2342,18 @@ async def require_auth_pwchange(request: Request) -> str:
 
 
 def _admin_verweigert_text(username: str) -> str:
-    """Grund fuer ein 403 an einer Admin-Schranke. Fehlt nur die 2FA der Sitzung,
-    sagt der Text das – sonst sucht ein Administrator in der Rechteverwaltung."""
+    """Grund fuer ein 403 an einer Admin-Schranke. Fehlt nur die Erhoehung am
+    Zahnrad, sagt der Text das – sonst sucht ein Administrator in der
+    Rechteverwaltung."""
     kx = _sitzung_kontext.get()
     if _sitzung_ohne_admin(username):
-        _kx_token = _sitzung_kontext.set(None)
-        try:
-            konto_ist_admin = _user_is_admin(username)
-        finally:
-            _sitzung_kontext.reset(_kx_token)
+        konto_ist_admin = _konto_ist_admin(username)
         if konto_ist_admin and len(kx) > 2 and kx[2]:
-            return ("In der App gibt es keine Administrator-Rechte. "
-                    "Bitte die Weboberfläche benutzen.")
+            return ("In der App und über die kennwortlose Anmeldung gibt es keine "
+                    "Administrator-Rechte. Bitte die Weboberfläche benutzen.")
         if konto_ist_admin:
-            return ("Administrator-Rechte gibt es nur nach einer Anmeldung mit "
-                    "Zwei-Faktor-Code. Bitte abmelden und über die Anmeldeseite neu anmelden.")
+            return ("Administrator-Rechte gibt es erst nach einem Klick auf das "
+                    "Zahnrad und der Eingabe des Zwei-Faktor-Codes.")
     return "Nur Administratoren dürfen diese Aktion ausführen (Sicherheit → LDAP → Administratoren)."
 
 
@@ -4382,9 +4384,12 @@ def _sitzung_ohne_admin(user: str) -> bool:
     kx = _sitzung_kontext.get()
     if kx is None or kx[0] != _norm_login(user):
         return False
+    # Tiefenverteidigung, bewusst doppelt: eine App-/SSO-Sitzung traegt nie
+    # "erhoeht" (sitzung_token.admin_erhoeht prueft das selbst). Die Zeile haelt
+    # die Zusage auch dann, wenn ein kuenftiger Weg das Merkmal anders setzt.
     if len(kx) > 2 and kx[2]:
         return True
-    return not kx[1] and _admin_2fa_pflicht()
+    return not kx[1]
 
 
 def _sitzung_ist_app(user: str) -> bool:
@@ -4428,11 +4433,17 @@ def _ist_ai_maus_anmeldung(body: dict) -> bool:
     return str((body or {}).get("client") or "").strip().lower() == "ai-mouse"
 
 
-def _admin_2fa_pflicht() -> bool:
-    """Brauchen Administratoren eine 2FA (BSI M3)? Vorgabe: ja. Abschalten nur
-    ausdruecklich (``admin_2fa_pflicht: false`` in settings.json)."""
-    v = config.get_setting("admin_2fa_pflicht", True)
-    return not (v is False or str(v).strip().lower() in ("false", "0", "nein", "off"))
+def _konto_ist_admin(user: str) -> bool:
+    """Ist das KONTO Administrator – unabhaengig davon, ob die laufende Sitzung
+    die Admin-Rechte gerade traegt? Fuer die Anmeldung (Admins werden dort nicht
+    nach der 2FA gefragt), das Zahnrad (``admin_konto`` in /api/me) und die
+    Erhoehung selbst. Ohne Sitzungskontext gerechnet, damit die Pruefung weder
+    die Sitzung befragt noch als Admin-Anfrage ins Protokoll zaehlt."""
+    _kx_token = _sitzung_kontext.set(None)
+    try:
+        return _user_is_admin(user)
+    finally:
+        _sitzung_kontext.reset(_kx_token)
 
 
 @_admin_pruefung_merken
@@ -4446,10 +4457,10 @@ def _user_is_admin(user: str) -> bool:
     u = (user or "").strip()
     if not u:
         return False
-    # BSI M3: in einer Sitzung OHNE bestandene 2FA hat dieses Konto keine
-    # Admin-Rechte (Add-in-SSO, Sitzungen von vor der Pflicht); eine App-Sitzung
-    # nie (ohne_admin, unabhaengig von der Pflicht). Gilt nur fuer das Konto DER
-    # Sitzung – Pruefungen ueber fremde Konten bleiben unberuehrt.
+    # BSI M3 (Zahnrad, 2026-11-20): Admin-Rechte hat dieses Konto nur in einer
+    # Sitzung, in der es sie am Zahnrad geholt hat; eine App-/SSO-Sitzung nie
+    # (ohne_admin). Gilt nur fuer das Konto DER Sitzung – Pruefungen ueber
+    # fremde Konten bleiben unberuehrt.
     if _sitzung_ohne_admin(u):
         return False
     # NUR die lokalen Konten (Code-Review 2026-10-18): hier stand zusaetzlich
@@ -4896,6 +4907,40 @@ async def _totp_broker_pruefen(username: str, code: str) -> tuple[bool, str]:
               f"{str(res.get('error'))[:200]}) – jarvis-broker.service neu gestartet? "
               f"Notweg: jarvis-broker-admin totp-aus {_norm_login(username)}", flush=True)
     return False, grund
+
+
+async def _totp_code_pruefen(username: str, secret, code: str):
+    """2FA-Code gegen das AKTIVE Geheimnis eines Kontos pruefen – fuer die
+    Kennwortanmeldung und die Admin-Erhoehung am Zahnrad (eine Stelle, damit
+    Broker-Weg, unlesbares Geheimnis und Einmal-Pruefung nicht auseinanderlaufen).
+
+    None = Code gilt. Sonst ``(Fehlertext, Status, zaehlt_als_Fehlversuch)``:
+    503 heisst "der Server kann gerade nicht pruefen" (Broker weg, Hauptschluessel
+    fehlt), 401 ein falscher oder schon benutzter Code.
+
+    ⚠ FAIL-CLOSED: ein nicht erreichbarer Broker heisst "nein", nicht "ohne
+    zweiten Faktor hinein". Der Notweg ist die root-Konsole:
+    ``jarvis-broker-admin totp-aus <konto>``."""
+    if _totp_im_broker(secret):
+        # Das Geheimnis liegt root-eigen im Broker, damit EIN Eintrag in der
+        # Authenticator-App fuer Anmeldung UND Root-Freigaben genuegt
+        # (Betreiberentscheid 2026-10-20). Das Backend kennt es nie.
+        ok, grund = await _totp_broker_pruefen(username, code)
+        if ok:
+            return None
+        status = 503 if grund in ("unreachable", "nicht_eingerichtet") else 401
+        return _totp_broker_fehlertext(grund), status, True
+    if not _totp_secret_lesbar(secret):
+        # BSI M5: das Secret liegt verpackt, der Hauptschluessel fehlt (oder
+        # passt nicht). pyotp wuerfe sonst einen nackten 500.
+        print(f"[AUTH] 2FA-Secret von '{username}' nicht lesbar – Hauptschluessel "
+              "/etc/jarvis/geheimnis.key fehlt oder passt nicht", flush=True)
+        return ("Die Zwei-Faktor-Prüfung ist auf dem Server gerade nicht möglich. "
+                "Bitte den Administrator verständigen.", 503, False)
+    erg = _totp_schutz.pruefen(_norm_login(username), secret, code)
+    if erg != _totp_schutz.OK:
+        return _totp_fehlertext(erg), 401, True
+    return None
 
 
 def _totp_broker_fehlertext(grund: str) -> str:
@@ -5851,75 +5896,28 @@ async def _login_ablauf(request: Request):
     elif _ohne_admin:
         print(f"[AUTH] App-Anmeldung eines Admin-Kontos ohne Admin-Rechte: {username}",
               flush=True)
-    # 2FA aktiviert? → TOTP-Code prüfen
+    elif _konto_ist_admin(username):
+        # Zahnrad (Betreiberentscheid 2026-11-20): Administratoren werden bei der
+        # Anmeldung NICHT nach der 2FA gefragt, auch nicht zur Einrichtung. Die
+        # Sitzung beginnt ohne Admin-Rechte; geholt werden sie am Zahnrad mit dem
+        # Code (``/api/admin/erhoehen``), eingerichtet wird die 2FA ebenfalls dort.
+        print(f"[AUTH] Admin-Konto ohne 2FA-Abfrage angemeldet (Rechte erst am "
+              f"Zahnrad): {username}", flush=True)
+    # 2FA aktiviert? → TOTP-Code prüfen (nur noch Nicht-Admins)
     elif user_state.get("totp_enabled") and user_state.get("totp_secret"):
         totp_code = str(body.get("totp_code") or "").strip()
         if not totp_code:
             # Passwort korrekt, aber 2FA-Code fehlt → Frontend zeigt TOTP-Eingabe
             return JSONResponse({"success": False, "requires_totp": True,
                                  "error": "2FA-Code erforderlich"})
-        if _totp_im_broker(user_state["totp_secret"]):
-            # Das Geheimnis liegt root-eigen im Broker, damit EIN Eintrag in der
-            # Authenticator-App fuer Anmeldung UND Root-Freigaben genuegt
-            # (Betreiberentscheid 2026-10-20). Das Backend kennt es nie.
-            #
-            # ⚠ FAIL-CLOSED: ein nicht erreichbarer Broker heisst "keine
-            # Anmeldung", nicht "ohne zweiten Faktor hinein". Der Notweg dagegen
-            # ist die root-Konsole: jarvis-broker-admin totp-aus <konto>.
-            _brk_ok, _brk_grund = await _totp_broker_pruefen(username, totp_code)
-            if not _brk_ok:
+        _totp_fehler = await _totp_code_pruefen(username, user_state["totp_secret"],
+                                                totp_code)
+        if _totp_fehler is not None:
+            _text, _status, _zaehlt = _totp_fehler
+            if _zaehlt:
                 _record_login_attempt(client_ip, username)
-                _status = 503 if _brk_grund in ("unreachable", "nicht_eingerichtet") else 401
-                return JSONResponse(
-                    {"success": False, "requires_totp": True,
-                     "error": _totp_broker_fehlertext(_brk_grund)},
-                    status_code=_status,
-                )
-        else:
-            if not _totp_secret_lesbar(user_state["totp_secret"]):
-                # BSI M5: das Secret liegt verpackt, der Hauptschluessel fehlt (oder
-                # passt nicht). pyotp wuerfe sonst einen nackten 500.
-                print(f"[AUTH] 2FA-Secret von '{username}' nicht lesbar – Hauptschluessel "
-                      "/etc/jarvis/geheimnis.key fehlt oder passt nicht", flush=True)
-                return JSONResponse(
-                    {"success": False, "requires_totp": True,
-                     "error": "Die Zwei-Faktor-Prüfung ist auf dem Server gerade nicht möglich. "
-                              "Bitte den Administrator verständigen."},
-                    status_code=503)
-            _totp_erg = _totp_schutz.pruefen(_norm_login(username), user_state["totp_secret"],
-                                             totp_code)
-            if _totp_erg != _totp_schutz.OK:
-                _record_login_attempt(client_ip, username)
-                return JSONResponse(
-                    {"success": False, "requires_totp": True,
-                     "error": _totp_fehlertext(_totp_erg)},
-                    status_code=401,
-                )
-        _mit_2fa = True
-    elif _admin_2fa_pflicht() and _is_admin_user(username):
-        # BSI M3: Administratoren brauchen eine 2FA. Wer noch keine hat, richtet
-        # sie HIER ein, bevor es ein Token gibt (wie der erzwungene
-        # Kennwortwechsel, nur eine Stufe frueher). Ohne Code: neues Secret
-        # vormerken und QR zurueck; mit Code: gegen das vorgemerkte pruefen.
-        # Clients ohne diese Maske (Apps, Bereichsseiten) zeigen ``error``.
-        _einricht_hinweis = ("Für Administratoren ist die Zwei-Faktor-Anmeldung Pflicht. "
-                             "Bitte einmal über die Anmeldeseite anmelden und sie einrichten.")
-        totp_code = str(body.get("totp_code") or "").strip()
-        _vorgemerkt = user_state.get("totp_pending_secret")
-        if not totp_code or not _vorgemerkt:
-            return JSONResponse({"success": False, "requires_totp_setup": True,
-                                 "error": _einricht_hinweis,
-                                 **_totp_vormerken(username)})
-        _totp_erg = _totp_schutz.pruefen(_norm_login(username), _vorgemerkt, totp_code)
-        if _totp_erg != _totp_schutz.OK:
-            _record_login_attempt(client_ip, username)
-            return JSONResponse({"success": False, "requires_totp_setup": True,
-                                 "error": _totp_fehlertext(_totp_erg)}, status_code=401)
-        _set_user_auth_state(username, {"totp_secret": _vorgemerkt, "totp_enabled": True,
-                                        "totp_pending_secret": None})
-        _konto_hinweis_abraeumen(username)
-        print(f"[AUTH] 2FA bei der Anmeldung eingerichtet (Admin-Pflicht): {username}",
-              flush=True)
+            return JSONResponse({"success": False, "requires_totp": True, "error": _text},
+                                status_code=_status)
         _mit_2fa = True
 
     # Lizenzgrenze fuer die Zahl verschiedener Benutzer. Bewusst HIER, nach
@@ -5999,11 +5997,14 @@ async def _login_ablauf(request: Request):
     if not _DOCKER_MODE and (username in ALLOWED_USERS or _is_admin_user(username)):
         asyncio.get_event_loop().run_in_executor(None, switch_desktop_session,
                                                  DESKTOP_USER)
-    # is_admin = Rechte DIESER Sitzung (App: nie), nicht die des Kontos
-    _sitzung_kontext.set((_norm_login(username), _mit_2fa, _ohne_admin))
+    # is_admin = Rechte DIESER Sitzung (frisch angemeldet: nie – die gibt es erst
+    # am Zahnrad); admin_konto = das Zahnrad wird angeboten (App: nie).
+    _sitzung_kontext.set((_norm_login(username), False, _ohne_admin))
     return _sitzung_antwort(request, {"success": True, "token": token, "username": username,
                                       "must_change_password": must_change,
-                                      "is_admin": _is_admin_user(username)})
+                                      "is_admin": _is_admin_user(username),
+                                      "admin_konto": (not _ohne_admin
+                                                      and _konto_ist_admin(username))})
 
 
 def _ad_windows_freigabe(plain: str) -> str:
@@ -6551,12 +6552,12 @@ async def oidc_callback(request: Request):
 async def oidc_einloesen(request: Request):
     """Einloese-Schein gegen eine Sitzung tauschen (fetch von der Anmeldeseite).
 
-    2FA: Erkennt der Administrator die MFA des IdP an (und belegt das Token sie,
-    falls ein Nachweis eingetragen ist), gilt die Anmeldung als mit zweitem
-    Faktor. Sonst wie bei der Kennwortanmeldung: ein Konto mit eingerichteter
-    2FA gibt seinen Code ein. Ein Administrator ohne 2FA bekommt bei
-    eingeschalteter Pflicht eine Sitzung OHNE Admin-Rechte (wie beim
-    Outlook-SSO) – eingerichtet wird die 2FA ueber die Kennwortanmeldung."""
+    2FA (Betreiberentscheid 2026-11-20): bei der Anmeldung ueber das
+    Firmenkonto wird fuer NIEMANDEN ein Code abgefragt. Die Sitzung beginnt
+    ohne Admin-Rechte; ein Administrator holt sie am Zahnrad, IMMER mit dem
+    eigenen Code. Erkennt der Betreiber die MFA des IdP an (und belegt das Token
+    sie, falls ein Nachweis eingetragen ist), traegt die Sitzung das Merkmal
+    "mit zweitem Faktor" – am Zahnrad ersetzt das den Code nicht."""
     try:
         resp = await _oidc_einloesen_ablauf(request)
     except AuthStateUnlesbar:
@@ -6590,39 +6591,7 @@ async def _oidc_einloesen_ablauf(request: Request):
         _oidc_cookie_weg(_gesperrt, _OIDC_COOKIE_SCHEIN)
         return _gesperrt
 
-    body = await _json_objekt(request)
-    user_state = _get_user_auth_state(konto)
-    mit_2fa = False
-    if _oidc_mfa_anerkennen() and schein.get("mfa_belegt"):
-        mit_2fa = True
-    elif user_state.get("totp_enabled") and user_state.get("totp_secret"):
-        totp_code = str((body or {}).get("totp_code") or "").strip()
-        if not totp_code:
-            return JSONResponse({"success": False, "requires_totp": True, "username": konto,
-                                 "error": "2FA-Code erforderlich"})
-        if _totp_im_broker(user_state["totp_secret"]):
-            ok, grund = await _totp_broker_pruefen(konto, totp_code)
-            fehler = None if ok else _totp_broker_fehlertext(grund)
-            status = 503 if grund in ("unreachable", "nicht_eingerichtet") else 401
-        elif not _totp_secret_lesbar(user_state["totp_secret"]):
-            return JSONResponse(
-                {"success": False, "requires_totp": True,
-                 "error": "Die Zwei-Faktor-Prüfung ist auf dem Server gerade nicht möglich. "
-                          "Bitte den Administrator verständigen."}, status_code=503)
-        else:
-            erg = _totp_schutz.pruefen(konto, user_state["totp_secret"], totp_code)
-            fehler = None if erg == _totp_schutz.OK else _totp_fehlertext(erg)
-            status = 401
-        if fehler:
-            if status == 401:
-                _record_login_attempt(ip, konto)
-            rest = _oidc.SCHEINE.fehlversuch(schein_id, _oidc.SCHEIN_MAX_VERSUCHE)
-            resp = JSONResponse({"success": False, "requires_totp": rest > 0,
-                                 "abgelaufen": rest <= 0, "error": fehler}, status_code=status)
-            if rest <= 0:
-                _oidc_cookie_weg(resp, _OIDC_COOKIE_SCHEIN)
-            return resp
-        mit_2fa = True
+    mit_2fa = bool(_oidc_mfa_anerkennen() and schein.get("mfa_belegt"))
 
     # Ab hier ist die Anmeldung entschieden: Schein verbrauchen (einmalig).
     if _oidc.SCHEINE.nehmen(schein_id) is None:
@@ -6637,14 +6606,11 @@ async def _oidc_einloesen_ablauf(request: Request):
         pass
     print(f"[AUTH] IdP-Anmeldung erfolgreich: {konto} ({ip}, 2FA={'ja' if mit_2fa else 'nein'})",
           flush=True)
-    _sitzung_kontext.set((konto, mit_2fa, False))
-    ist_admin = _is_admin_user(konto) and (mit_2fa or not _admin_2fa_pflicht())
+    # Frisch angemeldet: keine Admin-Rechte – die gibt es erst am Zahnrad.
+    _sitzung_kontext.set((konto, False, False))
     daten = {"success": True, "token": token, "username": konto,
-             "must_change_password": False, "is_admin": ist_admin}
-    if _is_admin_user(konto) and not ist_admin:
-        daten["hinweis"] = ("Administrator-Rechte gibt es nur nach einer Anmeldung mit "
-                            "Zwei-Faktor-Code. Für Verwaltungsaufgaben bitte mit Kennwort "
-                            "und Code anmelden.")
+             "must_change_password": False, "is_admin": False,
+             "admin_konto": _konto_ist_admin(konto)}
     _block = security_guard.get_block(konto)
     if _block:
         daten.update({"is_admin": False, "account_blocked": True,
@@ -7223,7 +7189,7 @@ async def totp_setup(request: Request, username: str = Depends(require_auth)):
 def _totp_vormerken(username: str) -> dict:
     """Neues TOTP-Secret als ``totp_pending_secret`` vormerken (das aktive bleibt
     unberuehrt) und ``{secret, qr_code, uri}`` fuer die Einrichtung liefern.
-    Gemeinsam fuer /totp/setup und die Pflicht-Einrichtung beim Login (BSI M3)."""
+    Gemeinsam fuer /totp/setup und die Einrichtung am Zahnrad (BSI M3)."""
     import pyotp
 
     secret = pyotp.random_base32()
@@ -7294,13 +7260,12 @@ async def totp_verify(request: Request, username: str = Depends(require_auth)):
     # Ein offener Ruecksetz-Hinweis ist damit erledigt – in JEDER Schreibweise,
     # sonst kaeme er wieder, sobald die 2FA spaeter einmal abgeschaltet wird.
     _konto_hinweis_abraeumen(username)
-    # ⚠ Die Sitzung wird hier NICHT zur Sitzung "mit 2FA" (Code-Review
-    # 2026-10-07): einen Faktor EINRICHTEN ist nicht dasselbe wie ihn VORZEIGEN.
-    # Eine Admin-Sitzung ohne 2FA (Outlook-SSO, Sitzung von vor der Pflicht)
-    # haette sich sonst ohne Kennwort selbst Admin-Rechte gegeben – mit einem
-    # Faktor, den der Inhaber der Sitzung gerade selbst eingetragen hat. Die
-    # Admin-Rechte kommen mit der naechsten Anmeldung (Kennwort + Code); die
-    # Pflicht-Einrichtung beim Login setzt das Merkmal weiter selbst.
+    # ⚠ Die Sitzung bekommt hier KEINE Admin-Rechte (Code-Review 2026-10-07):
+    # einen Faktor EINRICHTEN ist nicht dasselbe wie ihn VORZEIGEN – sonst gaebe
+    # sich eine Sitzung ohne Kennwort selbst Admin-Rechte, mit einem Faktor, den
+    # ihr Inhaber gerade selbst eingetragen hat. Die Rechte holt der
+    # Administrator am Zahnrad; richtet er die 2FA DORT ein, verlangt das
+    # zusaetzlich sein Kennwort (``admin_erhoehen``).
     return JSONResponse({"success": True, "message": "2FA aktiviert"})
 
 
@@ -7395,14 +7360,10 @@ async def totp_disable(request: Request, username: str = Depends(require_auth)):
     if not password:
         return JSONResponse({"success": False, "error": "Passwort zur Bestätigung erforderlich"}, status_code=400)
 
-    # BSI M3: fuer Administratoren ist die 2FA Pflicht. Geprueft wird das KONTO,
-    # nicht die Sitzung (in einer Sitzung ohne 2FA waere _is_admin_user False).
-    _kx_token = _sitzung_kontext.set(None)
-    try:
-        _konto_admin = _is_admin_user(username)
-    finally:
-        _sitzung_kontext.reset(_kx_token)
-    if _konto_admin and _admin_2fa_pflicht():
+    # BSI M3: fuer Administratoren ist die 2FA Pflicht – ohne sie gaebe es am
+    # Zahnrad keine Admin-Rechte mehr. Geprueft wird das KONTO, nicht die
+    # Sitzung (ohne Erhoehung waere _is_admin_user False).
+    if _konto_ist_admin(username):
         return JSONResponse({"success": False, "error": "Für Administratoren ist die "
                              "Zwei-Faktor-Anmeldung Pflicht und lässt sich nicht abschalten."},
                             status_code=403)
@@ -7418,6 +7379,135 @@ async def totp_disable(request: Request, username: str = Depends(require_auth)):
     _set_user_auth_state(username, {"totp_enabled": False, "totp_secret": None,
                                     "totp_pending_secret": None})
     return JSONResponse({"success": True, "message": "2FA deaktiviert"})
+
+
+# ─── Admin-Rechte am Zahnrad (Betreiberentscheid 2026-11-20) ─────────
+# Bei der Anmeldung wird ein Administrator nicht mehr nach der 2FA gefragt
+# (Kennwort-Anmeldung) bzw. niemand (Firmenkonto). Jede Sitzung beginnt ohne
+# Admin-Rechte; der Administrator holt sie mit einem Klick auf das Zahnrad und
+# dem Zwei-Faktor-Code. Sie gelten fuer DIESE Sitzung (alle Seiten und Tabs),
+# bis er sie dort wieder abgibt ("Administration beenden") oder sich abmeldet.
+#
+# Wege zur Erhoehung (es gibt KEINEN ohne Code – auch nicht nach einer
+# Firmenkonto-Anmeldung mit MFA, Betreiberentscheid 2026-11-20):
+#   1. 2FA eingerichtet -> Code;
+#   2. noch keine 2FA -> QR-Code, dann Code UND Kennwort. Das Kennwort ist
+#      Absicht: sonst gaebe sich eine gestohlene Sitzung ohne Kennwort mit
+#      einem Faktor, den der Dieb gerade selbst eingetragen hat, Admin-Rechte
+#      (Code-Review 2026-10-07, dieselbe Lehre wie bei /totp/verify).
+# App-, AI-Maus- und Add-in-SSO-Sitzungen werden nie erhoeht (ohne_admin).
+
+def _erhoehung_protokoll(user: str, ip: str, ergebnis: str, weg: str = "",
+                         grund: str = "") -> None:
+    _sicherheits_log.ereignis("admin_erhoehung", benutzer=_norm_login(user), ip=ip,
+                              ergebnis=ergebnis, weg=weg, grund=grund)
+
+
+@app.post("/api/admin/erhoehen")
+async def admin_erhoehen(request: Request, username: str = Depends(require_auth)):
+    """Admin-Rechte fuer die laufende Sitzung holen. Body ``{code?, password?}``.
+
+    Antworten: ``{ok: true, erhoeht: true}``; ohne Code ``{ok: false,
+    requires_totp: true}``; ohne eingerichtete 2FA ``{ok: false,
+    requires_totp_setup: true, qr_code, secret}`` (der Code kommt dann
+    zusammen mit dem Kennwort)."""
+    ip = request.client.host if request.client else ""
+    kx = _sitzung_kontext.get()
+    herkunft = _abruf_sitzung(username)
+    if kx is None or herkunft is None or kx[0] != _norm_login(username):
+        return JSONResponse({"ok": False, "error": "Keine gültige Sitzung."}, status_code=403)
+    if len(kx) > 2 and kx[2]:
+        _erhoehung_protokoll(username, ip, "abgewiesen", grund="app")
+        return JSONResponse({"ok": False, "error": "In der App und über die kennwortlose "
+                             "Anmeldung gibt es keine Administrator-Rechte."}, status_code=403)
+    if not _konto_ist_admin(username):
+        _erhoehung_protokoll(username, ip, "abgewiesen", grund="kein_admin")
+        return JSONResponse({"ok": False, "error": "Nur Administratoren."}, status_code=403)
+    ts, kennung = herkunft
+    if kx[1]:
+        return JSONResponse({"ok": True, "erhoeht": True})
+    body = await _json_objekt(request)
+    code = str(body.get("code") or "").strip()
+    st = _get_user_auth_state(username)
+    # KEIN Weg ohne Code (Betreiberentscheid 2026-11-20, zweite Runde): auch eine
+    # Firmenkonto-Anmeldung mit "MFA des IdP" ersetzt den Code am Zahnrad nicht.
+    # Auf DEV gemessen: das Token traegt gar keinen MFA-Nachweis, und ohne
+    # eingetragenen Nachweis galt JEDE IdP-Anmeldung als MFA – ein Admin ohne
+    # 2FA kam mit einem Klick an die Rechte.
+    if st.get("totp_enabled") and st.get("totp_secret"):
+        if not code:
+            return JSONResponse({"ok": False, "requires_totp": True,
+                                 "error": "Bitte den Zwei-Faktor-Code eingeben."})
+        schranke = _kennwort_schranke(request, username)
+        if schranke is not None:
+            return schranke
+        fehler = await _totp_code_pruefen(username, st["totp_secret"], code)
+        if fehler is not None:
+            text, status, zaehlt = fehler
+            if zaehlt:
+                _record_login_attempt(ip, username)
+                _erhoehung_protokoll(username, ip, "fehlgeschlagen", weg="code")
+            return JSONResponse({"ok": False, "requires_totp": True, "error": text},
+                                status_code=status)
+        weg = "code"
+    else:
+        vorgemerkt = st.get("totp_pending_secret")
+        password = str(body.get("password") or "")
+        if not code or not vorgemerkt:
+            return JSONResponse({"ok": False, "requires_totp_setup": True,
+                                 "error": "Für Administratoren ist die Zwei-Faktor-Anmeldung "
+                                          "Pflicht. Bitte jetzt einrichten.",
+                                 **_totp_vormerken(username)})
+        if not password:
+            return JSONResponse({"ok": False, "requires_totp_setup": True,
+                                 "error": "Bitte zur Bestätigung auch das Kennwort eingeben."},
+                                status_code=400)
+        schranke = _kennwort_schranke(request, username)
+        if schranke is not None:
+            return schranke
+        if not await asyncio.to_thread(authenticate_linux_user, username, password):
+            _kennwort_fehlversuch(request, username, "admin_erhoehung")
+            return JSONResponse({"ok": False, "requires_totp_setup": True,
+                                 "error": "Falsches Kennwort"}, status_code=401)
+        erg = _totp_schutz.pruefen(_norm_login(username), vorgemerkt, code)
+        if erg != _totp_schutz.OK:
+            _record_login_attempt(ip, username)
+            _erhoehung_protokoll(username, ip, "fehlgeschlagen", weg="einrichtung")
+            return JSONResponse({"ok": False, "requires_totp_setup": True,
+                                 "error": _totp_fehlertext(erg)}, status_code=401)
+        _set_user_auth_state(username, {"totp_secret": vorgemerkt, "totp_enabled": True,
+                                        "totp_pending_secret": None})
+        _konto_hinweis_abraeumen(username)
+        weg = "einrichtung"
+    _anmelde_schutz.erfolg(_norm_login(username))
+    if not _sitzung.setze_admin_erhoeht(kennung, ts, True):
+        return JSONResponse({"ok": False, "error": "Diese Sitzung kann keine "
+                             "Administrator-Rechte bekommen."}, status_code=403)
+    _sitzung_kontext.set((kx[0], True, False))
+    _erhoehung_protokoll(username, ip, "ok", weg=weg)
+    print(f"[AUTH] Admin-Rechte am Zahnrad geholt: {username} ({ip}, {weg})", flush=True)
+    return JSONResponse({"ok": True, "erhoeht": True})
+
+
+@app.post("/api/admin/erhoehung/beenden")
+async def admin_erhoehung_beenden(request: Request, username: str = Depends(require_auth)):
+    """Admin-Rechte der laufenden Sitzung abgeben ("Administration beenden").
+    Die Sitzung selbst bleibt angemeldet."""
+    ip = request.client.host if request.client else ""
+    herkunft = _abruf_sitzung(username)
+    if herkunft is None:
+        return JSONResponse({"ok": False, "error": "Keine gültige Sitzung."}, status_code=403)
+    ts, kennung = herkunft
+    kx = _sitzung_kontext.get()
+    war = bool(kx and kx[1])
+    _sitzung.setze_admin_erhoeht(kennung, ts, False)
+    if kx is not None:
+        _sitzung_kontext.set((kx[0], False, kx[2] if len(kx) > 2 else False))
+    if war:
+        _sicherheits_log.ereignis("admin_beendet", benutzer=_norm_login(username), ip=ip,
+                                  ergebnis="ok")
+        print(f"[AUTH] Administration beendet: {username} ({ip})", flush=True)
+    return JSONResponse({"ok": True, "erhoeht": False})
 
 
 # ─── 2FA-Ruecksetzung durch einen Administrator ──────────────────────
@@ -7513,13 +7603,15 @@ async def totp_admin_reset(request: Request, user: str = Depends(require_local_a
     return JSONResponse({"ok": True})
 
 
-# ─── Anmeldeschutz: Konto-Sperren + 2FA-Pflicht fuer Admins (BSI M3) ──
+# ─── Anmeldeschutz: Konto-Sperren (BSI M3) ──
+# Den Schalter "2FA-Pflicht fuer Administratoren" gibt es seit 2026-11-20 nicht
+# mehr: Admin-Rechte gibt es nur noch am Zahnrad mit Code (``admin_erhoehen``).
 # Oberflaeche: Einstellungen -> Sicherheit (frontend/js/totp_admin.js).
 
 @app.get("/api/admin/anmeldeschutz")
 async def anmeldeschutz_status(user: str = Depends(require_local_auth)):
-    """Laufende Konto-Sperren nach Fehlversuchen + Schalter der 2FA-Pflicht."""
-    return JSONResponse({"ok": True, "admin_2fa_pflicht": _admin_2fa_pflicht(),
+    """Laufende Konto-Sperren nach Fehlversuchen + Lage der IdP-Anmeldung."""
+    return JSONResponse({"ok": True,
                          "idp_mfa_anerkennen": _oidc_mfa_anerkennen(),
                          "idp_mfa_nachweis": str(config.get_setting("oidc_mfa_nachweis", "")
                                                  or ""),
@@ -7531,27 +7623,6 @@ async def anmeldeschutz_status(user: str = Depends(require_local_auth)):
                          "konto_sperre_min": _anmelde_schutz.KONTO_SPERRE_S // 60,
                          "schwellen_quelle": _anmelde_schutz.SCHWELLEN_QUELLE,
                          "spruehen": _anmelde_schutz.spruehlage()})
-
-
-@app.post("/api/admin/anmeldeschutz")
-async def anmeldeschutz_setzen(request: Request, user: str = Depends(require_local_auth)):
-    """Zwei-Faktor-Pflicht fuer Administratoren ein- oder ausschalten.
-
-    Body ``{admin_2fa_pflicht: bool}``. Nur ein echtes bool wird angenommen."""
-    _note_activity(user, request)
-    try:
-        body = await request.json()
-    except Exception:  # noqa: BLE001
-        body = {}
-    wert = body.get("admin_2fa_pflicht") if isinstance(body, dict) else None
-    if not isinstance(wert, bool):
-        return JSONResponse({"ok": False, "error": "admin_2fa_pflicht (true/false) erwartet."},
-                            status_code=400)
-    _sprot_angaben(admin_2fa_pflicht=wert)
-    config.save_setting("admin_2fa_pflicht", wert)
-    print(f"[AUTH] 2FA-Pflicht fuer Administratoren {'EIN' if wert else 'AUS'} (durch {user})",
-          flush=True)
-    return JSONResponse({"ok": True, "admin_2fa_pflicht": _admin_2fa_pflicht()})
 
 
 @app.post("/api/admin/anmeldeschutz/aufheben")
@@ -7695,22 +7766,23 @@ def _sitzungen_nach_kennwortwechsel(username: str, request: Request | None = Non
     aus derselben Sekunde waere sonst sofort mit widerrufen. Der Client MUSS es
     uebernehmen (app.js), sonst ist er nach dem Wechsel abgemeldet.
     """
-    # Das Ersatz-Token erbt das 2FA-Merkmal der Sitzung, in der gewechselt
-    # wurde (BSI M3) – sonst verloere ein Administrator mit dem Kennwortwechsel
-    # seine Rechte, und die Erst-Anmeldung von `jarvis` (Pflicht-Einrichtung,
-    # dann erzwungener Wechsel) endete ohne Admin-Rechte.
-    mit_2fa = ohne_admin = False
+    # Das Ersatz-Token erbt die Merkmale der Sitzung, in der gewechselt wurde
+    # (BSI M3) – sonst verloere ein Administrator mit dem Kennwortwechsel die
+    # am Zahnrad geholten Rechte bzw. eine IdP-Sitzung ihren zweiten Faktor.
+    mit_2fa = ohne_admin = erhoeht = False
     if request is not None:
         try:
             _u, _ts, _sig = request.headers.get("Authorization", "").replace("Bearer ", "").split(":", 2)
             mit_2fa = _sitzung.mit_2fa(_sig)
             ohne_admin = _sitzung.ohne_admin(_sig)
+            erhoeht = _sitzung.admin_erhoeht(_sig)
         except Exception:  # noqa: BLE001
-            mit_2fa = ohne_admin = False
+            mit_2fa = ohne_admin = erhoeht = False
     rev = int(time.time())
     _revoked_logins[_norm_login(username)] = rev
     _save_revocations()
-    return generate_token(username, ts=rev + 1, mit_2fa=mit_2fa, ohne_admin=ohne_admin)
+    return generate_token(username, ts=rev + 1, mit_2fa=mit_2fa, ohne_admin=ohne_admin,
+                          admin_erhoeht=erhoeht)
 
 
 @app.get("/api/version")
@@ -10240,9 +10312,27 @@ async def get_me(user: str = Depends(require_auth)):
                           f"({z.get('gueltig_bis')}).")
         except Exception:  # noqa: BLE001
             banner = ""
+    # Zahnrad (2026-11-20): ``is_admin`` = Rechte DIESER Sitzung (erst nach der
+    # Erhoehung), ``admin_konto`` = das Zahnrad wird angeboten. Eine App- oder
+    # SSO-Sitzung bekommt es nie (sie kann nicht erhoeht werden).
+    _kx = _sitzung_kontext.get()
+    _app = bool(_kx is not None and _kx[0] == _norm_login(user) and len(_kx) > 2 and _kx[2])
+    admin_konto = (not _app) and _konto_ist_admin(user)
+    erhoehung = None
+    if admin_konto:
+        try:
+            _st = _get_user_auth_state(user)
+        except Exception:  # noqa: BLE001
+            _st = {}
+        erhoehung = {
+            # Ohne eingerichtete 2FA zeigt das Zahnrad zuerst den QR-Code
+            "einrichten": not (_st.get("totp_enabled") and _st.get("totp_secret")),
+        }
     return JSONResponse({
         "username": user,
         "is_admin": ist_admin,
+        "admin_konto": admin_konto,
+        "admin_erhoehung": erhoehung,
         "permissions": {
             "sap": _user_may_use_sap(user) and _skill_active("sap"),
             # Gleiche Logik wie bei sap: Freigabe UND aktiver Skill – die Kachel
@@ -17273,7 +17363,9 @@ async def _addin_sso_ablauf(request: Request):
     if not _lic_ok:
         return JSONResponse({"ok": False, "error": _lic_grund}, status_code=403)
 
-    token = generate_token(username)
+    # Kennwortlose Anmeldung: nie Admin-Rechte, auch nicht am Zahnrad
+    # (Betreiberentscheid 2026-11-20 – das Add-in bleibt, wie es war).
+    token = generate_token(username, ohne_admin=True)
     try:
         _user_sessions.record_login(username, client_ip, display=_display_name(username))
     except Exception:  # noqa: BLE001
@@ -17287,9 +17379,9 @@ async def _addin_sso_ablauf(request: Request):
                              "block_reason": _block.get("reason", ""),
                              "block_incidents": _block.get("incidents", [])})
     print("[Add-in] Kennwortlose Anmeldung: %s (%s)" % (username, client_ip), flush=True)
-    # Die SSO-Sitzung hat keine 2FA bestanden – die Antwort meldet die Rechte
+    # Die SSO-Sitzung bekommt nie Admin-Rechte – die Antwort meldet die Rechte
     # DIESER Sitzung, nicht die des Kontos (BSI M3).
-    _sitzung_kontext.set((_norm_login(username), False, False))
+    _sitzung_kontext.set((_norm_login(username), False, True))
     return JSONResponse({"ok": True, "token": token, "username": username,
                          "is_admin": _is_admin_user(username)})
 

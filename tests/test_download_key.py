@@ -125,6 +125,8 @@ if vt:
           "_sitzung": types.SimpleNamespace(
               pruefe_und_beruehre=lambda sig, ts, jetzt=None: True,
               mit_2fa=lambda sig: False, ohne_admin=lambda sig: False,
+              # seit 2026-11-20: Admin-Rechte erst nach dem Zahnrad
+              admin_erhoeht=lambda sig: False,
               # seit 2026-10-27: AI-Maus-Sitzungen gelten nur auf ihren Pfaden
               pfad_erlaubt=lambda sig: True,
               schluessel=lambda sig: "k" * 32),
@@ -439,7 +441,9 @@ _fns = {}
 # Pfad dort und nicht mehr aus request.url.path. Ohne sie lief der Namensraum in
 # einen NameError - als Absturz, nicht als FAIL (gefunden erst im CI-Lauf
 # 2026-11-19, lokal nicht mitgemessen).
-_GESCHNITTEN = ("_query_benutzer", "_sitzung_ohne_admin", "_admin_2fa_pflicht",
+# Den Schalter "_admin_2fa_pflicht" gibt es seit 2026-11-20 nicht mehr
+# (Admin-Rechte nur am Zahnrad) – _sitzung_ohne_admin braucht ihn nicht.
+_GESCHNITTEN = ("_query_benutzer", "_sitzung_ohne_admin",
                 "_abruf_ziel", "_routing_pfad")
 for k in baum.body:
     if isinstance(k, ast.FunctionDef) and k.name in _GESCHNITTEN:

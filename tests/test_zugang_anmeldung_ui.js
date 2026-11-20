@@ -215,7 +215,10 @@ function klick(s, id) { s.$(id).dispatchEvent(new s.dom.window.Event('click')); 
     {
         const app = fs.readFileSync(APP_JS, 'utf8');
         const iErfolg = app.indexOf('} else if (data.must_change_password) {');
-        const iTotp = app.indexOf('} else if (data.requires_totp_setup) {');
+        // Endmarke ist der naechste Zweig nach dem Erfolg. Bis 2026-11-20 war
+        // das die Admin-Einrichtung (requires_totp_setup); die gibt es an der
+        // Anmeldemaske nicht mehr (Zahnrad), seitdem folgt requires_totp.
+        const iTotp = app.indexOf('} else if (data.requires_totp) {');
         check(iErfolg > 0 && iTotp > iErfolg, 'Positivkontrolle: Erfolgszweig gefunden');
         const zweig = (iErfolg > 0 && iTotp > iErfolg) ? app.slice(iErfolg, iTotp) : '';
         const iSchritt = zweig.indexOf('await window.ZugangAnmeldung.schritt(token)');

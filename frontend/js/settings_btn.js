@@ -47,6 +47,24 @@
  * GENAU den Abschnitt, der sie erledigt (`jarvis_settings_focus`). Ein nativer
  * `title` konnte das nie: er kommt verzoegert, laesst sich nicht anklicken und
  * wird je nach Browser hart abgeschnitten.
+ *
+ * ADMIN-RECHTE AM ZAHNRAD (Betreiberentscheid 2026-11-20): bei der Anmeldung
+ * wird ein Administrator nicht mehr nach der 2FA gefragt, jede Sitzung beginnt
+ * OHNE Admin-Rechte. Sichtbar ist das Zahnrad deshalb fuer jedes Admin-KONTO
+ * (`admin_konto` aus /api/me), nicht erst fuer eine Sitzung mit Rechten
+ * (`is_admin`). Ein Klick fragt den Server (POST /api/admin/erhoehen), und der
+ * entscheidet den Weg: es erscheint der Dialog fuer den Code bzw. – ohne
+ * eingerichtete 2FA – fuer QR-Code, Code und Kennwort. Einen Weg ohne Code
+ * gibt es nicht, auch nicht nach einer Firmenkonto-Anmeldung mit MFA. Mit Rechten traegt das
+ * Zahnrad die Markierung `.jv-gear-erhoeht`, und ein Klick oeffnet ein Menue
+ * mit "Einstellungen oeffnen" und "Administration beenden" (auf /settings nur
+ * Letzteres). Beenden nimmt die Rechte der SITZUNG zurueck (alle Tabs), die
+ * Anmeldung bleibt.
+ *
+ * Die Admin-Oberflaeche der Seite haengt an `is_admin` aus den Abrufen beim
+ * Seitenaufbau. Nach dem Holen bzw. Abgeben wird deshalb die Seite gewechselt
+ * bzw. neu geladen – ein halb umgeschalteter Zustand waere eine Anzeige, die
+ * Rechte behauptet, die die Sitzung nicht (mehr) hat.
  */
 (function () {
     'use strict';
@@ -56,7 +74,8 @@
     // Letzter Stand aus /api/me: {root_pending, gesperrt, gesamt}. null = noch
     // nichts gemessen (dann wird auch nichts behauptet, also keine Badge).
     var _badge = null;
-    var _admin = false;      // belegter Administrator-Status
+    var _admin = false;      // Admin-Rechte DIESER Sitzung (nach dem Zahnrad)
+    var _konto = false;      // Admin-KONTO: das Zahnrad wird angeboten
     var _pollTimer = null;
     var POLL_MS = 60000;   // wie die alte Fassung in app.js
 
@@ -291,9 +310,11 @@
                 // Der Klick auf die Badge soll IN den Sicherheits-Reiter fuehren.
                 // Eigener Handler statt Ausnutzen des Knopf-Handlers, weil nur
                 // hier bekannt ist, dass die Badge gemeint war.
-                el.addEventListener('click', function () {
-                    try { sessionStorage.setItem('jarvis_settings_tab', 'security'); }
-                    catch (e) { /* egal - dann oeffnet der Vorgabe-Reiter */ }
+                el.addEventListener('click', function (ev) {
+                    // Nicht an den Knopf weiterreichen: der oeffnet mit Rechten
+                    // das Menue – gemeint ist hier aber der Sicherheits-Reiter.
+                    ev.stopPropagation();
+                    nachSettings('');
                 });
                 el.addEventListener('mouseenter', function () { tipAn(el); });
                 el.addEventListener('mouseleave', tipAusGleich);
@@ -329,14 +350,352 @@
             else b.classList.add('hidden');
             if (!an || b.dataset.jvsGebunden) return;
             b.dataset.jvsGebunden = '1';
-            b.addEventListener('click', function () {
-                var ziel = b.getAttribute('data-jarvis-settings') || location.pathname;
-                try { sessionStorage.setItem('jarvis_settings_return', ziel); }
-                catch (e) { /* egal – /settings faellt dann aufs Portal zurueck */ }
+            b.addEventListener('click', function () { klick(b); });
+        });
+        zustandMalen();
+        badgeMalen();
+    }
+
+    // ── Admin-Rechte am Zahnrad ─────────────────────────────────────────────
+
+    function aufEinstellungen() { return location.pathname === '/settings'; }
+
+    /* Markierung und Beschriftung je Zustand. Der `title` aus
+     * `data-i18n-title="nav.settings"` wird hier ueberschrieben, weil er sonst
+     * "Einstellungen" behauptet, wo ein Klick erst nach dem Code fragt; nach
+     * einem Sprachwechsel malt der Listener unten neu. */
+    function zustandMalen() {
+        var text = _admin ? T('gear.title_aktiv', 'Administration aktiv – Klick für Optionen')
+                          : T('gear.title_start', 'Administration starten');
+        knoepfe().forEach(function (b) {
+            b.classList.toggle('jv-gear-erhoeht', !!_admin);
+            b.setAttribute('title', text);
+            b.setAttribute('aria-label', text);
+        });
+    }
+
+    function rueckwegMerken(b) {
+        var ziel = (b && b.getAttribute('data-jarvis-settings')) || location.pathname;
+        if (ziel === '/settings') return;
+        try { sessionStorage.setItem('jarvis_settings_return', ziel); }
+        catch (e) { /* egal – /settings faellt dann aufs Portal zurueck */ }
+    }
+
+    /* Die Titelleiste (kopfzeile.js) zeichnet ihre Nur-Admin-Symbole beim
+     * naechsten Seitenaufbau SOFORT aus dem gemerkten Stand – ohne diese Zeile
+     * stuenden sie nach "Administration beenden" bis zur Antwort von /api/me
+     * noch einmal da (bzw. fehlten nach dem Holen kurz). */
+    function kopfMerken(an) {
+        try { if (window.JarvisKopf && window.JarvisKopf.merke) window.JarvisKopf.merke('admin', !!an); }
+        catch (e) { /* egal – /api/me belegt den Stand ohnehin */ }
+    }
+
+    function senden(pfad, daten) {
+        return fetch(pfad, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token(),
+                       'Content-Type': 'application/json' },
+            body: JSON.stringify(daten || {})
+        }).then(function (r) {
+            return r.json().catch(function () { return {}; })
+                .then(function (d) { return { status: r.status, d: d || {} }; });
+        });
+    }
+
+    function klick(b) {
+        if (_admin) { menueAn(b); return; }
+        erhoehen(b, {});
+    }
+
+    /* Erster Schritt ohne Code: der Server sagt, was er braucht. */
+    function erhoehen(b, daten) {
+        return senden('/api/admin/erhoehen', daten).then(function (res) {
+            var d = res.d;
+            if (d.ok && d.erhoeht) {
+                dialogZu();
+                _admin = true;
+                kopfMerken(true);
+                rueckwegMerken(b);
+                // Auf /settings selbst genuegt Neuladen; sonst dorthin wechseln.
+                if (aufEinstellungen()) location.reload();
+                else location.href = '/settings';
+                return true;
+            }
+            if (d.requires_totp_setup || d.requires_totp) {
+                dialogAuf(b, d);
+            } else if (_dlg) {
+                // Offener Dialog (z. B. 429 nach zu vielen Versuchen): die Meldung
+                // gehoert an die Eingabe, die Felder bleiben stehen.
+                meldung(d.error || d.detail
+                    || T('gear.fehler', 'Die Administrator-Rechte konnten nicht freigeschaltet werden.'));
+            } else {
+                dialogAuf(b, { error: d.error || d.detail
+                    || T('gear.fehler', 'Die Administrator-Rechte konnten nicht freigeschaltet werden.') });
+            }
+            return false;
+        }).catch(function () {
+            var t = T('gear.fehler_netz', 'Der Server ist gerade nicht erreichbar.');
+            if (_dlg) meldung(t); else dialogAuf(b, { error: t });
+            return false;
+        });
+    }
+
+    function beenden() {
+        menueAus();
+        return senden('/api/admin/erhoehung/beenden', {}).then(function (res) {
+            if (!(res.d && res.d.ok)) return false;
+            _admin = false;
+            kopfMerken(false);
+            if (aufEinstellungen()) {
+                var ziel = '';
+                try { ziel = sessionStorage.getItem('jarvis_settings_return') || ''; }
+                catch (e) { ziel = ''; }
+                location.href = ziel && ziel !== '/settings' ? ziel : '/portal';
+            } else {
+                location.reload();
+            }
+            return true;
+        }).catch(function () { return false; });
+    }
+
+    // ── Dialog: Code bzw. Einrichtung ───────────────────────────────────────
+    var _dlg = null;
+    var _dlgKnopf = null;
+
+    function dialogZu() {
+        if (_dlg && _dlg.parentNode) _dlg.parentNode.removeChild(_dlg);
+        _dlg = null;
+        document.removeEventListener('keydown', dialogTaste, true);
+        if (_dlgKnopf) { try { _dlgKnopf.focus(); } catch (e) { /* egal */ } }
+    }
+
+    function dialogTaste(ev) {
+        if (ev.key === 'Escape') { ev.preventDefault(); dialogZu(); }
+    }
+
+    function feld(id, typ, beschriftung, extra) {
+        var wrap = document.createElement('label');
+        wrap.className = 'jv-erh-zeile';
+        var sp = document.createElement('span');
+        sp.className = 'jv-erh-label';
+        sp.textContent = beschriftung;
+        var inp = document.createElement('input');
+        inp.className = 'jv-erh-feld';
+        inp.id = id;
+        inp.type = typ;
+        Object.keys(extra || {}).forEach(function (k) { inp.setAttribute(k, extra[k]); });
+        wrap.appendChild(sp);
+        wrap.appendChild(inp);
+        return wrap;
+    }
+
+    /* `d`: Antwort des Servers – requires_totp (Code), requires_totp_setup
+     * (QR + Code + Kennwort) oder nur `error`. Ein Fehler bleibt stehen, bis
+     * der naechste Versuch laeuft (Register: Fehler verschwinden nicht von selbst). */
+    function dialogAuf(b, d) {
+        _dlgKnopf = b || _dlgKnopf;
+        var einrichten = !!d.requires_totp_setup;
+        // Ein offener Dialog bleibt stehen (der QR darf bei einem falschen Code
+        // nicht verschwinden) – nur die Meldung wechselt.
+        if (_dlg && _dlg.getAttribute('data-modus') === (einrichten ? 'einrichten' : 'code')
+                && !d.qr_code) {
+            meldung(d.error || '');
+            var c = _dlg.querySelector('#jv-erh-code');
+            if (c) { c.value = ''; c.focus(); }
+            return;
+        }
+        dialogZu();
+        var ov = document.createElement('div');
+        ov.className = 'jv-erh-overlay';
+        ov.setAttribute('data-modus', einrichten ? 'einrichten' : (d.requires_totp ? 'code' : 'fehler'));
+        var box = document.createElement('div');
+        box.className = 'jv-erh-dlg';
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-modal', 'true');
+        box.setAttribute('aria-labelledby', 'jv-erh-h');
+        var kopf = document.createElement('div');
+        kopf.className = 'jv-erh-kopf';
+        var h = document.createElement('h3');
+        h.id = 'jv-erh-h';
+        h.textContent = T('gear.dlg_titel', 'Administration starten');
+        var x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'jv-erh-x';
+        var xt = T('gear.schliessen', 'Schließen');
+        x.setAttribute('title', xt);
+        x.setAttribute('aria-label', xt);
+        x.innerHTML = (window.JarvisIcons && window.JarvisIcons.close) ? window.JarvisIcons.close() : '';
+        x.addEventListener('click', dialogZu);
+        kopf.appendChild(h);
+        kopf.appendChild(x);
+        box.appendChild(kopf);
+
+        var text = document.createElement('p');
+        text.className = 'jv-erh-text';
+        box.appendChild(text);
+        if (einrichten) {
+            text.textContent = T('gear.setup_text', 'Für Administratoren ist die Zwei-Faktor-Anmeldung Pflicht. Scanne den Code mit deiner Authenticator-App und gib den angezeigten 6-stelligen Code sowie zur Bestätigung dein Kennwort ein.');
+            if (d.qr_code) {
+                var qrw = document.createElement('div');
+                qrw.className = 'jv-erh-qr';
+                var img = document.createElement('img');
+                img.src = d.qr_code;
+                img.alt = T('gear.qr_alt', 'QR-Code für die Authenticator-App');
+                qrw.appendChild(img);
+                box.appendChild(qrw);
+                var man = document.createElement('p');
+                man.className = 'jv-erh-text';
+                man.textContent = T('gear.manual', 'Oder den Schlüssel von Hand eintragen:') + ' ';
+                var code = document.createElement('code');
+                code.className = 'jv-erh-schluessel';
+                code.textContent = d.secret || '';
+                man.appendChild(code);
+                box.appendChild(man);
+            }
+        } else if (d.requires_totp) {
+            text.textContent = T('gear.code_text', 'Gib den 6-stelligen Code aus deiner Authenticator-App ein, um die Administrator-Rechte für diese Sitzung freizuschalten.');
+        }
+        var codeFeld = null, pwFeld = null;
+        if (einrichten || d.requires_totp) {
+            var zc = feld('jv-erh-code', 'text', T('gear.code_label', 'Zwei-Faktor-Code'),
+                { autocomplete: 'one-time-code', inputmode: 'numeric', maxlength: '6',
+                  pattern: '[0-9]*' });
+            box.appendChild(zc);
+            codeFeld = zc.querySelector('input');
+            if (einrichten) {
+                var zp = feld('jv-erh-pw', 'password', T('gear.pw_label', 'Kennwort'),
+                    { autocomplete: 'current-password' });
+                box.appendChild(zp);
+                pwFeld = zp.querySelector('input');
+            }
+        }
+        var fehler = document.createElement('p');
+        fehler.className = 'jv-erh-fehler';
+        fehler.setAttribute('role', 'alert');
+        box.appendChild(fehler);
+
+        var fuss = document.createElement('div');
+        fuss.className = 'jv-erh-fuss';
+        var ab = document.createElement('button');
+        ab.type = 'button';
+        ab.className = 'jv-erh-btn';
+        ab.textContent = T('gear.abbrechen', 'Abbrechen');
+        ab.addEventListener('click', dialogZu);
+        fuss.appendChild(ab);
+        if (codeFeld) {
+            var ok = document.createElement('button');
+            ok.type = 'button';
+            ok.className = 'jv-erh-btn jv-erh-btn-haupt';
+            ok.textContent = T('gear.bestaetigen', 'Freischalten');
+            var abschicken = function () {
+                var c = (codeFeld.value || '').replace(/\D/g, '');
+                if (c.length !== 6) {
+                    meldung(T('gear.code_fehlt', 'Bitte den 6-stelligen Code eingeben.'));
+                    codeFeld.focus();
+                    return;
+                }
+                var daten = { code: c };
+                if (pwFeld) {
+                    if (!pwFeld.value) {
+                        meldung(T('gear.pw_fehlt', 'Bitte zur Bestätigung dein Kennwort eingeben.'));
+                        pwFeld.focus();
+                        return;
+                    }
+                    daten.password = pwFeld.value;
+                }
+                ok.disabled = true;
+                meldung('');
+                erhoehen(_dlgKnopf, daten).then(function () { ok.disabled = false; });
+            };
+            ok.addEventListener('click', abschicken);
+            [codeFeld, pwFeld].forEach(function (f) {
+                if (f) f.addEventListener('keydown', function (ev) {
+                    if (ev.key === 'Enter') { ev.preventDefault(); abschicken(); }
+                });
+            });
+            // Wie an der Anmeldemaske: sechs Ziffern schicken ab – aber nur,
+            // wenn kein Kennwort mehr fehlt.
+            codeFeld.addEventListener('input', function () {
+                var c = codeFeld.value.replace(/\D/g, '');
+                if (c.length === 6 && !pwFeld && !ok.disabled) { codeFeld.value = c; abschicken(); }
+            });
+            fuss.appendChild(ok);
+        }
+        box.appendChild(fuss);
+        ov.appendChild(box);
+        // Kein Schliessen per Klick auf den grauen Rand (Vorgabe 2026-10-29,
+        // tests/test_popup_kein_aussenklick.js) – nur ×, Abbrechen oder Escape.
+        document.body.appendChild(ov);
+        _dlg = ov;
+        document.addEventListener('keydown', dialogTaste, true);
+        // Beim ersten Oeffnen ist der Server-Text nur die Aufforderung, die der
+        // Dialog schon selbst ausspricht – gezeigt wird er nur ohne Eingabefeld.
+        if (!codeFeld) meldung(d.error || '');
+        if (codeFeld) codeFeld.focus(); else ab.focus();
+    }
+
+    function meldung(text) {
+        if (!_dlg) return;
+        var f = _dlg.querySelector('.jv-erh-fehler');
+        if (f) f.textContent = text || '';
+    }
+
+    // ── Menue mit Rechten: Einstellungen / Administration beenden ───────────
+    var _menue = null;
+
+    function menueAus() {
+        if (_menue && _menue.parentNode) _menue.parentNode.removeChild(_menue);
+        _menue = null;
+        document.removeEventListener('mousedown', menueAussen, true);
+        document.removeEventListener('keydown', menueTaste, true);
+    }
+
+    function menueAussen(ev) {
+        if (_menue && !_menue.contains(ev.target)) menueAus();
+    }
+
+    function menueTaste(ev) {
+        if (ev.key === 'Escape') { ev.preventDefault(); menueAus(); }
+    }
+
+    function menueAn(b) {
+        if (_menue) { menueAus(); return; }
+        tipAus();
+        var m = document.createElement('div');
+        m.className = 'jv-erh-menue';
+        m.setAttribute('role', 'menu');
+        function eintrag(text, fn, art) {
+            var e = document.createElement('button');
+            e.type = 'button';
+            e.className = 'jv-erh-menue-zeile' + (art ? ' ' + art : '');
+            e.setAttribute('role', 'menuitem');
+            e.textContent = text;
+            e.addEventListener('click', fn);
+            m.appendChild(e);
+            return e;
+        }
+        if (!aufEinstellungen()) {
+            eintrag(T('gear.menue_einstellungen', 'Einstellungen öffnen'), function () {
+                menueAus();
+                rueckwegMerken(b);
                 location.href = '/settings';
             });
-        });
-        badgeMalen();
+        }
+        eintrag(T('gear.menue_beenden', 'Administration beenden'), beenden, 'is-ende');
+        document.body.appendChild(m);
+        var a = b.getBoundingClientRect();
+        var r = m.getBoundingClientRect();
+        var rand = 8;
+        var links = Math.max(rand, Math.min(a.right - r.width, window.innerWidth - r.width - rand));
+        var oben = a.bottom + 6;
+        if (oben + r.height > window.innerHeight - rand) oben = Math.max(rand, a.top - r.height - 6);
+        m.style.left = links + 'px';
+        m.style.top = oben + 'px';
+        _menue = m;
+        document.addEventListener('mousedown', menueAussen, true);
+        document.addEventListener('keydown', menueTaste, true);
+        var erst = m.querySelector('button');
+        if (erst) erst.focus();
     }
 
     var _lauf = null;
@@ -357,9 +716,10 @@
         _lauf = fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + t } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                var an = !!(d && d.is_admin);
-                _admin = an;
+                _admin = !!(d && d.is_admin);
+                _konto = !!(d && d.admin_konto) || _admin;
                 _badge = (d && d.admin_badge) || null;
+                var an = _konto;
                 zeige(an);
                 if (an) starteTakt();
                 return an;
@@ -395,6 +755,10 @@
                 // Freigabe" waere eine Behauptung, die der Abruf nicht deckt.
                 if (!d) return null;
                 _badge = d.admin_badge || null;
+                // Rechte in einem ANDEREN Tab geholt oder abgegeben: die
+                // Markierung folgt (die Oberflaeche der Seite erst beim Neuladen).
+                _admin = !!d.is_admin;
+                zustandMalen();
                 badgeMalen();
                 return _badge;
             })
@@ -414,8 +778,11 @@
 
     // Der Badge-Tooltip ist uebersetzt, steht aber nicht im Markup –
     // `applyLang()` erreicht ihn nicht. Neu malen, NICHT neu abrufen.
-    window.addEventListener('jarvis-lang-changed', badgeMalen);
+    window.addEventListener('jarvis-lang-changed', function () {
+        if (_konto) zustandMalen();
+        badgeMalen();
+    });
 
     window.JarvisSettingsBtn = { pruefe: pruefe, zeige: zeige,
-                                 aktualisiere: aktualisiere };
+                                 aktualisiere: aktualisiere, beenden: beenden };
 })();

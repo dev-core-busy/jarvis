@@ -688,7 +688,7 @@ _ns9 = {
     "_internet_access_cache": {}, "_admin_access_cache": {},
     # BSI M3: _user_is_admin fragt die Sitzung (hier: keine) und die Pflicht
     "_sitzung_kontext": __import__("contextvars").ContextVar("_sk", default=None),
-    "_admin_2fa_pflicht": lambda: True,
+    "_konto_ist_admin": lambda u: False,
     "_sitzung_ohne_admin": lambda u: False,   # ohne Anfrage: keine Sitzung
 }
 exec(compile("".join(_h9.values()), "<main-teile-9>", "exec"), _ns9)  # noqa: S102

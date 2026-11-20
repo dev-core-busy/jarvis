@@ -631,6 +631,123 @@ body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000);
 }
 .jv-gear-tip-hint { color: var(--text-secondary); font-size: 10px; padding: 4px 8px 0; }
 
+/* ── Admin-Rechte am Zahnrad (settings_btn.js, 2026-11-20) ──────────────────
+ * Hier und nicht in style.css: Zahnrad, Dialog und Menue gibt es auf jeder
+ * Bereichsseite. Eigene Knopf-Klassen statt `.btn-*` – die stehen nur in
+ * style.css, und das laden die meisten Bereichsseiten nicht (Register).
+ * Kein `.modal`: das traegt `opacity: 0` bis `.open` (Register). */
+.jv-gear-erhoeht {
+    color: var(--accent) !important;
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), .45);
+    border-radius: 8px;
+}
+.jv-erh-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(var(--shadow-rgb), .55);
+}
+.jv-erh-dlg {
+    width: min(400px, 100%);
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    box-sizing: border-box;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(var(--shadow-rgb), .5);
+    padding: 16px 18px;
+    text-align: left;
+    font-size: 14px;
+}
+.jv-erh-kopf { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.jv-erh-kopf h3 { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 600; }
+.jv-erh-x {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.jv-erh-x:hover, .jv-erh-x:focus-visible { background: rgba(var(--fg-rgb), .08); color: var(--text-primary); }
+.jv-erh-x svg { width: 16px; height: 16px; }
+.jv-erh-text { margin: 0 0 10px; color: var(--text-secondary); line-height: 1.45; }
+.jv-erh-qr { text-align: center; margin: 4px 0 8px; }
+.jv-erh-qr img { max-width: 100%; border-radius: 8px; background: var(--bg-secondary); }
+.jv-erh-schluessel { word-break: break-all; color: var(--text-primary); user-select: all; }
+.jv-erh-zeile { display: block; margin: 0 0 10px; }
+.jv-erh-label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.jv-erh-feld {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font: inherit;
+}
+#jv-erh-code { font-family: var(--font-mono); letter-spacing: 6px; text-align: center; font-size: 18px; }
+.jv-erh-feld:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(var(--accent-rgb), .25); }
+/* Fehlertext: --danger allein haelt auf heller Flaeche keine 4,5:1 (Register) –
+ * deshalb die Hausmischung, im dunklen Thema das reine --danger. */
+.jv-erh-fehler { min-height: 18px; margin: 0 0 8px; font-size: 13px;
+    color: color-mix(in srgb, var(--danger) 78%, #000); }
+body:not(.light) .jv-erh-fehler { color: var(--danger); }
+.jv-erh-fuss { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.jv-erh-btn {
+    flex: 0 0 auto;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    cursor: pointer;
+}
+.jv-erh-btn:hover, .jv-erh-btn:focus-visible { background: rgba(var(--fg-rgb), .08); outline: none; }
+.jv-erh-btn-haupt { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
+.jv-erh-btn-haupt:hover, .jv-erh-btn-haupt:focus-visible { background: var(--accent); filter: brightness(1.08); }
+.jv-erh-btn:disabled { opacity: .6; cursor: default; }
+.jv-erh-menue {
+    position: fixed;
+    z-index: 99989;
+    min-width: 220px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid rgba(var(--accent-rgb), .35);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(var(--shadow-rgb), .5);
+    padding: 6px;
+}
+.jv-erh-menue-zeile {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 7px;
+    padding: 8px 10px;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.jv-erh-menue-zeile:hover, .jv-erh-menue-zeile:focus-visible { background: rgba(var(--accent-rgb), .10); outline: none; }
+
 /* ── Prompt-Pruefung (frontend/js/prompt_check.js) ──────────────────────────
    IN theme.css UND NICHT in style.css/chat.css: der Knopf sitzt in mehreren
    Bereichsseiten (/tracks, /email, Einstellungen), und die laden style.css

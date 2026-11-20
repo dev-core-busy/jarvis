@@ -614,7 +614,7 @@ class AuthStateUnlesbar(RuntimeError):
 
 
 def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
-        admin=False, pflicht=True, totp_ok=True, block=None, log=None,
+        admin=False, totp_ok=True, block=None, log=None,
         anmeldungen=None, konten=None, darf=True):
     log = log if log is not None else {}
     log.setdefault("token", [])
@@ -667,7 +667,7 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
         "_display_name": lambda u: u,
         "_sitzung_kontext": types.SimpleNamespace(set=log["kontext"].append),
         "_is_admin_user": lambda u: admin,
-        "_admin_2fa_pflicht": lambda: pflicht,
+        "_konto_ist_admin": lambda u: admin,
         "security_guard": types.SimpleNamespace(get_block=lambda u: block),
         "_sitzung_antwort": lambda req, daten: JSONResponse(daten),
         "AuthStateUnlesbar": AuthStateUnlesbar,
@@ -865,54 +865,48 @@ pruefe(r.status_code == 401 and d.get("abgelaufen") and not log["token"], "Schei
 r, d, log, _ = _einloesen(schein_id="erfunden")
 pruefe(r.status_code == 401 and not log["token"], "unbekannter Schein -> 401")
 
+# Betreiberentscheid 2026-11-20: bei der Anmeldung ueber das Firmenkonto wird fuer
+# NIEMANDEN ein Code abgefragt; Admin-Rechte gibt es erst am Zahnrad. Die MFA des
+# IdP entscheidet nur noch ueber das Merkmal "mit zweitem Faktor" der Sitzung
+# (dann genuegt am Zahnrad der Klick).
 TOTP = {"totp_enabled": True, "totp_secret": "S"}
 r, d, log, sid = _einloesen(auth_state=TOTP)
-pruefe(d.get("requires_totp") and not log["token"], "Konto mit 2FA, MFA nicht anerkannt -> Code verlangt")
-r, d, log, _ = _einloesen(auth_state=TOTP, schein_id=sid, body={"totp_code": "123456"})
-pruefe(d.get("success") and log["token"] == [("m.muster", {"mit_2fa": True})],
-       "richtiger Code -> Sitzung MIT zweitem Faktor")
-r, d, log, sid = _einloesen(auth_state=TOTP, body={"totp_code": "000000"})
-pruefe(r.status_code == 401 and d.get("requires_totp") and log["versuche"] == ["m.muster"],
-       "falscher Code -> 401, zaehlt als Fehlversuch des Kontos")
-_einloesen(auth_state=TOTP, schein_id=sid, body={"totp_code": "000000"})
-r, d, log, _ = _einloesen(auth_state=TOTP, schein_id=sid, body={"totp_code": "000000"})
-pruefe(d.get("abgelaufen") and not d.get("requires_totp"), "dritter falscher Code verbraucht den Schein")
-r, d, log, _ = _einloesen(auth_state=TOTP, schein_id=sid, body={"totp_code": "123456"})
-pruefe(not log["token"], "danach hilft auch der richtige Code nicht mehr")
+pruefe(d.get("success") and not d.get("requires_totp")
+       and log["token"] == [("m.muster", {"mit_2fa": False})],
+       "Konto mit eigener 2FA, MFA nicht belegt: KEIN Code, Sitzung ohne zweiten Faktor")
+r, d, log, _ = _einloesen(auth_state=TOTP, body={"totp_code": "000000"})
+pruefe(d.get("success") and not log["versuche"],
+       "ein mitgeschickter (falscher) Code wird nicht ausgewertet – kein Fehlversuch")
 
 MFA_AN = dict(EINST, oidc_mfa_anerkennen=True)
 r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=MFA_AN, auth_state=TOTP)
 pruefe(d.get("success") and log["token"] == [("m.muster", {"mit_2fa": True})],
-       "MFA anerkannt und belegt -> kein Code, Sitzung mit zweitem Faktor")
+       "MFA anerkannt und belegt -> Sitzung mit zweitem Faktor")
 r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": False}, einst=MFA_AN, auth_state=TOTP)
-pruefe(d.get("requires_totp") and not log["token"], "MFA anerkannt, aber NICHT belegt -> Code verlangt")
+pruefe(d.get("success") and log["token"] == [("m.muster", {"mit_2fa": False})],
+       "MFA anerkannt, aber NICHT belegt -> ohne zweiten Faktor (aber ohne Code-Abfrage)")
 MFA_AUS = dict(EINST, oidc_mfa_anerkennen=False)
 r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=MFA_AUS, auth_state=TOTP)
-pruefe(d.get("requires_totp"), "MFA belegt, aber Schalter ausdruecklich AUS -> Code verlangt")
-# Festlegung 2026-11-18: ohne Eintrag zaehlt die IdP-Anmeldung als zweiter Faktor –
-# auch fuer Administratoren bei 2FA-Pflicht, auch fuer ein Konto mit eigenem Code.
-r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, auth_state=TOTP,
-                          admin=True, pflicht=True)
-pruefe(d.get("success") and d.get("is_admin") is True and not d.get("requires_totp")
-       and log["token"] == [("m.muster", {"mit_2fa": True})],
-       "Vorgabe: Admin bei 2FA-Pflicht nach IdP-Anmeldung ohne eigenen Code mit Admin-Rechten")
-r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=MFA_AUS,
-                          admin=True, pflicht=True)
-pruefe(d.get("is_admin") is False, "Schalter AUS: Admin ohne eigenen Code bekommt keine Admin-Rechte")
-
-r, d, log, _ = _einloesen(admin=True, pflicht=True)
-pruefe(d.get("success") and d.get("is_admin") is False and d.get("hinweis")
+pruefe(d.get("success") and log["token"] == [("m.muster", {"mit_2fa": False})],
+       "MFA belegt, aber Schalter ausdruecklich AUS -> ohne zweiten Faktor")
+# Vorgabe (kein Eintrag): die MFA des IdP zaehlt – auch fuer Administratoren.
+r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, auth_state=TOTP, admin=True)
+pruefe(d.get("success") and d.get("is_admin") is False and d.get("admin_konto") is True
+       and log["token"] == [("m.muster", {"mit_2fa": True})]
        and log["kontext"] == [("m.muster", False, False)],
-       "Admin ohne 2FA bei Pflicht: Sitzung OHNE Admin-Rechte, mit Hinweis")
-r, d, log, _ = _einloesen({"konto": "m.muster", "mfa_belegt": True}, einst=MFA_AN,
-                          admin=True, pflicht=True)
-pruefe(d.get("is_admin") is True and log["kontext"] == [("m.muster", True, False)],
-       "Admin mit anerkannter MFA: Admin-Rechte")
+       "Admin mit anerkannter MFA: Sitzung mit zweitem Faktor, Admin-Rechte aber erst am Zahnrad")
+r, d, log, _ = _einloesen(admin=True)
+pruefe(d.get("success") and d.get("is_admin") is False and d.get("admin_konto") is True
+       and not d.get("requires_totp") and not d.get("requires_totp_setup")
+       and log["kontext"] == [("m.muster", False, False)],
+       "Admin ohne MFA: keine Code-Abfrage, keine Einrichtung, Sitzung ohne Admin-Rechte")
+r, d, log, _ = _einloesen()
+pruefe(d.get("admin_konto") is False, "Nicht-Admin: kein Zahnrad (admin_konto false)")
 r, d, log, _ = _einloesen(gesperrt=JSONResponse({"error": "gesperrt"}, 423))
 pruefe(r.status_code == 423 and not log["token"], "gesperrtes Konto beim Einloesen -> keine Sitzung")
 r, d, log, _ = _einloesen(einst=dict(EINST, oidc_aktiv=False))
 pruefe(r.status_code == 401 and not log["token"], "IdP-Anmeldung inzwischen aus -> keine Sitzung")
-r, d, log, _ = _einloesen(block={"reason": "x", "incidents": []}, admin=True, pflicht=False)
+r, d, log, _ = _einloesen(block={"reason": "x", "incidents": []}, admin=True)
 pruefe(d.get("account_blocked") and d.get("is_admin") is False, "gesperrter Account (Sicherheit): nur Sperrhinweis")
 
 
@@ -1020,11 +1014,8 @@ r, d, log, _ = _mit_zug(anmeldungen=ALLE, block={"reason": "x", "incidents": []}
 pruefe(d.get("account_blocked") and not log["zugang"], "gesperrter Account: keine Zugangsdaten uebernommen")
 r, d, log, sid = _einloesen({"konto": "m.muster", "mfa_belegt": False, "zugaenge": ZUG},
                             auth_state=TOTP, anmeldungen=ALLE)
-pruefe(d.get("requires_totp") and not log["zugang"], "2FA-Code noch offen: noch nichts angemeldet")
-r, d, log, _ = _einloesen(auth_state=TOTP, schein_id=sid, body={"totp_code": "123456"},
-                          anmeldungen=ALLE)
 pruefe(d.get("success") and len(d.get("idp_zugaenge") or []) == 4,
-       "nach richtigem Code: Zugangsdaten aus dem Schein angemeldet")
+       "Konto mit eigener 2FA: ohne Code-Abfrage, Zugangsdaten aus dem Schein angemeldet")
 
 
 # ═══ 3. Bestandsschutz und Begleitstellen ════════════════════════════════════

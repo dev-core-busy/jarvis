@@ -8,7 +8,8 @@
       Schein im HttpOnly-Cookie. Diese Datei tauscht ihn per fetch gegen die
       Sitzung (/api/login/oidc/einloesen) – auf demselben Weg wie die
       Kennwortanmeldung (Sitzungs-Cookie + CSRF-Token in der Antwort).
-      Verlangt der Server den Zwei-Faktor-Code, erscheint #idp-totp.
+      Einen Zwei-Faktor-Code fragt der Server dabei nie ab (Betreiberentscheid
+      2026-11-20); Administratoren holen ihre Rechte am Zahnrad.
    3. Fehler (/?idp_fehler=<kennung>) stehen in #login-error, uebersetzt.
    4. Kennwortanmeldung (AD, #kennwort-bereich) neben dem IdP: der Server
       meldet ad_modus (die Vorgabe entscheidet der Server, seit 2026-11-20
@@ -274,19 +275,11 @@
             .catch(function () { fertig(false, ''); });
     }
 
-    function codeModus(an) {
-        var form = $('login-form'), box = $('idp-totp');
-        if (form) form.hidden = !!an;
-        if (box) box.hidden = !an;
-        if (an && $('idp-totp-code')) $('idp-totp-code').focus();
-    }
-
     async function erfolg(data) {
         var token = data.token;
         localStorage.setItem('jarvis_token', token);
         localStorage.setItem('jarvis_user', data.username || '');
         if (data.account_blocked) {
-            codeModus(false);
             if (window.SecurityIncidents) {
                 window.SecurityIncidents.showBlockedScreen(data.block_reason, data.block_incidents);
             }
@@ -301,53 +294,29 @@
     }
 
     var laeuft = false;
-    async function einloesen(code) {
+    async function einloesen() {
         if (laeuft) return;
         laeuft = true;
-        var btn = $('idp-totp-btn');
-        if (btn) btn.disabled = true;
-        var err = $('idp-totp-error');
-        if (err) err.hidden = true;
         try {
             var res = await fetch('/api/login/oidc/einloesen', {
                 method: 'POST',
                 headers: window.JarvisSitzung.anmeldeKopf({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify(code ? { totp_code: code } : {})
+                body: '{}'
             });
             var data = {};
             try { data = await res.json(); } catch (e) { data = {}; }
             if (data.success && data.token) {
                 await erfolg(data);
-            } else if (data.requires_totp) {
-                codeModus(true);
-                if (code && data.error) fehlerZeigen('idp-totp-error', data.error);
-                var feld = $('idp-totp-code');
-                if (feld) feld.value = '';
             } else {
-                codeModus(false);
                 ausweichen();
                 fehlerZeigen('login-error', data.error || T('login.failed', 'Anmeldung fehlgeschlagen.'));
             }
         } catch (e) {
-            codeModus(false);
             ausweichen();
             fehlerZeigen('login-error', T('login.server_error', 'Server nicht erreichbar.'));
         } finally {
             laeuft = false;
-            if (btn) btn.disabled = false;
         }
-    }
-
-    function codeVerdrahten() {
-        var feld = $('idp-totp-code'), btn = $('idp-totp-btn');
-        if (btn) btn.addEventListener('click', function () {
-            var c = (feld && feld.value || '').replace(/\D/g, '');
-            if (c.length === 6) einloesen(c);
-        });
-        if (feld) feld.addEventListener('input', function () {
-            var c = feld.value.replace(/\D/g, '');
-            if (c.length === 6) { feld.value = c; einloesen(c); }
-        });
     }
 
     var gestartet = false;
@@ -377,7 +346,6 @@
         autoHakenVerdrahten();
         aufklappVerdrahten();
         knopfZeigen();
-        codeVerdrahten();
         if (!q) return;
         if (fehler) {
             adresseAufraeumen();
@@ -385,7 +353,7 @@
                 FEHLER[fehler] || T('login.failed', 'Anmeldung fehlgeschlagen.')));
         } else if (q.get('anmeldung') === 'idp') {
             adresseAufraeumen();
-            einloesen('');
+            einloesen();
         }
     }
 

@@ -184,8 +184,6 @@
             // TOTP-Code mitschicken falls Feld sichtbar
             const totpRow = document.getElementById('totp-row');
             const totpInput = document.getElementById('login-totp');
-            // 2FA-Pflicht fuer Admins (BSI M3): Einrichtungs-Block ueber dem Codefeld
-            const totpSetup = document.getElementById('totp-setup');
             if (totpRow && totpRow.style.display !== 'none' && totpInput && totpInput.value.trim()) {
                 payload.totp_code = totpInput.value.trim();
             }
@@ -204,7 +202,6 @@
                 localStorage.setItem('jarvis_user', currentUser);
                 if (totpRow) totpRow.style.display = 'none';
                 if (totpInput) totpInput.value = '';
-                if (totpSetup) totpSetup.hidden = true;
                 if (data.account_blocked) {
                     // Sicherheitsschicht: Konto gesperrt → nur Hinweis + Protokoll
                     if (window.SecurityIncidents) {
@@ -229,28 +226,9 @@
                         window.location.replace('/portal');
                     }
                 }
-            } else if (data.requires_totp_setup) {
-                // Admin ohne 2FA: QR + Schluessel zeigen, Code ins vorhandene Feld.
-                // Mit qr_code = frisch vorgemerkt (der Server-Text richtet sich
-                // dann an Clients ohne diese Maske und wird hier nicht gezeigt);
-                // ohne = falscher Code, der QR von eben bleibt stehen.
-                if (data.qr_code && totpSetup) {
-                    const qr = document.getElementById('totp-setup-qr');
-                    const sec = document.getElementById('totp-setup-secret');
-                    if (qr) {
-                        qr.src = data.qr_code;
-                        qr.alt = window.t ? window.t('login.totp_setup.qr_alt') : qr.alt;
-                    }
-                    if (sec) sec.textContent = data.secret || '';
-                    totpSetup.hidden = false;
-                    loginError.hidden = true;
-                } else if (data.error) {
-                    loginError.textContent = data.error;
-                    loginError.hidden = false;
-                }
-                if (totpRow) totpRow.style.display = '';
-                if (totpInput) { totpInput.value = ''; totpInput.focus(); }
             } else if (data.requires_totp) {
+                // Seit 2026-11-20 nur noch fuer Nicht-Admins mit eigener 2FA –
+                // Administratoren geben ihren Code am Zahnrad ein (settings_btn.js).
                 // Passwort korrekt, 2FA-Code nötig → TOTP-Feld einblenden
                 if (totpRow) totpRow.style.display = '';
                 if (totpInput) totpInput.focus();
@@ -573,7 +551,6 @@
         const SVG_EYE_CLOSED = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
 
         const modal = document.getElementById('settings-modal');
-        const btnOpen = document.getElementById('btn-settings');
         const btnClose = document.getElementById('btn-close-settings');
         const settingsTitle = document.getElementById('settings-title');
 
@@ -628,8 +605,9 @@
         let defaults = {};
         let editingProfileId = null; // null = neues Profil
 
-        // btnOpen (Header-Zahnrad) ist optional – /settings oeffnet das Modal ueber
-        // window._openSettingsModal. Nur das Modal selbst ist Pflicht.
+        // /settings oeffnet das Modal ueber window._openSettingsModal; das Zahnrad
+        // auf /settings gehoert settings_btn.js (Administration beenden). Nur das
+        // Modal selbst ist Pflicht.
         if (!modal) return;
 
         const PROVIDER_LABELS = {
@@ -2026,7 +2004,6 @@
         // Von _enterSettingsPage genutzt, damit /settings das Modal ohne den
         // (entfernten) Header-Zahnrad-Button oeffnen kann.
         window._openSettingsModal = openModal;
-        if (btnOpen) btnOpen.addEventListener('click', openModal);
         // Das Kreuz gibt es seit 2026-11-16 nicht mehr (zurueck geht es ueber das
         // Haus); die Pruefung bleibt, falls eine Seite es noch mitbringt.
         if (btnClose) btnClose.addEventListener('click', closeModal);

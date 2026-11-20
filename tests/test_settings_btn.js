@@ -56,10 +56,16 @@ const MODUL = fs.existsSync(MODUL_P) ? lies(MODUL_P) : '';
 const MCODE = nurCode(MODUL);
 pruefe('fragt /api/me', MCODE.includes("'/api/me'") || MCODE.includes('"/api/me"'));
 pruefe('liest is_admin', /\bis_admin\b/.test(MCODE));
-// DIE KERNZUSAGE: kein bereichsspezifischer Endpunkt darf hier auftauchen.
-const BEREICHS_EP = MCODE.match(/\/api\/(?!me\b)[a-z_]+/g) || [];
-pruefe('kein anderer API-Endpunkt als /api/me', BEREICHS_EP.length === 0,
-       BEREICHS_EP.join(', '));
+pruefe('liest admin_konto (Zahnrad fuer jedes Admin-KONTO, 2026-11-20)',
+       /\badmin_konto\b/.test(MCODE));
+// DIE KERNZUSAGE: kein bereichsspezifischer Endpunkt darf hier auftauchen. Die
+// Sichtbarkeit haengt allein an /api/me; erlaubt sind daneben nur die beiden
+// Endpunkte, die das Zahnrad SELBST bedient (Admin-Rechte holen/abgeben) – sie
+// entscheiden nichts ueber die Sichtbarkeit.
+const ZAHNRAD_EP = new Set(['/api/me', '/api/admin/erhoehen', '/api/admin/erhoehung/beenden']);
+const BEREICHS_EP = (MCODE.match(/\/api\/[a-z_\/]+/g) || []).filter(e => !ZAHNRAD_EP.has(e));
+pruefe('kein anderer API-Endpunkt als /api/me (und die eigenen Zahnrad-Endpunkte)',
+       BEREICHS_EP.length === 0, BEREICHS_EP.join(', '));
 pruefe('sucht per data-jarvis-settings (Konvention, keine Id-Liste)',
        MCODE.includes('data-jarvis-settings'));
 // /wissen versteckt per Klasse `hidden` mit display:none !important – ein
@@ -103,11 +109,12 @@ for (const datei of SEITEN) {
 pruefe('Knopf-Ids aus dem Markup gelesen', IDS.size >= 10, [...IDS].join(', '));
 
 /* Geprueft werden GENAU die Skripte, die auf einer Seite MIT Zahnrad laufen.
- * Das ist die praezise Regel und braucht keine Ausnahmeliste: `app.js` nennt
- * `btn-settings` als optionalen Modal-Oeffner, laeuft aber nur auf
- * settings.html – und die hat kein Zahnrad. Eine Sammelfreigabe fuer app.js
- * waere das Anti-Muster; sie wuerde eine spaetere echte Doppelverdrahtung
- * durchlassen. */
+ * Das ist die praezise Regel und braucht keine Ausnahmeliste. Seit 2026-11-20
+ * traegt auch settings.html ein Zahnrad ("Administration beenden") – damit
+ * gilt die Regel auch fuer app.js, und dessen toter Modal-Oeffner
+ * `btn-settings` ist entfernt worden statt hier freigegeben. Eine
+ * Sammelfreigabe waere das Anti-Muster; sie wuerde eine spaetere echte
+ * Doppelverdrahtung durchlassen. */
 const ZAHNRAD_SKRIPTE = new Set();
 for (const datei of SEITEN) {
     const s = lies(path.join(FE, datei));

@@ -702,9 +702,17 @@ check("REGEL: kein .verify(...) auf einem TOTP in main.py",
       not [k for k in ast.walk(BAUM) if isinstance(k, ast.Call)
            and isinstance(k.func, ast.Attribute) and k.func.attr == "verify"
            and "totp" in ast.unparse(k.func.value).lower()])
-for name, n_min in (("_login_ablauf", 2), ("totp_verify", 1), ("geheimnis_bestaetigen", 1)):
+# Seit 2026-11-20 prueft die Kennwortanmeldung (und die Admin-Erhoehung am
+# Zahnrad) den Code ueber EINE Stelle (_totp_code_pruefen); die Einrichtung am
+# Zahnrad prueft den vorgemerkten Code selbst.
+for name, n_min in (("_totp_code_pruefen", 1), ("totp_verify", 1),
+                    ("geheimnis_bestaetigen", 1), ("admin_erhoehen", 1)):
     n = len(_aufrufe(_fn(name), lambda s: s == "_totp_schutz.pruefen"))
     check("%s prueft ueber _totp_schutz.pruefen (%dx)" % (name, n_min), n == n_min, n)
+for name in ("_login_ablauf", "admin_erhoehen"):
+    n = len(_aufrufe(_fn(name), lambda s: s == "_totp_code_pruefen"))
+    check("%s prueft den Code des aktiven Geheimnisses ueber _totp_code_pruefen" % name,
+          n == 1, n)
 
 # ══ N4 ═══════════════════════════════════════════════════════════════════════
 print("\n[N4] Grenze an Kennwortwechsel und 2FA-Abschaltung")
@@ -738,7 +746,7 @@ NS4 = {
     "authenticate_linux_user": _auth,
     "_get_user_auth_state": _get_state, "_set_user_auth_state": _set_state,
     "_sitzung_kontext": contextvars.ContextVar("_sk", default=None),
-    "_is_admin_user": lambda u: False, "_admin_2fa_pflicht": lambda: True,
+    "_is_admin_user": lambda u: False, "_konto_ist_admin": lambda u: False,
     "_validate_password_strength": lambda pw, u: [],
     "_DOCKER_MODE": True,
     "_load_auth_state": lambda: {}, "_save_auth_state": lambda s: None,

@@ -314,8 +314,15 @@ _hana_knoten = [k for k in ast.parse(AGENT_SRC).body if isinstance(k, ast.Assign
 if len(_hana_knoten) != 1:
     print("ABBRUCH: _SAP_HANA_TOOLS nicht genau einmal in agent.py")
     sys.exit(2)
+# Seit 2026-11-20 liest `_gesperrte_weg` auch `_JIRA_SCHREIB_TOOLS` – ebenfalls aus
+# dem echten Modul, sonst stirbt der Schnitt mit einem nackten NameError.
+_jira_knoten = [k for k in ast.parse(AGENT_SRC).body if isinstance(k, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "_JIRA_SCHREIB_TOOLS" for t in k.targets)]
+if len(_jira_knoten) != 1:
+    print("ABBRUCH: _JIRA_SCHREIB_TOOLS nicht genau einmal in agent.py")
+    sys.exit(2)
 _ans = {"_MCP_TOOL_PREFIX": "mcp_"}
-exec(compile(ast.Module(body=_hana_knoten, type_ignores=[]), "agent", "exec"), _ans)
+exec(compile(ast.Module(body=_hana_knoten + _jira_knoten, type_ignores=[]), "agent", "exec"), _ans)
 _teile = [_funktion(AGENT_SRC, "_ist_mcp_tool"), _funktion(AGENT_SRC, "_mcp_freigegeben")]
 exec(compile(ast.Module(body=_teile, type_ignores=[]), "agent", "exec"), _ans)
 _klasse = ast.ClassDef(name="_A", bases=[], keywords=[], decorator_list=[], type_params=[],

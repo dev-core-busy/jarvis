@@ -266,7 +266,8 @@ baum = ast.parse(AGENT_SRC)
 teile = []
 for knoten in baum.body:
     if isinstance(knoten, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id in ("_SAP_HANA_TOOLS", "_MCP_TOOL_PREFIX")
+            isinstance(t, ast.Name) and t.id in ("_SAP_HANA_TOOLS", "_MCP_TOOL_PREFIX",
+                                          "_JIRA_SCHREIB_TOOLS")
             for t in knoten.targets):
         teile.append(knoten)
     if isinstance(knoten, ast.FunctionDef) and knoten.name in ("_ist_mcp_tool", "_mcp_freigegeben"):
@@ -277,7 +278,9 @@ for knoten in baum.body:
         for m in knoten.body:
             if isinstance(m, ast.FunctionDef) and m.name == "_gesperrte_weg":
                 methode = m
-if methode is None or len(teile) != 4:
+# 5 Teile: drei Modulwerte (seit 2026-11-20 auch _JIRA_SCHREIB_TOOLS, das
+# _gesperrte_weg liest) + zwei Funktionen.
+if methode is None or len(teile) != 5:
     print(f"ABBRUCH: Schnitt unvollstaendig ({len(teile)} Teile, Methode {methode is not None})")
     sys.exit(2)
 ns = {}

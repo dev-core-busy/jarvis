@@ -254,7 +254,12 @@ class JiraAddCommentTool(_Base):
 
     @property
     def description(self):
-        return "Fuegt einem Ticket einen Kommentar hinzu."
+        # Die Bedingung steht in der Beschreibung, damit das Modell sie dem
+        # Benutzer nennen kann; die Schranke selbst ist JiraClient (Nur-Lesen
+        # ausser beim persoenlichen Zugang) plus die Bestaetigung (wirkung.py).
+        return ("Fuegt einem Ticket einen Kommentar hinzu – unter dem Namen des "
+                "Benutzers ueber seinen persoenlichen Jira-Zugang; der Benutzer "
+                "bestaetigt vorher. Nur auf ausdruecklichen Wunsch des Benutzers.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {
@@ -283,7 +288,9 @@ class JiraCreateIssueTool(_Base):
 
     @property
     def description(self):
-        return "Legt ein neues Ticket an (Projekt-Key, Titel, optional Beschreibung und Typ)."
+        return ("Legt ein neues Ticket an (Projekt-Key, Titel, optional Beschreibung und "
+                "Typ) – ueber den persoenlichen Jira-Zugang des Benutzers; der Benutzer "
+                "bestaetigt vorher. Nur auf ausdruecklichen Wunsch des Benutzers.")
 
     def parameters_schema(self):
         return {"type": "OBJECT", "properties": {

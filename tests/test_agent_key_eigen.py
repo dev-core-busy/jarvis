@@ -23,7 +23,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MAIN = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "backend" / "main.py"
+# agent_keys_update importiert ``backend.agent_schluessel`` im Rumpf (seit den
+# Bereichen je Schluessel). Ohne ROOT im Suchpfad scheitert der Schnitt mit
+# "No module named 'backend'" - beim Aufruf ``python3 tests/...`` steht nur
+# tests/ darin. Das Modul ist rein (keine Backend-Importe, kein config).
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+MAIN =Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "backend" / "main.py"
 
 ok = fail = 0
 

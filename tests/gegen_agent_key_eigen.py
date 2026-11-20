@@ -39,7 +39,12 @@ PROBEN = [
      "    andere.append(str(config.AGENT_API_KEY or \"\"))\n    roh = wert.encode(\"ascii\")\n",
      "    andere = []\n    roh = wert.encode(\"ascii\")\n", 1),
     ("Backend: Endpunkt speichert trotz Fehler", MAIN,
+     # Mit der Pruef-Zeile davor: seit Bereichen/Ablauf je Schluessel steht
+     # dasselbe "if fehler: return …" dreimal im Endpunkt; gemeint ist der
+     # Zweig fuer den selbst gewaehlten Key.
+     "                fehler = _agent_key_eigener_fehler(eigen, keys, kid)\n"
      "                if fehler:\n                    return JSONResponse({\"ok\": False, \"error\": fehler}, status_code=400)\n",
+     "                fehler = _agent_key_eigener_fehler(eigen, keys, kid)\n"
      "                pass\n", 1),
     ("Backend: Pruefung umbenannt -> konnte nicht laufen", MAIN,
      "def _agent_key_eigener_fehler(wert, keys: list, kid: str) -> str:\n",

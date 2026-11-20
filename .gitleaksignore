@@ -28,6 +28,12 @@ frontend/support-api.html:curl-auth-header:680
 frontend/support-api.html:curl-auth-header:715
 tests/gegen_secret_key_platzhalter.py:generic-api-key:32
 tests/test_agent_keys_ui.js:generic-api-key:51
+# 2026-11-20, Commit a2feecc6: derselbe erfundene Testwert wie Zeile 51 (Key des
+# Bestands "kundenverwaltung"), die Zeile wurde um Bereiche/Ablauf erweitert und
+# steht seitdem in Zeile 52 - gitleaks meldet sie als neu hinzugefuegt. Zeile 51
+# bleibt fuer den Wurzel-Commit stehen. Fundstelle lokal nachgerechnet (Regel,
+# Entropie knapp ueber 3.5), nicht mit gitleaks selbst bestaetigt.
+tests/test_agent_keys_ui.js:generic-api-key:52
 tests/test_bildmasse.py:generic-api-key:234
 tests/test_bsi_m5.py:generic-api-key:911
 tests/test_jira_nur_lesen.py:generic-api-key:178

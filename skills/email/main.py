@@ -276,6 +276,54 @@ def _anhaenge(kwargs) -> list:
     return mail_anhang.laden(roh, _wer())
 
 
+def _fremde_nachricht(mid: str) -> bool:
+    """Ist ``mid`` NICHT die Nachricht, fuer die der Regel-Lauf gestartet wurde?
+
+    Bei der eingegangenen Nachricht stammen Text und Anhaenge vom Absender
+    selbst – sie zu zitieren oder an ihn zurueckzugeben traegt nichts hinaus.
+    Jede ANDERE Nachricht des Postfachs (per email_liste gefunden) kann
+    interner Schriftverkehr sein und wird deshalb mitgeprueft. Im Zweifel
+    (keine Kennung bekannt) gilt sie als fremd – die strengere Seite.
+    """
+    from backend import mail_schutz
+    l = mail_schutz.lauf_cv.get()
+    return l is None or not l.mail_id or str(mid or "").strip() != l.mail_id
+
+
+def _antwort_pruefen(c: MailClient, mid: str, text: str, allen: bool) -> list:
+    """Gruende fuer "nur als Entwurf" bei einer Antwort (blockierend, im Thread).
+
+    Die Empfaenger einer Antwort stehen nicht im Aufruf – sie ergeben sich aus
+    der beantworteten Nachricht (Absender, bei ``allen`` auch An/Kopie). Dieselbe
+    Ableitung wie in ``MailClient.antworten``.
+    """
+    from backend import mail_schutz
+    if not mail_schutz.aktiv():
+        return []
+    alt = c.lesen(mid)
+    eigen = (getattr(c.konto, "adresse", "") or "").lower()
+    empf = [alt.von] if alt.von else []
+    if allen:
+        empf += [a for a in (alt.an or []) + (alt.cc or []) if (a or "").lower() != eigen]
+    texte = [text]
+    if _fremde_nachricht(mid):
+        texte += [alt.betreff or "", alt.text or ""]
+    return mail_schutz.versand_pruefen(empf, texte)
+
+
+def _weiterleitung_pruefen(c: MailClient, mid: str, an, text: str) -> list:
+    """Gruende fuer "nur als Entwurf" bei einer Weiterleitung (blockierend)."""
+    from backend import mail_schutz
+    from backend.mail_client import _adressliste
+    if not mail_schutz.aktiv():
+        return []
+    alt = c.lesen(mid)
+    fremd = _fremde_nachricht(mid)
+    texte = [text] + ([alt.betreff or "", alt.text or ""] if fremd else [])
+    anhaenge = len(alt.anhaenge or []) if fremd else 0
+    return mail_schutz.versand_pruefen(_adressliste(an), texte, anhaenge=anhaenge)
+
+
 class EmailSendenTool(_Base):
     @property
     def name(self): return "email_senden"
@@ -341,11 +389,21 @@ class EmailSendenTool(_Base):
         except MailFehler as f:
             return "❌ " + klartext(f)
 
+        # Schutz vor Datenabfluss (backend/mail_schutz.py): im Regel-Lauf wird
+        # ein Versand an fremde Empfaenger, mit Befund im Inhalt oder mit
+        # Anhaengen nach aussen zum ENTWURF. Ausserhalb eines Regel-Laufs ist
+        # die Liste leer – dort entscheidet der Mensch in der Karte.
+        from backend import mail_schutz
+        from backend.mail_client import _adressliste
+        gruende = mail_schutz.versand_pruefen(
+            _adressliste(an) + _adressliste(cc), [betreff, text], anhaenge=len(anh))
+
         def _tun(c: MailClient):
             from backend import mail_anhang
-            return ("✅ " + c.senden(an, betreff, text, cc=cc, entwurf=False,
+            return ("✅ " + c.senden(an, betreff, text, cc=cc, entwurf=bool(gruende),
                                     anhaenge=anh)
-                    + mail_anhang.vermerk(anh))
+                    + mail_anhang.vermerk(anh)
+                    + (mail_schutz.entwurf_vermerk(gruende) if gruende else ""))
         return await self._mit_client(_tun)
 
 
@@ -444,8 +502,15 @@ class EmailAntwortenTool(_Base):
             vermerk += " " + sig["hinweis"]
 
         def _tun(c: MailClient):
-            return "✅ " + c.antworten(mid, rumpf_text, allen=allen, entwurf=entwurf,
-                                       html=rumpf_html) + vermerk
+            schutz = ""
+            ist_entwurf = entwurf
+            if not entwurf:
+                gruende = _antwort_pruefen(c, mid, text, allen)
+                if gruende:
+                    from backend import mail_schutz
+                    ist_entwurf, schutz = True, mail_schutz.entwurf_vermerk(gruende)
+            return "✅ " + c.antworten(mid, rumpf_text, allen=allen, entwurf=ist_entwurf,
+                                       html=rumpf_html) + vermerk + schutz
         return await self._mit_client(_tun)
 
 
@@ -481,7 +546,14 @@ class EmailWeiterleitenTool(_Base):
         entwurf = bool(kwargs.get("entwurf"))
 
         def _tun(c: MailClient):
-            return "✅ " + c.weiterleiten(mid, an, text=text, entwurf=entwurf)
+            schutz = ""
+            ist_entwurf = entwurf
+            if not entwurf:
+                gruende = _weiterleitung_pruefen(c, mid, an, text)
+                if gruende:
+                    from backend import mail_schutz
+                    ist_entwurf, schutz = True, mail_schutz.entwurf_vermerk(gruende)
+            return "✅ " + c.weiterleiten(mid, an, text=text, entwurf=ist_entwurf) + schutz
         return await self._mit_client(_tun)
 
 

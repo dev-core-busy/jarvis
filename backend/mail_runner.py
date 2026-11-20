@@ -797,6 +797,15 @@ async def _lauf_fuer_nachricht(regel: dict, n, konto, werkzeuge, actor: dict) ->
         marke_a = _wirkung.auftrag_cv.set(_wirkung.Auftrag(
             "E-Mail-Regel '%s'" % (regel.get("name") or ""),
             regel.get("aussenwirkung") is True))
+        # Schutz vor Datenabfluss (mail_schutz.py, Massnahmen 1-3): die
+        # Sendewerkzeuge machen einen Versand an Fremde, mit Befund im Inhalt
+        # oder bei einer Regel mit Zugriff auf Firmenwissen zum Entwurf. Die
+        # Beteiligten des Gespraechs sind die Adressen der eingegangenen
+        # Nachricht - an sie zurueckzuschreiben traegt nichts nach aussen,
+        # was der Absender nicht schon hat (ausser Firmenwissen: Massnahme 2).
+        from backend import mail_schutz as _schutz
+        marke_l = _schutz.lauf_cv.set(_schutz.lauf_fuer(
+            regel, n, str(getattr(konto, "adresse", "") or "")))
         try:
             antwort = await _agent.run_task_headless(auftrag, actor=actor)
             if _lauf_abgewiesen(antwort):
@@ -824,7 +833,8 @@ async def _lauf_fuer_nachricht(regel: dict, n, konto, werkzeuge, actor: dict) ->
             for cv, mk in ((mail_accounts.current_mail_user, marke),
                            (mail_accounts.current_antwort_format, marke_f),
                            (mail_accounts.current_antwort_signatur, marke_s),
-                           (_wirkung.auftrag_cv, marke_a)):
+                           (_wirkung.auftrag_cv, marke_a),
+                           (_schutz.lauf_cv, marke_l)):
                 try:
                     cv.reset(mk)
                 except Exception:  # noqa: BLE001

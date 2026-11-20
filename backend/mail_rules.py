@@ -310,6 +310,18 @@ def _pruefe(felder: dict, bestehend: dict | None = None,
                               "der Nachricht geschehen soll.")
         if len(prompt) > PROMPT_MAX:
             raise RegelFehler("Das Prompt ist zu lang (max. %d Zeichen)." % PROMPT_MAX)
+        # Schutz vor Datenabfluss (mail_schutz.py, Massnahme 4): das Prompt
+        # laeuft spaeter ohne anwesenden Menschen – ein Kennwort, ein
+        # Sperrbegriff oder eine eingeschleuste Anweisung darin ginge bei
+        # JEDEM Lauf mit. Nur bei GEAENDERTEM Prompt geprueft (das Formular
+        # schickt es bei jedem Speichern mit): ein Bestand, der eine Pruefung
+        # von heute nicht besteht, soll das Umschalten von "aktiv" nicht
+        # blockieren.
+        from backend import mail_schutz
+        gruende = ([] if bestehend and prompt == (bestehend.get("prompt") or "")
+                   else mail_schutz.feld_pruefen("regel", prompt))
+        if gruende:
+            raise RegelFehler(mail_schutz.ablehnung("regel", gruende))
         r["prompt"] = prompt
 
     if "ordner" in felder or not bestehend:

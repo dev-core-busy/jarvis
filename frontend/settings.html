@@ -4492,6 +4492,33 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- ═══ Schutz vor Datenabfluss (backend/mail_schutz.py) ═══
+                             Eigener Knopf, eigene TEILMENGE: sendet nur
+                             versand_domaenen + sperrbegriffe (der Server merged). -->
+                        <div class="kb-section" id="em-sect-schutz">
+                            <div class="kb-section-header kb-collapse-header" id="em-sect-schutz-hdr">
+                                <h3 data-i18n="mailadm.sect_schutz">Schutz vor Datenabfluss</h3>
+                                <span class="sk-openclaw-toggle" id="em-sect-schutz-tog">▼</span>
+                            </div>
+                            <div class="kb-collapse-body" id="em-sect-schutz-body">
+                                <p class="kb-hint" style="margin-bottom:10px;" data-i18n-html="mailadm.schutz_hint">Eine Regel sendet <b>nur dann direkt</b>, wenn jeder Empfänger in einer der unten genannten Domänen liegt oder am Gespräch beteiligt ist. Alles andere legt sie als <b>Entwurf</b> ab – der Postfach-Inhaber prüft und sendet selbst. Ebenfalls nur als Entwurf: Mails mit Zugangsdaten oder Sperrbegriffen, Anhänge an externe Empfänger und jeder externe Versand einer Regel, die Firmenwissen lesen darf. Regel-Texte, Stile und Signaturen mit solchen Inhalten werden gar nicht erst gespeichert.</p>
+                                <div class="form-group">
+                                    <label for="em-schutz-domaenen" data-i18n="mailadm.schutz_dom">Domänen, an die Regeln direkt senden dürfen</label>
+                                    <textarea id="em-schutz-domaenen" rows="3" style="width:100%;"></textarea>
+                                    <p class="kb-hint" data-i18n="mailadm.schutz_dom_hint">Eine Domäne je Zeile, Subdomänen gelten mit. Leer = die Domäne des jeweiligen Postfachs.</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="em-schutz-sperr" data-i18n="mailadm.schutz_sperr">Sperrbegriffe</label>
+                                    <textarea id="em-schutz-sperr" rows="5" style="width:100%;"></textarea>
+                                    <p class="kb-hint" data-i18n="mailadm.schutz_sperr_hint">Ein Begriff je Zeile (z. B. interne Projektnamen, Kennzeichnungen wie „streng vertraulich“), mindestens drei Zeichen. Groß- und Kleinschreibung spielt keine Rolle.</p>
+                                </div>
+                                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                    <button type="button" class="btn-primary" id="em-save-schutz" style="flex:0 0 auto;" data-i18n="mailadm.save_schutz">Schutz speichern</button>
+                                    <span id="em-schutz-status" class="kb-hint"></span>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- ═══ Bereitstellung des Outlook-Add-ins ═══
                              Der Pfad ist HAUSINTERN und steht deshalb in der
                              Einstellung, nicht im Quelltext: das Repo ist
@@ -6833,7 +6860,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_bedienung.js?v=8"></script>
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
-    <script src="/static/js/i18n.js?v=503"></script>
+    <script src="/static/js/i18n.js?v=504"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=38"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6862,7 +6889,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/sapcert.js?v=4"></script>
     <script src="/static/js/sap.js?v=17"></script>
     <script src="/static/js/vemas.js?v=12"></script>
-    <script src="/static/js/email.js?v=11"></script>
+    <script src="/static/js/email.js?v=12"></script>
     <script src="/static/js/short_tracks_admin.js?v=3"></script>
     <script src="/static/js/ai_mouse_admin.js?v=14"></script>
     <script src="/static/js/feedback_admin.js?v=8"></script>
@@ -6899,7 +6926,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=3"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=261"></script>
+    <script src="/static/js/app.js?v=262"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

@@ -101,6 +101,9 @@
                 // Skill-Config und kommt mit diesem Abruf mit - ein eigener
                 // Roundtrip fuer ein Feld waere der teuerste Weg.
                 ladeAddinPfad(c);
+                // Schutz vor Datenabfluss: dieselbe Config, eigener Knopf.
+                setzeWert('em-schutz-domaenen', zeilen(c.versand_domaenen));
+                setzeWert('em-schutz-sperr', zeilen(c.sperrbegriffe));
                 setzeHaken('em-addin-diag', c.addin_diagnose === true);
                 _cfgMail = c;
                 zertMount();
@@ -191,6 +194,38 @@
             melde('em-conn-status', T('mailadm.m_conn_saved', '✓ Verbindung gespeichert.'), 'ok');
         }).catch(function (e) {
             melde('em-conn-status', T('common.error', 'Fehler') + ': ' + e.message, 'fehler');
+        });
+    }
+
+    /* ── Schutz vor Datenabfluss (backend/mail_schutz.py) ─────────────────
+     * Eigener Knopf, eigene TEILMENGE: nur `versand_domaenen` und
+     * `sperrbegriffe` - der Server merged, ein Mitsenden der uebrigen Felder
+     * ueberschriebe den Stand der anderen Knoepfe. Gespeichert wird zeilen-
+     * getrennt; eine aeltere, kommagetrennte Eingabe wird zum Anzeigen in
+     * Zeilen gebracht (der Server liest beide Formen). */
+    function zeilen(wert) {
+        if (Array.isArray(wert)) return wert.join('\n');
+        return String(wert || '').split(/[,;\n]/).map(function (t) { return t.trim(); })
+            .filter(function (t) { return t; }).join('\n');
+    }
+
+    function speichereSchutz() {
+        var daten = {
+            versand_domaenen: zeilen((($('em-schutz-domaenen') || {}).value) || ''),
+            sperrbegriffe: zeilen((($('em-schutz-sperr') || {}).value) || '')
+        };
+        melde('em-schutz-status', T('common.saving', 'Speichere…'));
+        return fetch('/api/skills/email/config', {
+            method: 'POST',
+            headers: kopf({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(daten)
+        }).then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            setzeWert('em-schutz-domaenen', daten.versand_domaenen);
+            setzeWert('em-schutz-sperr', daten.sperrbegriffe);
+            melde('em-schutz-status', T('mailadm.m_schutz_saved', '✓ Schutz gespeichert.'), 'ok');
+        }).catch(function (e) {
+            melde('em-schutz-status', T('common.error', 'Fehler') + ': ' + e.message, 'fehler');
         });
     }
 
@@ -689,6 +724,8 @@
         var b;
         if ((b = $('em-save-conn'))) b.addEventListener('click', speichereVerbindung);
         if ((b = $('em-save-areas'))) b.addEventListener('click', speichereBereiche);
+        var schutzSave = $('em-save-schutz');
+        if (schutzSave) schutzSave.addEventListener('click', speichereSchutz);
         var serverSave = $('em-server-save');
         if (serverSave) serverSave.addEventListener('click', speichereServerzugriff);
         // Eigene Variablen, nicht `b` weiterverwenden: eine geteilte `var` sieht

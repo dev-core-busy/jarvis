@@ -426,6 +426,27 @@ def _stile_schreiben(un: str, liste: list[dict]) -> list[dict]:
     return _stile_von(k)
 
 
+def _schutz_pruefen(user: str, art: str, text: str = "", html: str = "") -> None:
+    """Stil-/Signaturtext vor dem Speichern pruefen (mail_schutz.py, Massnahme 4).
+
+    Ein Stil geht in jeden Regel-Auftrag ein, eine Signatur in jede Mail – ein
+    Kennwort, ein Sperrbegriff, eine versteckte Zeile oder eine eingeschleuste
+    Anweisung darin wirkt bei jedem Lauf, ohne dass jemand gegenliest. Wirft
+    ``MailFehler`` (Kategorie ``eingabe``) mit den Gruenden; sperrt nichts.
+    Die eigene Adresse bestimmt die Vorgabe der freigegebenen Domaenen.
+    """
+    if not (str(text or "").strip() or str(html or "").strip()):
+        return
+    from backend import mail_schutz
+    try:
+        adresse = str((_laden().get(norm_user(user)) or {}).get("adresse") or "")
+    except Exception:  # noqa: BLE001
+        adresse = ""
+    gruende = mail_schutz.feld_pruefen(art, text, html, eigene_adresse=adresse)
+    if gruende:
+        raise MailFehler(mail_schutz.ablehnung(art, gruende), "eingabe")
+
+
 def stil_anlegen(user: str, name: str, text: str = "",
                  standard: bool | None = None) -> list[dict]:
     """Neuen Stil anlegen. Rueckgabe = die vollstaendige Liste.
@@ -449,6 +470,7 @@ def stil_anlegen(user: str, name: str, text: str = "",
         # Der Name ist die sprachliche Kennung im Regel-Prompt – zwei gleiche
         # waeren dort nicht aufloesbar.
         raise MailFehler("Es gibt bereits einen Stil mit dem Namen '%s'." % nm, "eingabe")
+    _schutz_pruefen(user, "stil", str(text or "").strip()[:VORGABE_MAX])
     eintrag = {"id": _stil_id(), "name": nm,
                "text": str(text or "").strip()[:VORGABE_MAX],
                "standard": bool(standard) if standard is not None else (not liste)}
@@ -480,7 +502,10 @@ def stil_aendern(user: str, stil_id: str, felder: dict) -> list[dict]:
         # LEER heisst hier wirklich "kein Text" – anders als beim Kennwort, das
         # nie angezeigt wird. Der Benutzer sieht seinen Text und kann ihn
         # bewusst loeschen.
-        e["text"] = str(felder.get("text") or "").strip()[:VORGABE_MAX]
+        neu_text = str(felder.get("text") or "").strip()[:VORGABE_MAX]
+        if neu_text != (e.get("text") or ""):
+            _schutz_pruefen(user, "stil", neu_text)
+        e["text"] = neu_text
     if "standard" in (felder or {}):
         if felder.get("standard"):
             for a in liste:
@@ -714,6 +739,8 @@ def sig_anlegen(user: str, name: str, text: str = "", html: str = "",
                          % (MAX_SIGNATUREN, len(liste)), "eingabe")
     if any(e["name"].lower() == nm.lower() for e in liste):
         raise MailFehler("Es gibt bereits eine Signatur mit dem Namen '%s'." % nm, "eingabe")
+    _schutz_pruefen(user, "signatur", str(text or "").strip()[:SIG_TEXT_MAX],
+                    str(html or "").strip()[:SIG_HTML_MAX])
     eintrag = {"id": _sig_id(), "name": nm,
                "text": str(text or "").strip()[:SIG_TEXT_MAX],
                "html": str(html or "").strip()[:SIG_HTML_MAX],
@@ -747,10 +774,15 @@ def sig_aendern(user: str, sig_id: str, felder: dict) -> list[dict]:
     # LEER heisst hier wirklich "kein Text" - der Benutzer sieht seine Signatur
     # und darf sie bewusst loeschen (anders als beim Kennwort, das nie angezeigt
     # wird und wo leer "unveraendert" bedeutet).
-    if "text" in (felder or {}):
-        e["text"] = str(felder.get("text") or "").strip()[:SIG_TEXT_MAX]
-    if "html" in (felder or {}):
-        e["html"] = str(felder.get("html") or "").strip()[:SIG_HTML_MAX]
+    neu_t = (str(felder.get("text") or "").strip()[:SIG_TEXT_MAX]
+             if "text" in (felder or {}) else e.get("text") or "")
+    neu_h = (str(felder.get("html") or "").strip()[:SIG_HTML_MAX]
+             if "html" in (felder or {}) else e.get("html") or "")
+    # Nur bei GEAENDERTEM Inhalt pruefen – Umbenennen oder "als Standard"
+    # darf ein Bestand nicht an einer Pruefung von heute scheitern lassen.
+    if (neu_t, neu_h) != (e.get("text") or "", e.get("html") or ""):
+        _schutz_pruefen(user, "signatur", neu_t, neu_h)
+    e["text"], e["html"] = neu_t, neu_h
     if "standard" in (felder or {}):
         if felder.get("standard"):
             for a in liste:

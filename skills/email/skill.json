@@ -102,6 +102,18 @@
             "description": "Kommagetrennt: mail, adressbuch, wissen, fach, dokumente, voll. 'mail' ist immer dabei. Der Benutzer kann je Regel NUR aus den hier freigegebenen Bereichen waehlen. Wird ueber die Kaestchen im Reiter gepflegt - 'voll' bedeutet: der Regel-Lauf bekommt den ganzen Werkzeugkasten des Benutzers. ACHTUNG bei 'adressbuch': zusammen mit dem Versand kann eine praeparierte E-Mail damit Adressen aus dem Firmen-Adressbuch nach aussen tragen - fuer Regeln, die nur sortieren, nicht noetig.",
             "default": "mail"
         },
+        "versand_domaenen": {
+            "type": "string",
+            "label": "Domaenen, an die Regeln direkt senden duerfen",
+            "description": "Eine je Zeile (Subdomaenen gelten mit). Ein Regel-Lauf sendet nur dann direkt, wenn jeder Empfaenger hier liegt oder am Gespraech beteiligt ist - sonst wird ein Entwurf abgelegt. Leer = die Domaene des jeweiligen Postfachs. Wird ueber den Reiter gepflegt (backend/mail_schutz.py).",
+            "default": ""
+        },
+        "sperrbegriffe": {
+            "type": "string",
+            "label": "Sperrbegriffe",
+            "description": "Einer je Zeile, mindestens drei Zeichen. Eine Regel-Mail mit einem dieser Begriffe wird nur als Entwurf abgelegt; Regel-Texte, Stile und Signaturen damit werden nicht gespeichert. Wird ueber den Reiter gepflegt.",
+            "default": ""
+        },
         "addin_ordner_pfad": {
             "type": "string",
             "label": "Netzwerkordner fuer das Outlook-Add-in (optional)",

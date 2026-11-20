@@ -392,6 +392,16 @@
         .wi-section .desc.wi-mem-frist { margin-top: -10px; }
         .wi-mem-leiste .sec-btn { margin: 0 0 12px; }
         .wi-mem-leiste .sec-btn[hidden] { display: none; }
+        /* Suche ueber der Gedaechtnisliste: Feld + Trefferzahl in einer Zeile,
+           auf schmalen Fenstern bricht die Zahl um. `[hidden]` ausdruecklich,
+           weil `display:flex` das Attribut sonst schlaegt. */
+        .wi-mem-suche { display: flex; align-items: center; flex-wrap: wrap;
+                        gap: 8px; margin: 0 0 12px; }
+        .wi-mem-suche[hidden] { display: none; }
+        .wi-mem-suche .wi-search-in { flex: 1 1 220px; min-width: 0; }
+        .wi-mem-treffer { font-size: 0.78rem; color: var(--text-secondary); }
+        /* Ohne Suchbegriff leer: dann auch keinen Flex-Abstand belegen */
+        .wi-mem-treffer:empty { display: none; }
         .wi-dest-take { margin-top: 12px; border-top: 1px solid var(--border);
                         padding-top: 12px; }
         .wi-dest-take > label { display: block; font-size: 0.78rem;
@@ -909,6 +919,16 @@
                  (Loeschkonzept, backend/loeschfristen.py, Modulkopf). Aendert sich
                  das dort, muss dieser Text mit. -->
             <p class="desc wi-mem-frist" data-i18n="wissen.mem_frist">Automatisch gelöscht wird hier nichts: die Einträge bleiben gespeichert, bis du sie selbst löschst.</p>
+            <!-- Suche: filtert die geladene Liste nach Schluessel und Wert
+                 (js/gedaechtnis.js), nur sichtbar solange es Eintraege gibt -->
+            <div class="wi-mem-suche" id="wi-gedaechtnis-suche" hidden>
+                <input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="search" class="wi-input wi-search-in" id="wi-gedaechtnis-q"
+                       name="gedaechtnis-suche" autocomplete="off"
+                       placeholder="Im Gedächtnis suchen…"
+                       data-i18n-placeholder="wissen.mem_suche_ph"
+                       aria-label="Im Gedächtnis suchen" data-i18n-aria="wissen.mem_suche_ph">
+                <span class="wi-mem-treffer" id="wi-gedaechtnis-treffer" aria-live="polite"></span>
+            </div>
             <div class="wi-mem-leiste">
                 <button class="sec-btn small danger" id="wi-gedaechtnis-alle" type="button" hidden data-i18n="wissen.mem_alle">Alles löschen</button>
             </div>
@@ -928,7 +948,7 @@
     <script src="/static/js/syspackages.js?v=25"></script>
     <script src="/static/js/sysload.js?v=6"></script>
     <script src="/static/js/fusszeile.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=504"></script>
+    <script src="/static/js/i18n.js?v=505"></script>
     <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/seite_breit.js?v=1"></script>
     <script src="/static/js/theme.js?v=3"></script>
@@ -941,8 +961,8 @@
     <script src="/static/js/sessions.js?v=10"></script>
     <script src="/static/js/logo_home.js?v=1"></script>
     <script src="/static/js/wissen_destillat.js?v=12"></script>
-    <script src="/static/js/gedaechtnis.js?v=3"></script>
-    <script src="/static/js/wissen.js?v=78"></script>
+    <script src="/static/js/gedaechtnis.js?v=4"></script>
+    <script src="/static/js/wissen.js?v=79"></script>
 <script src="/static/js/settings_btn.js?v=7"></script>
     <script src="/static/js/branding.js?v=31"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->

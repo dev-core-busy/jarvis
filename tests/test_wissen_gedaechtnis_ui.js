@@ -15,6 +15,11 @@
  *  1b. "Alles löschen" (2026-11-16): Rueckfrage, EIN DELETE mit {alle:true},
  *      Liste leer, Knopf weg; abgelehnte Rueckfrage schickt nichts; Fehler
  *      bleibt am Knopf stehen; Infozeile zur Loeschfrist steht im Container
+ *  1c. Suche (2026-11-20): filtert nach Schluessel UND Wert, Gross-/Klein-
+ *      schreibung egal, mehrere Woerter = UND; Trefferzahl, "keine Treffer",
+ *      Escape leert; Loeschen eines Treffers behaelt den Filter; "Alles
+ *      löschen" bei aktiver Suche fragt ausdruecklich nach ALLEN und loescht
+ *      alle; ohne Eintraege ist das Suchfeld weg
  *   4. Regeln: Einstellungen tragen den Block nicht mehr, Texte DE/EN da
  *
  *   node tests/test_wissen_gedaechtnis_ui.js
@@ -223,6 +228,112 @@ section('1b. "Alles löschen" und Infozeile zur Loeschfrist');
     s.win.close();
 }
 
+section('1c. Suche im Gedaechtnis');
+{
+    const EINTR = [
+        { key: 'lieblingsfarbe', value: 'Blau', updated: '2026-10-14T10:00:00' },
+        { key: 'projekt', value: 'Apollo Umbau', updated: '2026-10-13T09:00:00' },
+        { key: 'drucker', value: 'steht im Flur, blaues Gehaeuse', updated: '' },
+        { key: 'kollege', value: 'sitzt im Raum 4', updated: '' },
+    ];
+    const s = await seite({ is_editor: false, groups: [], folders: [] }, EINTR);
+    const d = s.doc;
+    const feld = d.getElementById('wi-gedaechtnis-q');
+    const leiste = d.getElementById('wi-gedaechtnis-suche');
+    const zahl = d.getElementById('wi-gedaechtnis-treffer');
+    const alle = () => Array.from(d.querySelectorAll('#wi-gedaechtnis-liste .lk-mem'));
+    const sichtbar = () => alle().filter(z => z.style.display !== 'none');
+    const sichtbareSchluessel = () => sichtbar().map(z => (z.querySelector('b') || {}).textContent).sort().join(',');
+    const keineTreffer = () => d.querySelector('#wi-gedaechtnis-liste .lk-keine-treffer');
+    const suche = (q) => { if (feld) { feld.value = q; feld.dispatchEvent(new s.win.Event('input', { bubbles: true })); } };
+    check('Positivkontrolle: vier Eintraege gezeigt, alle sichtbar',
+          alle().length === 4 && sichtbar().length === 4, alle().length + '/' + sichtbar().length);
+    if (alle().length !== 4) { console.log('ABBRUCH: Liste nicht aufgebaut'); process.exit(2); }
+    check('Suchfeld steht im Gedaechtnis-Container', !!feld && !!feld.closest('#wi-sec-gedaechtnis'));
+    check('… und ist mit Eintraegen sichtbar', !!leiste && leiste.hidden === false);
+    check('… traegt einen Platzhalter (i18n)', !!feld && /Gedächtnis/.test(feld.placeholder), feld && feld.placeholder);
+    check('… ist als Suchfeld vom TAB-Vorschlag ausgenommen', !!feld && feld.hasAttribute('data-tabfill-nein'));
+    check('ohne Suchbegriff keine Trefferzahl', !!zahl && zahl.textContent === '', zahl && zahl.textContent);
+
+    suche('apollo');
+    check('Suche im WERT, Gross-/Kleinschreibung egal ("apollo")', sichtbareSchluessel() === 'projekt', sichtbareSchluessel());
+    check('… Trefferzahl "1 von 4"', !!zahl && /1 von 4/.test(zahl.textContent), zahl && zahl.textContent);
+    suche('DRUCK');
+    check('Suche im SCHLUESSEL ("DRUCK")', sichtbareSchluessel() === 'drucker', sichtbareSchluessel());
+    suche('blau');
+    check('Teilwort trifft mehrere ("blau" -> Blau, blaues)', sichtbareSchluessel() === 'drucker,lieblingsfarbe', sichtbareSchluessel());
+    suche('  im   flur ');
+    check('mehrere Woerter = UND, Leerraum egal ("im flur")', sichtbareSchluessel() === 'drucker', sichtbareSchluessel());
+    suche('im');
+    check('… "im" allein trifft beide', sichtbareSchluessel() === 'drucker,kollege', sichtbareSchluessel());
+    check('bei Treffern keine "keine Treffer"-Zeile', !keineTreffer());
+    suche('zebra');
+    check('kein Treffer -> nichts sichtbar', sichtbar().length === 0, String(sichtbar().length));
+    check('… mit Hinweis "Kein Eintrag passt"', !!keineTreffer() && /Kein Eintrag passt/.test(keineTreffer().textContent));
+    check('… und Trefferzahl "0 von 4"', !!zahl && /0 von 4/.test(zahl.textContent), zahl && zahl.textContent);
+    check('… die Eintraege selbst bleiben (nur ausgeblendet)', alle().length === 4);
+    suche('');
+    check('leerer Suchbegriff -> wieder alle sichtbar, Hinweis weg',
+          sichtbar().length === 4 && !keineTreffer() && zahl.textContent === '');
+    suche('blau');
+    if (feld) feld.dispatchEvent(new s.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    check('Escape leert das Feld und zeigt alles', !!feld && feld.value === '' && sichtbar().length === 4,
+          feld && (feld.value + '/' + sichtbar().length));
+
+    // Einen Treffer loeschen: der Filter bleibt, Zahl zieht nach
+    suche('blau');
+    const del = sichtbar().map(z => z.querySelector('.lk-mem-del')).find(Boolean);
+    if (del) del.click();
+    await schlaf(40);
+    check('Loeschen eines Treffers: Filter bleibt aktiv (nur der andere Treffer sichtbar)',
+          alle().length === 3 && sichtbar().length === 1, alle().length + '/' + sichtbar().length);
+    check('… Trefferzahl zieht nach ("1 von 3")', !!zahl && /1 von 3/.test(zahl.textContent), zahl && zahl.textContent);
+    const del2 = sichtbar().map(z => z.querySelector('.lk-mem-del')).find(Boolean);
+    if (del2) del2.click();
+    await schlaf(40);
+    check('letzter Treffer geloescht, andere da -> "keine Treffer"',
+          alle().length === 2 && sichtbar().length === 0 && !!keineTreffer(), alle().length + '/' + sichtbar().length);
+    check('… nicht die Leer-Anzeige des ganzen Gedaechtnisses',
+          !d.querySelector('#wi-gedaechtnis-liste .lk-leer:not(.lk-keine-treffer)'));
+
+    // "Alles löschen" bei aktiver Suche: ausdrueckliche Frage, loescht ALLES
+    suche('apollo');
+    const knopf = d.getElementById('wi-gedaechtnis-alle');
+    if (knopf) knopf.click();
+    await schlaf(40);
+    const frage = s.win.__fragen[s.win.__fragen.length - 1] || '';
+    check('Rueckfrage bei aktiver Suche nennt ALLE und die ausgeblendeten',
+          /ALLE 2/.test(frage) && /ausblendet/.test(frage), frage);
+    const dels = s.rufe.filter(r => r.p === '/api/memory' && r.methode === 'DELETE');
+    const letzter = dels.length ? JSON.parse(dels[dels.length - 1].body) : {};
+    check('… geschickt wird {alle:true}, keine Einzelloeschung der Treffer', letzter.alle === true,
+          dels.map(r => r.body).join(' | '));
+    check('danach: Liste leer, Leer-Anzeige, Suchfeld geleert und ausgeblendet',
+          alle().length === 0 && !!d.querySelector('#wi-gedaechtnis-liste .lk-leer') && !keineTreffer()
+          && !!feld && feld.value === '' && !!leiste && leiste.hidden === true);
+    s.win.close();
+}
+{
+    // Ohne Suche: die gewohnte Rueckfrage (nicht die mit "ausblendet")
+    const s = await seite({ is_editor: false, groups: [], folders: [] },
+                          [{ key: 'a', value: '1', updated: '' }]);
+    const knopf = s.doc.getElementById('wi-gedaechtnis-alle');
+    if (knopf) knopf.click();
+    await schlaf(40);
+    check('Positivkontrolle: Rueckfrage gestellt', s.win.__fragen.length === 1);
+    check('ohne Suche: gewohnte Rueckfrage ohne "ausblendet"',
+          s.win.__fragen.length === 1 && !/ausblendet/.test(s.win.__fragen[0]), s.win.__fragen.join(' | '));
+    s.win.close();
+}
+{
+    const s = await seite({ is_editor: false, groups: [], folders: [] }, []);
+    const leiste = s.doc.getElementById('wi-gedaechtnis-suche');
+    check('Positivkontrolle: leeres Gedaechtnis zeigt die Leer-Anzeige',
+          !!s.doc.querySelector('#wi-gedaechtnis-liste .lk-leer'));
+    check('leeres Gedaechtnis -> kein Suchfeld', !!leiste && leiste.hidden === true);
+    s.win.close();
+}
+
 section('2. Mit Wissensbereich: Pflege UND eigenes Wissen');
 {
     const s = await seite({ is_editor: false, groups: [GRUPPE],
@@ -288,11 +399,15 @@ section('4. Regeln');
     check('Einstellungen tragen den Gedaechtnis-Block nicht mehr', settings.indexOf('lk-gedaechtnis') === -1);
     check('loeschkonzept.js fragt /api/memory nicht mehr ab',
           lies('frontend/js/loeschkonzept.js').indexOf('/api/memory') === -1);
+    // .wi-mem-suche setzt display:flex und schluege sonst das hidden-Attribut
+    check('Suchzeile: [hidden] ausdruecklich auf display:none',
+          /\.wi-mem-suche\[hidden\]\s*\{\s*display:\s*none/.test(HTML));
     check('wissen.html bindet gedaechtnis.js VOR wissen.js ein',
           /gedaechtnis\.js\?v=\d+[\s\S]*wissen\.js\?v=\d+/.test(HTML.slice(HTML.indexOf('<script'))));
     const i18n = lies('frontend/js/i18n.js');
     ['wissen.sec_mem', 'wissen.sec_mem_desc', 'wissen.nur_eigenes', 'wissen.no_groups_editor',
-     'wissen.mem_frist', 'wissen.mem_alle', 'wissen.mem_alle_frage'].forEach(k =>
+     'wissen.mem_frist', 'wissen.mem_alle', 'wissen.mem_alle_frage', 'wissen.mem_alle_frage_suche',
+     'wissen.mem_suche_ph', 'wissen.mem_treffer', 'wissen.mem_keine_treffer'].forEach(k =>
         check(k + ' in DE und EN', (i18n.match(new RegExp("'" + k.replace('.', '\\.') + "'\\s*:", 'g')) || []).length === 2));
 }
 

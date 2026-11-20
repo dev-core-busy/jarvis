@@ -243,6 +243,17 @@ PROBEN = [
      '        gueltig.append(m["id"])\n'),
     ("CI-Auszug kennt nur englische Fehlerzeilen", CI,
      '|ABBRUCH|FEHLER|Traceback', '|ABBRUCH|Traceback'),
+    # Die drei Wege, auf denen eine benannte Luecke wieder unsichtbar wird.
+    ("Luecken gruener Waechter werden nicht gesammelt", CI,
+     "                luecken += _luecken(name, ausgabe)\n", ""),
+    ("Bilanzzeile verschweigt die Zahl", CI,
+     '          + (", %d %s nicht gemessen" % (len(luecken),\n'
+     '                                         "Zusage" if len(luecken) == 1 else "Zusagen")\n'
+     '             if luecken else ""))\n',
+     "          )\n"),
+    ("Marker klein geschrieben (jede Erwaehnung zaehlt mit)", CI,
+     '_NICHT_GEMESSEN = re.compile(r"NICHT GEPRUEFT")\n',
+     '_NICHT_GEMESSEN = re.compile(r"(?i)nicht geprueft")\n'),
     ("CI-Lauf nimmt gegen_* mit", CI,
      '    dateien = sorted(TESTS.glob("test_*.py")) + sorted(TESTS.glob("test_*.js"))\n',
      '    dateien = sorted(TESTS.glob("*_*.py")) + sorted(TESTS.glob("test_*.js"))\n'),

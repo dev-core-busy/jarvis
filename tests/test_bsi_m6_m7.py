@@ -31,6 +31,7 @@
 """
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import importlib.util
 import os
@@ -930,6 +931,44 @@ _aus = ci_mod._auszug(_fuell + "\nFEHLER: sudoers-Pruefung (visudo -cf) fehlgesc
 check("CI-Auszug nimmt eine deutsche FEHLER-Zeile mit", "visudo -cf" in _aus, _aus[-200:])
 check("…und nicht jede beliebige Zeile (sonst misst die Pruefung darueber nichts)",
       "ok Zeile 5" not in _aus)
+# Eine Zusage, die ein GRUENER Waechter ausdruecklich nicht gemessen hat, muss in
+# der Bilanz auftauchen. Bis 2026-11-20 verwarf ci_lauf die Ausgabe gruener
+# Waechter restlos: im Lauf 00a0e81f war nicht zu sagen, ob der Laeufer ein
+# taugliches visudo fand oder zwei Zusagen ungemessen blieben - beides Exit 0.
+# Geprueft an den ECHTEN Ausgabeformen der vier Waechter, die das melden; eine
+# erfundene Form wuerde nur die Pruefung bestaetigen, nicht die Wirklichkeit.
+_formen = {
+    "test_system_haertung.py": "NICHT GEPRUEFT: visudo -cf (visudo fehlt)",
+    "test_excel_objekte.py": "  NICHT GEPRUEFT: backend.excel_ask nicht importierbar (ImportError())",
+    # test_onenote_import faerbt und setzt den Marker MITTEN in die Zeile
+    "test_onenote_import.py": "  \033[33m–\033[0m Seiten werden geholt  (NICHT GEPRUEFT: kein Zugang)",
+}
+for _w, _zeile in _formen.items():
+    _gef = ci_mod._luecken(_w, "  OK   irgendwas\n" + _zeile + "\nErgebnis: 5 OK, 0 FAIL\n")
+    check("CI-Bilanz hebt die nicht gemessene Zusage aus %s" % _w,
+          len(_gef) == 1 and _gef[0][0] == _w and "NICHT GEPRUEFT" in _gef[0][1], _gef)
+# Gegenkontrolle: klein geschriebenes "nicht geprueft" steht in Pruefnamen und
+# Begruendungen – wuerde es mitzaehlen, meldete jeder Lauf Luecken, die keine
+# sind, und der Abschnitt waere binnen Tagen Tapete.
+check("…und nicht jede Zeile, die 'nicht geprueft' nur erwaehnt",
+      ci_mod._luecken("x.py", "  OK   Grund wird genannt, nicht geprueft ist nicht bestanden\n") == [])
+# Die Funktion allein genuegt nicht: sie muss im Sammellauf AUFGERUFEN werden
+# und ihr Ergebnis in die Bilanz fliessen. Am Syntaxbaum gemessen, nicht am
+# Text - ein Teilstring belegt keinen Aufruf (eine Pruefung, die nur _luecken()
+# befragt, haette eine entfernte Sammelstelle nicht bemerkt).
+_cibaum = ast.parse((ROOT / "tests" / "ci_lauf.py").read_text(encoding="utf-8"))
+_main = next((k for k in _cibaum.body
+              if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == "main"), None)
+if _main is None:
+    abbruch("tests/ci_lauf.py ohne main() – die Pruefungen darueber messen nichts")
+check("Sammellauf ruft _luecken() auf",
+      any(isinstance(c, ast.Call) and ast.unparse(c.func) == "_luecken" for c in ast.walk(_main)))
+# Und die Bilanzzeile nennt die Zahl - sonst steht die Luecke nur in einem
+# Abschnitt, den ein langer Lauf nach oben schiebt.
+_bilanz = [c for c in ast.walk(_main) if isinstance(c, ast.Call)
+           and ast.unparse(c.func) == "print" and "BILANZ" in ast.unparse(c)]
+check("…und die Bilanzzeile nennt die nicht gemessenen Zusagen",
+      bool(_bilanz) and all("luecken" in ast.unparse(c) for c in _bilanz), len(_bilanz))
 tmpd = Path(tempfile.mkdtemp(prefix="jv_ci_"))
 alt_a = ci_mod.AUSNAHMEN
 try:

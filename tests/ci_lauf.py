@@ -146,6 +146,37 @@ def lauf(datei: Path, zeitdeckel: int) -> tuple[str, int | None, float, str]:
 # begann bei der Frage, welcher Zweig ueberhaupt abgebrochen hat.
 _FEHLZEILE = re.compile(r"(\u2717|\u274c|\bFAIL\b|ABBRUCH|FEHLER|Traceback|Error)")
 
+# ⚠ EINE BENANNTE LUECKE MUSS SICHTBAR SEIN, SONST IST SIE KEINE. Ein Waechter
+# darf eine Zusage als "NICHT GEPRUEFT" zuruecklegen, wenn er sie auf DIESEM
+# Rechner nicht messen KANN (test_system_haertung: ohne ein visudo, das die
+# sudoers-Syntax des Zielsystems beurteilt; test_excel_objekte: ohne
+# importierbares Modul; test_onenote_import, test_sicherheits_log_kette).
+# Bis 2026-11-20 hat diese Schicht die Ausgabe GRUENER Waechter restlos
+# verworfen: die Zeile entstand und kam nie an. Genau der Fehler, den der Kopf
+# dieser Datei fuer Exit 2 beschreibt - gemeldet ist nicht bemerkt. Im Lauf
+# 00a0e81f war deshalb nicht zu sagen, ob der Laeufer ein taugliches visudo
+# fand oder zwei Zusagen stillschweigend ungemessen blieben; beides ergibt
+# Exit 0.
+# Gross geschrieben als Marker: "nicht geprueft" kommt auch in Pruefnamen und
+# Begruendungen vor, "NICHT GEPRUEFT" ist die AUSGABEFORM aller vier Waechter.
+# Der Marker darf mitten in der Zeile stehen (test_onenote_import: "– <zusage>
+# (NICHT GEPRUEFT: <grund>)").
+_NICHT_GEMESSEN = re.compile(r"NICHT GEPRUEFT")
+_ANSI = re.compile(r"\033\[[0-9;]*m")
+
+
+def _luecken(name: str, ausgabe: str) -> list[tuple[str, str]]:
+    """Zusagen, die ein Waechter ausdruecklich NICHT gemessen hat (je Zeile eine).
+
+    Eigene Funktion, damit sie pruefbar ist: in main() verborgen waere sie es
+    nicht (Waechter test_bsi_m6_m7.py ruft sie direkt auf, wie _auszug)."""
+    aus = []
+    for z in ausgabe.splitlines():
+        sauber = _ANSI.sub("", z).strip()
+        if _NICHT_GEMESSEN.search(sauber):
+            aus.append((name, sauber[:200]))
+    return aus
+
 
 def _auszug(ausgabe: str) -> str:
     """ALLE Fehlzeilen (sonst schnitt ein langer Waechter sie ab – erster
@@ -185,6 +216,7 @@ def main() -> int:
     nicht_gelaufen: list[tuple[str, str]] = []
     rot: list[tuple[str, str, str]] = []
     streichen: list[str] = []
+    luecken: list[tuple[str, str]] = []
     with cf.ThreadPoolExecutor(max_workers=a.parallel) as pool:
         for name, rc, _dauer, _ausgabe in pool.map(lambda d: lauf(d, a.zeitdeckel), ausgenommen):
             if rc == 0:
@@ -197,6 +229,10 @@ def main() -> int:
             letzte = [z for z in ausgabe.strip().splitlines() if z.strip()][-1:] or [""]
             if rc == 0:
                 gruen.append(name)
+                # Nur bei GRUENEN: bei rot und Exit 2 traegt der Auszug die
+                # Zeile ohnehin (ABBRUCH/FAIL), und doppelt gemeldet wandert
+                # dasselbe in zwei Abschnitte.
+                luecken += _luecken(name, ausgabe)
             elif rc == 2:
                 nicht_gelaufen.append((name, letzte[0][:160], _auszug(ausgabe)))
             else:
@@ -226,10 +262,24 @@ def main() -> int:
         print(f"── ausgenommen, aber GRUEN – aus {AUSNAHMEN.name} streichen: {len(streichen)}")
         for name in streichen:
             print(f"   {name}")
+    if luecken:
+        # Name UND Zeile, wie bei "ausgenommen, aber GRUEN" - damit es handelbar
+        # ist. Bewusst NICHT fail-closed: der Waechter LIEF, und den Grund hat er
+        # selbst geprueft (dort eine Positivkontrolle ueber das Werkzeug). Ein
+        # roter Lauf auf jedem Laeufer, dem ein Werkzeug fehlt, wuerde die Bilanz
+        # entwerten - und eine entwertete Bilanz liest am Ende niemand.
+        print(f"── gelaufen, aber Zusagen NICHT GEMESSEN: {len(luecken)}")
+        for name, z in luecken:
+            print(f"   {name}: {z}")
     for name, grund, ausgabe in rot:
         print(f"\n══ FAIL {name} ({grund}) – Ende der Ausgabe:\n{ausgabe}")
     print(f"\nBILANZ: {len(gruen)} gruen, {len(rot)} rot, {len(nicht_gelaufen)} nicht gelaufen, "
-          f"{len(ausn)} ausgenommen")
+          f"{len(ausn)} ausgenommen"
+          # Nur wenn es etwas zu tun gibt: eine Zahl, die in JEDER Zeile steht,
+          # wird zur Tapete (so geschehen mit "nicht gelaufen", Kopf dieser Datei).
+          + (", %d %s nicht gemessen" % (len(luecken),
+                                         "Zusage" if len(luecken) == 1 else "Zusagen")
+             if luecken else ""))
     if rot:
         # Befunde sind die staerkere Aussage als "nicht gemessen".
         return 1

@@ -3330,21 +3330,101 @@
 
             // Bereiche und Ablaufdatum je Schluessel (backend/agent_schluessel.py,
             // 2026-11-20). Der Katalog kommt vom Server, die Beschriftungen aus i18n.
+            // Vorgabe des Betreibers: "Gültig bis" steht IN der Zeile zwischen
+            // Neu-generieren und Loeschen; die Bereiche bearbeitet ein Stift in
+            // einem eigenen Fenster (die Kaestchen-Zeile je Schluessel war
+            // unuebersichtlich). Der Tooltip des Stifts nennt die aktuelle Wahl,
+            // damit sie ohne Klick sichtbar bleibt.
             let _katalog = [];
-            function rechteZeile(k, _tt) {
-                const hat = new Set(k.bereiche || []);
-                const kaesten = _katalog.map(b =>
-                    '<label style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap;">' +
-                    '<input type="checkbox" class="ak-bereich" value="' + esc(b) + '"' + (hat.has(b) ? ' checked' : '') + '>' +
-                    esc(_tt('app.key_b_' + b, b)) + '</label>').join('');
-                return '<div class="ak-rechte" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:.78rem;">' +
-                    '<span style="opacity:.75;">' + esc(_tt('app.key_bereiche', 'Gilt für:')) + '</span>' + kaesten +
-                    '<label style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap;">' +
-                    esc(_tt('app.key_ablauf', 'Gültig bis')) +
-                    ' <input type="date" class="ak-ablauf" value="' + esc(k.ablauf || '') + '"></label>' +
+            let _schluessel = [];
+            const _bName = (b, _tt) => _tt('app.key_b_' + b, b);
+            function bereicheText(k, _tt) {
+                const liste = (k.bereiche || []).map(b => _bName(b, _tt));
+                return liste.length ? liste.join(', ') : _tt('app.key_keine_bereiche', 'gilt nirgends');
+            }
+            function ablaufTeil(k, _tt) {
+                return '<label class="ak-ablauf-feld" style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap;font-size:.78rem;" title="' +
+                    esc(_tt('app.key_ablauf_hint', 'Gültig bis einschließlich diesem Tag – leer = unbefristet')) + '">' +
+                    esc(_tt('app.key_ablauf_kurz', 'bis')) +
+                    ' <input type="date" class="ak-ablauf" value="' + esc(k.ablauf || '') + '" style="width:9.5em;">' +
                     // Zustand als TEXT, nicht nur als Farbe (Register).
-                    (k.abgelaufen ? '<b class="ak-abgelaufen">' + esc(_tt('app.key_abgelaufen', 'abgelaufen – gilt nirgends mehr')) + '</b>' : '') +
+                    (k.abgelaufen ? ' <b class="ak-abgelaufen">' + esc(_tt('app.key_abgelaufen_kurz', 'abgelaufen')) + '</b>' : '') +
+                    '</label>';
+            }
+            function stiftTeil(k, _tt) {
+                const titel = _tt('app.key_rechte_titel', 'Gültigkeitsbereich bearbeiten') + ' – ' +
+                    _tt('app.key_bereiche', 'Gilt für:') + ' ' + bereicheText(k, _tt);
+                return '<button class="btn-icon btn-small ak-rechte" title="' + esc(titel) + '" aria-label="' +
+                    esc(_tt('app.key_rechte_titel', 'Gültigkeitsbereich bearbeiten')) + '">' + JarvisIcons.pencil() + '</button>';
+            }
+
+            // Fenster "Gültigkeitsbereich" – Muster wie die Profil-Berechtigungen
+            // (.modal + .open; display allein oeffnet kein .modal, Register).
+            function rechteFenster(k) {
+                const _tt = (x, d) => (window.t && window.t(x) !== x ? window.t(x) : d);
+                const alt = document.getElementById('ak-rechte-modal');
+                if (alt) alt.remove();
+                const hat = new Set(k.bereiche || []);
+                const m = document.createElement('div');
+                m.id = 'ak-rechte-modal';
+                m.className = 'modal';
+                m.style.zIndex = '10001';
+                m.innerHTML =
+                    '<div class="modal-content glass" style="max-width:560px;">' +
+                      '<div class="modal-header">' +
+                        // Kurzer Titel: der lange wurde mitsamt Schluesselnamen
+                        // abgeschnitten ("android-a…", optische Abnahme 2026-11-20).
+                        '<h2 title="' + esc(k.name || '') + '">' + esc(_tt('app.key_rechte_kurz', 'Gültigkeitsbereich')) + ' – ' + esc(k.name || '') + '</h2>' +
+                        '<button class="btn-icon ak-rm-zu" aria-label="' + esc(_tt('common.close', 'Schließen')) + '">' + JarvisIcons.close() + '</button>' +
+                      '</div>' +
+                      '<div class="modal-body" style="overflow-y:auto;">' +
+                        '<p class="kb-hint" style="margin-top:0;">' + esc(_tt('app.key_rechte_hinweis',
+                            'Der Schlüssel gilt nur für die angehakten Bereiche. Was hier fehlt, beantwortet der Server für diesen Schlüssel mit „nicht angemeldet“.')) + '</p>' +
+                        '<div class="form-group">' +
+                        // Kaestchen FEST dimensioniert und oben ausgerichtet: in der
+                        // Flex-Zeile quetschte ein langer Erklaerungstext das Kaestchen
+                        // (bei "Chat" sichtbar kleiner) und verschob den Textanfang.
+                        _katalog.map(b =>
+                            '<label class="checkbox-group" style="display:flex;align-items:flex-start;gap:10px;margin:0 0 10px;">' +
+                              '<input type="checkbox" class="ak-rm-bereich" value="' + esc(b) + '"' + (hat.has(b) ? ' checked' : '') +
+                              ' style="flex:0 0 auto;width:16px;height:16px;margin:2px 0 0;">' +
+                              '<span style="min-width:0;"><b>' + esc(_bName(b, _tt)) + '</b><br><span class="kb-hint">' +
+                              esc(_tt('app.key_bd_' + b, '')) + '</span></span>' +
+                            '</label>').join('') +
+                        '</div>' +
+                        '<div class="ak-rm-fehler" role="alert" style="margin-top:8px;"></div>' +
+                      '</div>' +
+                      // Fusszeile AUSSERHALB des rollenden Bereichs (.modal-content ist
+                      // eine Flex-Spalte): Speichern ist ohne Scrollen erreichbar – in
+                      // der ersten Fassung stand es unter acht Eintraegen ausser Sicht.
+                      '<div class="ak-rm-fuss" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--border);">' +
+                        '<button type="button" class="btn-secondary ak-rm-abbrechen" style="flex:0 0 auto;width:auto;">' + esc(_tt('profile.cancel', 'Abbrechen')) + '</button>' +
+                        '<button type="button" class="btn-primary ak-rm-speichern" style="flex:0 0 auto;width:auto;">' + esc(_tt('profile.save', 'Speichern')) + '</button>' +
+                      '</div>' +
                     '</div>';
+                document.body.appendChild(m);
+                const zu = () => m.remove();
+                m.querySelector('.ak-rm-zu').onclick = zu;
+                m.querySelector('.ak-rm-abbrechen').onclick = zu;
+                m.querySelector('.ak-rm-speichern').onclick = () => {
+                    const gewaehlt = Array.from(m.querySelectorAll('.ak-rm-bereich'))
+                        .filter(cb => cb.checked).map(cb => cb.value);
+                    const fehlerEl = m.querySelector('.ak-rm-fehler');
+                    api('/api/agent/keys/' + k.id, { method: 'PUT', body: JSON.stringify({ bereiche: gewaehlt }) })
+                        .then(r => r.json().catch(() => ({})).then(d => ({ ok: r.ok, d: d || {} })))
+                        .then(({ ok, d }) => {
+                            if (!ok || d.ok === false) {
+                                // Fehler bleibt stehen und das Fenster offen (ein Fehler
+                                // darf nicht von selbst verschwinden).
+                                fehlerEl.textContent = d.error || _tt('app.key_save_error', 'Speichern fehlgeschlagen.');
+                                return;
+                            }
+                            zu();
+                            load();
+                        })
+                        .catch(() => { fehlerEl.textContent = _tt('app.key_save_error', 'Speichern fehlgeschlagen.'); });
+                };
+                requestAnimationFrame(() => m.classList.add('open'));
             }
 
             function render(keys) {
@@ -3373,8 +3453,9 @@
                         '<button class="btn-icon btn-small ak-show ak-eye" title="' + esc(_tt('app.key_show', 'Anzeigen/Verbergen')) + '">' + EYE + '</button>' +
                         '<button class="btn-icon btn-small ak-copy" title="' + esc(_tt('common.copy', 'Kopieren')) + '">' + COPY + '</button>' +
                         '<button class="btn-icon btn-small ak-regen" title="' + esc(_tt('app.key_regen', 'Neu generieren')) + '">' + JarvisIcons.refresh() + '</button>' +
+                        ablaufTeil(k, _tt) +
+                        stiftTeil(k, _tt) +
                         '<button class="btn-icon btn-small ak-del" title="' + esc(_tt('common.delete', 'Löschen')) + '">' + JarvisIcons.trash() + '</button>' +
-                        rechteZeile(k, _tt) +
                         // Fehler bleibt stehen, bis die naechste Eingabe gelingt (ein
                         // Fehler darf nicht von selbst verschwinden).
                         '<div class="ak-fehler" role="alert"></div>';
@@ -3393,7 +3474,8 @@
                 api('/api/agent/keys').then(r => r.json()).then(d => {
                     if (aussenCb) aussenCb.checked = !!(d && d.aussenwirkung === true);
                     _katalog = (d && d.bereiche) || [];
-                    render((d && d.keys) || []);
+                    _schluessel = (d && d.keys) || [];
+                    render(_schluessel);
                 })
                     .catch(() => { listEl.innerHTML = `<div style="opacity:.6;font-size:.8rem;color:var(--danger);">${window.t('app.load_error')}</div>`; });
             }
@@ -3449,6 +3531,9 @@
                         navigator.clipboard.writeText(w);
                         b.title = (window.t && window.t('app.key_copied') !== 'app.key_copied') ? window.t('app.key_copied') : 'Kopiert'; setTimeout(() => b.title = o, 1500);
                     });
+                } else if (e.target.closest('.ak-rechte')) {
+                    const eintrag = _schluessel.find(x => x.id === id);
+                    if (eintrag) rechteFenster(eintrag);
                 } else if (e.target.closest('.ak-regen')) {
                     if (!confirm((window.t && window.t('app.key_regen_confirm') !== 'app.key_regen_confirm') ? window.t('app.key_regen_confirm') : 'Diesen Key neu generieren? Der alte Key wird ungültig.')) return;
                     api('/api/agent/keys/' + id, { method: 'PUT', body: JSON.stringify({ regenerate: true }) }).then(() => load());
@@ -3457,7 +3542,7 @@
                     api('/api/agent/keys/' + id, { method: 'DELETE' }).then(() => load());
                 }
             });
-            // Bereiche/Ablauf: eigener Speicherweg mit Fehleranzeige an der Zeile.
+            // Ablaufdatum: eigener Speicherweg mit Fehleranzeige an der Zeile.
             function rechteSpeichern(row, daten) {
                 const fehlerEl = row.querySelector('.ak-fehler');
                 const _tt3 = (k, d) => (window.t && window.t(k) !== k ? window.t(k) : d);
@@ -3474,13 +3559,6 @@
                     .catch(() => { if (fehlerEl) fehlerEl.textContent = _tt3('app.key_save_error', 'Speichern fehlgeschlagen.'); });
             }
             listEl.addEventListener('change', e => {
-                if (e.target.classList.contains('ak-bereich')) {
-                    const row = e.target.closest('[data-id]');
-                    const gewaehlt = Array.from(row.querySelectorAll('.ak-bereich'))
-                        .filter(cb => cb.checked).map(cb => cb.value);
-                    rechteSpeichern(row, { bereiche: gewaehlt });
-                    return;
-                }
                 if (e.target.classList.contains('ak-ablauf')) {
                     rechteSpeichern(e.target.closest('[data-id]'), { ablauf: e.target.value || '' });
                     return;

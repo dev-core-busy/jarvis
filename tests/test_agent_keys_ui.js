@@ -49,7 +49,11 @@ const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 // Der Bestand wie auf ECHT: genau ein benannter Key.
-const KEYS = [{ id: 'k1', name: 'kundenverwaltung', key: 'geheim-abc-123' }];
+const KEYS = [{ id: 'k1', name: 'kundenverwaltung', key: 'geheim-abc-123',
+                bereiche: ['agent', 'dateien'], ablauf: '', abgelaufen: false },
+              { id: 'k2', name: 'alt', key: 'x', bereiche: [], ablauf: '2020-01-01', abgelaufen: true }];
+// Katalog wie vom Server (backend/agent_schluessel.BEREICHE).
+const KATALOG = ['agent', 'chat', 'dateien', 'issues', 'jira', 'sprache', 'support', 'feedback'];
 
 let calls = [];
 
@@ -69,7 +73,7 @@ function appFetch(url, opts) {
     calls.push({ url: u, method, body });
 
     if (u.startsWith('/api/agent/keys')) {
-        if (method === 'GET') return j({ keys: KEYS, legacy: false });
+        if (method === 'GET') return j({ keys: KEYS, bereiche: KATALOG, legacy: false });
         return j({ ok: true, keys: KEYS });
     }
     if (u.startsWith('/api/settings/ldap')) return j({ access_mode: 'none' });
@@ -95,6 +99,9 @@ function makeDom({ apiOffen }) {
     window.confirm = () => true;
     window.alert = () => {};
     window.scrollTo = () => {};
+    // jsdom stellt requestAnimationFrame nur mit pretendToBeVisual bereit; die
+    // Fenster (.modal) oeffnen sich darueber (.open im naechsten Bild).
+    window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
     window.WebSocket = class { constructor() { this.readyState = 0; } send() {} close() {} addEventListener() {} };
     return dom;
 }
@@ -163,6 +170,72 @@ async function ladeApp(dom) {
     check('Knoepfe Anzeigen/Kopieren/Neu/Loeschen vorhanden',
         !!(liste1.querySelector('.ak-show') && liste1.querySelector('.ak-copy')
            && liste1.querySelector('.ak-regen') && liste1.querySelector('.ak-del')));
+
+    // ══════════════════════════════════════════════════════════════════════
+    section('2b) Gueltig bis IN der Zeile, Bereiche per Stift im eigenen Fenster');
+    // ══════════════════════════════════════════════════════════════════════
+    // Vorgabe des Betreibers 2026-11-20: "Gültig bis" zwischen Neu-generieren
+    // und Loeschen; die Kaestchen-Zeile je Schluessel war unuebersichtlich und
+    // ist durch einen Stift ersetzt.
+    const zeile = liste1.querySelector('[data-id="k1"]');
+    const kinder = zeile ? Array.from(zeile.children) : [];
+    const pos = (sel) => kinder.findIndex(el => el.matches(sel));
+    const [iRegen, iAbl, iStift, iDel] = ['.ak-regen', '.ak-ablauf-feld', '.ak-rechte', '.ak-del'].map(pos);
+    check('Reihenfolge in DERSELBEN Zeile: Neu → Gueltig bis → Stift → Loeschen',
+        iRegen >= 0 && iRegen < iAbl && iAbl < iStift && iStift < iDel,
+        `regen=${iRegen} bis=${iAbl} stift=${iStift} del=${iDel}`);
+    check('keine Kaestchen mehr in der Liste',
+        liste1.querySelectorAll('input[type=checkbox]').length === 0,
+        `${liste1.querySelectorAll('input[type=checkbox]').length} Kaestchen`);
+    const stift = zeile && zeile.querySelector('.ak-rechte');
+    check('der Knopf traegt das Stift-Symbol aus icons.js',
+        !!(stift && stift.querySelector('.jv-ico-pencil')));
+    const tt = stift ? stift.getAttribute('title') : '';
+    check('Tooltip nennt die aktuellen Bereiche (sichtbar ohne Klick)',
+        /Agent/.test(tt) && /Dateien/.test(tt) && !/Chat/.test(tt), tt);
+    check('abgelaufener Schluessel: Zustand als TEXT in seiner Zeile',
+        /abgelaufen/.test((liste1.querySelector('[data-id="k2"] .ak-ablauf-feld') || {}).textContent || ''));
+
+    calls = [];
+    stift.click();
+    await sleep(40);
+    const fenster = d1.getElementById('ak-rechte-modal');
+    check('Klick auf den Stift oeffnet das Fenster (.modal.open)',
+        !!(fenster && fenster.classList.contains('modal') && fenster.classList.contains('open')));
+    const kaesten = fenster ? Array.from(fenster.querySelectorAll('.ak-rm-bereich')) : [];
+    check('das Fenster listet ALLE Bereiche des Katalogs', kaesten.length === KATALOG.length,
+        `${kaesten.length} statt ${KATALOG.length}`);
+    check('angehakt ist genau die gespeicherte Wahl',
+        kaesten.filter(c => c.checked).map(c => c.value).join() === 'agent,dateien');
+    check('jeder Bereich hat eine Erklaerung',
+        fenster && Array.from(fenster.querySelectorAll('label.checkbox-group .kb-hint'))
+            .every(el => el.textContent.trim().length > 10));
+    check('Schliessen-Knopf traegt das Kreuz (×), nicht den Muelleimer',
+        !!(fenster && fenster.querySelector('.ak-rm-zu .jv-ico')) &&
+        !(fenster && fenster.querySelector('.ak-rm-zu .jv-ico-trash')));
+    const chatCb = kaesten.find(c => c.value === 'chat');
+    if (chatCb) chatCb.checked = true;
+    fenster.querySelector('.ak-rm-speichern').click();
+    await sleep(60);
+    const put = calls.find(c => c.method === 'PUT' && c.url === '/api/agent/keys/k1');
+    check('Speichern schickt die neue Wahl an den Server',
+        !!(put && put.body && JSON.stringify(put.body.bereiche) === JSON.stringify(['agent', 'chat', 'dateien'])),
+        put ? JSON.stringify(put.body) : 'kein PUT');
+    check('nach erfolgreichem Speichern ist das Fenster zu', !d1.getElementById('ak-rechte-modal'));
+
+    calls = [];
+    // Die Liste wurde nach dem Speichern NEU gezeichnet – die alte Zeile haengt
+    // nicht mehr im DOM, ein Ereignis an ihr erreichte den Listener nie.
+    const zeileNeu = liste1.querySelector('[data-id="k1"]');
+    check('(Positivkontrolle) die Zeile haengt nach dem Neuzeichnen im Dokument',
+        !!(zeileNeu && d1.body.contains(zeileNeu)));
+    const datum = zeileNeu.querySelector('.ak-ablauf');
+    datum.value = '2027-01-31';
+    datum.dispatchEvent(new w1.Event('change', { bubbles: true }));
+    await sleep(40);
+    const putA = calls.find(c => c.method === 'PUT' && c.url === '/api/agent/keys/k1');
+    check('Gueltig bis wird bei Aenderung gespeichert',
+        !!(putA && putA.body && putA.body.ablauf === '2027-01-31'), putA ? JSON.stringify(putA.body) : 'kein PUT');
 
     section('3) Kein doppelter Abruf beim zweiten Oeffnen');
     calls = [];

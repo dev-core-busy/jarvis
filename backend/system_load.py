@@ -101,7 +101,15 @@ def _prozess_zeile(p: psutil.Process, kerne: int) -> Dict[str, Any] | None:
 
 
 def _platten() -> List[Dict[str, Any]]:
-    aus: List[Dict[str, Any]] = []
+    """Ein Eintrag je DATEISYSTEM, nicht je Einhaengepunkt.
+
+    Der Dienst laeuft mit systemd-Haertung (ReadWritePaths/ProtectSystem):
+    /home, /home/jarvis, /media, /mnt, /opt/jarvis, /root, /var/tmp ... sind
+    dort Bind-Mounts DESSELBEN Dateisystems wie /. Nach Pfad dedupliziert
+    stand dieselbe Platte achtmal im Popup. Massgeblich ist deshalb `st_dev`;
+    je Geraet gewinnt der kuerzeste Pfad (also / vor /home).
+    """
+    je_geraet: Dict[int, Dict[str, Any]] = {}
     gesehen = set()
     for part in psutil.disk_partitions(all=False):
         if part.fstype in _FS_AUS or part.mountpoint in gesehen:
@@ -110,15 +118,22 @@ def _platten() -> List[Dict[str, Any]]:
         # `statvfs` beliebig lange – dieselbe Klasse wie `Path.is_mount()`.
         if part.fstype in ("cifs", "smb3", "nfs", "nfs4", "fuse.sshfs"):
             continue
+        gesehen.add(part.mountpoint)
+        try:
+            geraet = os.stat(part.mountpoint).st_dev
+        except (PermissionError, OSError):
+            continue
+        bisher = je_geraet.get(geraet)
+        if bisher is not None and len(bisher["mount"]) <= len(part.mountpoint):
+            continue
         try:
             u = psutil.disk_usage(part.mountpoint)
         except (PermissionError, OSError):
             continue
-        gesehen.add(part.mountpoint)
-        aus.append({"mount": part.mountpoint, "fstype": part.fstype,
-                    "gesamt": u.total, "belegt": u.used, "frei": u.free,
-                    "prozent": u.percent})
-    return aus
+        je_geraet[geraet] = {"mount": part.mountpoint, "fstype": part.fstype,
+                             "gesamt": u.total, "belegt": u.used, "frei": u.free,
+                             "prozent": u.percent}
+    return sorted(je_geraet.values(), key=lambda p: p["mount"])
 
 
 def bericht(anzahl: int = ANZAHL, fenster: float = FENSTER_S) -> Dict[str, Any]:

@@ -104,6 +104,42 @@ pl = b.get("platte") or {}
 check("Platte mit I/O und mindestens einer Partition",
       "io" in pl and len(pl.get("partitionen") or []) >= 1)
 
+abschnitt("3b. Platte: ein Eintrag je Dateisystem, nicht je Bind-Mount")
+# Der Dienst sieht unter systemd-Haertung /home, /var/tmp, /opt/jarvis ... als
+# Bind-Mounts DESSELBEN Dateisystems wie / – im Popup stand dieselbe Platte
+# achtmal. Attrappe mit der echten Form (sdiskpart / sdiskusage), /home steht
+# absichtlich VOR /, damit "kuerzester Pfad gewinnt" gemessen wird und nicht
+# die Reihenfolge.
+import types
+from collections import namedtuple
+
+_Teil = namedtuple("sdiskpart", "device mountpoint fstype opts")
+_Nutz = namedtuple("sdiskusage", "total used free percent")
+_GERAET = {"/home": 1, "/": 1, "/var/tmp": 1, "/opt/jarvis": 1,
+           "/boot": 2, "/daten": 3}
+_teile = [_Teil("/dev/sda1" if g == 1 else f"/dev/sd{g}", mp, "ext4", "rw")
+          for mp, g in _GERAET.items()]
+_teile.append(_Teil("//srv/x", "/mnt/rag/share_0", "cifs", "rw"))
+_echt_ps, _echt_os = system_load.psutil, system_load.os
+system_load.psutil = types.SimpleNamespace(
+    disk_partitions=lambda all=False: list(_teile),
+    disk_usage=lambda mp: _Nutz(100, 24 * _GERAET[mp], 100 - 24 * _GERAET[mp],
+                                24.0 * _GERAET[mp]))
+system_load.os = types.SimpleNamespace(
+    stat=lambda mp: types.SimpleNamespace(st_dev=_GERAET[mp]))
+try:
+    platten = system_load._platten()
+finally:
+    system_load.psutil, system_load.os = _echt_ps, _echt_os
+mounts = [p.get("mount") for p in platten]
+if not mounts:
+    abbruch("Attrappe liefert gar keine Platte – Messung nicht deutbar")
+check("je Geraet genau ein Eintrag (/, /boot, /daten)",
+      sorted(mounts) == ["/", "/boot", "/daten"], mounts)
+check("Bind-Mounts von / erscheinen nicht", not ({"/home", "/var/tmp",
+      "/opt/jarvis"} & set(mounts)), mounts)
+check("Netzlaufwerk bleibt draussen", "/mnt/rag/share_0" not in mounts, mounts)
+
 # ── 4. Endpunkt am Syntaxbaum ────────────────────────────────────────────
 abschnitt("4. Endpunkt: Admin + to_thread")
 baum = ast.parse(MAIN.read_text(encoding="utf-8"))

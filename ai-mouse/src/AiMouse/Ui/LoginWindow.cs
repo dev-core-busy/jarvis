@@ -33,6 +33,9 @@ internal sealed class LoginWindow : Form
     public LoginWindow(AppSettings settings, bool totpNoetig = false, string benutzer = "")
     {
         Text = settings.Marke + " — " + Texte.AnmeldenTitel;
+        // Dasselbe Symbol wie im Tray (TrayIconFactory.Fenster).
+        Icon = TrayIconFactory.Fenster;
+        ShowIcon = true;
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MinimizeBox = false;

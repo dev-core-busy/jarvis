@@ -148,6 +148,9 @@ internal sealed class SettingsWindow : Form
         // dem Paket. Ein Serverabruf erreicht diesen Dialog nicht zuverlaessig
         // (er ist auch ohne Anmeldung erreichbar).
         Text = current.Marke + " — " + Texte.Einstellungen.TrimEnd('…');
+        // Dasselbe Symbol wie im Tray (TrayIconFactory.Fenster).
+        Icon = TrayIconFactory.Fenster;
+        ShowIcon = true;
         StartPosition = FormStartPosition.CenterScreen;
         // ⚠ `Sizable` STATT `FixedDialog` – gemeldet 2026-09-14: „ich kann
         //    keine Einstellung fuer die Tastenkombination finden". Sie war da,

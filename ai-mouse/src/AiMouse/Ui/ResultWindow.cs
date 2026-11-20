@@ -48,6 +48,9 @@ internal sealed class ResultWindow : Form
         _cts = cts;
 
         Text = $"{Texte.Marke} — {title}";
+        // Dasselbe Symbol wie im Tray (TrayIconFactory.Fenster).
+        Icon = TrayIconFactory.Fenster;
+        ShowIcon = true;
         StartPosition = FormStartPosition.Manual;
         MinimizeBox = false;
         MaximizeBox = true;

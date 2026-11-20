@@ -153,7 +153,10 @@
          Bildschirmen auf dem auf, auf dem die Maus steht (vorher: Menue nahe
          am Rand auf dem Nachbarschirm, Dialoge auf dem Bildschirm nahe dem
          unsichtbaren Besitzerfenster bei -32000/-32000). -->
-    <Version>1.0.15</Version>
+    <!-- 1.0.16 (2026-11-20): Anmeldung, Ergebnis und Einstellungen tragen das
+         Tray-Symbol in Titel- und Taskleiste statt des generischen
+         WinForms-Symbols. Ohne Erhoehung kaeme es nur bei Neu-Downloads an. -->
+    <Version>1.0.16</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

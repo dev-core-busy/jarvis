@@ -13,6 +13,22 @@ internal static class TrayIconFactory
 {
     private static readonly Color Accent = Color.FromArgb(90, 170, 255);
 
+    /// <summary>Dasselbe Symbol fuer die Titelleiste und Taskleiste der Fenster
+    /// (Anmeldung, Ergebnis, Einstellungen).
+    ///
+    /// ⚠ GEMELDET 2026-11-20: die Zusatzfenster trugen das generische
+    /// WinForms-Symbol – in der Taskleiste war nicht zu erkennen, dass sie zur
+    /// AI-Maus gehoeren. Jetzt zeigen sie dasselbe Symbol wie der Tray.
+    ///
+    /// EINE Instanz fuer die ganze Laufzeit statt `Create()` je Fenster: jedes
+    /// `Create()` belegt ein GDI-Handle, und `Form.Dispose` gibt ein von aussen
+    /// gesetztes `Icon` nicht frei – je Ergebnisfenster ein Handle mehr, bis zum
+    /// Prozessende. Die geteilte Instanz wird nie freigegeben; das ist gewollt.
+    /// </summary>
+    public static Icon Fenster => _fenster.Value;
+
+    private static readonly Lazy<Icon> _fenster = new(Create);
+
     public static Icon Create()
     {
         using var bitmap = new Bitmap(32, 32, PixelFormat.Format32bppArgb);

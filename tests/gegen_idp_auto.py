@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Gegenprobe zu tests/test_idp_anmeldung_ui.js, Abschnitte D ("Automatisch anmelden")
-und E (ein Servername).
+"""Gegenprobe zu tests/test_idp_anmeldung_ui.js, Abschnitte D ("Automatisch anmelden"),
+E (ein Servername) und F (Notfall-Anmeldung im Modus "minimiert", samt Polung des
+umbenannten Schalters "AD-Anmeldung minimiert anzeigen", 2026-11-20).
 
 Jede Probe dreht EINE Regel zurueck (Ersetzung ganzer Zeilen), laesst den
 Waechter laufen und erwartet mindestens einen FAIL (Exit 1). Exit 2 des
 Waechters zaehlt NICHT als Biss (die Positivkontrolle hat dann abgebrochen).
 Vorher gruener Basislauf, danach Byte-Gleichheit aller Dateien per md5.
-Gepatcht werden nur idp_anmeldung.js und app.js – i18n.js und settings.html
+Gepatcht werden nur idp_anmeldung.js, settings_idp.js und app.js – i18n.js und settings.html
 bearbeitet der Betreiber parallel, die bleiben bewusst unangetastet.
 
 Exit 0 = alle Proben beissen, 1 = mindestens eine nicht, 2 = konnte nicht laufen.
@@ -31,6 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_idp_anmeldung_ui.js"
 MOD = "frontend/js/idp_anmeldung.js"
 APP = "frontend/js/app.js"
+ADMIN = "frontend/js/settings_idp.js"
 SICHERUNG = Path.home() / ".gegen_idp_auto_sicherung"
 
 PROBEN = [
@@ -97,6 +99,21 @@ PROBEN = [
     ("Tokenpruefung: Netzfehler ohne Ereignis", APP,
      "        }).catch(() => {\n            _maskeNachTokenpruefung();\n",
      "        }).catch(() => {\n            showLoginScreen();\n"),
+    # ── Notfall-Anmeldung (Abschnitt F) ──
+    ("Notfall-Link bleibt immer verborgen", MOD,
+     "        if (link) link.hidden = !!an;   // Aufklappen nur, solange es etwas aufzuklappen gibt\n", ""),
+    ("Notfall-Link ohne Wirkung", MOD,
+     "        aufklappVerdrahten();\n", ""),
+    ("Notfall-Link klappt auf, spaete Statusantwort klappt wieder zu", MOD,
+     "\n            ausweichen();\n            var feld = $('login-username');\n",
+     "\n            kennwortZeigen(true);\n            var feld = $('login-username');\n"),
+    ("Notfall-Link ohne Fokus ins Benutzerfeld", MOD,
+     "            if (feld) feld.focus();\n", ""),
+    ("Schalter zeigt die alte Polung", ADMIN,
+     "        if ($('idp-ad-minimiert')) $('idp-ad-minimiert').checked = d.oidc_ad_modus === 'fallback';\n",
+     "        if ($('idp-ad-minimiert')) $('idp-ad-minimiert').checked = d.oidc_ad_modus === 'zusaetzlich';\n"),
+    ("Schalter speichert die alte Polung", ADMIN,
+     "                ? 'fallback' : 'zusaetzlich',\n", "                ? 'zusaetzlich' : 'fallback',\n"),
 ]
 DATEIEN = sorted({p[1] for p in PROBEN})
 

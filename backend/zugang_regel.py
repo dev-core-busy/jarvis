@@ -95,7 +95,6 @@ AUSNAHMEN: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/branding/logo"): ("oeffentlich", "Logo – gebraucht auf der Anmeldemaske"),
     ("GET", "/api/branding/portal-video"): ("oeffentlich", "Portal-Video der Marke"),
     ("GET", "/api/cert"): ("oeffentlich", "Server-Zertifikat zum Importieren (oeffentlicher Schluessel)"),
-    ("GET", "/api/cert/status"): ("oeffentlich", "Anmeldemaske: ist das Zertifikat von einer CA ausgestellt? (nur ja/nein)"),
     ("POST", "/api/csp-report"): ("oeffentlich", "CSP-Verstossmeldungen des Browsers (BSI H4), ohne Sitzung gesendet"),
     ("GET", "/api/addin/version"): ("oeffentlich", "Versionsabgleich des Add-ins"),
     ("POST", "/api/addin/diag"): ("oeffentlich", "Start-Diagnose des Outlook-Add-ins (vor der Anmeldung, nur Journal)"),

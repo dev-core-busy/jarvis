@@ -6267,13 +6267,17 @@ def _oidc_mfa_anerkennen() -> bool:
     return _oidc_schalter("oidc_mfa_anerkennen", True)
 
 
-# Kennwortanmeldung (AD) neben der IdP-Anmeldung: "zusaetzlich" = immer
-# sichtbar (Vorgabe, Festlegung des Betreibers 2026-11-19 – bis dahin war es
-# "fallback"); "fallback" = nur sichtbar, wenn die IdP-Anmeldung scheitert.
+# Kennwortanmeldung (AD) neben der IdP-Anmeldung: "fallback" = eingeklappt
+# (Schalter "AD-Anmeldung minimiert anzeigen"), per Link aufklappbar
+# (Notfall-Anmeldung) und von selbst offen, wenn die IdP-Anmeldung scheitert –
+# VORGABE seit der Festlegung des Betreibers 2026-11-20, nachdem der Link es
+# gibt. "zusaetzlich" = immer sichtbar (Vorgabe vom 2026-11-19 bis dahin: ohne
+# Link war eine eingeklappte Maske ohne Notweg). Die Werte blieben beim
+# Umbenennen des Schalters gleich – gespeicherte Einstellungen gelten weiter.
 # Der ERSTE Eintrag ist die Vorgabe (_oidc_ad_modus). Nur die ANZEIGE der
 # Anmeldemaske – /api/login bleibt in beiden Faellen erreichbar (Ausweichweg,
 # Apps, Add-in, Notfallkonto). Ein gespeicherter Wert bleibt, wie er ist.
-_OIDC_AD_MODI = ("zusaetzlich", "fallback")
+_OIDC_AD_MODI = ("fallback", "zusaetzlich")
 
 
 def _oidc_ad_modus() -> str:
@@ -11216,21 +11220,6 @@ async def download_cert():
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
     return JSONResponse({"error": "Zertifikat nicht gefunden"}, status_code=404)
-
-
-@app.get("/api/cert/status")
-async def cert_status():
-    """Braucht die Anmeldemaske den Zertifikathinweis? (2026-11-18)
-
-    Liefert nur, ob das Serverzertifikat von einer Zertifizierungsstelle
-    ausgestellt ist – ``true``/``false``/``null`` (nicht feststellbar). Mehr
-    nicht: das Zertifikat selbst legt der Server ohnehin jedem Client im
-    TLS-Handshake vor, eine Ja/Nein-Auskunft darueber hat keinen
-    Schutzbedarf. Ohne Anmeldung, weil sie VOR der Anmeldung gebraucht wird.
-    """
-    from backend.security import zertifikat_von_ca  # noqa: PLC0415
-    return JSONResponse({"ca_ausgestellt": zertifikat_von_ca()},
-                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/generated/{name}")

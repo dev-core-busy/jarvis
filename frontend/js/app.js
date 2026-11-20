@@ -3744,28 +3744,36 @@
         });
     }
 
-    // Zertifikathinweis der Anmeldemaske nur, wenn er gebraucht wird
-    // (gemeldet 2026-11-18). Der Browser kann per Skript nicht sagen, ob er
-    // der Verbindung vertraut – ein weggeklicktes Warnfenster sieht hier
-    // genauso aus wie eine gueltige Kette. Der Server weiss aber, was er
-    // vorlegt: ist sein Zertifikat von einer Zertifizierungsstelle ausgestellt
-    // (Firmen-CA, Let's Encrypt), braucht niemand die Import-Anleitung.
-    // ⚠ NUR EIN ECHTES `true` NIMMT IHN WEG. Unbekannt, Fehler oder ein alter
-    // Server ohne den Endpunkt lassen ihn stehen – eine Auskunft, die die
-    // Seite nicht hat, darf den Hinweis nicht verschwinden lassen.
+    // Zertifikathinweis der Anmeldemaske nur bei UNSICHERER Verbindung
+    // (gemeldet 2026-11-18, erneut 2026-11-20: „entferne ENDLICH den
+    // ueberfluessigen Button, wenn eine sichere HTTPS Verbindung hergestellt
+    // ist").
+    //
+    // ⚠ WARUM DIE ZWEITE MELDUNG: bis 2026-11-20 entschied das eine
+    // Server-Auskunft (`GET /api/cert/status` – „ist mein Zertifikat von einer
+    // Zertifizierungsstelle ausgestellt?"). Die beantwortet eine ANDERE Frage
+    // als die gestellte: auf einem Server mit selbst ausgestelltem Zertifikat
+    // blieb der Knopf stehen, auch wenn der Browser das Zertifikat laengst
+    // importiert hat und die Verbindung gruen ist – gemessen auf DEV
+    // (`ca_ausgestellt: false`), waehrend er auf ECHT (`true`) schon weg war.
+    // Massgeblich ist jetzt allein die VERBINDUNG: laeuft die Maske ueber
+    // HTTPS (oder lokal), ist die Import-Anleitung ueberfluessig. Die Auskunft
+    // und ihr Endpunkt sind damit ersatzlos entfallen.
+    //
+    // Erreichbar bleibt die Hilfe dort, wo sie gebraucht wird: im Warn-Banner
+    // bei unsicherer Verbindung (`#btn-banner-help`) und nach der Anmeldung
+    // ueber das Schloss im Portal (`#security-indicator`).
+    //
     // ⚠ `style.display`, nicht `hidden`: `.btn-link` und `.login-extras`
-    // setzen `display:flex` und ueberstimmen das Attribut.
-    function zertHinweisAnpassen() {
-        fetch('/api/cert/status', { cache: 'no-store' })
-            .then(r => (r && r.ok) ? r.json() : null)
-            .then(d => {
-                if (!d || d.ca_ausgestellt !== true) return;
-                const btn = document.getElementById('btn-cert-help');
-                if (!btn) return;
-                const box = btn.closest('.login-extras');
-                (box || btn).style.display = 'none';
-            })
-            .catch(() => { /* Hinweis bleibt stehen */ });
+    // setzen `display:flex` und ueberstimmen das Attribut. Die Vorgabe im
+    // Markup ist `display:none` – ein Aufblitzen beim Laden gibt es damit
+    // nicht, und faellt diese Funktion aus, bleibt der Knopf weg statt
+    // faelschlich zu erscheinen.
+    function zertHinweisZeigen() {
+        const btn = document.getElementById('btn-cert-help');
+        if (!btn) return;
+        const box = btn.closest('.login-extras') || btn;
+        box.style.display = '';
     }
 
     function checkSecurity() {
@@ -3783,6 +3791,7 @@
             banner.hidden = false;
             banner.style.display = 'block';
             bannerText.textContent = window.t('panel.security_banner');
+            zertHinweisZeigen();
             if (indicator) {
                 indicator.className = 'security-badge';
                 indicator.title = window.t('panel.security_critical');
@@ -3804,7 +3813,6 @@
                 indicator.className = 'security-badge secure';
                 indicator.title = window.t('panel.security_secure');
             }
-            if (isHttps) zertHinweisAnpassen();
         }
 
         if (btnClose) {

@@ -1989,6 +1989,28 @@ body .wi-section { margin-bottom: var(--jv-abstand); }
     accent-color: var(--accent);
     cursor: pointer;
 }
+/* Notfall-Anmeldung: Link unter dem IdP-Knopf, klappt die eingeklappte
+   Kennwortanmeldung auf (Modus "minimiert", idp_anmeldung.js). Bewusst
+   unauffaellig – ein Textlink, kein zweiter Knopf. Farbe --text-secondary,
+   nicht --text-muted: gemessen 2026-11-20 hat --text-muted auf der hellen
+   Anmeldeflaeche nur 3,41:1 (Text braucht 4,5:1), --text-secondary 6,9:1
+   hell und 7,5:1 dunkel. */
+.idp-kennwort-link {
+    display: block;
+    margin: 14px auto 0;
+    padding: 4px 8px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-family: inherit;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+.idp-kennwort-link:hover,
+.idp-kennwort-link:focus-visible { color: var(--text-primary); }
+.idp-kennwort-link[hidden] { display: none; }
 /* Einziger Knopf der Maske (Ausweichweg, Kennwort verborgen): Aussehen des
    Hauptknopfs "Anmelden" (.btn-login in style.css). Zwei Klassen, damit es
    gegen .btn-link aus style.css (spaeter geladen) gewinnt. idp_anmeldung.js. */

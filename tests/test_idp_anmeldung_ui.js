@@ -20,6 +20,11 @@
  *     und bei mitgebrachtem Token erst, wenn app.js es verworfen hat. Dazu
  *     am Syntaxbaum von app.js: das Ereignis kommt NUR aus der gescheiterten
  *     Tokenpruefung, nicht aus showLoginScreen().
+ *  F  NOTFALL-ANMELDUNG (2026-11-20): im Modus "minimiert" (fallback) steht
+ *     unter dem IdP-Knopf der Link #btn-kennwort-zeigen; er ist genau dann
+ *     sichtbar, wenn die Kennwortanmeldung verborgen ist, klappt sie auf,
+ *     setzt den Fokus ins Benutzerfeld und bleibt offen, auch wenn die
+ *     Statusantwort "fallback" erst danach eintrifft. (Abschnitt B.)
  *  E  EIN SERVERNAME (2026-11-19): meldet der Status einen `ursprung` und
  *     steht die Seite unter einem anderen, wechselt "/" vorab dorthin – vor
  *     dem Haken (localStorage gilt je Ursprung) und vor dem IdP-Start. Nicht
@@ -80,12 +85,17 @@ check('Knopf-Bereich ist anfangs verborgen', /<div id="idp-login" hidden>/.test(
     check('Fehlerzeile und IdP-Knopf liegen NICHT im Kennwort-Bereich',
           !!kb && !kb.contains(d0.getElementById('login-error')) && !kb.contains(d0.getElementById('idp-login')));
     const z = d0.getElementById('idp-ad-modus-zeile');
-    check('Einstellung "AD-Anmeldung zusaetzlich" anfangs verborgen, mit Schalter',
-          !!z && z.hidden && !!d0.getElementById('idp-ad-zusaetzlich') && z.contains(d0.getElementById('idp-ad-zusaetzlich')));
+    check('Einstellung "AD-Anmeldung minimiert anzeigen" anfangs verborgen, mit Schalter',
+          !!z && z.hidden && !!d0.getElementById('idp-ad-minimiert') && z.contains(d0.getElementById('idp-ad-minimiert')));
+    const nl = d0.getElementById('btn-kennwort-zeigen');
+    check('Notfall-Link: ein Knopf (type=button, kein Absenden), anfangs verborgen, NICHT im Kennwort-Bereich',
+          !!nl && nl.tagName === 'BUTTON' && nl.getAttribute('type') === 'button' && nl.hidden && !!kb && !kb.contains(nl));
 }
 const THEME = lies('frontend/css/theme.css');
 check('theme.css: .idp-trenner[hidden] { display: none } (sonst ueberstimmt display:flex)',
       /\.idp-trenner\[hidden\]\s*\{\s*display:\s*none/.test(THEME));
+check('theme.css: .idp-kennwort-link[hidden] { display: none } (sonst ueberstimmt display:block)',
+      /\.idp-kennwort-link\[hidden\]\s*\{\s*display:\s*none/.test(THEME));
 {
     // Hauptknopf-Aussehen: zwei Klassen (gewinnt gegen .btn-link aus dem spaeter
     // geladenen style.css), Flaeche in der Akzentfarbe, Schrift aus der Variable.
@@ -205,6 +215,7 @@ function seite(url, antworten) {
     const sichtbar = (s) => !s.d.getElementById('kennwort-bereich').hidden;
     const trenner = (s) => !s.d.getElementById('idp-trenner').hidden;
     const haupt = (s) => s.d.getElementById('btn-idp-login').classList.contains('btn-idp-haupt');
+    const notfall = (s) => !s.d.getElementById('btn-kennwort-zeigen').hidden;
 
     s = seite('https://jarvis.test/', { aktiv: true, modus: 'fallback', einloesen: [] });
     await warte(60);
@@ -212,6 +223,26 @@ function seite(url, antworten) {
           !sichtbar(s) && !trenner(s) && s.d.getElementById('idp-login').hidden === false);
     check('fallback: Modus im Browser gemerkt', s.w.localStorage.getItem('jarvis_idp_ad_modus') === 'fallback');
     check('fallback: IdP-Knopf traegt das Hauptknopf-Aussehen (btn-idp-haupt)', haupt(s));
+    check('fallback: Notfall-Link "Mit Benutzername und Kennwort anmelden" sichtbar', notfall(s));
+    s.d.getElementById('btn-kennwort-zeigen').click();
+    check('Notfall-Link geklickt: Kennwort-Bereich und "oder" sichtbar, Link verborgen',
+          sichtbar(s) && trenner(s) && !notfall(s));
+    check('Notfall-Link geklickt: IdP-Knopf wieder Nebenknopf', !haupt(s));
+    check('Notfall-Link geklickt: Fokus im Benutzernamen',
+          s.d.activeElement === s.d.getElementById('login-username'));
+    s.w.close();
+
+    // Klick VOR der Statusantwort (gemerkter Modus): die spaete Antwort
+    // "fallback" darf die aufgeklappte Maske nicht wieder einklappen.
+    s = seite('https://jarvis.test/', { aktiv: true, modus: 'fallback', statusHalten: true, merk: 'fallback', einloesen: [] });
+    await warte(20);
+    const linkFrueh = s.d.getElementById('btn-kennwort-zeigen');
+    linkFrueh.click();
+    const offenFrueh = sichtbar(s);
+    if (s.z.statusFreigeben) s.z.statusFreigeben();
+    await warteBis(() => s.d.getElementById('idp-login').hidden === false, 3000);
+    check('Notfall-Link vor der Statusantwort geklickt: bleibt nach "fallback" aufgeklappt',
+          offenFrueh && sichtbar(s) && !notfall(s) && s.d.getElementById('idp-login').hidden === false);
     s.w.close();
 
     s = seite('https://jarvis.test/', { aktiv: true, modus: 'zusaetzlich', einloesen: [] });
@@ -219,9 +250,12 @@ function seite(url, antworten) {
     check('zusaetzlich: Kennwort-Bereich, "oder" und IdP-Knopf sichtbar',
           sichtbar(s) && trenner(s) && s.d.getElementById('idp-login').hidden === false);
     check('zusaetzlich: IdP-Knopf bleibt Nebenknopf (Hauptknopf ist "Anmelden")', !haupt(s));
+    check('zusaetzlich: kein Notfall-Link (es gibt nichts aufzuklappen)', !notfall(s));
     s.w.close();
 
-    // Vorgabe seit 2026-11-19 "zusaetzlich": nur ein AUSDRUECKLICHES fallback verbirgt.
+    // Die VORGABE entscheidet der Server (seit 2026-11-20 "fallback") und meldet sie
+    // immer mit. Fehlt ad_modus trotzdem (alter Server), zeigt die Maske das
+    // Kennwort: nur ein AUSDRUECKLICHES fallback verbirgt (fail-open).
     s = seite('https://jarvis.test/', { aktiv: true, ohneModus: true, einloesen: [] });
     await warte(60);
     check('Status ohne ad_modus: Kennwort-Bereich sichtbar (Vorgabe zusaetzlich, fail-open)',
@@ -244,6 +278,7 @@ function seite(url, antworten) {
     check('fallback + IdP-Anmeldung gescheitert: Kennwort sichtbar, Meldung steht da',
           sichtbar(s) && trenner(s) && !s.d.getElementById('login-error').hidden);
     check('fallback + gescheitert: IdP-Knopf wieder Nebenknopf', !haupt(s));
+    check('fallback + gescheitert: kein Notfall-Link (schon aufgeklappt)', !notfall(s));
     s.w.close();
 
     s = seite('https://jarvis.test/?anmeldung=idp', { aktiv: true, modus: 'fallback', einloesen: [
@@ -286,27 +321,27 @@ function seite(url, antworten) {
         for (const f of ['i18n.js', 'sitzung.js', 'tabfill.js', 'settings_idp.js']) w.eval(lies('frontend/js/' + f));
         d.dispatchEvent(new w.Event('DOMContentLoaded'));
         const E = w.IdpEinstellungen, zeile = d.getElementById('idp-ad-modus-zeile');
-        const cb = d.getElementById('idp-ad-zusaetzlich'), aktiv = d.getElementById('idp-aktiv');
+        const cb = d.getElementById('idp-ad-minimiert'), aktiv = d.getElementById('idp-aktiv');
         if (!E || !E._zeigen) { console.log('ABBRUCH (Exit 2): settings_idp.js nicht geladen'); bilanz = true; process.exit(2); }
         E._zeigen({ oidc_aktiv: true, oidc_ad_modus: 'zusaetzlich', namensclaims: [] });
-        check('Einstellung: IdP an -> Schalter sichtbar und gesetzt (zusaetzlich)', !zeile.hidden && cb.checked);
+        check('Einstellung: IdP an, zusaetzlich -> Schalter sichtbar und AUS', !zeile.hidden && !cb.checked);
         E._zeigen({ oidc_aktiv: true, oidc_ad_modus: 'fallback', namensclaims: [] });
-        check('Einstellung: fallback -> Schalter aus', !zeile.hidden && !cb.checked);
+        check('Einstellung: fallback -> Schalter "minimiert" AN', !zeile.hidden && cb.checked);
         E._zeigen({ oidc_aktiv: false, oidc_ad_modus: 'fallback', namensclaims: [] });
         check('Einstellung: IdP aus -> Schalter verborgen', zeile.hidden);
         aktiv.checked = true; aktiv.dispatchEvent(new w.Event('change'));
         check('Einstellung: IdP-Haken setzen blendet den Schalter ein', !zeile.hidden);
         aktiv.checked = false; aktiv.dispatchEvent(new w.Event('change'));
         check('Einstellung: IdP-Haken entfernen blendet ihn aus', zeile.hidden);
-        aktiv.checked = true; cb.checked = true;
+        aktiv.checked = true; cb.checked = false;
         d.getElementById('idp-speichern').click();
         await warte(30);
-        check('Speichern schickt oidc_ad_modus=zusaetzlich', posts.length === 1 && posts[0].oidc_ad_modus === 'zusaetzlich',
+        check('Speichern (minimiert aus) schickt oidc_ad_modus=zusaetzlich', posts.length === 1 && posts[0].oidc_ad_modus === 'zusaetzlich',
               JSON.stringify(posts));
-        cb.checked = false;
+        cb.checked = true;
         d.getElementById('idp-speichern').click();
         await warte(30);
-        check('Speichern schickt oidc_ad_modus=fallback', posts.length === 2 && posts[1].oidc_ad_modus === 'fallback');
+        check('Speichern (minimiert an) schickt oidc_ad_modus=fallback', posts.length === 2 && posts[1].oidc_ad_modus === 'fallback');
         w.close();
     }
 
@@ -333,9 +368,13 @@ function seite(url, antworten) {
               JSON.stringify(knopfTexte));
         const vorgabe = (SETTINGS.match(/data-i18n="login\.idp_button">([^<]*)</) || [])[1];
         check('Knopf: Vorgabetext im Markup = DE-Wert', vorgabe === knopfTexte[0], vorgabe);
-        const zitat = wert('security.idp_ad_zusaetzlich_hint');
+        const zitat = wert('security.idp_ad_minimiert_hint');
         check('Einstellungshinweis zitiert den Knopf mit dem neuen Text (DE + EN)',
               zitat.length === 2 && zitat[0].includes('„' + knopfTexte[0] + '“') && zitat[1].includes('“' + knopfTexte[1] + '”'));
+        const linkTexte = wert('login.idp_kennwort_zeigen');
+        check('Einstellungshinweis zitiert den Notfall-Link mit seinem Text (DE + EN)',
+              linkTexte.length === 2 && zitat.length === 2 && zitat[0].includes('„' + linkTexte[0] + '“') && zitat[1].includes('“' + linkTexte[1] + '”'),
+              JSON.stringify(linkTexte));
     }
 
     // ── D: Automatisch anmelden ─────────────────────────────────────────────

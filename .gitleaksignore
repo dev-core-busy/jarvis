@@ -71,10 +71,17 @@ tests/test_agent_key_eigen.py:generic-api-key:164
 # 2026-11-20, Commit 820f2e52: zwei erfundene Werte in der Positivkontrolle der
 # Ausgangspruefung von mail_schutz ("3. Ausgangspruefung") - die Proben belegen,
 # dass genau diese Muster erkannt werden, also MUSS das Muster dort stehen.
-# AKIAABCDEFGHIJKLMNOP ist eine durchgezaehlte Buchstabenfolge ohne Entropie,
-# das JWT das Standardbeispiel (Nutzlast sub=1234567890, Signatur "abcdefghijk").
+# Der AWS-Wert ist ein AKIA-Praefix mit durchgezaehlter Buchstabenfolge (ohne
+# Entropie), das JWT das Standardbeispiel (Nutzlast sub=1234567890).
+# ⚠ DIESE DATEI WIRD SELBST GESCANNT. In a78fdcc8 stand der AWS-Wert im
+# Klartext in dieser Begruendung, und gitleaks meldete prompt
+# ".gitleaksignore:aws-access-token:74". Aus der aktuellen Fassung ist er
+# entfernt; der Eintrag mit SHA darunter deckt nur den Fund in jenem Commit ab,
+# den die Historien-Pruefung weiterhin sieht (wie bei test_broker_totp oben).
+# Wer hier einen Fehlalarm begruendet, schreibt den WERT nicht aus.
 # Erstmals mit gitleaks 8.28.0 SELBST gemessen (Fingerabdruecke uebernommen,
 # nicht nachgerechnet): der Privatschluessel eine Zeile darueber ist kein Fund,
 # weil der Rumpf zu kurz ist - ein geratener dritter Eintrag waere falsch gewesen.
 tests/test_mail_schutz.py:aws-access-token:276
 tests/test_mail_schutz.py:jwt:277
+a78fdcc85116cc60e0eaca3b4d4994fe8f43b116:.gitleaksignore:aws-access-token:74

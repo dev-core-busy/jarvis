@@ -556,8 +556,8 @@ def _konstante(name):
 
 
 AD_MODI = _konstante("_OIDC_AD_MODI")
-pruefe(isinstance(AD_MODI, tuple) and AD_MODI[:1] == ("zusaetzlich",) and "fallback" in AD_MODI,
-       "_OIDC_AD_MODI: Vorgabe 'zusaetzlich' (Festlegung 2026-11-19), daneben 'fallback'")
+pruefe(isinstance(AD_MODI, tuple) and AD_MODI[:1] == ("fallback",) and "zusaetzlich" in AD_MODI,
+       "_OIDC_AD_MODI: Vorgabe 'fallback' = minimiert (Festlegung 2026-11-20), daneben 'zusaetzlich'")
 
 
 pruefe("app.get('/api/login/oidc/start')" in _dek(FUNK["oidc_start"])
@@ -1047,20 +1047,20 @@ ns, _ = _ns(dict(EINST, oidc_mfa_anerkennen=False))
 pruefe(ns["_oidc_mfa_anerkennen"]() is False, "ausdruecklich aus bleibt aus")
 
 abschnitt("3b. Kennwortanmeldung neben dem IdP (oidc_ad_modus)")
-for wert, soll in ((None, "zusaetzlich"), ("zusaetzlich", "zusaetzlich"), (" Zusaetzlich ", "zusaetzlich"),
+for wert, soll in ((None, "fallback"), ("zusaetzlich", "zusaetzlich"), (" Zusaetzlich ", "zusaetzlich"),
                    ("fallback", "fallback"), (" Fallback ", "fallback"),
-                   ("immer", "zusaetzlich"), ("", "zusaetzlich")):
+                   ("immer", "fallback"), ("", "fallback")):
     ns, _ = _ns(dict(EINST, **({} if wert is None else {"oidc_ad_modus": wert})))
     pruefe(ns["_oidc_ad_modus"]() == soll, "ad_modus %r -> %r" % (wert, soll))
 ns, _ = _ns(EINST)
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
-pruefe(d == {"aktiv": True, "ad_modus": "zusaetzlich"}, "Status: aktiv + Vorgabe zusaetzlich", )
+pruefe(d == {"aktiv": True, "ad_modus": "fallback"}, "Status: aktiv + Vorgabe fallback (minimiert)", )
 ns, _ = _ns(dict(EINST, oidc_ad_modus="fallback"))
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
 pruefe(d == {"aktiv": True, "ad_modus": "fallback"}, "Status: gespeichertes fallback bleibt fallback")
 ns, _ = _ns(dict(EINST, oidc_ad_modus="zusaetzlich"))
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
-pruefe(d == {"aktiv": True, "ad_modus": "zusaetzlich"}, "Status: zusaetzlich")
+pruefe(d == {"aktiv": True, "ad_modus": "zusaetzlich"}, "Status: gespeichertes zusaetzlich bleibt zusaetzlich")
 ns, _ = _ns(dict(EINST, oidc_aktiv=False, oidc_ad_modus="zusaetzlich"))
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
 pruefe(d == {"aktiv": False}, "Status bei ausgeschaltetem IdP unveraendert {aktiv: false}")
@@ -1073,7 +1073,7 @@ ns, _ = _ns(dict(EINST, oidc_redirect_uri=_RU))
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
 pruefe(d.get("ursprung") == "https://192.0.2.30",
        "Positivkontrolle: feste Rueckkehradresse -> Status nennt ihren Ursprung (%s)" % d)
-pruefe(d.get("aktiv") is True and d.get("ad_modus") == "zusaetzlich", "... neben aktiv und ad_modus")
+pruefe(d.get("aktiv") is True and d.get("ad_modus") == "fallback", "... neben aktiv und ad_modus")
 ns, _ = _ns(EINST)
 d = json.loads(asyncio.run(ns["oidc_status"]()).body)
 pruefe("ursprung" not in d, "ohne feste Rueckkehradresse kein Ursprung (abgeleitet waere hinter Proxy intern)")

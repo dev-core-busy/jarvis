@@ -4,8 +4,10 @@
    Zwei Stellen:
    * Unter-Container "Anmeldung ueber den IdP" im Bereich Berechtigungen
      (GET/POST /api/admin/oidc, POST /api/admin/oidc/test). Darin der Schalter
-     "AD-Anmeldung zusaetzlich" (oidc_ad_modus: aus = "fallback", an =
-     "zusaetzlich") – nur sichtbar, solange "Anmeldung ueber den IdP
+     "AD-Anmeldung minimiert anzeigen" (oidc_ad_modus: an = "fallback", aus =
+     "zusaetzlich"; bis 2026-11-20 hiess er "AD-Anmeldung zusaetzlich" und war
+     umgekehrt gepolt – die gespeicherten Werte sind dieselben; Vorgabe seit
+     2026-11-20 "fallback", also an) – nur sichtbar, solange "Anmeldung ueber den IdP
      anbieten" angehakt ist. Geladen wird beim
      ersten Aufklappen. Das Client-Secret kommt nie zurueck – das Feld bleibt
      leer, darunter steht nur, ob eines hinterlegt ist; leer speichern laesst
@@ -46,7 +48,7 @@
     // ── Unter-Container: Verbindung zum IdP ─────────────────────────────
 
     // Der Modus-Schalter gilt nur fuer die IdP-Anmeldung: ohne sie gibt es
-    // nichts, wozu die Kennwortanmeldung "zusaetzlich" sein koennte.
+    // nichts, neben dem die Kennwortanmeldung minimiert stehen koennte.
     function modusZeile() {
         var z = $('idp-ad-modus-zeile'), cb = $('idp-aktiv');
         if (z) z.hidden = !(cb && cb.checked);
@@ -54,7 +56,7 @@
 
     function zeigen(d) {
         if ($('idp-aktiv')) $('idp-aktiv').checked = !!d.oidc_aktiv;
-        if ($('idp-ad-zusaetzlich')) $('idp-ad-zusaetzlich').checked = d.oidc_ad_modus === 'zusaetzlich';
+        if ($('idp-ad-minimiert')) $('idp-ad-minimiert').checked = d.oidc_ad_modus === 'zusaetzlich';
         modusZeile();
         if ($('idp-issuer')) $('idp-issuer').value = d.oidc_issuer || '';
         if ($('idp-client-id')) $('idp-client-id').value = d.oidc_client_id || '';
@@ -115,8 +117,8 @@
         var btn = $('idp-speichern');
         var rumpf = {
             oidc_aktiv: !!($('idp-aktiv') && $('idp-aktiv').checked),
-            oidc_ad_modus: ($('idp-ad-zusaetzlich') && $('idp-ad-zusaetzlich').checked)
-                ? 'zusaetzlich' : 'fallback',
+            oidc_ad_modus: ($('idp-ad-minimiert') && $('idp-ad-minimiert').checked)
+                ? 'fallback' : 'zusaetzlich',
             oidc_issuer: ($('idp-issuer') || {}).value || '',
             oidc_client_id: ($('idp-client-id') || {}).value || '',
             oidc_namensclaim: ($('idp-namensclaim') || {}).value || '',

@@ -11,9 +11,15 @@
       Verlangt der Server den Zwei-Faktor-Code, erscheint #idp-totp.
    3. Fehler (/?idp_fehler=<kennung>) stehen in #login-error, uebersetzt.
    4. Kennwortanmeldung (AD, #kennwort-bereich) neben dem IdP: der Server
-      meldet ad_modus. "zusaetzlich" (Vorgabe) -> immer sichtbar. "fallback"
-      -> verborgen, bis die Anmeldung ueber den IdP scheitert (Fehlerkennung,
-      Einloesen abgelehnt, Server nicht erreichbar). FAIL-OPEN: jeder Zweifel
+      meldet ad_modus (die Vorgabe entscheidet der Server, seit 2026-11-20
+      "fallback"). "zusaetzlich" -> immer sichtbar. "fallback"
+      (Einstellung "AD-Anmeldung minimiert anzeigen") -> eingeklappt, bis die
+      Anmeldung ueber den IdP scheitert (Fehlerkennung, Einloesen abgelehnt,
+      Server nicht erreichbar) ODER jemand sie ueber den Link
+      #btn-kennwort-zeigen aufklappt (Notfall-Anmeldung, 2026-11-20: faellt
+      der IdP still aus, ohne eine Fehlerkennung zu liefern, gab es vorher
+      keinen Weg zur Kennwortmaske). Der Link ist genau dann sichtbar, wenn
+      der Bereich verborgen ist. FAIL-OPEN: jeder Zweifel
       (Status nicht lesbar, keine Antwort binnen SICHERUNG_MS, IdP aus) zeigt
       sie – ein verstecktes Formular ohne funktionierenden IdP sperrte alle
       aus. Damit die Maske nicht kurz aufblitzt, merkt sich der Browser den
@@ -101,7 +107,9 @@
     }
     function kennwortZeigen(an) {
         var b = $('kennwort-bereich'), tr = $('idp-trenner'), k = $('btn-idp-login');
+        var link = $('btn-kennwort-zeigen');
         if (b) b.hidden = !an;
+        if (link) link.hidden = !!an;   // Aufklappen nur, solange es etwas aufzuklappen gibt
         if (tr) tr.hidden = !an;   // "oder" nur, wenn es etwas zu waehlen gibt
         // Allein auf der Maske ist der IdP-Knopf der Hauptknopf (Aussehen wie "Anmelden").
         if (k) k.classList.toggle('btn-idp-haupt', !an);
@@ -109,6 +117,19 @@
     function ausweichen() {
         ausgewichen = true;
         kennwortZeigen(true);
+    }
+
+    // Notfall-Anmeldung: der Link klappt die Kennwortanmeldung auf. Ueber
+    // ausweichen(), damit eine spaeter eintreffende Statusantwort "fallback"
+    // sie nicht wieder einklappt.
+    function aufklappVerdrahten() {
+        var link = $('btn-kennwort-zeigen');
+        if (!link) return;
+        link.addEventListener('click', function () {
+            ausweichen();
+            var feld = $('login-username');
+            if (feld) feld.focus();
+        });
     }
 
     function adresseAufraeumen() {
@@ -354,6 +375,7 @@
         // Dieselbe Bedingung wie in app.js (`if (token)` -> erst pruefen).
         autoLage.maske = autoLage.maske || !window.JarvisSitzung.token();
         autoHakenVerdrahten();
+        aufklappVerdrahten();
         knopfZeigen();
         codeVerdrahten();
         if (!q) return;

@@ -56,7 +56,7 @@
 
     function zeigen(d) {
         if ($('idp-aktiv')) $('idp-aktiv').checked = !!d.oidc_aktiv;
-        if ($('idp-ad-minimiert')) $('idp-ad-minimiert').checked = d.oidc_ad_modus === 'zusaetzlich';
+        if ($('idp-ad-minimiert')) $('idp-ad-minimiert').checked = d.oidc_ad_modus === 'fallback';
         modusZeile();
         if ($('idp-issuer')) $('idp-issuer').value = d.oidc_issuer || '';
         if ($('idp-client-id')) $('idp-client-id').value = d.oidc_client_id || '';

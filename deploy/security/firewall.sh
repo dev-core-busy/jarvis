@@ -82,6 +82,14 @@ FW_UNIT_DIR="${JARVIS_UNIT_DIR:-/etc/systemd/system}"
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 RUECKFALL_DATEI="${JARVIS_FW_RUECKFALL:-/etc/jarvis/ssh-netze.rueckfall}"
 
+# Protokoll verworfener Pakete (Haertung B11). Die Praefixe sind die Suchmarken
+# fuer die Ueberwachung (B13) – auf BEIDEN Wegen dieselben, auch auf dem
+# iptables-Weg (iptables-nft schreibt ohnehin in nftables). Ausgehend
+# protokolliert backend/egress_guard.py mit "nft-out-drop: ".
+FW_LOG_RATE="5/minute"
+FW_LOG_PREFIX_IN="nft-in-drop: "
+FW_LOG_PREFIX_FWD="nft-fwd-drop: "
+
 # ── SSH_NETZE (BSI M7) ───────────────────────────────────────────────────────
 BROKER_CONF="${JARVIS_BROKER_CONF:-/etc/jarvis/broker.conf}"
 
@@ -273,6 +281,16 @@ _nft_regeln_text() {
     # Zeitfenster ohne Filter entsteht. Das `table`+`delete`-Paar am Anfang macht
     # das auch beim ERSTEN Lauf fehlerfrei (delete auf eine nicht vorhandene
     # Tabelle waere sonst ein Fehler).
+    # VERWORFENES PROTOKOLLIEREN (Haertung B11, Checkliste 52): die LETZTE Regel
+    # jeder Kette schreibt, was gleich an der policy drop scheitert, mit
+    # $FW_LOG_PREFIX_* ins Kernel-Journal (journalctl -k). Sie muss HINTER allen
+    # accept-Regeln stehen – davor protokollierte sie auch erlaubten Verkehr.
+    # Gedrosselt auf $FW_LOG_RATE: ein Portscan schreibt sonst das Journal voll.
+    # NUR an den Host gerichtete Pakete (meta pkttype host): auf DEV gemessen
+    # (2026-11-20) verbrauchte mDNS-Multicast aus dem LAN (224.0.0.251:5353)
+    # drei der fuenf Zeilen je Minute, ein Zugriff von aussen bekam nur zwei.
+    # Rundsendungen sind Grundrauschen, kein Zugriff – sie fallen weiter an der
+    # Policy, nur ohne Zeile. Die Regel verwirft selbst nichts.
     cat <<NFT
 table inet jarvis_fw {}
 delete table inet jarvis_fw
@@ -285,9 +303,11 @@ table inet jarvis_fw {
         ip protocol icmp accept
         ip6 nexthdr ipv6-icmp accept
         tcp dport { $ports } ct state new accept$ssh_regeln
+        meta pkttype host limit rate $FW_LOG_RATE log prefix "$FW_LOG_PREFIX_IN"
     }
     chain forward {
         type filter hook forward priority filter; policy drop;
+        meta pkttype host limit rate $FW_LOG_RATE log prefix "$FW_LOG_PREFIX_FWD"
     }
 }
 NFT
@@ -356,6 +376,16 @@ regeln_setzen() {
                 "$ipt" -A JARVIS-IN -p tcp -s "$netz" --dport 22 -m conntrack --ctstate NEW -j ACCEPT
             done
         fi
+        # 4c) Verworfenes protokollieren (B11) – als LETZTE Regel der Kette:
+        #     was hier ankommt, faellt nach dem Ruecksprung an der Policy DROP.
+        #     JARVIS-IN wird oben geleert, die Zeile steht also genau einmal da.
+        #     Nur Unicast an den Host – Begruendung bei _nft_regeln_text.
+        local log_arg=(-m pkttype --pkt-type unicast -m limit --limit "${FW_LOG_RATE/minute/min}" -j LOG)
+        "$ipt" -A JARVIS-IN "${log_arg[@]}" --log-prefix "$FW_LOG_PREFIX_IN"
+        # FORWARD hat keine eigene Kette (Tailscale haengt dort seine ein):
+        # anhaengen nur, wenn die Zeile noch fehlt – sonst waechst sie je Lauf.
+        "$ipt" -C FORWARD "${log_arg[@]}" --log-prefix "$FW_LOG_PREFIX_FWD" 2>/dev/null \
+            || "$ipt" -A FORWARD "${log_arg[@]}" --log-prefix "$FW_LOG_PREFIX_FWD"
 
         # Kette einhaengen (nur einmal) – NACH ts-input, damit Tailscale zuerst
         # entscheidet.

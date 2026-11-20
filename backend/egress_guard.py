@@ -183,6 +183,16 @@ def _render_nft(uid, resolvers):
         "        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } accept\n"
         "        ip6 daddr { fe80::/10, fc00::/7 } accept\n"
         f"{dns}"
+        # Verworfenes protokollieren (Haertung B11): dieselbe Bindung an den
+        # Sandbox-Benutzer wie das drop darunter – ungebunden schriebe die
+        # Zeile auch fuer Kernel-Sockets, die gar nicht verworfen werden.
+        # "flags skuid" nennt den Benutzer im Journal, die Drossel haelt einen
+        # Lauf mit tausend Fehlversuchen aus dem Journal heraus. Laufende
+        # Ketten bekommen die Zeile erst mit einem neuen setup() (Einrichten /
+        # Reparieren); ein fehlendes Protokoll gilt bewusst NICHT als
+        # "veraltet" (kette_veraltet), denn das loeste die Selbstheilung aus
+        # und aenderte die Kette auf jedem Server beim naechsten Update.
+        f"        meta skuid {uid} limit rate 5/minute log prefix \"nft-out-drop: \" flags skuid\n"
         # ⚠ DAS DROP MUSS AUF DEN SANDBOX-BENUTZER BESCHRAENKT SEIN.
         # Ein nacktes "drop" trifft auch Verkehr OHNE Socket-Eigentuemer – und
         # das sind die KERNEL-Sockets: der CIFS- und der NFS-Client des Kernels

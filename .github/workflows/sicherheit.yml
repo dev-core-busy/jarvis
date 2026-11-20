@@ -51,11 +51,13 @@ jobs:
       # dem pip-audit-Abbruch).
       # openssh-server: test_bsi_m6_m7 misst die SSH-Grenzen mit dem echten
       # `sshd -T` gegen eine Sandkasten-Konfiguration (ohne sshd -> Exit 2).
-      - name: Systempakete (OCR/PDF, Wortliste, Sandbox, ffmpeg, sshd wie auf den Servern)
+      # nftables: test_firewall_log prueft die Regelsaetze mit dem echten
+      # nft-Parser im Wegwerf-Namensraum (unshare -rn; ohne nft -> Exit 2).
+      - name: Systempakete (OCR/PDF, Wortliste, Sandbox, ffmpeg, sshd, nft wie auf den Servern)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
-            tesseract-ocr tesseract-ocr-deu poppler-utils wngerman bubblewrap ffmpeg openssh-server >/dev/null
+            tesseract-ocr tesseract-ocr-deu poppler-utils wngerman bubblewrap ffmpeg openssh-server nftables >/dev/null
           # Ubuntu 24.04 sperrt unprivilegierte User-Namespaces per AppArmor;
           # Debian (die Server) nicht. unshare -r / bwrap brauchen sie.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true

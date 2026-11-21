@@ -2,11 +2,14 @@
 # Jarvis AI Desktop Agent – Docker Compose
 # Startet Jarvis Web-UI + VNC-Desktop + WhatsApp-Bridge (alles in einem Container)
 #
-# Schnellstart:
-#   docker compose up -d
+# Schnellstart (zeigt am Ende Adresse, Benutzer und Kennwort an):
+#   curl -fsSL https://jarvis-ai.info/downloads/docker-install.sh | bash
 #   Browser: https://<server-ip>  (SSL-Warnung bestätigen)
-#   Login:   jarvis / Erstkennwort aus  docker logs jarvis | grep Erstkennwort
+#   Login:   jarvis / Erstkennwort aus der Abschlussmeldung des Skripts,
+#            spaeter erneut:  docker exec jarvis cat /app/data/.erstkennwort
 #            (oder JARVIS_PASSWORD setzen; Wechsel beim ersten Login ist Pflicht)
+#   Von Hand: docker compose pull && docker compose up -d  (pull nicht
+#            weglassen – sonst bleibt ein altes lokales Image stehen)
 # ──────────────────────────────────────────────────────────────────────────────
 
 services:

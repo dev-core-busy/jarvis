@@ -258,18 +258,18 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
             <div class="step">
                 <div class="step-num">1</div>
                 <div class="step-content">
-                    <div class="step-title"><span class="t-de">Herunterladen &amp; Starten</span><span class="t-en">Download &amp; Start</span></div>
-                    <div class="step-desc"><span class="t-de">Lädt die <span class="code-inline">docker-compose.yml</span> herunter und startet Jarvis. Das Docker-Image (~1,4 GB Download) wird beim ersten Mal automatisch gezogen.</span><span class="t-en">Downloads the <span class="code-inline">docker-compose.yml</span> and starts Jarvis. The Docker image (~1.4 GB download) is pulled automatically on first run.</span></div>
+                    <div class="step-title"><span class="t-de">Installieren &amp; Starten</span><span class="t-en">Install &amp; Start</span></div>
+                    <div class="step-desc"><span class="t-de">Im Terminal des Docker-Hosts ausführen (als root oder mit sudo). Das Skript lädt die <span class="code-inline">docker-compose.yml</span> ins aktuelle Verzeichnis, holt das aktuelle Image (~1,4 GB beim ersten Mal), startet Jarvis, wartet, bis es bereit ist, und <strong>zeigt am Ende Adresse, Benutzer und Kennwort an</strong>.</span><span class="t-en">Run in a terminal on the Docker host (as root or with sudo). The script downloads the <span class="code-inline">docker-compose.yml</span> into the current directory, pulls the current image (~1.4 GB the first time), starts Jarvis, waits until it is ready and <strong>shows address, username and password at the end</strong>.</span></div>
                     <div class="code-block highlight">
                         <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
-                        <code>curl -fsSL https://jarvis-ai.info/downloads/docker-compose.yml -o docker-compose.yml
-docker compose up -d</code>
+                        <code>curl -fsSL https://jarvis-ai.info/downloads/docker-install.sh | bash</code>
                     </div>
                     <div class="step-desc" style="margin-top:10px;"><span class="t-de">Danach im Browser öffnen:</span><span class="t-en">Then open in your browser:</span></div>
                     <div class="code-block" style="margin-top:8px;">
                         <code>https://&lt;server-ip&gt;         <span class="comment"># Web-UI (HTTPS)</span>
 
-Login: jarvis / initial password  <span class="comment"># docker logs jarvis | grep Erstkennwort</span></code>
+Benutzer: jarvis
+Kennwort: <span class="comment"># wird nach der Installation angezeigt</span></code>
                     </div>
                     <div class="info-box tip" style="margin-top:12px;">
                         <span class="icon">🔐</span>
@@ -390,14 +390,11 @@ location / {
 
         <div class="info-box warn">
             <span class="icon">⚠️</span>
-            <div><span class="t-de"><span class="code-inline">JARVIS_PASSWORD</span> ist nur ein <strong>Startkennwort</strong>: Sobald in der Oberfläche ein eigenes Kennwort vergeben wurde, gilt dieses, und eine geänderte Variable bleibt wirkungslos. Bekannte oder triviale Werte (z.&nbsp;B. <span class="code-inline">jarvis</span>, <span class="code-inline">password</span>, <span class="code-inline">12345678</span>) werden ignoriert – dann gilt das Zufallskennwort aus dem Log.</span><span class="t-en"><span class="code-inline">JARVIS_PASSWORD</span> is only an <strong>initial password</strong>: once a password has been set in the UI, that one applies and a changed variable has no effect. Well-known or trivial values (e.g. <span class="code-inline">jarvis</span>, <span class="code-inline">password</span>, <span class="code-inline">12345678</span>) are ignored – the random password from the log applies instead.</span></div>
+            <div><span class="t-de"><span class="code-inline">JARVIS_PASSWORD</span> ist nur ein <strong>Startkennwort</strong>: Sobald in der Oberfläche ein eigenes Kennwort vergeben wurde, gilt dieses, und eine geänderte Variable bleibt wirkungslos. Bekannte oder triviale Werte (z.&nbsp;B. <span class="code-inline">jarvis</span>, <span class="code-inline">password</span>, <span class="code-inline">12345678</span>) werden ignoriert – dann gilt das Zufallskennwort, das nach der Installation angezeigt wird.</span><span class="t-en"><span class="code-inline">JARVIS_PASSWORD</span> is only an <strong>initial password</strong>: once a password has been set in the UI, that one applies and a changed variable has no effect. Well-known or trivial values (e.g. <span class="code-inline">jarvis</span>, <span class="code-inline">password</span>, <span class="code-inline">12345678</span>) are ignored – the random password shown after the installation applies instead.</span></div>
         </div>
 
-        <h3><span class="t-de">Erstkennwort anzeigen</span><span class="t-en">Show the initial password</span></h3>
-        <div class="code-block">
-            <button class="copy-btn" onclick="copyCode(this)"><span class="t-de">⧉ Kopieren</span><span class="t-en">⧉ Copy</span></button>
-            <code>docker logs jarvis | grep Erstkennwort</code>
-        </div>
+        <h3 id="erstkennwort"><span class="t-de">Kennwort</span><span class="t-en">Password</span></h3>
+        <p style="color:var(--text-secondary); margin:12px 0;"><span class="t-de">Das Kennwort wird nach der Installation angezeigt.</span><span class="t-en">The password is shown after the installation.</span></p>
 
         <h3><span class="t-de">Eigenes Startkennwort vorgeben (vor dem ersten Start)</span><span class="t-en">Set your own initial password (before the first start)</span></h3>
         <p style="color:var(--text-secondary); margin-bottom:12px;"><span class="t-de">Neben der <span class="code-inline">docker-compose.yml</span> eine Datei <span class="code-inline">.env</span> anlegen – Compose liest sie automatisch:</span><span class="t-en">Create a file <span class="code-inline">.env</span> next to the <span class="code-inline">docker-compose.yml</span> – Compose reads it automatically:</span></p>
@@ -408,7 +405,7 @@ SERVER_IP=<span class="t-de">&lt;IP des Hosts&gt;</span><span class="t-en">&lt;h
 
 <span class="comment"># <span class="t-de">nur für root lesbar, dann starten</span><span class="t-en">readable by root only, then start</span></span>
 chmod 600 .env
-docker compose up -d</code>
+curl -fsSL https://jarvis-ai.info/downloads/docker-install.sh | bash</code>
         </div>
     </div>
 
@@ -423,7 +420,7 @@ docker compose up -d</code>
                 <div class="step-num">1</div>
                 <div class="step-content">
                     <div class="step-title"><span class="t-de">Web-UI öffnen und einloggen</span><span class="t-en">Open Web-UI and log in</span></div>
-                    <div class="step-desc"><span class="code-inline">https://&lt;server-ip&gt;</span> → Login: jarvis / initial password from <span class="code-inline">docker logs jarvis</span> – you must change it at first login</div>
+                    <div class="step-desc"><span class="code-inline">https://&lt;server-ip&gt;</span> → <span class="t-de">Benutzer <span class="code-inline">jarvis</span>, das Kennwort wird nach der Installation angezeigt – beim ersten Login muss es geändert werden</span><span class="t-en">user <span class="code-inline">jarvis</span>, the password is shown after the installation – you must change it at first login</span></div>
                 </div>
             </div>
             <div class="step">

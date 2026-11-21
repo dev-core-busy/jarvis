@@ -219,7 +219,13 @@ try:
     pruefe(rc == 0 and "geschrieben" not in out,
            "zweiter Lauf schreibt nichts (Ausgabe ohne 'geschrieben')")
     pruefe(vorher == nachher, "zweiter Lauf: Inhalt, mtime und Modus aller Dateien gleich")
-    pruefe(len(vorher) == 11, "genau 11 Dateien angelegt – 10 Ziele + auditd.conf (gefunden %d)" % len(vorher))
+    # Formel statt Konstante (hier stand "11" - mit B13 kamen zwei Units dazu):
+    # je Zeile der ZIELE-Liste eine Datei, dazu auditd.conf.
+    _ziele = re.search(r'^ZIELE="\n(.*?)^"', SKRIPT.read_text(encoding="utf-8"), re.S | re.M)
+    _n_ziele = len([z for z in (_ziele.group(1) if _ziele else "").splitlines() if z.strip()])
+    pruefe(_n_ziele >= 12, "ZIELE-Liste des Skripts gelesen (%d Eintraege)" % _n_ziele)
+    pruefe(len(vorher) == _n_ziele + 1,
+           "genau %d Dateien angelegt – %d Ziele + auditd.conf (gefunden %d)" % (_n_ziele + 1, _n_ziele, len(vorher)))
 
     # ── 3. --pruefen aendert nichts ──────────────────────────────────────────
     print("[3] --pruefen ist rein lesend")

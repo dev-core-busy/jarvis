@@ -9999,6 +9999,25 @@ async def system_load(user: str = Depends(require_local_auth)):
     return JSONResponse(bericht)
 
 
+@app.get("/api/system/ueberwachung")
+async def system_ueberwachung(user: str = Depends(require_local_auth)):
+    """Zustand der Serverueberwachung (Haertung B13) fuer die CPU-Anzeige.
+
+    ADMIN-ONLY (`require_local_auth`): die Befunde nennen Dienste, Pfade und
+    Quelladressen fehlgeschlagener SSH-Anmeldungen. Geschrieben wird der
+    Zustand von einem root-Timer (backend/ueberwachung.py --lauf); hier wird
+    er nur gelesen – samt der Pruefung, ob der Waechter noch laeuft.
+    """
+    from backend import ueberwachung as _ueberw
+    try:
+        erg = await asyncio.to_thread(_ueberw.lesen)
+    except Exception as e:
+        logger.error(f"[UEBERWACHUNG] Zustand nicht lesbar: {e}")
+        return JSONResponse({"ok": False, "error": "Zustand der Serverüberwachung nicht lesbar"},
+                            status_code=500)
+    return JSONResponse(erg, headers={"Cache-Control": "no-store"})
+
+
 def _check_vnc_available() -> bool:
     """Prüft ob x11vnc auf Port 5900 erreichbar ist (schneller TCP-Connect)."""
     import socket

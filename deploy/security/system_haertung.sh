@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Systemhaertung B1-B8 der Checkliste "hardening" (Confluence, Seite 342048622)
+# Systemhaertung B1-B8 und B13 der Checkliste "hardening" (Confluence, Seite 342048622)
 # – als root.
 #
 #   bash system_haertung.sh --pruefen     nur melden, nichts aendern
@@ -19,6 +19,10 @@
 #       Speicher 20 x 50 MB statt der Vorgabe 5 x 8 MB (siehe AUDITD_WERTE)
 #   B7  AIDE mit Ausnahmen fuer Netzfreigaben, Pseudo-Dateisysteme und Caches
 #   B8  lynis installiert (der Lauf und seine Bewertung sind Handarbeit)
+#   B13 Ueberwachung: jarvis-ueberwachung.timer ruft alle 5 Minuten
+#       backend/ueberwachung.py aus der ROOT-EIGENEN Broker-Kopie auf (nicht
+#       aus /opt/jarvis - Befund K1). Die Datei kommt mit dem Broker-Neustart
+#       dorthin; fehlt sie, meldet --anwenden das und richtet nichts ein.
 #
 # WAS ES BEWUSST NICHT TUT – jeweils gemessen am 18.11.2026:
 #   * Kein Eingriff in apt: Remove-Unused-Dependencies verwaltet Jarvis selbst
@@ -270,7 +274,46 @@ AIDE='# Haertung B7 (Checkliste 76) - deploy/security/system_haertung.sh
 # geprueft; genau dafuer wurden die Zaehler herausgeloest.
 /var/lib/jarvis-broker$ d VarDir
 /var/lib/jarvis-broker/zaehler\.json$ f VarFile
-!/var/lib/jarvis-broker/zaehler\.tmp$'
+!/var/lib/jarvis-broker/zaehler\.tmp$
+
+# Zustand der Ueberwachung (B13): wird alle 5 Minuten neu geschrieben.
+/var/lib/jarvis-ueberwachung$ d VarDir
+/var/lib/jarvis-ueberwachung/zustand\.json$ f VarFile
+!/var/lib/jarvis-ueberwachung/zustand\.json\.tmp$'
+
+# B13 (Checkliste 136). Laeuft als root, weil es das Kernel-Journal, den
+# Zustand aller Units und das Zertifikat lesen muss - aber ohne Netz und ohne
+# Schreibrecht ausser auf das eigene Zustandsverzeichnis.
+UEBERW_PROG="/usr/local/lib/jarvis-broker/backend/ueberwachung.py"
+UEBERW_SERVICE="# Haertung B13 (Checkliste 136) - deploy/security/system_haertung.sh
+[Unit]
+Description=Jarvis Serverueberwachung (Haertung B13)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I $UEBERW_PROG --lauf
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=120
+StateDirectory=jarvis-ueberwachung
+StateDirectoryMode=0755
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes"
+
+UEBERW_TIMER='# Haertung B13 (Checkliste 136) - deploy/security/system_haertung.sh
+[Unit]
+Description=Jarvis Serverueberwachung alle 5 Minuten (Haertung B13)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target'
 
 # ── Ziele: Pfad | Modus | Inhalt-Variable ────────────────────────────────────
 ZIELE="
@@ -284,6 +327,8 @@ etc/systemd/system/jarvis.service.d/70-coredump.conf|0644|DROPIN
 etc/audit/rules.d/50-haertung.rules|0640|AUDIT
 etc/aide/aide.conf.d/95_jarvis_ausnahmen|0644|AIDE
 etc/logrotate.d/sudo-haertung|0644|LOGROTATE
+etc/systemd/system/jarvis-ueberwachung.service|0644|UEBERW_SERVICE
+etc/systemd/system/jarvis-ueberwachung.timer|0644|UEBERW_TIMER
 "
 
 abweichungen=0
@@ -394,6 +439,21 @@ system_pruefen() {
         || { echo "  AUS         dailyaidecheck.timer"; abweichungen=$((abweichungen + 1)); }
     [ -s /var/lib/aide/aide.db ] \
         || { echo "  FEHLT       AIDE-Vergleichsstand (--aide-init)"; abweichungen=$((abweichungen + 1)); }
+    systemctl is-enabled --quiet jarvis-ueberwachung.timer 2>/dev/null \
+        && systemctl is-active --quiet jarvis-ueberwachung.timer 2>/dev/null \
+        || { echo "  AUS         jarvis-ueberwachung.timer"; abweichungen=$((abweichungen + 1)); }
+    [ -f "$UEBERW_PROG" ] \
+        || { echo "  FEHLT       $UEBERW_PROG (Broker-Kopie aelter als B13 - jarvis-broker neu starten)"; abweichungen=$((abweichungen + 1)); }
+    # Ein Timer, der laeuft, aber nichts schreibt, ist kein Waechter: der
+    # Zustand muss juenger sein als drei Takte (15 Minuten).
+    if [ -f /var/lib/jarvis-ueberwachung/zustand.json ]; then
+        local alter=$(( $(date +%s) - $(stat -c %Y /var/lib/jarvis-ueberwachung/zustand.json) ))
+        [ "$alter" -le 900 ] \
+            || { echo "  VERALTET    Ueberwachung: letzter Lauf vor $((alter / 60)) Minuten"; abweichungen=$((abweichungen + 1)); }
+    else
+        echo "  FEHLT       Zustand der Ueberwachung (/var/lib/jarvis-ueberwachung/zustand.json)"
+        abweichungen=$((abweichungen + 1))
+    fi
     # Laufende Kernel-Werte gegen die Datei
     local k v ist
     while IFS='=' read -r k v; do
@@ -425,6 +485,16 @@ anwenden_system() {
     esac
     systemctl enable --now auditd >/dev/null 2>&1 || echo "WARNUNG: auditd liess sich nicht starten" >&2
     systemctl enable --now dailyaidecheck.timer >/dev/null 2>&1 || true
+    case " $geaendert " in *" UEBERW_"*) systemctl daemon-reload ;; esac
+    if [ -f "$UEBERW_PROG" ]; then
+        systemctl enable --now jarvis-ueberwachung.timer >/dev/null 2>&1 \
+            || echo "WARNUNG: jarvis-ueberwachung.timer liess sich nicht starten" >&2
+    else
+        # Ohne Programm liefe der Timer alle 5 Minuten in einen Fehler - dann
+        # lieber gar nicht einschalten und laut sagen, warum.
+        echo "WARNUNG: $UEBERW_PROG fehlt - Broker-Kopie aelter als B13. Erst" >&2
+        echo "         'systemctl restart jarvis-broker.service', dann erneut --anwenden." >&2
+    fi
     [ -s /var/lib/aide/aide.db ] || echo "  HINWEIS: noch kein AIDE-Vergleichsstand - bash $0 --aide-init"
 }
 

@@ -356,7 +356,10 @@ def mit_ueberwachung(ns_befunde, kracht=False):
 
 
 SSH_W = {"id": "ssh", "art": "ssh_fehl", "stufe": "warnung", "text": "x",
-         "werte": {"anzahl": 37, "ip": "198.51.100.4", "user": "gast", "zuletzt": 3000}}
+         "werte": {"anzahl": 37, "ip": "198.51.100.4", "user": "gast", "zuletzt": 3000,
+                   "verlauf": [{"zeit": 3000, "anzahl": 30, "ips": ["198.51.100.4", 7], "user": "gast"},
+                               "kaputt"] + [{"zeit": 1, "anzahl": 1, "ips": ["192.0.2.%d" % i]} for i in range(12)],
+                   "verlauf_gesamt": 14}}
 ns, _ = baue(pending=1, gesperrt=1)
 mit_ueberwachung([{"id": "zert", "art": "zert_ablauf", "stufe": "warnung", "werte": {}}, SSH_W])
 w = messe(ns)
@@ -369,6 +372,11 @@ check([e.get("art") for e in w.get("items") or []] == ["blocked", "ssh", "root"]
 p_ssh = posten(w, 1)
 check(p_ssh.get("anzahl") == 37 and p_ssh.get("ip") == "198.51.100.4" and p_ssh.get("user") == "gast"
       and p_ssh.get("ts") == 3000, "der SSH-Eintrag traegt Anzahl, Adresse, Benutzer, Zeitpunkt", str(p_ssh))
+vl = p_ssh.get("verlauf") or []
+check(len(vl) <= 10 and vl[:1] == [{"zeit": 3000, "anzahl": 30, "ips": ["198.51.100.4", "7"], "user": "gast"}]
+      and p_ssh.get("verlauf_gesamt") == 14,
+      "Verlauf durchgereicht: gedeckelt, Typen gesetzt, Gesamtzahl dabei", str(vl[:2]))
+check(all(isinstance(v, dict) for v in vl), "unbrauchbare Verlaufseintraege werden verworfen")
 check(not any(e.get("art") == "zert" for e in w.get("items") or []),
       "andere Befunde der Ueberwachung erscheinen NICHT am Zahnrad")
 ns, _ = baue()

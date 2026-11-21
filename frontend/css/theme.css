@@ -589,9 +589,10 @@ body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000);
 }
 .jv-gear-tip-row:hover,
 .jv-gear-tip-row:focus-visible { background: rgba(var(--accent-rgb), .10); outline: none; }
-/* SSH-Hinweis (B13): keine Sprungzeile, also keine Klick-Anmutung */
-.jv-gear-tip-row.ist-hinweis { cursor: default; }
-.jv-gear-tip-row.ist-hinweis:hover { background: none; }
+/* SSH-Zeile (B13): klappt die einzelnen Versuche auf */
+.jv-gear-tip-auf { margin-left: auto; color: var(--text-secondary); flex: 0 0 auto; }
+.jv-gear-tip-detail { margin: 5px 0 1px 4px; padding-left: 8px; border-left: 2px solid var(--border); }
+.jv-gear-tip-dz { font-size: 11px; color: var(--text-secondary); padding: 1px 0; overflow-wrap: anywhere; }
 .jv-gear-tip-top { display: flex; align-items: center; gap: 6px; }
 /* `min-width: 0` ist Pflicht, nicht Kosmetik: ein Flex-Kind schrumpft von sich
  * aus nicht unter seine Inhaltsbreite – ohne die Zeile schiebt ein langer

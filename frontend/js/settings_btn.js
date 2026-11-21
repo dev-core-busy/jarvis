@@ -36,10 +36,14 @@
  * Fassungen, und die zwoelfte Seite vergisst sie wieder.
  *
  * SSH-FEHLANMELDUNGEN (Serverueberwachung B13, Betreiberentscheid 2026-11-21):
- * stehen HIER als ein Posten und nicht an der CPU-Anzeige. Die Zeile fuehrt
- * nirgendwohin – in den Einstellungen gibt es keinen Abschnitt, der sie
- * erledigt; sie ist ein Hinweis, kein Sprung. Ein SSH-Alarm (Durchprobieren)
- * faerbt die Badge wie eine Sperre.
+ * stehen HIER als ein Posten und nicht an der CPU-Anzeige. In den
+ * Einstellungen gibt es keinen Abschnitt, der sie erledigt – ein Klick auf
+ * die Zeile klappt deshalb die einzelnen Versuche der letzten 24 Stunden auf
+ * (Zeitpunkt, Anzahl, Quelladressen, Benutzer). Bis 2026-11-22 war die Zeile
+ * ohne Wirkung, waehrend darunter "Eintrag anklicken, um den Abschnitt zu
+ * oeffnen" stand – gemeldet als "ein Klick hat keine Wirkung". Der Hinweis
+ * nennt jetzt, was der Klick bei welcher Zeile tut. Ein SSH-Alarm
+ * (Durchprobieren) faerbt die Badge wie eine Sperre.
  *
  * Ein Klick auf die Badge fuehrt in den Sicherheits-Reiter (sessionStorage
  * `jarvis_settings_tab`, ausgewertet in app.js) – eine Warnung ohne Weg zur
@@ -132,6 +136,9 @@
     // ── Mouseover am Badge: was hinter der Zahl steckt ──────────────────────
     var _tip = null;
     var _tipTimer = null;
+    // SSH-Zeile aufgeklappt? Lebt im Modul: das Panel wird im 60-s-Takt neu
+    // gezeichnet und klappte sonst unter dem Zeiger wieder zu.
+    var _sshOffen = false;
 
     function tipEl() {
         if (_tip) return _tip;
@@ -201,11 +208,19 @@
             + ' (' + gesamt + ')</div>'
             + (zeilen || ersatz)
             + mehr
-            + '<div class="jv-gear-tip-hint">'
-            + esc(T('security.gear_tip_hint',
-                    'Eintrag anklicken, um den Abschnitt zu öffnen')) + '</div>';
-        // Nur Zeilen MIT Abschnitt: die SSH-Zeile hat keinen und darf nicht
-        // nach /settings fuehren (ohne Ziel waere das ein Sprung ins Leere).
+            + tipHinweis(posten);
+        // Die SSH-Zeile klappt auf, statt zu springen: kein Abschnitt erledigt sie.
+        Array.prototype.forEach.call(el.querySelectorAll('.jv-gear-tip-row[data-ssh]'),
+            function (b) {
+                b.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    _sshOffen = !_sshOffen;
+                    tipZeichnen();
+                    var neu = el.querySelector('.jv-gear-tip-row[data-ssh]');
+                    if (neu) neu.focus();
+                });
+            });
+        // Nur Zeilen MIT Abschnitt fuehren nach /settings.
         Array.prototype.forEach.call(el.querySelectorAll('.jv-gear-tip-row[data-fokus]'),
             function (b) {
                 b.addEventListener('click', function () {
@@ -225,14 +240,56 @@
         if (sub.indexOf('security.') === 0) sub = String(it.ip || '');
         if (it.user) sub += ' (' + it.user + ')';
         var unten = [esc(sub), it.ts ? zeitpunkt(it.ts) : ''].filter(Boolean).join(' · ');
-        return '<div class="jv-gear-tip-row ist-hinweis">'
+        var verlauf = Array.isArray(it.verlauf) ? it.verlauf : [];
+        return '<button type="button" class="jv-gear-tip-row" data-ssh="1" aria-expanded="'
+            + (_sshOffen ? 'true' : 'false') + '">'
             + '<div class="jv-gear-tip-top">'
             + '<span class="jv-gear-tip-k ' + (it.alarm ? 'blocked' : 'root') + '">'
             + esc(T('security.gear_tip_ssh', 'SSH')) + '</span>'
             + '<span class="jv-gear-tip-t">' + esc(titel) + '</span>'
+            + '<span class="jv-gear-tip-auf" aria-hidden="true">' + (_sshOffen ? '▾' : '▸') + '</span>'
             + '</div>'
             + (unten ? '<div class="jv-gear-tip-sub">' + unten + '</div>' : '')
-            + '</div>';
+            + (_sshOffen ? sshVerlauf(verlauf, Number(it.verlauf_gesamt) || verlauf.length) : '')
+            + '</button>';
+    }
+
+    /* Die einzelnen Laeufe mit Fehlversuchen, juengster zuerst. Adressen und
+     * Benutzer stammen aus dem sshd-Journal (Fremdtext) und werden maskiert. */
+    function sshVerlauf(verlauf, gesamt) {
+        if (!verlauf.length) {
+            return '<div class="jv-gear-tip-detail">'
+                + esc(T('security.gear_ssh_kein_verlauf', 'Keine Einzelheiten gespeichert.')) + '</div>';
+        }
+        var zeilen = verlauf.map(function (v) {
+            var ips = (Array.isArray(v.ips) ? v.ips : []).filter(Boolean).join(', ') || '–';
+            var text = T('security.gear_ssh_versuch', '{n} × von {ips}')
+                .replace('{n}', String(Number(v.anzahl) || 0)).replace('{ips}', ips);
+            if (text.indexOf('security.') === 0) text = String(Number(v.anzahl) || 0) + ' × ' + ips;
+            if (v.user) text += ' (' + v.user + ')';
+            return '<div class="jv-gear-tip-dz">' + esc((v.zeit ? zeitpunkt(v.zeit) + ' · ' : '') + text) + '</div>';
+        }).join('');
+        var rest = gesamt - verlauf.length;
+        var mehr = rest > 0
+            ? '<div class="jv-gear-tip-dz">' + esc(T('security.gear_ssh_mehr', '… und {n} frühere')
+                  .replace('{n}', String(rest))) + '</div>'
+            : '';
+        return '<div class="jv-gear-tip-detail">' + zeilen + mehr + '</div>';
+    }
+
+    /* Was ein Klick tut, je nach den Zeilen, die dastehen – ein Hinweis, der
+     * fuer eine Zeile nicht stimmt, ist die gemeldete "keine Wirkung". */
+    function tipHinweis(posten) {
+        var springt = posten.some(function (it) { return it.art !== 'ssh'; });
+        var ssh = posten.some(function (it) { return it.art === 'ssh'; });
+        var teile = [];
+        if (springt || !posten.length) {
+            teile.push(T('security.gear_tip_hint', 'Eintrag anklicken, um den Abschnitt zu öffnen'));
+        }
+        if (ssh) {
+            teile.push(T('security.gear_tip_hint_ssh', 'SSH-Eintrag anklicken, um die einzelnen Versuche zu sehen'));
+        }
+        return teile.map(function (s) { return '<div class="jv-gear-tip-hint">' + esc(s) + '</div>'; }).join('');
     }
 
     function tipAn(anker) {

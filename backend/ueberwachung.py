@@ -68,6 +68,7 @@ KONF_DATEI = Path("/etc/jarvis/ueberwachung.conf")
 TAKT_S = 300                 # Abstand der Laeufe (Timer)
 VERALTET_S = 3 * TAKT_S      # drei verpasste Laeufe = der Waechter steht
 HALTE_S = 24 * 3600          # so lange bleibt ein Ereignis sichtbar
+VERLAUF_MAX = 10             # so viele Laeufe mit SSH-Fehlversuchen nennt der Befund
 ERINNERN_S = 24 * 3600       # anhaltender Alarm: Erinnerung im Journal
 
 # Vorgaben – ueberschreibbar in KONF_DATEI (root-eigen, siehe konf_laden)
@@ -432,7 +433,16 @@ def auswerten(eing: dict, vorher: dict, konf: dict, jetzt: float) -> tuple[dict,
                                % (n, _uhr(letzt["zeit"]), letzt["ip"],
                                   (" (Benutzer %s)" % letzt["user"]) if letzt.get("user") else ""),
                                anzahl=n, spitze=spitze, ip=letzt["ip"], user=letzt.get("user", ""),
-                               zuletzt=letzt["zeit"]))
+                               zuletzt=letzt["zeit"],
+                               # Die einzelnen Laeufe, juengster zuerst: das Zahnrad
+                               # klappt sie auf (ein Klick muss etwas zeigen). Gedeckelt;
+                               # die Gesamtzahl steht in "anzahl", "verlauf_gesamt" sagt,
+                               # wie viele Laeufe es waren.
+                               verlauf=[{"zeit": e["zeit"], "anzahl": e["anzahl"],
+                                         "ips": list(e.get("ips") or [e.get("ip", "")])[:10],
+                                         "user": e.get("user", "")}
+                                        for e in reversed(es)][:VERLAUF_MAX],
+                               verlauf_gesamt=len(es)))
     for art, stufe, satz in (
             ("out_dienst", "alarm", "Der Dienstbenutzer wollte ins Netz und wurde abgewiesen: %d Pakete in 24 h, Ziele %s"),
             ("out_fremd", "warnung", "Abgewiesene Verbindungen eines unerwarteten Benutzers (UID %s): %d Pakete in 24 h"),

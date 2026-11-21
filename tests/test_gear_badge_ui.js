@@ -394,7 +394,10 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
             root_pending: 1, gesperrt: 0, ssh_fehl: 37, ssh_alarm: false, gesamt: 2,
             items: [
                 { art: 'ssh', titel: '37 fehlgeschlagene SSH-Anmeldungen in 24 h', sub: '198.51.100.4',
-                  ts: 1756000200, anzahl: 37, ip: '198.51.100.4', user: 'gast<b>', alarm: false },
+                  ts: 1756000200, anzahl: 37, ip: '198.51.100.4', user: 'gast<b>', alarm: false,
+                  verlauf: [{ zeit: 1756000200, anzahl: 30, ips: ['198.51.100.4', '203.0.113.9'], user: 'gast<b>' },
+                            { zeit: 1756000000, anzahl: 7, ips: ['198.51.100.4'], user: '' }],
+                  verlauf_gesamt: 3 },
                 { art: 'root', titel: 'apt-get install x', sub: 'firma\\a.probe', ts: 1756000100 },
             ] } };
         const { w, d } = starte('portal.html', SSH);
@@ -410,11 +413,40 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
         pruefe(zeilen.length === 2 && ssh && /37 fehlgeschlagene SSH-Anmeldungen/.test(ssh.textContent)
                && /198\.51\.100\.4/.test(ssh.textContent),
                'die SSH-Zeile nennt Anzahl und Quelladresse', ssh && ssh.textContent);
-        pruefe(ssh && ssh.tagName === 'DIV' && !ssh.hasAttribute('data-fokus'),
-               'die SSH-Zeile ist kein Sprung (kein Abschnitt erledigt sie)', ssh && ssh.outerHTML.slice(0, 80));
-        pruefe(ssh && !ssh.querySelector('b') && /gast<b>/.test(ssh.textContent),
-               'Benutzername aus dem Journal wird maskiert');
+        // Gemeldet 2026-11-22: "ein Klick hat keine Wirkung" – die Zeile war
+        // ohne Ziel, der Hinweis darunter versprach einen Abschnitt.
+        pruefe(ssh && ssh.tagName === 'BUTTON' && !ssh.hasAttribute('data-fokus')
+               && ssh.getAttribute('aria-expanded') === 'false',
+               'die SSH-Zeile ist ein Knopf zum Aufklappen, kein Sprung', ssh && ssh.outerHTML.slice(0, 90));
+        pruefe(ssh && !ssh.querySelector('.jv-gear-tip-detail'), 'zugeklappt: keine Einzelheiten');
+        const hinweis = [...el.querySelectorAll('.jv-gear-tip-hint')].map(h => h.textContent).join(' | ');
+        pruefe(/SSH-Eintrag anklicken/.test(hinweis) && /Abschnitt/.test(hinweis),
+               'Hinweis nennt beide Wirkungen (Abschnitt fuer Freigaben, Aufklappen fuer SSH)', hinweis);
         if (ssh) ssh.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+        const offen = el.querySelector('.jv-gear-tip-row[data-ssh]');
+        const detail = offen && offen.querySelector('.jv-gear-tip-detail');
+        pruefe(offen && offen.getAttribute('aria-expanded') === 'true' && !!detail,
+               'Klick klappt die einzelnen Versuche auf (WIRKUNG)', offen && offen.outerHTML.slice(0, 90));
+        const dz = detail ? [...detail.querySelectorAll('.jv-gear-tip-dz')].map(z => z.textContent) : [];
+        pruefe(dz.length === 3 && /30 × von 198\.51\.100\.4, 203\.0\.113\.9/.test(dz[0]) && /7 × von/.test(dz[1])
+               && /1 frühere/.test(dz[2]), 'je Lauf eine Zeile, juengster zuerst, Rest beziffert', dz.join(' | '));
+        pruefe(detail && !detail.querySelector('b') && /gast<b>/.test(detail.textContent)
+               && offen && !offen.querySelector('.jv-gear-tip-sub b'),
+               'Benutzername aus dem Journal wird maskiert');
+        pruefe(tip(d) && tip(d).style.display === 'block', 'das Panel bleibt nach dem Klick offen');
+        // Neuzeichnen im Takt darf die Zeile nicht zuklappen
+        const vorher = tip(d) && tip(d).querySelector('.jv-gear-tip-row[data-ssh]');
+        w.dispatchEvent(new w.Event('jarvis-lang-changed'));
+        await gleich();
+        const nach = tip(d) && tip(d).querySelector('.jv-gear-tip-row[data-ssh]');
+        // Positivkontrolle: das Panel wurde WIRKLICH neu gezeichnet (neues Element)
+        pruefe(nach && vorher && nach !== vorher, 'Neuzeichnen hat stattgefunden (Messaufbau)');
+        pruefe(nach && nach.getAttribute('aria-expanded') === 'true' && !!nach.querySelector('.jv-gear-tip-detail'),
+               'aufgeklappt bleibt aufgeklappt, wenn das Panel neu gezeichnet wird');
+        if (nach) nach.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+        const zu = el.querySelector('.jv-gear-tip-row[data-ssh]');
+        pruefe(zu && zu.getAttribute('aria-expanded') === 'false' && !zu.querySelector('.jv-gear-tip-detail'),
+               'zweiter Klick klappt wieder zu');
         pruefe(!w.sessionStorage.getItem('jarvis_settings_focus') && !w.sessionStorage.getItem('jarvis_settings_tab'),
                'ein Klick auf die SSH-Zeile wechselt nirgendwohin', JSON.stringify([w.sessionStorage.getItem('jarvis_settings_focus'), w.sessionStorage.getItem('jarvis_settings_tab'), w.location.href]));
         w.close();
@@ -425,6 +457,16 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
         pruefe(badge(s2.d) && badge(s2.d).classList.contains('is-danger'),
                'SSH-Alarm (Durchprobieren) faerbt die Badge wie eine Sperre');
         s2.w.close();
+        // NUR SSH: kein Versprechen eines Abschnitts (die gemeldete Lage auf ECHT)
+        const nur = JSON.parse(JSON.stringify(SSH));
+        nur.admin_badge.root_pending = 0; nur.admin_badge.gesamt = 1; nur.admin_badge.items = [nur.admin_badge.items[0]];
+        const s3 = starte('portal.html', nur);
+        await gleich(); await gleich();
+        const el3 = hover(s3.w, s3.d);
+        const h3 = el3 ? [...el3.querySelectorAll('.jv-gear-tip-hint')].map(h => h.textContent).join(' | ') : '';
+        pruefe(/SSH-Eintrag anklicken/.test(h3) && !/Abschnitt/.test(h3),
+               'nur SSH: der Hinweis verspricht keinen Abschnitt', h3);
+        s3.w.close();
     }
     {   // Klick auf die Badge selbst setzt KEINEN Abschnitt (nur den Reiter)
         const { w, d } = starte('portal.html', POSTEN);

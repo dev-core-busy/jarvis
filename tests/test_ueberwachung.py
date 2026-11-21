@@ -237,6 +237,18 @@ try:
     s5, _ = ue.auswerten(eingabe(ssh=j(*[FEHL % (100 + i) for i in range(n_alarm)])), {}, KONF, JETZT)
     pruefe(ids(s5).get("ssh") == "alarm", "%d Fehlversuche in einem Lauf: Alarm" % n_alarm)
     pruefe(s5["cursor"] == {"ssh": "c1", "kern": "k1"}, "Journal-Cursor wird fortgeschrieben")
+    # Verlauf fuer das Aufklappen am Zahnrad: je Lauf ein Eintrag, juengster zuerst
+    sv = s1
+    for i in range(ue.VERLAUF_MAX + 2):
+        sv, _ = ue.auswerten(eingabe(ssh=j(FEHL % (500 + i), "Invalid user y from 203.0.113.%d port %d" % (i, 600 + i))),
+                             sv, KONF, JETZT + 300 * (i + 1))
+    wv = ([b for b in sv["befunde"] if b["id"] == "ssh"] or [{}])[0].get("werte", {})
+    vl = wv.get("verlauf") or []
+    pruefe(len(vl) == ue.VERLAUF_MAX and wv.get("verlauf_gesamt") == ue.VERLAUF_MAX + 3,
+           "Verlauf gedeckelt auf VERLAUF_MAX, Gesamtzahl der Laeufe genannt (%d/%s)" % (len(vl), wv.get("verlauf_gesamt")))
+    pruefe(bool(vl) and vl[0].get("zeit", 0) > vl[-1].get("zeit", 0) and vl[0].get("anzahl") == 2
+           and "203.0.113.%d" % (ue.VERLAUF_MAX + 1) in vl[0].get("ips", []),
+           "juengster Lauf zuerst, mit Anzahl und allen Quelladressen %s" % str(vl[:1]))
 
     # ── 7. Meldungen nur bei Aenderung ────────────────────────────────────────
     print("[7] Journal-Meldungen")

@@ -10208,6 +10208,14 @@ def _admin_badge_messen(user: str) -> dict:
                 "ip": str(ssh_werte.get("ip") or ""),
                 "user": str(ssh_werte.get("user") or ""),
                 "alarm": ssh_alarm,
+                # Die einzelnen Laeufe fuer das Aufklappen am Zahnrad. Typen
+                # hart gesetzt: die Datei schreibt zwar root, aber eine
+                # Oberflaeche nimmt keine Form an, die sie nicht geprueft hat.
+                "verlauf": [{"zeit": int(v.get("zeit") or 0), "anzahl": int(v.get("anzahl") or 0),
+                             "ips": [str(x) for x in (v.get("ips") or [])][:10],
+                             "user": str(v.get("user") or "")}
+                            for v in (ssh_werte.get("verlauf") or [])[:10] if isinstance(v, dict)],
+                "verlauf_gesamt": int(ssh_werte.get("verlauf_gesamt") or 0),
             })
         for e in offen:
             posten.append({

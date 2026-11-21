@@ -1576,11 +1576,20 @@ async def _sicherheits_protokoll_mw(request: Request, call_next):
 app.add_middleware(_AnfragePfadMiddleware)
 
 # GZip fuer statische Inhalte und HTML-Seiten (nicht /api/, /ws, /webdav) –
-# Begruendung und Grenzen in backend/kompression.py. ZULETZT registriert, damit
-# sie die AEUSSERSTE Schicht ist: die inneren Middlewares (no_cache_static
-# schreibt HTML um) sehen den unkomprimierten Rumpf.
+# Begruendung und Grenzen in backend/kompression.py. Nach allen inneren
+# Middlewares registriert (aussen liegt nur noch die Host-Pruefung), damit
+# diese (no_cache_static schreibt HTML um) den unkomprimierten Rumpf sehen.
 from backend import kompression as _kompression
 app.add_middleware(_kompression.KompressionsWeiche)
+
+# Servername pruefen (Haertung B12, Checkliste 109): eine Anfrage mit fremdem
+# Host-Kopf wird abgewiesen (CA-Zertifikat) bzw. gemeldet (selbst signiert) –
+# Regeln und erlaubte Namen in backend/host_pruefung.py. NACH der Kompression
+# registriert und damit die AEUSSERSTE Schicht: abgewiesen wird, bevor irgendeine
+# andere Middleware oder Route die Anfrage sieht (sie fasst keinen Rumpf an).
+from backend import host_pruefung as _host_pruefung
+_host_pruefung.einstellungen_quelle(config.get_setting, _SERVER_ZERTIFIKAT)
+app.add_middleware(_host_pruefung.HostPruefung)
 
 
 def _aktivitaet(user: str, bereich: str, aktion: str, objekt: str = "", *,

@@ -8,7 +8,9 @@ Gemessen wird die WIRKUNG an einer echten Starlette-App mit der echten Weiche:
 - ``/api/`` NDJSON-Strom: jede Zeile kommt EINZELN an, nicht gepuffert
 - POST, kleine Antworten, Bilder: unkomprimiert
 - Regel am AST: ``main.py`` registriert die Weiche als LETZTE Middleware
-  (aeusserste Schicht – sonst saehe no_cache_static einen gepackten Rumpf)
+  (aeusserste Schicht – sonst saehe no_cache_static einen gepackten Rumpf).
+  Ausgenommen ist allein die Host-Pruefung (Haertung B12): sie liegt noch
+  weiter aussen, fasst aber keinen Rumpf an – sie weist nur ab oder reicht durch.
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 """
@@ -223,8 +225,12 @@ for k in ast.parse(MAIN).body:
                 registriert.append(k.name)
 check("Positivkontrolle: mehrere Middlewares gefunden", len(registriert) >= 5, registriert)
 check("KompressionsWeiche ist registriert", any("KompressionsWeiche" in r for r in registriert), registriert)
-check("…und zwar als LETZTE (= aeusserste Schicht)",
-      bool(registriert) and "KompressionsWeiche" in registriert[-1], registriert[-3:])
+# Die Host-Pruefung liegt bewusst noch aussen (tests/test_host_pruefung.py) und
+# fasst keinen Rumpf an; jede ANDERE Middleware muss innen liegen.
+AUSSEN_ERLAUBT = {"_host_pruefung.HostPruefung"}
+innen = [r for r in registriert if r not in AUSSEN_ERLAUBT]
+check("…und zwar als LETZTE (= aeusserste Schicht, ausser der Host-Pruefung)",
+      bool(innen) and "KompressionsWeiche" in innen[-1], registriert[-3:])
 check("main.py benutzt GZipMiddleware nicht direkt (nur ueber die Weiche)",
       "GZipMiddleware" not in MAIN.replace("# ", ""))
 

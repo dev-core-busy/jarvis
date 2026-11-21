@@ -92,6 +92,8 @@ VORGABE = {
 }
 
 STUFEN = ("ok", "info", "warnung", "alarm")
+# Zustaende von ``systemctl is-active``, die kein Ausfall sind
+UEBERGANG = ("active", "activating", "deactivating", "reloading", "refreshing")
 
 
 def _rang(stufe: str) -> int:
@@ -334,10 +336,14 @@ def auswerten(eing: dict, vorher: dict, konf: dict, jetzt: float) -> tuple[dict,
     """Neuer Zustand + Journal-Meldungen [(stufe, text)] aus den Eingaben."""
     befunde: list[dict] = []
 
-    # Dienste
+    # Dienste. Uebergaenge zaehlen nicht als Ausfall – auch "deactivating"
+    # nicht: auf ECHT traf der erste Lauf am 2026-11-21 genau die 5 Sekunden
+    # eines Neustarts von jarvis.service und meldete einen Alarm, der keiner
+    # war. Ein Neustart durchlaeuft deactivating -> activating ohne "inactive";
+    # ein haengendes Beenden endet in failed oder inactive und wird dann gemeldet.
     for unit, z in sorted(eing.get("dienste", {}).items()):
         if z.get("enabled") in ("enabled", "enabled-runtime") \
-                and z.get("active") not in ("active", "activating", "reloading", "refreshing"):
+                and z.get("active") not in UEBERGANG:
             befunde.append(_befund("dienst:" + unit, "dienst_aus", "alarm",
                                    "%s ist aktiviert, laeuft aber nicht (%s)" % (unit, z.get("active") or "?"),
                                    unit=unit, zustand=z.get("active", "")))

@@ -169,10 +169,11 @@ d = {"a.service": {"enabled": "enabled", "active": "inactive"},
      "c.service": {"enabled": "disabled", "active": "inactive"},
      "d.service": {"enabled": "not-found", "active": "inactive"},
      "e.service": {"enabled": "enabled", "active": "failed"},
-     "f.service": {"enabled": "enabled", "active": "active"}}
+     "f.service": {"enabled": "enabled", "active": "active"},
+     "g.service": {"enabled": "enabled", "active": "deactivating"}}
 s, _ = ue.auswerten(eingabe(dienste=d), {}, KONF, JETZT)
 pruefe(ids(s) == {"dienst:a.service": "alarm", "dienst:e.service": "alarm"},
-       "aktiviert und nicht aktiv = Alarm; startend, abgeschaltet, nicht installiert = nichts (%s)" % ids(s))
+       "aktiviert und nicht aktiv = Alarm; startend, beim Neustart (deactivating), abgeschaltet, nicht installiert = nichts (%s)" % ids(s))
 s, _ = ue.auswerten(eingabe(fehlgeschlagen=["x.timer", "y.service"]), {}, KONF, JETZT)
 pruefe(ids(s) == {"failed": "warnung"}, "Units im Zustand failed: Warnung")
 dienste_vorgabe = set(ue.VORGABE["DIENSTE"].split())

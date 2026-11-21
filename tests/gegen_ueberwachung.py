@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Gegenprobe zu tests/test_ueberwachung.py und tests/test_ueberwachung_ui.js.
+"""Gegenprobe zu tests/test_ueberwachung.py, tests/test_ueberwachung_ui.js und
+dem SSH-Posten am Zahnrad (tests/test_gear_badge.py, tests/test_gear_badge_ui.js).
 
 Jede Probe sabotiert eine KOPIE von backend/ueberwachung.py,
 deploy/security/system_haertung.sh, backend/main.py oder frontend/js/sysload.js
@@ -22,6 +23,7 @@ import schreibschutz  # noqa: E402
 schreibschutz.aktivieren(__file__)
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -34,9 +36,12 @@ QUELLEN = {
     "sh": REPO / "deploy" / "security" / "system_haertung.sh",
     "main": REPO / "backend" / "main.py",
     "js": REPO / "frontend" / "js" / "sysload.js",
+    "sbtn": REPO / "frontend" / "js" / "settings_btn.js",
 }
 PY = REPO / "tests" / "test_ueberwachung.py"
 JS = REPO / "tests" / "test_ueberwachung_ui.js"
+GEAR_PY = REPO / "tests" / "test_gear_badge.py"
+GEAR_JS = REPO / "tests" / "test_gear_badge_ui.js"
 
 # (Name, Datei, alt, neu, erwartete Trefferzahl von 'alt')
 PROBEN = [
@@ -111,6 +116,25 @@ PROBEN = [
     ("Anzeige: Abschnitt fehlt im Fenster", "js", "            + ueAbschnitt()\n", "", 1),
     ("Anzeige: keine Sortierung nach Stufe", "js",
      "            return (UE_STUFEN[b.stufe] || 0) - (UE_STUFEN[a.stufe] || 0);", "            return 0;", 1),
+    # ── SSH am Zahnrad statt an der CPU-Anzeige (2026-11-21) ──
+    ("CPU-Anzeige: SSH nicht herausgefiltert", "js", "var UE_AM_ZAHNRAD = { ssh_fehl: 1 };", "var UE_AM_ZAHNRAD = {};", 1),
+    ("CPU-Anzeige: Stufe des Servers (mit SSH) uebernommen", "js",
+     "        var s = 'ok';\n        ueBefunde()", "        var s = _ue.stufe || 'ok';\n        ueBefunde()", 1),
+    ("Zahnrad: SSH je Fehlversuch gezaehlt", "main",
+     '"gesamt": pending + gesperrt + (1 if ssh else 0),', '"gesamt": pending + gesperrt + ssh,', 1),
+    ("Zahnrad: kein SSH-Eintrag", "main", '        if ssh:\n            posten.append({\n                "art": "ssh",',
+     '        if False:\n            posten.append({\n                "art": "ssh",', 1),
+    ("Zahnrad: SSH-Alarm verschluckt", "main",
+     'ssh_alarm = bool(ssh) and ssh_befund.get("stufe") == "alarm"', "ssh_alarm = False", 1),
+    ("Zahnrad: SSH-Zeile als normaler Eintrag (mit Sprung)", "sbtn",
+     "            if (it.art === 'ssh') return sshZeile(it);\n", "", 1),
+    ("Zahnrad: SSH-Zeile springt in die Einstellungen", "sbtn",
+     """'<div class="jv-gear-tip-row ist-hinweis">'""", """'<div class="jv-gear-tip-row ist-hinweis" data-fokus="broker">'""", 1),
+    ("Zahnrad: Klick-Handler an jeder Zeile", "sbtn",
+     "el.querySelectorAll('.jv-gear-tip-row[data-fokus]')", "el.querySelectorAll('.jv-gear-tip-row')", 1),
+    ("Zahnrad: SSH-Alarm faerbt nicht rot", "sbtn",
+     "(_badge.gesperrt || _badge.ssh_alarm)", "(_badge.gesperrt)", 1),
+    ("Zahnrad: Benutzername unmaskiert", "sbtn", "var unten = [esc(sub),", "var unten = [sub,", 1),
 ]
 # Doppelte Admin-Schranke: die erste Probe nimmt auch den Start-Zweig weg.
 NACHTRAG = {"Anzeige: Abruf auch fuer Nicht-Admins": (
@@ -121,16 +145,19 @@ NACHTRAG = {"Anzeige: Abruf auch fuer Nicht-Admins": (
 def waechter(pfade):
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
                JARVIS_UEBERW_PRUEFLING=str(pfade["ue"]), JARVIS_HAERTUNG_PRUEFLING=str(pfade["sh"]),
-               JARVIS_MAIN_PRUEFLING=str(pfade["main"]), JARVIS_SYSLOAD_PRUEFLING=str(pfade["js"]))
+               JARVIS_MAIN_PRUEFLING=str(pfade["main"]), JARVIS_SYSLOAD_PRUEFLING=str(pfade["js"]),
+               JARVIS_SBTN_PRUEFLING=str(pfade["sbtn"]))
     erg = []
-    for argv in ([sys.executable, str(PY)], ["node", str(JS)]):
+    for argv in ([sys.executable, str(PY)], ["node", str(JS)],
+                 [sys.executable, str(GEAR_PY)], ["node", str(GEAR_JS)]):
         p = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=240)
-        erg.append((p.returncode, p.stdout.count("✗")))
+        # test_gear_badge*.py/js melden "FAIL", die B13-Waechter "✗"
+        erg.append((p.returncode, p.stdout.count("✗") + len(re.findall(r"^\s*FAIL ", p.stdout, re.M))))
     return erg
 
 
 def main():
-    for f in list(QUELLEN.values()) + [PY, JS]:
+    for f in list(QUELLEN.values()) + [PY, JS, GEAR_PY, GEAR_JS]:
         if not f.is_file():
             print("ABBRUCH: %s fehlt" % f)
             return 2

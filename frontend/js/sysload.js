@@ -26,6 +26,9 @@
  * Warnung oder Alarm – sie ist die eine Stelle, die ein Administrator auf
  * JEDER Seite sieht. Die Einzelheiten stehen oben im Fenster. Farbe allein
  * traegt die Aussage nicht: Tooltip und Fenster nennen sie als Text.
+ * Fehlgeschlagene SSH-Anmeldungen stehen NICHT hier, sondern am Zahnrad
+ * (settings_btn.js, Betreiberentscheid 2026-11-21) – der Befund wird fuer
+ * Markierung und Liste herausgefiltert, die Stufe hier neu bestimmt.
  * ============================================================ */
 (function () {
     'use strict';
@@ -146,8 +149,23 @@
 
     /* ── Serverueberwachung (B13) ──────────────────────────────────────── */
 
+    // Befunde, die an der CPU-Anzeige stehen: alle ausser den
+    // SSH-Fehlanmeldungen (die zeigt das Zahnrad).
+    var UE_AM_ZAHNRAD = { ssh_fehl: 1 };
+
+    function ueBefunde() {
+        return ((_ue && _ue.befunde) || []).filter(function (b) { return !UE_AM_ZAHNRAD[b.art]; });
+    }
+
+    /** Stufe ohne die Befunde des Zahnrads – die Stufe des Servers enthaelt
+     *  sie und waere hier eine Markierung ohne passende Zeile im Fenster. */
     function ueStufe() {
-        return (_admin && _ue && _ue.eingerichtet) ? (_ue.stufe || 'ok') : 'ok';
+        if (!(_admin && _ue && _ue.eingerichtet)) return 'ok';
+        var s = 'ok';
+        ueBefunde().forEach(function (b) {
+            if ((UE_STUFEN[b.stufe] || 0) > (UE_STUFEN[s] || 0)) s = b.stufe;
+        });
+        return s;
     }
 
     /** Markiert die CPU-Anzeige. Der Tooltip traegt die Aussage als Text,
@@ -233,7 +251,7 @@
                 + esc(T('ue.nicht_eingerichtet', 'Auf diesem Server ist keine Überwachung eingerichtet.'))
                 + '</div></div>';
         }
-        var bf = (_ue.befunde || []).slice().sort(function (a, b) {
+        var bf = ueBefunde().sort(function (a, b) {
             return (UE_STUFEN[b.stufe] || 0) - (UE_STUFEN[a.stufe] || 0);
         });
         var alter = Math.round((_ue.alter_s || 0) / 60);
@@ -251,7 +269,7 @@
             + esc(stand) + '</div>'
             + (zeilen ? '<ul class="jv-ue-liste">' + zeilen + '</ul>' : '')
             + '<div class="jv-ue-hinweis">' + esc(T('ue.hinweis',
-                'Geprüft werden alle 5 Minuten Dienste, freier Platz, Zertifikat, SSH-Anmeldungen und die Firewall. Ereignisse bleiben 24 Stunden sichtbar.'))
+                'Geprüft werden alle 5 Minuten Dienste, freier Platz, Zertifikat und die Firewall; fehlgeschlagene SSH-Anmeldungen stehen am Zahnrad. Ereignisse bleiben 24 Stunden sichtbar.'))
             + '</div></div>';
     }
 

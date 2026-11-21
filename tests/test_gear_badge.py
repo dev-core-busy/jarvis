@@ -47,7 +47,9 @@ def ohne_kommentare(s: str) -> str:
     return "\n".join(z for z in s.splitlines() if not z.lstrip().startswith("#"))
 
 
-MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+import os  # noqa: E402
+# JARVIS_MAIN_PRUEFLING: Kopie fuer die Gegenprobe (tests/gegen_ueberwachung.py)
+MAIN = Path(os.environ.get("JARVIS_MAIN_PRUEFLING", ROOT / "backend" / "main.py")).read_text(encoding="utf-8")
 
 
 def schnitt(name: str) -> str:
@@ -335,6 +337,54 @@ check(zahlen(w) == {"root_pending": 3, "gesperrt": 2, "gesamt": 5},
 check(w.get("items") == [],
       "und liefert nur eine leere Liste (das Panel faellt auf die Quellen zurueck)",
       str(w.get("items")))
+
+# ═══════════════════════════════════════════════════════════════════════════
+abschnitt("4b. SSH-Fehlanmeldungen aus der Serverueberwachung (B13)")
+# ═══════════════════════════════════════════════════════════════════════════
+# Sie stehen am Zahnrad, nicht an der CPU-Anzeige (Betreiberentscheid
+# 2026-11-21) – als EIN Posten, die Zahl der Versuche steht im Eintrag.
+def mit_ueberwachung(ns_befunde, kracht=False):
+    ue = types.ModuleType("backend.ueberwachung")
+
+    def _lesen():
+        if kracht:
+            raise OSError("Zustand nicht lesbar")
+        return {"ok": True, "eingerichtet": True, "befunde": ns_befunde}
+    ue.lesen = _lesen
+    sys.modules["backend"].ueberwachung = ue
+    sys.modules["backend.ueberwachung"] = ue
+
+
+SSH_W = {"id": "ssh", "art": "ssh_fehl", "stufe": "warnung", "text": "x",
+         "werte": {"anzahl": 37, "ip": "198.51.100.4", "user": "gast", "zuletzt": 3000}}
+ns, _ = baue(pending=1, gesperrt=1)
+mit_ueberwachung([{"id": "zert", "art": "zert_ablauf", "stufe": "warnung", "werte": {}}, SSH_W])
+w = messe(ns)
+check(w.get("ssh_fehl") == 37 and w.get("ssh_alarm") is False,
+      "Zahl der SSH-Fehlversuche aus dem Zustand der Ueberwachung", str(w))
+check(w.get("gesamt") == 3,
+      "SSH zaehlt als EIN Posten (sonst waere ein Durchprobieren sofort 99+)", str(w.get("gesamt")))
+check([e.get("art") for e in w.get("items") or []] == ["blocked", "ssh", "root"],
+      "Reihenfolge: Sperre, SSH, Freigabe", str([e.get("art") for e in w.get("items") or []]))
+p_ssh = posten(w, 1)
+check(p_ssh.get("anzahl") == 37 and p_ssh.get("ip") == "198.51.100.4" and p_ssh.get("user") == "gast"
+      and p_ssh.get("ts") == 3000, "der SSH-Eintrag traegt Anzahl, Adresse, Benutzer, Zeitpunkt", str(p_ssh))
+check(not any(e.get("art") == "zert" for e in w.get("items") or []),
+      "andere Befunde der Ueberwachung erscheinen NICHT am Zahnrad")
+ns, _ = baue()
+mit_ueberwachung([dict(SSH_W, stufe="alarm")])
+w = messe(ns)
+check(w.get("ssh_alarm") is True and posten(w, 0).get("alarm") is True,
+      "SSH-Alarm (Durchprobieren) wird als solcher gemeldet", str(w))
+ns, _ = baue(pending=2, gesperrt=1)
+mit_ueberwachung([], kracht=True)
+w = messe(ns)
+check(zahlen(w) == {"root_pending": 2, "gesperrt": 1, "gesamt": 3} and not w.get("ssh_fehl"),
+      "unlesbarer Zustand: nur der SSH-Posten fehlt, die uebrigen Zahlen stehen", str(w))
+ns, _ = baue()
+mit_ueberwachung([])
+check(messe(ns).get("gesamt") == 0, "ohne SSH-Befund kein Posten")
+sys.modules.pop("backend.ueberwachung", None)
 
 # ═══════════════════════════════════════════════════════════════════════════
 abschnitt("5. Kein zweiter Endpunkt, keine zweite Fassung")

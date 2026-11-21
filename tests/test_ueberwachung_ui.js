@@ -12,6 +12,8 @@
  *   3. Warnung / ok / nicht eingerichtet: richtige bzw. keine Markierung
  *   4. Nicht-Administrator: KEIN Abruf, keine Markierung
  *   5. Hintergrund-Tab: kein Abruf
+ *   6. SSH-Fehlanmeldungen stehen am Zahnrad, NICHT hier (Betreiberentscheid
+ *      2026-11-21): keine Markierung, keine Zeile im Fenster
  *
  *   node tests/test_ueberwachung_ui.js
  */
@@ -137,7 +139,9 @@ const ANTW = (stufe, befunde) => ({ ok: true, eingerichtet: true, stufe, zeit: 1
         pruefe(!!ab, lang + ': Abschnitt Serverueberwachung im Fenster');
         if (!ab) continue;
         const zeilen = [...ab.querySelectorAll('li')].map(l => l.textContent);
-        pruefe(zeilen.length === ALLE.length, lang + ': eine Zeile je Befund (' + zeilen.length + '/' + ALLE.length + ')');
+        const HIER = ALLE.filter(b => b.art !== 'ssh_fehl');
+        if (HIER.length === ALLE.length) abbruch('der Erzeuger lieferte keinen SSH-Befund – Filter nicht messbar');
+        pruefe(zeilen.length === HIER.length, lang + ': eine Zeile je Befund ausser SSH (' + zeilen.length + '/' + HIER.length + ')');
         const offen = zeilen.filter(z => /\{\w+\}/.test(z));
         pruefe(!offen.length, lang + ': kein unaufgeloester {platzhalter}', offen.join(' | '));
         const leer = zeilen.filter(z => /\(\)|: \.|von \.|from \.|UID \)|Ziele \.|targets \./.test(z));
@@ -151,11 +155,12 @@ const ANTW = (stufe, befunde) => ({ ok: true, eingerichtet: true, stufe, zeit: 1
         const erste = ab.querySelector('li b');
         pruefe(erste && erste.textContent === (lang === 'de' ? 'Alarm' : 'Alarm'),
                lang + ': Alarme stehen oben, mit Stufe als Text');
-        const z_ssh = zeilen.find(z => /198\.51\.100\.4/.test(z));
-        pruefe(!!z_ssh, lang + ': SSH-Befund nennt die Quelladresse', zeilen.join(' | '));
+        pruefe(!zeilen.some(z => /198\.51\.100\.4|SSH/.test(z)),
+               lang + ': kein SSH-Befund im Fenster (der steht am Zahnrad)', zeilen.filter(z => /SSH/.test(z)).join(' | '));
+        const z_platz = zeilen.find(z => /3[.,]0 %/.test(z) && /(frei|free)/.test(z));
         // Positivkontrolle der Sprache: ohne sie waere "EN" ein zweiter DE-Lauf
-        pruefe(z_ssh && (lang === 'de' ? /SSH-Anmeldungen/ : /failed SSH logins/).test(z_ssh),
-               lang + ': Zeile steht wirklich in dieser Sprache', z_ssh);
+        pruefe(z_platz && (lang === 'de' ? /nur noch .* frei/ : /Only .* free on/).test(z_platz),
+               lang + ': Zeile steht wirklich in dieser Sprache', z_platz || zeilen.join(' | '));
     }
 
     abschnitt('3. Warnung, ok, nicht eingerichtet');
@@ -170,6 +175,19 @@ const ANTW = (stufe, befunde) => ({ ok: true, eingerichtet: true, stufe, zeit: 1
     const p5 = await seite({ admin: true, antwort: { ok: true, eingerichtet: false, stufe: 'ok', befunde: [] } });
     pruefe(!p5.bar.classList.contains('jv-ue-warnung') && !p5.bar.classList.contains('jv-ue-alarm'),
            'nicht eingerichtet: keine Markierung');
+
+    abschnitt('3b. Nur SSH-Fehlanmeldungen');
+    const nurSsh = ALLE.filter(b => b.art === 'ssh_fehl');
+    for (const st of ['warnung', 'alarm']) {
+        const bf = nurSsh.map(b => Object.assign({}, b, { stufe: st }));
+        const p = await seite({ admin: true, antwort: ANTW(st, bf) });
+        pruefe(!p.bar.classList.contains('jv-ue-warnung') && !p.bar.classList.contains('jv-ue-alarm'),
+               'SSH-' + st + ' (Server-Stufe ' + st + '): CPU-Anzeige bleibt unmarkiert', p.bar.className);
+        p.w.JarvisSysLoad.oeffnen(); await warte(120);
+        const ab = p.w.document.querySelector('.jv-ue');
+        pruefe(ab && /Alles in Ordnung/.test(ab.textContent) && !ab.querySelector('li'),
+               'SSH-' + st + ': Fenster sagt "Alles in Ordnung", ohne Zeile', ab && ab.textContent.slice(0, 120));
+    }
 
     abschnitt('4. Nicht-Administrator');
     const p6 = await seite({ admin: false, antwort: ANTW('alarm', alarm) });

@@ -59,7 +59,9 @@ const lies = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
  * Referenzen). Geladen wird vor JEDEM Modul-eval: eine Schutzmassnahme an
  * einem von mehreren Zugaengen ist keine. */
 const ICONS    = lies('frontend/js/icons.js');
-const SBTN     = lies('frontend/js/settings_btn.js');
+// JARVIS_SBTN_PRUEFLING: Kopie fuer die Gegenprobe (tests/gegen_ueberwachung.py)
+const SBTN     = process.env.JARVIS_SBTN_PRUEFLING
+    ? fs.readFileSync(process.env.JARVIS_SBTN_PRUEFLING, 'utf8') : lies('frontend/js/settings_btn.js');
 const THEMECSS = lies('frontend/css/theme.css');
 const STYLECSS = lies('frontend/css/style.css');
 const I18N     = lies('frontend/js/i18n.js');
@@ -386,6 +388,43 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
                'der Rueckweg wird trotzdem gesetzt',
                w.sessionStorage.getItem('jarvis_settings_return'));
         w.close();
+    }
+    {   // SSH-Fehlanmeldungen (B13): ein Posten, kein Sprung, Alarm faerbt rot
+        const SSH = { is_admin: true, admin_badge: {
+            root_pending: 1, gesperrt: 0, ssh_fehl: 37, ssh_alarm: false, gesamt: 2,
+            items: [
+                { art: 'ssh', titel: '37 fehlgeschlagene SSH-Anmeldungen in 24 h', sub: '198.51.100.4',
+                  ts: 1756000200, anzahl: 37, ip: '198.51.100.4', user: 'gast<b>', alarm: false },
+                { art: 'root', titel: 'apt-get install x', sub: 'firma\\a.probe', ts: 1756000100 },
+            ] } };
+        const { w, d } = starte('portal.html', SSH);
+        await gleich(); await gleich();
+        const b = badge(d);
+        pruefe(b && b.textContent === '2', 'SSH zaehlt als ein Posten in der Badge', b && b.textContent);
+        pruefe(b && !b.classList.contains('is-danger'), 'SSH-Warnung faerbt die Badge nicht rot');
+        pruefe(b && /SSH/.test(b.getAttribute('aria-label') || ''),
+               'aria-label nennt die SSH-Fehlanmeldungen', b && b.getAttribute('aria-label'));
+        const el = hover(w, d);
+        const zeilen = el ? el.querySelectorAll('.jv-gear-tip-row') : [];
+        const ssh = zeilen[0];
+        pruefe(zeilen.length === 2 && ssh && /37 fehlgeschlagene SSH-Anmeldungen/.test(ssh.textContent)
+               && /198\.51\.100\.4/.test(ssh.textContent),
+               'die SSH-Zeile nennt Anzahl und Quelladresse', ssh && ssh.textContent);
+        pruefe(ssh && ssh.tagName === 'DIV' && !ssh.hasAttribute('data-fokus'),
+               'die SSH-Zeile ist kein Sprung (kein Abschnitt erledigt sie)', ssh && ssh.outerHTML.slice(0, 80));
+        pruefe(ssh && !ssh.querySelector('b') && /gast<b>/.test(ssh.textContent),
+               'Benutzername aus dem Journal wird maskiert');
+        if (ssh) ssh.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+        pruefe(!w.sessionStorage.getItem('jarvis_settings_focus') && !w.sessionStorage.getItem('jarvis_settings_tab'),
+               'ein Klick auf die SSH-Zeile wechselt nirgendwohin', JSON.stringify([w.sessionStorage.getItem('jarvis_settings_focus'), w.sessionStorage.getItem('jarvis_settings_tab'), w.location.href]));
+        w.close();
+        const alarm = JSON.parse(JSON.stringify(SSH));
+        alarm.admin_badge.ssh_alarm = true; alarm.admin_badge.items[0].alarm = true;
+        const s2 = starte('portal.html', alarm);
+        await gleich(); await gleich();
+        pruefe(badge(s2.d) && badge(s2.d).classList.contains('is-danger'),
+               'SSH-Alarm (Durchprobieren) faerbt die Badge wie eine Sperre');
+        s2.w.close();
     }
     {   // Klick auf die Badge selbst setzt KEINEN Abschnitt (nur den Reiter)
         const { w, d } = starte('portal.html', POSTEN);

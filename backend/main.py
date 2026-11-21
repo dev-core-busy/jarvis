@@ -10085,7 +10085,13 @@ def _is_admin_user(username: str) -> bool:
     return _user_is_admin(username)
 
 
-# ── Zahnrad-Badge fuer Administratoren: offene Root-Freigaben + Sperren ──
+# ── Zahnrad-Badge fuer Administratoren: offene Root-Freigaben, Sperren und
+#    fehlgeschlagene SSH-Anmeldungen (Serverueberwachung B13) ──
+# Die SSH-Fehlanmeldungen stehen HIER und nicht an der CPU-Anzeige
+# (Betreiberentscheid 2026-11-21): sie betreffen den Zugang zum Server, und
+# der Weg zur Administration fuehrt ueber das Zahnrad. Sie zaehlen als EIN
+# Posten – die Zahl der Fehlversuche steht im Eintrag; als Badge-Zahl waere
+# ein Durchprobieren sofort "99+" und verdeckte Sperren und Freigaben.
 # WARUM AN /api/me UND NICHT AN EINEM EIGENEN ENDPUNKT: dieselbe Begruendung
 # wie bei ``license_banner`` – jede der elf Bereichsseiten ruft /api/me ohnehin
 # ab (settings_btn.js braucht daraus den Administrator-Status, um das Zahnrad
@@ -10112,7 +10118,8 @@ _ADMIN_BADGE_TIMEOUT = 3.0       # harter Deckel je Messung
 # Schnitt liesse den Administrator die gekuerzte Liste fuer vollstaendig halten,
 # waehrend die Badge daneben eine groessere Zahl zeigt (Register).
 _ADMIN_BADGE_ITEMS_MAX = 12
-_ADMIN_BADGE_LEER = {"root_pending": 0, "gesperrt": 0, "gesamt": 0, "items": []}
+_ADMIN_BADGE_LEER = {"root_pending": 0, "gesperrt": 0, "ssh_fehl": 0, "ssh_alarm": False,
+                     "gesamt": 0, "items": []}
 _admin_badge_stand: dict = {"ts": 0.0, "ttl": 0.0, "wert": dict(_ADMIN_BADGE_LEER)}
 
 
@@ -10161,6 +10168,23 @@ def _admin_badge_messen(user: str) -> dict:
     except Exception:  # noqa: BLE001
         gesperrt = 0
         eintraege = []
+    ssh_befund: dict = {}
+    try:
+        # Zustand der Serverueberwachung (root-Timer, backend/ueberwachung.py):
+        # eine Datei lesen, kein fremder Prozess - faellt sie aus, fehlt nur
+        # dieser Posten.
+        from backend import ueberwachung as _ueberw
+        for b in _ueberw.lesen().get("befunde") or []:
+            if b.get("art") == "ssh_fehl":
+                ssh_befund = b
+    except Exception:  # noqa: BLE001
+        ssh_befund = {}
+    ssh_werte = ssh_befund.get("werte") or {}
+    try:
+        ssh = max(0, int(ssh_werte.get("anzahl") or 0))
+    except (TypeError, ValueError):
+        ssh = 0
+    ssh_alarm = bool(ssh) and ssh_befund.get("stufe") == "alarm"
     try:
         # Sperren zuerst: ein Konto kommt nicht mehr herein, bis jemand handelt –
         # dieselbe Rangfolge, die die Badge ueber `is-danger` schon in der Farbe
@@ -10172,6 +10196,19 @@ def _admin_badge_messen(user: str) -> dict:
                 "sub": str(e.get("reason") or ""),
                 "ts": int(e.get("at") or 0),
             })
+        # Dann die SSH-Fehlanmeldungen: ein Angriffsversuch auf den Server
+        # wiegt schwerer als eine offene Freigabe.
+        if ssh:
+            posten.append({
+                "art": "ssh",
+                "titel": "%d fehlgeschlagene SSH-Anmeldungen in 24 h" % ssh,
+                "sub": str(ssh_werte.get("ip") or ""),
+                "ts": int(ssh_werte.get("zuletzt") or 0),
+                "anzahl": ssh,
+                "ip": str(ssh_werte.get("ip") or ""),
+                "user": str(ssh_werte.get("user") or ""),
+                "alarm": ssh_alarm,
+            })
         for e in offen:
             posten.append({
                 "art": "root",
@@ -10182,7 +10219,8 @@ def _admin_badge_messen(user: str) -> dict:
     except Exception:  # noqa: BLE001
         posten = []
     return {"root_pending": pending, "gesperrt": gesperrt,
-            "gesamt": pending + gesperrt,
+            "ssh_fehl": ssh, "ssh_alarm": ssh_alarm,
+            "gesamt": pending + gesperrt + (1 if ssh else 0),
             "items": posten[:_ADMIN_BADGE_ITEMS_MAX]}
 
 

@@ -35,6 +35,12 @@
  * gehoert deshalb HIERHIN und nicht in eine Seite: sonst haette sie elf
  * Fassungen, und die zwoelfte Seite vergisst sie wieder.
  *
+ * SSH-FEHLANMELDUNGEN (Serverueberwachung B13, Betreiberentscheid 2026-11-21):
+ * stehen HIER als ein Posten und nicht an der CPU-Anzeige. Die Zeile fuehrt
+ * nirgendwohin – in den Einstellungen gibt es keinen Abschnitt, der sie
+ * erledigt; sie ist ein Hinweis, kein Sprung. Ein SSH-Alarm (Durchprobieren)
+ * faerbt die Badge wie eine Sperre.
+ *
  * Ein Klick auf die Badge fuehrt in den Sicherheits-Reiter (sessionStorage
  * `jarvis_settings_tab`, ausgewertet in app.js) – eine Warnung ohne Weg zur
  * Abhilfe ist nur Laerm (dieselbe Regel wie beim Lizenz-Banner im Portal).
@@ -153,6 +159,7 @@
         var gesamt = (_badge && _badge.gesamt) || 0;
         el.setAttribute('aria-label', T('security.gear_tip_title', 'Zu erledigen'));
         var zeilen = posten.map(function (it) {
+            if (it.art === 'ssh') return sshZeile(it);
             var blockiert = it.art === 'blocked';
             var marke = blockiert
                 ? T('security.gear_tip_blocked', 'Gesperrt')
@@ -197,12 +204,35 @@
             + '<div class="jv-gear-tip-hint">'
             + esc(T('security.gear_tip_hint',
                     'Eintrag anklicken, um den Abschnitt zu öffnen')) + '</div>';
-        Array.prototype.forEach.call(el.querySelectorAll('.jv-gear-tip-row'),
+        // Nur Zeilen MIT Abschnitt: die SSH-Zeile hat keinen und darf nicht
+        // nach /settings fuehren (ohne Ziel waere das ein Sprung ins Leere).
+        Array.prototype.forEach.call(el.querySelectorAll('.jv-gear-tip-row[data-fokus]'),
             function (b) {
                 b.addEventListener('click', function () {
                     nachSettings(b.getAttribute('data-fokus'));
                 });
             });
+    }
+
+    /* SSH-Zeile: kein Knopf (kein Abschnitt, der sie erledigt). Titel und
+     * Unterzeile aus der Uebersetzung; Adresse und Benutzer sind Fremdtext und
+     * werden maskiert. */
+    function sshZeile(it) {
+        var titel = T('security.gear_ssh_titel', '{n} fehlgeschlagene SSH-Anmeldungen in 24 Stunden')
+            .replace('{n}', String(Number(it.anzahl) || 0));
+        if (titel.indexOf('security.') === 0) titel = String(it.titel || '');
+        var sub = it.ip ? T('security.gear_ssh_sub', 'zuletzt von {ip}').replace('{ip}', String(it.ip)) : '';
+        if (sub.indexOf('security.') === 0) sub = String(it.ip || '');
+        if (it.user) sub += ' (' + it.user + ')';
+        var unten = [esc(sub), it.ts ? zeitpunkt(it.ts) : ''].filter(Boolean).join(' · ');
+        return '<div class="jv-gear-tip-row ist-hinweis">'
+            + '<div class="jv-gear-tip-top">'
+            + '<span class="jv-gear-tip-k ' + (it.alarm ? 'blocked' : 'root') + '">'
+            + esc(T('security.gear_tip_ssh', 'SSH')) + '</span>'
+            + '<span class="jv-gear-tip-t">' + esc(titel) + '</span>'
+            + '</div>'
+            + (unten ? '<div class="jv-gear-tip-sub">' + unten + '</div>' : '')
+            + '</div>';
     }
 
     function tipAn(anker) {
@@ -266,6 +296,10 @@
             teile.push(T('security.gear_badge_blocked', 'Gesperrte Konten')
                 + ': ' + _badge.gesperrt);
         }
+        if (_badge && _badge.ssh_fehl) {
+            teile.push(T('security.gear_badge_ssh', 'Fehlgeschlagene SSH-Anmeldungen (24 h)')
+                + ': ' + _badge.ssh_fehl);
+        }
         return teile.join(' · ');
     }
 
@@ -324,7 +358,8 @@
             el.textContent = n > 99 ? '99+' : String(n);
             // Eine Sperre ist dringlicher als eine offene Freigabe: ein Konto
             // kommt nicht mehr herein, bis jemand handelt.
-            el.classList.toggle('is-danger', !!(_badge && _badge.gesperrt));
+            // Ein SSH-Alarm (Durchprobieren) wiegt wie eine Sperre.
+            el.classList.toggle('is-danger', !!(_badge && (_badge.gesperrt || _badge.ssh_alarm)));
             el.setAttribute('aria-label', quellenText());
         });
         // Steht das Panel gerade offen, muss es dem neuen Stand folgen \u2013 sonst

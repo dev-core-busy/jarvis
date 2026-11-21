@@ -39,12 +39,27 @@ command -v docker >/dev/null 2>&1 || fehler "Docker ist nicht installiert (https
 docker compose version >/dev/null 2>&1 || fehler "Docker Compose fehlt (Paket docker-compose-plugin)."
 docker info >/dev/null 2>&1 || fehler "Kein Zugriff auf Docker – als root oder mit sudo ausführen."
 
-# ── docker-compose.yml ──────────────────────────────────────────────────────
-if [ -f docker-compose.yml ]; then
-    info "Vorhandene docker-compose.yml in $(pwd) wird verwendet."
+# ── Verzeichnis + docker-compose.yml ───────────────────────────────────────
+# WARUM nicht einfach das aktuelle Verzeichnis (2026-11-21): stand die Shell
+# in einem inzwischen geloeschten Verzeichnis, scheiterte das Schreiben der
+# Datei und das Skript meldete irrefuehrend "Download fehlgeschlagen".
+# Liegt hier schon eine docker-compose.yml (bestehende Installation), bleibt
+# es dabei; sonst immer ein festes Verzeichnis.
+if [ -f docker-compose.yml ] && [ -w . ]; then
+    ZIEL="$(pwd)"
+    info "Vorhandene docker-compose.yml in $ZIEL wird verwendet."
 else
-    info "Lade docker-compose.yml nach $(pwd) ..."
-    curl -fsSL "$COMPOSE_URL" -o docker-compose.yml || fehler "Download von $COMPOSE_URL fehlgeschlagen."
+    ZIEL="${JARVIS_DIR:-$HOME/jarvis}"
+    mkdir -p "$ZIEL" || fehler "Verzeichnis $ZIEL kann nicht angelegt werden."
+    cd "$ZIEL" || fehler "Wechsel nach $ZIEL nicht möglich."
+    if [ -f docker-compose.yml ]; then
+        info "Vorhandene docker-compose.yml in $ZIEL wird verwendet."
+    else
+        info "Lade docker-compose.yml nach $ZIEL ..."
+        curl -fsSL "$COMPOSE_URL" -o docker-compose.yml.neu \
+            || { rm -f docker-compose.yml.neu; fehler "Download von $COMPOSE_URL fehlgeschlagen (Netz/Proxy prüfen)."; }
+        mv docker-compose.yml.neu docker-compose.yml || fehler "docker-compose.yml kann in $ZIEL nicht abgelegt werden."
+    fi
 fi
 
 # ── Image holen – IMMER, sonst bleibt ein altes lokales :latest stehen ─────
@@ -108,6 +123,7 @@ echo
 echo "${G}${linie}${N}"
 echo "${G}  Jarvis läuft${N}   ${B}https://${ip}${N}"
 echo "  (Die Zertifikatswarnung im Browser bestätigen – selbstsigniert.)"
+echo "  Installationsverzeichnis: ${ZIEL}"
 echo
 echo "  Benutzer:  ${B}jarvis${N}"
 case "$ergebnis" in
@@ -123,7 +139,7 @@ case "$ergebnis" in
         echo "  Auf diesem Rechner liegen Daten einer früheren Jarvis-Installation;"
         echo "  das dort vergebene Kennwort gilt weiter."
         echo "  Ganz neu beginnen (${R}LÖSCHT alle Jarvis-Daten${N}):"
-        echo "      docker compose down -v && curl -fsSL https://jarvis-ai.info/downloads/docker-install.sh | bash"
+        echo "      cd ${ZIEL} && docker compose down -v && curl -fsSL https://jarvis-ai.info/downloads/docker-install.sh | bash"
         ;;
     ENV)
         echo "  Kennwort:  ${Y}der Wert von JARVIS_PASSWORD${N} (aus .env bzw. Umgebung)"

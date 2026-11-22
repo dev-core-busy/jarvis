@@ -154,6 +154,21 @@ const PROBEN = [
                              "    return true;"),
         erwartet: /Probequelle 3: blosse Erwaehnungen zaehlen NICHT/,
     },
+    // ── Starter fuer Abschnitt 3 (tests/lib/parallel_laeufe.js, 2026-11-22) ──
+    {
+        name: "Starter liefert die Ergebnisse in anderer Reihenfolge",
+        datei: "tests/lib/parallel_laeufe.js",
+        um: (s) => s.replace("    fs.writeFileSync(A.ergebnis, JSON.stringify({ ergebnisse }));",
+                             "    ergebnisse.reverse();\n    fs.writeFileSync(A.ergebnis, JSON.stringify({ ergebnisse }));"),
+        erwartet: /passen nicht zu den Dateien/,
+    },
+    {
+        name: "Starter laesst einen Lauf weg",
+        datei: "tests/lib/parallel_laeufe.js",
+        um: (s) => s.replace("    fs.writeFileSync(A.ergebnis, JSON.stringify({ ergebnisse }));",
+                             "    ergebnisse.pop();\n    fs.writeFileSync(A.ergebnis, JSON.stringify({ ergebnisse }));"),
+        erwartet: /keine vollstaendigen Ergebnisse/,
+    },
 ];
 
 /* ── REGEL statt Liste: jede angefasste Datei muss gesichert werden ────────── */

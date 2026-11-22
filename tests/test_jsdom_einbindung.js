@@ -48,6 +48,7 @@
 
 require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { execFileSync, spawnSync } = require("child_process");
 
@@ -426,10 +427,51 @@ function darfUeberspringen(quelle) {
     return gefunden;
 }
 
+/* ⚠ GLEICHZEITIG GESTARTET (2026-11-22): nacheinander waren diese ~160 Laeufe
+ * 28 von 31 s CPU-Profil - reines Warten auf Kindprozesse -, und die Gegenprobe
+ * zahlte es je Probe (14 Laeufe, 20 Minuten). Gestartet wird ueber
+ * tests/lib/parallel_laeufe.js mit hoechstens 8 gleichzeitig (nie mehr als
+ * Kerne); AUSGEWERTET wird unten weiter in Dateireihenfolge. */
+const GLEICHZEITIG = Math.max(1, Number(process.env.JSDOM_EINBINDUNG_PARALLEL)
+                                 || Math.min(8, (os.cpus() || []).length || 1));
+const ablageLaeufe = fs.mkdtempSync(path.join(os.tmpdir(), "jsdom-einbindung-"));
+let laeufe;
+try {
+    const auftrag = path.join(ablageLaeufe, "auftrag.json");
+    const ergebnisDatei = path.join(ablageLaeufe, "ergebnis.json");
+    fs.writeFileSync(auftrag, JSON.stringify({
+        grenze: GLEICHZEITIG, ergebnis: ergebnisDatei,
+        laeufe: dateien.map((d) => ({ argv: ["-r", BLOCKER, path.join("tests", d.name)],
+                                      cwd: WURZEL, timeout_ms: 120000 })),
+    }));
+    const starter = spawnSync(process.execPath, [path.join(TESTS, "lib", "parallel_laeufe.js"), auftrag],
+                              { cwd: WURZEL, encoding: "utf8", timeout: 600000 });
+    try { laeufe = JSON.parse(fs.readFileSync(ergebnisDatei, "utf8")).ergebnisse; }
+    catch (e) { laeufe = null; }
+    // Ohne vollstaendige Ergebnisse waere jede Pruefung unten trivial wahr.
+    if (starter.status !== 0 || !Array.isArray(laeufe) || laeufe.length !== dateien.length
+        || laeufe.some((l) => !l)) {
+        console.log("\nABBRUCH: der Starter (tests/lib/parallel_laeufe.js) lieferte keine "
+                    + "vollstaendigen Ergebnisse (Exit " + starter.status + ", "
+                    + String(starter.stderr || "").trim().split("\n")[0] + "). Exit 2 = konnte nicht laufen.");
+        process.exit(2);
+    }
+    // Die Reihenfolge ist die Zusage, an der die Auswertung haengt: verrutscht
+    // sie, landet ein Befund still bei der falschen Datei, die Zahlen bleiben.
+    const fremd = dateien.filter((d, i) => !Array.isArray(laeufe[i].argv)
+        || laeufe[i].argv[laeufe[i].argv.length - 1] !== path.join("tests", d.name));
+    if (fremd.length) {
+        console.log("\nABBRUCH: Ergebnisse des Starters passen nicht zu den Dateien ("
+                    + kurz(fremd.map((d) => d.name), 3) + "). Exit 2 = konnte nicht laufen.");
+        process.exit(2);
+    }
+} finally {
+    fs.rmSync(ablageLaeufe, { recursive: true, force: true });
+}
+
 const falscherExit = [], mitStacktrace = [], ohneMeldung = [];
-for (const d of dateien) {
-    const lauf = spawnSync(process.execPath, ["-r", BLOCKER, path.join("tests", d.name)],
-                           { cwd: WURZEL, encoding: "utf8", timeout: 120000 });
+for (const [i, d] of dateien.entries()) {
+    const lauf = laeufe[i];
     const ausgabe = (lauf.stdout || "") + (lauf.stderr || "");
 
     // Ein Stacktrace ist in JEDEM Fall verboten – auch bei den Ausnahmen.

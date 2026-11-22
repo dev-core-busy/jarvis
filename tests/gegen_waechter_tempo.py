@@ -43,8 +43,9 @@ CI = ROOT / "tests/ci_lauf.py"
 W_SEGMENT = ROOT / "tests/test_anhang_bild_mime.py"
 W_VERSATZ = ROOT / "tests/test_dienst_neustart.py"
 W_IMPORT = ROOT / "tests/test_unlesbar_cache.py"
+PROLOG = ROOT / "tests/test_prolog_vollstaendig.js"
 WAECHTER = ROOT / "tests/test_waechter_tempo.py"
-DATEIEN = [HELFER, CI, W_SEGMENT, W_VERSATZ, W_IMPORT]
+DATEIEN = [HELFER, CI, W_SEGMENT, W_VERSATZ, W_IMPORT, PROLOG]
 UMG = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 
 
@@ -146,6 +147,22 @@ PROBEN = [
               "    except OSError:\n        return {}\n")),
     ("Zeitdatei in falscher Form laesst den Lauf abstuerzen", CI,
      ersetzen("    if not isinstance(roh, dict):\n        return {}\n", "")),
+    # ── Prolog-Beobachtung im Sammellauf ──
+    ("Sammellauf schaltet die Beobachtung nicht ein", CI,
+     ersetzen('            return {"PROLOG_PRUEFUNG": str(sammlung / (d.name + ".jsonl"))}\n',
+              "            return None\n")),
+    ("Prolog-Waechter laeuft mitten im Sammellauf statt danach", CI,
+     ersetzen("        parallel = [d for d in laufen if d.name not in ALLEIN and d not in nachlauf]\n",
+              "        parallel = [d for d in laufen if d.name not in ALLEIN]\n"
+              "        nachlauf = []\n")),
+    ("Liste der gelaufenen Pruefstaende bleibt leer", CI,
+     ersetzen("                json.dumps(sorted(beobachtet & set(gemessen))), encoding=\"utf-8\")",
+              "                json.dumps([]), encoding=\"utf-8\")")),
+    ("Sammlung bleibt nach dem Lauf liegen", CI,
+     ersetzen("            shutil.rmtree(sammlung, ignore_errors=True)\n", "            pass\n")),
+    ("Prolog-Waechter liest die Sammlung nicht (nur eigene Ablage)", PROLOG,
+     ersetzen('const quelleVon = (name) => path.join(uebernommen.has(name) ? SAMMLUNG : ablage, name + ".jsonl");',
+              'const quelleVon = (name) => path.join(ablage, name + ".jsonl");')),
 ]
 
 

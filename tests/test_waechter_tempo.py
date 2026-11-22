@@ -342,5 +342,128 @@ finally:
         os.environ["JARVIS_CI_DAUERN"] = alt_env
     shutil.rmtree(tmp, ignore_errors=True)
 
+# ═══ Teil D: Prolog-Waechter wertet die Beobachtung des Sammellaufs aus ═══
+print("\nTeil D: ci_lauf.py + test_prolog_vollstaendig.js - Beobachtung aus dem Sammellauf")
+
+import subprocess  # noqa: E402
+
+NODE = shutil.which("node")
+if not NODE:
+    abbruch("node fehlt - Teil D misst nichts")
+PROLOG = ci.PROLOG
+tmp = Path(tempfile.mkdtemp(prefix="waechter-tempo-prolog-"))
+vorher = set(Path.home().glob(".prolog_sammlung_*"))
+alt = (ci.TESTS, ci.WURZEL, ci.AUSNAHMEN, sys.argv)
+alt_env = os.environ.get("JARVIS_CI_DAUERN")
+try:
+    prot = tmp / "prot.jsonl"
+    probe = tmp / "tests"
+    probe.mkdir()
+    # Zwei Pruefstaende mit Prolog (Auswahlregel: liest frontend/ UND ruft
+    # .eval( - hier im Text), einer ohne, ein Python-Waechter, und ein
+    # Prolog-Waechter, der festhaelt, was er vorfindet.
+    meldung = ("const fs = require('fs');\n"
+               "fs.appendFileSync(" + json.dumps(str(prot)) + ", JSON.stringify({wer: %s, "
+               "pruefung: process.env.PROLOG_PRUEFUNG || null, sammlung: process.env.PROLOG_SAMMLUNG || null, "
+               "inhalt: process.env.PROLOG_SAMMLUNG ? fs.readdirSync(process.env.PROLOG_SAMMLUNG).sort() : null, "
+               "gelaufen: (() => { try { return JSON.parse(fs.readFileSync("
+               "process.env.PROLOG_SAMMLUNG + '/_gelaufen.json', 'utf8')); } catch (e) { return null; } })()"
+               "}) + '\\n');\n")
+    for n in ("test_mit_a.js", "test_mit_b.js"):
+        (probe / n).write_text("// readFileSync(path.join(ROOT, 'frontend/js/x.js')) ... w.eval(x)\n"
+                               + meldung % json.dumps(n)
+                               + "if (process.env.PROLOG_PRUEFUNG) fs.writeFileSync(process.env.PROLOG_PRUEFUNG, "
+                                 "'{\"art\":\"fenster\"}\\n');\nconsole.log('Ergebnis: 1 OK, 0 FAIL');\n",
+                               encoding="utf-8")
+    (probe / "test_ohne.js").write_text(meldung % json.dumps("test_ohne.js")
+                                        + "console.log('Ergebnis: 1 OK, 0 FAIL');\n", encoding="utf-8")
+    (probe / "test_py.py").write_text(
+        "import json, os\nwith open(%r, 'a') as f:\n    f.write(json.dumps({'wer': 'test_py.py', "
+        "'pruefung': os.environ.get('PROLOG_PRUEFUNG')}) + '\\n')\nprint('Ergebnis: 1 OK, 0 FAIL')\n"
+        % str(prot), encoding="utf-8")
+    (probe / PROLOG).write_text(meldung % json.dumps(PROLOG) + "console.log('Ergebnis: 1 OK, 0 FAIL');\n",
+                                encoding="utf-8")
+    ci.TESTS, ci.WURZEL, ci.AUSNAHMEN = probe, tmp, tmp / "keine_ausnahmen.txt"
+    os.environ["JARVIS_CI_DAUERN"] = str(tmp / "dauern.json")
+
+    def sammellauf(*muster):
+        if prot.exists():
+            prot.unlink()
+        sys.argv = ["ci_lauf.py", "--parallel", "4", *muster]
+        puffer = io.StringIO()
+        with contextlib.redirect_stdout(puffer), contextlib.redirect_stderr(puffer):
+            try:
+                rc = ci.main()
+            except Exception as exc:  # noqa: BLE001 - ein Absturz ist ein Befund
+                rc = f"Absturz {type(exc).__name__}: {exc}"
+        saetze = [json.loads(z) for z in prot.read_text().splitlines()] if prot.exists() else []
+        return rc, {s["wer"]: s for s in saetze}, [s["wer"] for s in saetze], puffer.getvalue()
+
+    rc, je, folge, ausgabe = sammellauf()
+    if rc != 0 or len(je) != 5:
+        abbruch(f"Probelauf untauglich (rc={rc}, gelaufen {sorted(je)})\n{ausgabe[-800:]}")
+    pw = je[PROLOG]
+    sammlung = pw.get("sammlung")
+    pruefe("Prolog-Waechter laeuft NACH allen anderen", folge[-1] == PROLOG, folge)
+    pruefe("…mit Sammlung, und die Liste nennt genau die beobachteten Laeufe",
+           bool(sammlung) and pw.get("gelaufen") == ["test_mit_a.js", "test_mit_b.js"], pw)
+    pruefe("…und ihre Beobachtungen liegen dort vor",
+           {"test_mit_a.js.jsonl", "test_mit_b.js.jsonl"} <= set(pw.get("inhalt") or []), pw.get("inhalt"))
+    pruefe("Beobachtung nur in Pruefstaenden mit Prolog (nicht ohne, nicht Python, nicht im Waechter)",
+           all(je[n]["pruefung"] and str(je[n]["pruefung"]).startswith(str(sammlung or "?"))
+               for n in ("test_mit_a.js", "test_mit_b.js"))
+           and not je["test_ohne.js"]["pruefung"] and not je["test_py.py"]["pruefung"]
+           and not pw["pruefung"], {n: s.get("pruefung") for n, s in je.items()})
+    pruefe("Sammlung nach dem Lauf geloescht",
+           bool(sammlung) and not Path(sammlung).exists()
+           and set(Path.home().glob(".prolog_sammlung_*")) == vorher, sammlung)
+    rc, je, folge, _ = sammellauf("test_mit_a.js")
+    pruefe("ohne Prolog-Waechter im Lauf: keine Beobachtung (kein Mehraufwand)",
+           rc == 0 and je.get("test_mit_a.js", {}).get("pruefung") is None, je)
+finally:
+    ci.TESTS, ci.WURZEL, ci.AUSNAHMEN, sys.argv = alt
+    if alt_env is None:
+        os.environ.pop("JARVIS_CI_DAUERN", None)
+    else:
+        os.environ["JARVIS_CI_DAUERN"] = alt_env
+    shutil.rmtree(tmp, ignore_errors=True)
+    # Eine Sammlung, die DIESER Probelauf liegen liess (gemeldet ist es oben),
+    # gehoert nicht ins Home.
+    for rest in set(Path.home().glob(".prolog_sammlung_*")) - vorher:
+        shutil.rmtree(rest, ignore_errors=True)
+
+# D2: der ECHTE Prolog-Waechter wertet eine Sammlung wirklich aus - eine
+# Luecke darin muss er melden, ein Umgebungsname nicht. Alle Pruefstaende
+# stehen als gelaufen in der Liste (nichts nachzustarten, Sekunden statt
+# Minuten); nur einer hat eine Beobachtung.
+auswahl = subprocess.run([NODE, str(TESTS / "lib" / "prolog_auswahl.js")], capture_output=True,
+                         text=True, timeout=60)
+try:
+    alle = json.loads(auswahl.stdout)
+except ValueError:
+    alle = []
+if not alle:
+    abbruch("tests/lib/prolog_auswahl.js liefert keine Pruefstaende")
+ziel_name = alle[0]
+for name_fehlend, erwartet_rc, titel in (("_selSetze", 1, "eine Schnitt-Luecke in der Sammlung wird gemeldet"),
+                                         ("fetch", 0, "ein Umgebungsname in der Sammlung bleibt gruen")):
+    sml = Path(tempfile.mkdtemp(prefix="waechter-tempo-sammlung-"))
+    try:
+        (sml / "_gelaufen.json").write_text(json.dumps(alle))
+        (sml / (ziel_name + ".jsonl")).write_text(
+            json.dumps({"art": "fenster"}) + "\n"
+            + json.dumps({"art": "eval", "zeichen": 10, "fehlend": [{"name": name_fehlend, "zeile": 1}]}) + "\n")
+        r = subprocess.run([NODE, str(TESTS / "test_prolog_vollstaendig.js")], capture_output=True, text=True,
+                           timeout=600, cwd=ROOT, env=dict(os.environ, PROLOG_SAMMLUNG=str(sml)))
+        aus = r.stdout + r.stderr
+    finally:
+        shutil.rmtree(sml, ignore_errors=True)
+    if "0 Pruefstaende selbst zu starten" not in aus:
+        abbruch(f"Prolog-Waechter hat die Sammlung nicht uebernommen ({titel}):\n{aus[-600:]}")
+    treffer = (ziel_name + " → " + name_fehlend) in aus
+    pruefe(f"Prolog-Waechter: {titel}",
+           r.returncode == erwartet_rc and treffer == (erwartet_rc == 1),
+           f"rc={r.returncode}, gemeldet={treffer}")
+
 print("\nErgebnis: %d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

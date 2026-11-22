@@ -37,8 +37,14 @@
  * `frontend/` UND ruft `.eval(`), und ob ein Name von der Umgebung kommt,
  * entscheidet `name in window` am ECHTEN Fenster.
  *
- * ⚠ DAUER: rund 6 Minuten – jeder Pruefstand laeuft wirklich. Ein billigerer
- * Weg existiert nicht: ohne Lauf gibt es den Prolog nicht.
+ * ⚠ DAUER: allein rund 2 Minuten – jeder Pruefstand laeuft wirklich. Ohne
+ * Lauf gibt es den Prolog nicht. IM SAMMELLAUF laeuft aber jeder dieser
+ * Pruefstaende ohnehin: seit 2026-11-22 schaltet `tests/ci_lauf.py` die
+ * Beobachtung in DIESEN Laeufen ein und startet den Waechter danach mit
+ * `PROLOG_SAMMLUNG=<ordner>`. Dann wird ausgewertet, was dort beobachtet
+ * wurde - gemessen am Ort des Geschehens bleibt es, es ist derselbe Lauf -,
+ * und nur nachgestartet, was der Sammellauf nicht gefahren hat (vorher:
+ * 225-400 s und damit der laengste Pfad des ganzen Sammellaufs).
  *
  * Lauf:  node tests/test_prolog_vollstaendig.js
  * Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
@@ -253,17 +259,9 @@ abschnitt("2 · Die betroffenen Pruefstaende");
  * nicht.) `gegen_*` bleibt ausdruecklich draussen: eine Gegenprobe patcht
  * Dateien und darf NIE in einem Sammellauf mitlaufen – der Rueckstand stand
  * danach schon einmal im Arbeitsbaum. */
-const LIEST_FRONTEND = /readFileSync\([^)]*frontend|join\([^)]*['"]frontend/;
-const EVAL = /\.eval\(/;
-const dateien = fs.readdirSync(TESTS)
-    .filter(n => n.endsWith(".js"))
-    .filter(n => !n.startsWith("gegen_"))
-    .sort()
-    .filter(n => {
-        if (path.join(TESTS, n) === __filename) return false;
-        const q = fs.readFileSync(path.join(TESTS, n), "utf8");
-        return LIEST_FRONTEND.test(q) && EVAL.test(q);
-    });
+// Die Regel steht in tests/lib/prolog_auswahl.js - der Sammellauf benutzt
+// dieselbe, damit beide dieselben Dateien meinen.
+const dateien = require("./lib/prolog_auswahl").pruefstaende(TESTS, __filename);
 
 if (dateien.length < 20) {
     abbruch("nur " + dateien.length + " Pruefstaende mit Prolog gefunden (erwartet: "
@@ -284,14 +282,50 @@ const nebenbefunde = { nachbarmodul: new Set(), umgebung: new Set() };
 const nebenbefundeDateien = { nachbarmodul: new Set(), umgebung: new Set() };
 let evalsGesamt = 0;
 
-/* ═══ 3a · Alle Pruefstaende STARTEN (nebenlaeufig) ═══════════════════════
+/* Gleichzeitigkeit allein: 8, hoechstens die Kernzahl, mindestens 4.
+ * Gemessen 2026-11-22 (12 Kerne, 119 Pruefstaende): 4 -> 181 s, 8 -> 123 s,
+ * 12 -> 117 s, Auswertung jedes Mal identisch. Ueber 8 bringt kaum noch
+ * etwas, und im Sammellauf startet der Waechter mit Sammlung fast nichts
+ * mehr selbst - die Vervielfachung, vor der prolog_fanout.js warnt, faellt
+ * dort weg. */
+const GRENZE_VORGABE = Math.min(8, Math.max(4, (os.cpus() || []).length || 4));
+const GRENZE = Math.max(1, Number(process.env.PROLOG_PARALLEL || GRENZE_VORGABE) || GRENZE_VORGABE);
+
+/* ═══ 3a · Was der Sammellauf schon beobachtet hat ═══════════════════════
+ * `PROLOG_SAMMLUNG` setzt nur tests/ci_lauf.py. `_gelaufen.json` nennt, wer
+ * dort WIRKLICH lief - nur deren Beobachtung wird uebernommen. Ein Pruefstand
+ * ohne .jsonl ist dann dasselbe wie hier: kein Fenster gebaut. Fehlt die
+ * Liste oder taugt sie nicht, wird alles selbst gestartet (langsamer, nicht
+ * falscher) - und das gesagt. */
+const SAMMLUNG = process.env.PROLOG_SAMMLUNG || "";
+let uebernommen = new Set();
+if (SAMMLUNG) {
+    let gelaufen = null;
+    try {
+        gelaufen = JSON.parse(fs.readFileSync(path.join(SAMMLUNG, "_gelaufen.json"), "utf8"));
+    } catch (e) { /* unten benannt */ }
+    if (Array.isArray(gelaufen)) {
+        const g = new Set(gelaufen);
+        uebernommen = new Set(dateien.filter(n => g.has(n)));
+    } else {
+        console.log("  ·    PROLOG_SAMMLUNG ohne lesbare _gelaufen.json - alle Pruefstaende "
+                    + "werden selbst gestartet");
+    }
+}
+const nachstarten = dateien.filter(n => !uebernommen.has(n));
+const quelleVon = (name) => path.join(uebernommen.has(name) ? SAMMLUNG : ablage, name + ".jsonl");
+check(uebernommen.size + nachstarten.length === dateien.length,
+      uebernommen.size + " Beobachtungen aus dem Sammellauf uebernommen, "
+      + nachstarten.length + " Pruefstaende selbst zu starten");
+/* ═══ 3b · Die uebrigen Pruefstaende STARTEN (nebenlaeufig) ═══════════════
  * Seriell war die Laufzeit dieses Waechters die SUMME der ~86 anderen und
  * wuchs mit jedem neuen Pruefstand: in der CI 286,6 s / 300,1 s / 305,3 s bei
  * 300 s Deckel, zweimal gerissen (2026-10-11).
  *
- * Gestartet wird mit derselben Grenze, die ci_lauf.py aussen fuer genau diese
- * Dateien schon benutzt (--parallel 4) - sie laufen dort heute bereits
- * nebenlaeufig, es kommt also KEINE neue Konfliktklasse dazu. Und
+ * Gleichzeitig laufen hoechstens so viele, wie ci_lauf.py aussen fuer genau
+ * diese Dateien schon nebeneinander faehrt (lokal ein Platz je Kern, in der
+ * CI --parallel 4 auf einem Laeufer mit wenigen Kernen) - es kommt also
+ * KEINE neue Konfliktklasse dazu. Und
  * `test_bsi_m5.py`, das ci_lauf bewusst ALLEIN faehrt, ist hier nicht dabei:
  * gesammelt werden ausschliesslich .js-Dateien.
  *
@@ -302,11 +336,10 @@ let evalsGesamt = 0;
  * Waechter: ein eingebettetes Node-Skript ist nicht diagnostizierbar - am
  * 2026-10-11 lautete ein Abbruchgrund woertlich "node lieferte nichts
  * Lesbares:  s/loader:1613:10)". */
-const GRENZE = Math.max(1, Number(process.env.PROLOG_PARALLEL || 4) || 4);
-{
+if (nachstarten.length) {
     const auftrag = path.join(ablage, "_auftrag.json");
     fs.writeFileSync(auftrag, JSON.stringify({
-        wurzel: WURZEL, ablage, namen: dateien, grenze: GRENZE, zeitdeckel_ms: 300000,
+        wurzel: WURZEL, ablage, namen: nachstarten, grenze: GRENZE, zeitdeckel_ms: 300000,
     }));
     const r = spawnSync(process.execPath,
                         [path.join("tests", "lib", "prolog_fanout.js"), auftrag],
@@ -319,18 +352,18 @@ const GRENZE = Math.max(1, Number(process.env.PROLOG_PARALLEL || 4) || 4);
                 + String(r.stderr || "").trim().split("\n").slice(0, 2).join(" | "));
     }
     const gestartet = String(r.stdout || "").split("\n").filter(Boolean).length;
-    check(gestartet === dateien.length,
-          "alle " + dateien.length + " Pruefstaende gestartet (" + GRENZE + " gleichzeitig)",
+    check(gestartet === nachstarten.length,
+          "alle " + nachstarten.length + " Pruefstaende gestartet (" + GRENZE + " gleichzeitig)",
           "gemeldet: " + gestartet);
-    if (gestartet !== dateien.length) {
-        abbruch("der Starter meldet " + gestartet + " von " + dateien.length
+    if (gestartet !== nachstarten.length) {
+        abbruch("der Starter meldet " + gestartet + " von " + nachstarten.length
                 + " - fuer die uebrigen ist \"keine Luecke\" keine Aussage.");
     }
 }
 
 try {
     for (const name of dateien) {
-        const ziel = path.join(ablage, name + ".jsonl");
+        const ziel = quelleVon(name);
         let saetze = [];
         try {
             saetze = fs.readFileSync(ziel, "utf8").split("\n").filter(Boolean)

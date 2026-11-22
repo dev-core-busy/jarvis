@@ -62,6 +62,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -73,6 +74,16 @@ AUSNAHMEN = TESTS / "ci_ausnahmen.txt"
 # parallel dazu aendert ihn ein anderer Waechter, und sie brechen mit Exit 2
 # ab, obwohl sie allein gruen sind (gemessen 2026-10-06).
 ALLEIN = {"test_bsi_m5.py"}
+# Der Prolog-Waechter startet allein jeden Pruefstand mit Prolog ein ZWEITES
+# Mal, nur mit eingeschalteter Beobachtung - im Sammellauf mit 225-400 s der
+# laengste Pfad. Seit 2026-11-22 schaltet dieser Lauf die Beobachtung
+# (PROLOG_PRUEFUNG) gleich in den REGULAEREN Laeufen dieser Pruefstaende ein
+# und startet den Waechter DANACH mit der Sammlung (PROLOG_SAMMLUNG); er
+# wertet sie aus und startet nur nach, was hier nicht lief. Welche Dateien
+# gemeint sind, entscheidet dieselbe Regel wie im Waechter
+# (tests/lib/prolog_auswahl.js) - fehlt node oder scheitert sie, laeuft er
+# wie bisher und startet alles selbst.
+PROLOG = "test_prolog_vollstaendig.js"
 # Waechter mit EIGENEM Zeitdeckel, als VIELFACHES des globalen (nicht als
 # feste Sekundenzahl - sonst wandert er nicht mit, wenn jemand --zeitdeckel
 # aendert, und eine feste Zahl in einem Test ist eine Zeitbombe).
@@ -170,12 +181,28 @@ def deckel_fuer(name: str, global_deckel: int) -> int:
     return global_deckel * ZEITDECKEL_FAKTOR.get(name, 1)
 
 
-def lauf(datei: Path, zeitdeckel: int) -> tuple[str, int | None, float, str]:
+def prolog_auswahl() -> list[str]:
+    """Pruefstaende mit Prolog in TESTS - nach der Regel des Waechters (node)."""
+    skript = Path(__file__).resolve().parent / "lib" / "prolog_auswahl.js"
+    try:
+        r = subprocess.run([shutil.which("node") or "node", str(skript), str(TESTS)],
+                           capture_output=True, text=True, timeout=60, cwd=WURZEL)
+        namen = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        namen = None
+    if not isinstance(namen, list):
+        return []
+    return [n for n in namen if isinstance(n, str)]
+
+
+def lauf(datei: Path, zeitdeckel: int,
+         zusatz: dict[str, str] | None = None) -> tuple[str, int | None, float, str]:
     if datei.suffix == ".py":
         befehl = [sys.executable, str(datei)]
     else:
         befehl = [shutil.which("node") or "node", str(datei)]
     umgebung = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONUNBUFFERED="1")
+    umgebung.update(zusatz or {})
     zeitdeckel = deckel_fuer(datei.name, zeitdeckel)
     t0 = time.monotonic()
     try:
@@ -238,6 +265,44 @@ def _auszug(ausgabe: str) -> str:
     return "\n".join(fehl + ["…"] + zeilen[-15:])
 
 
+def _laufen(a, laufen, ausgenommen, ausn, dauern, gemessen, streichen,
+            sammlung, beobachtet, zusatz_fuer):
+    """Alle Waechter laufen lassen; liefert die Ergebnisse nach Namen sortiert."""
+    with cf.ThreadPoolExecutor(max_workers=a.parallel) as pool:
+        # Ausgenommene und regulaere in EINER Warteschlange, laengste zuerst:
+        # vorher liefen die ausgenommenen als eigener Block davor, und jeder
+        # Langlaeufer darin hielt den Start aller anderen auf.
+        nachlauf = [d for d in laufen if d.name == PROLOG and sammlung is not None]
+        parallel = [d for d in laufen if d.name not in ALLEIN and d not in nachlauf]
+        einzeln = [d for d in laufen if d.name in ALLEIN]
+        zukunft = {pool.submit(lauf, d, a.zeitdeckel, zusatz_fuer(d)): d.name in ausn
+                   for d in reihenfolge(parallel + ausgenommen, dauern)}
+        ergebnisse = []
+        for f in cf.as_completed(zukunft):
+            name, rc, dauer, ausgabe = f.result()
+            gemessen[name] = dauer
+            if zukunft[f]:
+                if rc == 0:
+                    streichen.append(name)
+            else:
+                ergebnisse.append((name, rc, dauer, ausgabe))
+        ergebnisse.sort(key=lambda e: e[0])
+        streichen.sort()
+        # Der Prolog-Waechter NACH allen anderen: erst dann ist die Sammlung
+        # vollstaendig. Welche Pruefstaende hier wirklich liefen, steht in
+        # _gelaufen.json - fuer alle anderen startet er selbst nach.
+        for d in nachlauf:
+            (sammlung / "_gelaufen.json").write_text(
+                json.dumps(sorted(beobachtet & set(gemessen))), encoding="utf-8")
+            ergebnisse.append(lauf(d, a.zeitdeckel, {"PROLOG_SAMMLUNG": str(sammlung)}))
+            gemessen[d.name] = ergebnisse[-1][2]
+        for d in einzeln:
+            ergebnisse.append(lauf(d, a.zeitdeckel))
+            gemessen[d.name] = ergebnisse[-1][2]
+        dauern_speichern(gemessen)
+    return ergebnisse
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--parallel", type=int, default=max(2, (os.cpu_count() or 2)))
@@ -271,44 +336,44 @@ def main() -> int:
     luecken: list[tuple[str, str]] = []
     dauern = dauern_laden()
     gemessen: dict[str, float] = {}
-    with cf.ThreadPoolExecutor(max_workers=a.parallel) as pool:
-        # Ausgenommene und regulaere in EINER Warteschlange, laengste zuerst:
-        # vorher liefen die ausgenommenen als eigener Block davor, und jeder
-        # Langlaeufer darin hielt den Start aller anderen auf.
-        parallel = [d for d in laufen if d.name not in ALLEIN]
-        einzeln = [d for d in laufen if d.name in ALLEIN]
-        zukunft = {pool.submit(lauf, d, a.zeitdeckel): d.name in ausn
-                   for d in reihenfolge(parallel + ausgenommen, dauern)}
-        ergebnisse = []
-        for f in cf.as_completed(zukunft):
-            name, rc, dauer, ausgabe = f.result()
-            gemessen[name] = dauer
-            if zukunft[f]:
-                if rc == 0:
-                    streichen.append(name)
-            else:
-                ergebnisse.append((name, rc, dauer, ausgabe))
-        ergebnisse.sort(key=lambda e: e[0])
-        streichen.sort()
-        for d in einzeln:
-            ergebnisse.append(lauf(d, a.zeitdeckel))
-            gemessen[d.name] = ergebnisse[-1][2]
-        dauern_speichern(gemessen)
-        for name, rc, dauer, ausgabe in ergebnisse:
-            letzte = [z for z in ausgabe.strip().splitlines() if z.strip()][-1:] or [""]
-            if rc == 0:
-                gruen.append(name)
-                # Nur bei GRUENEN: bei rot und Exit 2 traegt der Auszug die
-                # Zeile ohnehin (ABBRUCH/FAIL), und doppelt gemeldet wandert
-                # dasselbe in zwei Abschnitte.
-                luecken += _luecken(name, ausgabe)
-            elif rc == 2:
-                nicht_gelaufen.append((name, letzte[0][:160], _auszug(ausgabe)))
-            else:
-                grund = "Zeitdeckel" if rc is None else f"Exit {rc}"
-                rot.append((name, grund, _auszug(ausgabe)))
-            print(f"  {'OK  ' if rc == 0 else ('N/L ' if rc == 2 else 'FAIL')} "
-                  f"{name}  ({dauer:.1f} s)", flush=True)
+    # Prolog-Beobachtung in den regulaeren Laeufen (siehe PROLOG oben)
+    sammlung: Path | None = None
+    beobachtet: set[str] = set()
+    if any(d.name == PROLOG for d in laufen):
+        # Nur, was in DIESEM Lauf startet; den Rest (lies_*, Ausnahmen) startet
+        # der Waechter selbst nach.
+        beobachtet = (set(prolog_auswahl()) - {PROLOG}) & {d.name for d in laufen + ausgenommen}
+        if beobachtet:
+            sammlung = Path(tempfile.mkdtemp(prefix=".prolog_sammlung_", dir=Path.home()))
+        print(f"   {PROLOG}: Beobachtung in {len(beobachtet)} regulaeren Laeufen"
+              + ("" if sammlung else " - Auswahl leer, der Waechter startet selbst"))
+
+    def zusatz_fuer(d: Path) -> dict[str, str] | None:
+        if sammlung is not None and d.name in beobachtet:
+            return {"PROLOG_PRUEFUNG": str(sammlung / (d.name + ".jsonl"))}
+        return None
+
+    try:
+        ergebnisse = _laufen(a, laufen, ausgenommen, ausn, dauern, gemessen, streichen,
+                             sammlung, beobachtet, zusatz_fuer)
+    finally:
+        if sammlung is not None:
+            shutil.rmtree(sammlung, ignore_errors=True)
+    for name, rc, dauer, ausgabe in ergebnisse:
+        letzte = [z for z in ausgabe.strip().splitlines() if z.strip()][-1:] or [""]
+        if rc == 0:
+            gruen.append(name)
+            # Nur bei GRUENEN: bei rot und Exit 2 traegt der Auszug die
+            # Zeile ohnehin (ABBRUCH/FAIL), und doppelt gemeldet wandert
+            # dasselbe in zwei Abschnitte.
+            luecken += _luecken(name, ausgabe)
+        elif rc == 2:
+            nicht_gelaufen.append((name, letzte[0][:160], _auszug(ausgabe)))
+        else:
+            grund = "Zeitdeckel" if rc is None else f"Exit {rc}"
+            rot.append((name, grund, _auszug(ausgabe)))
+        print(f"  {'OK  ' if rc == 0 else ('N/L ' if rc == 2 else 'FAIL')} "
+              f"{name}  ({dauer:.1f} s)", flush=True)
 
     print()
     if nicht_gelaufen:

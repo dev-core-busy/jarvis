@@ -23,6 +23,8 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -231,7 +233,7 @@ check(datei.kopfzeilen("/settings", "text/html", False) == {},
 QUELLE = MAIN.read_text(encoding="utf-8")
 for fn in ("get_chat_attachment", "get_generated_image"):
     k = next((x for x in BAUM.body if isinstance(x, ast.AsyncFunctionDef) and x.name == fn), None)
-    seg = ast.get_source_segment(QUELLE, k) if k else ""
+    seg = quell_ausschnitt.segment(QUELLE, k) if k else ""
     check(k is not None and "svg" not in seg.split('"""', 2)[-1].lower(),
           "%s liefert kein SVG aus" % fn)
 

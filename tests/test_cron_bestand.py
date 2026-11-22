@@ -26,6 +26,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))   # backend.atomar fuer die Klasse
@@ -60,13 +62,13 @@ cls = next((n for n in baum.body
 if cls is None:
     print("KEIN CronManager im Quelltext gefunden - nicht pruefbar")
     sys.exit(2)
-KLASSE = ast.get_source_segment(src, cls)
+KLASSE = quell_ausschnitt.segment(src, cls)
 # Die Fehlerklasse fuer einen unlesbaren Bestand steht auf Modulebene - sie
 # wird mitgeschnitten, sonst endet jeder Schreibweg im NameError und die
 # Pruefungen unten waeren aus dem falschen Grund rot bzw. gruen.
 _fk = next((n for n in baum.body
             if isinstance(n, ast.ClassDef) and n.name == "JobsUnlesbar"), None)
-FEHLERKLASSE = ast.get_source_segment(src, _fk) if _fk is not None else ""
+FEHLERKLASSE = quell_ausschnitt.segment(src, _fk) if _fk is not None else ""
 
 
 class _SchedStub:

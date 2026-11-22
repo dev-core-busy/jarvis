@@ -45,6 +45,9 @@ import pathlib
 import sys
 import tempfile
 import time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ))
@@ -345,7 +348,7 @@ if fn_pruefen is None:
     abbruch("_totp_broker_pruefen fehlt in main.py")
 ok += 1
 
-quelle_fn = ast.get_source_segment(MAIN, fn_pruefen) or ""
+quelle_fn = quell_ausschnitt.segment(MAIN, fn_pruefen) or ""
 # Jede Rueckgabe ausser dem Erfolgsfall muss False sein – ein Fehler darf nie
 # "Code war in Ordnung" bedeuten.
 rueckgaben = [k.value for k in ast.walk(fn_pruefen) if isinstance(k, ast.Return)]
@@ -366,7 +369,7 @@ fn_login = next((k for k in ast.walk(BAUM)
                  and k.name == "_login_ablauf"), None)
 if fn_login is None:
     abbruch("_login_ablauf fehlt in main.py")
-quelle_login = ast.get_source_segment(MAIN, fn_login) or ""
+quelle_login = quell_ausschnitt.segment(MAIN, fn_login) or ""
 # Seit 2026-11-20 pruefen Kennwortanmeldung und Admin-Erhoehung den Code ueber
 # EINE Stelle (_totp_code_pruefen) – dort steht der Broker-Zweig samt 503.
 fn_code = next((k for k in ast.walk(BAUM)
@@ -374,7 +377,7 @@ fn_code = next((k for k in ast.walk(BAUM)
                 and k.name == "_totp_code_pruefen"), None)
 if fn_code is None:
     abbruch("_totp_code_pruefen fehlt in main.py")
-quelle_code = ast.get_source_segment(MAIN, fn_code) or ""
+quelle_code = quell_ausschnitt.segment(MAIN, fn_code) or ""
 p("die Code-Pruefung antwortet bei unerreichbarem Broker mit 503",
   '503 if grund in ("unreachable", "nicht_eingerichtet")' in quelle_code)
 p("die Code-Pruefung laesst nur bei 'ok' durch (sonst ein Fehler-Tupel)",
@@ -456,7 +459,7 @@ fn_schreiben = next((k for k in ast.walk(baum_admin)
                      if isinstance(k, ast.FunctionDef) and k.name == "_auth_state_schreiben"), None)
 p("_auth_state_schreiben existiert", fn_schreiben is not None)
 if fn_schreiben is not None:
-    q = ast.get_source_segment(ADMIN, fn_schreiben) or ""
+    q = quell_ausschnitt.segment(ADMIN, fn_schreiben) or ""
     # Register: chmod MUSS nach chown kommen – ein chown loescht setgid.
     p("der Eigentuemer von auth_state.json bleibt erhalten (sonst kann das Backend "
       "die Datei nicht mehr schreiben)", "os.chown" in q)

@@ -38,6 +38,8 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WURZEL))
@@ -189,7 +191,7 @@ def teil1():
     # REGEL: die Normalisierung wird BENUTZT, nicht nachgebaut. Ohne pruefe()
     # versteht netzpfad die Windows-Schreibweise des Altbestands nicht.
     q = (WURZEL / "backend" / "mount_quelle.py").read_text()
-    rumpf = ast.get_source_segment(
+    rumpf = quell_ausschnitt.segment(
         q, next(k for k in ast.parse(q).body
                 if isinstance(k, ast.FunctionDef) and k.name == "netzpfad"))
     check("pruefe(" in rumpf,
@@ -293,7 +295,7 @@ def _clean():
             ziel = getattr(k.targets[0], "id", "")
             if ziel.startswith("_") and ziel.upper() == ziel:
                 try:
-                    exec(ast.get_source_segment(AGENT_QUELLE, k), umg)
+                    exec(quell_ausschnitt.segment(AGENT_QUELLE, k), umg)
                 except Exception:      # braucht einen fremden Import
                     pass
     kls = next(k for k in baum.body
@@ -301,9 +303,9 @@ def _clean():
     teile = []
     for k in kls.body:
         if isinstance(k, ast.FunctionDef) and k.name in ("_clean_doc_refs", "_liefer_ext_re"):
-            teile.append(ast.get_source_segment(AGENT_QUELLE, k))
+            teile.append(quell_ausschnitt.segment(AGENT_QUELLE, k))
         if isinstance(k, ast.Assign) and getattr(k.targets[0], "id", "") == "_LIEFER_EXT":
-            teile.insert(0, ast.get_source_segment(AGENT_QUELLE, k))
+            teile.insert(0, quell_ausschnitt.segment(AGENT_QUELLE, k))
     code = "class A:\n" + "\n".join(
         "\n".join("    " + z for z in t.splitlines()) for t in teile)
     exec(code, umg)
@@ -376,7 +378,7 @@ def teil4():
           "und kennt weder Einhaengepunkte noch die Mount-Basis")
 
     kq = (WURZEL / "backend" / "tools" / "knowledge.py").read_text()
-    rumpf = ast.get_source_segment(
+    rumpf = quell_ausschnitt.segment(
         kq, next(k for k in ast.parse(kq).body
                  if isinstance(k, ast.FunctionDef) and k.name == "quell_anzeige"))
     check("mount_quelle" in rumpf and "netzpfad" in rumpf,
@@ -442,13 +444,13 @@ def teil6():
         check(False, "der Endpunkt read_knowledge_netzquelle existiert")
         return
     check(True, "der Endpunkt read_knowledge_netzquelle existiert")
-    rumpf = ast.get_source_segment(q, fn)
+    rumpf = quell_ausschnitt.segment(q, fn)
     # Docstring UND Kommentare weg – sonst liest der Waechter seine eigene
     # Begruendung: der Kommentar am 404-Zweig nennt woertlich "nicht 400"
     # (im ersten Lauf genau so passiert).
     ohne = ohne_kommentare(rumpf.replace(ast.get_docstring(fn) or "\x00", ""))
 
-    dek = " ".join(ast.get_source_segment(q, d) for d in fn.decorator_list)
+    dek = " ".join(quell_ausschnitt.segment(q, d) for d in fn.decorator_list)
     # ast.get_source_segment() eines Dekorators liefert den Ausdruck OHNE '@'.
     check('app.get("/api/knowledge/netzquelle")' in dek, "als GET registriert")
     check("require_auth_or_query" in rumpf,

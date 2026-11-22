@@ -29,6 +29,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(os.environ.get("CBV_ROOT") or Path(__file__).resolve().parent.parent)
 MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
@@ -79,7 +81,7 @@ try:
     sys.modules["backend.lauf_tmp"] = _Lauf
     ns = {"Path": Path, "os": os, "print": lambda *a, **k: None, "_documents": _Doc,
           "_anhang_merken": lambda *a, **k: None, "__file__": str(sk / "backend" / "main.py")}
-    quelle = "\n\n".join(ast.get_source_segment(MAIN, FUNK[n])
+    quelle = "\n\n".join(quell_ausschnitt.segment(MAIN, FUNK[n])
                          for n in ("_anhang_dateiname", "_anhang_ablegen", "_bild_als_datei"))
     exec(compile(quelle, "<kette>", "exec"), ns)
     abl = []
@@ -174,12 +176,12 @@ try:
 
     fn = FUNK["get_chat_attachment"]
     fn.decorator_list = []
-    _magic = next((ast.get_source_segment(MAIN, k) for k in BAUM.body if isinstance(k, ast.Assign)
+    _magic = next((quell_ausschnitt.segment(MAIN, k) for k in BAUM.body if isinstance(k, ast.Assign)
                    and any(getattr(t, "id", "") == "_ANHANG_BILD_MAGIC" for t in k.targets)), None)
     if not _magic:
         abbruch("_ANHANG_BILD_MAGIC fehlt in main.py")
     # Die Helfer kommen MIT - sie sind die geteilte Regel, keine Attrappe.
-    src = "\n\n".join([_magic] + [ast.get_source_segment(MAIN, FUNK[n]) for n in
+    src = "\n\n".join([_magic] + [quell_ausschnitt.segment(MAIN, FUNK[n]) for n in
                                    ("_bild_mime_aus_kopf", "_anhang_dateiname")] + [ast.unparse(fn)])
     ns = {"Path": Path, "JSONResponse": _JSON, "FileResponse": _File, "_documents": _D,
           "_is_admin_user": lambda u: u == "admin", "Depends": lambda f: None,

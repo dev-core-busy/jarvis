@@ -36,6 +36,9 @@ import builtins
 import pathlib
 import sys
 import time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = pathlib.Path(__file__).resolve().parent.parent
 MAIN = WURZEL / "backend" / "main.py"
@@ -169,7 +172,7 @@ kbaum = ast.parse(quelle, str(KNOW))
 schnitt = None
 for k in kbaum.body:
     if isinstance(k, ast.FunctionDef) and k.name == "_do_force_reindex":
-        schnitt = ast.get_source_segment(quelle, k)
+        schnitt = quell_ausschnitt.segment(quelle, k)
 if schnitt is None:
     print("ABBRUCH: _do_force_reindex nicht gefunden (umbenannt?)", flush=True)
     sys.exit(2)

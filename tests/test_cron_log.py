@@ -28,6 +28,8 @@ import tempfile
 import time
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -170,7 +172,7 @@ try:
     section("4. Scheduler: jeder Lauf schreibt einen Eintrag (echter Code)")
     src = (ROOT / "backend" / "scheduler.py").read_text(encoding="utf-8")
     baum = ast.parse(src)
-    teile = {n.name: ast.get_source_segment(src, n) for n in baum.body
+    teile = {n.name: quell_ausschnitt.segment(src, n) for n in baum.body
              if isinstance(n, ast.ClassDef) and n.name in ("CronManager", "JobsUnlesbar")}
     if "CronManager" not in teile:
         print("  CronManager nicht gefunden – NICHT PRUEFBAR"); sys.exit(2)

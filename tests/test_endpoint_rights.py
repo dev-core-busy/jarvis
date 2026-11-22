@@ -34,6 +34,8 @@ der geschuetzten Namensraeume anlegt und dabei ``require_auth`` verwendet.
 import re
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
@@ -570,7 +572,7 @@ def _def_quelle(name):
     import ast
     for n in ast.parse(SRC).body:
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name:
-            return ast.get_source_segment(SRC, n) or ""
+            return quell_ausschnitt.segment(SRC, n) or ""
     return ""
 
 

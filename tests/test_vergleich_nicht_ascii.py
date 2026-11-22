@@ -17,6 +17,8 @@ import hmac
 import sys
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 # Der geschnittene Helfer importiert backend.agent_schluessel (keine weiteren
@@ -39,7 +41,7 @@ def schneide(datei, name):
     src = (ROOT / datei).read_text(encoding="utf-8")
     for k in ast.parse(src).body:
         if isinstance(k, ast.FunctionDef) and k.name == name:
-            return ast.get_source_segment(src, k)
+            return quell_ausschnitt.segment(src, k)
     return None
 
 
@@ -106,7 +108,7 @@ src_ks = (ROOT / "backend/knowledge_sync.py").read_text(encoding="utf-8")
 for k in ast.parse(src_ks).body:   # Modulkonstanten, die die Funktion braucht
     if isinstance(k, ast.Assign) and all(isinstance(t, ast.Name) and t.id.isupper() for t in k.targets):
         try:
-            exec(ast.get_source_segment(src_ks, k), ns2)
+            exec(quell_ausschnitt.segment(src_ks, k), ns2)
         except Exception:  # noqa: BLE001
             pass
 exec(code, ns2)

@@ -40,6 +40,8 @@ import tempfile
 import time
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -110,7 +112,7 @@ def fdef(name):
 def rumpf_ausfuehren(name, ns):
     """Den ECHTEN Funktionsrumpf aus main.py (ohne Dekoratoren) in ``ns`` definieren."""
     k = fdef(name)
-    k2 = ast.parse(ast.get_source_segment(MAIN_SRC, k) or "").body[0]
+    k2 = ast.parse(quell_ausschnitt.segment(MAIN_SRC, k) or "").body[0]
     k2.decorator_list = []
     try:
         exec(compile(ast.Module(body=[k2], type_ignores=[]), "main.py:" + name, "exec"), ns)

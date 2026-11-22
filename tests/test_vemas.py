@@ -22,6 +22,8 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -596,7 +598,7 @@ baum = ast.parse(MAIN)
 def _funktion(name):
     for n in ast.walk(baum):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name:
-            return ast.get_source_segment(MAIN, n) or ""
+            return quell_ausschnitt.segment(MAIN, n) or ""
     return ""
 
 
@@ -625,7 +627,7 @@ for n in ast.walk(baum):
         pfad = d.args[0].value if d.args and isinstance(d.args[0], ast.Constant) else ""
         if not str(pfad).startswith("/api/vemas"):
             continue
-        quelle = ast.get_source_segment(MAIN, n) or ""
+        quelle = quell_ausschnitt.segment(MAIN, n) or ""
         deps = set(re.findall(r"Depends\((\w+)\)", quelle.split("\n\n")[0] or quelle))
         routen.append((d.func.attr, pfad, deps))
 

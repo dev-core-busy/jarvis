@@ -40,6 +40,8 @@ import ast
 import sys
 import textwrap
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 AGENT_PY = WURZEL / "backend" / "agent.py"
@@ -100,7 +102,7 @@ print("1. Die EINE Ladefunktion existiert und heilt")
 fn = _funktion(A_BAUM, "geheilter_sitzungskontext")
 if fn is None:
     abbruch("geheilter_sitzungskontext fehlt in agent.py – Fix nicht vorhanden?")
-_src = _ohne_kommentare(ast.get_source_segment(A_QUELLE, fn) or "")
+_src = _ohne_kommentare(quell_ausschnitt.segment(A_QUELLE, fn) or "")
 pruef("_verlauf_reparieren" in _src, "die Ladefunktion ruft die Reparatur nicht auf")
 pruef("load_context" in _src, "die Ladefunktion liest den Kontext gar nicht")
 pruef("save_context" in _src,
@@ -215,7 +217,7 @@ for datei, quelle in (("backend/agent.py", A_QUELLE), ("backend/main.py", M_QUEL
         verstoesse.append(f"{datei}:{nr}  {nackt[:88]}")
 
 # In agent.py ist genau EIN Vorkommen erlaubt: das in geheilter_sitzungskontext.
-erlaubt = _ohne_kommentare(ast.get_source_segment(A_QUELLE, fn) or "")
+erlaubt = _ohne_kommentare(quell_ausschnitt.segment(A_QUELLE, fn) or "")
 erlaubte_zeilen = {z.strip() for z in erlaubt.splitlines() if "load_context" in z}
 offen = [v for v in verstoesse
          if not any(e and e in v for e in erlaubte_zeilen)]
@@ -235,7 +237,7 @@ pruef(M_QUELLE.count("geheilter_sitzungskontext") >= 2,
 # Der Lade-Zweig in run_task darf den Dreizeiler nicht wieder selbst bauen.
 rt = _funktion(A_BAUM, "run_task")
 if rt is not None:
-    rt_src = _ohne_kommentare(ast.get_source_segment(A_QUELLE, rt) or "")
+    rt_src = _ohne_kommentare(quell_ausschnitt.segment(A_QUELLE, rt) or "")
     pruef("load_context" not in rt_src,
           "run_task laedt den Kontext wieder selbst statt ueber die Heilfunktion")
 
@@ -248,7 +250,7 @@ for name in ("_execute_tool", "_run_headless"):
     f = _funktion(A_BAUM, name)
     if f is None:
         continue
-    src = _ohne_kommentare(ast.get_source_segment(A_QUELLE, f) or "")
+    src = _ohne_kommentare(quell_ausschnitt.segment(A_QUELLE, f) or "")
     pruef("_verlauf_reparieren" not in src,
           f"{name} ruft die Reparatur – die darf nur BEIM LADEN laufen")
 

@@ -26,6 +26,7 @@ Trefferkontrolle der Harnesse ("Anker 0x gefunden").
     from sabotage_anker import eintrag_entfernen, eintrag_ergaenzen
 """
 import ast
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 _LITERALE = (ast.Tuple, ast.Set, ast.List)
 
@@ -67,7 +68,7 @@ def _literal_an_ziel(baum, ziel):
 
 
 def _ausschnitt(quelle, knoten):
-    seg = ast.get_source_segment(quelle, knoten)
+    seg = quell_ausschnitt.segment(quelle, knoten)
     assert seg, "Quelltext-Ausschnitt nicht bestimmbar"
     return seg
 

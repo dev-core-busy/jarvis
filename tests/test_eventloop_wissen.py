@@ -29,6 +29,8 @@ import tempfile
 import threading
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -155,7 +157,7 @@ class _JsonZaehler:
 ns = {"json": _JsonZaehler, "threading": threading, "Path": Path,
       "PROJECT_ROOT": TMP, "_vector_store": None,
       "_faiss_uebersicht_cache": None, "_faiss_uebersicht_lock": threading.Lock()}
-code = "\n\n".join(ast.get_source_segment(KNOW, kfun[n]) for n in ("_faiss_meta_pfad", "_faiss_uebersicht"))
+code = "\n\n".join(quell_ausschnitt.segment(KNOW, kfun[n]) for n in ("_faiss_meta_pfad", "_faiss_uebersicht"))
 exec(compile("from __future__ import annotations\n" + code, "knowledge_schnitt", "exec"), ns)
 uebersicht = ns["_faiss_uebersicht"]
 

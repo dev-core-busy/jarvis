@@ -19,6 +19,9 @@ import shutil
 import sys
 import tempfile
 import pathlib
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -472,7 +475,7 @@ assert "feedback_allowed_users" not in KOMMENTARFREI, "Kommentarfilter greift ni
 _perm_helfer = None
 for _k in ast.walk(BAUM):
     if isinstance(_k, ast.FunctionDef) and _k.name == "_user_may_use_feedback":
-        _perm_helfer = ast.get_source_segment(QUELLE, _k)
+        _perm_helfer = quell_ausschnitt.segment(QUELLE, _k)
 
 
 def routen():
@@ -718,9 +721,9 @@ _scope_daten = None
 for _k in ast.walk(BAUM):
     if isinstance(_k, (ast.FunctionDef, ast.AsyncFunctionDef)):
         if _k.name == "wissen_scope":
-            _scope_fn = ast.get_source_segment(QUELLE, _k)
+            _scope_fn = quell_ausschnitt.segment(QUELLE, _k)
         elif _k.name == "_wissen_scope_daten":
-            _scope_daten = ast.get_source_segment(QUELLE, _k)
+            _scope_daten = quell_ausschnitt.segment(QUELLE, _k)
 check("der Scope-Endpunkt wurde gefunden (Positivkontrolle)", _scope_fn is not None)
 # Seit 2026-11-16 rechnet der Endpunkt im Thread (`_wissen_scope_daten`, sonst
 # blockiert er die Event-Loop) – gemessen wird dann der Helfer, an den er

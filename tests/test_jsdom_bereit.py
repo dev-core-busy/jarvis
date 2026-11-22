@@ -20,6 +20,8 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WURZEL))
@@ -182,7 +184,7 @@ fn = next((n for n in ast.walk(baum)
            if isinstance(n, ast.FunctionDef) and n.name == "riegel_laufen"), None)
 check("riegel_laufen existiert", fn is not None)
 if fn:
-    rumpf = ast.get_source_segment(cs, fn) or ""
+    rumpf = quell_ausschnitt.segment(cs, fn) or ""
     check("es fragt jsdom_bereit.pfad()", "jsdom_bereit" in rumpf and "pfad()" in rumpf)
     check("setzt JSDOM_PATH", "JSDOM_PATH" in rumpf)
     check("und gibt es an _lauf weiter", re.search(r"_lauf\(.*zusatz=", rumpf, re.S) is not None)
@@ -195,7 +197,7 @@ check("_lauf nimmt zusatz an", fl is not None and any(
     a.arg == "zusatz" for a in (fl.args.args if fl else [])))
 if fl:
     check("und mischt ihn in die Umgebung",
-          "**(zusatz or {})" in (ast.get_source_segment(cs, fl) or ""))
+          "**(zusatz or {})" in (quell_ausschnitt.segment(cs, fl) or ""))
 
 # ══════════════════════════════════════════════════════════════════════════
 abschnitt("6) Der Start stellt es bereit – auf JEDER Installation")

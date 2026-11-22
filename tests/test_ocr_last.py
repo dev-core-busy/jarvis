@@ -37,6 +37,8 @@ import sys
 import tempfile
 import tokenize
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 KNOW = WURZEL / "backend" / "tools" / "knowledge.py"
@@ -87,12 +89,14 @@ def ohne_worte(quelle: str) -> str:
             zeilen[i] = "\n"
     text = "".join(zeilen)
     aus = list(text)
+    # Einmal zerlegen und summieren - je Kommentar war es quadratisch
+    vor = quell_ausschnitt.ZeilenVersatz(text.splitlines(keepends=True))
     try:
         for tok in tokenize.generate_tokens(io.StringIO(text).readline):
             if tok.type == tokenize.COMMENT:
                 (z1, s1), (z2, s2) = tok.start, tok.end
                 if z1 == z2:
-                    versatz = sum(len(l) for l in text.splitlines(keepends=True)[:z1 - 1])
+                    versatz = vor(z1 - 1)
                     for i in range(versatz + s1, versatz + s2):
                         aus[i] = " "
     except tokenize.TokenError:
@@ -220,7 +224,7 @@ print("\n=== 5. Die Plakette haengt am PROGRAMM, nicht am Python-Paket ===")
 # ⚠ GEZIELT DIE FUNKTION SCHNEIDEN: 'which("tesseract")' steht auch in der
 # Formatliste weiter unten. Ueber die ganze Datei gesucht bleibt die Pruefung
 # gruen, waehrend die Verfuegbarkeits-Weiche sabotiert ist (Gegenprobe war stumm).
-_stat = next((ast.get_source_segment(OHNE, n) for n in ast.walk(BAUM_OHNE)
+_stat = next((quell_ausschnitt.segment(OHNE, n) for n in ast.walk(BAUM_OHNE)
               if isinstance(n, ast.FunctionDef) and n.name == "_get_static_stats"), None)
 check("Positivkontrolle: _get_static_stats geschnitten", bool(_stat))
 if _stat:
@@ -245,7 +249,7 @@ else:
     noetig = {"_ocr_zeitdeckel", "_ocr_datei", "_ocr_image", "_ocr_sprachen"}
     for n in BAUM.body:
         if isinstance(n, ast.FunctionDef) and n.name in noetig:
-            schnitt[n.name] = ast.get_source_segment(QUELL, n)
+            schnitt[n.name] = quell_ausschnitt.segment(QUELL, n)
 
     def _ziel(n):
         if isinstance(n, ast.Assign):
@@ -254,7 +258,7 @@ else:
             return [getattr(n.target, "id", "")]
         return []
 
-    konst = [ast.get_source_segment(QUELL, n) for n in BAUM.body
+    konst = [quell_ausschnitt.segment(QUELL, n) for n in BAUM.body
              if set(_ziel(n)) & {"_OCR_UMGEBUNG", "_ocr_sprachen_cache"}]
     check("Schnitt vollstaendig (4 Funktionen + 2 Konstanten)",
           len(schnitt) == 4 and len(konst) == 2,

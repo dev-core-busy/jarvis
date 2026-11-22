@@ -22,6 +22,8 @@ import struct
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WURZEL))
@@ -470,7 +472,7 @@ for txt, n in gefunden:
 for txt, n in gefunden:
     if "get(" not in txt:
         continue
-    quelle = ast.get_source_segment(MAIN, n) or ""
+    quelle = quell_ausschnitt.segment(MAIN, n) or ""
     check("der Lese-Endpunkt gibt NUR `zustand()` heraus, kein Geheimnis",
           "zustand()" in quelle and "PFX_DATEI" not in quelle
           and "read_bytes" not in quelle and "_entschluesseln" not in quelle)
@@ -539,7 +541,7 @@ _health_q = ""
 for n in ast.walk(BAUM):
     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
         if any("/api/ai-mouse/health" in ast.unparse(d) for d in n.decorator_list):
-            _health_q = ast.get_source_segment(MAIN, n) or ""
+            _health_q = quell_ausschnitt.segment(MAIN, n) or ""
 check("Positivkontrolle: der health-Endpunkt wurde geschnitten",
       "paket_bereit" in _health_q)
 check("health liefert den Pfad an die Kachel",

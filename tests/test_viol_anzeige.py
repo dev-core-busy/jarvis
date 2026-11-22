@@ -32,6 +32,9 @@ import ast
 import pathlib
 import sys
 import types
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = pathlib.Path(__file__).resolve().parent.parent
 QUELLE = WURZEL / "backend" / "agent.py"
@@ -86,39 +89,39 @@ def harness():
     for knoten in baum.body:
         if isinstance(knoten, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "_BLOCKED_TOOLS_FOR_LDAP" for t in knoten.targets):
-            teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+            teile.append(quell_ausschnitt.segment(QUELLE.read_text(encoding="utf-8"), knoten))
             gefunden["const"] = True
         if isinstance(knoten, ast.FunctionDef) and knoten.name == "_reminder_exempt":
-            teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+            teile.append(quell_ausschnitt.segment(QUELLE.read_text(encoding="utf-8"), knoten))
             gefunden["reminder"] = True
         if isinstance(knoten, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "_MCP_TOOL_PREFIX" for t in knoten.targets):
-            teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+            teile.append(quell_ausschnitt.segment(QUELLE.read_text(encoding="utf-8"), knoten))
             gefunden["prefix"] = True
         # Seit 2026-11-02 liest `_gesperrte_weg` auch die HANA-Werkzeugnamen.
         if isinstance(knoten, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "_SAP_HANA_TOOLS" for t in knoten.targets):
-            teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+            teile.append(quell_ausschnitt.segment(QUELLE.read_text(encoding="utf-8"), knoten))
             gefunden["hana"] = True
         # Seit 2026-11-20 liest `_gesperrte_weg` die Jira-Schreibwerkzeuge.
         if isinstance(knoten, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "_JIRA_SCHREIB_TOOLS" for t in knoten.targets):
-            teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+            teile.append(quell_ausschnitt.segment(QUELLE.read_text(encoding="utf-8"), knoten))
             gefunden["jira"] = True
         for fname, schl in (("_ist_mcp_tool", "mcp_tool"), ("_mcp_freigegeben", "mcp_frei")):
             if isinstance(knoten, ast.FunctionDef) and knoten.name == fname:
-                teile.append(ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), knoten))
+                teile.append(quell_ausschnitt.segment(QUELLE.read_text(encoding="utf-8"), knoten))
                 gefunden[schl] = True
         if isinstance(knoten, ast.ClassDef):
             for m in knoten.body:
                 if isinstance(m, ast.FunctionDef) and m.name == "_llm_tools":
-                    quelle = ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), m)
+                    quelle = quell_ausschnitt.segment(QUELLE.read_text(encoding="utf-8"), m)
                     # Dekorator (@property) steht nicht im Segment
                     methoden.append("    @property\n"
                                     + "\n".join("    " + z for z in quelle.splitlines()))
                     gefunden["prop"] = True
                 if isinstance(m, ast.FunctionDef) and m.name == "_gesperrte_weg":
-                    quelle = ast.get_source_segment(QUELLE.read_text(encoding="utf-8"), m)
+                    quelle = quell_ausschnitt.segment(QUELLE.read_text(encoding="utf-8"), m)
                     methoden.append("\n".join("    " + z for z in quelle.splitlines()))
                     gefunden["gesperrt"] = True
     if not all(gefunden.values()):

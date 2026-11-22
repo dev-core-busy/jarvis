@@ -20,6 +20,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 OK = FAIL = 0
 
@@ -756,7 +758,7 @@ check("ein ehrliches \"nichts zu aendern\" bleibt ohne Fehlermeldung",
 
 print("\n\033[1m9b. Endpunkt und Client reichen die Anweisung durch\033[0m")
 _haupt = (REPO / "backend/main.py").read_text(encoding="utf-8")
-_ep = next((ast.get_source_segment(_haupt, n) for n in ast.walk(ast.parse(_haupt))
+_ep = next((quell_ausschnitt.segment(_haupt, n) for n in ast.walk(ast.parse(_haupt))
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
             and n.name == "cleanup_analyse"), "")
 check("der Endpunkt wurde gefunden", bool(_ep))
@@ -790,7 +792,7 @@ _wa_src = _io.open(_os.path.join(_os.path.dirname(_os.path.dirname(
     _os.path.abspath(__file__))), "backend/wissen_aufraeumen.py"), encoding="utf-8").read()
 _fn = next((x for x in _ast.walk(_ast.parse(_wa_src))
             if isinstance(x, _ast.FunctionDef) and x.name == "prompt_bilanz"), None)
-_q = _ast.get_source_segment(_wa_src, _fn) if _fn else ""
+_q = quell_ausschnitt.segment(_wa_src, _fn) if _fn else ""
 check("prompt_bilanz gefunden", bool(_q))
 check("⚠ sie misst den Prompt mit voll=True (Obergrenze)",
       "_base_system_prompt(voll=True)" in _q)

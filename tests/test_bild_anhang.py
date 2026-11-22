@@ -34,6 +34,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -118,8 +120,11 @@ def ohne_kommentare(code: str) -> str:
     aus = list(code)
     zeilen = code.splitlines(keepends=True)
 
+    # Tabelle einmal bauen - die Summe je Aufruf war quadratisch (main.py: 11 s)
+    _vor = quell_ausschnitt.ZeilenVersatz(zeilen)
+
     def _versatz(zeile: int, spalte: int) -> int:
-        return sum(len(z) for z in zeilen[: zeile - 1]) + spalte
+        return _vor(zeile - 1) + spalte
 
     def _leeren(von: int, bis: int) -> None:
         for i in range(max(0, von), min(bis, len(aus))):
@@ -236,7 +241,7 @@ _teile = {}
 for k in ast.walk(_baum):
     if isinstance(k, ast.FunctionDef) and k.name in (
             "_bild_als_datei", "_anhang_ablegen", "_anhang_merken", "_anhang_dateiname"):
-        _teile[k.name] = ast.get_source_segment(MAIN, k) or ""
+        _teile[k.name] = quell_ausschnitt.segment(MAIN, k) or ""
 # `_anhang_dateiname` ist die mit der Auslieferung geteilte Namensregel
 # (seit 2026-09-28) - ohne sie im Schnitt endet `_anhang_ablegen` im NameError.
 check("alle vier Funktionen per AST geschnitten (Positivkontrolle)",

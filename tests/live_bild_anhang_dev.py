@@ -13,6 +13,8 @@ import ast
 import os
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 sys.path.insert(0, "/opt/jarvis")
 
@@ -60,7 +62,7 @@ teile = {}
 for k in ast.walk(_baum):
     if isinstance(k, ast.FunctionDef) and k.name in (
             "_bild_als_datei", "_anhang_ablegen", "_anhang_merken"):
-        teile[k.name] = ast.get_source_segment(MAIN, k) or ""
+        teile[k.name] = quell_ausschnitt.segment(MAIN, k) or ""
 if len(teile) != 3:
     print(f"ABBRUCH: Funktionen nicht geschnitten ({sorted(teile)})")
     sys.exit(2)

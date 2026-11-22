@@ -24,6 +24,8 @@ import sys
 import tokenize
 import xml.etree.ElementTree as ET
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 OK = FAIL = 0
@@ -481,7 +483,7 @@ check("Anhaenge gehen ueber `upload_attachment_bytes` (nichts auf Platte)",
 
 # ⚠ ABGEWIESEN, NICHT GEKUERZT: ein gekuerzter Titel ist ein ANDERER Titel –
 # die Seite hiesse dann anders, als der Benutzer gelesen hat.
-_ep_q = ast.get_source_segment(MAIN_OK, _ep) or ""
+_ep_q = quell_ausschnitt.segment(MAIN_OK, _ep) or ""
 check("Titel wird gegen TITEL_MAX geprueft", "TITEL_MAX" in _ep_q)
 check("⚠ Titel wird ABGEWIESEN, nicht gekuerzt",
       "titel[:" not in _ep_q.replace(" ", ""), _ep_q[:0])

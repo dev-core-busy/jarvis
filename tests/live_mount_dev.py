@@ -7,6 +7,9 @@ Deutung laeuft danach ueber die ECHTE Funktion aus main.py (per ast
 geschnitten, damit fastapi nicht importiert werden muss).
 """
 import ast, re, sys, time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 sys.path.insert(0, "/opt/jarvis")
 from backend import broker_client   # noqa: E402
 
@@ -20,7 +23,7 @@ quelle = open("/opt/jarvis/backend/main.py").read()
 code = ""
 for k in ast.parse(quelle).body:
     if isinstance(k, ast.FunctionDef) and k.name == "_mount_fehler_deuten":
-        code = ast.get_source_segment(quelle, k)
+        code = quell_ausschnitt.segment(quelle, k)
 ns = {"re": re}   # die Funktion benutzt re – sonst NameError im Schnitt
 exec(compile(code, "<schnitt>", "exec"), ns)
 deute = ns["_mount_fehler_deuten"]

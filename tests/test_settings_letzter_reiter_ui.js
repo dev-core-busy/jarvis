@@ -45,8 +45,20 @@ function stilleKonsole() {
     return vc;
 }
 
+// Hoechstens so lange auf das Ende von openModal() warten (echte Zeit). Nur
+// eine Notbremse fuer "kommt nie zu Ende" - das Ergebnis haengt NICHT an ihr.
+const NOTBREMSE_MS = 120000;
+
 // Laedt die Einstellungsseite mit vorbelegtem Speicher und wartet, bis
 // openModal() durch ist. `gemerkt`/`sprung` = null heisst: nicht setzen.
+//
+// ⚠ WARUM KEINE FESTE WARTEZEIT (2026-11-22): hier stand `setTimeout(900)`.
+// Allein reicht das, im Sammellauf unter Volllast nicht - openModal() war
+// noch bei seinen await-Aufrufen, und gemessen wurde der Vorgabe-Reiter
+// ("profiles" statt "security"): ein FAIL, der nichts ueber den Code sagt.
+// Gewartet wird jetzt auf das ECHTE Ende: app.js legt openModal als
+// `window._openSettingsModal` ab und ruft es von dort; die Eigenschaft wird
+// vorher abgefangen, und der Lauf wartet auf das Promise genau dieses Aufrufs.
 async function lade(gemerkt, sprung) {
     const dom = new JSDOM(lies('frontend/settings.html'),
         { url: 'https://x/settings', runScripts: 'outside-only',
@@ -69,11 +81,41 @@ async function lade(gemerkt, sprung) {
         removeListener() {}, addEventListener() {}, removeEventListener() {} }));
     w.requestAnimationFrame = (cb) => setTimeout(cb, 0);
     w.WebSocket = function () { this.close = () => {}; this.send = () => {}; };
+    // Fertig-Signal: openModal() abfangen, sobald app.js es ablegt.
+    let echt = null, gerufen = 0, fertigMelden;
+    const fertig = new Promise((r) => { fertigMelden = r; });
+    Object.defineProperty(w, '_openSettingsModal', {
+        configurable: true,
+        set(f) { echt = f; },
+        get() {
+            if (typeof echt !== 'function') return echt;
+            return function () {
+                gerufen++;
+                const p = Promise.resolve(echt.apply(this, arguments));
+                p.then(() => fertigMelden('ok'), (e) => fertigMelden('Fehler: ' + e));
+                return p;
+            };
+        },
+    });
     w.eval(SITZUNG);
     w.eval(ICONS);
     w.eval(I18N);
     w.eval(APPJS);
-    await new Promise((r) => setTimeout(r, 900));
+    let bremse;
+    const ende = await Promise.race([fertig, new Promise((r) => {
+        bremse = setTimeout(() => r('Notbremse'), NOTBREMSE_MS);
+    })]);
+    clearTimeout(bremse);
+    if (ende !== 'ok' || gerufen !== 1) {
+        // Ohne das Ende von openModal() ist kein Reiter deutbar: Messaufbau
+        // defekt, nicht der Code (Exit 2, "konnte nicht laufen").
+        console.log('  ABBRUCH: openModal() kam nicht sauber zu Ende (' + ende
+                    + ', ' + gerufen + ' Aufruf(e)) - Messaufbau defekt');
+        process.exit(2);
+    }
+    // Der Sprung in einen angeforderten Reiter haengt per .then() am Ende von
+    // openModal; eine Makroaufgabe spaeter sind alle Mikroaufgaben gelaufen.
+    await new Promise((r) => setTimeout(r, 0));
     const knopf = [...w.document.querySelectorAll('.settings-tab-btn.active')]
         .map((b) => b.dataset.settingsTab);
     const panel = [...w.document.querySelectorAll('[id^=settings-tab-].active')]

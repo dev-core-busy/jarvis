@@ -21,6 +21,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 res = []
@@ -161,7 +163,7 @@ for node in ast.walk(baum):
                 fn = node
 check("Endpunkt POST /api/chat/welcome/restore existiert", fn is not None)
 if fn:
-    rumpf = ast.get_source_segment(src, fn) or ""
+    rumpf = quell_ausschnitt.segment(src, fn) or ""
     args = [a.arg for a in fn.args.args]
     check("Parameter 'user' haengt an require_auth",
           "user" in args and "require_auth" in ast.dump(fn.args))

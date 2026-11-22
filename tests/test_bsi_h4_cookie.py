@@ -35,6 +35,8 @@ import os
 import sys
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -218,7 +220,7 @@ def fdef(name):
 
 
 def rumpf(name, ns):
-    k = ast.parse(ast.get_source_segment(MAIN_SRC, fdef(name)) or "").body[0]
+    k = ast.parse(quell_ausschnitt.segment(MAIN_SRC, fdef(name)) or "").body[0]
     k.decorator_list = []
     exec(compile(ast.Module(body=[k], type_ignores=[]), "main.py:" + name, "exec"), ns)
     return ns[name]

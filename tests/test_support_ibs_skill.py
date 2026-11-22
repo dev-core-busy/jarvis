@@ -13,6 +13,8 @@ import ast
 import asyncio
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 QUELL = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
@@ -57,7 +59,7 @@ class _Antwort:
 def status(skill_an, url="https://kv.beispiel.de", key="k"):
     """Fuehrt den echten Status-Endpunkt aus; nur seine Umgebung ist Attrappe."""
     knoten = FUNKTIONEN["support_status"]
-    ohne_depends = ast.parse(ast.get_source_segment(QUELL, knoten)
+    ohne_depends = ast.parse(quell_ausschnitt.segment(QUELL, knoten)
                              .replace("user: str = Depends(require_auth)", "user: str = 'anna'"))
     gefragt = []
 

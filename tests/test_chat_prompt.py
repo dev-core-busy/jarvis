@@ -26,6 +26,8 @@ import tempfile
 import textwrap
 import tokenize
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -178,14 +180,14 @@ baum = ast.parse(mq)
 def rumpf(name):
     for n in ast.walk(baum):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name:
-            return ast.get_source_segment(mq, n) or ""
+            return quell_ausschnitt.segment(mq, n) or ""
     return ""
 
 
 def dekoratoren(name):
     for n in ast.walk(baum):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name:
-            return [ast.get_source_segment(mq, d) or "" for d in n.decorator_list]
+            return [quell_ausschnitt.segment(mq, d) or "" for d in n.decorator_list]
     return []
 
 for fn, verb in (("chat_session_preprompt_get", "get"), ("chat_session_preprompt_save", "put")):
@@ -552,7 +554,7 @@ else:
         ziele = (n.targets if isinstance(n, ast.Assign)
                  else [n.target] if isinstance(n, ast.AugAssign) else [])
         if any(isinstance(t, ast.Name) and t.id == "system_prompt" for t in ziele):
-            _zuw.append((n.lineno, (ast.get_source_segment(aq, n) or "").strip()))
+            _zuw.append((n.lineno, (quell_ausschnitt.segment(aq, n) or "").strip()))
 _zuw.sort()
 _i_anhang = next((ln for ln, q in _zuw if q == "system_prompt += _pre_block"), -1)
 sicher("der Anhaeng-Schritt steht im Quelltext",

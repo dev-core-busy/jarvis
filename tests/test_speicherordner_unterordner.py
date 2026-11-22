@@ -25,6 +25,8 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 MAIN = (WURZEL / "backend" / "main.py").read_text(encoding="utf-8")
@@ -63,7 +65,7 @@ def knoten(name):
 
 
 def schneide(name):
-    return ast.get_source_segment(MAIN, knoten(name))
+    return quell_ausschnitt.segment(MAIN, knoten(name))
 
 
 GESCHNITTEN = ("_kb_norm_rel", "_kb_configured_root_for", "_kb_safe_within_data",

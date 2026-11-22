@@ -17,6 +17,8 @@ import sys
 import types as _pytypes
 import zlib
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -461,7 +463,7 @@ fn_save = next((n for n in ast.walk(mbaum)
                 and n.name == "ai_mouse_areas_speichern"), None)
 check("der Speichern-Endpunkt existiert", fn_save is not None)
 if fn_save is not None:
-    roh_save = ast.get_source_segment(haupt, fn_save) or ""
+    roh_save = quell_ausschnitt.segment(haupt, fn_save) or ""
     # Kommentare raus - sonst liest der Waechter seine eigene Begruendung
     # (dreizehnter Fall dieser Klasse im Projekt).
     ohne_k = "\n".join(z.split("#")[0] for z in roh_save.splitlines())
@@ -487,7 +489,7 @@ check("privileged ist False", a.get("privileged") is False)
 check("der Benutzer wird durchgereicht", a.get("user") == "chef")
 check("Internet/SAP/VEMAS kommen vom Benutzer",
       a.get("internet") and a.get("sap") and a.get("vemas"))
-src_actor = ast.get_source_segment(src, next(
+src_actor = quell_ausschnitt.segment(src, next(
     n for n in ast.walk(baum) if isinstance(n, ast.FunctionDef) and n.name == "_actor"))
 check("privileged steht als Literal False im Code (nicht konfigurierbar)",
       '"privileged": False' in src_actor)
@@ -505,7 +507,7 @@ check("_headless_user_parts existiert", mnode is not None)
 if mnode is not None:
     from google.genai import types as gt
     ns = {"types": gt}
-    exec(ast.get_source_segment(asrc, mnode).replace("    def ", "def ", 1)
+    exec(quell_ausschnitt.segment(asrc, mnode).replace("    def ", "def ", 1)
          .replace("\n    ", "\n"), ns)
     f = ns["_headless_user_parts"]
 
@@ -531,7 +533,7 @@ fn_head = next((n for n in ast.walk(abaum)
                 if isinstance(n, ast.AsyncFunctionDef) and n.name == "_run_headless"), None)
 check("_run_headless gefunden", fn_head is not None)
 if fn_head is not None:
-    roh_head = ast.get_source_segment(asrc, fn_head) or ""
+    roh_head = quell_ausschnitt.segment(asrc, fn_head) or ""
     check("_run_headless benutzt _headless_user_parts",
           "_headless_user_parts" in roh_head)
     # Genau EINE Ausnahme bleibt: der Auto-Learning-Aufruf (Faktenextraktion,
@@ -746,7 +748,7 @@ fn_bau = next((n for n in ast.walk(qbaum)
                if isinstance(n, ast.FunctionDef) and n.name == "_bauen"), None)
 check("_bauen existiert", fn_bau is not None)
 if fn_bau is not None:
-    roh_bau = ast.get_source_segment(quelle, fn_bau) or ""
+    roh_bau = quell_ausschnitt.segment(quelle, fn_bau) or ""
     ohne_bau = "\n".join(z.split("#")[0] for z in roh_bau.splitlines())
     check("der Bau ruft das Skript direkt", "ai_mouse_build.sh" in ohne_bau)
     check("KEIN Broker-Aufruf mehr im Bau", "broker" not in ohne_bau.lower())
@@ -2885,7 +2887,7 @@ _r23 = ""
 for _n23 in _ast23.walk(_b23):
     if (isinstance(_n23, (_ast23.FunctionDef, _ast23.AsyncFunctionDef))
             and _n23.name == "ai_mouse_fragen_sortieren"):
-        _r23 = _ast23.get_source_segment(_mq23, _n23) or ""
+        _r23 = quell_ausschnitt.segment(_mq23, _n23) or ""
 _r23_ok = "\n".join(z for z in _r23.split("\n")
                      if not z.lstrip().startswith("#"))
 check("der Endpunkt existiert", len(_r23) > 100)

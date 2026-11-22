@@ -36,6 +36,8 @@ import textwrap
 import time
 import uuid
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 # `_deliver_docs` importiert backend.meta_marke selbst (U+2063-Meta-Bloecke,
@@ -138,7 +140,7 @@ def modul_konstanten() -> dict:
         if not ziel.startswith("_") or not ziel.isupper() and ziel.upper() != ziel:
             continue
         try:
-            exec(_ast.get_source_segment(QUELLE, k), aus)
+            exec(quell_ausschnitt.segment(QUELLE, k), aus)
         except Exception:      # braucht einen fremden Import – nicht noetig
             pass
     return aus

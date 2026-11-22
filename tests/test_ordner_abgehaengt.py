@@ -24,6 +24,8 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OK = FAIL = 0
@@ -164,7 +166,7 @@ kandidaten = [n_ for n_ in ast.walk(BAUM)
               and _ruft_vs_clear(n_)]
 check(f"genau eine Funktion ruft vs.clear() (gefunden: "
       f"{[k.name for k in kandidaten]})", len(kandidaten) == 1)
-rumpf = ast.get_source_segment(Q, kandidaten[0]) if kandidaten else ""
+rumpf = quell_ausschnitt.segment(Q, kandidaten[0]) if kandidaten else ""
 # ⚠ Auch die REIHENFOLGE ueber Zeilennummern des AST, nicht ueber `find`:
 # der erklaerende Kommentar nennt "vs.clear()" VOR dem Aufruf von
 # _nutzbare_ordner - eine Textsuche vergleicht damit Kommentar gegen Code.
@@ -188,7 +190,7 @@ check("die Abbruch-Schranke 'kein Ordner erreichbar' steht noch",
       "Kein Wissensordner erreichbar" in rumpf)
 
 print("\n\033[1m5. Der Fall wird PROTOKOLLIERT (sonst bemerkt ihn niemand)\033[0m")
-q_helfer = ast.get_source_segment(Q, next(
+q_helfer = quell_ausschnitt.segment(Q, next(
     n_ for n_ in BAUM.body if isinstance(n_, ast.FunctionDef) and n_.name == "_nutzbare_ordner")) or ""
 check("es gibt eine Warnung mit dem Ordnernamen",
       "_log.warning" in q_helfer and "%s" in q_helfer)

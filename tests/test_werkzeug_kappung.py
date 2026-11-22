@@ -17,6 +17,8 @@ Lauf:  python3 tests/test_werkzeug_kappung.py
 import ast
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 LLM = ROOT / "backend" / "llm.py"
@@ -41,9 +43,9 @@ teile = []
 for k in baum.body:
     if isinstance(k, ast.Assign) and any(isinstance(t, ast.Name) and t.id in NAMEN
                                          for t in k.targets):
-        teile.append(ast.get_source_segment(src, k))
+        teile.append(quell_ausschnitt.segment(src, k))
     elif isinstance(k, ast.FunctionDef) and k.name in NAMEN:
-        teile.append(ast.get_source_segment(src, k))
+        teile.append(quell_ausschnitt.segment(src, k))
 if len(teile) != 3:
     print(f"ABBRUCH: {len(teile)}/3 Bausteine in backend/llm.py gefunden")
     sys.exit(2)
@@ -89,7 +91,7 @@ print("\n3. Regel: kein stilles Slicing mehr an Werkzeugergebnissen")
 fstrings = []
 for knoten in ast.walk(baum):
     if isinstance(knoten, ast.JoinedStr):
-        roh = ast.get_source_segment(src, knoten) or ""
+        roh = quell_ausschnitt.segment(src, knoten) or ""
         if "Tool-Ergebnis" in roh:
             fstrings.append(knoten)
 check("Positivkontrolle: die Werkzeugergebnis-Nachricht ist auffindbar", len(fstrings) >= 1,
@@ -106,7 +108,7 @@ for f in fstrings:
     # ("Tool-Ergebnis für") ist die, die kappen MUSS (kleine Kontexte);
     # _build_followup reicht das Ergebnis ungekuerzt durch – auch das ist ehrlich.
     check(f"Zeile {zeile}: kein Slice im Platzhalter", not slice_)
-    if "Tool-Ergebnis für" in (ast.get_source_segment(src, f) or ""):
+    if "Tool-Ergebnis für" in (quell_ausschnitt.segment(src, f) or ""):
         check(f"Zeile {zeile}: Prompt-Werkzeugmodus geht durch werkzeug_ergebnis_kappen", kappt)
         gefunden_kappstelle = True
 

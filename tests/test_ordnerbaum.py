@@ -30,6 +30,8 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 MAIN = (WURZEL / "backend" / "main.py").read_text(encoding="utf-8")
@@ -64,7 +66,7 @@ def schneide(name):
     baum = ast.parse(MAIN)
     for k in baum.body:
         if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == name:
-            return ast.get_source_segment(MAIN, k)
+            return quell_ausschnitt.segment(MAIN, k)
     print(f"FUNKTION {name} NICHT GEFUNDEN – Waechter kann nichts messen")
     sys.exit(2)
 

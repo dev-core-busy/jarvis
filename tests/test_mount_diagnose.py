@@ -21,6 +21,8 @@ import re
 import sys
 from pathlib import Path
 import time
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 OK = FAIL = 0
 
@@ -58,12 +60,13 @@ def ohne_kommentare(quelle):
     """
     import io, tokenize
     zeichen = list(quelle)
+    # Einmal zerlegen und summieren - je Kommentar war es quadratisch (main.py: 30 s)
+    vor = quell_ausschnitt.ZeilenVersatz(quelle.splitlines(keepends=True))
     try:
         for tok in tokenize.generate_tokens(io.StringIO(quelle).readline):
             if tok.type != tokenize.COMMENT:
                 continue
-            zeilen = quelle.splitlines(keepends=True)
-            start = sum(len(z) for z in zeilen[:tok.start[0] - 1]) + tok.start[1]
+            start = vor(tok.start[0] - 1) + tok.start[1]
             for i in range(start, start + len(tok.string)):
                 if i < len(zeichen):
                     zeichen[i] = " "
@@ -78,11 +81,11 @@ def schneide(quelle, namen):
     teile = []
     for n in baum.body:
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in namen:
-            teile.append(ast.get_source_segment(quelle, n))
+            teile.append(quell_ausschnitt.segment(quelle, n))
         elif isinstance(n, ast.Assign):
             for z in n.targets:
                 if getattr(z, "id", "") in namen:
-                    teile.append(ast.get_source_segment(quelle, n))
+                    teile.append(quell_ausschnitt.segment(quelle, n))
     return "\n\n".join(teile)
 
 

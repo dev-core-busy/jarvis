@@ -39,6 +39,15 @@ Mit --ausnahmen-pruefen laufen die ausgenommenen Waechter zusaetzlich; wer davon
 gruen ist, wird als "aus der Liste streichen" gemeldet (kein Fehlschlag) – sonst
 wird die Liste nur laenger und nie kuerzer.
 
+REIHENFOLGE (2026-11-22): die LAENGSTEN Waechter starten zuerst, nach den
+zuletzt gemessenen Laufzeiten (``JARVIS_CI_DAUERN``, sonst
+``~/.cache/jarvis/ci_dauern.json``; unbekannte zuerst, sonst nach Namen).
+Alphabetisch konnte der laengste Waechter (test_prolog_vollstaendig.js, im
+Sammellauf 225 s) als einer der letzten starten - dann wartete der ganze
+Lauf auf ihn, waehrend die anderen Plaetze leer standen. Die Datei steuert
+NUR die Startreihenfolge, nie ein Ergebnis; fehlt oder ist sie kaputt, laeuft
+alles wie vorher alphabetisch. Die Ausgabe bleibt nach Namen sortiert.
+
 Aufruf:  python3 tests/ci_lauf.py [--parallel N] [--zeitdeckel SEK]
                                   [--ausnahmen-pruefen] [muster ...]
 """
@@ -47,6 +56,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import fnmatch
+import json
 import os
 import re
 import shutil
@@ -81,6 +91,48 @@ ALLEIN = {"test_bsi_m5.py"}
 # dreifacher Rueckschritt (116 s -> 350 s) bliebe darunter unbemerkt. 2 laesst
 # dem Sammellauf seine Sonderstellung und meldet eine Verdreifachung.
 ZEITDECKEL_FAKTOR = {"test_prolog_vollstaendig.js": 2}
+
+
+def dauern_datei() -> Path:
+    """Ablage der zuletzt gemessenen Laufzeiten (ausserhalb des Arbeitsbaums)."""
+    eigen = os.environ.get("JARVIS_CI_DAUERN")
+    if eigen:
+        return Path(eigen)
+    basis = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(basis) / "jarvis" / "ci_dauern.json"
+
+
+def dauern_laden() -> dict[str, float]:
+    """Name -> Sekunden. Fehlt oder taugt die Datei nicht: leer (alphabetisch)."""
+    try:
+        roh = json.loads(dauern_datei().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(roh, dict):
+        return {}
+    return {k: float(v) for k, v in roh.items()
+            if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool)}
+
+
+def dauern_speichern(neu: dict[str, float]) -> None:
+    """Gemessene Zeiten in die Ablage MISCHEN (ein Teillauf loescht nichts)."""
+    ziel = dauern_datei()
+    alle = dauern_laden()
+    alle.update({k: round(v, 1) for k, v in neu.items()})
+    try:
+        ziel.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ziel.with_name(ziel.name + ".%d.tmp" % os.getpid())
+        tmp.write_text(json.dumps(alle, indent=0, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, ziel)
+    except OSError as e:
+        # Nur die Reihenfolge des NAECHSTEN Laufs leidet - kein Grund, diesen
+        # Lauf zu kippen. Gesagt wird es trotzdem.
+        print(f"   Laufzeiten nicht gespeichert ({e}) - naechster Lauf startet alphabetisch")
+
+
+def reihenfolge(dateien: list[Path], dauern: dict[str, float]) -> list[Path]:
+    """Laengste zuerst; unbekannte (keine Messung) noch davor; Gleichstand nach Namen."""
+    return sorted(dateien, key=lambda d: (-dauern.get(d.name, float("inf")), d.name))
 
 
 def ausnahmen_laden() -> dict[str, str]:
@@ -217,14 +269,31 @@ def main() -> int:
     rot: list[tuple[str, str, str]] = []
     streichen: list[str] = []
     luecken: list[tuple[str, str]] = []
+    dauern = dauern_laden()
+    gemessen: dict[str, float] = {}
     with cf.ThreadPoolExecutor(max_workers=a.parallel) as pool:
-        for name, rc, _dauer, _ausgabe in pool.map(lambda d: lauf(d, a.zeitdeckel), ausgenommen):
-            if rc == 0:
-                streichen.append(name)
+        # Ausgenommene und regulaere in EINER Warteschlange, laengste zuerst:
+        # vorher liefen die ausgenommenen als eigener Block davor, und jeder
+        # Langlaeufer darin hielt den Start aller anderen auf.
         parallel = [d for d in laufen if d.name not in ALLEIN]
         einzeln = [d for d in laufen if d.name in ALLEIN]
-        ergebnisse = list(pool.map(lambda d: lauf(d, a.zeitdeckel), parallel))
-        ergebnisse += [lauf(d, a.zeitdeckel) for d in einzeln]
+        zukunft = {pool.submit(lauf, d, a.zeitdeckel): d.name in ausn
+                   for d in reihenfolge(parallel + ausgenommen, dauern)}
+        ergebnisse = []
+        for f in cf.as_completed(zukunft):
+            name, rc, dauer, ausgabe = f.result()
+            gemessen[name] = dauer
+            if zukunft[f]:
+                if rc == 0:
+                    streichen.append(name)
+            else:
+                ergebnisse.append((name, rc, dauer, ausgabe))
+        ergebnisse.sort(key=lambda e: e[0])
+        streichen.sort()
+        for d in einzeln:
+            ergebnisse.append(lauf(d, a.zeitdeckel))
+            gemessen[d.name] = ergebnisse[-1][2]
+        dauern_speichern(gemessen)
         for name, rc, dauer, ausgabe in ergebnisse:
             letzte = [z for z in ausgabe.strip().splitlines() if z.strip()][-1:] or [""]
             if rc == 0:

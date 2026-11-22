@@ -33,6 +33,8 @@ import contextvars
 import sys
 import textwrap
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 AGENT_PY = WURZEL / "backend" / "agent.py"
@@ -79,7 +81,7 @@ if _rti is None:
     abbruch("record_task_image nicht gefunden")
 
 _ns = {"current_task_images": contextvars.ContextVar("t", default=None)}
-exec(ast.get_source_segment(I_QUELLE, _rti), _ns)
+exec(quell_ausschnitt.segment(I_QUELLE, _rti), _ns)
 record = _ns["record_task_image"]
 
 liste = []
@@ -179,7 +181,7 @@ def _ohne_kommentare(text: str) -> str:
     return "\n".join(z for z in text.splitlines() if not z.strip().startswith("#"))
 
 
-_q_rti = _ohne_kommentare(ast.get_source_segment(I_QUELLE, _rti) or "")
+_q_rti = _ohne_kommentare(quell_ausschnitt.segment(I_QUELLE, _rti) or "")
 pruef("append" in _q_rti and ("any(" in _q_rti or "url ==" in _q_rti),
       "record_task_image prueft nicht auf eine bereits gemerkte URL")
 

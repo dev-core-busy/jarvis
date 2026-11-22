@@ -28,6 +28,8 @@ import sys
 _UEBERSPRUNGEN: list = []
 import zipfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -440,7 +442,7 @@ _mbaum = _ast.parse(MAIN)
 def _fn_src(name):
     k = next((n for n in _mbaum.body if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
               and n.name == name), None)
-    return _ast.get_source_segment(MAIN, k) if k else ""
+    return quell_ausschnitt.segment(MAIN, k) if k else ""
 _hilf = _fn_src("_vorlagen_dateiname")
 _ablegen = _fn_src("_vorlage_ablegen")
 _loeschen = _fn_src("_vorlage_loeschen")

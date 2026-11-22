@@ -30,6 +30,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -450,7 +452,7 @@ check("sie ruft nichts Schreibendes auf der Platte", not (gerufen8 & schreibend)
 check("sie raeumt den Index (Positivkontrolle)", "remove_files" in gerufen8,
       str(sorted(gerufen8)))
 # Die Zusage "nur was WEG ist": ein `not ....exists()` muss in der Bedingung stehen.
-_q8 = ast.get_source_segment(quelle("backend/learning.py"), fn8) or ""
+_q8 = quell_ausschnitt.segment(quelle("backend/learning.py"), fn8) or ""
 check("sie raeumt nur, was nicht mehr existiert",
       "not kandidat.exists()" in _q8 or ("not " in _q8 and ".exists()" in _q8))
 

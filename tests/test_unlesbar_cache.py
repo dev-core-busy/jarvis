@@ -18,6 +18,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OK = FAIL = 0
@@ -144,7 +146,7 @@ import ast as _ast2                                             # noqa: E402
 _qr = ""
 for _n in _ast2.walk(_ast2.parse(QUELLE)):
     if isinstance(_n, (_ast2.FunctionDef, _ast2.AsyncFunctionDef)):
-        _seg = _ast2.get_source_segment(QUELLE, _n) or ""
+        _seg = quell_ausschnitt.segment(QUELLE, _n) or ""
         if "text_aus_datei(" in _seg:
             _qr = _seg
             break
@@ -165,7 +167,7 @@ _b = ast.parse(QUELLE)
 # Fehler, die es nicht gibt - und haette die Umstrukturierung abgelehnt.
 # Genommen wird deshalb der GANZE Vektor-Indexweg.
 _WEG = ("_rebuild_vector_index", "_inline_vector_index", "_vector_index_lauf")
-_teile = [ast.get_source_segment(QUELLE, n) or "" for n in ast.walk(_b)
+_teile = [quell_ausschnitt.segment(QUELLE, n) or "" for n in ast.walk(_b)
           if isinstance(n, ast.FunctionDef) and n.name in _WEG]
 _q = "\n".join(_teile)
 check(f"der Vektor-Indexweg gefunden ({len(_teile)} Funktionen)", bool(_q))

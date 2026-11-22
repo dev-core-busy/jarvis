@@ -18,6 +18,9 @@ import ast
 import io
 import os
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OK = FAIL = 0
@@ -86,9 +89,9 @@ check("die Schwelle liegt zwischen Muell (15 Z.) und echtem Wissen (170 Z.)",
 print("\n\033[1m4. Die Pruefung ist VERDRAHTET (die Funktion allein nuetzt nichts)\033[0m")
 fn = next((n for n in ast.walk(baum)
            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-           and "_save_and_index" in (ast.get_source_segment(Q, n) or "")
+           and "_save_and_index" in (quell_ausschnitt.segment(Q, n) or "")
            and n.name != "_save_and_index"), None)
-q = ast.get_source_segment(Q, fn) if fn else ""
+q = quell_ausschnitt.segment(Q, fn) if fn else ""
 check("die speichernde Funktion gefunden", bool(q))
 check("⚠ sie ruft _hat_substanz", "_hat_substanz(" in q)
 i_pruef = q.find("_hat_substanz(")

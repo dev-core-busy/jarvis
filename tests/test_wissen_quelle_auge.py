@@ -23,6 +23,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 W = Path(__file__).resolve().parent.parent
 _ok = _fail = 0
@@ -116,7 +118,7 @@ def ruf(pfad):
     mod_l.LEARNED_DIR = LEARNED
     sys.modules["backend.tools.knowledge"] = mod_k
     sys.modules["backend.learning"] = mod_l
-    quelle = ast.get_source_segment(QUELLE, fn)
+    quelle = quell_ausschnitt.segment(QUELLE, fn)
     # Dekorator weglassen – ast.get_source_segment liefert ihn nicht mit
     exec(compile(ast.parse(quelle), "<endpunkt>", "exec"), ns)
     try:

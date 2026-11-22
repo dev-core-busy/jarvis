@@ -19,6 +19,8 @@ import json
 import re
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
@@ -58,7 +60,7 @@ def funktion(quelle: str, name: str) -> str:
         return ""
     for knoten in ast.walk(baum):
         if isinstance(knoten, (ast.FunctionDef, ast.AsyncFunctionDef)) and knoten.name == name:
-            return ast.get_source_segment(quelle, knoten) or ""
+            return quell_ausschnitt.segment(quelle, knoten) or ""
     return ""
 
 

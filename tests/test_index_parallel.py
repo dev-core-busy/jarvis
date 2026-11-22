@@ -31,6 +31,8 @@ import sys
 import threading
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 KNOW = WURZEL / "backend" / "tools" / "knowledge.py"
@@ -87,7 +89,7 @@ print("\n=== 2. Der Suchpfad haelt ueberhaupt eine Sperre ===")
 # Suchpfad-Weiche eine EIGENE nimmt - und zwar nicht blockierend.
 rvi = next(n for n in BAUM.body
            if isinstance(n, ast.FunctionDef) and n.name == "_rebuild_vector_index")
-rvi_src = ast.get_source_segment(QUELL, rvi) or ""
+rvi_src = quell_ausschnitt.segment(QUELL, rvi) or ""
 check("_rebuild_vector_index nimmt _inline_index_lock", "_inline_index_lock" in rvi_src)
 check("und zwar NICHT blockierend (acquire(blocking=False))",
       "acquire(blocking=False)" in rvi_src,
@@ -100,7 +102,7 @@ check("_inline_index_lock ist auf Modulebene definiert",
 freigabe_im_finally = False
 for k in ast.walk(rvi):
     if isinstance(k, ast.Try) and k.finalbody:
-        if "_inline_index_lock.release()" in (ast.get_source_segment(QUELL, k) or ""):
+        if "_inline_index_lock.release()" in (quell_ausschnitt.segment(QUELL, k) or ""):
             freigabe_im_finally = True
 check("die Freigabe steht in einem finally", freigabe_im_finally,
       "ohne finally bleibt die Sperre nach der ersten Ausnahme dauerhaft zu")
@@ -108,7 +110,7 @@ check("die Freigabe steht in einem finally", freigabe_im_finally,
 print("\n=== 3. AUSGEFUEHRT: zwei gleichzeitige Suchen, ein Lauf ===")
 # Geschnitten werden NUR die beiden Weichen. Der Lauf selbst ist Bestand und
 # wird gestubbt - so misst der Waechter genau das Neue.
-schnitt = {n.name: ast.get_source_segment(QUELL, n) for n in BAUM.body
+schnitt = {n.name: quell_ausschnitt.segment(QUELL, n) for n in BAUM.body
            if isinstance(n, ast.FunctionDef)
            and n.name in ("_rebuild_vector_index", "_inline_vector_index")}
 check("Schnitt vollstaendig (beide Weichen)", len(schnitt) == 2, str(list(schnitt)))

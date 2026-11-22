@@ -58,6 +58,8 @@ import sys
 _UEBERSPRUNGEN: list = []
 import textwrap
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -92,7 +94,7 @@ def methode(name: str) -> ast.FunctionDef:
 
 
 def quelle_von(name: str) -> str:
-    return textwrap.dedent(ast.get_source_segment(QUELLE, methode(name)))
+    return textwrap.dedent(quell_ausschnitt.segment(QUELLE, methode(name)))
 
 
 def _ohne_docstring(fn) -> str:
@@ -106,7 +108,7 @@ def _ohne_docstring(fn) -> str:
             and isinstance(koerper[0].value, ast.Constant)
             and isinstance(koerper[0].value.value, str)):
         koerper = koerper[1:]
-    return "\n".join(ast.get_source_segment(QUELLE, k) or "" for k in koerper)
+    return "\n".join(quell_ausschnitt.segment(QUELLE, k) or "" for k in koerper)
 
 
 def konstante(name: str):
@@ -144,7 +146,7 @@ def modul_konstanten() -> dict:
         if not ziel.startswith("_") or not ziel.isupper() and ziel.upper() != ziel:
             continue
         try:
-            exec(_ast.get_source_segment(QUELLE, k), aus)
+            exec(quell_ausschnitt.segment(QUELLE, k), aus)
         except Exception:      # braucht einen fremden Import – nicht noetig
             pass
     return aus
@@ -743,7 +745,7 @@ def konstante_text(name: str) -> str:
                     try:
                         return ast.literal_eval(node.value)
                     except Exception:
-                        return ast.get_source_segment(QUELLE, node.value) or ""
+                        return quell_ausschnitt.segment(QUELLE, node.value) or ""
     raise AssertionError(f"Konstante {name} nicht gefunden")
 
 

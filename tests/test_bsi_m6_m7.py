@@ -41,6 +41,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 SEC = ROOT / "deploy" / "security"
@@ -736,7 +738,7 @@ _im_thread = _hook is not None and any(
     and getattr(n.args[0], "attr", "") == "abgleichen" for n in _ast.walk(_hook))
 check("…ruft abgleichen (im Thread) und startet bei Aenderung neu",
       _im_thread and "restart_service_delayed" in _rufe, _rufe)
-_src = (_ast.get_source_segment(_main_src, _hook) or "") if _hook else ""
+_src = (quell_ausschnitt.segment(_main_src, _hook) or "") if _hook else ""
 check("…Neustart nur bei NEUER Aenderung und nicht nach Ruecknahme (keine Schleife)",
       "neu != vorher" in _src and 'not erg.get("zurueckgesetzt")' in _src)
 check("…taeglich wiederholt", "86400" in _src)

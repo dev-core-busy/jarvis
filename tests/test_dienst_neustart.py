@@ -37,6 +37,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (Versatztabelle statt Summe je Kommentar)
 
 ok = fail = 0
 
@@ -69,10 +71,11 @@ def ohne_kommentare_py(quelle: str) -> str:
     erhalten – ein Entferner, der den Quelltext UMBAUT, prueft nicht mehr den
     Quelltext (Register)."""
     aus = list(quelle)
+    # Einmal zerlegen und summieren - je Kommentar war es quadratisch (main.py: 30 s)
+    vor = quell_ausschnitt.ZeilenVersatz(quelle.splitlines(keepends=True))
     for tok in tokenize.generate_tokens(io.StringIO(quelle).readline):
         if tok.type == tokenize.COMMENT:
-            zeilen = quelle.splitlines(keepends=True)
-            start = sum(len(z) for z in zeilen[:tok.start[0] - 1]) + tok.start[1]
+            start = vor(tok.start[0] - 1) + tok.start[1]
             for i in range(start, start + len(tok.string)):
                 if i < len(aus):
                     aus[i] = " "

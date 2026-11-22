@@ -24,6 +24,8 @@ import asyncio
 import sys
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -342,7 +344,7 @@ _q = ast.dump(summ)
 check("_support_ai_summary filtert 'no_summary'", "no_summary" in _q)
 check("die Quellenliste wird gefiltert, nicht 'blocks' roh gelesen",
       "_quellen" in _q)
-_txt_summ = ast.get_source_segment(QUELL, summ) or ""
+_txt_summ = quell_ausschnitt.segment(QUELL, summ) or ""
 check("die genannte Trefferzahl zaehlt die GEFILTERTEN Quellen",
       "len(_quellen)" in _txt_summ and "len(blocks)" not in _txt_summ)
 
@@ -351,7 +353,7 @@ abschnitt("10. Status-Endpunkt meldet Freigabe UND Konfiguration getrennt")
 st = FUNKTIONEN.get("support_status")
 if st is None:
     abbruch("support_status nicht gefunden")
-_txt_st = ast.get_source_segment(QUELL, st) or ""
+_txt_st = quell_ausschnitt.segment(QUELL, st) or ""
 check("_allowed wird gemeldet", "_allowed" in _txt_st)
 check("_configured wird gemeldet", "_configured" in _txt_st)
 check("die Freigabe kommt aus _support_fach_erlaubt", "_support_fach_erlaubt" in _txt_st)

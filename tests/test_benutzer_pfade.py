@@ -27,6 +27,8 @@ from pathlib import Path
 
 WURZEL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WURZEL))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (Versatztabelle statt Summe je Kommentar)
 
 OK = FAIL = 0
 def check(bez, bed):
@@ -52,13 +54,14 @@ def ohne_kommentare(quelle: str) -> str:
     Begruendung liest, prueft nichts (Register, 13 belegte Faelle)."""
     import tokenize
     raus = list(quelle)
+    # Einmal zerlegen und summieren - je Kommentar war es quadratisch (main.py: 30 s)
+    vor = quell_ausschnitt.ZeilenVersatz(quelle.split("\n"), zusatz=1)
     try:
         for tok in tokenize.generate_tokens(io.StringIO(quelle).readline):
             if tok.type == tokenize.COMMENT:
                 (zs, zc), (ze, ec) = tok.start, tok.end
                 if zs == ze:
-                    zeilen = quelle.split("\n")
-                    off = sum(len(z) + 1 for z in zeilen[:zs - 1])
+                    off = vor(zs - 1)
                     for i in range(off + zc, min(off + ec, len(raus))):
                         raus[i] = " "
     except Exception:

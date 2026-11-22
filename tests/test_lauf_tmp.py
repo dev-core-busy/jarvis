@@ -29,6 +29,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -591,7 +593,7 @@ pruef("Broker validiert die Bindungen", "binds_pruefen" in ops)
 import ast as _ast_h10
 _op_lauf = next((n for n in _ast_h10.walk(_ast_h10.parse(ops))
                  if isinstance(n, _ast_h10.FunctionDef) and n.name == "_op_sandbox_lauf"), None)
-_op_lauf_src = _ast_h10.get_source_segment(ops, _op_lauf) if _op_lauf else ""
+_op_lauf_src = quell_ausschnitt.segment(ops, _op_lauf) if _op_lauf else ""
 pruef("Broker-Op sandbox_lauf existiert", bool(_op_lauf_src))
 pruef("Broker faellt bei Fehlern NICHT auf gemeinsames /tmp zurueck",
       bool(_op_lauf_src) and "runuser -u" not in _op_lauf_src

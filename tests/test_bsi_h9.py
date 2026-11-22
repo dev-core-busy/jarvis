@@ -34,6 +34,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -1113,7 +1115,7 @@ if len(ant) == 1 and len(ant[0].args) == 4:
            ast.unparse(a_erl))
 # Die Token-Pruefung oben in handle_ws_message gilt fuer alles ausser ping –
 # also auch fuer die Antwort. Positivkontrolle, dass es diese Schranke gibt:
-pruefe(hwm is not None and 'if msg_type != "ping":' in ast.get_source_segment(MAIN, hwm),
+pruefe(hwm is not None and 'if msg_type != "ping":' in quell_ausschnitt.segment(MAIN, hwm),
        "Token-Pruefung gilt auch fuer die Antwort (nur ping ist ausgenommen)")
 
 W.FRIST_S = _FRIST_ECHT

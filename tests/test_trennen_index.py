@@ -14,6 +14,8 @@ import ast
 import os
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WURZEL))
@@ -47,7 +49,7 @@ def schneide(datei: Path, name: str) -> str:
     baum = ast.parse(datei.read_text(encoding="utf-8"))
     for kn in ast.walk(baum):
         if isinstance(kn, (ast.FunctionDef, ast.AsyncFunctionDef)) and kn.name == name:
-            return ast.get_source_segment(datei.read_text(encoding="utf-8"), kn)
+            return quell_ausschnitt.segment(datei.read_text(encoding="utf-8"), kn)
     return ""
 
 

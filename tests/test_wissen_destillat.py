@@ -24,6 +24,8 @@ import re
 import sys
 import zipfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 OK = FAIL = 0
@@ -150,7 +152,7 @@ def funktion(quelle: str, name: str) -> str:
     baum = ast.parse(quelle)
     for k in ast.walk(baum):
         if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == name:
-            return ast.get_source_segment(quelle, k) or ""
+            return quell_ausschnitt.segment(quelle, k) or ""
     return ""
 
 
@@ -655,7 +657,7 @@ for _name in _ENDPUNKTE:
     if not _k:
         check(f"{_name}: Rechte-Pruefung", False, "Endpunkt fehlt")
         continue
-    _src = ast.get_source_segment(MAIN, _k) or ""
+    _src = quell_ausschnitt.segment(MAIN, _k) or ""
     check(f"{_name}: prueft _destillat_erlaubt", "_destillat_erlaubt(user)" in _src)
     check(f"{_name}: haengt an require_auth",
           "Depends(require_auth)" in _src)
@@ -672,7 +674,7 @@ for _name in _ENDPUNKTE:
     check(f"{_name}: Rechte VOR dem Lesen des Rumpfes", _iR < _iA,
           f"{_iR} / {_iA}")
 
-_ueb = ast.get_source_segment(MAIN, _fn["wissen_destillat_uebernehmen"]) if "wissen_destillat_uebernehmen" in _fn else ""
+_ueb = quell_ausschnitt.segment(MAIN, _fn["wissen_destillat_uebernehmen"]) if "wissen_destillat_uebernehmen" in _fn else ""
 # ⚠ DIE EINE REGEL WIRD BENUTZT, NICHT NACHGEBAUT. `_wissen_check_groups`
 # beantwortet BEIDE Fragen (mindestens eine – und nur aus dem eigenen Bereich).
 check("Uebernehmen: benutzt _wissen_check_groups (kein Nachbau)",
@@ -700,7 +702,7 @@ check("Uebernehmen: Benutzer kommt aus der ANMELDUNG, nicht aus dem Rumpf",
       "_norm_login(user)" in _ueb
       and not re.search(r'body\.get\(\s*["\'](user|username|benutzer)', _ueb))
 
-_ext = ast.get_source_segment(MAIN, _fn["wissen_destillat_extract"]) if "wissen_destillat_extract" in _fn else ""
+_ext = quell_ausschnitt.segment(MAIN, _fn["wissen_destillat_extract"]) if "wissen_destillat_extract" in _fn else ""
 # ⚠ Blockierende Arbeit (pdfplumber, OCR, Tika) gehoert NIE in den Event-Loop –
 # sonst steht der Dienst fuer ALLE (20-Sekunden-Freeze, Register).
 # ⚠ AM AST, NICHT AM VORKOMMEN: seit dem Strom-Zweig (2026-09-27) steht
@@ -819,7 +821,7 @@ if _ext_fn:
         if isinstance(_k, ast.AsyncFunctionDef) and _k.name == "_strom":
             _strom = _k
 check("Extract: es gibt einen Strom-Zweig (_strom)", _strom is not None)
-_strom_src = ast.get_source_segment(MAIN, _strom) if _strom else ""
+_strom_src = quell_ausschnitt.segment(MAIN, _strom) if _strom else ""
 # ⚠ AM AUFRUF gemessen, nicht am Vorkommen: `asyncio.to_thread(_wd.extrahiere, …, _melde)`.
 _tt = [c for c in ast.walk(_strom) if isinstance(c, ast.Call)
        and isinstance(c.func, ast.Attribute) and c.func.attr == "to_thread"] if _strom else []
@@ -839,7 +841,7 @@ check("… der Rueckruf uebergibt per call_soon_threadsafe",
                           and c.func.attr == "call_soon_threadsafe" for c in ast.walk(_meld)))
 check("… Fehler im Strom kommen als Zeile art=fehler (nicht als Abbruch ohne Ende)",
       '"art": "fehler"' in _strom_src and '"art": "fertig"' in _strom_src)
-_ext_src = ast.get_source_segment(MAIN, _ext_fn) if _ext_fn else ""
+_ext_src = quell_ausschnitt.segment(MAIN, _ext_fn) if _ext_fn else ""
 _iStrom = _ext_src.find("_strom()")
 _iDeckel = _ext_src.find("413")
 check("… der Upload-Deckel greift VOR dem Strom", 0 <= _iDeckel < _iStrom, f"{_iDeckel} / {_iStrom}")
@@ -878,7 +880,7 @@ for _name, (_meth, _pfad) in _FEP.items():
     _k = _ff.get(_name)
     _dek = [ast.unparse(d) for d in (_k.decorator_list if _k else [])]
     check(f"{_meth.upper()} {_pfad} existiert", f"app.{_meth}('{_pfad}')" in _dek, str(_dek))
-    _src = ast.get_source_segment(MAIN, _k) if _k else ""
+    _src = quell_ausschnitt.segment(MAIN, _k) if _k else ""
     check(f"{_name}: haengt an require_auth", "Depends(require_auth)" in _src)
     # Recht VOR jeder Arbeit – am AST: das erste `if` des Rumpfs prueft es und gibt 403.
     _erstes_if = next((x for x in (_k.body if _k else []) if isinstance(x, ast.If)), None)
@@ -904,7 +906,7 @@ for _name, (_meth, _pfad) in _FEP.items():
               for c in ast.walk(_k)) if _k else False)
 
 _sp = _ff.get("wissen_destillat_filter_speichern")
-_sp_src = ast.get_source_segment(MAIN, _sp) if _sp else ""
+_sp_src = quell_ausschnitt.segment(MAIN, _sp) if _sp else ""
 _iP, _iW = _sp_src.find("_wd.filter_pruefen("), _sp_src.find(".write_text(")
 check("⚠ Speichern: geprueft wird VOR dem Schreiben", 0 <= _iP < _iW, f"{_iP} / {_iW}")
 check("⚠ Speichern: ein Pruef-Fehler antwortet 400 und schreibt nichts",
@@ -915,7 +917,7 @@ check("Speichern: atomar (tmp + os.replace)", ".json.tmp" in _sp_src and "os.rep
 check("Speichern: es wird geschrieben, was GEPRUEFT wurde (daten), nicht der Rumpf",
       "json.dumps(daten" in _sp_src and "json.dumps(body" not in _sp_src)
 _le = _ff.get("wissen_destillat_filter_lesen")
-_le_src = ast.get_source_segment(MAIN, _le) if _le else ""
+_le_src = quell_ausschnitt.segment(MAIN, _le) if _le else ""
 check("Lesen: fail-open in die harmlose Richtung (Fehler -> leere Listen, 200)",
       "except Exception" in _le_src and "'weiss': []" in ast.unparse(_le) if _le else False)
 check("Lesen: schreibt nichts", ".write_text(" not in _le_src and "os.replace" not in _le_src)

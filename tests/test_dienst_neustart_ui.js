@@ -20,6 +20,7 @@
 'use strict';
 require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1 (test_waechter_bilanz.js)
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { JSDOM } = require('./lib/jsdom_laden')();
@@ -32,6 +33,7 @@ function check(name, cond, detail) {
     if (typeof name !== 'string') {
         console.log('\x1b[31mABBRUCH: check() falsch herum\x1b[0m'); process.exit(2);
     }
+    wachhundSpannen(name);
     if (cond) { ok++; console.log('  \x1b[32m✓\x1b[0m ' + name); }
     else { fail++; console.log('  \x1b[31m✗\x1b[0m ' + name + (detail ? ' – ' + detail : '')); }
 }
@@ -51,12 +53,40 @@ process.on('unhandledRejection', function (e) {
     console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + (fail + 1) + ' FAIL\x1b[0m');
     process.exit(1);
 });
-const WACHHUND = setTimeout(function () {
-    bilanz = true;
-    console.log('\x1b[31m✗ Wachhund: der Lauf haengt (>25 s)\x1b[0m');
-    console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + (fail + 1) + ' FAIL\x1b[0m');
-    process.exit(1);
-}, 25000);
+// Wachhund auf STILLSTAND, nicht auf die Gesamtdauer.
+//
+// ⚠ WARUM (2026-11-22): hier lief ein fester 25-s-Wecker ueber den GANZEN
+// Lauf. Allein braucht er 8 s, im Sammellauf unter Volllast (12 parallel,
+// laengste zuerst) 28 s - und der Wecker meldete "der Lauf haengt", obwohl
+// jede Pruefung bestanden hatte. Gemessen hat er die Last der Maschine, nicht
+// den Code. Ein Haenger ist: es kommt KEINE Pruefung mehr. Jede Pruefung
+// spannt den Wecker deshalb neu; die laengste Strecke ohne Pruefung ist ein
+// einzelner lauf() (Seite + i18n.js, allein ~1 s). Die Gesamtdauer begrenzt
+// der Zeitdeckel des Sammellaufs.
+//
+// Und die Frist waechst mit der LAST: unter Speichermangel (64 Laeufe auf
+// 7 GB, gemessen 2026-11-22) brauchte schon der erste Seitenaufbau ueber 25 s.
+// Faktor = Lastmittel (1 min) je Kern, mindestens 1 - auf einer ruhigen
+// Maschine bleibt es bei 25 s, ein echter Haenger faellt weiter auf.
+const STILLSTAND_GRUND_MS = 25000;
+let WACHHUND = null, letztePruefung = '(noch keine)';
+function stillstandMs() {
+    const kerne = (os.cpus() || []).length || 1;
+    return Math.round(STILLSTAND_GRUND_MS * Math.max(1, os.loadavg()[0] / kerne));
+}
+function wachhundSpannen(name) {
+    if (name) letztePruefung = name;
+    clearTimeout(WACHHUND);
+    const frist = stillstandMs();
+    WACHHUND = setTimeout(function () {
+        bilanz = true;
+        console.log('\x1b[31m✗ Wachhund: der Lauf haengt (' + Math.round(frist / 1000)
+                    + ' s ohne neue Pruefung, zuletzt: ' + letztePruefung + ')\x1b[0m');
+        console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + (fail + 1) + ' FAIL\x1b[0m');
+        process.exit(1);
+    }, frist);
+}
+wachhundSpannen();
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
 const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');

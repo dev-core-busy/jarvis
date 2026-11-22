@@ -27,6 +27,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -203,7 +205,7 @@ for fname, muss in [("create_knowledge_folder", "zu_rag"),
     check(f"{fname} vorhanden", node is not None)
     if node is None:
         continue
-    seg = ast.get_source_segment(MAIN, node) or ""
+    seg = quell_ausschnitt.segment(MAIN, node) or ""
     check(f"{fname} benutzt die eine Regel ({muss})", muss in seg, seg[:80])
     # Die alte Regel darf nicht zurueckkommen: jeder direkte data/-Unterordner.
     check(f"{fname} prueft NICHT mehr gegen data/ als Wurzel",
@@ -266,9 +268,9 @@ check("leere Ordnerliste bricht den Neuaufbau ab, statt den Index zu leeren",
 kbaum = ast.parse(KNOW)
 kfun = {n.name: n for n in ast.walk(kbaum)
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-seg_fr = ast.get_source_segment(KNOW, kfun["_do_force_reindex"]) if "_do_force_reindex" in kfun else ""
+seg_fr = quell_ausschnitt.segment(KNOW, kfun["_do_force_reindex"]) if "_do_force_reindex" in kfun else ""
 if not seg_fr:
-    seg_fr = ast.get_source_segment(KNOW, kfun.get("force_reindex")) or ""
+    seg_fr = quell_ausschnitt.segment(KNOW, kfun.get("force_reindex")) or ""
 seg_fr_ok = ohne_kommentare("def _x():\n" + "\n".join("    " + z for z in seg_fr.splitlines()))
 check("der Neuaufbau-Rumpf wurde gefunden (Positivkontrolle)",
       "vs.clear()" in seg_fr_ok, seg_fr_ok[:80])
@@ -458,7 +460,7 @@ hooks = [n.name for n in ast.walk(baum)
 check("startup_rag_umzug ist ein Startup-Hook", "startup_rag_umzug" in hooks, str(hooks[:8]))
 if "startup_rag_umzug" in hooks:
     node = funktionen["startup_rag_umzug"]
-    seg = ast.get_source_segment(MAIN, node) or ""
+    seg = quell_ausschnitt.segment(MAIN, node) or ""
     ruft = any(isinstance(n, ast.Call) and
                (getattr(n.func, "id", "") == "migriere" or
                 any(getattr(a, "id", "") == "migriere" for a in n.args))
@@ -486,7 +488,7 @@ check("_renderFolders reicht `display` durch", "f.has_children, f.display" in KJ
 # `_wissen_scope_daten`; dass der Endpunkt dorthin uebergibt, prueft die Zeile danach.
 _ws = funktionen.get("wissen_scope")
 check("wissen_scope uebergibt an _wissen_scope_daten",
-      _ws is not None and "to_thread(_wissen_scope_daten" in (ast.get_source_segment(MAIN, _ws) or ""))
+      _ws is not None and "to_thread(_wissen_scope_daten" in (quell_ausschnitt.segment(MAIN, _ws) or ""))
 for fname in ("get_knowledge_stats", "knowledge_folder_tree",
               "browse_knowledge_dir", "_wissen_scope_daten"):
     node = funktionen.get(fname)
@@ -494,7 +496,7 @@ for fname in ("get_knowledge_stats", "knowledge_folder_tree",
     if node is None:
         continue
     seg = ohne_kommentare("def _x():\n" + "\n".join(
-        "    " + z for z in (ast.get_source_segment(MAIN, node) or "").splitlines()))
+        "    " + z for z in (quell_ausschnitt.segment(MAIN, node) or "").splitlines()))
     check(f"{fname} liefert das Feld `display`",
           '"display"' in seg and "_rag.anzeige(" in seg, seg[:100])
 check("der Knopf fuer BELIEBIGE Pfade ist weg (er hob die Regel auf)",

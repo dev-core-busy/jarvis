@@ -24,6 +24,7 @@ waere teurer als der Fehler, den er sucht.
 """
 import sys as _sys_jo, pathlib as _pl_jo  # noqa: E401
 _sys_jo.path.insert(0, str(_pl_jo.Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 # Das ECHTE main._json_objekt fuer geschnittene Endpunkte (tests/lib/json_objekt.py)
 from json_objekt import json_objekt_aus_main as _json_objekt_aus_main  # noqa: E402
 import ast
@@ -299,8 +300,8 @@ abschnitt("7 – Route, Anmeldung, Benutzerherkunft")
 # `get_source_segment` einer FunctionDef laesst die Dekoratoren AUSSEN vor –
 # deshalb wird der Dekorator einzeln geschnitten.
 _ep = FUNKTIONEN["support_history_delete_entry"]
-deko = [ast.get_source_segment(QUELL, d) for d in _ep.decorator_list]
-quelle = ast.get_source_segment(QUELL, _ep)
+deko = [quell_ausschnitt.segment(QUELL, d) for d in _ep.decorator_list]
+quelle = quell_ausschnitt.segment(QUELL, _ep)
 check("Route ist DELETE /api/support/history/entry",
       any('app.delete("/api/support/history/entry")' in (d or "") for d in deko), deko)
 check("Anmeldung ueber require_auth", "Depends(require_auth)" in quelle)

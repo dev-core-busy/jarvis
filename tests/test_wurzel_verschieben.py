@@ -22,6 +22,8 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 MAIN = (WURZEL / "backend" / "main.py").read_text(encoding="utf-8")
@@ -139,13 +141,13 @@ NS = {"Path": Path, "_rag": _rag, "_KB_FOLDER_NAME_RE": None,
 # Namensregel der Anlage: die ECHTE Regex aus main.py, nicht nachgebaut.
 for _k in BAUM.body:
     if isinstance(_k, ast.Assign) and any(getattr(t, "id", "") == "_KB_FOLDER_NAME_RE" for t in _k.targets):
-        exec("import re\n" + ast.get_source_segment(MAIN, _k), NS)
+        exec("import re\n" + quell_ausschnitt.segment(MAIN, _k), NS)
 if NS["_KB_FOLDER_NAME_RE"] is None:
     print("ABBRUCH – _KB_FOLDER_NAME_RE nicht gefunden")
     sys.exit(2)
 for _n in ("_kb_norm_rel", "_kb_configured_root_for", "_kb_safe_within_data",
            "_kb_validate_folder_name", "_kb_move_folder"):
-    exec(ast.get_source_segment(MAIN, knoten(_n)), NS)
+    exec(quell_ausschnitt.segment(MAIN, knoten(_n)), NS)
 # _kb_safe_within_data prueft gegen backend.tools.knowledge.PROJECT_ROOT -> Sandkasten
 schieben = NS["_kb_move_folder"]
 

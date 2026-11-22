@@ -21,6 +21,8 @@ import sys
 import threading
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 KNOW = WURZEL / "backend" / "tools" / "knowledge.py"
@@ -61,7 +63,7 @@ for noetig in ("force_reindex", "_run_with_retries"):
 if "force_reindex" not in FN:
     print(f"\nERGEBNIS: {_ok} OK, {_fail} FAIL  (ABBRUCH: konnte nicht laufen)")
     sys.exit(2)
-SCHNITT = ast.get_source_segment(QUELL, FN["force_reindex"])
+SCHNITT = quell_ausschnitt.segment(QUELL, FN["force_reindex"])
 
 
 def baue(lauf_dauer=0.3, wirft=False):

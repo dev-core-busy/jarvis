@@ -27,6 +27,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -154,7 +156,7 @@ try:
     check("update_mount gefunden", rumpf is not None)
 
     # Nur den Teil ab dem Neubau des Eintrags - davor liegen Broker-Aufrufe.
-    src = ast.get_source_segment(mq, rumpf) or ""
+    src = quell_ausschnitt.segment(mq, rumpf) or ""
     i = src.find("_alt = mounts[idx]")
     check("der Kennwort-Teil ist im Schnitt (Positivkontrolle)", i > 0, str(i))
     teil = src[i:src.find("_save_mounts_config", i)] if i > 0 else ""
@@ -194,7 +196,7 @@ try:
         if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == "add_mount":
             rumpf_add = n
     check("add_mount gefunden", rumpf_add is not None)
-    src_a = ast.get_source_segment(mq, rumpf_add) or ""
+    src_a = quell_ausschnitt.segment(mq, rumpf_add) or ""
     ia = src_a.find("mount_entry = {")
     check("der Eintrags-Teil ist im Schnitt (Positivkontrolle)", ia > 0, str(ia))
     teil_a = src_a[ia:src_a.find("mounts.append", ia)] if ia > 0 else ""
@@ -304,7 +306,7 @@ try:
         if isinstance(n, ast.FunctionDef) and n.name == "mount":
             fn = n
     check("Bereich mount gefunden", fn is not None)
-    src_r = ast.get_source_segment(rq, fn) or ""
+    src_r = quell_ausschnitt.segment(rq, fn) or ""
     check("er liest ueber kennwort_aus, nicht roh",
           "kennwort_aus" in src_r and 'get("password")' not in src_r, src_r[-160:])
 finally:

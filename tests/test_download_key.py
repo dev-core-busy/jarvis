@@ -26,6 +26,9 @@ import re
 import sys
 import time
 import types
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WURZEL))
@@ -111,8 +114,8 @@ baum = ast.parse(QUELLE)
 vt = None
 for k in baum.body:
     if isinstance(k, ast.FunctionDef) and k.name == "verify_token":
-        vt = ast.get_source_segment(QUELLE, k)
-_ew = next((ast.get_source_segment(QUELLE, k) for k in baum.body
+        vt = quell_ausschnitt.segment(QUELLE, k)
+_ew = next((quell_ausschnitt.segment(QUELLE, k) for k in baum.body
             if isinstance(k, ast.FunctionDef) and k.name == "_epoche_widerrufen"), "")
 check("verify_token ist auffindbar (Positivkontrolle)", bool(vt))
 if vt:
@@ -447,7 +450,7 @@ _GESCHNITTEN = ("_query_benutzer", "_sitzung_ohne_admin",
                 "_abruf_ziel", "_routing_pfad")
 for k in baum.body:
     if isinstance(k, ast.FunctionDef) and k.name in _GESCHNITTEN:
-        _fns[k.name] = ast.get_source_segment(QUELLE, k)
+        _fns[k.name] = quell_ausschnitt.segment(QUELLE, k)
 check(f"Positivkontrolle: {len(_GESCHNITTEN)} Funktionen aus main.py geschnitten",
       len(_fns) == len(_GESCHNITTEN), sorted(_fns))
 

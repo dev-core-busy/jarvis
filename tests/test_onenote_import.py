@@ -18,6 +18,8 @@ import subprocess
 import sys
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).parent.parent
 sys.path.insert(0, str(WURZEL))
@@ -304,7 +306,7 @@ def rumpf(quelle, name):
     baum = ast.parse(quelle)
     for k in ast.walk(baum):
         if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == name:
-            return ast.get_source_segment(quelle, k) or ""
+            return quell_ausschnitt.segment(quelle, k) or ""
     return ""
 
 
@@ -780,7 +782,7 @@ def startup_rumpf(name):
         return ""
     for k in baum.body:
         if isinstance(k, ast.AsyncFunctionDef) and k.name == name:
-            return ast.get_source_segment(haupt_roh, k) or ""
+            return quell_ausschnitt.segment(haupt_roh, k) or ""
     return ""
 
 

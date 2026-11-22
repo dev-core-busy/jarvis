@@ -14,6 +14,9 @@ import io
 import os
 import re
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OK = FAIL = 0
@@ -149,7 +152,7 @@ check("_llm_tools ruft den Zuschnitt", "_buendel_zuschnitt" in AGENT and
       any(isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "_buendel_zuschnitt"
           for n in ast.walk(fn.get("_llm_tools", ast.Module(body=[], type_ignores=[])))))
 zus = fn.get("_buendel_zuschnitt")
-quelle_zus = ast.get_source_segment(AGENT, zus) if zus else ""
+quelle_zus = quell_ausschnitt.segment(AGENT, zus) if zus else ""
 check("der Zuschnitt existiert als eigene Funktion", bool(quelle_zus))
 check("⚠ er prueft den Schalter (Vorgabe AUS)",
       "WERKZEUG_BUENDEL" in quelle_zus or "_buendel_aktiv" in quelle_zus)
@@ -162,7 +165,7 @@ check("⚠ _buendel_voll wird an BEIDEN Lauf-Starts zurueckgesetzt",
       AGENT.count("self._buendel_voll = False") == 2)
 check("und ist im Konstruktor gesetzt", "self._buendel_voll: bool = False" in AGENT)
 check("werkzeuge_anfordern haengt in _attach_extra_tools (nicht an einem Skill)",
-      "WerkzeugeAnfordernTool" in ast.get_source_segment(AGENT, fn["_attach_extra_tools"]))
+      "WerkzeugeAnfordernTool" in quell_ausschnitt.segment(AGENT, fn["_attach_extra_tools"]))
 
 print("\n\033[1m6b. AUSGESCHALTET aendert sich NICHTS am Angebot\033[0m")
 # ⚠ DIESE PRUEFUNG IST BEZAHLT (2026-09-06): `werkzeuge_anfordern` haengt immer
@@ -170,7 +173,7 @@ print("\n\033[1m6b. AUSGESCHALTET aendert sich NICHTS am Angebot\033[0m")
 # aber nur, wenn es etwas bewirkt. Ohne diesen Filter aendert das Feature das
 # Angebot auch im AUSGESCHALTETEN Zustand, und drei Bestandstests fielen um
 # (test_agent_roles 168->11 FAIL, test_lauf_rechte, test_bild_anzeige).
-quelle_llm = ast.get_source_segment(AGENT, fn["_llm_tools"]) or ""
+quelle_llm = quell_ausschnitt.segment(AGENT, fn["_llm_tools"]) or ""
 check("⚠ bei ausgeschaltetem Zuschnitt faellt werkzeuge_anfordern aus dem Angebot",
       't.name != "werkzeuge_anfordern"' in quelle_zus)
 # ⚠ OHNE DOCSTRING UND KOMMENTARE: der erklaert beide Namen und steht GANZ
@@ -192,7 +195,7 @@ check("und zwar VOR jeder weiteren Entscheidung (auch vor _buendel_voll)",
       and rumpf.index("werkzeuge_anfordern") < rumpf.index("_buendel_voll"))
 check("die Aktiv-Frage ist fail-closed (Fehler = aus)",
       "_buendel_aktiv" in AGENT and
-      re.search(r"except[^\n]*\n\s*return False", ast.get_source_segment(AGENT, fn["_buendel_aktiv"]) or "") is not None)
+      re.search(r"except[^\n]*\n\s*return False", quell_ausschnitt.segment(AGENT, fn["_buendel_aktiv"]) or "") is not None)
 
 print("\n\033[1m7. Der Schalter ist AUS, solange niemand ihn setzt\033[0m")
 check("Klassen-Vorgabe ist False",
@@ -268,16 +271,16 @@ check("⚠ werkzeuglose Abschnitte fallen NIE weg",
 check("Positivkontrolle: bei leerem Zuschnitt faellt ueberhaupt etwas", len(weg_min) > 0)
 
 # Prompt und Werkzeuge muessen aus DERSELBEN Quelle kommen.
-q_prompt = ast.get_source_segment(AGENT, fn["_prompt_zugeschnitten"]) or ""
+q_prompt = quell_ausschnitt.segment(AGENT, fn["_prompt_zugeschnitten"]) or ""
 check("⚠ der Prompt-Zuschnitt nutzt _buendel_erlaubt (eine Quelle fuer beides)",
       "_buendel_erlaubt" in q_prompt and "_buendel_erlaubt" in quelle_zus)
 check("er ist fail-open (Fehler = voller Prompt)",
       re.search(r"except[^\n]*\n(?:[^\n]*\n){0,3}?\s*return self\.SYSTEM_PROMPT", q_prompt)
       is not None)
 check("_base_system_prompt ruft ihn (sonst wirkt er nirgends)",
-      "_prompt_zugeschnitten" in (ast.get_source_segment(AGENT, fn["_base_system_prompt"]) or ""))
+      "_prompt_zugeschnitten" in (quell_ausschnitt.segment(AGENT, fn["_base_system_prompt"]) or ""))
 check("die Rollen-/Sub-Agent-Weiche ist unangetastet",
-      "SUB_AGENT_PROMPT" in (ast.get_source_segment(AGENT, fn["_base_system_prompt"]) or ""))
+      "SUB_AGENT_PROMPT" in (quell_ausschnitt.segment(AGENT, fn["_base_system_prompt"]) or ""))
 
 print("\n\033[1m10. Der AGENTEN-PFAD - nicht nur die Funktion (Review-Befund)\033[0m")
 # ⚠ DER TEUERSTE BEFUND DES REVIEWS: die Umkehrung steckte in `zuschnitt()`,
@@ -295,11 +298,11 @@ class _FakeAgent:
     def actor_name(self): return "jarvis"
 
 _agent_q = AGENT
-_bz = ast.get_source_segment(_agent_q, fn["_buendel_zuschnitt"])
-_be = ast.get_source_segment(_agent_q, fn["_buendel_erlaubt"])
-_ba = ast.get_source_segment(_agent_q, fn["_buendel_aufgabe"])
-_bv = ast.get_source_segment(_agent_q, fn["_buendel_voll_aktiv"])
-_bk = ast.get_source_segment(_agent_q, fn["_buendel_aktiv"])
+_bz = quell_ausschnitt.segment(_agent_q, fn["_buendel_zuschnitt"])
+_be = quell_ausschnitt.segment(_agent_q, fn["_buendel_erlaubt"])
+_ba = quell_ausschnitt.segment(_agent_q, fn["_buendel_aufgabe"])
+_bv = quell_ausschnitt.segment(_agent_q, fn["_buendel_voll_aktiv"])
+_bk = quell_ausschnitt.segment(_agent_q, fn["_buendel_aktiv"])
 _ns = {"contextvars": __import__("contextvars"),
        "_BLOCKED_TOOLS_FOR_LDAP": set(), "_reminder_exempt": lambda *a: False}
 exec("import contextvars\n"
@@ -363,7 +366,7 @@ if _alt is not None:
 print("\n\033[1m11. Weitere Review-Befunde\033[0m")
 check("⚠ der Rueckweg reicht den PROMPT nach (nicht nur die Werkzeuge)",
       "_buendel_prompt_nachtrag" in AGENT
-      and "_buendel_prompt_nachtrag()" in (ast.get_source_segment(AGENT, fn["run_task"]) or ""))
+      and "_buendel_prompt_nachtrag()" in (quell_ausschnitt.segment(AGENT, fn["run_task"]) or ""))
 check("und das Signal wird je Lauf zurueckgesetzt",
       AGENT.count("self._buendel_prompt_neu = False") >= 2)
 check("⚠ Lauf-Zustand liegt in ContextVars (geteilter Hauptagent!)",
@@ -382,7 +385,7 @@ _zuw = [k for k in getattr(_as, "body", [])
 check("und wird im actor_scope WIRKLICH gesetzt (echte Zuweisung, kein toter Zweig)",
       len(_zuw) == 2)
 check("und im finally zurueckgenommen",
-      "_cv.reset(_tk)" in (ast.get_source_segment(AGENT, fn["actor_scope"]) or ""))
+      "_cv.reset(_tk)" in (quell_ausschnitt.segment(AGENT, fn["actor_scope"]) or ""))
 check("⚠ WERKZEUG_BUENDEL steht NICHT im try von LLM_MAX_TOKENS",
       not re.search(r"LLM_MAX_TOKENS = max\(256[^\n]*\n\s*self\.WERKZEUG_BUENDEL", CFG))
 ZS = io.open(os.path.join(REPO, "deploy/buendel_zaehlen.sh"), encoding="utf-8").read()

@@ -17,6 +17,8 @@ import sys
 import types
 import xml.dom.minidom
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -492,7 +494,7 @@ def funktion(name):
     """
     for k in ast.walk(baum):
         if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == name:
-            return ast.get_source_segment(MAIN, k) or ""
+            return quell_ausschnitt.segment(MAIN, k) or ""
     return ""
 
 
@@ -1643,8 +1645,8 @@ pruefe(_ep is not None and _setzt_attribut(_ep, "_role_prompt"),
        "der Endpunkt SETZT _role_prompt (sonst gilt der Hauptagenten-Prompt)")
 pruefe(_ep is not None and _setzt_attribut(_ep, "_role_tools"),
        "der Endpunkt setzt _role_tools (harte Werkzeug-Schranke)")
-pruefe("rollen_prompt()" in _ast.get_source_segment(_main_src, _ep or _baum) or
-       "rollen_prompt" in _ast.get_source_segment(_main_src, _ep or _baum),
+pruefe("rollen_prompt()" in quell_ausschnitt.segment(_main_src, _ep or _baum) or
+       "rollen_prompt" in quell_ausschnitt.segment(_main_src, _ep or _baum),
        "der Prompt kommt aus excel_ask.rollen_prompt() – keine zweite Fassung")
 
 # ── 12k. DRIFT-SCHRANKE: die Fehlerwert-Liste steht in ZWEI Sprachen ─────

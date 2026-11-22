@@ -33,6 +33,8 @@ Exit 0 = bestanden · 1 = FAIL · 2 = konnte nicht laufen.
 import ast
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).resolve().parent.parent
 AGENT_PY = WURZEL / "backend" / "agent.py"
@@ -73,7 +75,7 @@ _bb = next((n for n in KLS.body
             if isinstance(n, ast.FunctionDef) and n.name == "_bilddaten_bergen"), None)
 if _bb is None:
     abbruch("_bilddaten_bergen nicht gefunden")
-_src = ast.get_source_segment(QUELLE, _bb) or ""
+_src = quell_ausschnitt.segment(QUELLE, _bb) or ""
 
 # Der Text fuer das MODELL (fuer_anzeige=False) – nur die Literale, nicht die
 # Kommentare: ein Waechter, der seine eigene Begruendung liest, prueft nichts.

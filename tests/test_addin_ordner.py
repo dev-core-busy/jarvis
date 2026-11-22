@@ -32,6 +32,8 @@ import re
 import sys
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -200,7 +202,7 @@ _mail_wirft = False
 # Listenaufbau und der Zaehler fiel still auf 0.
 check("hat einen eigenen try/except",
       any(isinstance(n, ast.Try) for n in ast.walk(_safe)))
-_safe_src = ohne_kommentare(ast.get_source_segment(MAIN, _safe) or "")
+_safe_src = ohne_kommentare(quell_ausschnitt.segment(MAIN, _safe) or "")
 check("meldet den Grund, statt still zu schweigen",
       "print" in _safe_src, _safe_src[:120])
 
@@ -213,7 +215,7 @@ for k in ast.walk(_baum):
         _status = k
         break
 check("email_status gefunden", _status is not None)
-_st_src = ohne_kommentare(ast.get_source_segment(MAIN, _status) or "") if _status else ""
+_st_src = ohne_kommentare(quell_ausschnitt.segment(MAIN, _status) or "") if _status else ""
 # Der Client liest genau diesen Namen. Ein anderer hier heisst: die Kachel
 # bietet auf ewig den Download an, ohne dass etwas auffaellt.
 check("sendet den Schluessel 'addin_ordner'", '"addin_ordner"' in _st_src, _st_src[:200])
@@ -278,7 +280,7 @@ for _k in ast.walk(ast.parse(ADDIN_PY)):
         _ordner_knoten = _k
         break
 check("ordner_pfad im Syntaxbaum gefunden", _ordner_knoten is not None)
-_of = ohne_kommentare(ast.get_source_segment(ADDIN_PY, _ordner_knoten) or "") \
+_of = ohne_kommentare(quell_ausschnitt.segment(ADDIN_PY, _ordner_knoten) or "") \
     if _ordner_knoten else ""
 # POSITIVKONTROLLE DES SCHNITTS: er muss die Funktion enthalten und NICHT die
 # Nachbarfunktion, in der `subprocess` legitim steht.

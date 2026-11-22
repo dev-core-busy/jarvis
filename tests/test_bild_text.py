@@ -19,6 +19,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -315,7 +317,7 @@ for _n in ast.walk(ast.parse(agent)):
         try:
             _sp = ast.literal_eval(_n.value)
         except Exception:  # noqa: BLE001
-            _sp = ast.get_source_segment(agent, _n.value) or ""
+            _sp = quell_ausschnitt.segment(agent, _n.value) or ""
 check("Positivkontrolle: der System-Prompt wurde geschnitten", len(_sp) > 5000, str(len(_sp)))
 check("Punkt 15 des SYSTEM_PROMPTS nennt bild_text_ersetzen",
       "bild_text_ersetzen" in _sp)

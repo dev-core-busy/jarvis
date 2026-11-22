@@ -17,6 +17,8 @@ import os
 import sys
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -50,7 +52,7 @@ MAIN_SRC = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 def schneide(src, *namen):
     """Funktionen per AST herausschneiden und ausfuehrbar machen."""
     baum = ast.parse(src)
-    teile = [ast.get_source_segment(src, n) for n in baum.body
+    teile = [quell_ausschnitt.segment(src, n) for n in baum.body
              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in namen]
     fehlend = set(namen) - {n.name for n in baum.body
                             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}

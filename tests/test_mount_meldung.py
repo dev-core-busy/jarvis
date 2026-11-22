@@ -22,6 +22,8 @@ import ast
 import re
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 WURZEL = Path(__file__).parent.parent
 OK = FAIL = 0
@@ -55,7 +57,7 @@ def schneide(quelle, name):
     baum = ast.parse(quelle)
     for k in baum.body:
         if isinstance(k, (ast.FunctionDef, ast.AsyncFunctionDef)) and k.name == name:
-            return ast.get_source_segment(quelle, k) or ""
+            return quell_ausschnitt.segment(quelle, k) or ""
     return ""
 
 
@@ -79,7 +81,7 @@ ns = {"re": re}
 for _n in ast.parse(HAUPT).body:
     if isinstance(_n, ast.Assign) and any(
             getattr(_z, "id", "") == "_MOUNT_KERNCODES" for _z in _n.targets):
-        exec(compile(ast.get_source_segment(HAUPT, _n), "<konstante>", "exec"), ns)
+        exec(compile(quell_ausschnitt.segment(HAUPT, _n), "<konstante>", "exec"), ns)
 check("Positivkontrolle: die Kernel-Deutungen sind im Namensraum",
       isinstance(ns.get("_MOUNT_KERNCODES"), dict) and "-115" in ns["_MOUNT_KERNCODES"])
 exec(compile(code, "<schnitt>", "exec"), ns)
@@ -349,7 +351,7 @@ baum_add = ast.parse(add_code)
 mkdir_geschuetzt = False
 for k in ast.walk(baum_add):
     if isinstance(k, ast.Try):
-        quelle_try = ast.get_source_segment(add_code, k) or ""
+        quelle_try = quell_ausschnitt.segment(add_code, k) or ""
         if ".mkdir(" in quelle_try:
             mkdir_geschuetzt = True
 check("⚠ das mkdir des Einhaengepunkts ist abgesichert (kein HTTP 500)",
@@ -363,7 +365,7 @@ ops_quelle = (WURZEL / "backend" / "broker" / "ops.py").read_text()
 op_code = ""
 for k in ast.parse(ops_quelle).body:
     if isinstance(k, ast.FunctionDef) and k.name == "_op_mount_share":
-        op_code = ast.get_source_segment(ops_quelle, k) or ""
+        op_code = quell_ausschnitt.segment(ops_quelle, k) or ""
 check("Positivkontrolle: die Broker-Op wurde geschnitten", len(op_code) > 200)
 check("auch der Broker prueft die Form (Tiefenverteidigung)",
       "mount_quelle" in op_code and "pruefe(" in op_code, op_code[:200])
@@ -374,7 +376,7 @@ check("⚠ ein belegter Einhaengepunkt wird VOR dem mkdir geloest",
       "_mp_freimachen(" in op_code
       and op_code.find("_mp_freimachen(") < op_code.find(".mkdir("),
       op_code[:200])
-mkdir_try = any(isinstance(k, ast.Try) and ".mkdir(" in (ast.get_source_segment(op_code, k) or "")
+mkdir_try = any(isinstance(k, ast.Try) and ".mkdir(" in (quell_ausschnitt.segment(op_code, k) or "")
                 for k in ast.walk(ast.parse(op_code)))
 check("… und das mkdir selbst wirft keinen Broker-Op-Fehler mehr", mkdir_try)
 check("der Hinweis auf den geloesten Mount landet im Ergebnis",
@@ -382,12 +384,12 @@ check("der Hinweis auf den geloesten Mount landet im Ergebnis",
 frei_code = ""
 for k in ast.parse(ops_quelle).body:
     if isinstance(k, ast.FunctionDef) and k.name in ("_mp_freimachen", "_ist_eingehaengt"):
-        frei_code += (ast.get_source_segment(ops_quelle, k) or "") + "\n"
+        frei_code += (quell_ausschnitt.segment(ops_quelle, k) or "") + "\n"
 check("Positivkontrolle: die Helfer wurden geschnitten", len(frei_code) > 300)
 kern_code = ""
 for k in ast.parse(ops_quelle).body:
     if isinstance(k, ast.FunctionDef) and k.name == "_kernel_grund":
-        kern_code = ast.get_source_segment(ops_quelle, k) or ""
+        kern_code = quell_ausschnitt.segment(ops_quelle, k) or ""
 check("Positivkontrolle: _kernel_grund wurde geschnitten", len(kern_code) > 200)
 check("⚠ der Broker holt den Kernel-Grund aus dmesg (nur root kann das)",
       "dmesg" in kern_code and "CIFS" in kern_code, kern_code[:160])

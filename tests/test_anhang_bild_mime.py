@@ -26,6 +26,8 @@ GEMESSEN WIRD DIE EIGENSCHAFT, NICHT DAS VORKOMMEN:
 import ast
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 QUELLE = ROOT / "backend" / "main.py"
@@ -91,8 +93,8 @@ _k = funktion("_bild_mime_aus_kopf")
 if _k is None:
     print("ABBRUCH: _bild_mime_aus_kopf nicht gefunden")
     sys.exit(2)
-exec(_TAB + "\n" + ast.get_source_segment(SRC, _k) + "\n\n"
-     + ast.get_source_segment(SRC, _f), _raum)  # noqa: S102
+exec(_TAB + "\n" + quell_ausschnitt.segment(SRC, _k) + "\n\n"
+     + quell_ausschnitt.segment(SRC, _f), _raum)  # noqa: S102
 bild_mime = _raum["_bild_mime_aus_bytes"]
 
 import base64  # noqa: E402
@@ -166,7 +168,7 @@ for k in ast.walk(BAUM):
     # `ast.walk` liefert die AEUSSERE Weiche zuerst, und deren Quelltext
     # enthaelt die innere mit - der Waechter beurteilte dann den falschen
     # else-Zweig (beim ersten Lauf genau so passiert).
-    if (ast.get_source_segment(SRC, k.test) or "") == "len(_data) <= 14_000_000":
+    if (quell_ausschnitt.segment(SRC, k.test) or "") == "len(_data) <= 14_000_000":
         _gefunden = True
         # ⚠ NICHT `bool(k.orelse)` – das ist auch bei einem `elif` wahr, und ein
         # `elif False:` laesst das Bild weiter wortlos verschwinden. Die
@@ -177,7 +179,7 @@ for k in ast.walk(BAUM):
               bool(k.orelse) and not _ist_elif,
               "elif statt else" if _ist_elif else "bis 2026-09-16 verschwand es wortlos")
         check("die Meldung nennt die Grenze",
-              "10 MB" in "".join(ast.get_source_segment(SRC, o) or "" for o in k.orelse))
+              "10 MB" in "".join(quell_ausschnitt.segment(SRC, o) or "" for o in k.orelse))
         break
 check("die Groessen-Weiche wurde ueberhaupt gefunden", _gefunden,
       "ohne sie sagen die zwei Pruefungen darueber nichts")

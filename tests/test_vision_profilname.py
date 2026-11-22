@@ -26,6 +26,8 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 QUELLE = ROOT / "skills" / "vision" / "vision_engine.py"
@@ -51,9 +53,9 @@ modul_teile = []
 for knoten in baum.body:
     if isinstance(knoten, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "_PROFILNAME" for t in knoten.targets):
-        modul_teile.append(ast.get_source_segment(src, knoten))
+        modul_teile.append(quell_ausschnitt.segment(src, knoten))
     if isinstance(knoten, ast.FunctionDef) and knoten.name == "profilname_gueltig":
-        modul_teile.append(ast.get_source_segment(src, knoten))
+        modul_teile.append(quell_ausschnitt.segment(src, knoten))
 
 klasse = next((k for k in baum.body
                if isinstance(k, ast.ClassDef) and k.name == "VisionEngine"), None)
@@ -63,7 +65,7 @@ methoden = {}
 if klasse:
     for k in klasse.body:
         if isinstance(k, ast.FunctionDef) and k.name in METHODEN:
-            methoden[k.name] = ast.get_source_segment(src, k)
+            methoden[k.name] = quell_ausschnitt.segment(src, k)
 
 fehlt = [m for m in METHODEN if m not in methoden]
 if len(modul_teile) != 2 or fehlt:

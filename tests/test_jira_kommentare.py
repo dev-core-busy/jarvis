@@ -8,6 +8,8 @@ bzw. als nachgebaute Methode.
 import re
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import quell_ausschnitt  # noqa: E402  (linear statt ast.get_source_segment)
 
 ROOT = Path(__file__).resolve().parent.parent
 _ok = _fail = 0
@@ -101,7 +103,7 @@ for _n in _ast.parse(AGENT).body:
             isinstance(_n, _ast.Assign) and any(
                 isinstance(t, _ast.Name) and t.id.startswith("_WEGGELASSEN_")
                 for t in _n.targets)):
-        exec(_ast.get_source_segment(AGENT, _n), _ns)
+        exec(quell_ausschnitt.segment(AGENT, _n), _ns)
 check("_weggelassen_abtrennen" in _ns and "_WEGGELASSEN_ENDE" in _ns,
       "Positivkontrolle: Helfer aus agent.py geladen")
 exec("class _A:\n" + "\n".join("    " + z for z in _src.splitlines()), _ns)

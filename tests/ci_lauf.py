@@ -48,7 +48,15 @@ Lauf auf ihn, waehrend die anderen Plaetze leer standen. Die Datei steuert
 NUR die Startreihenfolge, nie ein Ergebnis; fehlt oder ist sie kaputt, laeuft
 alles wie vorher alphabetisch. Die Ausgabe bleibt nach Namen sortiert.
 
-Aufruf:  python3 tests/ci_lauf.py [--parallel N] [--zeitdeckel SEK]
+NUR BETROFFENE (2026-11-22, ``--nur-betroffene``): jeder Waechter laeuft unter
+``strace -f``, seine Lesespur (Dateien, fehlende Pfade, aufgelistete
+Verzeichnisse) und deren Zustand landen in einer lokalen Karte. Beim
+naechsten Lauf entfaellt ein Waechter nur, wenn er zuletzt GRUEN war, das
+hoechstens 24 h her ist und sich weder Umgebung noch eine seiner
+Abhaengigkeiten geaendert hat (Regel und Grenzen: tests/lib/betroffen.py).
+Ohne strace laeuft alles wie gewohnt. Die CI bleibt beim vollen Lauf.
+
+Aufruf:  python3 tests/ci_lauf.py [--parallel N] [--zeitdeckel SEK] [--nur-betroffene]
                                   [--ausnahmen-pruefen] [muster ...]
 """
 from __future__ import annotations
@@ -67,6 +75,9 @@ import time
 from pathlib import Path
 
 WURZEL = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import betroffen  # noqa: E402
+import lesespur  # noqa: E402
 TESTS = WURZEL / "tests"
 AUSNAHMEN = TESTS / "ci_ausnahmen.txt"
 # Laufen NACH dem parallelen Block, einzeln: sie pruefen, dass der echte
@@ -84,6 +95,15 @@ ALLEIN = {"test_bsi_m5.py"}
 # (tests/lib/prolog_auswahl.js) - fehlt node oder scheitert sie, laeuft er
 # wie bisher und startet alles selbst.
 PROLOG = "test_prolog_vollstaendig.js"
+# Lesespur fuer --nur-betroffene: Verzeichnis der strace-Mitschnitte und die
+# Waechter, die aufgezeichnet werden. Leer = keine Aufzeichnung (Normalfall).
+_SPUR: dict = {"verzeichnis": None, "namen": set()}
+# Unter strace ist ein Lauf langsamer - stark bei mehrfaedigen Programmen:
+# test_ai_mouse.py (baut eine .NET-Anwendung) allein 7,7 s -> 30 s, unter
+# Volllast ueber 300 s (gemessen 2026-11-22; --seccomp-bpf und ohne -y je
+# nur ~5 % besser). Aufgezeichnete Laeufe bekommen deshalb ein Vielfaches des
+# Deckels, statt als Zeitdeckel rot zu werden.
+STRACE_ZEITFAKTOR = 3
 # Waechter mit EIGENEM Zeitdeckel, als VIELFACHES des globalen (nicht als
 # feste Sekundenzahl - sonst wandert er nicht mit, wenn jemand --zeitdeckel
 # aendert, und eine feste Zahl in einem Test ist eine Zeitbombe).
@@ -204,6 +224,10 @@ def lauf(datei: Path, zeitdeckel: int,
     umgebung = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONUNBUFFERED="1")
     umgebung.update(zusatz or {})
     zeitdeckel = deckel_fuer(datei.name, zeitdeckel)
+    if _SPUR["verzeichnis"] is not None and datei.name in _SPUR["namen"]:
+        befehl = [shutil.which("strace") or "strace", *lesespur.STRACE_ARGUMENTE,
+                  "-o", str(_SPUR["verzeichnis"] / (datei.name + ".st")), *befehl]
+        zeitdeckel *= STRACE_ZEITFAKTOR
     t0 = time.monotonic()
     try:
         p = subprocess.run(befehl, cwd=WURZEL, env=umgebung, capture_output=True,
@@ -303,11 +327,36 @@ def _laufen(a, laufen, ausgenommen, ausn, dauern, gemessen, streichen,
     return ergebnisse
 
 
+def _karte_fortschreiben(karte, zustaende, ergebnisse) -> None:
+    """Lesespur jedes gelaufenen Waechters in die Karte; ohne lesbare Spur: Eintrag weg."""
+    jetzt = time.time()
+    for name, rc, _dauer, _ausgabe in ergebnisse:
+        spur = _SPUR["verzeichnis"] / (name + ".st")
+        try:
+            text = spur.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if not text:
+            # Keine Spur = keine Aussage ueber Abhaengigkeiten: lieber wieder laufen.
+            karte.vergessen(name)
+            continue
+        gelesen, verz = lesespur.auswerten(text, WURZEL)
+        rd, ad = lesespur.einteilen(gelesen, WURZEL)
+        rv, av = lesespur.einteilen(verz, WURZEL)
+        karte.eintragen(name, rc, jetzt, rd | ad, rv | av, zustaende)
+    # Nur Waechter entfernen, die es nicht mehr GIBT - nicht die, die ein
+    # Teillauf (Muster) nicht ausgewaehlt hat.
+    karte.behalten_nur({d.name for d in kandidaten([])})
+    karte.speichern()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--parallel", type=int, default=max(2, (os.cpu_count() or 2)))
     ap.add_argument("--zeitdeckel", type=int, default=300)
     ap.add_argument("--ausnahmen-pruefen", action="store_true")
+    ap.add_argument("--nur-betroffene", action="store_true",
+                    help="nur Waechter, deren Abhaengigkeiten sich seit ihrem letzten gruenen Lauf geaendert haben")
     ap.add_argument("muster", nargs="*")
     a = ap.parse_args()
 
@@ -328,6 +377,31 @@ def main() -> int:
     for name, sek in eigen:
         print(f"   eigener Zeitdeckel: {name} = {sek} s "
               f"({ZEITDECKEL_FAKTOR[name]}x – Sammellauf im Sammellauf)")
+
+    # ── Nur betroffene: Auswahl ueber die Karte (tests/lib/betroffen.py) ──
+    karte = zustaende = None
+    uebersprungen: list[str] = []
+    if a.nur_betroffene:
+        if not shutil.which("strace"):
+            print("   --nur-betroffene: strace fehlt - ohne Lesespur keine Auswahl, alle laufen")
+        else:
+            karte = betroffen.Karte(betroffen.umgebung_kennung([Path(__file__)]))
+            zustaende = lesespur.Zustaende(WURZEL)
+            if karte.hinweis:
+                print("   --nur-betroffene: " + karte.hinweis)
+            jetzt = time.time()
+            bleiben = []
+            for d in laufen:
+                if karte.grund(d.name, zustaende, jetzt) is None:
+                    uebersprungen.append(d.name)
+                else:
+                    bleiben.append(d)
+            laufen = bleiben
+            _SPUR["verzeichnis"] = Path(tempfile.mkdtemp(prefix="ci-lesespur-"))
+            _SPUR["namen"] = {d.name for d in laufen}
+            print(f"   --nur-betroffene: {len(laufen)} laufen, {len(uebersprungen)} unveraendert "
+                  f"seit ihrem letzten gruenen Lauf (aufgezeichnet unter strace, Zeitdeckel "
+                  f"x{STRACE_ZEITFAKTOR})")
 
     gruen: list[str] = []
     nicht_gelaufen: list[tuple[str, str]] = []
@@ -356,9 +430,14 @@ def main() -> int:
     try:
         ergebnisse = _laufen(a, laufen, ausgenommen, ausn, dauern, gemessen, streichen,
                              sammlung, beobachtet, zusatz_fuer)
+        if karte is not None:
+            _karte_fortschreiben(karte, zustaende, ergebnisse)
     finally:
         if sammlung is not None:
             shutil.rmtree(sammlung, ignore_errors=True)
+        if _SPUR["verzeichnis"] is not None:
+            shutil.rmtree(_SPUR["verzeichnis"], ignore_errors=True)
+            _SPUR["verzeichnis"] = None
     for name, rc, dauer, ausgabe in ergebnisse:
         letzte = [z for z in ausgabe.strip().splitlines() if z.strip()][-1:] or [""]
         if rc == 0:
@@ -407,6 +486,9 @@ def main() -> int:
             print(f"   {name}: {z}")
     for name, grund, ausgabe in rot:
         print(f"\n══ FAIL {name} ({grund}) – Ende der Ausgabe:\n{ausgabe}")
+    if uebersprungen:
+        print(f"\n── unveraendert seit ihrem letzten gruenen Lauf, nicht gestartet: {len(uebersprungen)} "
+              "(--nur-betroffene)")
     print(f"\nBILANZ: {len(gruen)} gruen, {len(rot)} rot, {len(nicht_gelaufen)} nicht gelaufen, "
           f"{len(ausn)} ausgenommen"
           # Nur wenn es etwas zu tun gibt: eine Zahl, die in JEDER Zeile steht,

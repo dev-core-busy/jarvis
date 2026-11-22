@@ -70,8 +70,12 @@ PROBEN = [
     ("/api/settings protokolliert WERTE", MA,
      '_sprot_angaben(felder=sorted(str(k)[:60] for k in body)[:60]',
      '_sprot_angaben(felder=sorted(str(v)[:60] for v in body.values())[:60]', PY),
+    # Ziel bis 2026-11-22: /api/admin/anmeldeschutz – mit 2bac31b5 entfernt, der
+    # Anker lief seitdem ins Leere ("Anker 0x"). Gleiche Bauform: aendernder
+    # Admin-Endpunkt ohne Kennzeichnung, ein Satz, dann der Body-Absatz.
     ("Admin-Endpunkt beschreibt sich wieder mit 'Body …'", MA,
-     '    """Zwei-Faktor-Pflicht fuer Administratoren ein- oder ausschalten.\n\n    Body', '    """Body', PY),
+     '    """Schaltet die 2FA eines ANDEREN Kontos ab (Admin + Kennwort des Admins).\n\n    Body',
+     '    """Body', PY),
     ("Admin-Endpunkt ohne Beschreibung", MA,
      '    """Laufenden Aufbau des Wissensgraphen abbrechen."""\n', '', PY),
     ("Aktion per innerHTML", JS,

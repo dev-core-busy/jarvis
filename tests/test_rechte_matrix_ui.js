@@ -66,7 +66,7 @@ function fruehesEnde(grund) {
     process.exit(fail ? 1 : 2);
 }
 const schlaf = (ms) => new Promise(r => setTimeout(r, ms));
-const WACH = setTimeout(() => { console.log('ABBRUCH: Lauf haengt'); process.exit(2); }, 60000);
+const WACH = require('./lib/wachhund')(() => { console.log('ABBRUCH: Lauf haengt'); process.exit(2); }, 60000);
 process.on('exit', (c) => { if (!BILANZ && c === 0) { console.log('ABBRUCH ohne Bilanz'); process.exitCode = 2; } });
 
 const MODULE = ['frontend/js/i18n.js', 'frontend/js/icons.js', 'frontend/js/ldap_picker.js',

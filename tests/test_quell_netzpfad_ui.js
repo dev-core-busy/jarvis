@@ -45,7 +45,7 @@ function kopf(t) { console.log('\n\x1b[1m' + t + '\x1b[0m'); }
 const { JSDOM } = require('./lib/jsdom_laden')();
 
 // Ein Wachhund: haengt der Lauf, endet er MIT Bilanz statt still (Exit 0).
-const hund = setTimeout(() => {
+const hund = require('./lib/wachhund')(() => {
     console.log('\x1b[31mFAIL\x1b[0m Wachhund: der Lauf haengt');
     FAIL++; bilanz(); process.exit(1);
 }, 40000);

@@ -51,7 +51,7 @@ process.on('exit', (code) => {
 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Wachhund: eine geladene Seite haelt eigene Takte; ohne ihn haengt ein Wurf.
-const WACHHUND = setTimeout(() => { check('Lauf endet innerhalb von 40 s', false); bilanz(); process.exit(1); }, 40000);
+const WACHHUND = require('./lib/wachhund')(() => { check('Lauf endet innerhalb von 40 s', false); bilanz(); process.exit(1); }, 40000);
 
 const GRUPPEN = [
     { id: 'g-eins', name: 'Eins', color: '#336699' },

@@ -42,7 +42,7 @@ function bilanz() {
     _bilanzGedruckt = true;
     console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + fail + ' FAIL\x1b[0m');
 }
-const wachhund = setTimeout(() => {
+const wachhund = require('./lib/wachhund')(() => {
     console.log('  \x1b[31m✗\x1b[0m Wachhund: Lauf haengt (25 s)');
     fail++; bilanz(); process.exit(1);
 }, 25000);

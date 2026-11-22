@@ -35,7 +35,7 @@ function check(name, bed) {
 }
 
 // ── Wachhund: ein haengender Lauf darf nicht wie ein bestandener aussehen ──
-const hund = setTimeout(() => {
+const hund = require('./lib/wachhund')(() => {
     console.log('  \x1b[31m✗\x1b[0m ABBRUCH: Zeitlimit');
     console.log(`\n\x1b[1m${OK} OK, ${FAIL + 1} FAIL\x1b[0m`);
     process.exit(1);

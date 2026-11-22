@@ -34,7 +34,7 @@ function check(name, cond, detail) {
 }
 function abbruch(grund) { console.log('ABBRUCH: ' + grund); bilanz = true; process.exit(2); }
 process.on('exit', (code) => { if (!bilanz && code === 0) process.exitCode = 1; });
-const wachhund = setTimeout(() => { console.log('ABBRUCH: Zeitueberschreitung'); bilanz = true; process.exit(2); }, 90000);
+const wachhund = require('./lib/wachhund')(() => { console.log('ABBRUCH: Zeitueberschreitung'); bilanz = true; process.exit(2); }, 90000);
 
 const lies = (p) => fs.readFileSync(p, 'utf8');
 const MODUL = {

@@ -28,7 +28,7 @@ const vorhanden = (el, was) => {
 };
 // Wachhund: ohne ihn haengt ein Lauf im Fehlerfall bis zum Zeitlimit und
 // beendet ohne Bilanzzeile – von „nicht gelaufen" nicht zu unterscheiden.
-const wd = setTimeout(() => {
+const wd = require('./lib/wachhund')(() => {
   // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
   // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
   // als Biss, samt erfundener +1 in der Bilanz.

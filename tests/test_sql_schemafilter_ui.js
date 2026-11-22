@@ -28,7 +28,7 @@ function check(name, cond, detail) {
 process.on('exit', function (code) {
     if (!bilanz && code === 0) { console.log('ABBRUCH: ohne Bilanzzeile'); process.exitCode = 1; }
 });
-const WACHHUND = setTimeout(function () {
+const WACHHUND = require('./lib/wachhund')(function () {
     bilanz = true;
     console.log('✗ Wachhund (>20 s)');
     console.log('\nErgebnis: ' + ok + ' OK, ' + (fail + 1) + ' FAIL');

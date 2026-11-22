@@ -28,7 +28,7 @@ const ROOT = path.resolve(__dirname, '..');
 const results = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let BILANZ = false;
-const WACHHUND = setTimeout(() => {
+const WACHHUND = require('./lib/wachhund')(() => {
     console.log('❌ ABBRUCH: Lauf haengt (Wachhund 90 s)');
     process.exit(2);
 }, 90000);

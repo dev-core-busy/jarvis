@@ -38,7 +38,7 @@ const APP = lies('frontend/js/app.js');
 const STYLE = lies('frontend/css/style.css');
 const I18N = lies('frontend/js/i18n.js');
 
-const wachhund = setTimeout(() => { console.log('ABBRUCH: Lauf haengt (Wachhund 40 s)'); process.exit(2); }, 40000);
+const wachhund = require('./lib/wachhund')(() => { console.log('ABBRUCH: Lauf haengt (Wachhund 40 s)'); process.exit(2); }, 40000);
 
 function baue() {
     const vc = new VirtualConsole();

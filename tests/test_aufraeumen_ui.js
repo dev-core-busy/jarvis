@@ -15,7 +15,7 @@ const REPO = path.resolve(__dirname, '..');
 let OK = 0, FAIL = 0;
 const check = (n, b) => { console.log((b ? '  \x1b[32m✓\x1b[0m ' : '  \x1b[31m✗\x1b[0m ') + n); b ? OK++ : FAIL++; };
 
-const wachhund = setTimeout(() => {
+const wachhund = require('./lib/wachhund')(() => {
     console.log('\x1b[31mABBRUCH: Zeitlimit\x1b[0m'); process.exit(1);
 }, 60000);
 

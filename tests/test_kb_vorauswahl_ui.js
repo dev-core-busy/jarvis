@@ -33,7 +33,7 @@ function sicher(fn) { try { return fn(); } catch (e) { return 'WURF: ' + e.messa
 
 // Wachhund: haengt der Lauf (offene Timer der geladenen Seite), soll er MIT
 // Bilanz abbrechen statt still weiterzulaufen.
-const wachhund = setTimeout(() => {
+const wachhund = require('./lib/wachhund')(() => {
     console.log('  \x1b[31m✗\x1b[0m Wachhund: Lauf haengt (25 s)');
     fail++; bilanz(); process.exit(1);
 }, 25000);

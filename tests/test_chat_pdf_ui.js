@@ -51,7 +51,7 @@ process.on('unhandledRejection', (e) => { fail++; console.log('  ✗ unbehandelt
  * ausgefuehrt – auch nicht die Bilanz und `process.exit`. Node beendet dann
  * mit Exit 0, und ein ABGEBROCHENER Lauf sieht aus wie ein bestandener. */
 let _bilanz = false;
-setTimeout(() => {
+require('./lib/wachhund')(() => {
     console.log('  ✗ ABBRUCH: der Lauf haengt (kein Ergebnis nach 30 s)');
     process.exit(1);
 }, 30000);

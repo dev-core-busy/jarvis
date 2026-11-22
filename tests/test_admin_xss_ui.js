@@ -26,7 +26,7 @@ function check(name, cond, detail) {
     else { fail++; console.log('  FAIL ' + name + (detail ? ' – ' + detail : '')); }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const WACHHUND = setTimeout(() => { console.log('ABBRUCH: Lauf haengt (60 s)'); process.exit(2); }, 60000);
+const WACHHUND = require('./lib/wachhund')(() => { console.log('ABBRUCH: Lauf haengt (60 s)'); process.exit(2); }, 60000);
 process.on('exit', (c) => {
     if (!BILANZ && c === 0) { console.log('ABBRUCH: keine Bilanzzeile'); process.exitCode = 1; }
 });

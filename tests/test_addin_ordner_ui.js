@@ -40,7 +40,7 @@ const { JSDOM } = require('./lib/jsdom_laden')();
 // Wachhund: haengt der Lauf (die geladene Seite haelt eigene Poll-Timer), darf
 // er nicht mit Exit 0 und ohne Bilanz enden – das waere von "bestanden" nicht
 // zu unterscheiden (Register, mehrfach bezahlt).
-const wachhund = setTimeout(() => {
+const wachhund = require('./lib/wachhund')(() => {
     console.log('  ✗ ABBRUCH: Wachhund nach 40 s');
     console.log('\n' + '='.repeat(62));
     console.log('  ' + ok + ' OK, ' + (fail + 1) + ' FAIL');

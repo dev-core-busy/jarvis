@@ -24,7 +24,7 @@ let bilanz = false;
 process.on('exit', () => {
   if (!bilanz) { console.log('\nABGEBROCHEN – keine Bilanz'); process.exitCode = 1; }
 });
-const wd = setTimeout(() => {
+const wd = require('./lib/wachhund')(() => {
   console.log('\nWACHHUND: haengt\n' + ok + ' OK, ' + (fail + 1) + ' FAIL');
   bilanz = true; process.exit(1);
 }, 25000);

@@ -19,7 +19,7 @@ const sitzungLaden = require('./lib/sitzung_laden');
 const fs=require('fs');
 const { JSDOM } = require('./lib/jsdom_laden')();
 let ok=0,fail=0;const c=(t,b)=>{b?(ok++,console.log('  OK   '+t)):(fail++,console.log('  FAIL '+t))};
-const wd=setTimeout(()=>{console.log('\nWACHHUND: haengt\n'+ok+' OK, '+(fail+1)+' FAIL');process.exit(1)},25000);
+const wd=require('./lib/wachhund')(()=>{console.log('\nWACHHUND: haengt\n'+ok+' OK, '+(fail+1)+' FAIL');process.exit(1)},25000);
 const d=new JSDOM(fs.readFileSync('frontend/ai_mouse.html','utf8'),{url:'https://x/ai-mouse',runScripts:'outside-only'});
 const w=d.window;w.localStorage.setItem('jarvis_token','t');
 // sitzung.js VOR ai_mouse.js - im Browser ist sie das erste Skript der Seite.

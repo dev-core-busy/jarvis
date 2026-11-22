@@ -40,7 +40,7 @@ process.on('exit', () => {
         process.exitCode = 1;
     }
 });
-const wachhund = setTimeout(() => {
+const wachhund = require('./lib/wachhund')(() => {
     console.log('\nErgebnis: ABGEBROCHEN – Zeitlimit (30 s)');
     process.exit(1);
 }, 30000);

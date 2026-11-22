@@ -29,7 +29,7 @@ function check(name, cond, detail) {
 function section(t) { console.log('\n' + t); }
 
 let BILANZ = false;
-const WACHHUND = setTimeout(() => {
+const WACHHUND = require('./lib/wachhund')(() => {
     console.log('❌ ABBRUCH: Lauf haengt (Wachhund nach 60 s)');
     process.exit(1);
 }, 60000);

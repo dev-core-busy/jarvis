@@ -35,7 +35,7 @@ process.on('exit', function (code) {
 });
 // Wachhund: haengt eine Attrappe, bricht der Lauf MIT Bilanz ab statt ins
 // Zeitlimit zu laufen (die geladene Seite haelt eigene Timer).
-const WACHHUND = setTimeout(function () {
+const WACHHUND = require('./lib/wachhund')(function () {
     console.log('\n\x1b[31m✗ Wachhund: der Lauf haengt\x1b[0m');
     fail++;
     ende();

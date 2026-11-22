@@ -62,7 +62,7 @@ process.on('unhandledRejection', function (e) {
 // Die geladene Seite haelt eigene Poll-Timer (LLM-Status alle 30 s). Ohne
 // diesen Wachhund laeuft ein gescheiterter Lauf ins Zeitlimit des Aufrufers
 // und ist von "nicht gelaufen" nicht zu unterscheiden.
-const WACHHUND = setTimeout(function () {
+const WACHHUND = require('./lib/wachhund')(function () {
     bilanz = true;
     console.log('\x1b[31m✗ Wachhund: der Lauf haengt (>25 s)\x1b[0m');
     console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + (fail + 1) + ' FAIL\x1b[0m');

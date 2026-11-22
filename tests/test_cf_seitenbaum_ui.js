@@ -24,7 +24,7 @@ let OK = 0, FAIL = 0, bilanz = false;
 process.on('exit', () => {
     if (!bilanz) { console.error('\n\x1b[31mABGEBROCHEN – keine Bilanz\x1b[0m'); process.exitCode = 1; }
 });
-const wach = setTimeout(() => {
+const wach = require('./lib/wachhund')(() => {
     // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
     // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
     // als Biss, samt erfundener +1 in der Bilanz.

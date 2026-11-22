@@ -57,7 +57,7 @@ process.on('exit', (code) => {
         if (code === 0) process.exitCode = 1;
     }
 });
-const wachhund = setTimeout(() => {
+const wachhund = require('./lib/wachhund')(() => {
     console.log('  FAIL Wachhund: Lauf haengt (20 s)'); fail++; bilanz(); process.exit(1);
 }, 20000);
 

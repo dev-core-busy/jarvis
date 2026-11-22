@@ -29,7 +29,7 @@ process.on('unhandledRejection', e => { fail++; console.log('  ✗ unbehandelte 
 let _bilanz = false;
 process.on('exit', (c) => { if (!_bilanz && c === 0) {
     console.log('  ✗ ABBRUCH: keine Bilanzzeile – der Lauf ist vorzeitig beendet'); process.exitCode = 1; } });
-setTimeout(() => { console.log('  ✗ ABBRUCH: der Lauf haengt (kein Ergebnis nach 30 s)'); process.exit(1); }, 30000);
+require('./lib/wachhund')(() => { console.log('  ✗ ABBRUCH: der Lauf haengt (kein Ergebnis nach 30 s)'); process.exit(1); }, 30000);
 
 const { JSDOM } = require('./lib/jsdom_laden')();
 

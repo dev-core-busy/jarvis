@@ -32,7 +32,7 @@ function check(name, cond, detail) {
 }
 function section(t) { console.log('\n\x1b[1m' + t + '\x1b[0m'); }
 const schlaf = (ms) => new Promise(r => setTimeout(r, ms));
-const WACH = setTimeout(() => { console.log('ABBRUCH: Lauf haengt'); process.exit(2); }, 30000);
+const WACH = require('./lib/wachhund')(() => { console.log('ABBRUCH: Lauf haengt'); process.exit(2); }, 30000);
 process.on('exit', (c) => { if (!BILANZ && c === 0) { console.log('ABBRUCH ohne Bilanz'); process.exitCode = 2; } });
 
 const HTML = lies('frontend/wissen.html');

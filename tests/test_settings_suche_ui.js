@@ -56,7 +56,7 @@ process.on('unhandledRejection', (e) => {
 process.on('exit', (c) => {
     if (!bilanz) { console.log('\n\x1b[31mABGEBROCHEN – keine Bilanz\x1b[0m'); if (!c) process.exitCode = 1; }
 });
-const wachhund = setTimeout(() => {
+const wachhund = require('./lib/wachhund')(() => {
     console.log('\n\x1b[31mABGEBROCHEN – Zeitlimit (60 s)\x1b[0m');
     process.exit(1);
 }, 60000);

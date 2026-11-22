@@ -58,7 +58,7 @@ process.on('unhandledRejection', function (e) {
     console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + (fail + 1) + ' FAIL\x1b[0m');
     process.exit(1);
 });
-const WACHHUND = setTimeout(function () {
+const WACHHUND = require('./lib/wachhund')(function () {
     bilanz = true;
     console.log('\x1b[31m✗ Wachhund: der Lauf haengt (>25 s)\x1b[0m');
     console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + (fail + 1) + ' FAIL\x1b[0m');

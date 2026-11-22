@@ -50,7 +50,7 @@ function abbruch(t) { console.log('\x1b[31mABBRUCH: ' + t + '\x1b[0m'); process.
 process.on('exit', function (code) {
     if (!bilanz && code === 0) { console.log('ABBRUCH: ohne Bilanzzeile'); process.exitCode = 1; }
 });
-const WACHHUND = setTimeout(function () {
+const WACHHUND = require('./lib/wachhund')(function () {
     bilanz = true;
     console.log('✗ Wachhund: der Lauf haengt (>40 s)');
     console.log('\nErgebnis: ' + ok + ' OK, ' + (fail + 1) + ' FAIL');

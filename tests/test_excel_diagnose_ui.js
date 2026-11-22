@@ -89,7 +89,7 @@ if (API_FASSUNGEN.length === 0) {
    Ende uebersprungen – auch die Bilanzzeile – und Node beendet mit 0. Ein
    abgebrochener Lauf saehe dann wie ein bestandener aus. */
 let bilanz = false;
-const hund = setTimeout(() => {
+const hund = require('./lib/wachhund')(() => {
     // Abbruch -> Exit 2, nicht 1 (Register; Vorbild test_excel_diagnose_ui.js):
     // Exit 1 heisst "Waechter beisst". Bis 2026-11-06 zaehlte ein Absturz hier
     // als Biss, samt erfundener +1 in der Bilanz.

@@ -69,7 +69,7 @@ function bilanz() {
 process.on('exit', (code) => {
     if (!BILANZ && code === 0) { console.log('ABBRUCH ohne Bilanz'); process.exitCode = 1; }
 });
-const hund = setTimeout(() => {
+const hund = require('./lib/wachhund')(() => {
     console.log('\x1b[31mFAIL\x1b[0m Wachhund: der Lauf haengt');
     FAIL++; bilanz(); process.exit(1);
 }, 40000);

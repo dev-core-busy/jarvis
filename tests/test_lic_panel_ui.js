@@ -18,7 +18,7 @@ process.on('exit', (code) => {
   // zu Exit 1 und sah damit aus wie "der Waechter beisst".
   if (!bilanz && code === 0) { console.log('\n(ABGEBROCHEN – keine Bilanz)'); process.exitCode = 1; }
 });
-const wachhund = setTimeout(() => {
+const wachhund = require('./lib/wachhund')(() => {
   console.log('\nFAIL: Wachhund – der Lauf haengt'); process.exit(1);
 }, 25000);
 

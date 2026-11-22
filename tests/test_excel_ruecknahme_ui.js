@@ -35,7 +35,7 @@ process.on('exit', () => {
         process.exitCode = 1;
     }
 });
-setTimeout(() => { console.log('\nErgebnis: ABGEBROCHEN – Zeitlimit'); process.exit(1); },
+require('./lib/wachhund')(() => { console.log('\nErgebnis: ABGEBROCHEN – Zeitlimit'); process.exit(1); },
            20000).unref();
 
 /* Geklammert schneiden (Einzeiler-Funktionen, Strings, Kommentare). */

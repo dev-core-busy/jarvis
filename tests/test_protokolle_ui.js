@@ -31,7 +31,7 @@ function bilanz(code) {
     console.log('='.repeat(62));
     process.exit(code === undefined ? (fail ? 1 : 0) : code);
 }
-const wachhund = setTimeout(() => { console.log('  ✗ ABBRUCH: Wachhund nach 40 s'); bilanz(2); }, 40000);
+const wachhund = require('./lib/wachhund')(() => { console.log('  ✗ ABBRUCH: Wachhund nach 40 s'); bilanz(2); }, 40000);
 wachhund.unref && wachhund.unref();
 
 const HTML = lies('frontend/settings.html');

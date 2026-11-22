@@ -35,6 +35,10 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ABLAGE = pathlib.Path.home() / ".gegen-seite-breit"
 MARKE = ABLAGE / ".laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE, marke=MARKE)
 
 DATEIEN = [
     "frontend/js/seite_breit.js",

@@ -75,6 +75,10 @@ if not ZIELE["vorgaben"].exists():
 # liegen, und nur dann ist die Sicherung ein Rueckstand (Register: „Ein
 # Start-zurueck() ohne LAUFMARKE macht fertige Arbeit zunichte").
 MARKE = ABLAGE / "LAUF"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE, marke=MARKE)
 if MARKE.exists():
     for name, ziel in ZIELE.items():
         sich = ABLAGE / (name + ".bak")

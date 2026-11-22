@@ -70,6 +70,10 @@ WAECHTER_ALLE = [W_H7, W_M5, W_M5UI, W_CSP, W_LOOP, W_DEST, W_DAV, W_FZ, W_FW, W
                  W_ABM, W_CFA]
 SICHERUNG = Path.home() / ".gegen_review_mittel"
 MARKE = SICHERUNG / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 
 SK = "backend/sicherheits_kopf.py"
 CSP = "backend/csp.py"

@@ -34,6 +34,10 @@ MOD = "frontend/js/idp_anmeldung.js"
 APP = "frontend/js/app.js"
 ADMIN = "frontend/js/settings_idp.js"
 SICHERUNG = Path.home() / ".gegen_idp_auto_sicherung"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG)
 
 PROBEN = [
     ("ohne Haken trotzdem Start", MOD,

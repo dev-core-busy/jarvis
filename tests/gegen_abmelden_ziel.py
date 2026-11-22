@@ -32,6 +32,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_abmelden_ziel.js"
 SICHERUNG = Path.home() / ".gegen_abmelden_sicherung"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG)
 ALTSTAND = "39f26608"   # letzter Stand vor der Korrektur
 
 ALT = ["frontend/js/chat.js", "frontend/js/userchat.js", "frontend/js/support.js",

@@ -33,6 +33,10 @@ ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_llm_tls.py"
 SICHERUNG = Path.home() / ".gegen_llm_tls_sicherung"
 MARKE = SICHERUNG / "LAUF"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 
 LLM_TLS = "backend/llm_tls.py"
 LLM = "backend/llm.py"

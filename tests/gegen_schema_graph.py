@@ -32,6 +32,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_schema_graph.py"
 SICHERUNG = Path.home() / ".jarvis_gegen_schema_graph"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=SICHERUNG / "laufmarke.json")
 
 PA = "backend/schema_graph_parser.py"
 ST = "backend/schema_graph_store.py"

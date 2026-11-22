@@ -35,6 +35,10 @@ WURZEL = Path(__file__).resolve().parent.parent
 WAECHTER = [sys.executable, str(WURZEL / "tests" / "test_chat_sessions_traversal.py")]
 SICHERUNG = Path.home() / ".gegen_chat_sessions_traversal"
 MARKE = SICHERUNG / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 MODUL = "backend/chat_sessions.py"
 
 PUNKT = ("    if not out.strip(\".\"):\n        return fallback\n    return out\n",

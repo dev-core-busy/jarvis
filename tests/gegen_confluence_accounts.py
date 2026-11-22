@@ -54,6 +54,10 @@ WAECHTER = [
 ]
 SICHER = Path.home() / ".gegen-confluence"          # HOME (0700), NICHT /tmp
 MARKE = SICHER / ".laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHER, marke=MARKE)
 
 # Jede Datei, die eine Probe anfasst – als REGEL geprueft, nicht gepflegt.
 DATEIEN = [

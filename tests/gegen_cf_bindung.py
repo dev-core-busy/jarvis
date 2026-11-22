@@ -40,6 +40,10 @@ sys.path.insert(0, str(ROOT / "tests" / "lib"))
 from sabotage_anker import in_funktion  # noqa: E402
 ABL = Path.home() / ".gegen-cf-bindung"
 MARKE = ABL / "LAUF"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABL, marke=MARKE)
 
 DATEIEN = [
     "backend/confluence_bindung.py",

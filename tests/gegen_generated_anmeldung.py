@@ -26,6 +26,10 @@ from pathlib import Path
 WURZEL = Path(__file__).resolve().parent.parent
 MARKE = Path.home() / ".gegen_generated_anmeldung.laeuft"
 SICHER = Path.home() / ".gegen_generated_anmeldung.sicherung"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHER)
 MAIN = "backend/main.py"
 ZR = "backend/zugang_regel.py"
 CL = "frontend/js/chatlib.js"

@@ -70,6 +70,10 @@ W_CL = _js("test_cron_log_ui.js")
 WAECHTER_ALLE = [W_SN, W_DL, W_LOOP, W_AB, W_BR, W_M6, W_DC, W_IZ, W_CA, W_BB, W_UI, W_CL]
 SICHERUNG = Path.home() / ".gegen_review_niedrig"
 MARKE = SICHERUNG / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 
 MAIN = "backend/main.py"
 ST = "backend/sitzung_token.py"

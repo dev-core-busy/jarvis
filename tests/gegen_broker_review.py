@@ -36,6 +36,10 @@ W_LINK = [PY, str(WURZEL / "tests" / "test_lauf_tmp_symlink.py")]
 W_CERT = [PY, str(WURZEL / "tests" / "test_broker_certbot_benutzer.py")]
 SICHERUNG = Path.home() / ".gegen_broker_review"
 MARKE = SICHERUNG / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 LT = "backend/lauf_tmp.py"
 OPS = "backend/broker/ops.py"
 ERFASST = [LT, OPS]

@@ -32,6 +32,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_tabfill_ui.js"
 SICHERUNG = Path.home() / ".gegen_tabfill_sicherung"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG)
 
 TF = "frontend/js/tabfill.js"
 IDP = "frontend/js/settings_idp.js"

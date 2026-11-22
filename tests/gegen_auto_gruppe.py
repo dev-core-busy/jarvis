@@ -33,6 +33,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ABL = Path.home() / ".gegen-auto-gruppe"
 MARKE = ABL / "LAUF"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABL, marke=MARKE)
 
 KG = "backend/knowledge_groups.py"
 KN = "backend/tools/knowledge.py"

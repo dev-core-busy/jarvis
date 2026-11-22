@@ -38,6 +38,10 @@ KANDIDATEN = ([str(_VENV)] if _VENV.is_file() else []) + [sys.executable]
 GEWAEHLT = {}
 SICHERUNG = Path.home() / ".gegen_review_20261018"
 MARKE = SICHERUNG / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 
 
 def py(name):

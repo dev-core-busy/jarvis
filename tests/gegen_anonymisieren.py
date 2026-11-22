@@ -30,6 +30,10 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ABL = pathlib.Path.home() / ".gegen-anonymisieren"
 MARKE = ABL / "LAUF"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABL, marke=MARKE)
 
 AN = "backend/anonymisieren.py"
 AMF = "backend/ai_mouse_fragen.py"

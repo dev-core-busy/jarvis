@@ -32,6 +32,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ABLAGE = Path.home() / ".gegen-sysload-sort"   # 0700, NICHT /tmp (1777)
 MARKE = ABLAGE / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE, marke=MARKE)
 
 JS = ROOT / "frontend/js/sysload.js"
 W = ROOT / "tests/test_sysload_sort.js"

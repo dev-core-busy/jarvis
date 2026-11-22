@@ -29,6 +29,10 @@ PY_W = [sys.executable, str(WURZEL / "tests" / "test_konto_hinweise.py")]
 JS_W = ["node", str(WURZEL / "tests" / "test_konto_hinweise_ui.js")]
 SICHERUNG = Path.home() / ".gegen_konto_hinweise"
 MARKE = SICHERUNG / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 
 MAIN = "backend/main.py"
 MODUL = "frontend/js/konto_hinweise.js"

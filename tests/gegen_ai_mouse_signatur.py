@@ -39,6 +39,10 @@ from pathlib import Path
 WURZEL = Path(__file__).resolve().parent.parent
 ABLAGE = Path.home() / ".gegen-aimouse-sig"
 MARKE = ABLAGE / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE, marke=MARKE)
 # ⚠ BEIDE WAECHTER. Die Sichtbarkeits-Zusage („der Admin behaelt den
 # Download-Knopf") laesst sich im Quelltext nicht messen – sie haengt am
 # ausgefuehrten Renderer. Ein Harness, der nur den Python-Waechter faehrt,

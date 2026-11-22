@@ -30,6 +30,10 @@ WURZEL = Path(__file__).resolve().parent.parent
 WAECHTER = WURZEL / "tests" / "test_anmelde_spruehen.py"
 MARKE = Path.home() / ".gegen_anmelde_spruehen.laeuft"
 SICHER = Path.home() / ".gegen_anmelde_spruehen.sicherung"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHER)
 AS = "backend/anmelde_schutz.py"
 MAIN = "backend/main.py"
 

@@ -36,6 +36,10 @@ I18 = W / "frontend/js/i18n.js"
 DATEIEN = [MA, AK, LR, I18]
 SICH = Path.home() / ".cache" / "jarvis_gegen_akt"
 MARKE = SICH / "LAUF"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICH, marke=MARKE)
 md5 = lambda p: hashlib.md5(p.read_bytes()).hexdigest()  # noqa: E731
 env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 PY = "test_aktivitaet.py"

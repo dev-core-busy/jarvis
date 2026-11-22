@@ -33,6 +33,10 @@ ROOT = Path(__file__).resolve().parent.parent
 ZIEL = ROOT / "backend" / "agent.py"
 WAECHTER = ROOT / "tests" / "test_chat_prompt.py"
 ABLAGE = Path.home() / ".gegen-pp-zuletzt"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE)
 
 
 def md5(p: Path) -> str:

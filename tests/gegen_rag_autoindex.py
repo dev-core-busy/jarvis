@@ -35,6 +35,10 @@ from sabotage_anker import eintrag_entfernen, eintrag_ergaenzen  # noqa: E402
 # Rest eines fremden Laufs den naechsten Lauf blockiert.
 SICHER = Path.home() / ".gegen-rag-autoindex"
 MARKE = SICHER / ".laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHER, marke=MARKE)
 WAECHTER = ROOT / "tests" / "test_rag_autoindex.py"
 
 DATEIEN = [

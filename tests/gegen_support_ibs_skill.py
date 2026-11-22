@@ -23,6 +23,10 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ABLAGE = pathlib.Path.home() / ".gegen-support-ibs"
 MARKE = ABLAGE / ".laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE, marke=MARKE)
 SERVER = ["python3", "tests/test_support_ibs_skill.py"]
 UI = ["node", "tests/test_support_ibs_skill_ui.js"]
 DATEIEN = ["backend/main.py", "frontend/js/support.js", "frontend/support.html"]

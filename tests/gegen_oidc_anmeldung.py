@@ -33,6 +33,10 @@ MAIN = "backend/main.py"
 SAP = "backend/sap_accounts.py"
 VEM = "backend/vemas_accounts.py"
 SICHERUNG = Path.home() / ".gegen_oidc_sicherung"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG)
 
 PROBEN = [
     ("alg none/HS erlaubt", MOD,

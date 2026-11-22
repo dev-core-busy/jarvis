@@ -30,6 +30,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SICHERUNG = Path.home() / ".gegen_sprachwechsel_sicherung"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG)
 
 REGEL = "tests/test_sprachwechsel_zuhoerer.js"
 W_SPROT = "tests/test_sicherheitsprotokoll_ui.js"

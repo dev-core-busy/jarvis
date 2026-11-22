@@ -29,6 +29,10 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ABL = pathlib.Path.home() / ".gegen-uia-worker"
 MARKE = ABL / "LAUF"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABL, marke=MARKE)
 
 # ⚠ Die Messdatei steht MIT drin, obwohl keine Probe sie veraendert: die Regel
 #   unten verlangt jede genannte Datei, und eine zu viel zu sichern ist

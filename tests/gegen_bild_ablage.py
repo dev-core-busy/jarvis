@@ -45,6 +45,10 @@ DATEIEN = [
 
 SICHER = Path.home() / ".gegen-bildablage"
 MARKE = SICHER / ".laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHER, marke=MARKE)
 
 
 def md5(p: Path) -> str:

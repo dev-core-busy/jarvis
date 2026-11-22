@@ -27,6 +27,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SICHER = Path.home() / ".gegen-review-nebenbefunde"
 MARKE = SICHER / "LAEUFT"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHER, marke=MARKE)
 WAECHTER = [sys.executable, str(ROOT / "tests" / "test_review_nebenbefunde.py")]
 
 DATEIEN = ["backend/ai_mouse_fragen.py", "backend/license.py",

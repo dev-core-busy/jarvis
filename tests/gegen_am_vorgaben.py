@@ -22,6 +22,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ABLAGE = Path.home() / ".gegen-am-vorgaben"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE)
 
 DATEIEN = ["backend/ai_mouse_fragen.py", "backend/main.py",
            "frontend/js/ai_mouse_admin.js", "frontend/js/app.js",

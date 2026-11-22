@@ -29,6 +29,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ABLAGE = Path.home() / ".gegen-linkziel"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "deploy"))
 import ziele  # noqa: E402  (Server-Ziel aus .env, nie aus dem Repo)
 DEV = ziele.wert("JARVIS_DEV_SSH")

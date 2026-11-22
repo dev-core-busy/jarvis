@@ -31,6 +31,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ABLAGE = pathlib.Path.home() / ".gegen-am-knopf"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE)
 DATEIEN = ["frontend/ai_mouse.html", "frontend/js/ai_mouse.js"]
 WAECHTER = "tests/test_ai_mouse_ui.js"
 

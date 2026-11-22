@@ -32,6 +32,10 @@ WAECHTER = REPO / "tests" / "test_stt_fern.py"
 DATEIEN = ["backend/stt_fern.py", "backend/main.py"]
 ABLAGE = Path.home() / ".cache" / "jarvis-gegenproben" / "stt_fern_token"
 MARKE = ABLAGE / "LAUF_AKTIV"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE, marke=MARKE)
 
 PROBEN = [
     ("Token geht auch ueber ws:// hinaus", "backend/stt_fern.py",

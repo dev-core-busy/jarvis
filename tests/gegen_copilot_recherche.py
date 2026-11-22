@@ -56,6 +56,10 @@ ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_copilot_recherche.py"
 SICHERUNG = Path.home() / ".jarvis-gegen-copilot"
 MARKE = SICHERUNG / "LAUF_AKTIV"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 
 SKILL = "skills/copilot/main.py"
 CLIENT = "backend/copilot_client.py"

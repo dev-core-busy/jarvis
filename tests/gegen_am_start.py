@@ -34,6 +34,10 @@ SRC = ROOT / "ai-mouse/src/AiMouse"
 WAECHTER = ROOT / "tests/test_ai_mouse.py"
 SICHER = Path.home() / ".gegen-am-start"
 MARKE = SICHER / "laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHER, marke=MARKE)
 
 DATEIEN = [
     SRC / "Start/Verknuepfung.cs",

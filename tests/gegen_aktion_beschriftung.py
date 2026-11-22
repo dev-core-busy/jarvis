@@ -55,6 +55,10 @@ ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = [sys.executable, str(ROOT / "tests" / "test_aktion_beschriftung.py")]
 SICHER = Path.home() / ".gegen-aktion-beschriftung"      # HOME (0700), NICHT /tmp
 MARKE = SICHER / ".laeuft"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHER, marke=MARKE)
 
 # Jede Datei, die eine Probe anfasst – auch die TESTDATEI selbst (sie wird von
 # der Meta-Probe sabotiert; fehlte sie hier, blieb die Sabotage liegen und der

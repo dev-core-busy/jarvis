@@ -28,6 +28,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ABLAGE = Path.home() / ".gegen-chat-prompt"      # NICHT /tmp (1777, fremde Reste)
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(ABLAGE)
 
 DATEIEN = ["backend/agent.py", "backend/chat_sessions.py", "backend/main.py",
            "frontend/js/chat.js", "frontend/js/icons.js", "frontend/css/chat.css"]

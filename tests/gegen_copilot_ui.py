@@ -33,6 +33,10 @@ ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_copilot_ui.js"
 SICHERUNG = Path.home() / ".jarvis-gegen-copilot-ui"
 MARKE = SICHERUNG / "LAUF_AKTIV"
+# Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
+# atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
+import gegen_ablage  # noqa: E402
+gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 
 JS = "frontend/js/copilot.js"
 CSS = "frontend/css/style.css"

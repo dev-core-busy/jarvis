@@ -534,8 +534,14 @@ window.TokenVerbrauch = (function () {
                 if (daten && offen()) diagramm(daten);
             }, 150);
         });
-        // Sprachwechsel: Beschriftungen aus den Daten neu setzen.
-        document.addEventListener('jarvis-lang-changed', function () {
+        // Sprachwechsel: Beschriftungen aus den Daten neu setzen. Das Ereignis
+        // kommt am WINDOW (i18n.js) – ein Zuhoerer am document hoerte es nie
+        // (2026-11-22). Nur bei WIRKLICH neuer Sprache: applyLang() feuert es
+        // bei jedem Aufruf, und optionenFuellen() baut die Auswahllisten neu.
+        var sprache = window._lang;
+        window.addEventListener('jarvis-lang-changed', function () {
+            if (sprache === window._lang) return;
+            sprache = window._lang;
             if (daten) { optionenFuellen(daten); zeichnen(); }
         });
     }

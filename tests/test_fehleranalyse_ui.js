@@ -137,6 +137,39 @@ function waehle(w, sel, wert) {
     pruefe('Benutzer ohne Laeufe: Auswahl gesperrt, Knoepfe gesperrt',
            lauf.disabled && bD.disabled && bA.disabled, lauf.options[0] && lauf.options[0].textContent);
 
+    console.log('\n2b. Sprachwechsel ueber den echten Weg (setLang -> Ereignis am window)');
+    // Bis 2026-11-22 hoerte das Modul am DOCUMENT, i18n.js sendet am window –
+    // Optionen und Profilhinweis blieben in der alten Sprache. Als der Zuhoerer
+    // griff, zeigte sich der zweite Fehler: laeufeZeichnen() verwarf die
+    // Auswahl, und beide Knoepfe waren gesperrt.
+    waehle(w, ben, 'firma\\m.mustermann');
+    await warte(20);
+    waehle(w, lauf, '1792993217000-1');
+    const profilDe = d.getElementById('fa-profil').textContent;
+    pruefe('Positivkontrolle: Lauf gewaehlt, Profilhinweis deutsch',
+           lauf.value === '1792993217000-1' && /Die Analyse läuft/.test(profilDe), profilDe);
+    Array.from(lauf.options).forEach(o => { o.__marke = 1; });
+    let feuer = 0;
+    w.addEventListener('jarvis-lang-changed', () => { feuer++; });
+    w.applyLang();
+    await warte(10);
+    pruefe('Positivkontrolle: applyLang() feuert das Ereignis am window', feuer === 1, feuer);
+    pruefe('applyLang() OHNE Sprachwechsel baut die Laufliste nicht neu',
+           Array.from(lauf.options).every(o => o.__marke === 1));
+    w.setLang('en');
+    await warte(10);
+    pruefe('Positivkontrolle: setLang("en") hat umgestellt und gefeuert', w._lang === 'en' && feuer === 2);
+    pruefe('⚠ Profilhinweis auf Englisch', /The analysis uses/.test(d.getElementById('fa-profil').textContent),
+           d.getElementById('fa-profil').textContent);
+    pruefe('⚠ Laufliste auf Englisch', /choose run \(2\)/.test(lauf.options[0].textContent)
+           && /· error$/.test(lauf.options[2].textContent), lauf.options[0].textContent + ' | ' + lauf.options[2].textContent);
+    pruefe('⚠ gewaehlter Lauf bleibt gewaehlt, Knoepfe bleiben frei',
+           lauf.value === '1792993217000-1' && !bD.disabled && !bA.disabled, lauf.value);
+    w.setLang('de');
+    await warte(10);
+    pruefe('zurueck auf Deutsch', /Die Analyse läuft/.test(d.getElementById('fa-profil').textContent)
+           && /· Fehler$/.test(lauf.options[2].textContent), lauf.options[2].textContent);
+
     console.log('\n3. Dossier');
     waehle(w, ben, 'firma\\m.mustermann');
     await warte(20);

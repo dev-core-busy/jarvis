@@ -171,9 +171,20 @@ async function oeffne(d, name) {
         .querySelector('.jv-ico-trash, .is-danger')), 'kein Muelleimer in den neuen Abschnitten');
 
     abschnitt('8. Sprachwechsel');
-    w._lang = 'en';
-    d.dispatchEvent(new w.Event('jarvis-lang-changed'));
+    // Ueber den ECHTEN Weg (setLang -> applyLang -> Ereignis am window). Bis
+    // 2026-11-22 loeste dieser Abschnitt das Ereignis selbst am DOCUMENT aus –
+    // genau dort hoerte das Modul, i18n.js sendet aber am window.
+    const sshZeile = d.querySelector('#plog-ssh-tbody tr');
+    let feuer = 0;
+    w.addEventListener('jarvis-lang-changed', () => { feuer++; });
+    w.applyLang();
     await warte(30);
+    pruefe(feuer === 1 && !!sshZeile, 'Positivkontrolle: applyLang() feuert das Ereignis am window', String(feuer));
+    pruefe(d.querySelector('#plog-ssh-tbody tr') === sshZeile,
+           'applyLang() OHNE Sprachwechsel zeichnet die Tabellen nicht neu');
+    w.setLang('en');
+    await warte(30);
+    pruefe(w._lang === 'en' && feuer === 2, 'Positivkontrolle: setLang("en") hat umgestellt und gefeuert');
     pruefe(/Accepted|Failed/.test(d.getElementById('plog-ssh-tbody').textContent), 'SSH-Ergebnisse auf Englisch');
     pruefe(/Open vulnerability/.test(d.getElementById('plog-abh-tbody').textContent), 'Abhaengigkeiten auf Englisch');
     w.close();

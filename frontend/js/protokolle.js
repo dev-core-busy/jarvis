@@ -404,7 +404,13 @@ window.Protokolle = (function () {
         }
     }
 
-    document.addEventListener('jarvis-lang-changed', function () {
+    // Sprachwechsel: Das Ereignis kommt am WINDOW (i18n.js) – ein Zuhoerer am
+    // document hoerte es nie (2026-11-22). Nur bei WIRKLICH neuer Sprache neu
+    // zeichnen: applyLang() feuert es bei jedem Aufruf.
+    var sprache = window._lang;
+    window.addEventListener('jarvis-lang-changed', function () {
+        if (sprache === window._lang) return;
+        sprache = window._lang;
         Object.keys(letzte).forEach(function (n) { QUELLEN[n].zeichnen(letzte[n]); });
     });
 

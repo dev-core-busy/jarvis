@@ -82,8 +82,16 @@ window.sicherheitsProtokoll = (function () {
             $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') laden(); });
             ['input', 'change'].forEach(function (ev) { $(id).addEventListener(ev, zaehler); });
         });
-        // Bei Sprachwechsel neu zeichnen (Ereignisnamen, Zeitformat)
-        document.addEventListener('jarvis-lang-changed', function () {
+        // Bei Sprachwechsel neu zeichnen (Ereignisnamen, Zeitformat). Das
+        // Ereignis kommt am WINDOW (i18n.js) – ein Zuhoerer am document hoerte
+        // es nie, die Ansicht blieb in der alten Sprache (2026-11-22).
+        // Nur bei WIRKLICH neuer Sprache: applyLang() feuert es bei jedem
+        // Aufruf, und zeichnen() baut die Auswahlliste neu – eine gerade
+        // geoeffnete Liste ginge sonst zu.
+        var sprache = window._lang;
+        window.addEventListener('jarvis-lang-changed', function () {
+            if (sprache === window._lang) return;
+            sprache = window._lang;
             if (letzte) zeichnen(letzte);
         });
     }

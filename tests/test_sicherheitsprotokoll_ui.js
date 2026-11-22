@@ -191,9 +191,22 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 60));
            'geaenderter, nicht angewandter Filter wird angezeigt');
 
     abschnitt('5. Sprachwechsel');
-    w._lang = 'en';
-    d.dispatchEvent(new w.Event('jarvis-lang-changed'));
+    // Ueber den ECHTEN Weg (setLang -> applyLang -> Ereignis am window). Bis
+    // 2026-11-22 loeste dieser Abschnitt das Ereignis selbst am DOCUMENT aus –
+    // genau dort hoerte das Modul, i18n.js sendet aber am window: der Waechter
+    // bestaetigte die Annahme des Codes, die Ansicht blieb im Betrieb deutsch.
+    const artSel = d.getElementById('sprot-filter-art');
+    Array.from(artSel.options).forEach((o) => { o.__marke = 1; });
+    let feuer = 0;
+    w.addEventListener('jarvis-lang-changed', () => { feuer++; });
+    w.applyLang();
     await warte(30);
+    pruefe(feuer === 1, 'Positivkontrolle: applyLang() feuert das Ereignis am window', String(feuer));
+    pruefe(Array.from(artSel.options).every((o) => o.__marke === 1),
+           'applyLang() OHNE Sprachwechsel baut die Auswahlliste nicht neu (eine offene Liste bliebe offen)');
+    w.setLang('en');
+    await warte(30);
+    pruefe(w._lang === 'en' && feuer === 2, 'Positivkontrolle: setLang("en") hat umgestellt und gefeuert');
     pruefe(d.querySelector('#sprot-tbody tr').textContent.includes('Sign-in failed'), 'Arten auf Englisch neu gezeichnet');
     pruefe(/intact/.test(d.getElementById('sprot-kette').textContent), 'Kettenaussage auf Englisch');
     pruefe(/Object: server_id=abc-123/.test(d.querySelectorAll('#sprot-tbody tr')[2].textContent),

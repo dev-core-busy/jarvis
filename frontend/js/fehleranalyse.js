@@ -258,6 +258,10 @@ window.Fehleranalyse = (function () {
     function laeufeZeichnen() {
         var sel = $('fa-lauf');
         if (!sel) return;
+        // Auswahl behalten: der Sprachwechsel zeichnet die Liste neu, und ein
+        // verworfener Lauf sperrte beide Knoepfe, ohne dass der Benutzer etwas
+        // getan hat. Nach neuem Laden (anderer Benutzer) gibt es ihn nicht mehr.
+        var gewaehlt = sel.value;
         sel.textContent = '';
         if (!$('fa-benutzer') || !$('fa-benutzer').value) {
             sel.appendChild(option('', T('fa.lauf_erst_benutzer', '– zuerst Benutzer wählen –')));
@@ -276,6 +280,9 @@ window.Fehleranalyse = (function () {
                 sel.appendChild(option(String(l.id), teile.join(' · ')));
             });
             sel.disabled = false;
+            if (gewaehlt && laeufe.some(function (l) { return String(l.id) === gewaehlt; })) {
+                sel.value = gewaehlt;
+            }
         }
         knoepfeAktualisieren();
     }
@@ -401,7 +408,8 @@ window.Fehleranalyse = (function () {
         // Gerenderte Texte (Optionen, Profilhinweis) folgen dem Sprachwechsel.
         // Nur bei WIRKLICH neuer Sprache – applyLang() feuert das Ereignis auch
         // ohne Wechsel (Register: Endlosschleife im Short-Tracks-Reiter).
-        document.addEventListener('jarvis-lang-changed', function () {
+        // Am WINDOW: dort sendet i18n.js – am document kam es nie an (2026-11-22).
+        window.addEventListener('jarvis-lang-changed', function () {
             if (lang === window._lang) return;
             lang = window._lang;
             profilZeigen();

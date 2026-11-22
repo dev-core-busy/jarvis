@@ -250,13 +250,25 @@ function waehle(d, w, id, wert) {
     pruefe(hoehe() !== hSumme && hoehe() !== '', 'Saeulen neu gezeichnet', hSumme + ' -> ' + hoehe());
 
     abschnitt('8. Sprachwechsel');
-    w._lang = 'en';
-    d.dispatchEvent(new w.Event('jarvis-lang-changed'));
+    // Ueber den ECHTEN Weg (setLang -> applyLang -> Ereignis am window). Bis
+    // 2026-11-22 loeste dieser Abschnitt das Ereignis selbst am DOCUMENT aus –
+    // genau dort hoerte das Modul, i18n.js sendet aber am window.
+    const kanalSel = d.getElementById('tv-f-kanal');
+    Array.from(kanalSel.options).forEach((o) => { o.__marke = 1; });
+    let feuer = 0;
+    w.addEventListener('jarvis-lang-changed', () => { feuer++; });
+    w.applyLang();
     await warte();
+    pruefe(feuer === 1, 'Positivkontrolle: applyLang() feuert das Ereignis am window', String(feuer));
+    pruefe(Array.from(kanalSel.options).every((o) => o.__marke === 1),
+           'applyLang() OHNE Sprachwechsel baut die Auswahllisten nicht neu');
+    w.setLang('en');
+    await warte();
+    pruefe(w._lang === 'en' && feuer === 2, 'Positivkontrolle: setLang("en") hat umgestellt und gefeuert');
     const legEn = Array.from(d.querySelectorAll('#tv-legende .tv-legende-eintrag')).map((e) => e.textContent);
     pruefe(legEn.includes('Other (4)'), 'Legende neu beschriftet (EN)', legEn.join(' | '));
     pruefe(opt('tv-f-kanal').some(([v, t]) => v === '' && t === 'Background'), 'Auswahllisten neu beschriftet (EN)');
-    w._lang = 'de';
+    w.setLang('de');
 
     abschnitt('8b. Einzahl und Tausenderpunkt');
     ({ w, d, rufe } = baue(() => [200, Object.assign({}, ANTWORT, {

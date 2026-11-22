@@ -23,9 +23,17 @@ sichern. Ausgenommen sind Ablagen, die eine einzelne DATEI sind (Markendatei
 im Home): die raeumen die Harnesse selbst per ``unlink`` ab, ein Ordner
 entsteht dort nicht.
 
+Teil C (2026-11-22) dasselbe fuer die JS-Harnesse ``tests/gegen_*.js``: die
+Wirkung von ``tests/lib/gegen_ablage.js`` (ruft beim Prozessende die Regel
+dieser Python-Datei) je Szenario in einem Node-Prozess, und die Regel am
+Syntaxbaum ueber ``tests/lib/gegen_ablage_regel.js`` (acorn). In Node laufen
+exit-Handler in ANMELDE-Reihenfolge - ein spaeter angemeldetes Zuruecklegen
+ist dort der Befund.
+
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht messen (Positivkontrolle).
 """
 import ast
+import json
 import os
 import shutil
 import subprocess
@@ -38,6 +46,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LIB = ROOT / "tests" / "lib"
 HARNESSE = ROOT / "tests"
 UMG = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+NODE = shutil.which("node")
 
 ok = fail = 0
 
@@ -336,15 +345,147 @@ def teil_b():
            not schlecht, "; ".join(schlecht[:6]) + (" ...(%d)" % len(schlecht) if len(schlecht) > 6 else ""))
 
 
+# ═══ Teil C: JS-Harnesse (tests/lib/gegen_ablage.js) ══════════════════════
+
+KOPF_JS = ("const fs = require('fs'), path = require('path');\n"
+           "const gegenAblage = require({helfer});\n"
+           "const W = {wurzel}, A = {ablage}, M = path.join(A, 'LAUF');\n")
+
+
+def lauf_js(w: Path, a: Path, rumpf: str):
+    code = KOPF_JS.format(helfer=json.dumps(str(LIB / "gegen_ablage.js")), wurzel=json.dumps(str(w)),
+                          ablage=json.dumps(str(a))) + textwrap.dedent(rumpf)
+    return subprocess.run([NODE, "-e", code], capture_output=True, text=True, timeout=60, env=UMG)
+
+
+def teil_c(basis: Path):
+    print("\n== Teil C: JS-Helfer (je Szenario ein Node-Prozess) und Regel ueber tests/gegen_*.js")
+    w, a = aufbau(basis, "js_ohne_helfer")
+    (a / "a__x.txt").write_bytes((w / "a" / "x.txt").read_bytes())
+    r = lauf_js(w, a, "process.exit(0);\n")
+    if r.returncode != 0 or not a.exists():
+        abbruch("Positivkontrolle JS: ohne Helfer muss die Ablage liegen bleiben (rc=%s, %s)"
+                % (r.returncode, r.stderr.strip()[-300:]))
+
+    aufruf = "gegenAblage.abraeumenBeimEnde(A, { marke: M, wurzel: W });\n"
+    w, a = aufbau(basis, "js_gleich")
+    (a / "a__x.txt").write_bytes((w / "a" / "x.txt").read_bytes())
+    (a / "b__y.txt").write_bytes((w / "b" / "y.txt").read_bytes())
+    r = lauf_js(w, a, aufruf + "process.exit(1);\n")
+    pruefe("JS: alles gleich, keine Marke -> Ablage ist weg", not a.exists(), r.stderr.strip())
+    pruefe("JS: ... und der Exit-Code des Harness bleibt unberuehrt (1 = Befund)", r.returncode == 1, r.returncode)
+
+    w, a = aufbau(basis, "js_marke")
+    (a / "a__x.txt").write_bytes((w / "a" / "x.txt").read_bytes())
+    (a / "LAUF").write_text("1")
+    r = lauf_js(w, a, aufruf)
+    pruefe("JS: Laufmarke liegt -> Ablage bleibt, Grund auf stderr",
+           a.exists() and "Laufmarke" in r.stderr, r.stderr.strip())
+
+    # Marke AUSSERHALB der Ablage: nur hier haelt allein die Markenpruefung -
+    # ein Helfer, der die Marke nicht weiterreicht, faellt sonst nicht auf.
+    w, a = aufbau(basis, "js_marke_aussen")
+    (a / "a__x.txt").write_bytes((w / "a" / "x.txt").read_bytes())
+    (a.parent / "LAUF_aussen").write_text("1")
+    r = lauf_js(w, a, "gegenAblage.abraeumenBeimEnde(A, { marke: path.join(A, '..', 'LAUF_aussen'), wurzel: W });\n")
+    pruefe("JS: Laufmarke ausserhalb der Ablage liegt -> Ablage bleibt", a.exists(), r.stderr.strip())
+
+    w, a = aufbau(basis, "js_abweichung")
+    (a / "a__x.txt").write_text("ALTSTAND x\n", encoding="utf-8")
+    r = lauf_js(w, a, aufruf)
+    pruefe("JS: eine Datei weicht ab -> Ablage bleibt", a.exists() and "a__x.txt" in r.stderr, r.stderr.strip())
+
+    # Das Muster der Harnesse: sichern, sabotieren, im finally zuruecklegen, exit.
+    w, a = aufbau(basis, "js_muster")
+    r = lauf_js(w, a, aufruf + """\
+        const x = path.join(W, 'a', 'x.txt');
+        fs.copyFileSync(x, path.join(A, 'a__x.txt')); fs.writeFileSync(M, '1');
+        try { fs.writeFileSync(x, 'SABOTIERT\\n'); }
+        finally { fs.copyFileSync(path.join(A, 'a__x.txt'), x); fs.unlinkSync(M); }
+        process.exit(0);
+    """)
+    pruefe("JS: Harness-Muster (finally legt zurueck) -> Baum heil, Ablage weg",
+           not a.exists() and (w / "a" / "x.txt").read_text() == "inhalt x\n", r.stderr.strip())
+
+    w, a = aufbau(basis, "js_exit_handler_spaet")
+    r = lauf_js(w, a, aufruf + """\
+        const x = path.join(W, 'a', 'x.txt');
+        fs.copyFileSync(x, path.join(A, 'a__x.txt')); fs.writeFileSync(M, '1');
+        fs.writeFileSync(x, 'SABOTIERT\\n');
+        process.on('exit', () => { fs.copyFileSync(path.join(A, 'a__x.txt'), x); fs.unlinkSync(M); });
+    """)
+    pruefe("JS: Zuruecklegen als exit-Handler NACH dem Helfer -> Ablage bleibt (sah den sabotierten Baum)",
+           a.exists() and (a / "a__x.txt").exists(), r.stderr.strip())
+
+    w, a = aufbau(basis, "js_kill")
+    r = lauf_js(w, a, aufruf + """\
+        fs.copyFileSync(path.join(W, 'a', 'x.txt'), path.join(A, 'a__x.txt')); fs.writeFileSync(M, '1');
+        process.kill(process.pid, 'SIGKILL');
+    """)
+    pruefe("JS: Abschuss per Signal -> Ablage und Marke bleiben", a.exists() and (a / "LAUF").exists(),
+           r.returncode)
+
+    # Regel: erst an synthetischen Quellen, dann am Bestand.
+    regel = LIB / "gegen_ablage_regel.js"
+    kopf = "const fs = require('fs'), os = require('os'), path = require('path');\n" \
+           "const S = path.join(os.homedir(), '.x');\n"
+    proben_js = {
+        "ohne Aufruf": (kopf + "const MARKE = path.join(S, 'LAUF');\nfs.mkdirSync(S);\n", 1),
+        "gut": (kopf + "const MARKE = path.join(S, 'LAUF');\n"
+                "require('./lib/gegen_ablage').abraeumenBeimEnde(S, { marke: MARKE });\n", 0),
+        "Marke fehlt": (kopf + "const MARKE = path.join(S, 'LAUF');\n"
+                        "require('./lib/gegen_ablage').abraeumenBeimEnde(S);\n", 1),
+        "nur im Kommentar": (kopf + "fs.mkdirSync(S);\n// x.abraeumenBeimEnde(S);\n", 1),
+        "in einer Funktion": (kopf + "fs.mkdirSync(S);\nfunction f() { g.abraeumenBeimEnde(S); }\n", 1),
+        "exit-Handler dahinter": (kopf + "fs.mkdirSync(S);\ng.abraeumenBeimEnde(S);\n"
+                                  "process.on('exit', () => {});\n", 1),
+        "keine Home-Ablage": ("const fs = require('fs');\nconst S = '/tmp/x';\nfs.mkdirSync(S);\n", 0),
+    }
+    pdir = basis / "regelproben"
+    pdir.mkdir()
+    for i, (name, (quelle, _)) in enumerate(proben_js.items()):
+        (pdir / ("p%d.js" % i)).write_text(quelle, encoding="utf-8")
+    r = subprocess.run([NODE, str(regel)] + [str(pdir / ("p%d.js" % i)) for i in range(len(proben_js))],
+                       capture_output=True, text=True, timeout=60)
+    try:
+        erg = json.loads(r.stdout)
+    except ValueError:
+        abbruch("Regel-Werkzeug lieferte nichts Lesbares (rc=%s): %s" % (r.returncode, r.stderr.strip()[-300:]))
+    for i, (name, (_, soll)) in enumerate(proben_js.items()):
+        ist = len(erg[str(pdir / ("p%d.js" % i))]["befunde"])
+        if ist != soll:
+            abbruch("Positivkontrolle JS '%s': %d Befund(e) statt %d %s"
+                    % (name, ist, soll, erg[str(pdir / ("p%d.js" % i))]["befunde"]))
+    print("  (Positivkontrolle: %d synthetische JS-Quellen richtig beurteilt)" % len(proben_js))
+    harnesse = sorted(HARNESSE.glob("gegen_*.js"))
+    if not harnesse:
+        abbruch("keine tests/gegen_*.js gefunden")
+    r = subprocess.run([NODE, str(regel)] + [str(h) for h in harnesse], capture_output=True, text=True, timeout=60)
+    try:
+        erg = json.loads(r.stdout)
+    except ValueError:
+        abbruch("Regel-Werkzeug am Bestand unlesbar (rc=%s): %s" % (r.returncode, r.stderr.strip()[-300:]))
+    erfasst = sum(1 for v in erg.values() if v["ablagen"])
+    if erfasst == 0:
+        abbruch("kein JS-Harness mit Home-Ablage erfasst - die Erkennung ist blind")
+    schlecht = ["%s: %s" % (Path(k).name, b) for k, v in erg.items() for b in v["befunde"]]
+    print("  (%d JS-Harnesse mit Verzeichnis-Ablage im Home erfasst)" % erfasst)
+    pruefe("jeder JS-Harness mit Home-Ablage raeumt sie per Helfer ab, mit Marke, ohne spaeten exit-Handler",
+           not schlecht, "; ".join(schlecht[:6]))
+
+
 def main():
     if shutil.which("git") is None:
         abbruch("git fehlt")
+    if NODE is None:
+        abbruch("node fehlt - Teil C (JS-Harnesse) misst nichts")
     basis = Path(tempfile.mkdtemp(prefix=".waechter-gegen-ablage-", dir=Path.home()))
     try:
         teil_a(basis)
+        teil_b()
+        teil_c(basis)
     finally:
         shutil.rmtree(basis, ignore_errors=True)
-    teil_b()
     print("\nErgebnis: %d OK, %d FAIL" % (ok, fail))
     sys.exit(0 if fail == 0 else 1)
 

@@ -35,6 +35,9 @@ const WURZEL = path.resolve(__dirname, '..');
 const WAECHTER = path.join('tests', 'test_waechter_bilanz.js');
 const SICHERUNG = path.join(os.homedir(), '.gegen_waechter_bilanz');
 const MARKE = path.join(SICHERUNG, 'LAUF_AKTIV');
+// Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.js, dieselbe Regel
+// wie fuer die Python-Harnesse) - vorher blieb hier nach jedem Lauf der Ordner liegen.
+require('./lib/gegen_ablage').abraeumenBeimEnde(SICHERUNG, { marke: MARKE });
 
 const md5 = (p) => crypto.createHash('md5')
     .update(fs.readFileSync(path.join(WURZEL, p))).digest('hex');

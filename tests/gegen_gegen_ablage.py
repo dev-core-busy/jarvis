@@ -40,8 +40,10 @@ gegen_ablage.abraeumen_bei_ende(ABLAGE, marke=MARKE)
 HELFER = ROOT / "tests/lib/gegen_ablage.py"
 H_EINS = ROOT / "tests/gegen_bild_einfuegen.py"
 H_ATEXIT = ROOT / "tests/gegen_am_reihenfolge.py"
+JS_HELFER = ROOT / "tests/lib/gegen_ablage.js"
+JS_HARNESS = ROOT / "tests/gegen_jsdom_einbindung.js"
 WAECHTER = ROOT / "tests/test_gegen_ablage.py"
-DATEIEN = [HELFER, H_EINS, H_ATEXIT]
+DATEIEN = [HELFER, H_EINS, H_ATEXIT, JS_HELFER, JS_HARNESS]
 UMG = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 
 
@@ -98,6 +100,16 @@ def hinter_atexit(text):
     return text.replace(aufruf, "").replace(anker, anker + aufruf)
 
 
+def sofort_js(text):
+    """Den exit-Handler zu einem SOFORT ausgefuehrten Block machen (beide Enden)."""
+    anfang = '    process.on("exit", () => {\n        try { abraeumen(ablage, optionen); }'
+    ende = '        }\n    });\n}\n\nmodule.exports'
+    if text.count(anfang) != 1 or text.count(ende) != 1:
+        raise AssertionError("Anker %dx/%dx gefunden" % (text.count(anfang), text.count(ende)))
+    return (text.replace(anfang, '    (() => {\n        try { abraeumen(ablage, optionen); }')
+                .replace(ende, '        }\n    })();\n}\n\nmodule.exports'))
+
+
 PROBEN = [
     ("Helfer loescht nie (rmtree entfernt)", HELFER,
      ersetzen("    shutil.rmtree(ablage)\n    return None\n", "    return None\n")),
@@ -120,6 +132,17 @@ PROBEN = [
      ersetzen("gegen_ablage.abraeumen_bei_ende(ABLAGE, marke=MARKE)\n",
               "gegen_ablage.abraeumen_bei_ende(ABLAGE)\n")),
     ("Aufruf hinter das Modul-atexit verschoben", H_ATEXIT, hinter_atexit),
+    # ── JS-Helfer und JS-Harnesse (2026-11-22) ──
+    ("JS-Helfer meldet nichts fuers Prozessende an", JS_HELFER,
+     ersetzen('    process.on("exit", () => {\n', '    [].forEach(() => {\n')),
+    ("JS-Helfer reicht die Laufmarke nicht weiter", JS_HELFER,
+     ersetzen('    if (o.marke) argv.push("--marke", String(o.marke));\n', "")),
+    ("JS-Helfer raeumt sofort statt am Prozessende", JS_HELFER, sofort_js),
+    ("ein JS-Harness ruft den Helfer nicht mehr auf", JS_HARNESS,
+     ersetzen('require("./lib/gegen_ablage").abraeumenBeimEnde(SICHERUNG, { marke: MARKE });\n', "")),
+    ("ein JS-Harness uebergibt seine Laufmarke nicht", JS_HARNESS,
+     ersetzen('require("./lib/gegen_ablage").abraeumenBeimEnde(SICHERUNG, { marke: MARKE });\n',
+              'require("./lib/gegen_ablage").abraeumenBeimEnde(SICHERUNG);\n')),
 ]
 
 

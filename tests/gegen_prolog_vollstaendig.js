@@ -42,6 +42,9 @@ const WAECHTER = path.join("tests", "test_prolog_vollstaendig.js");
 const WERKZEUG = path.join("tests", "lib", "prolog_pruefen.js");
 const SICHERUNG = path.join(os.homedir(), ".gegen_prolog_sicherung");
 const MARKE = path.join(SICHERUNG, "LAUF_AKTIV");
+// Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.js, dieselbe Regel
+// wie fuer die Python-Harnesse) - vorher blieb hier nach jedem Lauf der Ordner liegen.
+require("./lib/gegen_ablage").abraeumenBeimEnde(SICHERUNG, { marke: MARKE });
 
 const PROBEN = [
     {

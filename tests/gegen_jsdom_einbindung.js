@@ -31,6 +31,9 @@ const WURZEL = path.resolve(__dirname, "..");
 const WAECHTER = path.join("tests", "test_jsdom_einbindung.js");
 const SICHERUNG = path.join(os.homedir(), ".gegen_jsdom_sicherung");
 const MARKE = path.join(SICHERUNG, "LAUF_AKTIV");
+// Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.js, dieselbe Regel
+// wie fuer die Python-Harnesse) - vorher blieb hier nach jedem Lauf der Ordner liegen.
+require("./lib/gegen_ablage").abraeumenBeimEnde(SICHERUNG, { marke: MARKE });
 
 /* ── Proben: [Name, Datei, Umbau, welche Pruefung treffen muss] ────────────── */
 const PROBEN = [

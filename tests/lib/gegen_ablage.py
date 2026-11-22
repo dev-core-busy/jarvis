@@ -29,6 +29,14 @@ nutzlos) liegen. Waechter: ``tests/test_gegen_ablage.py``.
     sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
     from gegen_ablage import abraeumen_bei_ende
     abraeumen_bei_ende(ABLAGE, marke=MARKE)
+
+JS-HARNESSE (2026-11-22): ``tests/lib/gegen_ablage.js`` ruft beim Prozessende
+diese Datei als Kommandozeile auf - die Regel gibt es damit nur EINMAL:
+
+    python3 tests/lib/gegen_ablage.py <ablage> [--marke <datei>] [--wurzel <dir>]
+
+Exit 0 = abgeraeumt oder nichts da, 3 = bleibt liegen (Grund auf stderr),
+2 = Aufruf unbrauchbar.
 """
 import atexit
 import shutil
@@ -148,3 +156,27 @@ def _beim_ende(ablage, marke, wurzel):
 def abraeumen_bei_ende(ablage, marke=None, wurzel=WURZEL):
     """Meldet das Abraeumen fuer das Prozessende an (atexit, siehe REIHENFOLGE)."""
     atexit.register(_beim_ende, Path(ablage), Path(marke) if marke else None, Path(wurzel))
+
+
+def _kommandozeile(argv):
+    import argparse
+    ap = argparse.ArgumentParser(prog="gegen_ablage.py")
+    ap.add_argument("ablage")
+    ap.add_argument("--marke")
+    ap.add_argument("--wurzel", default=str(WURZEL))
+    try:
+        a = ap.parse_args(argv)
+    except SystemExit:
+        return 2
+    try:
+        grund = abraeumen(a.ablage, a.marke, a.wurzel)
+    except Exception as exc:  # Abraeumen darf das Ergebnis des Harness nie kippen
+        grund = f"Pruefung gescheitert: {exc}"
+    if grund:
+        print(f"[gegen_ablage] Sicherung bleibt liegen: {a.ablage} - {grund}", file=sys.stderr)
+        return 3
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_kommandozeile(sys.argv[1:]))

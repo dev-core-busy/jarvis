@@ -157,8 +157,37 @@ jobs:
       - name: exchangelib fuer die Adapter-Probe (Skill-Abhaengigkeit, nicht in der Lock)
         run: venv/bin/pip install -q exchangelib==5.6.0
 
+      # ⚠ ERGEBNIS-CACHE DER BAUM-WAECHTER (2026-11-22): test_keine_echtwerte und
+      # test_kommentare_deutsch nehmen ihr Ergebnis je Datei aus
+      # tests/lib/ergebnis_cache.py, solange Pfad, Inhalt (md5) und Waechter
+      # gleich sind - ueber die GUELTIGKEIT entscheidet der Helfer, nicht dieser
+      # Schluessel. Ein Eintrag im Actions-Cache ist unveraenderlich: je Lauf ein
+      # eigener Schluessel, wiederhergestellt wird der juengste ueber das Praefix.
+      # Ablage in runner.temp, NICHT im Workspace - test_keine_echtwerte liest
+      # auch unverfolgte Dateien und laese den Cache sonst selbst mit.
+      # Schreiben koennen nur Laeufe dieses Repos; ein Pull Request speichert in
+      # den Bereich seines PR-Refs, den ein Lauf auf master nicht liest.
+      - name: Ergebnis-Cache der Waechter wiederherstellen
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)
+        with:
+          path: ${{ runner.temp }}/waechter-cache
+          key: waechter-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            waechter-cache-
+
       - name: Waechter (tests/test_*.py, tests/test_*.js)
+        env:
+          JARVIS_WAECHTER_CACHE: ${{ runner.temp }}/waechter-cache
         run: venv/bin/python tests/ci_lauf.py --parallel 4 --zeitdeckel 300 --ausnahmen-pruefen
+
+      # Auch bei rotem Lauf: die Eintraege sauberer Dateien bleiben gueltig, und
+      # die einer Datei MIT Fund tragen den Fund (der Helfer liefert ihn wieder).
+      - name: Ergebnis-Cache der Waechter sichern
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)
+        with:
+          path: ${{ runner.temp }}/waechter-cache
+          key: waechter-cache-${{ github.run_id }}-${{ github.run_attempt }}
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5 (Commit gepinnt, Code-Review 2026-10-18)
         if: always()

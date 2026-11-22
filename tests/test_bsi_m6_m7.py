@@ -868,6 +868,44 @@ nodes = [s for s in schritte(lauf_step[1]) if str(s.get("uses", "")).startswith(
     if lauf_step else []
 check(f"CI-Waechter laufen unter Node {ziel}",
       bool(nodes) and str((nodes[0].get("with") or {}).get("node-version")) == str(ziel))
+# Ergebnis-Cache der Baum-Waechter (2026-11-22, tests/lib/ergebnis_cache.py):
+# ohne ihn lesen test_keine_echtwerte/test_kommentare_deutsch in der CI bei
+# jedem Lauf alle Dateien neu. Gemessen wird die ANORDNUNG im Job, nicht das
+# Vorkommen eines Namens: Wiederherstellen VOR dem Lauf, Sichern DANACH (auch
+# bei Rot), derselbe Pfad wie im env des Laufs - und der liegt in runner.temp,
+# denn test_keine_echtwerte liest auch unverfolgte Dateien im Workspace.
+_ls = schritte(lauf_step[1]) if lauf_step else []
+_li = next((i for i, s in enumerate(_ls) if re.search(r"tests/ci_lauf\.py", s.get("run") or "")), None)
+_cenv = (_ls[_li].get("env") or {}).get("JARVIS_WAECHTER_CACHE") if _li is not None else None
+
+
+def _cache_schritte(art):
+    return [(i, s) for i, s in enumerate(_ls) if str(s.get("uses", "")).startswith(f"actions/cache/{art}@")]
+
+
+def _cpfad(s):
+    return str((s.get("with") or {}).get("path") or "").strip()
+
+
+_wieder = [(i, s) for i, s in _cache_schritte("restore") if _cpfad(s) == _cenv]
+_sichern = [(i, s) for i, s in _cache_schritte("save") if _cpfad(s) == _cenv]
+check("CI-Waechter mit Ergebnis-Cache ausserhalb des Workspace (runner.temp)",
+      isinstance(_cenv, str) and re.fullmatch(r"\$\{\{\s*runner\.temp\s*\}\}/\S+", _cenv) is not None, _cenv)
+check("…wiederhergestellt VOR dem Waechterlauf, aus demselben Pfad",
+      _li is not None and any(i < _li for i, _ in _wieder), [i for i, _ in _wieder])
+check("…und gesichert DANACH, auch wenn ein Waechter rot ist (if: always())",
+      _li is not None and any(i > _li and "always()" in str(s.get("if", "")) for i, s in _sichern),
+      [(i, s.get("if")) for i, s in _sichern])
+_ws = [str((s.get("with") or {}).get("key") or "") for _, s in _wieder + _sichern]
+_rk = [str((s.get("with") or {}).get("restore-keys") or "").split() for _, s in _wieder]
+check("…je Lauf ein eigener Schluessel (Eintraege sind unveraenderlich), gleich fuer beide Schritte",
+      len(set(_ws)) == 1 and "github.run_id" in _ws[0] and "github.run_attempt" in _ws[0], _ws)
+check("…und das Wiederherstellen nimmt den juengsten ueber das Praefix des Schluessels",
+      bool(_rk) and bool(_ws) and all(any(_ws[0].startswith(r) and r for r in rk) for rk in _rk), _rk)
+check("…Cache-Actions per Commit gepinnt (40 Hex), nicht per Tag",
+      bool(_wieder) and bool(_sichern)
+      and all(re.fullmatch(r"actions/cache/(restore|save)@[0-9a-f]{40}", str(s.get("uses")))
+              for _, s in _wieder + _sichern), [s.get("uses") for _, s in _wieder + _sichern])
 
 abschnitt("M6.3 Dependabot")
 db = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))

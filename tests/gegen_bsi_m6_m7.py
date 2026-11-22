@@ -195,6 +195,38 @@ PROBEN = [
     ("Waechter-Lauf entfernt", WF,
      '        run: venv/bin/python tests/ci_lauf.py --parallel 4 --zeitdeckel 300 --ausnahmen-pruefen\n',
      '        run: "true"\n'),
+    # ── Ergebnis-Cache der Baum-Waechter (2026-11-22) ──
+    ("CI-Waechter ohne Ergebnis-Cache", WF,
+     '        env:\n          JARVIS_WAECHTER_CACHE: ${{ runner.temp }}/waechter-cache\n'
+     '        run: venv/bin/python tests/ci_lauf.py',
+     '        run: venv/bin/python tests/ci_lauf.py'),
+    ("Ergebnis-Cache im Workspace (wird von test_keine_echtwerte mitgelesen)", WF,
+     '          JARVIS_WAECHTER_CACHE: ${{ runner.temp }}/waechter-cache\n',
+     '          JARVIS_WAECHTER_CACHE: ${{ github.workspace }}/.waechter-cache\n'),
+    ("Ergebnis-Cache wird nicht wiederhergestellt", WF,
+     '      - name: Ergebnis-Cache der Waechter wiederherstellen\n'
+     '        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)\n'
+     '        with:\n'
+     '          path: ${{ runner.temp }}/waechter-cache\n'
+     '          key: waechter-cache-${{ github.run_id }}-${{ github.run_attempt }}\n'
+     '          restore-keys: |\n'
+     '            waechter-cache-\n',
+     ''),
+    ("Ergebnis-Cache nur bei gruenem Lauf gesichert", WF,
+     '      - name: Ergebnis-Cache der Waechter sichern\n        if: always()\n',
+     '      - name: Ergebnis-Cache der Waechter sichern\n'),
+    ("Ergebnis-Cache mit festem Schluessel (zweites Speichern scheitert)", WF,
+     '          path: ${{ runner.temp }}/waechter-cache\n'
+     '          key: waechter-cache-${{ github.run_id }}-${{ github.run_attempt }}\n'
+     '          restore-keys: |\n',
+     '          path: ${{ runner.temp }}/waechter-cache\n'
+     '          key: waechter-cache\n'
+     '          restore-keys: |\n'),
+    ("Ergebnis-Cache-Action per Tag statt per Commit", WF,
+     '        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)\n'
+     '        with:\n          path: ${{ runner.temp }}/waechter-cache\n',
+     '        uses: actions/cache/save@v6\n'
+     '        with:\n          path: ${{ runner.temp }}/waechter-cache\n'),
     ("bandit entfernt", WF, '      - run: bandit -q -r backend skills -lll -iii\n', '      - run: "true"\n'),
     ("govulncheck entfernt", WF,
      '            "$(go env GOPATH)/bin/govulncheck" ./...\n', '            true\n'),
@@ -245,7 +277,7 @@ PROBEN = [
      '|ABBRUCH|FEHLER|Traceback', '|ABBRUCH|Traceback'),
     # Die drei Wege, auf denen eine benannte Luecke wieder unsichtbar wird.
     ("Luecken gruener Waechter werden nicht gesammelt", CI,
-     "                luecken += _luecken(name, ausgabe)\n", ""),
+     "            luecken += _luecken(name, ausgabe)\n", ""),
     ("Bilanzzeile verschweigt die Zahl", CI,
      '          + (", %d %s nicht gemessen" % (len(luecken),\n'
      '                                         "Zusage" if len(luecken) == 1 else "Zusagen")\n'

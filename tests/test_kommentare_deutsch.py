@@ -30,6 +30,12 @@ AUSGENOMMEN (mit Grund - ein Geltungsbereich ohne Grund ist eine Luecke):
   * ``tests/gegen_kommentare_deutsch.py`` - traegt englische Probesaetze als
     Daten, anders laesst sich nicht messen, ob dieser Waechter beisst.
 
+TEMPO (2026-11-22): das Ergebnis je Datei kommt aus einem Cache, solange
+Pfad, Inhalt (md5) und dieser Waechter unveraendert sind
+(``tests/lib/ergebnis_cache.py``; ``JARVIS_WAECHTER_CACHE=aus`` schaltet ihn
+ab). Und die Zeilennummer je Kommentar wird fortlaufend gezaehlt statt jedes
+Mal ab Dateianfang - das war ein Drittel der Laufzeit.
+
 Exit 0 = gruen, 1 = englische Kommentare gefunden, 2 = konnte nicht messen.
 """
 import ast
@@ -38,6 +44,9 @@ import re
 import subprocess
 import sys
 import tokenize
+from pathlib import Path as _Pfad
+sys.path.insert(0, str(_Pfad(__file__).resolve().parent / "lib"))
+from ergebnis_cache import ErgebnisCache  # noqa: E402
 from pathlib import Path
 
 WURZEL = Path(__file__).resolve().parent.parent
@@ -133,8 +142,11 @@ _C_SCAN = re.compile(
 
 def kommentare_c(src: str, endung: str):
     zeilen, bloecke = [], []
+    # Fortlaufend zaehlen: je Treffer ab Dateianfang war quadratisch (15 von 45 s)
+    nr, bis = 1, 0
     for m in _C_SCAN.finditer(src):
-        nr = src.count("\n", 0, m.start()) + 1
+        nr += src.count("\n", bis, m.start())
+        bis = m.start()
         if m.group("z") is not None:
             if endung == ".css":
                 continue          # in CSS ist // kein Kommentar (URLs)
@@ -270,25 +282,35 @@ def main():
         return 2
 
     funde, unlesbar, n_bloecke = [], [], 0
+    cache = ErgebnisCache("kommentare_deutsch", [Path(__file__)])
     for rel, p in liste:
         try:
-            src = p.read_text(encoding="utf-8")
+            roh = p.read_bytes()
+            src = roh.decode("utf-8")
         except (UnicodeDecodeError, OSError):
             unlesbar.append(rel)
             continue
-        bl = kommentare(p, src)
-        if bl is None:
+        # Ergebnis je Datei: None = nicht auswertbar, sonst [Bloecke, Funde]
+        da, erg = cache.holen(rel, roh)
+        if not da:
+            bl = kommentare(p, src)
+            if bl is None:
+                erg = None
+            else:
+                erg = [len(bl), ["%s:%d: %s" % (rel, nr, " ".join(txt.split())[:110])
+                                 for nr, txt in bl if ist_englisch(txt)]]
+            cache.ablegen(rel, roh, erg)
+        if erg is None:
             unlesbar.append(rel)
             continue
-        for nr, txt in bl:
-            n_bloecke += 1
-            if ist_englisch(txt):
-                kurz = " ".join(txt.split())[:110]
-                funde.append("%s:%d: %s" % (rel, nr, kurz))
+        n_bloecke += erg[0]
+        funde.extend(erg[1])
+    cache.speichern()
 
     print("Geprueft: %d Dateien, %d Kommentarbloecke (%s)" % (
         len(liste), n_bloecke,
         ", ".join("%s %d" % kv for kv in sorted(je_endung.items()))))
+    print("Cache: " + cache.bilanz())
     if unlesbar:
         print("Nicht auswertbar (Syntax/Kodierung), uebersprungen: %d" % len(unlesbar))
         for r in unlesbar:

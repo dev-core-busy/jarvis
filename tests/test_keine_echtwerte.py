@@ -39,6 +39,11 @@ Punkt-PRAEFIX und jede CamelCase-Grenze, damit auch ``<firma>.atlassian.net``
 und ``<Firma>Adapter`` greifen (Begruendung an ``kandidaten()``). Adressen im
 internen Netz faengt die Netzregel unten, auch wenn sie in keiner Liste stehen.
 
+TEMPO (2026-11-22): das Ergebnis je Datei kommt aus einem Cache, solange
+Pfad, Inhalt (md5) und dieser Waechter - samt Sperrliste - unveraendert sind
+(``tests/lib/ergebnis_cache.py``; ``JARVIS_WAECHTER_CACHE=aus`` schaltet ihn
+ab). Ein Treffer liefert auch die FUNDE der Datei - vergessen wird nichts.
+
 Exit 0 = sauber, 1 = Fund, 2 = konnte nicht laufen.
 """
 import hashlib
@@ -48,6 +53,8 @@ import sys
 from pathlib import Path
 
 WURZEL = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from ergebnis_cache import ErgebnisCache  # noqa: E402
 SALZ = "jarvis-echtwerte-v1"
 
 KUERZEL_BAUEN = """    python3 -c "import hashlib; print(hashlib.sha256(
@@ -450,6 +457,28 @@ benutzte_ausnahmen = set()
 funde = []
 gelesen = 0
 
+
+def datei_funde(rel, text):
+    """[(Zeile, Wert)] einer Datei - haengt nur an Pfad und Inhalt (Cache)."""
+    aus = []
+    fremd = bool(RE_FREMDCODE.search(rel))
+    for nr, zeile in enumerate(text.splitlines(), 1):
+        for wort in kandidaten(zeile):
+            if kuerzel(wort) in GESPERRT:
+                aus.append((nr, wort))
+        for netz in netze(zeile):
+            aus.append((nr, netz))
+        if not fremd:
+            for person in personen(zeile):
+                aus.append((nr, person))
+        if not fremd and RE_DN_KONTEXT.search(zeile):
+            for teil in RE_DC.findall(zeile):
+                if teil.lower() not in ERLAUBTE_DC:
+                    aus.append((nr, "DC=" + teil))
+    return aus
+
+
+cache = ErgebnisCache("keine_echtwerte", [Path(__file__)])
 for rel in dateien:
     pfad = WURZEL / rel
     if not pfad.is_file():
@@ -459,24 +488,18 @@ for rel in dateien:
         benutzte_ausnahmen.add(muster)
         continue
     try:
-        text = pfad.read_text(encoding="utf-8")
+        roh = pfad.read_bytes()
+        text = roh.decode("utf-8")
     except (UnicodeDecodeError, OSError):
         continue                      # Binaerdateien ueberspringen
     gelesen += 1
-    fremd = bool(RE_FREMDCODE.search(rel))
-    for nr, zeile in enumerate(text.splitlines(), 1):
-        for wort in kandidaten(zeile):
-            if kuerzel(wort) in GESPERRT:
-                funde.append((rel, nr, wort))
-        for netz in netze(zeile):
-            funde.append((rel, nr, netz))
-        if not fremd:
-            for person in personen(zeile):
-                funde.append((rel, nr, person))
-        if not fremd and RE_DN_KONTEXT.search(zeile):
-            for teil in RE_DC.findall(zeile):
-                if teil.lower() not in ERLAUBTE_DC:
-                    funde.append((rel, nr, "DC=" + teil))
+    da, je_datei = cache.holen(rel, roh)
+    if not da:
+        je_datei = datei_funde(rel, text)
+        cache.ablegen(rel, roh, je_datei)
+    funde.extend((rel, nr, wert) for nr, wert in je_datei)
+cache.speichern()
+print("Cache: " + cache.bilanz())
 
 print("Gelesen: %d von %d verzeichneten Dateien "
       "(Rest binaer oder ausgenommen)\n" % (gelesen, len(dateien)))

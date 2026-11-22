@@ -199,6 +199,71 @@ select option:hover {
     color: #ffffff;   /* Text auf Akzentflaeche – gilt in beiden Themes */
 }
 
+/* ─── Auswahllisten: gestaltbare Auswahl (appearance: base-select) ──────────
+   WARUM (gemeldet 2026-11-21, Protokolle → Sicherheitsprotokoll → "Ereignis",
+   DEV und ECHT, Chrome): ein Klick oeffnete die Liste und WAEHLTE SOFORT einen
+   Eintrag. Mit echter Maus nachgestellt (1366x768, 1280x720): die Liste hat
+   21 Eintraege, Chrome zeigt davon 20 Zeilen (~480 px). Passt das Menue weder
+   unter noch ueber das Feld, schiebt Chrome es UEBER das Feld – also unter den
+   Mauszeiger, und das Loslassen der Taste trifft einen Eintrag. Die Hoehe des
+   Betriebssystem-Menues ist per CSS nicht begrenzbar; jede kuenftig lange
+   Liste haette denselben Fehler. Die gestaltbare Auswahl rendert die Liste in
+   der Seite: sie wird auf den freien Platz begrenzt, rollt, und liegt nie
+   ueber dem Feld.
+
+   ⚠ NUR IN `:where()`: `select:not([multiple]):not([size])` haette die
+   Spezifitaet 0,2,1 und ueberstimmte damit JEDE Klassenregel (`.kb-input`,
+   `.log-feld` …). In `:where()` bleibt es 0,0,1 – eine Klasse gewinnt wie
+   bisher, die Regeln hier sind nur die Grundform.
+   Mehrfachauswahl und Listenfelder (`multiple`, `size`) bleiben wie sie sind.
+
+   ⚠ DIE GRUNDFORM GLEICHT CHROMES VORGABEN FUER base-select AUS (gemessen an
+   allen sichtbaren Auswahlfeldern der Einstellungen, ohne gegen mit):
+   groessere Zeilenhoehe, Mindesthoehe 24 px und ein Rand in Schriftfarbe
+   machten die Felder 5 px hoeher als die Eingabefelder daneben. Die 1 px
+   oben/unten am Pfeil ersetzen den Innenabstand der alten Auswahl – ohne sie
+   standen die Felder 2 px NIEDRIGER als zuvor.
+
+   ⚠ BREITE: base-select richtet die Breite nach dem GEWAEHLTEN Eintrag, nicht
+   nach dem laengsten (gemessen 59 gegen 242 px). Ein Feld ohne feste Breite
+   sprang damit bei jeder Auswahl. Das gleicht `js/auswahlliste.js` aus – eine
+   CSS-Loesung gibt es nicht.
+
+   Browser ohne base-select (Firefox, aeltere Chrome) ignorieren den Block
+   vollstaendig und zeigen die bisherige Auswahl. */
+@supports (appearance: base-select) {
+    select:where(:not([multiple]):not([size])),
+    select:where(:not([multiple]):not([size]))::picker(select) {
+        appearance: base-select;
+    }
+    select:where(:not([multiple]):not([size])) {
+        align-items: center;
+        line-height: normal;
+        min-block-size: 0;
+        min-inline-size: 0;
+        padding: 2px 6px;
+        font-size: 0.8333rem;   /* Groesse der bisherigen Auswahl ohne eigene Klasse */
+        border: 1px solid var(--border-hover);
+        border-radius: var(--radius-sm);
+        background-color: var(--bg-secondary);
+        color: var(--text-primary);
+    }
+    select:where(:not([multiple]):not([size]))::picker-icon {
+        padding-block: 1px;
+        color: var(--text-secondary);
+    }
+    select:where(:not([multiple]):not([size]))::picker(select) {
+        background-color: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border-hover);
+        border-radius: var(--radius-sm);
+        box-shadow: var(--shadow-lg);
+        padding: 4px 0;
+        /* 100 % = der freie Platz ueber bzw. unter dem Feld; dort rollt die Liste */
+        max-block-size: min(22rem, 100%);
+    }
+}
+
 /* ─── Diagramme im Chat (```chartjs / ```mermaid) ───────────────────────────
    Steht hier und NICHT in chat.css – gleiche Begruendung wie bei den
    Dropdowns oben: chat.css laedt nur chat.html und userchat.html, waehrend

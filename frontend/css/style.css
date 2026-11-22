@@ -3175,6 +3175,24 @@ select.input-field {
     padding-right: 40px;
 }
 
+/* Felder mit EIGENEM Pfeil (Hintergrundbild): `appearance: none` hier
+   ueberstimmt die gestaltbare Auswahl aus theme.css (hoehere Spezifitaet) – sie
+   bekaemen sonst wieder das Betriebssystem-Menue, das sich bei langen Listen
+   ueber das Feld legt. Chromes eigener Pfeil entfaellt, der gezeichnete bleibt.
+   Begruendung und Grundform: theme.css, "Auswahllisten". */
+@supports (appearance: base-select) {
+    .input-group select,
+    select.input-field,
+    .wa-log-select {
+        appearance: base-select;
+    }
+    .input-group select::picker-icon,
+    select.input-field::picker-icon,
+    .wa-log-select::picker-icon {
+        display: none;
+    }
+}
+
 /* Dropdown-Eintraege (option/optgroup): Regel liegt jetzt in theme.css, weil
    style.css nur von settings.html und wissen.html geladen wird – auf allen
    anderen Seiten fehlte sie und die Auswahlmenues waren weiss auf weiss.

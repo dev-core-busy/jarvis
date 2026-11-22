@@ -71,6 +71,49 @@ printf 'password\trequisite\tpam_pwquality.so retry=3\npassword\t[success=1 defa
 """
 
 
+# Attrappe fuer ip (D8): die Schranke "nutzt das Netz IPv6?" liest Adressen
+# und Routen. Die Lage steht NEBEN der Wurzel (<wurzel>.ipv6): "global" =
+# eine globale Adresse, "route" = eine IPv6-Standardroute, fehlt = nichts.
+# Ohne Attrappe saehe das Skript das Netz des Pruefrechners.
+IP_ATTRAPPE = r"""#!/bin/bash
+lage="$(cat "${JARVIS_SYS_WURZEL}.ipv6" 2>/dev/null)"
+case "$*" in
+    *"addr show scope global"*)
+        [ "$lage" = "global" ] && echo "2: ens192    inet6 2001:db8::5/64 scope global dynamic" ;;
+    *"route show default"*)
+        [ "$lage" = "route" ] && echo "default via fe80::1 dev ens192 proto ra metric 100" ;;
+esac
+exit 0
+"""
+
+# Attrappe fuer nmcli (D8): Zustand je Schnittstelle und Profil als Dateien in
+# $NMD (dev_<if>_state, dev_<if>_con, con_<profil>_methode), jeder Aufruf im
+# Protokoll $NMD/log. "modify" schreibt die Methode wie das echte Werkzeug.
+NM_ATTRAPPE = r"""#!/bin/bash
+d="${JARVIS_NMCLI_STAND:?}"
+echo "$*" >> "$d/log"
+if [ "$1" = "-g" ]; then
+    case "$2 $3 $4" in
+        "GENERAL.STATE device show") cat "$d/dev_$5_state" 2>/dev/null ;;
+        "GENERAL.CONNECTION device show") cat "$d/dev_$5_con" 2>/dev/null ;;
+        "ipv6.method connection show") cat "$d/con_$5_methode" 2>/dev/null ;;
+    esac
+    exit 0
+fi
+if [ "$1 $2" = "connection modify" ] && [ "$4" = "ipv6.method" ]; then
+    echo "$5" > "$d/con_$3_methode"; exit 0
+fi
+exit 1
+"""
+
+
+def nm_modify(stand):
+    try:
+        return [z for z in (Path(stand) / "log").read_text().splitlines() if " modify " in " " + z + " "]
+    except OSError:
+        return []
+
+
 def pam_aufrufe(wurzel):
     try:
         return [z for z in Path(str(wurzel) + ".pam.log").read_text().splitlines() if z.strip()]
@@ -78,13 +121,23 @@ def pam_aufrufe(wurzel):
         return []
 
 
-def lauf(modus, wurzel, skript=None, test=True, attrappe=True):
+def lauf(modus, wurzel, skript=None, test=True, attrappe=True, ipv6_conf=None, nm=None):
     env = {k: v for k, v in os.environ.items()
            if k not in ("JARVIS_HAERTUNG_TEST", "JARVIS_SYS_WURZEL")}
-    env.pop("JARVIS_VISUDO", None)
-    env.pop("JARVIS_PAM_AUTH_UPDATE", None)
+    for k in ("JARVIS_VISUDO", "JARVIS_PAM_AUTH_UPDATE", "JARVIS_IP", "JARVIS_IPV6_CONF",
+              "JARVIS_NMCLI", "JARVIS_NMCLI_STAND"):
+        env.pop(k, None)
     if test and attrappe:
         env["JARVIS_PAM_AUTH_UPDATE"] = str(PAM_ATTRAPPE_PFAD)
+    if test:
+        # ip IMMER als Attrappe - sonst entschiede das Netz des Pruefrechners
+        # ueber die D8-Schranke, und das Ergebnis haenge am Rechner.
+        env["JARVIS_IP"] = str(IP_ATTRAPPE_PFAD)
+    if test and ipv6_conf is not None:
+        env["JARVIS_IPV6_CONF"] = str(ipv6_conf)
+    if test and nm is not None:
+        env["JARVIS_NMCLI"] = str(NM_ATTRAPPE_PFAD)
+        env["JARVIS_NMCLI_STAND"] = str(nm)
     if test:
         env["JARVIS_HAERTUNG_TEST"] = "1"
         if wurzel is not None:
@@ -212,11 +265,26 @@ pruefe(bool(_zuweisung) and '-n "$TEST"' in _zuweisung.group("bed"),
 _pam_zuweisung = re.search(r'(?m)^(?P<bed>if [^\n]*)\n\s*PAM_AUTH_UPDATE="\$JARVIS_PAM_AUTH_UPDATE"', _sk)
 pruefe(bool(_pam_zuweisung) and '-n "$TEST"' in _pam_zuweisung.group("bed"),
        "JARVIS_PAM_AUTH_UPDATE wird nur im Testmodus gelesen (Produktivlauf nimmt pam-auth-update des Systems)")
+_ip_zuweisung = re.search(r'(?m)^(?P<bed>if [^\n]*)\n\s*IP_BEFEHL="\$JARVIS_IP"', _sk)
+pruefe(bool(_ip_zuweisung) and '-n "$TEST"' in _ip_zuweisung.group("bed"),
+       "JARVIS_IP wird nur im Testmodus gelesen (Produktivlauf nimmt ip des Systems)")
+# Der Laufzeitteil von D8: Vorgabe das echte /proc und nmcli, die Ersatzwerte
+# NUR im Testmodus - und dort ohne Vorgabe LEER (nie das echte /proc).
+pruefe(bool(re.search(r'(?m)^IPV6_CONF="/proc/sys/net/ipv6/conf"\nNMCLI="nmcli"\n'
+                      r'if \[ -n "\$TEST" \]; then\n\s*IPV6_CONF="\$\{JARVIS_IPV6_CONF:-\}"\n'
+                      r'\s*NMCLI="\$\{JARVIS_NMCLI:-\}"\nfi$', _sk)),
+       "JARVIS_IPV6_CONF/JARVIS_NMCLI nur im Testmodus, dort ohne Vorgabe leer")
 
 sandkasten = Path(tempfile.mkdtemp(prefix="sys_haertung_"))
 PAM_ATTRAPPE_PFAD = sandkasten / "pam-auth-update-attrappe"
 PAM_ATTRAPPE_PFAD.write_text(PAM_ATTRAPPE, encoding="utf-8")
 PAM_ATTRAPPE_PFAD.chmod(0o755)
+IP_ATTRAPPE_PFAD = sandkasten / "ip-attrappe"
+IP_ATTRAPPE_PFAD.write_text(IP_ATTRAPPE, encoding="utf-8")
+IP_ATTRAPPE_PFAD.chmod(0o755)
+NM_ATTRAPPE_PFAD = sandkasten / "nmcli-attrappe"
+NM_ATTRAPPE_PFAD.write_text(NM_ATTRAPPE, encoding="utf-8")
+NM_ATTRAPPE_PFAD.chmod(0o755)
 try:
     W = sandkasten / "a"
     W.mkdir()
@@ -530,6 +598,113 @@ try:
     rc, out = lauf("--anwenden", W5, attrappe=False)
     pruefe(rc == 0 and "pam-auth-update uebersprungen" in out,
            "Testmodus ohne Attrappe: pam-auth-update uebersprungen (Exit %d)" % rc)
+
+    # ── 8. D8 IPv6 aus ───────────────────────────────────────────────────────
+    print("[8] D8 IPv6")
+    ip6 = W / "etc/sysctl.d/90-haertung-ipv6.conf"
+    lage = Path(str(W) + ".ipv6")
+    soll6 = ["net.ipv6.conf.all.disable_ipv6 = 1", "net.ipv6.conf.default.disable_ipv6 = 1",
+             "net.ipv6.conf.lo.disable_ipv6 = 0"]
+    # Reihenfolge ist Teil der Zusage: "all" setzt auch lo, die lo-Zeile muss danach kommen.
+    pruefe(zeilen(ip6) == soll6, "ohne IPv6 im Netz: eigene Datei, all/default aus, lo zuletzt wieder an (%s)"
+           % zeilen(ip6))
+    pruefe(oct(ip6.stat().st_mode & 0o777) == "0o644" if ip6.exists() else False, "Datei mit Modus 644")
+
+    lage.write_text("global")
+    rc, out = lauf("--pruefen", W)
+    pruefe(rc == 1 and "WEICHT AB" in out and "90-haertung-ipv6.conf" in out and "globale IPv6-Adresse" in out,
+           "globale Adresse + Datei da: --pruefen meldet den Widerspruch mit Grund (Exit %d)" % rc)
+    pruefe(ip6.exists(), "--pruefen hat die Datei nicht entfernt")
+    rc, out = lauf("--anwenden", W)
+    pruefe(rc == 0 and not ip6.exists() and "entfernt" in out,
+           "globale Adresse: --anwenden entfernt die eigene Datei (Exit %d)" % rc)
+    rc, out = lauf("--pruefen", W)
+    pruefe(rc == 0 and "bleibt an" in out, "danach --pruefen 'alles umgesetzt', IPv6 'bleibt an' (Exit %d)" % rc)
+
+    lage.write_text("route")
+    rc, out = lauf("--anwenden", W)
+    pruefe(rc == 0 and not ip6.exists() and "Standardroute" in out,
+           "IPv6-Standardroute: Datei wird nicht geschrieben (Exit %d)" % rc)
+
+    lage.unlink()
+    konf = W / "etc/jarvis/broker.conf"
+    konf.parent.mkdir(parents=True, exist_ok=True)
+    konf.write_text('SSH_NETZE="192.0.2.0/24"\nIPV6_ERLAUBT="ja"\n', encoding="utf-8")
+    rc, out = lauf("--anwenden", W)
+    pruefe(rc == 0 and not ip6.exists() and "IPV6_ERLAUBT" in out,
+           "IPV6_ERLAUBT=ja (in Anfuehrungszeichen): Datei wird nicht geschrieben (Exit %d)" % rc)
+    konf.write_text('IPV6_ERLAUBT=nein\n', encoding="utf-8")
+    rc, out = lauf("--anwenden", W)
+    pruefe(rc == 0 and zeilen(ip6) == soll6, "IPV6_ERLAUBT=nein und kein IPv6 im Netz: Datei kommt wieder")
+    shutil.rmtree(W / "etc/jarvis")
+
+    # Eine FREMDE Datei an derselben Stelle bleibt liegen
+    ip6.write_text("# von Hand\nnet.ipv6.conf.all.disable_ipv6 = 1\n", encoding="utf-8")
+    lage.write_text("global")
+    rc, out = lauf("--anwenden", W)
+    pruefe(ip6.exists() and "von Hand" in ip6.read_text(encoding="utf-8") and "nicht von diesem Skript" in out,
+           "fremde Datei wird nicht entfernt, die Ausgabe sagt warum")
+    lage.unlink()
+    lauf("--anwenden", W)
+
+    # Laufzeitteil: wirksamer Wert je Schnittstelle, NetworkManager-Profil
+    W6 = sandkasten / "ipv6"
+    W6.mkdir()
+    conf = sandkasten / "ipv6_conf"
+    nmd = sandkasten / "nm"
+    nmd.mkdir()
+    for name, wert in (("all", 1), ("default", 1), ("lo", 0), ("ens192", 0), ("tailscale0", 0), ("eth1", 0)):
+        (conf / name).mkdir(parents=True)
+        (conf / name / "disable_ipv6").write_text("%d\n" % wert)
+    for name, state, con, meth in (("ens192", "100 (connected)", "Wired connection 1", "auto"),
+                                   ("tailscale0", "100 (connected (externally))", "tailscale0", "ignore"),
+                                   ("eth1", "10 (unmanaged)", "", "")):
+        (nmd / ("dev_%s_state" % name)).write_text(state + "\n")
+        (nmd / ("dev_%s_con" % name)).write_text(con + "\n")
+        if con:
+            (nmd / ("con_%s_methode" % con)).write_text(meth + "\n")
+
+    def werte6():
+        return {n: (conf / n / "disable_ipv6").read_text().strip() for n in ("lo", "ens192", "tailscale0", "eth1")}
+
+    rc, out = lauf("--pruefen", W6, ipv6_conf=conf, nm=nmd)
+    pruefe(all(("AN          IPv6 auf %s" % n) in out for n in ("ens192", "tailscale0", "eth1")),
+           "--pruefen meldet jede Schnittstelle mit disable_ipv6 = 0 (ens192, tailscale0, eth1)")
+    pruefe("IPv6 auf lo" not in out, "--pruefen laesst lo aus")
+    pruefe('NM          ens192: Profil "Wired connection 1" mit ipv6.method=auto' in out,
+           "--pruefen meldet das NM-Profil, das IPv6 wieder einschalten wuerde")
+    pruefe("NM          tailscale0" not in out and "NM          eth1" not in out,
+           "extern verbundene und nicht verwaltete Schnittstellen sind kein NM-Befund")
+    pruefe(werte6() == {"lo": "0", "ens192": "0", "tailscale0": "0", "eth1": "0"} and not nm_modify(nmd),
+           "--pruefen aendert weder Werte noch NM-Profile")
+    rc, out = lauf("--anwenden", W6, ipv6_conf=conf, nm=nmd)
+    pruefe(werte6() == {"lo": "0", "ens192": "1", "tailscale0": "1", "eth1": "1"},
+           "--anwenden: alle Schnittstellen aus, lo bleibt an (%s)" % werte6())
+    pruefe(nm_modify(nmd) == ["connection modify Wired connection 1 ipv6.method disabled"],
+           "--anwenden: genau das NM-Profil von ens192 auf ipv6.method disabled (%s)" % nm_modify(nmd))
+    pruefe(not any(("up" in z.split() or "reapply" in z.split()) for z in (nmd / "log").read_text().splitlines()),
+           "keine Verbindung neu aufgebaut (kein nmcli up/reapply)")
+    rc, out = lauf("--anwenden", W6, ipv6_conf=conf, nm=nmd)
+    pruefe(len(nm_modify(nmd)) == 1 and "gesetzt" not in out and "aus          IPv6" not in out,
+           "zweiter Lauf aendert nichts mehr (%d modify)" % len(nm_modify(nmd)))
+    rc, out = lauf("--pruefen", W6, ipv6_conf=conf, nm=nmd)
+    pruefe(rc == 0 and "AN          IPv6" not in out and "NM  " not in out,
+           "danach --pruefen ohne IPv6-Befund (Exit %d)" % rc)
+
+    # Schranke gilt auch fuer den Laufzeitteil
+    for n in ("ens192", "eth1"):
+        (conf / n / "disable_ipv6").write_text("0\n")
+    Path(str(W6) + ".ipv6").write_text("global")
+    rc, out = lauf("--anwenden", W6, ipv6_conf=conf, nm=nmd)
+    pruefe(werte6()["ens192"] == "0" and werte6()["eth1"] == "0",
+           "globale Adresse: der Laufzeitteil schaltet nichts ab")
+    rc, out = lauf("--pruefen", W6, ipv6_conf=conf, nm=nmd)
+    pruefe("AN          IPv6" not in out, "globale Adresse: kein Laufzeit-Befund")
+    Path(str(W6) + ".ipv6").unlink()
+
+    # Testmodus ohne Ersatzverzeichnis: das echte /proc wird nicht gelesen
+    rc, out = lauf("--pruefen", W6)
+    pruefe("IPv6 auf" not in out, "Testmodus ohne JARVIS_IPV6_CONF: kein Wert des Pruefrechners in der Ausgabe")
 finally:
     shutil.rmtree(sandkasten, ignore_errors=True)
 

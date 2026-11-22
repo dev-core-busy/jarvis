@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Systemhaertung B1-B8, B13 und B14 der Checkliste "hardening" (Confluence, Seite 342048622)
+# Systemhaertung B1-B8, B13, B14 und D8 der Checkliste "hardening" (Confluence, Seite 342048622)
 # – als root.
 #
 #   bash system_haertung.sh --pruefen     nur melden, nichts aendern
@@ -29,6 +29,13 @@
 #       geaendert. root bleibt ausgenommen (Notzugang ueber die Konsole).
 #       Die Web-Anmeldung lokaler Konten bekommt einen eigenen PAM-Dienst
 #       jarvis-web OHNE faillock (Begruendung bei PAM_WEB).
+#   D8  IPv6 aus auf allen Schnittstellen ausser Loopback (eigene Datei
+#       /etc/sysctl.d/90-haertung-ipv6.conf) - aber NUR, wenn das Netz kein
+#       IPv6 nutzt: keine globale IPv6-Adresse, keine IPv6-Standardroute und
+#       nicht IPV6_ERLAUBT=ja in /etc/jarvis/broker.conf. ::1 bleibt (lokale
+#       Dienste lauschen dort). Eine Schnittstelle unter NetworkManager bekommt
+#       ipv6.method disabled - sonst setzt NM disable_ipv6 bei jeder Verbindung
+#       wieder auf 0 (DEV 22.11.2026: Datei mit all=1 seit Juni, ens192 trotzdem 0).
 #
 # WAS ES BEWUSST NICHT TUT – jeweils gemessen am 18.11.2026:
 #   * Kein Eingriff in apt: Remove-Unused-Dependencies verwaltet Jarvis selbst
@@ -38,8 +45,10 @@
 #     waere zudem wirkungslos – die Jarvis-Datei wird spaeter gelesen.
 #   * Kein kernel.modules_disabled (Checkliste 66): Netzfreigaben laden das
 #     cifs-Modul erst beim Einhaengen.
-#   * Keine IPv6-Abschaltung: eigene Massnahme (D8), erst klaeren, ob
-#     Verzeichnis, DNS oder Exchange IPv6 brauchen.
+#   * Kein IPv6 aus auf Loopback (lo): x11vnc, chrony und cups lauschen auf
+#     ::1, und "localhost" loest zuerst nach ::1 auf. Gemessen 22.11.2026: auf
+#     ECHT hat ens192 nur eine Link-local-Adresse, keine Route ausser fe80::/64,
+#     DNS nur ueber IPv4 - an entfernten Zielen aendert die Abschaltung nichts.
 #   * Kein Neustart von jarvis.service: LimitCORE=0 wirkt erst mit dem
 #     naechsten Neustart, und den bestimmt der Betreiber.
 #   * Kein aideinit im --anwenden: der Lauf dauert 15-20 Minuten und gehoert
@@ -91,6 +100,23 @@ PAM_AUTH_UPDATE="pam-auth-update"
 if [ -n "$TEST" ] && [ -n "${JARVIS_PAM_AUTH_UPDATE:-}" ]; then
     PAM_AUTH_UPDATE="$JARVIS_PAM_AUTH_UPDATE"
 fi
+# Dasselbe fuer ip (D8): die Schranke "nutzt das Netz IPv6?" misst die echten
+# Adressen und Routen; im Testmodus liefert eine Attrappe den Zustand.
+IP_BEFEHL="ip"
+if [ -n "$TEST" ] && [ -n "${JARVIS_IP:-}" ]; then
+    IP_BEFEHL="$JARVIS_IP"
+fi
+# Fuer den Laufzeitteil von D8 (ipv6_system) gibt der Waechter im Testmodus
+# ein Ersatzverzeichnis fuer /proc/sys/net/ipv6/conf und eine nmcli-Attrappe
+# vor. Ohne beide laeuft der Teil im Testmodus gar nicht - nie gegen das echte
+# /proc oder das echte NetworkManager des Pruefrechners.
+IPV6_CONF="/proc/sys/net/ipv6/conf"
+NMCLI="nmcli"
+if [ -n "$TEST" ]; then
+    IPV6_CONF="${JARVIS_IPV6_CONF:-}"
+    NMCLI="${JARVIS_NMCLI:-}"
+fi
+BROKER_CONF="$W/etc/jarvis/broker.conf"
 
 # ── Inhalte ──────────────────────────────────────────────────────────────────
 SUDOERS='# Haertung B1 (Checkliste 37, 75) - deploy/security/system_haertung.sh
@@ -134,7 +160,7 @@ blacklist $m"
 done
 
 SYSCTL='# Haertung B4 (Checkliste 62) - deploy/security/system_haertung.sh
-# OHNE IPv6-Abschaltung (eigene Massnahme D8) und OHNE kernel.modules_disabled
+# OHNE IPv6-Abschaltung (D8, eigene Datei mit Schranke: SYSCTL_IPV6) und OHNE kernel.modules_disabled
 # (Checkliste 66: Netzfreigaben laden das cifs-Modul nach).
 
 # Kernel
@@ -371,6 +397,35 @@ PAM_WEB='# Haertung B14 (Checkliste 44) - deploy/security/system_haertung.sh
 auth     required   pam_unix.so
 account  required   pam_unix.so'
 
+SYSCTL_IPV6='# Haertung D8 (Checkliste 54) - deploy/security/system_haertung.sh
+# IPv6 aus, ausser auf Loopback. Die Reihenfolge traegt: "all" setzt den Wert
+# auch auf lo, die letzte Zeile nimmt lo wieder aus (::1 bleibt erreichbar).
+# Zurueck: IPV6_ERLAUBT=ja in /etc/jarvis/broker.conf, dann --anwenden.
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 0'
+
+# ipv6_grund: warum IPv6 an bleiben muss (leer = darf abgeschaltet werden).
+# Gemessen wird die Nutzung, nicht vermutet: eine globale Adresse oder eine
+# Standardroute heisst, das Netz spricht IPv6 - dann waere das Abschalten
+# ein Ausfall. Nach dem Abschalten sind beide weg; der Wert bleibt dann aus,
+# bis jemand IPV6_ERLAUBT=ja setzt.
+ipv6_grund() {
+    local wert
+    wert="$(sed -n 's/^[[:space:]]*IPV6_ERLAUBT[[:space:]]*=[[:space:]]*//p' "$BROKER_CONF" 2>/dev/null \
+            | tail -1 | tr -d '"'"'" | tr -d '[:space:]')"
+    if [ "$wert" = "ja" ]; then
+        echo "IPV6_ERLAUBT=ja in /etc/jarvis/broker.conf"; return
+    fi
+    if [ -n "$("$IP_BEFEHL" -6 -o addr show scope global 2>/dev/null)" ]; then
+        echo "globale IPv6-Adresse vorhanden ($("$IP_BEFEHL" -6 -o addr show scope global 2>/dev/null | awk '{print $2}' | sort -u | tr '\n' ' ')- das Netz nutzt IPv6)"; return
+    fi
+    if [ -n "$("$IP_BEFEHL" -6 route show default 2>/dev/null)" ]; then
+        echo "IPv6-Standardroute vorhanden - das Netz nutzt IPv6"; return
+    fi
+}
+IPV6_GRUND="$(ipv6_grund)"
+
 # ── Ziele: Pfad | Modus | Inhalt-Variable ────────────────────────────────────
 ZIELE="
 etc/sudoers.d/10-haertung|0440|SUDOERS
@@ -389,6 +444,7 @@ etc/security/pwquality.conf.d/90-haertung.conf|0644|PWQUALITY
 etc/pam.d/jarvis-web|0644|PAM_WEB
 usr/share/pam-configs/jarvis-faillock|0644|FAILLOCK
 usr/share/pam-configs/jarvis-faillock-vorab|0644|FAILLOCK_VORAB
+etc/sysctl.d/90-haertung-ipv6.conf|0644|SYSCTL_IPV6
 "
 
 abweichungen=0
@@ -443,6 +499,27 @@ schreibe() {
     geaendert="$geaendert $name"
 }
 
+# ipv6_bleibt_an pruefen|anwenden <ziel>: IPv6 darf nicht aus (IPV6_GRUND).
+# Eine schon geschriebene Datei waere dann ein Widerspruch - sie gehoert weg,
+# aber nur, wenn es UNSERE ist (gleicher Inhalt); eine fremde bleibt liegen.
+ipv6_bleibt_an() {
+    local aktion="$1" ziel="$2"
+    if [ ! -f "$ziel" ]; then
+        echo "  bleibt an   IPv6 ($IPV6_GRUND)"
+    elif [ "$aktion" = "pruefen" ]; then
+        echo "  WEICHT AB   $ziel (IPv6 soll an bleiben: $IPV6_GRUND)"
+        abweichungen=$((abweichungen + 1))
+    elif [ "$(cat "$ziel")" = "$SYSCTL_IPV6" ]; then
+        rm -f "$ziel"
+        echo "  entfernt     $ziel ($IPV6_GRUND)"
+        echo "  HINWEIS: IPv6 kommt mit dem naechsten Neustart zurueck (oder sofort:"
+        echo "           sysctl -w net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.default.disable_ipv6=0)"
+        geaendert="$geaendert SYSCTL_IPV6"
+    else
+        echo "  WARNUNG: $ziel ist nicht von diesem Skript - nicht entfernt" >&2
+    fi
+}
+
 dateien() {
     local aktion="$1"
     local zeile pfad modus var
@@ -450,6 +527,10 @@ dateien() {
         [ -z "$zeile" ] && continue
         pfad="${zeile%%|*}"; zeile="${zeile#*|}"
         modus="${zeile%%|*}"; var="${zeile#*|}"
+        if [ "$var" = "SYSCTL_IPV6" ] && [ -n "$IPV6_GRUND" ]; then
+            ipv6_bleibt_an "$aktion" "$W/$pfad"
+            continue
+        fi
         if [ "$aktion" = "pruefen" ]; then
             pruefe_datei "$W/$pfad" "$modus" "${!var}"
         else
@@ -532,8 +613,72 @@ pam_aktivieren() {
     echo "  aktiviert    faillock (pam-auth-update)"
 }
 
+# ipv6_system pruefen|anwenden: der WIRKSAME Wert je Schnittstelle (D8).
+# Die Datei allein beweist nichts: auf DEV stand all=1 seit Juni 2026, und
+# NetworkManager hatte ens192 trotzdem auf 0 gesetzt (ipv6.method=auto).
+ipv6_system() {
+    local aktion="$1" d if wert con methode
+    [ -n "$IPV6_GRUND" ] && return 0
+    [ -n "$IPV6_CONF" ] && [ -d "$IPV6_CONF" ] || return 0
+    for d in "$IPV6_CONF"/*/; do
+        if="$(basename "$d")"
+        case "$if" in all|default|lo) continue ;; esac
+        wert="$(cat "$d/disable_ipv6" 2>/dev/null)"
+        # NetworkManager: verwaltet er die Schnittstelle, gehoert die Einstellung
+        # in sein Profil - ein sysctl -w allein hielte nur bis zur naechsten Verbindung.
+        # Nur Schnittstellen, die NM SELBST verbindet ("100 (connected)") - eine
+        # "externally" verbundene (tailscale0, Docker-Bruecken) gehoert einem
+        # anderen Dienst, ihr In-Memory-Profil zu aendern hiesse, es festzuschreiben.
+        con=""; methode=""
+        if [ -n "$NMCLI" ] && command -v "$NMCLI" >/dev/null 2>&1 \
+           && [ "$(LC_ALL=C "$NMCLI" -g GENERAL.STATE device show "$if" 2>/dev/null | head -1)" = "100 (connected)" ]; then
+            con="$("$NMCLI" -g GENERAL.CONNECTION device show "$if" 2>/dev/null | head -1)"
+            [ -n "$con" ] && methode="$("$NMCLI" -g ipv6.method connection show "$con" 2>/dev/null | head -1)"
+        fi
+        if [ "$aktion" = "pruefen" ]; then
+            if [ "$wert" != "1" ]; then
+                echo "  AN          IPv6 auf $if (disable_ipv6 = ${wert:-?})"
+                abweichungen=$((abweichungen + 1))
+            fi
+            if [ -n "$con" ] && [ "$methode" != "disabled" ]; then
+                echo "  NM          $if: Profil \"$con\" mit ipv6.method=$methode (setzt IPv6 bei jeder Verbindung wieder an)"
+                abweichungen=$((abweichungen + 1))
+            fi
+            continue
+        fi
+        if [ -n "$con" ] && [ "$methode" != "disabled" ]; then
+            # Nur das Profil aendern, die Verbindung NICHT neu aufbauen: das waere
+            # eine Netzunterbrechung. Wirksam wird es mit der naechsten Verbindung,
+            # bis dahin traegt das sysctl -w darunter.
+            if "$NMCLI" connection modify "$con" ipv6.method disabled; then
+                echo "  gesetzt      NetworkManager \"$con\": ipv6.method disabled (vorher $methode)"
+            else
+                echo "WARNUNG: NetworkManager-Profil \"$con\" nicht geaendert" >&2
+            fi
+        fi
+        if [ "$wert" != "1" ]; then
+            if ipv6_aus "$if"; then
+                echo "  aus          IPv6 auf $if"
+            else
+                echo "WARNUNG: IPv6 auf $if liess sich nicht abschalten" >&2
+            fi
+        fi
+    done
+}
+
+# ipv6_aus <schnittstelle>: im Produktivlauf sysctl -w, im Testmodus die
+# Datei im Ersatzverzeichnis (dieselbe Form wie /proc).
+ipv6_aus() {
+    if [ -n "$TEST" ]; then
+        echo 1 > "$IPV6_CONF/$1/disable_ipv6"
+    else
+        sysctl -q -w "net.ipv6.conf.$1.disable_ipv6=1" >/dev/null
+    fi
+}
+
 system_pruefen() {
     pam_pruefen
+    ipv6_system pruefen
     [ -n "$TEST" ] && return 0
     local p
     for p in $PAKETE; do
@@ -570,17 +715,21 @@ system_pruefen() {
         if [ "$ist" != "$v" ]; then
             echo "  SYSCTL      $k = $ist (soll $v)"; abweichungen=$((abweichungen + 1))
         fi
-    done <<< "$SYSCTL"
+    done <<< "$SYSCTL$([ -z "$IPV6_GRUND" ] && printf '\n%s' "$SYSCTL_IPV6")"
 }
 
 anwenden_system() {
     pam_aktivieren
-    [ -n "$TEST" ] && return 0
-    case " $geaendert " in *" SYSCTL "*)
+    if [ -n "$TEST" ]; then
+        ipv6_system anwenden
+        return 0
+    fi
+    case " $geaendert " in *" SYSCTL "*|*" SYSCTL_IPV6 "*)
         if sysctl --system 2>&1 | grep -iE "error|invalid|unknown"; then
             echo "WARNUNG: sysctl --system meldet Fehler (siehe oben)" >&2
         fi ;;
     esac
+    ipv6_system anwenden
     case " $geaendert " in *" AUDIT "*) augenrules --load >/dev/null 2>&1 || echo "WARNUNG: augenrules --load fehlgeschlagen" >&2 ;; esac
     case " $geaendert " in *" AUDITD "*)
         # SIGHUP: auditd liest die Konfiguration neu und uebernimmt die Werte

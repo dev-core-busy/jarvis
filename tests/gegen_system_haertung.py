@@ -70,6 +70,26 @@ PROBEN = [
     ("Sandbox-Arbeitsverzeichnisse voll geprueft", "!/tmp/jarvis-arbeit\n", "", 1),
     ("Freigabeliste als wechselnd gelockert", "/var/lib/jarvis-broker$ d VarDir\n",
      "/var/lib/jarvis-broker$ d VarDir\n/etc/jarvis/broker-policy\\.json$ f VarFile\n", 1),
+    # B14
+    ("jarvis-web mit faillock", "auth     required   pam_unix.so\n",
+     "auth     requisite  pam_faillock.so preauth\nauth     required   pam_unix.so\n", 1),
+    ("faillock nach 3 statt 5 Versuchen", 'FAILLOCK_ARGS="deny=5 ', 'FAILLOCK_ARGS="deny=3 ', 1),
+    ("faillock sperrt auch root", 'fail_interval=900"', 'fail_interval=900 even_deny_root"', 1),
+    ("Profile mit verschiedenen Werten", "pam_faillock.so authfail $FAILLOCK_ARGS",
+     "pam_faillock.so authfail deny=10 unlock_time=900 fail_interval=900", 1),
+    ("Profil ohne Zuruecksetzen (account)", "Account:\n\trequired\tpam_faillock.so", "Account:\n\trequired\tpam_permit.so", 1),
+    ("pwquality minlen 8", "minlen = 14'", "minlen = 8'", 1),
+    ("Paket libpam-pwquality fehlt", " lynis libpam-pwquality\"", " lynis\"", 1),
+    ("Schranke alter Code fehlt", 'if [ -f "$code" ] && ! grep -q', 'if false && ! grep -q', 1),
+    ("--pruefen blind fuer preauth",
+     "pam_faillock\\.so[[:space:]]+preauth' \"$d/common-auth\" 2>/dev/null \\\n        ||",
+     "pam_faillock\\.so[[:space:]]+preauth' \"$d/common-auth\" 2>/dev/null \\\n        || true ||", 1),
+    ("pam-auth-update bei jedem Lauf", '    if [ "$fehlt" -eq 0 ]; then', '    if false; then', 1),
+    ("Testmodus ruft echtes pam-auth-update",
+     '    if [ -n "$TEST" ] && [ -z "${JARVIS_PAM_AUTH_UPDATE:-}" ]; then', '    if false; then', 1),
+    ("JARVIS_PAM_AUTH_UPDATE auch im Produktivlauf",
+     'if [ -n "$TEST" ] && [ -n "${JARVIS_PAM_AUTH_UPDATE:-}" ]; then',
+     'if [ -n "${JARVIS_PAM_AUTH_UPDATE:-}" ]; then', 1),
 ]
 
 

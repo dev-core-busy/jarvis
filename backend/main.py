@@ -4531,6 +4531,23 @@ def _ad_identitaet_passt(conn, plain: str):
     return _norm_login(wer[2:]) == (plain or "").strip().lower()
 
 
+# PAM-Dienst der Web-Anmeldung lokaler Konten (Haertung B14). Die Datei
+# /etc/pam.d/jarvis-web legt deploy/security/system_haertung.sh an: NUR pam_unix,
+# ohne pam_faillock. Gemessen auf DEV 2026-11-21: im Dienstkontext
+# (ProtectSystem=strict) meldet pam_faillock "System error", auch beim RICHTIGEN
+# Kennwort - mit faillock im Dienst "login" ginge keine lokale Web-Anmeldung
+# mehr. Gegen Durchprobieren sperrt Jarvis selbst (anmelde_schutz, BSI M3).
+# Fehlt die Datei (System ohne B14), bleibt es beim bisherigen Dienst "login";
+# system_haertung.sh schaltet faillock erst ein, wenn diese Zeile im Code steht.
+PAM_DIENST_WEB = "jarvis-web"
+PAM_DIENST_DATEI = Path("/etc/pam.d") / PAM_DIENST_WEB
+
+
+def _pam_dienst() -> str:
+    """PAM-Dienst fuer die lokale Kennwortpruefung: jarvis-web, sonst login."""
+    return PAM_DIENST_WEB if PAM_DIENST_DATEI.is_file() else "login"
+
+
 def authenticate_linux_user(username: str, password: str, details: dict | None = None) -> bool:
     """Authentifiziert einen Benutzer – erst PAM/lokal, dann AD/LDAP (wenn konfiguriert).
 
@@ -4567,7 +4584,7 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
             else:
                 local_ok = password == _JARVIS_PASSWORD
         else:
-            local_ok = _pam.authenticate(username, password, service="login")
+            local_ok = _pam.authenticate(username, password, service=_pam_dienst())
         if local_ok:
             print(f"[AUTH] Lokaler Login erfolgreich: {username}", flush=True)
             return True
@@ -5004,12 +5021,21 @@ def _user_must_change(username: str) -> bool:
         return False
     return bool(_get_user_auth_state(username).get("must_change_password", True))
 
+# Mindestlaenge eines Kennworts (Haertung B14, Checkliste 44). Ein lokales
+# Konto hat EIN Kennwort fuer Web und Linux; pwquality bremst den Wechsel ueber
+# chpasswd (root, Broker) nicht - deshalb gilt die Grenze hier. Dieselbe Zahl
+# steht in frontend/js/app.js (zwei Staerkeanzeigen) und im Hinweis
+# security.pw_hint (i18n.js, settings.html); tests/test_b14_kennwort.py haelt
+# alle Stellen gleich.
+KENNWORT_MIN_LAENGE = 14
+
+
 def _validate_password_strength(password: str, username: str) -> list[str]:
     """Prüft Kennwort-Stärke (mittlere Sicherheit). Gibt Fehlerliste zurück."""
     import re
     errors = []
-    if len(password) < 8:
-        errors.append("Mindestens 8 Zeichen erforderlich.")
+    if len(password) < KENNWORT_MIN_LAENGE:
+        errors.append(f"Mindestens {KENNWORT_MIN_LAENGE} Zeichen erforderlich.")
     if len(password) > 128:
         errors.append("Maximal 128 Zeichen erlaubt.")
     if not re.search(r'[A-Z]', password):

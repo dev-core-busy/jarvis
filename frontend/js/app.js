@@ -328,7 +328,7 @@
         if (!cpwStrength || !cpwNew) return;
         const pw = cpwNew.value;
         const checks = [
-            pw.length >= 8,
+            pw.length >= 14,   // wie main.KENNWORT_MIN_LAENGE (Haertung B14)
             /[A-Z]/.test(pw),
             /[a-z]/.test(pw),
             /[0-9]/.test(pw),
@@ -3757,7 +3757,8 @@
         function _secStrengthCheck(inputEl, outputEl) {
             if (!outputEl) return;
             const pw = inputEl.value;
-            const score = [pw.length >= 8, /[A-Z]/.test(pw), /[a-z]/.test(pw), /[0-9]/.test(pw)].filter(Boolean).length;
+            // Mindestlaenge wie main.KENNWORT_MIN_LAENGE (Haertung B14)
+            const score = [pw.length >= 14, /[A-Z]/.test(pw), /[a-z]/.test(pw), /[0-9]/.test(pw)].filter(Boolean).length;
             const labels = [window.t('security.strength.0'), window.t('security.strength.1'), window.t('security.strength.2'), window.t('security.strength.3'), window.t('security.strength.4')];
             // Code-Review 2026-10-18: Theme-Variablen statt fester Hexwerte.
             const colors = ['var(--danger)', 'var(--danger)', 'var(--warning)', 'var(--success)', 'var(--success)'];

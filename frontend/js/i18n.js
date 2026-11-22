@@ -2567,7 +2567,7 @@ const _I18N = {
         'security.ch_chat':             'Chat',
         'security.ch_support':          'Support',
         'security.ch_whatsapp':         'WhatsApp',
-        'security.pw_hint':         'Bitte setze ein neues Kennwort. Es muss mindestens 8 Zeichen, einen Großbuchstaben, einen Kleinbuchstaben und eine Ziffer enthalten.',
+        'security.pw_hint':         'Bitte setze ein neues Kennwort. Es muss mindestens 14 Zeichen, einen Großbuchstaben, einen Kleinbuchstaben und eine Ziffer enthalten.',
 
         // ── Security – AD / 2FA ───────────────────────────────────────────────
         'security.pw_change_hint':  'Ändert das Linux-Benutzerkonto <code>jarvis</code> – gilt für die Web-Oberfläche und SSH-Login. <strong>Nicht</strong> das WebDAV-Passwort.',
@@ -8399,7 +8399,7 @@ const _I18N = {
         'security.ch_chat':             'Chat',
         'security.ch_support':          'Support',
         'security.ch_whatsapp':         'WhatsApp',
-        'security.pw_hint':         'Please set a new password. It must be at least 8 characters with an uppercase letter, lowercase letter, and a digit.',
+        'security.pw_hint':         'Please set a new password. It must be at least 14 characters with an uppercase letter, lowercase letter, and a digit.',
 
         // ── Sicherheit – AD / 2FA ─────────────────────────────────────────────
         'security.pw_change_hint':  'Changes the Linux user account <code>jarvis</code> – applies to the web interface and SSH login. <strong>Not</strong> the WebDAV password.',

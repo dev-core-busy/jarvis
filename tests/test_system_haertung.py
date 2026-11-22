@@ -14,6 +14,11 @@ Textvorkommen:
     gegen konkrete Pfade), Drop-in, coredump, sudoers 0440 + visudo.
  5. Kein Eingriff in apt (Jarvis verwaltet Remove-Unused-Dependencies selbst).
  6. Eine ungueltige sudoers-Datei wird NICHT eingespielt (Exit 3).
+ 7. B14: Inhalte (jarvis-web OHNE faillock, gleiche faillock-Werte in beiden
+    Profilen, root ausgenommen, minlen = main.KENNWORT_MIN_LAENGE) und die
+    Aktivierung ueber eine pam-auth-update-ATTRAPPE: einmal, danach nicht
+    mehr (idempotent), Abweichung im PAM-Stapel wird gemeldet und repariert,
+    und bei altem Jarvis-Code (Dienst "login") bleibt faillock AUS.
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 Das zu pruefende Skript kann ueber JARVIS_SYSTEM_HAERTUNG_SKRIPT umgelenkt
@@ -52,10 +57,34 @@ def pruefe(bed, t):
     ok(t) if bed else fail(t)
 
 
-def lauf(modus, wurzel, skript=None, test=True):
+# Attrappe fuer pam-auth-update (B14): schreibt die Zeilen, die das echte
+# Werkzeug aus den Profilen erzeugt, in den Sandkasten und protokolliert jeden
+# Aufruf NEBEN der Wurzel (<wurzel>.pam.log) - im Baum selbst zaehlte das
+# Protokoll als Datei des Skripts.
+PAM_ATTRAPPE = r"""#!/bin/bash
+log="${JARVIS_SYS_WURZEL}.pam.log"
+echo "$*" >> "$log"
+d="$JARVIS_SYS_WURZEL/etc/pam.d"; mkdir -p "$d"
+printf 'auth\trequisite\tpam_faillock.so preauth deny=5\nauth\t[success=2 default=ignore]\tpam_unix.so nullok\nauth\t[default=die]\tpam_faillock.so authfail deny=5\nauth\trequisite\tpam_deny.so\nauth\trequired\tpam_permit.so\n' > "$d/common-auth"
+printf 'account\trequired\tpam_faillock.so\naccount\t[success=1 default=ignore]\tpam_unix.so\n' > "$d/common-account"
+printf 'password\trequisite\tpam_pwquality.so retry=3\npassword\t[success=1 default=ignore]\tpam_unix.so obscure use_authtok\n' > "$d/common-password"
+"""
+
+
+def pam_aufrufe(wurzel):
+    try:
+        return [z for z in Path(str(wurzel) + ".pam.log").read_text().splitlines() if z.strip()]
+    except OSError:
+        return []
+
+
+def lauf(modus, wurzel, skript=None, test=True, attrappe=True):
     env = {k: v for k, v in os.environ.items()
            if k not in ("JARVIS_HAERTUNG_TEST", "JARVIS_SYS_WURZEL")}
     env.pop("JARVIS_VISUDO", None)
+    env.pop("JARVIS_PAM_AUTH_UPDATE", None)
+    if test and attrappe:
+        env["JARVIS_PAM_AUTH_UPDATE"] = str(PAM_ATTRAPPE_PFAD)
     if test:
         env["JARVIS_HAERTUNG_TEST"] = "1"
         if wurzel is not None:
@@ -180,7 +209,14 @@ _zuweisung = re.search(r'(?m)^(?P<bed>if [^\n]*)\n\s*VISUDO="\$JARVIS_VISUDO"', 
 pruefe(bool(_zuweisung) and '-n "$TEST"' in _zuweisung.group("bed"),
        "JARVIS_VISUDO wird nur im Testmodus gelesen (Produktivlauf nimmt das visudo des Systems)")
 
+_pam_zuweisung = re.search(r'(?m)^(?P<bed>if [^\n]*)\n\s*PAM_AUTH_UPDATE="\$JARVIS_PAM_AUTH_UPDATE"', _sk)
+pruefe(bool(_pam_zuweisung) and '-n "$TEST"' in _pam_zuweisung.group("bed"),
+       "JARVIS_PAM_AUTH_UPDATE wird nur im Testmodus gelesen (Produktivlauf nimmt pam-auth-update des Systems)")
+
 sandkasten = Path(tempfile.mkdtemp(prefix="sys_haertung_"))
+PAM_ATTRAPPE_PFAD = sandkasten / "pam-auth-update-attrappe"
+PAM_ATTRAPPE_PFAD.write_text(PAM_ATTRAPPE, encoding="utf-8")
+PAM_ATTRAPPE_PFAD.chmod(0o755)
 try:
     W = sandkasten / "a"
     W.mkdir()
@@ -220,12 +256,15 @@ try:
            "zweiter Lauf schreibt nichts (Ausgabe ohne 'geschrieben')")
     pruefe(vorher == nachher, "zweiter Lauf: Inhalt, mtime und Modus aller Dateien gleich")
     # Formel statt Konstante (hier stand "11" - mit B13 kamen zwei Units dazu):
-    # je Zeile der ZIELE-Liste eine Datei, dazu auditd.conf.
+    # je Zeile der ZIELE-Liste eine Datei, dazu auditd.conf und die drei
+    # common-*-Dateien, die pam-auth-update (hier die Attrappe) schreibt (B14).
     _ziele = re.search(r'^ZIELE="\n(.*?)^"', SKRIPT.read_text(encoding="utf-8"), re.S | re.M)
     _n_ziele = len([z for z in (_ziele.group(1) if _ziele else "").splitlines() if z.strip()])
     pruefe(_n_ziele >= 12, "ZIELE-Liste des Skripts gelesen (%d Eintraege)" % _n_ziele)
-    pruefe(len(vorher) == _n_ziele + 1,
-           "genau %d Dateien angelegt – %d Ziele + auditd.conf (gefunden %d)" % (_n_ziele + 1, _n_ziele, len(vorher)))
+    _n_soll = _n_ziele + 1 + 3
+    pruefe(len(vorher) == _n_soll,
+           "genau %d Dateien angelegt – %d Ziele + auditd.conf + 3 PAM-Dateien (gefunden %d)"
+           % (_n_soll, _n_ziele, len(vorher)))
 
     # ── 3. --pruefen aendert nichts ──────────────────────────────────────────
     print("[3] --pruefen ist rein lesend")
@@ -419,6 +458,78 @@ try:
             reste = [p.name for p in (W2 / "etc/sudoers.d").glob(".haertung.*")] \
                 if (W2 / "etc/sudoers.d").is_dir() else []
             pruefe(not reste, "ungueltige sudoers: keine Zwischendatei liegen geblieben")
+
+    # ── 7. B14: Kennwortregeln ───────────────────────────────────────────────
+    print("[7] B14 Kennwortregeln")
+    _text = SKRIPT.read_text(encoding="utf-8")
+    _pakete = re.search(r'(?m)^PAKETE="([^"]*)"', _text)
+    pruefe(bool(_pakete) and "libpam-pwquality" in _pakete.group(1).split(),
+           "Paket libpam-pwquality steht in PAKETE")
+    web = [" ".join(z.split()) for z in zeilen(W / "etc/pam.d/jarvis-web")]
+    pruefe(web == ["auth required pam_unix.so", "account required pam_unix.so"],
+           "jarvis-web: genau pam_unix fuer auth und account (%s)" % web)
+    pruefe(not any("faillock" in z for z in web), "jarvis-web: OHNE pam_faillock")
+    fl = (W / "usr/share/pam-configs/jarvis-faillock").read_text(encoding="utf-8") \
+        if (W / "usr/share/pam-configs/jarvis-faillock").is_file() else ""
+    fv = (W / "usr/share/pam-configs/jarvis-faillock-vorab").read_text(encoding="utf-8") \
+        if (W / "usr/share/pam-configs/jarvis-faillock-vorab").is_file() else ""
+    _authfail = re.search(r"\[default=die\]\s+pam_faillock\.so authfail (.*)", fl)
+    _preauth = re.search(r"requisite\s+pam_faillock\.so preauth (.*)", fv)
+    pruefe(bool(_authfail) and bool(_preauth), "Profile: authfail [default=die] und preauth requisite")
+    _werte = lambda m: dict(t.split("=", 1) for t in m.group(1).split() if "=" in t) if m else {}
+    pruefe(_werte(_authfail) == _werte(_preauth) and bool(_werte(_preauth)),
+           "beide Profile mit denselben faillock-Werten (%s / %s)" % (_werte(_authfail), _werte(_preauth)))
+    pruefe(_werte(_preauth) == {"deny": "5", "unlock_time": "900", "fail_interval": "900"},
+           "faillock: 5 Fehlversuche in 15 Minuten sperren 15 Minuten (%s)" % _werte(_preauth))
+    pruefe("even_deny_root" not in fl + fv, "root bleibt ausgenommen (kein even_deny_root, Notzugang)")
+    pruefe(re.search(r"(?m)^Account:\n\s+required\s+pam_faillock\.so\s*$", fv) is not None,
+           "Profil vorab: account required pam_faillock.so (setzt nach Erfolg zurueck)")
+    _main = (WURZEL_REPO / "backend" / "main.py").read_text(encoding="utf-8")
+    _min = re.search(r"(?m)^KENNWORT_MIN_LAENGE = (\d+)$", _main)
+    pq = {z.split("=")[0].strip(): z.split("=", 1)[1].strip()
+          for z in zeilen(W / "etc/security/pwquality.conf.d/90-haertung.conf") if "=" in z}
+    pruefe(bool(_min) and pq.get("minlen") == _min.group(1) == "14",
+           "pwquality minlen = main.KENNWORT_MIN_LAENGE = 14 (%s / %s)"
+           % (pq.get("minlen"), _min.group(1) if _min else None))
+    pruefe('PAM_DIENST_WEB = "jarvis-web"' in _main and 'PAM_DIENST_WEB = "jarvis-web"' in _text,
+           "Schranke im Skript sucht genau die Zeile, die main.py traegt")
+
+    # Aktivierung ueber die Attrappe (Laeufe aus [1]-[3] liegen schon hinter uns)
+    auf = pam_aufrufe(W)
+    pruefe(len(auf) == 1, "pam-auth-update genau EINMAL aufgerufen ueber [1]-[3] (%d)" % len(auf))
+    pruefe(bool(auf) and auf[0].split() == ["--enable", "jarvis-faillock", "jarvis-faillock-vorab"],
+           "Aufruf: --enable jarvis-faillock jarvis-faillock-vorab (%s)" % (auf[:1],))
+    ca = W / "etc/pam.d/common-auth"
+    ca.write_text("\n".join(z for z in ca.read_text().splitlines() if "preauth" not in z) + "\n")
+    rc, out = lauf("--pruefen", W)
+    pruefe(rc == 1 and "AUS" in out and "preauth" in out,
+           "fehlendes faillock preauth in common-auth wird gemeldet (Exit %d)" % rc)
+    rc, out = lauf("--anwenden", W)
+    pruefe(len(pam_aufrufe(W)) == 2 and "preauth" in ca.read_text(),
+           "--anwenden schaltet faillock wieder ein (%d Aufrufe)" % len(pam_aufrufe(W)))
+    rc, out = lauf("--pruefen", W)
+    pruefe(rc == 0, "danach --pruefen wieder 'alles umgesetzt' (Exit %d)" % rc)
+
+    # Alter Jarvis-Code (Web-Anmeldung ueber "login"): faillock bleibt AUS
+    W4 = sandkasten / "alt"
+    (W4 / "opt/jarvis/backend").mkdir(parents=True)
+    (W4 / "opt/jarvis/backend/main.py").write_text(
+        'local_ok = _pam.authenticate(username, password, service="login")\n', encoding="utf-8")
+    rc, out = lauf("--anwenden", W4)
+    pruefe(rc == 0 and not pam_aufrufe(W4) and "'login'" in out,
+           "alter Code: faillock NICHT eingeschaltet, Warnung nennt 'login' (%d Aufrufe)" % len(pam_aufrufe(W4)))
+    rc, out = lauf("--pruefen", W4)
+    pruefe(rc == 1 and "faillock" in out, "alter Code: --pruefen meldet faillock als AUS (Exit %d)" % rc)
+    (W4 / "opt/jarvis/backend/main.py").write_text('PAM_DIENST_WEB = "jarvis-web"\n', encoding="utf-8")
+    rc, out = lauf("--anwenden", W4)
+    pruefe(len(pam_aufrufe(W4)) == 1, "neuer Code: faillock eingeschaltet (%d Aufruf)" % len(pam_aufrufe(W4)))
+
+    # Testmodus ohne Attrappe: das echte pam-auth-update wird NICHT gerufen
+    W5 = sandkasten / "ohne_attrappe"
+    W5.mkdir()
+    rc, out = lauf("--anwenden", W5, attrappe=False)
+    pruefe(rc == 0 and "pam-auth-update uebersprungen" in out,
+           "Testmodus ohne Attrappe: pam-auth-update uebersprungen (Exit %d)" % rc)
 finally:
     shutil.rmtree(sandkasten, ignore_errors=True)
 

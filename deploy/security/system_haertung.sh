@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Systemhaertung B1-B8 und B13 der Checkliste "hardening" (Confluence, Seite 342048622)
+# Systemhaertung B1-B8, B13 und B14 der Checkliste "hardening" (Confluence, Seite 342048622)
 # – als root.
 #
 #   bash system_haertung.sh --pruefen     nur melden, nichts aendern
@@ -23,6 +23,12 @@
 #       backend/ueberwachung.py aus der ROOT-EIGENEN Broker-Kopie auf (nicht
 #       aus /opt/jarvis - Befund K1). Die Datei kommt mit dem Broker-Neustart
 #       dorthin; fehlt sie, meldet --anwenden das und richtet nichts ein.
+#   B14 Kennwortregeln lokaler Konten: pwquality (mindestens 14 Zeichen) und
+#       pam_faillock (5 Fehlversuche in 15 Minuten sperren 15 Minuten) ueber
+#       zwei eigene pam-auth-update-Profile - keine Datei eines Pakets wird
+#       geaendert. root bleibt ausgenommen (Notzugang ueber die Konsole).
+#       Die Web-Anmeldung lokaler Konten bekommt einen eigenen PAM-Dienst
+#       jarvis-web OHNE faillock (Begruendung bei PAM_WEB).
 #
 # WAS ES BEWUSST NICHT TUT – jeweils gemessen am 18.11.2026:
 #   * Kein Eingriff in apt: Remove-Unused-Dependencies verwaltet Jarvis selbst
@@ -65,7 +71,7 @@ if [ -z "$TEST" ]; then
     fi
 fi
 
-PAKETE="needrestart auditd audispd-plugins aide aide-common lynis"
+PAKETE="needrestart auditd audispd-plugins aide aide-common lynis libpam-pwquality"
 
 # Werkzeug fuer die sudoers-Pruefung. Im Produktivlauf IMMER das visudo des
 # Systems - die Variable wird dort nicht gelesen, sonst waehlte die Umgebung das
@@ -78,6 +84,12 @@ PAKETE="needrestart auditd audispd-plugins aide aide-common lynis"
 VISUDO="visudo"
 if [ -n "$TEST" ] && [ -n "${JARVIS_VISUDO:-}" ]; then
     VISUDO="$JARVIS_VISUDO"
+fi
+# Dasselbe fuer pam-auth-update (B14): im Produktivlauf immer das des Systems,
+# im Testmodus eine Attrappe des Waechters, die nur die Sandkasten-Wurzel kennt.
+PAM_AUTH_UPDATE="pam-auth-update"
+if [ -n "$TEST" ] && [ -n "${JARVIS_PAM_AUTH_UPDATE:-}" ]; then
+    PAM_AUTH_UPDATE="$JARVIS_PAM_AUTH_UPDATE"
 fi
 
 # ── Inhalte ──────────────────────────────────────────────────────────────────
@@ -315,6 +327,50 @@ AccuracySec=30s
 [Install]
 WantedBy=timers.target'
 
+# B14 (Checkliste 44). Gemessen auf DEV am 21.11.2026 mit einem Wegwerfkonto:
+#  * pwquality.conf.d wird gelesen: passwd lehnt 9 Zeichen ab ("shorter than
+#    14 characters"), 20 Zeichen gehen durch. root (chpasswd) wird nur gewarnt,
+#    nicht gebremst - deshalb prueft Jarvis die Laenge beim Kennwortwechsel
+#    selbst (main.KENNWORT_MIN_LAENGE).
+#  * faillock zaehlt auch, wenn ein Konto sein EIGENES Kennwort prueft (die
+#    Zaehldatei gehoert dem Konto) - also auch die Web-Anmeldung von jarvis.
+#  * Im Dienstkontext (ProtectSystem=strict wie jarvis.service) meldet
+#    pam_faillock "System error" - AUCH beim richtigen Kennwort. Mit faillock im
+#    Dienst "login" haette sich niemand mehr lokal im Web anmelden koennen.
+PWQUALITY='# Haertung B14 (Checkliste 44) - deploy/security/system_haertung.sh
+# Gilt fuer passwd. root (chpasswd ueber den Broker) wird nur gewarnt - dort
+# prueft Jarvis die Laenge selbst (backend/main.py, KENNWORT_MIN_LAENGE).
+minlen = 14'
+
+# Gleiche Werte in beiden Profilen: faillock liest sie je Aufruf aus den
+# Argumenten, die Datei /etc/security/faillock.conf (gehoert libpam-modules)
+# bleibt unberuehrt - eine geaenderte Paketdatei hielte jedes Update an.
+FAILLOCK_ARGS="deny=5 unlock_time=900 fail_interval=900"
+FAILLOCK="Name: Sperre nach Fehlversuchen - Zaehlen (Haertung B14)
+Default: yes
+Priority: 0
+Auth-Type: Primary
+Auth:
+	[default=die]	pam_faillock.so authfail $FAILLOCK_ARGS"
+FAILLOCK_VORAB="Name: Sperre nach Fehlversuchen - Pruefen und Zuruecksetzen (Haertung B14)
+Default: yes
+Priority: 1024
+Auth-Type: Primary
+Auth:
+	requisite	pam_faillock.so preauth $FAILLOCK_ARGS
+Account-Type: Primary
+Account:
+	required	pam_faillock.so"
+
+PAM_WEB='# Haertung B14 (Checkliste 44) - deploy/security/system_haertung.sh
+# Web-Anmeldung lokaler Konten (backend/main.py, _pam_dienst). NUR pam_unix,
+# bewusst OHNE pam_faillock: im Dienstkontext meldet faillock "System error",
+# auch beim richtigen Kennwort (DEV 21.11.2026). Gegen Durchprobieren sperrt
+# Jarvis selbst, je IP und je Konto (BSI M3, backend/anmelde_schutz.py) - und
+# diese Sperre kann ein Administrator in der Oberflaeche aufheben.
+auth     required   pam_unix.so
+account  required   pam_unix.so'
+
 # ── Ziele: Pfad | Modus | Inhalt-Variable ────────────────────────────────────
 ZIELE="
 etc/sudoers.d/10-haertung|0440|SUDOERS
@@ -329,6 +385,10 @@ etc/aide/aide.conf.d/95_jarvis_ausnahmen|0644|AIDE
 etc/logrotate.d/sudo-haertung|0644|LOGROTATE
 etc/systemd/system/jarvis-ueberwachung.service|0644|UEBERW_SERVICE
 etc/systemd/system/jarvis-ueberwachung.timer|0644|UEBERW_TIMER
+etc/security/pwquality.conf.d/90-haertung.conf|0644|PWQUALITY
+etc/pam.d/jarvis-web|0644|PAM_WEB
+usr/share/pam-configs/jarvis-faillock|0644|FAILLOCK
+usr/share/pam-configs/jarvis-faillock-vorab|0644|FAILLOCK_VORAB
 "
 
 abweichungen=0
@@ -426,7 +486,54 @@ auditd_konf() {
     done
 }
 
+# pam_pruefen: ist der B14-Stapel wirklich aktiv? Die Profile liegen zu lassen
+# genuegt nicht - wirksam ist erst, was pam-auth-update in common-* schreibt.
+pam_pruefen() {
+    local d="$W/etc/pam.d"
+    grep -qE '^auth[[:space:]]+requisite[[:space:]]+pam_faillock\.so[[:space:]]+preauth' "$d/common-auth" 2>/dev/null \
+        || { echo "  AUS         faillock preauth in common-auth"; abweichungen=$((abweichungen + 1)); }
+    grep -qE '^auth[[:space:]]+\[default=die\][[:space:]]+pam_faillock\.so[[:space:]]+authfail' "$d/common-auth" 2>/dev/null \
+        || { echo "  AUS         faillock authfail in common-auth"; abweichungen=$((abweichungen + 1)); }
+    grep -qE '^account[[:space:]]+required[[:space:]]+pam_faillock\.so' "$d/common-account" 2>/dev/null \
+        || { echo "  AUS         faillock in common-account"; abweichungen=$((abweichungen + 1)); }
+    grep -qE '^password[[:space:]]+requisite[[:space:]]+pam_pwquality\.so' "$d/common-password" 2>/dev/null \
+        || { echo "  AUS         pwquality in common-password"; abweichungen=$((abweichungen + 1)); }
+}
+
+# pam_aktivieren: die Profile einschalten - aber NUR, wenn der Jarvis-Code die
+# Web-Anmeldung schon ueber jarvis-web fuehrt. Aelterer Code prueft ueber den
+# Dienst "login"; dort braeche faillock JEDE lokale Web-Anmeldung (siehe PAM_WEB).
+pam_aktivieren() {
+    local code="$W/opt/jarvis/backend/main.py"
+    if [ -f "$code" ] && ! grep -q 'PAM_DIENST_WEB = "jarvis-web"' "$code"; then
+        echo "WARNUNG: $code prueft die Web-Anmeldung noch ueber den Dienst 'login' -" >&2
+        echo "         faillock NICHT eingeschaltet. Erst Jarvis aktualisieren und" >&2
+        echo "         jarvis.service neu starten, dann erneut --anwenden." >&2
+        return 0
+    fi
+    # Schon aktiv und Profile unveraendert: nicht neu schreiben lassen (jeder
+    # Lauf von pam-auth-update erneuerte sonst common-* - Rauschen fuer AIDE).
+    local vorher=$abweichungen
+    pam_pruefen >/dev/null
+    local fehlt=$((abweichungen - vorher)); abweichungen=$vorher
+    case " $geaendert " in *" FAILLOCK"*) fehlt=1 ;; esac
+    if [ "$fehlt" -eq 0 ]; then
+        echo "  unveraendert faillock/pwquality (pam-auth-update)"
+        return 0
+    fi
+    if [ -n "$TEST" ] && [ -z "${JARVIS_PAM_AUTH_UPDATE:-}" ]; then
+        echo "  HINWEIS Testmodus ohne JARVIS_PAM_AUTH_UPDATE - pam-auth-update uebersprungen"
+        return 0
+    fi
+    if ! DEBIAN_FRONTEND=noninteractive "$PAM_AUTH_UPDATE" --enable jarvis-faillock jarvis-faillock-vorab; then
+        echo "WARNUNG: pam-auth-update fehlgeschlagen - faillock nicht eingeschaltet" >&2
+        return 0
+    fi
+    echo "  aktiviert    faillock (pam-auth-update)"
+}
+
 system_pruefen() {
+    pam_pruefen
     [ -n "$TEST" ] && return 0
     local p
     for p in $PAKETE; do
@@ -467,6 +574,7 @@ system_pruefen() {
 }
 
 anwenden_system() {
+    pam_aktivieren
     [ -n "$TEST" ] && return 0
     case " $geaendert " in *" SYSCTL "*)
         if sysctl --system 2>&1 | grep -iE "error|invalid|unknown"; then

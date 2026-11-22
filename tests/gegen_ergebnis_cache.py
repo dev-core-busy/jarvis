@@ -100,9 +100,12 @@ def erstes(alt, neu):
 
 
 PROBEN = [
-    ("Treffer ohne md5-Vergleich (geaenderte Datei kommt aus dem Cache)", HELFER,
-     ersetzen("        if isinstance(e, list) and len(e) == 2 and e[0] == self._md5(inhalt):\n",
+    ("Treffer ohne Pruefsummen-Vergleich (geaenderte Datei kommt aus dem Cache)", HELFER,
+     ersetzen("        if isinstance(e, list) and len(e) == 2 and e[0] == self._pruefsumme(inhalt):\n",
               "        if isinstance(e, list) and len(e) == 2:\n")),
+    ("Pruefsumme wieder md5 (Kollisionen baubar)", HELFER,
+     ersetzen("        return hashlib.sha256(inhalt if isinstance(inhalt, bytes)",
+              "        return hashlib.md5(inhalt if isinstance(inhalt, bytes)")),
     ("Fingerabdruck ohne den Pruefer (geaenderte Sperrliste nutzt alte Ergebnisse)", HELFER,
      ersetzen("        for p in [Path(__file__), *map(Path, abhaengig)]:\n",
               "        for p in [Path(__file__)]:\n")),

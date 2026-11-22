@@ -40,7 +40,7 @@ und ``<Firma>Adapter`` greifen (Begruendung an ``kandidaten()``). Adressen im
 internen Netz faengt die Netzregel unten, auch wenn sie in keiner Liste stehen.
 
 TEMPO (2026-11-22): das Ergebnis je Datei kommt aus einem Cache, solange
-Pfad, Inhalt (md5) und dieser Waechter - samt Sperrliste - unveraendert sind
+Pfad, Inhalt (sha256) und dieser Waechter - samt Sperrliste - unveraendert sind
 (``tests/lib/ergebnis_cache.py``; ``JARVIS_WAECHTER_CACHE=aus`` schaltet ihn
 ab). Ein Treffer liefert auch die FUNDE der Datei - vergessen wird nichts.
 

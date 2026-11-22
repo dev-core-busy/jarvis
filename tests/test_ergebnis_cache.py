@@ -12,11 +12,12 @@ gleichem Pruefer; nur Beruehrtes wird gespeichert; ein kaputter Cache ist
 leer; ``JARVIS_WAECHTER_CACHE=aus`` schaltet ab; alte Fingerabdruecke werden
 nach Alter abgeraeumt.
 Teil B misst die beiden ECHTEN Waechter mit einem Wegwerf-Cache: ein
-gespeicherter Fund mit passendem md5 wird gemeldet (Exit 1), derselbe Fund
-mit falschem md5 wird verworfen und die Datei neu geprueft (Exit 0).
+gespeicherter Fund mit passender Pruefsumme wird gemeldet (Exit 1), derselbe
+Fund mit falscher Pruefsumme wird verworfen und die Datei neu geprueft (Exit 0).
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht messen.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -71,6 +72,9 @@ try:
     c.ablegen("y.py", b"anderes", [])
     c.speichern()
 
+    gespeichert = json.loads(c._datei.read_text())["eintraege"]["x.py"][0]
+    pruefe("Pruefsumme des Inhalts ist sha256 (64 Hex), nicht md5 (Kollisionen baubar)",
+           gespeichert == hashlib.sha256(b"inhalt").hexdigest(), gespeichert)
     c = neu()
     da, erg = c.holen("x.py", b"inhalt")
     pruefe("gleicher Pfad + Inhalt + Pruefer: Treffer mit dem gespeicherten FUND",
@@ -134,7 +138,7 @@ try:
     # ═══ Teil B: die echten Waechter ═══════════════════════════════════
     print("\nTeil B: test_keine_echtwerte.py und test_kommentare_deutsch.py mit Wegwerf-Cache")
     ZIEL = "tests/lib/ergebnis_cache.py"        # liegt im Geltungsbereich beider
-    ziel_md5 = ergebnis_cache.ErgebnisCache._md5((ROOT / ZIEL).read_bytes())
+    ziel_summe = ergebnis_cache.ErgebnisCache._pruefsumme((ROOT / ZIEL).read_bytes())
     WAECHTER = {
         # Name, Dateiname, erfundenes Ergebnis mit Fund, Text, an dem der Fund zu erkennen ist
         "keine_echtwerte": ("test_keine_echtwerte.py", [[7, "erfundener.wert.sonde"]],
@@ -150,7 +154,7 @@ try:
         fa = ergebnis_cache.ErgebnisCache(name, [TESTS / datei]).fingerabdruck
         cache_datei = vz / f"{name}-{fa}.json"
         # Vorwaermen aus dem Cache des Betreibers, falls es ihn gibt (nur Tempo:
-        # jeder Eintrag wird vom Waechter selbst per md5 geprueft).
+        # jeder Eintrag wird vom Waechter selbst per Pruefsumme geprueft).
         eigen = Path(alt_env) if alt_env and alt_env != "aus" else \
             Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "jarvis" / "waechter"
         vorrat = eigen / cache_datei.name
@@ -171,20 +175,20 @@ try:
             eintraege = roh["eintraege"]
         except (OSError, ValueError, KeyError) as exc:
             abbruch(f"{datei}: Cache-Datei unlesbar ({exc})")
-        if ZIEL not in eintraege or eintraege[ZIEL][0] != ziel_md5:
+        if ZIEL not in eintraege or eintraege[ZIEL][0] != ziel_summe:
             abbruch(f"{datei}: {ZIEL} fehlt im Cache - die Probe traefe nichts")
 
-        eintraege[ZIEL] = [ziel_md5, erfunden]
+        eintraege[ZIEL] = [ziel_summe, erfunden]
         cache_datei.write_text(json.dumps(roh))
         rc, aus = lauf()
-        pruefe(f"{datei}: gespeicherter Fund (md5 passt) wird gemeldet",
+        pruefe(f"{datei}: gespeicherter Fund (Pruefsumme passt) wird gemeldet",
                rc == 1 and kennung in aus, f"rc={rc}")
 
         roh = json.loads(cache_datei.read_text())
-        roh["eintraege"][ZIEL] = ["0" * 32, erfunden]
+        roh["eintraege"][ZIEL] = ["0" * 64, erfunden]
         cache_datei.write_text(json.dumps(roh))
         rc, aus = lauf()
-        pruefe(f"{datei}: derselbe Fund mit falschem md5 wird verworfen, die Datei neu geprueft",
+        pruefe(f"{datei}: derselbe Fund mit falscher Pruefsumme wird verworfen, die Datei neu geprueft",
                rc == 0 and kennung not in aus, f"rc={rc}")
 finally:
     if alt_env is None:

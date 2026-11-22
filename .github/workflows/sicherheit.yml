@@ -159,7 +159,7 @@ jobs:
 
       # ⚠ ERGEBNIS-CACHE DER BAUM-WAECHTER (2026-11-22): test_keine_echtwerte und
       # test_kommentare_deutsch nehmen ihr Ergebnis je Datei aus
-      # tests/lib/ergebnis_cache.py, solange Pfad, Inhalt (md5) und Waechter
+      # tests/lib/ergebnis_cache.py, solange Pfad, Inhalt (sha256) und Waechter
       # gleich sind - ueber die GUELTIGKEIT entscheidet der Helfer, nicht dieser
       # Schluessel. Ein Eintrag im Actions-Cache ist unveraenderlich: je Lauf ein
       # eigener Schluessel, wiederhergestellt wird der juengste ueber das Praefix.

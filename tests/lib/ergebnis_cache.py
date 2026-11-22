@@ -6,8 +6,12 @@ WARUM (2026-11-22): ``test_keine_echtwerte`` (35-69 s) und
 geaendert hat. Ihr Ergebnis je Datei haengt nur am INHALT, am PFAD und am
 Waechter selbst - also wird genau das zum Schluessel:
 
-  * je Eintrag: Pfad + md5 des Inhalts. Eine geaenderte Datei ist ein
-    Fehlschuss und wird neu geprueft.
+  * je Eintrag: Pfad + sha256 des Inhalts. Eine geaenderte Datei ist ein
+    Fehlschuss und wird neu geprueft. sha256 statt md5 (2026-11-22): seit
+    der Cache in der CI ueber Laeufe hinweg lebt, ist er ein gemeinsamer
+    Stand - und md5-Kollisionen lassen sich gezielt bauen (eine saubere und
+    eine belastete Datei mit gleicher Pruefsumme). Mehraufwand gemessen:
+    warmer Lauf 0,30 -> 0,35 s (keine_echtwerte).
   * je Cache-Datei: ein FINGERABDRUCK aus dem Quelltext des Waechters, dieser
     Datei, weiteren genannten Abhaengigkeiten und der Python-Version. Aendert
     sich die Pruefung (Sperrliste, Muster, Logik), gilt kein einziger alter
@@ -75,20 +79,20 @@ class ErgebnisCache:
         return self._datei is not None
 
     @staticmethod
-    def _md5(inhalt):
-        return hashlib.md5(inhalt if isinstance(inhalt, bytes) else inhalt.encode("utf-8")).hexdigest()
+    def _pruefsumme(inhalt):
+        return hashlib.sha256(inhalt if isinstance(inhalt, bytes) else inhalt.encode("utf-8")).hexdigest()
 
     def holen(self, rel, inhalt):
         """(True, Ergebnis) bei Treffer, sonst (False, None)."""
         e = self._alt.get(rel)
-        if isinstance(e, list) and len(e) == 2 and e[0] == self._md5(inhalt):
+        if isinstance(e, list) and len(e) == 2 and e[0] == self._pruefsumme(inhalt):
             self._jetzt[rel] = e
             self.treffer += 1
             return True, e[1]
         return False, None
 
     def ablegen(self, rel, inhalt, ergebnis):
-        self._jetzt[rel] = [self._md5(inhalt), ergebnis]
+        self._jetzt[rel] = [self._pruefsumme(inhalt), ergebnis]
         self.neu += 1
 
     def speichern(self):

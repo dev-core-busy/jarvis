@@ -31,7 +31,7 @@ AUSGENOMMEN (mit Grund - ein Geltungsbereich ohne Grund ist eine Luecke):
     Daten, anders laesst sich nicht messen, ob dieser Waechter beisst.
 
 TEMPO (2026-11-22): das Ergebnis je Datei kommt aus einem Cache, solange
-Pfad, Inhalt (md5) und dieser Waechter unveraendert sind
+Pfad, Inhalt (sha256) und dieser Waechter unveraendert sind
 (``tests/lib/ergebnis_cache.py``; ``JARVIS_WAECHTER_CACHE=aus`` schaltet ihn
 ab). Und die Zeilennummer je Kommentar wird fortlaufend gezaehlt statt jedes
 Mal ab Dateianfang - das war ein Drittel der Laufzeit.

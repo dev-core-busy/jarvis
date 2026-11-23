@@ -992,6 +992,49 @@ def ist_eingabe(pfad) -> bool:
         return _eingaben.get(k[0]) == k[1]
 
 
+# ── Arbeitskopien von Anhaengen sind IMMER Eingaben (Vorfall 2026-11-23, ECHT) ─
+#
+# Ein Benutzer haengte ein 7z-Archiv an. Erster Schritt des Laufs: ein Werkzeug,
+# dessen Ergebnis den Pfad der Arbeitskopie nannte
+# (``/tmp/jarvis-anhaenge/<kennung>/anhang_<12 Hex>_<name>.7z``). Zweig (b) von
+# ``_deliver_docs`` hielt ihn fuer eine Ergebnisdatei: ``/tmp`` gehoert zu den
+# Arbeitswurzeln (``such_wurzeln`` nennt TMP_ECHT immer mit), die Kopie war
+# Millisekunden vor Laufbeginn entstanden, also "aus diesem Lauf" – und sie wurde
+# nach data/documents VERSCHOBEN. Der naechste Schritt fand ein leeres
+# Verzeichnis, das Modell bat den Benutzer, die Datei erneut anzuhaengen.
+#
+# Die Annahme in der Regel vom 2026-11-09 ("Uploads liegen in ANH_ROOT,
+# ausserhalb der Arbeitswurzeln, und sind damit nie betroffen") war falsch:
+# ANH_ROOT liegt UNTER /tmp. Anders als ein Download braucht eine Arbeitskopie
+# aber keine Anmeldung – hier entscheidet der ORT, und zwar endgueltig: in
+# ANH_ROOT schreibt nur die Anhang-Ablage (``anhang_ziel``), nie ein Lauf (die
+# Bindung dort ist ``--ro-bind``). Ortsbasiert statt ueber ``eingabe_merken``,
+# weil (1) ein Dienst-Neustart das Register vergisst, die Kopie aber 240
+# Minuten lebt, und (2) es DREI Erzeuger gibt (Chat-Upload, Short Tracks,
+# AI-Maus) – eine Anmeldung, die einer vergisst, faellt nicht auf.
+#
+# Ohne Isolation liegt die Kopie direkt in /tmp (``anhang_ziel``); dort traegt
+# nur das exakte Namensmuster, und nur direkt unter /tmp.
+_ANHANG_NAME_RE = re.compile(r"^anhang_[0-9a-f]{12}_.+")
+
+
+def ist_anhang_kopie(pfad) -> bool:
+    """True, wenn ``pfad`` die Arbeitskopie eines Anhangs ist (= Eingabe).
+
+    Gemessen am AUFGELOESTEN Pfad, damit ein Symlink im Arbeitsverzeichnis
+    weder hinein- noch herausfuehrt.
+    """
+    try:
+        p = Path(os.path.realpath(str(pfad)))
+        anh = Path(os.path.realpath(str(ANH_ROOT)))
+        tmp = Path(os.path.realpath(str(TMP_ECHT)))
+    except (OSError, ValueError):
+        return False
+    if anh in p.parents:
+        return True
+    return p.parent == tmp and bool(_ANHANG_NAME_RE.match(p.name))
+
+
 def gehoert_arbeitsbereich(pfad, benutzer: str) -> bool | None:
     """Gehoert ein Pfad unter ARBEIT_ROOT DIESEM Benutzer?
 

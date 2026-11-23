@@ -178,6 +178,29 @@ def owner_of(fname: str) -> str | None:
     return entry if isinstance(entry, str) else None   # tolerant fuer Altformat
 
 
+def ist_upload(fname: str, mtime: float | None = None) -> bool:
+    """Ist diese Roh-Datei ein UNVERAENDERTER hochgeladener Anhang?
+
+    Fuer ``_deliver_docs`` (Vorfall 2026-11-23, ECHT): die Endantwort nannte den
+    Namen des Anhangs, Zweig (c) fand die Roh-Datei hier in data/documents und
+    stellte dem Benutzer seinen eigenen Upload als Download-Chip ein.
+
+    ``mtime``: die Datei gilt nur als Upload, solange sie seit dem Vermerk nicht
+    geschrieben wurde – ein Werkzeug, das spaeter eine Datei gleichen Namens
+    erzeugt, liefert ein ERGEBNIS. ``ts`` ist ganzzahlig und wird NACH dem
+    Schreiben gesetzt; zwei Sekunden decken Abrundung und Verzug ab.
+    """
+    entry = _load().get(os.path.basename(fname or ""))
+    if not (isinstance(entry, dict) and entry.get("kind") == "upload"):
+        return False
+    if mtime is None:
+        return True
+    try:
+        return float(mtime) <= float(entry.get("ts") or 0) + 2
+    except (TypeError, ValueError):
+        return False
+
+
 def may_access(fname: str, username: str, is_admin: bool = False) -> bool:
     """Darf ``username`` diese Datei laden? Admins immer, sonst nur der Ersteller."""
     if is_admin:

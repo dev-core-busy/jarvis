@@ -58,6 +58,7 @@ DATEIEN = [
     "tests/test_chat_status_sichtbar.js",
     "backend/lauf_tmp.py",
     "skills/confluence/main.py",
+    "backend/documents.py",
 ]
 
 SICHER = Path.home() / ".gegen-docdelivery"
@@ -348,23 +349,23 @@ probe("Fehler-Praefixliste im Waechter leer (Regel trivial wahr)", "py",
 # verschoben, `pdftotext` ins Leere). Jede Schranke einzeln.
 probe("Eingabe-Schranke in Zweig (b) entfernt (Zustand vor dem Fix)", "py",
       "backend/agent.py",
-      "            if _lauf_tmp.ist_eingabe(rp):\n                continue\n",
+      "            if _ist_eingabe(rp):\n                continue\n",
       "")
 
 probe("Eingabe in (b) als geliefert vermerkt (sperrt den Liefer-Marker)", "py",
       "backend/agent.py",
-      "            if _lauf_tmp.ist_eingabe(rp):\n                continue\n",
-      "            if _lauf_tmp.ist_eingabe(rp):\n                delivered.add(key)\n"
+      "            if _ist_eingabe(rp):\n                continue\n",
+      "            if _ist_eingabe(rp):\n                delivered.add(key)\n"
       "                continue\n")
 
 probe("Eingabe-Schranke in Zweig (c) entfernt (Name in der Endantwort)", "py",
       "backend/agent.py",
-      "            if _lauf_tmp.ist_eingabe(found):\n                return\n",
+      "            if _ist_eingabe(found):\n                return\n",
       "")
 
 probe("Liefer-Marker verschiebt auch eine Eingabe", "py",
       "backend/agent.py",
-      "_ingest(p, docs_dir / fname, behalten=_lauf_tmp.ist_eingabe(rp))",
+      "_ingest(p, docs_dir / fname, behalten=_ist_eingabe(rp))",
       "_ingest(p, docs_dir / fname)")
 
 probe("_ingest ignoriert `behalten`", "py",
@@ -381,6 +382,38 @@ probe("Confluence-Werkzeug meldet die Datei nicht an", "py",
       "skills/confluence/main.py",
       "                    _lt.eingabe_merken(path)\n",
       "                    pass\n")
+
+# G – Anhang-EINGABE (Vorfall 2026-11-23, ECHT: 7z-Anhang nach dem ersten
+# Werkzeugschritt verschoben, der Benutzer sollte ihn "erneut anhaengen";
+# dazu der eigene Upload als zweiter Chip). Jede Schranke einzeln.
+probe("Praedikat kennt die Anhang-Kopie nicht (Zustand vor dem Fix)", "py",
+      "backend/agent.py",
+      "                if _lauf_tmp.ist_eingabe(pfad) or _lauf_tmp.ist_anhang_kopie(pfad):\n",
+      "                if _lauf_tmp.ist_eingabe(pfad):\n")
+probe("Praedikat kennt den Roh-Upload nicht (zweiter Chip)", "py",
+      "backend/agent.py",
+      "                    return _documents.ist_upload(pfad.name, pfad.stat().st_mtime)\n",
+      "                    return False\n")
+probe("Praedikat fragt den Upload ohne Fassung (Ergebnis gleichen Namens bliebe liegen)", "py",
+      "backend/agent.py",
+      "_documents.ist_upload(pfad.name, pfad.stat().st_mtime)",
+      "_documents.ist_upload(pfad.name)")
+probe("Ortspruefung ohne ANH_ROOT-Zweig", "py",
+      "backend/lauf_tmp.py",
+      "    if anh in p.parents:\n        return True\n",
+      "")
+probe("Ortspruefung ohne Isolation: Muster auch in Unterverzeichnissen", "py",
+      "backend/lauf_tmp.py",
+      "    return p.parent == tmp and bool(_ANHANG_NAME_RE.match(p.name))",
+      "    return bool(_ANHANG_NAME_RE.match(p.name))")
+probe("Ortspruefung loest Symlinks nicht auf", "py",
+      "backend/lauf_tmp.py",
+      "        p = Path(os.path.realpath(str(pfad)))\n        anh = ",
+      "        p = Path(str(pfad))\n        anh = ")
+probe("Upload-Frage ignoriert die Fassung (mtime)", "py",
+      "backend/documents.py",
+      "        return float(mtime) <= float(entry.get(\"ts\") or 0) + 2",
+      "        return True")
 
 # F-19 (Pentest "Hardening"): fremde Dateien in data/documents – je Zweig EINE
 # Probe, weil jeder Zweig die Schranke selbst ruft.

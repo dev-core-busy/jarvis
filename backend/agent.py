@@ -7455,6 +7455,28 @@ KRITISCH – Ausfuehrungs-Regeln:
             except Exception:  # noqa: BLE001
                 return True          # fail-closed: nicht pruefbar = nicht ausliefern
 
+        def _ist_eingabe(pfad) -> bool:
+            """Ist ``pfad`` eine EINGABE des Laufs statt eines Ergebnisses?
+
+            EIN Praedikat fuer alle drei Zweige – (m) kopiert dann statt zu
+            verschieben, (b) und (c) lassen die Datei liegen. Drei Arten:
+              * angemeldet von einem Download-Werkzeug (ECHT 2026-11-09),
+              * Arbeitskopie eines Anhangs in ANH_ROOT (ECHT 2026-11-23: der
+                7z-Anhang wurde nach dem ersten Werkzeugschritt verschoben, der
+                Benutzer sollte ihn "erneut anhaengen"),
+              * die unveraenderte Roh-Datei des Uploads in data/documents
+                (derselbe Lauf: die Endantwort nannte den Namen, und der
+                Benutzer bekam seinen eigenen Upload als Chip).
+            """
+            try:
+                if _lauf_tmp.ist_eingabe(pfad) or _lauf_tmp.ist_anhang_kopie(pfad):
+                    return True
+                if pfad.parent == _docs_root:
+                    return _documents.ist_upload(pfad.name, pfad.stat().st_mtime)
+            except Exception:  # noqa: BLE001
+                pass
+            return False
+
         # (a) Fertige Capability-URLs (Dedup per physischem Pfad)
         _EXT_RE = self._liefer_ext_re()
         for m in re.finditer(r"/api/documents/[0-9a-f]{32}__[A-Za-z0-9_\-]+\.(?:" + _EXT_RE + ")", text):
@@ -7607,7 +7629,7 @@ KRITISCH – Ausfuehrungs-Regeln:
                 # Ein Marker ist eine AUSDRUECKLICHE Bitte – auch eine Eingabe
                 # (Download) darf so heraus, aber als KOPIE: der Lauf kann sie
                 # im naechsten Schritt noch brauchen.
-                _ingest(p, docs_dir / fname, behalten=_lauf_tmp.ist_eingabe(rp))
+                _ingest(p, docs_dir / fname, behalten=_ist_eingabe(rp))
             except Exception as e:
                 _verfehlt_merken(raw, disp_name, f"Ingest fehlgeschlagen: {e}")
                 continue
@@ -7679,7 +7701,7 @@ KRITISCH – Ausfuehrungs-Regeln:
             # fand sie nicht mehr, der Benutzer bekam ungefragt einen Chip.
             # NICHT in `delivered` vermerken: sonst sperrte `key in delivered`
             # einen spaeteren Liefer-Marker, der sie ausdruecklich anfordert.
-            if _lauf_tmp.ist_eingabe(rp):
+            if _ist_eingabe(rp):
                 continue
             delivered.add(key)
             ext = p.suffix.lower().lstrip(".")
@@ -7865,7 +7887,7 @@ KRITISCH – Ausfuehrungs-Regeln:
                 return
             # Eine angemeldete EINGABE (Download) ist keine Ergebnisdatei – die
             # Endantwort nennt sie als Quelle ("laut Handbuch.pdf").
-            if _lauf_tmp.ist_eingabe(found):
+            if _ist_eingabe(found):
                 return
             delivered.add(key)
             ext = found.suffix.lower().lstrip(".")

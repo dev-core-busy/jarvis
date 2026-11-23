@@ -51,6 +51,14 @@ try:
 except Exception as _e:  # noqa: BLE001
     print(f"ABBRUCH: backend.lauf_tmp nicht ladbar: {_e}")
     sys.exit(2)
+try:
+    # Die Upload-Frage (ECHT 2026-11-23) beantwortet das ECHTE Modul; seine
+    # Registry wird in main() auf eine Wegwerf-Datei umgebogen, bevor irgendein
+    # Abschnitt laeuft (sonst laese der Test die lokale .owners.json).
+    from backend import documents as _DOC_ECHT
+except Exception as _e:  # noqa: BLE001
+    print(f"ABBRUCH: backend.documents nicht ladbar: {_e}")
+    sys.exit(2)
 
 ok = 0
 fehler = 0
@@ -176,6 +184,10 @@ class DokStub:
         besitzer = [b for n, b in self.eintraege if n == fname]
         return bool(besitzer) and besitzer[-1] == username
 
+    def ist_upload(self, fname, mtime=None):
+        """Das ECHTE ``documents.ist_upload`` (Registry umgebogen, siehe main)."""
+        return _DOC_ECHT.ist_upload(fname, mtime)
+
 
 class AgentStub:
     """Nur das, was _deliver_docs von `self` braucht."""
@@ -244,6 +256,14 @@ class LaufTmpStub:
     # hier nur die Annahme ihres Autors pruefen (Register).
     def ist_eingabe(self, pfad):
         return _LT_ECHT.ist_eingabe(pfad)
+
+    # Ebenso ECHT (ECHT 2026-11-23): die Wurzeln ANH_ROOT/TMP_ECHT biegt
+    # Abschnitt 16 fuer seine Dauer um. ``anhang_blind`` stellt fuer die
+    # Positivkontrolle den Stand VOR dem Fix her.
+    anhang_blind = False
+
+    def ist_anhang_kopie(self, pfad):
+        return False if self.anhang_blind else _LT_ECHT.ist_anhang_kopie(pfad)
 
 
 def baue(tmpdir: Path, dok: DokStub, lauf=None):
@@ -314,6 +334,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(dir=_basis) as td:
         tmpdir = Path(td)
         (tmpdir / "backend").mkdir()
+        _DOC_ECHT._REGISTRY = tmpdir / "data" / "documents" / ".owners.json"
         deliver, clean = baue(tmpdir, dok)
         docs = tmpdir / "data" / "documents"
         stub = AgentStub(EXT)
@@ -622,9 +643,9 @@ def main() -> int:
         # in der Antwort `Auftragsnummer_C128.jpg`. Zweig (c) suchte genau
         # diesen Namen, fand nichts und brach mit einem nackten `continue` ab:
         # kein Chip, keine Vorschau, keine Journal-Zeile, keine Warnung.
-        arb2 = tmpdir / "jarvis-arbeit" / "83cccf13"
+        arb2 = tmpdir / "jarvis-arbeit" / "a1b2c3d4"
         arb2.mkdir(parents=True, exist_ok=True)
-        anh2 = tmpdir / "jarvis-anhaenge" / "83cccf13"
+        anh2 = tmpdir / "jarvis-anhaenge" / "a1b2c3d4"
         anh2.mkdir(parents=True, exist_ok=True)
         deliver2, _clean2 = baue(tmpdir, dok, LaufTmpStub(arb2, anh2))
 
@@ -1107,6 +1128,143 @@ def main() -> int:
                                set(), "admin", 0.0, True))
         pruefe("privilegierter Lauf: Marker liefert weiterhin aus",
                len(_chips15(s_)) == 1, str(s_.gesendet))
+
+        abschnitt("16) Anhang-EINGABE wird nicht weggezogen (Vorfall 2026-11-23, ECHT)")
+        # DER GEMELDETE FALL: ein 7z-Anhang, erster Werkzeugschritt nennt den
+        # Pfad der Arbeitskopie, Zweig (b) VERSCHIEBT sie nach data/documents
+        # (Journal: "Ausgeliefert: /tmp/jarvis-anhaenge/<k>/anhang_…7z -> …",
+        # 4 ms vor dem Leerwerden des Verzeichnisses). Das Modell fand ein
+        # leeres Verzeichnis und bat, die Datei neu anzuhaengen. Die Endantwort
+        # nannte den Namen, und (c) stellte die Roh-Datei des Uploads aus
+        # data/documents als ZWEITEN Chip ein.
+        #
+        # Aufbau wie in der Wirklichkeit: ANH_ROOT liegt UNTER einer
+        # Arbeitswurzel (dort /tmp, hier das Wegwerf-Verzeichnis).
+        _alt_anh, _alt_tmp = _LT_ECHT.ANH_ROOT, _LT_ECHT.TMP_ECHT
+        _LT_ECHT.ANH_ROOT = tmpdir / "jarvis-anhaenge"
+        _LT_ECHT.TMP_ECHT = tmpdir
+        try:
+            _kenn = "a1b2c3d4"
+            _anh_dir = tmpdir / "jarvis-anhaenge" / _kenn
+            _anh_dir.mkdir(parents=True, exist_ok=True)
+            docs.mkdir(parents=True, exist_ok=True)
+            _l16 = LaufTmpStub(arbeit=tmpdir, anhaenge=_anh_dir)
+            deliver16, _c16 = baue(tmpdir, dok, _l16)
+
+            def _chips16(s_):
+                return [m for m in s_.gesendet if "/api/documents/" in m]
+
+            def _anhang(name_):
+                k_ = uuid.uuid4().hex[:12]
+                f_ = _anh_dir / f"anhang_{k_}_{name_}"
+                f_.write_bytes(b"7z\xbc\xaf\x27\x1c" + name_.encode())
+                return f_, f"/tmp/jarvis-anhaenge/{_kenn}/{f_.name}"
+
+            # Echte Werkzeugausgabe von `7z l`: sie nennt das Archiv mit Pfad.
+            def _7z_text(modell_):
+                return (f"7-Zip 23.01\n\nScanning the drive for archives:\n"
+                        f"1 file, 2634139 bytes\n\nListing archive: {modell_}\n\n--\n"
+                        f"Path = {modell_}\nType = 7z\n")
+
+            # Einheit: die ECHTE Ortspruefung. Jede Form einzeln, damit genau
+            # ein Weg zum Treffer fuehrt.
+            _hex = uuid.uuid4().hex[:12]
+            (tmpdir / f"anhang_{_hex}_x.7z").write_bytes(b"x")
+            (tmpdir / "anhang_kurz_x.7z").write_bytes(b"x")
+            (tmpdir / "unter").mkdir(exist_ok=True)
+            (tmpdir / "unter" / f"anhang_{_hex}_x.7z").write_bytes(b"x")
+            (tmpdir / "ergebnis.7z").write_bytes(b"x")
+            pruefe("Ortspruefung: Kopie in ANH_ROOT/<kennung> ist Eingabe",
+                   _LT_ECHT.ist_anhang_kopie(_anhang("a.7z")[0]))
+            pruefe("Ortspruefung: ohne Isolation (direkt in /tmp, exaktes Muster) ist Eingabe",
+                   _LT_ECHT.ist_anhang_kopie(tmpdir / f"anhang_{_hex}_x.7z"))
+            pruefe("Ortspruefung: falsches Muster direkt in /tmp ist KEINE Eingabe",
+                   not _LT_ECHT.ist_anhang_kopie(tmpdir / "anhang_kurz_x.7z"))
+            pruefe("Ortspruefung: Muster in einem UNTERverzeichnis von /tmp ist KEINE Eingabe",
+                   not _LT_ECHT.ist_anhang_kopie(tmpdir / "unter" / f"anhang_{_hex}_x.7z"))
+            pruefe("Ortspruefung: gewoehnliche Ergebnisdatei ist KEINE Eingabe",
+                   not _LT_ECHT.ist_anhang_kopie(tmpdir / "ergebnis.7z"))
+            _sl = tmpdir / f"anhang_{uuid.uuid4().hex[:12]}_link.7z"
+            _sl.symlink_to(tmpdir / "ergebnis.7z")
+            pruefe("Ortspruefung: ein Symlink mit Anhangnamen auf ein Ergebnis zaehlt nicht",
+                   not _LT_ECHT.ist_anhang_kopie(_sl))
+
+            # POSITIVKONTROLLE: mit blinder Ortspruefung zieht derselbe Aufruf
+            # die Kopie weg – genau der Vorfall. Sonst waere "liegt noch da"
+            # trivial wahr.
+            _l16.anhang_blind = True
+            _f0, _m0 = _anhang("kontrolle.7z")
+            _s0 = AgentStub(EXT)
+            asyncio.run(deliver16(_s0, None, _7z_text(_m0), set(), "m.mustermann",
+                                  since=jetzt, melden=False, aus_werkzeug=True))
+            _l16.anhang_blind = False
+            if _f0.exists() or not _chips16(_s0):
+                print("ABBRUCH: Positivkontrolle – die Anhang-Kopie wurde ohne Ortspruefung "
+                      "NICHT verschoben; der Aufbau stellt den Vorfall nicht her (Exit 2).")
+                return 2
+            pruefe("Positivkontrolle: ohne Ortspruefung wird die Kopie verschoben (der Vorfall)",
+                   True)
+
+            _name16 = f"neueLogs_{uuid.uuid4().hex[:6]}.7z"
+            _f, _m = _anhang(_name16)
+            # Die Roh-Datei des Uploads, vermerkt wie in main.py (ECHTE Registry-
+            # Funktion, umgebogen auf die Wegwerf-Datei).
+            _roh = docs / _name16
+            _roh.write_bytes(_f.read_bytes())
+            _DOC_ECHT.register_upload(_roh.name, "m.mustermann")
+            dok.register(_roh.name, "m.mustermann")
+            _g16 = set()
+
+            _s1 = AgentStub(EXT)
+            asyncio.run(deliver16(_s1, None, _7z_text(_m), _g16, "m.mustermann",
+                                  since=jetzt, melden=False, aus_werkzeug=True))
+            pruefe("die Anhang-Kopie liegt nach dem Werkzeugschritt NOCH da (der gemeldete Fall)",
+                   _f.is_file())
+            pruefe("… und es gibt keinen ungefragten Chip dafuer",
+                   not _chips16(_s1), str(_s1.gesendet))
+
+            _s2 = AgentStub(EXT)
+            asyncio.run(deliver16(_s2, None,
+                                  f"Ich habe {_name16} entpackt. Die Logs aus {_m} zeigen …",
+                                  _g16, "m.mustermann", since=jetzt, melden=True))
+            pruefe("die Endantwort (Pfad + Name) liefert weder Kopie noch Upload aus",
+                   not _chips16(_s2), str(_s2.gesendet))
+            pruefe("… die Kopie liegt weiter da, die Roh-Datei unberuehrt",
+                   _f.is_file() and _roh.is_file())
+            pruefe("… und es kommt keine Warnung, dass etwas fehle",
+                   not any("Konnte nicht zum Download" in m for m in _s2.gesendet),
+                   str(_s2.gesendet))
+
+            # Ausdruecklich angefordert: Chip JA, als KOPIE.
+            _s3 = AgentStub(EXT)
+            asyncio.run(deliver16(_s3, None, f"Hier: [[JARVIS_DELIVER:{_m}]]",
+                                  _g16, "m.mustermann", since=jetzt, melden=True))
+            _u3 = chip_url(_s3.gesendet)
+            pruefe("ein Liefer-Marker liefert den Anhang trotzdem aus",
+                   _u3 is not None and (docs / _u3).is_file(), str(_s3.gesendet))
+            pruefe("… und laesst die Arbeitskopie liegen", _f.is_file())
+
+            # Ein Werkzeug, das SPAETER eine Datei gleichen Namens in
+            # data/documents erzeugt, liefert ein Ergebnis – die Upload-
+            # Eigenschaft haengt an der unveraenderten Fassung.
+            _neu = docs / f"bericht_{uuid.uuid4().hex[:6]}.xlsx"
+            _neu.write_bytes(b"PK\x03\x04alt")
+            _DOC_ECHT.register_upload(_neu.name, "m.mustermann")
+            dok.register(_neu.name, "m.mustermann")
+            pruefe("Registry: frisch hochgeladen gilt als Upload",
+                   _DOC_ECHT.ist_upload(_neu.name, _neu.stat().st_mtime))
+            os.utime(_neu, (time.time() + 30, time.time() + 30))
+            pruefe("Registry: spaeter neu geschrieben gilt NICHT mehr als Upload",
+                   not _DOC_ECHT.ist_upload(_neu.name, _neu.stat().st_mtime))
+            pruefe("Registry: eine nie hochgeladene Datei ist kein Upload",
+                   not _DOC_ECHT.ist_upload("gibt_es_nicht.xlsx", 0.0))
+            _s4 = AgentStub(EXT)
+            asyncio.run(deliver16(_s4, None, f"Fertig: {_neu.name}", set(),
+                                  "m.mustermann", since=jetzt, melden=True))
+            pruefe("… und wird als Ergebnis ausgeliefert", bool(_chips16(_s4)),
+                   str(_s4.gesendet))
+        finally:
+            _LT_ECHT.ANH_ROOT, _LT_ECHT.TMP_ECHT = _alt_anh, _alt_tmp
 
     print(f"\n{ok} ok, {fehler} Fehler ({ok + fehler} Pruefungen)")
     return 1 if fehler else 0

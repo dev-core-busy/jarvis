@@ -1677,23 +1677,25 @@
         return bar;
     }
 
-    // PDF-Export ohne externe Libs: Druckfenster mit gerendertem Bubble-Inhalt.
+    // Einzelne Antwort als PDF: DERSELBE Weg wie "Chat als PDF", nur mit einer
+    // Zeile. Bis 2026-11-23 gab es hier eine zweite, aeltere Fassung: rohes
+    // `bubble.innerHTML` per document.write, kein <base> (relative Bildadressen
+    // loesten gegen about:blank auf), ein leeres <canvas> statt Diagramm,
+    // `alert()` bei blockiertem Pop-up und `print()` nach festen 350 ms statt
+    // nach dem Bildladen. Gemeldet war ein Absturz beim PDF aus einer Antwort
+    // (ECHT, nicht nachgestellt) - zwei Fassungen fuer denselben Vorgang laufen
+    // auseinander, deshalb gibt es jetzt nur noch die in chatlib.
     function _exportBubblePdf(bubble) {
-        const w = window.open('', '_blank');
-        if (!w) { alert(window.t ? window.t('bubble.popup_blocked') : 'Bitte Pop-ups erlauben, um als PDF zu exportieren.'); return; }
-        const title = (window.t ? window.t('chat.title') : 'Chat');
-        w.document.write(
-            '<!doctype html><html><head><meta charset="utf-8"><title>' + title + '</title>'
-            + '<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.55;color:#111;max-width:820px;margin:0 auto;padding:28px;}'
-            + 'pre{background:#f4f4f5;border-radius:8px;padding:12px;overflow:auto;white-space:pre-wrap;word-break:break-word;}'
-            + 'code{background:#f4f4f5;border-radius:4px;padding:1px 4px;} pre code{padding:0;background:none;}'
-            + 'img,video{max-width:100%;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #ccc;padding:5px 9px;text-align:left;}'
-            + 'a{color:#4338ca;word-break:break-all;} h1,h2,h3{line-height:1.25;}</style></head><body>'
-            + (bubble.innerHTML || '') + '</body></html>'
-        );
-        w.document.close();
-        w.focus();
-        setTimeout(() => { try { w.print(); } catch (e) {} }, 350);
+        const lib = window.JarvisChatLib;
+        const row = bubble && bubble.closest ? bubble.closest('.msg-row') : null;
+        if (!lib || !lib.exportTranscriptPdf || !row) return;
+        const s = _sessions.find(x => x.id === _activeSid);
+        lib.exportTranscriptPdf({
+            rows: [row],
+            titel: (s && s.title) || (window.t ? window.t('chat.untitled') : 'Chat'),
+            userName: _currentUser || (window.t ? window.t('chatpdf.you') : 'Du'),
+            botName: window.jarvisMarke ? window.jarvisMarke() : 'Jarvis',
+        });
     }
 
     // ── "Chat als PDF": der KOMPLETTE Verlauf der Sitzung ────────────────────

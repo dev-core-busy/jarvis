@@ -471,6 +471,107 @@ abschnitt('5. i18n: jeder benutzte Schluessel existiert in DE und EN');
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+abschnitt('6. Einzelne Antwort als PDF: EIN Weg, und kein Doppelstart');
+
+/* ECHT 2026-11-23: "Stuerzt ab bei PDF-Erstellung aus Abfrage" – nicht
+ * nachgestellt. Bis dahin gab es fuer die einzelne Antwort eine ZWEITE,
+ * aeltere Fassung in chat.js (rohes innerHTML, kein <base>, leeres <canvas>,
+ * print() nach festen 350 ms). Gemessen wird die WIRKUNG: der Knopf fuehrt in
+ * exportTranscriptPdf, mit genau seiner Zeile – und oeffnet selbst kein
+ * Fenster mehr. */
+{
+    const teil = schneide(CHATJS, '_exportBubblePdf');
+    pruefe(teil.length > 0, '_exportBubblePdf gefunden (Positivkontrolle)');
+    const dom = new JSDOM('<!doctype html><html><body><div id="messages"></div></body></html>',
+        { url: 'https://jarvis.example/chat', runScripts: 'outside-only' });
+    const w = dom.window;
+    sitzungLaden(w);
+    const gerufen = [], geoeffnet = [];
+    w.open = (...a) => { geoeffnet.push(a); return null; };
+    w.alert = () => { geoeffnet.push('alert'); };
+    w.JarvisChatLib = { exportTranscriptPdf: (o) => { gerufen.push(o); return Promise.resolve(true); } };
+    w.jarvisMarke = () => 'Contoso DP';
+    w.t = (k) => k;
+    const prolog = 'var _sessions = [{ id: "s1", title: "Meine Sitzung" }];\n'
+        + 'var _activeSid = "s1";\n'
+        + 'var _currentUser = "firma\\\\sven";\n';
+    sicher(() => w.eval(prolog + teil), 'Schnitt laeuft in jsdom');
+    const d = w.document;
+    d.getElementById('messages').innerHTML =
+          '<div class="msg-row user"><div><div class="msg-bubble">Frage</div></div></div>'
+        + '<div class="msg-row bot" id="ziel"><div class="msg-avatar">J</div><div>'
+        + '<div class="msg-time">10:01</div><div class="msg-bubble">Antwort</div></div></div>'
+        + '<div class="msg-row bot"><div><div class="msg-bubble">Spaeter</div></div></div>';
+    const bubble = d.querySelector('#ziel .msg-bubble');
+    sicher(() => w._exportBubblePdf(bubble), 'Klick auf den PDF-Knopf der Antwort');
+    const o = gerufen[0];
+    pruefe(gerufen.length === 1, 'der Knopf fuehrt in exportTranscriptPdf (EINE Fassung)', 'n=' + gerufen.length);
+    pruefe(geoeffnet.length === 0,
+        'der Knopf oeffnet SELBST kein Fenster und kein alert – das tut nur chatlib',
+        JSON.stringify(geoeffnet));
+    if (o) {
+        pruefe(Array.isArray(o.rows) && o.rows.length === 1 && o.rows[0] === d.getElementById('ziel'),
+            'genau die ZEILE der angeklickten Antwort geht mit', 'n=' + (o.rows || []).length);
+        pruefe(o.titel === 'Meine Sitzung' && o.botName === 'Contoso DP' && o.userName === 'firma\\sven',
+            'Titel, Marke und Benutzer wie beim Verlaufs-Export', JSON.stringify([o.titel, o.botName, o.userName]));
+    }
+}
+
+// ── Einzahl im Kopf ───────────────────────────────────────────────────────
+{
+    const { w } = fenster();
+    const rows = verlaufBauen(w).filter(r => r.classList.contains('msg-row') && r.classList.contains('bot')
+                                          && r.style.display !== 'none');
+    pruefe(rows.length === 1, 'Probe: genau eine Antwort (Positivkontrolle)', 'n=' + rows.length);
+    await w.JarvisChatLib.exportTranscriptPdf({ rows, titel: 'Eins' });
+    const txt = w.__kind ? w.__kind.document.body.textContent : '';
+    pruefe(/chatpdf\.msg_one/.test(txt) && !/chatpdf\.msgs/.test(txt),
+        'eine einzelne Nachricht heisst im Kopf "1 Nachricht", nicht "1 Nachrichten"');
+}
+
+// ── Doppelklick: nur EIN Druckfenster ─────────────────────────────────────
+{
+    const { w, spur } = fenster();
+    const rows = verlaufBauen(w).filter(r => r.style.display !== 'none');
+    const p1 = w.JarvisChatLib.exportTranscriptPdf({ rows, titel: 'A' });
+    const p2 = w.JarvisChatLib.exportTranscriptPdf({ rows, titel: 'B' });
+    const [r1, r2] = await Promise.all([p1, p2]);
+    pruefe(spur.filter(s => s === 'open').length === 1,
+        'zweiter Aufruf waehrend der Vorbereitung oeffnet KEIN zweites Fenster', JSON.stringify(spur));
+    pruefe(spur.filter(s => s === 'print').length === 1, 'genau ein print()', JSON.stringify(spur));
+    pruefe(r1 === true && r2 === false, 'der erste meldet Erfolg, der zweite false', JSON.stringify([r1, r2]));
+    // Nach dem Ende ist die Sperre wieder offen – sonst ginge nur EIN Export je Seitenaufruf.
+    await w.JarvisChatLib.exportTranscriptPdf({ rows, titel: 'C' });
+    pruefe(spur.filter(s => s === 'open').length === 2,
+        'nach dem Ende des ersten Exports geht der naechste wieder', JSON.stringify(spur));
+}
+{
+    // Ein Fehlschlag (Pop-up blockiert) darf die Sperre nicht stehen lassen.
+    const { w, spur } = fenster({ keinFenster: true });
+    const rows = verlaufBauen(w).filter(r => r.style.display !== 'none');
+    await w.JarvisChatLib.exportTranscriptPdf({ rows });
+    await w.JarvisChatLib.exportTranscriptPdf({ rows });
+    pruefe(spur.filter(s => s === 'open').length === 2,
+        'nach einem gescheiterten Export ist die Sperre wieder offen', JSON.stringify(spur));
+}
+{
+    // Haengt ein Bildabruf ohne Antwort, darf die Sperre nicht ewig gelten.
+    const { w, spur } = fenster();
+    const rows = verlaufBauen(w).filter(r => r.style.display !== 'none');
+    w.fetch = () => { spur.push('fetch:haengt'); return new Promise(() => {}); };
+    let jetzt = 1e12;
+    w.Date.now = () => jetzt;
+    w.JarvisChatLib.exportTranscriptPdf({ rows, titel: 'haengt' });
+    w.JarvisChatLib.exportTranscriptPdf({ rows, titel: 'gleich danach' });
+    pruefe(spur.filter(s => s === 'open').length === 1,
+        'Positivkontrolle: waehrend der erste haengt, ist die Sperre aktiv', JSON.stringify(spur));
+    jetzt += 61000;
+    w.JarvisChatLib.exportTranscriptPdf({ rows, titel: 'spaeter' });
+    pruefe(spur.filter(s => s === 'open').length === 2,
+        'nach dem Zeitdeckel (60 s) oeffnet ein neuer Export trotz haengendem Abruf', JSON.stringify(spur));
+}
+
 _bilanz = true;
 console.log('\n──────────────────────────────');
 console.log(ok + ' OK, ' + fail + ' FAIL');

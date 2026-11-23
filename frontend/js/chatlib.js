@@ -1540,7 +1540,26 @@
      *   hinweise: [string],   // Zeilen, die im Kopf stehen muessen (z.B. was FEHLT)
      * }
      */
+    /* Doppelstart-Sperre. Ein Doppelklick auf den PDF-Knopf oeffnete zwei
+     * Druckfenster, und beide riefen `print()` - zwei Druckdialoge desselben
+     * Ursprungs gleichzeitig (Chrome meldet dabei "Page is already being
+     * printed"). Solange ein Export vorbereitet wird, bleibt jeder weitere
+     * Aufruf wirkungslos. MIT ZEITDECKEL: haengt ein Abruf ohne Antwort, darf
+     * die Sperre den Export nicht bis zum Neuladen der Seite blockieren. */
+    var PDF_SPERRE_MS = 60000;
+    var _pdfLaeuftSeit = 0;
+
     async function exportTranscriptPdf(opts) {
+        var jetzt = Date.now();
+        if (_pdfLaeuftSeit && jetzt - _pdfLaeuftSeit < PDF_SPERRE_MS) return false;
+        _pdfLaeuftSeit = jetzt;
+        // Der innere Aufruf laeuft bis zu seinem ersten await SYNCHRON - das
+        // open() bleibt damit in der Benutzergeste (siehe (1)).
+        try { return await _pdfExport(opts); }
+        finally { _pdfLaeuftSeit = 0; }
+    }
+
+    async function _pdfExport(opts) {
         opts = opts || {};
         var rows = Array.prototype.slice.call(opts.rows || []);
         var hatNachricht = rows.some(function (r) {
@@ -1609,7 +1628,9 @@
             var meta = d.createElement('p');
             meta.className = 'jv-pdf-meta';
             meta.textContent = _tt('chatpdf.exported', 'Exportiert am {d}').split('{d}').join(stand.toLocaleString())
-                + ' · ' + _tt('chatpdf.msgs', '{n} Nachrichten').split('{n}').join(String(gebaut.stats.nachrichten));
+                + ' · ' + (gebaut.stats.nachrichten === 1
+                    ? _tt('chatpdf.msg_one', '1 Nachricht')
+                    : _tt('chatpdf.msgs', '{n} Nachrichten').split('{n}').join(String(gebaut.stats.nachrichten)));
             kopf.appendChild(meta);
             hinweise.forEach(function (txt) {
                 if (!txt) return;

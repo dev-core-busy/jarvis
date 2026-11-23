@@ -62,6 +62,15 @@ const WACHHUND = require('./lib/wachhund')(function () {
 }, 25000);
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+// Ausschnitt statt der VOLLEN settings.html: ausgefuehrt wird nur der
+// Verdrahtungsblock aus app.js, und der fasst Knopf und Statuszeile im
+// Profil-Reiter an (2026-11-23, die vollen Aufbauten waren der groesste Teil
+// der Laufzeit). skripte: true, weil die volle Seite ihre <script>-Tags im DOM
+// traegt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(HTML, ['settings-tab-profiles'], { skripte: true });
+check('Ausschnitt der Proben: Profil-Reiter gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
 const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
 const I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
 
@@ -85,7 +94,7 @@ if (!/addEventListener\('click'/.test(BLOCK) || !/restart_back/.test(BLOCK)
 
 // ── Ein Lauf: Seite, Uhr, fetch-Attrappe, Klick ───────────────────────────
 async function lauf(opt) {
-    const dom = new JSDOM(HTML, {
+    const dom = new JSDOM(AUSSCHNITT.html, {
         url: 'https://localhost/settings',
         runScripts: 'outside-only',
         pretendToBeVisual: false,

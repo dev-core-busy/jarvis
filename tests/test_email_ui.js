@@ -569,9 +569,19 @@ abschnitt('3. Protokoll');
 /* ═══════════════════════════════════════════════════════════════════════ */
 abschnitt('4. Einstellungs-Reiter: zwei Knoepfe, zwei Teilmengen');
 /* ═══════════════════════════════════════════════════════════════════════ */
+// Ausschnitt statt der VOLLEN settings.html: der Reiter-Teil braucht nur den
+// E-Mail-Reiter (2026-11-22, 10 von 21 s waren Aufbauten der ganzen Seite).
+// Teil 5 liest Markup und Verdrahtung weiter am vollen Text. skripte: true,
+// weil die volle Seite ihre <script>-Tags im DOM traegt.
+// Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(SET_HTML, ['settings-tab-email'], { skripte: true });
+pruefe(AUSSCHNITT.fehlend.length === 0, 'Ausschnitt der Proben: E-Mail-Reiter gefunden (Positivkontrolle)',
+       AUSSCHNITT.fehlend.join(', '));
+
 function baueReiter(opt) {
     opt = opt || {};
-    const dom = new JSDOM(SET_HTML, { url: 'https://x/settings', runScripts: 'outside-only' });
+    const dom = new JSDOM(AUSSCHNITT.html, { url: 'https://x/settings', runScripts: 'outside-only' });
     const w = dom.window;
     w.localStorage.setItem('jarvis_token', 'T');
     const rufe = [];

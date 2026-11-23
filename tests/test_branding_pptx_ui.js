@@ -23,6 +23,14 @@ function check(name, cond, detail) {
 function section(t) { console.log('\n\x1b[1m' + t + '\x1b[0m'); }
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+// Ausschnitt statt der VOLLEN settings.html: die PowerPoint-Vorlagen leben im Branding-Reiter
+// (2026-11-23, die vollen Aufbauten waren der groesste Teil der Laufzeit).
+// skripte: true, weil die volle Seite ihre <script>-Tags im DOM traegt.
+// Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(HTML, ['settings-tab-branding'], { skripte: true });
+check('Ausschnitt der Proben: Branding-Reiter gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
 const I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
 const BRANDING = fs.readFileSync(path.join(ROOT, 'frontend/js/branding.js'), 'utf8');
 
@@ -30,7 +38,7 @@ const BRANDING = fs.readFileSync(path.join(ROOT, 'frontend/js/branding.js'), 'ut
  * gleiche Begründung wie im SAP-UI-Test). branding.js allein genügt: der
  * Vorlagen-Abschnitt hängt nur an BrandingAdmin. */
 function fenster(antworten) {
-    const dom = new JSDOM(HTML, { url: 'https://localhost/settings', runScripts: 'outside-only' });
+    const dom = new JSDOM(AUSSCHNITT.html, { url: 'https://localhost/settings', runScripts: 'outside-only' });
     const w = dom.window;
     const rufe = [];
     w.localStorage.setItem('jarvis_token', 'testtoken');

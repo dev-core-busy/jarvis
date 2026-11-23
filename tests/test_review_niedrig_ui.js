@@ -89,6 +89,15 @@ const json = (d, st) => Promise.resolve({ ok: (st || 200) < 300, status: st || 2
 
 (async () => {
 const SETTINGS = lies('frontend/settings.html');
+// Ausschnitt statt der VOLLEN settings.html fuer die beiden Proben auf der
+// Einstellungsseite: AD-Status (settings_ad.js) und Sandbox (security_incidents.js)
+// leben im Sicherheits-Reiter (2026-11-22, 15 von 29 s waren Aufbauten der ganzen
+// Seite). skripte: true, weil die volle Seite ihre <script>-Tags im DOM traegt.
+// Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(SETTINGS, ['settings-tab-security'], { skripte: true });
+check('Ausschnitt der Proben: Sicherheits-Reiter gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
 
 // ── 1. settings_ad.js ───────────────────────────────────────────────────────
 section('1. Firmenverzeichnis-Status: Theme-Klassen und i18n (echte settings.html)');
@@ -106,7 +115,7 @@ const MODI = [
 ];
 for (const lang of ['de', 'en']) for (const [modus, extra, klasse, textVon] of MODI) {
     const AD = Object.assign({}, AD_BASIS, extra);
-    const s = await seite(SETTINGS, {
+    const s = await seite(AUSSCHNITT.html, {
         lang, module: ['frontend/js/i18n.js', 'frontend/js/settings_ad.js'],
         fetch: (u) => String(u).split('?')[0] === '/api/auth/ad_status' ? json(AD) : json({})
     });
@@ -159,7 +168,7 @@ section('2. Sandbox "auch fuer Administratoren": Fehlschlag stellt das Kaestchen
 for (const [antwort, soll, name] of [[{ ok: true, auch_admins: true, grenzen: {} }, true, 'Positivkontrolle: Erfolg -> bleibt an'],
                                      [{ ok: false, error: 'nein' }, false, '⚠ Server lehnt ab -> Kaestchen zurueck'],
                                      [null, false, '⚠ Netzfehler -> Kaestchen zurueck']]) {
-    const s = await seite(SETTINGS, {
+    const s = await seite(AUSSCHNITT.html, {
         module: ['frontend/js/icons.js', 'frontend/js/i18n.js', 'frontend/js/security_incidents.js'],
         fetch: (u) => {
             if (String(u).split('?')[0] === '/api/security/sandbox/config')

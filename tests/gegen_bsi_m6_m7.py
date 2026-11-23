@@ -217,6 +217,29 @@ PROBEN = [
      '      - name: Ergebnis-Cache der Waechter sichern\n'),
     ("Ergebnis-Cache mit festem Schluessel (zweites Speichern scheitert)", WF,
      '          path: ${{ runner.temp }}/waechter-cache\n'
+    # ── venv-Cache (2026-11-22) ──
+    ("venv-Cache mit Teiltreffer (restore-keys)", WF,
+     "-${{ hashFiles('requirements.lock') }}\n\n      - name: venv + Abhaengigkeiten",
+     "-${{ hashFiles('requirements.lock') }}\n          restore-keys: |\n            venv-\n\n"
+     "      - name: venv + Abhaengigkeiten"),
+    ("venv-Cache-Schluessel ohne Lock-Inhalt", WF,
+     "-${{ hashFiles('requirements.lock') }}\n\n      - name: venv + Abhaengigkeiten",
+     "\n\n      - name: venv + Abhaengigkeiten"),
+    ("Installation nur ohne Treffer (wiederhergestellte venv ungeprueft)", WF,
+     '      - name: venv + Abhaengigkeiten (requirements.lock, --require-hashes)\n        run: |\n',
+     '      - name: venv + Abhaengigkeiten (requirements.lock, --require-hashes)\n'
+     "        if: steps.venv_cache.outputs.cache-hit != 'true'\n        run: |\n"),
+    ("venv auch bei Treffer gesichert", WF,
+     "      - name: venv im Cache sichern\n        if: steps.venv_cache.outputs.cache-hit != 'true'\n",
+     '      - name: venv im Cache sichern\n'),
+    ("venv erst nach einem weiteren pip install gesichert", WF,
+     '          venv/bin/pip check\n\n      - name: venv im Cache sichern\n',
+     '          venv/bin/pip check\n\n      - name: frueh\n'
+     '        run: venv/bin/pip install -q exchangelib==5.6.0\n\n      - name: venv im Cache sichern\n'),
+    ("venv-Cache-Action per Tag statt per Commit", WF,
+     '        id: venv_cache\n'
+     '        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)\n',
+     '        id: venv_cache\n        uses: actions/cache/restore@v6\n'),
      '          key: waechter-cache-${{ github.run_id }}-${{ github.run_attempt }}\n'
      '          restore-keys: |\n',
      '          path: ${{ runner.temp }}/waechter-cache\n'

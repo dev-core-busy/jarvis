@@ -62,6 +62,13 @@ const wachhund = require('./lib/wachhund')(() => {
 }, 20000);
 
 const HTML  = fs.readFileSync(path.join(ROOT, 'frontend', 'settings.html'), 'utf8');
+// Ausschnitt statt der VOLLEN settings.html: checkSecurity fasst nur die
+// Anmeldemaske, das Sicherheitsband und den Zertifikatsdialog an (2026-11-23,
+// die vollen Aufbauten waren der groesste Teil der Laufzeit). Die einzige
+// .login-extras der Seite liegt in der Anmeldemaske. Regeln:
+// tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(HTML, ['login-screen', 'security-banner', 'cert-modal'], { skripte: true });
 const APPJS = fs.readFileSync(path.join(ROOT, 'frontend', 'js', 'app.js'), 'utf8');
 // ⚠ NUR DIE BEIDEN MASSGEBLICHEN REGELN aus style.css, nicht die ganze Datei:
 // jsdoms Selektor-Bibliothek (nwsapi) wirft an einem `:has()` weiter unten, und
@@ -102,7 +109,7 @@ function warte(n) {
 }
 
 async function lauf(url) {
-    const dom = new JSDOM(HTML, { url, runScripts: 'outside-only', pretendToBeVisual: true });
+    const dom = new JSDOM(AUSSCHNITT.html, { url, runScripts: 'outside-only', pretendToBeVisual: true });
     const w = dom.window;
     const st = w.document.createElement('style');
     st.textContent = CSS;
@@ -132,6 +139,8 @@ async function lauf(url) {
     pruefe('beide Regeln aus style.css gelesen und mit display:flex',
            /display:\s*flex/.test(regel('.btn-link')) && /display:\s*flex/.test(regel('.login-extras')),
            CSS.slice(0, 80));
+    pruefe('Ausschnitt der Proben: Anmeldemaske, Band und Dialog gefunden (Positivkontrolle)',
+           AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
     if (fail) { bilanz(); process.exit(2); }
 
     // Die Messung muss Sichtbarkeit ueberhaupt feststellen koennen – sonst waere
@@ -165,7 +174,7 @@ async function lauf(url) {
     console.log('── Markup-Vorgabe');
     // Faellt app.js aus, muss der Knopf WEG bleiben statt faelschlich zu
     // erscheinen: die Vorgabe im Markup ist `display:none`, nicht `hidden`.
-    const roh = new JSDOM(HTML, { url: 'https://pruef.local/' });
+    const roh = new JSDOM(AUSSCHNITT.html, { url: 'https://pruef.local/' });
     const rohBox = roh.window.document.querySelector('.login-extras');
     pruefe('Container traegt im Markup display:none (kein Aufblitzen, kein hidden)',
            !!rohBox && /display:\s*none/.test(rohBox.getAttribute('style') || ''),

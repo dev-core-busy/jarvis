@@ -123,10 +123,24 @@ const MODUL = {
                   admin: '/api/vemas/admin/accounts', bereich: 'VEMAS', pw: 'vemas-password' }, KACHEL),
 };
 
+// Ausschnitt je Reiter statt der VOLLEN settings.html: jede Probe braucht nur
+// ihren eigenen Reiter, 27 Aufbauten der ganzen Seite kosteten 26 der 37 s
+// (2026-11-22). Abschnitt 1 misst den Aufbau weiter am vollen DOM. skripte: true,
+// weil die volle Seite ihre <script>-Tags im DOM traegt.
+// Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = {};
+for (const name of Object.keys(REITER)) {
+    AUSSCHNITT[name] = ausschnitt(HTML, ['settings-tab-' + name], { skripte: true });
+}
+check(Object.values(AUSSCHNITT).every((a) => a.fehlend.length === 0),
+      'Ausschnitt der Proben: alle vier Reiter gefunden (Positivkontrolle)',
+      Object.values(AUSSCHNITT).flatMap((a) => a.fehlend).join(', '));
+
 async function reiter(name, cfg, confirmAntwort, accounts) {
     const m = MODUL[name];
     const posts = [], fragen = [], adminAbrufe = [];
-    const s = new JSDOM(HTML, {
+    const s = new JSDOM(AUSSCHNITT[name].html, {
         url: 'https://localhost/settings', runScripts: 'outside-only',
         beforeParse(win) {
             win.localStorage.setItem('jarvis_token', 'testtoken');

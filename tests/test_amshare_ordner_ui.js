@@ -44,9 +44,19 @@ function warte(pruef, ms) {
   });
 }
 
+// Ausschnitt statt der VOLLEN settings.html: die Bereitstellung lebt im
+// AI-Maus-Reiter (2026-11-23, die vollen Aufbauten waren der groesste Teil der
+// Laufzeit). skripte: true, weil die volle Seite ihre <script>-Tags im DOM
+// traegt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(fs.readFileSync('frontend/settings.html', 'utf8'),
+                              ['settings-tab-aimouse'], { skripte: true });
+c('Ausschnitt der Proben: AI-Maus-Reiter gefunden (Positivkontrolle)',
+  AUSSCHNITT.fehlend.length === 0);
+
 /** Seite bauen. `opt.fs` = File System Access API vorhanden. */
 function seite(opt) {
-  const d = new JSDOM(fs.readFileSync('frontend/settings.html', 'utf8'),
+  const d = new JSDOM(AUSSCHNITT.html,
                       { url: 'https://x/settings', runScripts: 'outside-only' });
   const w = d.window;
   sitzungLaden(w);

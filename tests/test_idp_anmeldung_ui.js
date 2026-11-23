@@ -61,9 +61,19 @@ const SETTINGS = lies('frontend/settings.html');
 const MODUL = lies('frontend/js/idp_anmeldung.js');
 const MODUL_ADMIN = lies('frontend/js/settings_idp.js');
 const I18N = lies('frontend/js/i18n.js');
+// Ausschnitt fuer die Verhaltensproben (Teil B und die Einstellungsmaske):
+// Anmeldemaske und Sicherheits-Reiter statt der VOLLEN settings.html - 45
+// Aufbauten der ganzen Seite kosteten 62 der 104 s dieses Waechters
+// (2026-11-22). Teil A liest weiter den vollen Text und baut das volle DOM
+// EINMAL (Struktur der Anmeldemaske). Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(SETTINGS.replace(/<script[\s\S]*?<\/script>/g, ''),
+                              ['login-screen', 'settings-tab-security']);
 
 // ── A: Einbindung ───────────────────────────────────────────────────────────
 console.log('A  Einbindung');
+check('Ausschnitt der Proben: Anmeldemaske und Sicherheits-Reiter gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
 check('settings.html laedt idp_anmeldung.js', /<script src="\/static\/js\/idp_anmeldung\.js\?v=\d+"><\/script>/.test(SETTINGS));
 check('settings.html laedt settings_idp.js', /<script src="\/static\/js\/settings_idp\.js\?v=\d+"><\/script>/.test(SETTINGS));
 const knopf = SETTINGS.match(/<a id="btn-idp-login"[^>]*>/);
@@ -111,7 +121,7 @@ check('theme.css: .idp-kennwort-link[hidden] { display: none } (sonst ueberstimm
 
 // ── B: Verhalten ────────────────────────────────────────────────────────────
 function seite(url, antworten) {
-    const html = SETTINGS.replace(/<script[\s\S]*?<\/script>/g, '');
+    const html = AUSSCHNITT.html;
     const vc = new VirtualConsole();
     const z = { posts: [], koepfe: [], nav: [], fehler: [], statusFreigeben: null };
     vc.on('jsdomError', (e) => { if (/navigation/i.test(String(e && e.message))) z.nav.push(e.message); else z.fehler.push(String(e && e.message)); });
@@ -319,7 +329,7 @@ function seite(url, antworten) {
 
     // ── Einstellungsmaske: Schalter nur bei eingeschaltetem IdP ─────────
     {
-        const html = SETTINGS.replace(/<script[\s\S]*?<\/script>/g, '');
+        const html = AUSSCHNITT.html;
         const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'https://jarvis.test/settings' });
         const w = dom.window, d = w.document;
         const posts = [];

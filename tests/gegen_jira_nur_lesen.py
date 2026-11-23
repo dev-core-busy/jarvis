@@ -68,8 +68,11 @@ PROBEN = [
     ("fehlendes Feld gilt als abgeschaltet", "konten",
      "    return cfg.get(PERSOENLICH_SCHALTER) is not False",
      "    return cfg.get(PERSOENLICH_SCHALTER) is True"),
+    # Anker 2026-11-23 nachgezogen: das Loeschen laeuft seit dem gemeinsamen
+    # Zweig fuer Jira UND Confluence ueber das Konten-Modul des Skills.
     ("Abschalten loescht keine Token", "main",
-     "            _nj = _jacc.alle_entfernen()\n", "            _nj = 0\n"),
+     '            _nj = importlib.import_module("backend." + _pers_modul).alle_entfernen()\n',
+     "            _nj = 0\n"),
     ("Admin-Liste ohne Schalter", "main",
      '                         "persoenlich_erlaubt": jira_accounts.persoenlich_erlaubt()})',
      '                         })'),
@@ -85,8 +88,10 @@ PROBEN = [
     ("Schalter wird nicht mitgespeichert", "jirajs",
      "                persoenliche_zugaenge: $('jira-persoenlich') ? $('jira-persoenlich').checked : true\n",
      "                persoenliche_zugaenge: true\n"),
+    # Anker 2026-11-23 nachgezogen: der Zustand steht seitdem in `ohneEigenen`
+    # (auch probePlatzieren liest ihn) - sabotiert wird NUR die Sichtbarkeit.
     ("Mein Jira-Zugang bleibt trotz Abschalten sichtbar", "addonjs",
-     "        if (sect) sect.style.display = (a.persoenlich_erlaubt === false) ? 'none' : '';",
+     "        if (sect) sect.style.display = ohneEigenen ? 'none' : '';",
      "        if (sect) sect.style.display = '';"),
     # Punkt f: Browser-Erweiterung nur ueber den gemeinsamen Lesezugang
     ("aufloesen ignoriert nur_gemeinsam", "konten",

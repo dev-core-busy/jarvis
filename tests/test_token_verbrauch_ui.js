@@ -79,8 +79,16 @@ const ANTWORT = {
     erfasst_seit: T0 - 3600, anzeige_benutzer: { 'a.nutzer': 'BEISPIEL\\a.nutzer' }, aufbewahrung_tage: 90,
 };
 
+// Ausschnitt statt der VOLLEN settings.html: Kopf, Fenster und die beiden Reiter, die ihn tragen (2026-11-22, alle
+// Aufbauten der ganzen Seite zusammen 13 von 21 s). skripte: true, weil die
+// volle Seite ihre <script>-Tags im DOM traegt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(HTML, ['tv-overlay', 'settings-tab-knowledge', 'settings-tab-telemetry'], { skripte: true });
+pruefe(AUSSCHNITT.fehlend.length === 0, 'Ausschnitt der Proben: Fenster, Wissens- und Telemetrie-Reiter gefunden (Positivkontrolle)',
+       AUSSCHNITT.fehlend.join(', '));
+
 function baue(antwortFn) {
-    const dom = new JSDOM(HTML, { url: 'https://x/settings', runScripts: 'outside-only' });
+    const dom = new JSDOM(AUSSCHNITT.html, { url: 'https://x/settings', runScripts: 'outside-only' });
     const w = dom.window;
     const rufe = [];
     w.fetch = (url) => {

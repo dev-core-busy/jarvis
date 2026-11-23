@@ -42,6 +42,14 @@ function check(name, cond, detail) {
 function section(t) { console.log('\n\x1b[1m' + t + '\x1b[0m'); }
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+// Ohne die FREMDEN Reiter statt der vollen settings.html (2026-11-23, die
+// vollen Aufbauten waren der groesste Teil der Laufzeit): app.js laeuft ganz
+// und braucht dafuer den ganzen Rahmen der Seite; die Agent-API-Keys leben im
+// Profil-Reiter, der bleibt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ohneReiter } = require('./lib/seite_ausschnitt');
+const SEITE = ohneReiter(HTML, ['settings-tab-profiles']);
+check('Seite der Proben: Profil-Reiter da, fremde Reiter entfernt (Positivkontrolle)',
+      SEITE.fehlend.length === 0 && SEITE.entfernt.length > 0, SEITE.fehlend.join(', '));
 const APP = fs.readFileSync(path.join(ROOT, 'frontend/js/app.js'), 'utf8');
 // Symbole (Muelleimer/Kreuz) – im Browser das ERSTE Skript jeder Seite.
 // Module wie chat.js/knowledge.js rufen JarvisIcons.trash() beim Rendern auf;
@@ -86,7 +94,7 @@ function appFetch(url, opts) {
 }
 
 function makeDom({ apiOffen }) {
-    const dom = new JSDOM(HTML, { runScripts: 'outside-only', url: 'https://localhost/settings' });
+    const dom = new JSDOM(SEITE.html, { runScripts: 'outside-only', url: 'https://localhost/settings' });
     const { window } = dom;
     window.localStorage.setItem('jarvis_token', 'tok');
     window.localStorage.setItem('jarvis_user', 'jarvis');

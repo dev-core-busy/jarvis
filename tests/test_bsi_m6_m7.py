@@ -888,6 +888,48 @@ def _cpfad(s):
 
 
 _wieder = [(i, s) for i, s in _cache_schritte("restore") if _cpfad(s) == _cenv]
+# venv-Cache (2026-11-22): die Installation aus der Lock kostete je Lauf gut
+# 4 Minuten. Gemessen wird wieder die ANORDNUNG: Wiederherstellen vor der
+# Installation, die Installation selbst ohne Bedingung (sie gleicht einen
+# Treffer gegen die Lock ab), Sichern direkt danach und nur ohne Treffer - also
+# bevor Skill-Locks oder sonst ein pip install die venv erweitern. Und der
+# Schluessel traegt Abbild, Python-Fassung und Lock-Inhalt OHNE Teiltreffer:
+# eine venv einer anderen Lock liesse Pakete stehen, die pip-audit und SBOM
+# dann mitzaehlen.
+_vi = next((i for i, s in enumerate(_ls)
+            if re.search(r"--require-hashes\b", s.get("run") or "")
+            and re.search(r"-r\s+requirements\.lock\b", s.get("run") or "")), None)
+_vw = [(i, s) for i, s in _cache_schritte("restore") if _cpfad(s) == "venv"]
+_vs = [(i, s) for i, s in _cache_schritte("save") if _cpfad(s) == "venv"]
+_vweitere = [i for i, s in enumerate(_ls)
+             if _vi is not None and i > _vi and re.search(r"venv/bin/pip install\b", s.get("run") or "")]
+_py_id = next((s.get("id") for s in _ls if str(s.get("uses", "")).startswith("actions/setup-python@")), None)
+_vkeys = [str((s.get("with") or {}).get("key") or "") for _, s in _vw + _vs]
+check("venv-Cache: Installationsschritt aus der Lock gefunden (Positivkontrolle)", _vi is not None)
+check("…wiederhergestellt VOR der Installation", _vi is not None and len(_vw) == 1 and _vw[0][0] < _vi,
+      [i for i, _ in _vw])
+check("…Installation laeuft immer (ohne if) und gleicht einen Treffer gegen die Lock ab",
+      _vi is not None and "if" not in _ls[_vi], _ls[_vi].get("if") if _vi is not None else None)
+_vid = _vw[0][1].get("id") if len(_vw) == 1 else None
+check("…gesichert direkt nach der Installation und nur ohne Treffer",
+      _vi is not None and len(_vs) == 1 and _vs[0][0] > _vi and bool(_vid)
+      and re.fullmatch(r"steps\.%s\.outputs\.cache-hit\s*!=\s*'true'" % re.escape(str(_vid)),
+                       str(_vs[0][1].get("if", "")).strip()) is not None,
+      [(i, s.get("if")) for i, s in _vs])
+check("…und VOR jedem weiteren pip install in die venv (Skill-Locks, exchangelib)",
+      len(_vs) == 1 and bool(_vweitere) and all(_vs[0][0] < i for i in _vweitere),
+      ([i for i, _ in _vs], _vweitere))
+check("…Schluessel gleich fuer beide und aus Lock-Inhalt, Python-Fassung und Runner-Abbild",
+      len(_vkeys) == 2 and len(set(_vkeys)) == 1 and "hashFiles('requirements.lock')" in _vkeys[0]
+      and bool(_py_id) and f"steps.{_py_id}.outputs.python-version" in _vkeys[0]
+      and re.search(r"steps\.[\w-]+\.outputs\.kennung", _vkeys[0]) is not None, (_py_id, _vkeys))
+check("…ohne restore-keys (ein Teiltreffer braechte eine venv einer anderen Lock)",
+      len(_vw) == 1 and "restore-keys" not in (_vw[0][1].get("with") or {}))
+check("…venv-Cache-Actions per Commit gepinnt (40 Hex), nicht per Tag",
+      bool(_vw) and bool(_vs)
+      and all(re.fullmatch(r"actions/cache/(restore|save)@[0-9a-f]{40}", str(s.get("uses")))
+              for _, s in _vw + _vs), [s.get("uses") for _, s in _vw + _vs])
+
 _sichern = [(i, s) for i, s in _cache_schritte("save") if _cpfad(s) == _cenv]
 check("CI-Waechter mit Ergebnis-Cache ausserhalb des Workspace (runner.temp)",
       isinstance(_cenv, str) and re.fullmatch(r"\$\{\{\s*runner\.temp\s*\}\}/\S+", _cenv) is not None, _cenv)

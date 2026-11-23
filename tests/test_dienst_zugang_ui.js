@@ -29,6 +29,17 @@ function check(b, t, d) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lies = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
+// Ausschnitt statt der VOLLEN settings.html: die beiden Dienstzugaenge leben im
+// Wissens- und im Jira-Reiter (2026-11-23, die vollen Aufbauten waren der
+// groesste Teil der Laufzeit). Abschnitt 4 liest weiter den VOLLEN Text.
+// skripte: true, weil die volle Seite ihre <script>-Tags im DOM traegt.
+// Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(lies('frontend/settings.html'), ['settings-tab-knowledge', 'settings-tab-jira'],
+                              { skripte: true });
+check(AUSSCHNITT.fehlend.length === 0, 'Ausschnitt der Proben: Wissens- und Jira-Reiter gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.join(', '));
+
 function zustand(dienst, quelle, skillAktiv) {
     const skill = dienst === 'loesungsarchiv' ? 'jira' : 'confluence';
     const feld = dienst === 'loesungsarchiv' ? 'loesungsarchiv_api_token' : 'einbindung_api_token';
@@ -37,11 +48,10 @@ function zustand(dienst, quelle, skillAktiv) {
 }
 
 async function seite(opt) {
-    const html = lies('frontend/settings.html');
     const aufrufe = [], fragen = [];
     const z = { loesungsarchiv: zustand('loesungsarchiv', opt.larch || 'sammel', true),
                 confluence_einbindung: zustand('confluence_einbindung', opt.cfb || 'sammel', opt.cfbAktiv !== false) };
-    const s = new JSDOM(html, {
+    const s = new JSDOM(AUSSCHNITT.html, {
         url: 'https://localhost/settings', runScripts: 'outside-only',
         beforeParse(win) {
             win.localStorage.setItem('jarvis_token', 'testtoken');

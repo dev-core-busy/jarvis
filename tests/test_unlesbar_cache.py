@@ -94,9 +94,20 @@ check("nach einem Erfolg ist der Eintrag weg",
       kn._unlesbar_ueberspringen(P, 1000.0, 46_000_000) is None)
 
 print("\n\033[1m3. Deckel und Robustheit\033[0m")
-for i in range(2050):
+# Vorbefuellt ueber den ECHTEN Schreibweg statt 2050-mal _unlesbar_merken:
+# jeder Aufruf schreibt die ganze Datei, die Schleife kostete damit quadratisch
+# ~20 s (2026-11-22, Profil: 98 % in json.dump). Gemessen wird derselbe Deckel -
+# volle Ablage, danach Eintraege ueber _unlesbar_merken - und zusaetzlich, WER
+# weichen muss (die aeltesten nach ts), was die Schleife nie geprueft hat.
+kn._unlesbar_speichern({f"/x/{i}.one": {"mtime": 1.0, "groesse": 1, "grund": "grund", "ts": float(i)}
+                        for i in range(2000)})
+for i in range(2000, 2050):
     kn._unlesbar_merken(f"/x/{i}.one", 1.0, 1, "grund")
-check("der Cache waechst nicht unbegrenzt", len(kn._unlesbar_laden()) <= 2000)
+_dk = kn._unlesbar_laden()
+check("Deckel-Probe: die Vorbefuellung ist angekommen (Positivkontrolle)", "/x/1999.one" in _dk)
+check(f"der Cache waechst nicht unbegrenzt ({len(_dk)} Eintraege)", len(_dk) <= 2000)
+check("…die aeltesten weichen, die neuesten bleiben",
+      "/x/0.one" not in _dk and "/x/49.one" not in _dk and "/x/2049.one" in _dk and "/x/50.one" in _dk)
 io.open(kn._unlesbar_pfad(), "w").write("{kaputt")
 check("⚠ eine beschaedigte Datei wirft nicht (fail-open: wieder versuchen)",
       kn._unlesbar_ueberspringen(P, 1.0, 1) is None)

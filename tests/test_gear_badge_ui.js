@@ -662,8 +662,19 @@ const badge = (d) => d.querySelector('[data-jarvis-settings] .jv-gear-badge');
     // Klapp-Handler, den `_initSecCollapse()` erst beim Aktivieren des Reiters
     // bindet - und "Sicherheitsvorfaelle" startet ZU, "Root-Freigaben" AUF.
     // Ein blindes click() wuerde den offenen zuklappen.
+    // Ohne die FREMDEN Reiter statt der vollen settings.html (2026-11-23, vier
+    // volle Aufbauten samt app.js): app.js laeuft ganz und braucht den Rahmen;
+    // gemessen wird nur im Sicherheits-Reiter, der Profil-Reiter bleibt, weil
+    // openModal ihn als Vorgabe aktiviert. Abschnitt 4 bleibt auf der VOLLEN
+    // Seite - "GENAU sein Panel" misst ueber ALLE Reiter.
+    // Regeln: tests/lib/seite_ausschnitt.js.
+    const { ohneReiter } = require('./lib/seite_ausschnitt');
+    const SEITE5 = ohneReiter(lies('frontend/settings.html'), ['settings-tab-security', 'settings-tab-profiles']);
+    pruefe(SEITE5.fehlend.length === 0 && SEITE5.entfernt.length > 0,
+           'Seite der Proben: Sicherheits- und Profil-Reiter da, fremde entfernt (Positivkontrolle)',
+           SEITE5.fehlend.join(', '));
     async function settingsMit(fokus) {
-        const dom = new JSDOM(lies('frontend/settings.html'),
+        const dom = new JSDOM(SEITE5.html,
             { url: 'https://x/settings', runScripts: 'outside-only',
               virtualConsole: stilleKonsole() });
         const w = dom.window;

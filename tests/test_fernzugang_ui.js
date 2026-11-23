@@ -55,8 +55,16 @@ function stand(teil) {
     return Object.assign(basis, teil || {});
 }
 
+// Ausschnitt statt der VOLLEN settings.html: SSH-Abschnitt im Sicherheits-Reiter
+// und der RDP-Schalter im Profile-Reiter - 24 Aufbauten der ganzen Seite
+// kosteten 25 der 36 s (2026-11-22). Der Markup-Abschnitt (Teil 6) liest weiter
+// den vollen Text. skripte: true, weil die volle Seite ihre <script>-Tags im DOM
+// traegt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(lies('settings.html'), ['settings-tab-security', 'settings-tab-profiles'], { skripte: true });
+
 async function seite(status, antworten) {
-    const dom = new JSDOM(lies('settings.html'), { url: 'https://localhost/settings', runScripts: 'outside-only' });
+    const dom = new JSDOM(AUSSCHNITT.html, { url: 'https://localhost/settings', runScripts: 'outside-only' });
     const w = dom.window;
     w.matchMedia = w.matchMedia || function () {
         return { matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} };
@@ -101,6 +109,8 @@ function text(w, id) { const el = w.document.getElementById(id); return el ? el.
         process.exit(2);
     }
 
+    check('Ausschnitt der Proben: Sicherheits- und Profile-Reiter gefunden (Positivkontrolle)',
+          AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
     console.log('\n── 1. Status');
     let s = await seite(stand());
     const st = text(s.w, 'sec-ssh-status');

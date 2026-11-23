@@ -36,6 +36,7 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6 (Commit gepinnt, Code-Review 2026-10-18)
+        id: py
         with:
           python-version: '3.13'
 
@@ -91,6 +92,31 @@ jobs:
       # Aus der Lock mit Hash-Pruefung (2026-10-21) – pip-audit und SBOM sehen
       # damit GENAU den festgelegten Stand. Vorher stand die torch-Fassung hier
       # ein zweites Mal von Hand; jetzt kommt sie (samt Hash) aus der Lock.
+      #
+      # ⚠ VENV-CACHE (2026-11-22): das Aufsetzen kostete je Lauf gut 4 Minuten
+      # (Lauf 44995900239: 256 s von 15 min). Wiederhergestellt wird NUR bei
+      # GENAU gleichem Schluessel - Runner-Abbild, Python-Fassung und Inhalt der
+      # Lock. KEIN restore-keys: ein Teiltreffer braechte eine venv einer ANDEREN
+      # Lock, pip installierte nur nach und entfernte nie - pip-audit und SBOM
+      # saehen dann Pakete, die nicht in der Lock stehen. Der Installationsschritt
+      # laeuft trotzdem IMMER (ohne `if`): bei einem Treffer findet er alles
+      # erfuellt und ist in Sekunden durch, weicht etwas ab, holt er es mit
+      # Hash-Pruefung. Gesichert wird direkt danach und nur ohne Treffer, also
+      # VOR Skill-Locks und exchangelib - der Cache traegt genau die Lock.
+      # Schreiben koennen nur Laeufe dieses Repos; ein Pull Request speichert in
+      # den Bereich seines PR-Refs, den ein Lauf auf master nicht liest.
+      # Regeln: test_bsi_m6_m7.py (M6.2 venv-Cache).
+      - name: Runner-Abbild (Schluessel des venv-Cache)
+        id: abbild_py
+        run: echo "kennung=${ImageOS:-unbekannt}-${ImageVersion:-unbekannt}" >> "$GITHUB_OUTPUT"
+
+      - name: venv aus dem Cache wiederherstellen
+        id: venv_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)
+        with:
+          path: venv
+          key: venv-${{ steps.abbild_py.outputs.kennung }}-py${{ steps.py.outputs.python-version }}-${{ hashFiles('requirements.lock') }}
+
       - name: venv + Abhaengigkeiten (requirements.lock, --require-hashes)
         run: |
           python -m venv venv
@@ -98,6 +124,13 @@ jobs:
           venv/bin/pip install -q --require-hashes -Ccompile-args=-j2 \
             --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.lock
           venv/bin/pip check
+
+      - name: venv im Cache sichern
+        if: steps.venv_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0 (Commit gepinnt)
+        with:
+          path: venv
+          key: venv-${{ steps.abbild_py.outputs.kennung }}-py${{ steps.py.outputs.python-version }}-${{ hashFiles('requirements.lock') }}
 
       # Werkzeuge in EIGENER venv: in der Dienst-venv installiert, wuerde pip-audit
       # sich selbst und seine Abhaengigkeiten mitpruefen und die SBOM verfaelschen.

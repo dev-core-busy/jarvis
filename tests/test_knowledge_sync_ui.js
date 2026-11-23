@@ -94,10 +94,22 @@ const PEERS = [
     },
 ];
 
+// Ausschnitt statt der VOLLEN settings.html: Wissens-Reiter und die beiden
+// Sync-Dialoge - 21 Aufbauten der ganzen Seite kosteten 24 der 36 s
+// (2026-11-22). Teil 5 liest Markup und Verdrahtung weiter am vollen Text.
+// skripte: true, weil die volle Seite ihre <script>-Tags im DOM traegt.
+// Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(HTML, ['settings-tab-knowledge', 'kbsync-share-modal', 'kbsync-info-modal'],
+                              { skripte: true });
+pruefe(AUSSCHNITT.fehlend.length === 0,
+       'Ausschnitt der Proben: Wissens-Reiter und Sync-Dialoge gefunden (Positivkontrolle)',
+       AUSSCHNITT.fehlend.join(', '));
+
 /** Baut die echte Einstellungsseite mit gemockter API. */
 function bauen(opt) {
     opt = opt || {};
-    const dom = new JSDOM(HTML, { url: 'https://host/settings', runScripts: 'outside-only' });
+    const dom = new JSDOM(AUSSCHNITT.html, { url: 'https://host/settings', runScripts: 'outside-only' });
     const w = dom.window;
     // sitzung.js VOR den Modulen der Seite - im Browser ist sie das ERSTE
     // Skript, und die Module lesen den Token nur ueber window.JarvisSitzung.

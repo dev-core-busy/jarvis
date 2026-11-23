@@ -87,8 +87,16 @@ const ANTWORT_BRUCH_UND_ANERKANNT = Object.assign({}, ANTWORT_OK, {
              anerkannt: ANERKANNT, anzahl_anerkannt: 1 },
 });
 
+// Ausschnitt statt der VOLLEN settings.html: das Protokoll lebt im Telemetrie-Reiter (2026-11-22, alle
+// Aufbauten der ganzen Seite zusammen 13 von 25 s). skripte: true, weil die
+// volle Seite ihre <script>-Tags im DOM traegt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(HTML, ['settings-tab-telemetry', 'settings-tab-knowledge'], { skripte: true });
+pruefe(AUSSCHNITT.fehlend.length === 0, 'Ausschnitt der Proben: Telemetrie- und Wissens-Reiter gefunden (Positivkontrolle)',
+       AUSSCHNITT.fehlend.join(', '));
+
 function baue(antwort, status) {
-    const dom = new JSDOM(HTML, { url: 'https://x/settings', runScripts: 'outside-only' });
+    const dom = new JSDOM(AUSSCHNITT.html, { url: 'https://x/settings', runScripts: 'outside-only' });
     const w = dom.window;
     const rufe = [];
     w.fetch = (url, o) => {

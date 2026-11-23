@@ -308,7 +308,11 @@ check("und sie wuerde den Altstand melden (Probe im Test selbst)",
 _dlurl_rumpf = []
 for d in sorted((WURZEL / "frontend" / "js").glob("*.js")):
     _t = gefiltert(d)
-    for m in re.finditer(r"(?:function\s+|^\s*)_dlUrl\s*\(\s*u\s*\)\s*\{", _t, re.M):
+    # ^[ \t]* statt ^\s*: \s frisst Zeilenumbrueche, und ueber den zu Leerraum
+    # gemachten Kommentarbloecken lief die Suche ab JEDEM Zeilenanfang bis ans
+    # Blockende und zurueck - quadratisch, 18 von 21 s (2026-11-22). Das Ende
+    # eines Treffers (und damit der Rumpf) ist in beiden Fassungen dasselbe.
+    for m in re.finditer(r"(?:function\s+|^[ \t]*)_dlUrl\s*\(\s*u\s*\)\s*\{", _t, re.M):
         _dlurl_rumpf.append((d.name, _t[m.end():_t.find("}", m.end())]))
 check("_dlUrl ist definiert (Positivkontrolle zur naechsten Zeile)",
       len(_dlurl_rumpf) >= 7, [n for n, _ in _dlurl_rumpf])

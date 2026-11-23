@@ -56,6 +56,15 @@ const WACHHUND = require('./lib/wachhund')(function () {
 }, 40000);
 
 const HTML = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+// Ausschnitt statt der VOLLEN settings.html: die Konfliktpruefung lebt im
+// Wissens-Reiter und seinen beiden Dialogen (2026-11-23, die vollen Aufbauten
+// waren der groesste Teil der Laufzeit). skripte: true, weil die volle Seite
+// ihre <script>-Tags im DOM traegt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(HTML, ['settings-tab-knowledge', 'kb-cleanup-modal', 'kb-compact-modal'],
+                              { skripte: true });
+check('Ausschnitt der Proben: Wissens-Reiter und Dialoge gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
 const JS_KB = fs.readFileSync(path.join(ROOT, 'frontend/js/knowledge.js'), 'utf8');
 const JS_I18N = fs.readFileSync(path.join(ROOT, 'frontend/js/i18n.js'), 'utf8');
 const JS_ICONS = fs.readFileSync(path.join(ROOT, 'frontend/js/icons.js'), 'utf8');
@@ -71,7 +80,7 @@ const KONFLIKTE = [
 
 // Ein Lauf: Seite bauen, Gesamtpruefung fahren, optional den Knopf klicken.
 async function lauf(opt) {
-    const dom = new JSDOM(HTML, {
+    const dom = new JSDOM(AUSSCHNITT.html, {
         url: 'https://localhost/settings',
         runScripts: 'outside-only',
         pretendToBeVisual: false,

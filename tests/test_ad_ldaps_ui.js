@@ -50,11 +50,19 @@ const FP = 'sha256:' + 'ab'.repeat(32);
 const json = (d, st) => Promise.resolve({ ok: (st || 200) < 300, status: st || 200,
                                           json: () => Promise.resolve(d) });
 
+// Ausschnitt statt der VOLLEN settings.html: die AD-Verbindung lebt im Sicherheits-Reiter (2026-11-22, alle
+// Aufbauten der ganzen Seite zusammen 14 von 23 s). skripte: true, weil die
+// volle Seite ihre <script>-Tags im DOM traegt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(lies('frontend/settings.html'), ['settings-tab-security'], { skripte: true });
+check('Ausschnitt der Proben: Sicherheits-Reiter gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
+
 async function seite(opt) {
     const vc = new VirtualConsole();
     const fehler = [];
     vc.on('jsdomError', (e) => fehler.push(String(e && e.message)));
-    const dom = new JSDOM(lies('frontend/settings.html'), {
+    const dom = new JSDOM(AUSSCHNITT.html, {
         url: 'https://localhost/settings', runScripts: 'outside-only', virtualConsole: vc, pretendToBeVisual: true });
     const w = dom.window;
     const posts = [];

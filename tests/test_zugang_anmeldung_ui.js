@@ -33,9 +33,21 @@ function check(b, t, d) {
 function section(t) { console.log('\n═══ ' + t); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Ausschnitt statt der VOLLEN settings.html: der Anmeldeschritt lebt in der
+// Anmeldemaske (2026-11-22, 12 von 16 s waren Aufbauten der ganzen Seite).
+// Die Einbindungsreihenfolge (Abschnitt 1) liest weiter den vollen Text.
+// skripte: true, weil die volle Seite ihre <script>-Tags im DOM traegt.
+// Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(fs.readFileSync(path.join(ROOT, 'frontend', 'settings.html'), 'utf8'),
+                              ['login-screen'], { skripte: true });
+check(AUSSCHNITT.fehlend.length === 0, 'Ausschnitt der Proben: Anmeldemaske gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.join(', '));
+
 /** Seite laden; `api(pfad, methode, rumpf)` liefert {status, data} oder wirft. */
 function seite(datei, api) {
-    const html = fs.readFileSync(path.join(ROOT, 'frontend', datei), 'utf8');
+    const html = datei === 'settings.html' ? AUSSCHNITT.html
+        : fs.readFileSync(path.join(ROOT, 'frontend', datei), 'utf8');
     const rufe = [];
     const dom = new JSDOM(html, {
         url: 'https://localhost/', runScripts: 'outside-only', virtualConsole: new VirtualConsole(),

@@ -79,6 +79,12 @@ from backend import sitzung_token as ST    # noqa: E402
 from backend import totp_schutz as TS      # noqa: E402
 
 AS.STORE_PATH = TMP / "anmelde_schutz.json"
+# Zeitbremsen aus: dieser Waechter misst Sperren, Tokens und 2FA, keine Dauer.
+# Mit den Vorgaben wartete jeder Fehlversuch >= 1 s (angleichen) und jeder
+# weitere Versuch derselben IP 2 s (bremse) - 24 der 28 s Laufzeit (Profil
+# 2026-11-22). Die Zeitzusagen selbst misst test_anmelde_spruehen.py, und
+# test_pentest_anmeldung.py stellt sie fuer seinen uebrigen Ablauf genauso ab.
+AS.FEHL_MINDESTDAUER_S, AS.FEHL_STREUUNG_S, AS.SPRUEH_ABSTAND_S = 0.0, 0.0, 0.0
 ST.STORE_PATH = TMP / "auth_sitzungen.json"
 TS.STORE_PATH = TMP / "totp_schritte.json"
 for _p in (AS.STORE_PATH, ST.STORE_PATH, TS.STORE_PATH):

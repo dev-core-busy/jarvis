@@ -103,8 +103,17 @@ function mkFetch(state) {
     };
 }
 
+// Ausschnitt statt der VOLLEN settings.html: die Vorlagen leben im Jira-Reiter (2026-11-22, alle
+// Aufbauten der ganzen Seite zusammen 13 von 17 s). Abschnitt 1 ("liegt im Jira-Reiter, nicht
+// irgendwo auf der Seite") misst weiter am vollen DOM. skripte: true, weil die
+// volle Seite ihre <script>-Tags im DOM traegt. Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(HTML, ['settings-tab-jira'], { skripte: true });
+check('Ausschnitt der Proben: Jira-Reiter gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.length === 0, AUSSCHNITT.fehlend.join(', '));
+
 function makeDom(state, opts) {
-    const dom = new JSDOM(HTML, { runScripts: 'outside-only', url: 'https://localhost/settings' });
+    const dom = new JSDOM(AUSSCHNITT.html, { runScripts: 'outside-only', url: 'https://localhost/settings' });
     const w = dom.window;
     w.localStorage.setItem('jarvis_token', 'tok');
     w.confirm = () => (state.confirmAntwort !== false);

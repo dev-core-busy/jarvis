@@ -27,10 +27,19 @@ function check(b, t, d) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Ausschnitt statt der VOLLEN settings.html: der Schalter lebt im Jira-Reiter
+// (2026-11-23, die vollen Aufbauten waren der groesste Teil der Laufzeit).
+// skripte: true, weil die volle Seite ihre <script>-Tags im DOM traegt.
+// Regeln: tests/lib/seite_ausschnitt.js.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+const AUSSCHNITT = ausschnitt(fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8'),
+                              ['settings-tab-jira'], { skripte: true });
+check(AUSSCHNITT.fehlend.length === 0, 'Ausschnitt der Proben: Jira-Reiter gefunden (Positivkontrolle)',
+      AUSSCHNITT.fehlend.join(', '));
+
 async function reiter(cfg, confirmAntwort) {
-    const html = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
     const posts = [], fragen = [];
-    const s = new JSDOM(html, {
+    const s = new JSDOM(AUSSCHNITT.html, {
         url: 'https://localhost/settings', runScripts: 'outside-only',
         beforeParse(win) {
             win.localStorage.setItem('jarvis_token', 'testtoken');

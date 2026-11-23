@@ -21,6 +21,26 @@ def _log(msg):
     print(f"[AGENT] {msg}", flush=True)
 
 
+def _headless_herkunft(agent, actor) -> dict:
+    """Felder des Protokoll-Kontexts fuer einen Lauf ohne Oberflaeche.
+
+    ``wer`` aus dem Actor (fehlt er, erbt der Kontext), ``auftrag`` aus der
+    Auftragsquelle (``wirkung.auftrag_cv``: "cron:<id>", "regel:17" …),
+    ``kanal`` wie in der Token-Statistik. Nie werfen."""
+    felder = {"agent": getattr(agent, "agent_id", "")}
+    try:
+        if isinstance(actor, dict):
+            felder["wer"] = str(actor.get("user") or "")
+        a = _wirkung.auftrag_cv.get()
+        if a is not None:
+            felder["auftrag"] = str(getattr(a, "quelle", "") or "")
+        from backend import token_verbrauch as _tvh
+        felder["kanal"] = _tvh._kanal() or "ohne Oberflaeche"
+    except Exception:  # noqa: BLE001
+        pass
+    return felder
+
+
 def _friendly_api_error(exc: Exception) -> str:
     """Wandelt rohe API-Fehler in verständliche Meldungen um."""
     raw = str(exc)
@@ -145,6 +165,7 @@ from backend.skills.manager import SkillManager
 from backend.tools.memory import load_memory_context, load_selective_memory
 from backend.tools.memory import schreiben_gesperrt as _memory_schreiben_gesperrt
 import backend.conv_log as conv_log
+import backend.log_kontext as _log_kontext
 import backend.documents as _documents
 import backend.lauf_tmp as _lauf_tmp
 import backend.prompt_schutz as _prompt_schutz
@@ -3180,6 +3201,12 @@ KRITISCH – Ausfuehrungs-Regeln:
         import sys
         from backend.telemetry import tracer
         def _log(msg): print(f"[AGENT {self.agent_id}] {msg}", flush=True)
+        # Wer/wodurch fuer JEDE Zeile und jeden Fehlerlog-Eintrag dieses Laufs
+        # (backend/log_kontext.py). Leere Werte erben: ein Sub-Agent ohne
+        # username behaelt den Auftraggeber seines Eltern-Laufs.
+        _lk_token = _log_kontext.oeffnen(
+            wer=username, ip=("" if client_ip in ("", "unknown") else client_ip),
+            kanal=client_type, chat=session_id, agent=self.agent_id)
         _log(f"run_task gestartet: {task_text[:100]}... (sub={self.is_sub_agent})")
         # Sub-Agents werden ohne username gestartet – dann den vom Eltern-Agent
         # geerbten Namen behalten (nicht mit "" ueberschreiben), damit LDAP-Gating greift.
@@ -4288,7 +4315,10 @@ KRITISCH – Ausfuehrungs-Regeln:
                         _log(f"Auto-Learning fehlgeschlagen: {le}")
 
         except Exception as e:
-            import traceback; _tb = traceback.format_exc(); _log(f"EXCEPTION: {e}\n{_tb}")
+            import traceback; _tb = traceback.format_exc()
+            # Typ UND lesbare Ursache in die erste Zeile: str(ReadTimeout) ist
+            # leer, die Zeile hiess sonst nur "EXCEPTION:" (ECHT 2026-11-23).
+            _log(f"EXCEPTION {type(e).__name__}: {_log_kontext.fehlertext(e)}\n{_tb}")
             run_outcome = "error"
             err_msg = _friendly_api_error(e)
             # WICHTIG: als highlight senden -> sichtbare Antwort-Bubble. Ohne highlight
@@ -4307,9 +4337,17 @@ KRITISCH – Ausfuehrungs-Regeln:
             agent_span.attributes["error.type"] = type(e).__name__
             agent_span.attributes["error.traceback"] = _tb[-4000:]
             agent_span.attributes["model"] = self.current_model
+            try:
+                _prof = getattr(self, "_active_profile", None) or {}
+                if isinstance(_prof, dict) and (_prof.get("name") or _prof.get("id")):
+                    agent_span.attributes["llm.profil"] = str(_prof.get("name") or _prof.get("id"))
+            except Exception:  # noqa: BLE001
+                pass
             if 'steps' in locals():
                 agent_span.attributes["steps"] = steps
-            _err_detail = str(e).strip() or type(e).__name__
+            # Lesbare Ursache samt Vermerk des LLM-Aufrufs (Server, Modell,
+            # Zeitlimit) – nicht nur der Typname.
+            _err_detail = _log_kontext.fehlertext(e)
             tracer.end_span(agent_span, status="error", error=_err_detail)
             agent_span = None  # Verhindern, dass finally nochmal beendet
             # History auch bei Fehler zurückspeichern
@@ -4333,13 +4371,13 @@ KRITISCH – Ausfuehrungs-Regeln:
                         messages=_conv_messages,
                         steps=0,
                         duration_ms=_dur,
-                        error=str(e)[:300],
+                        error=_log_kontext.fehlertext(e)[:300],
                         username=username,
                     )
                 except Exception:
                     pass
         finally:
-            _log(f"run_task beendet (state={self.state.value})")
+            _log(f"run_task beendet (ergebnis={run_outcome})")
             if agent_span:
                 tracer.end_span(agent_span)
             self.state = AgentState.IDLE
@@ -4401,6 +4439,8 @@ KRITISCH – Ausfuehrungs-Regeln:
                 _lauf_stack.close()
             except Exception as e:  # noqa: BLE001
                 _log(f"Lauf-Verzeichnis nicht abgeraeumt: {e}")
+            # Als LETZTES: auch die Zeilen oben tragen noch die Herkunft.
+            _log_kontext.schliessen(_lk_token)
         # Benutzer-Stop hat immer Vorrang: nach einem manuellen Abbruch NIE
         # automatisch neu versuchen (auch wenn zwischendrin ein Fehler auftrat).
         if stop_scope.stopped:
@@ -4468,6 +4508,9 @@ KRITISCH – Ausfuehrungs-Regeln:
         # Aufruf als Einstieg, der einen Auftrags-Entscheid braucht.)
         token = (_lauf_kontext_oeffnen(self)
                  if actor is not None and id(self) not in (_lauf_kontext_cv.get() or {}) else None)
+        # Wer/wodurch (backend/log_kontext.py): Auftraggeber, Quelle des
+        # Auftrags (Cron, Mail-Regel, Messenger …) und Agent. actor=None erbt.
+        _lk_token = _log_kontext.oeffnen(**_headless_herkunft(self, actor))
         try:
             if actor is not None:
                 # Pentest C7: Deckel je Benutzer (aeusserster Lauf, Admins frei).
@@ -4493,6 +4536,7 @@ KRITISCH – Ausfuehrungs-Regeln:
             # (nur fuer Sub-Laeufe, die schon in einem actor_scope stehen).
             return await self._run_headless(task_text, reasoning_effort)
         finally:
+            _log_kontext.schliessen(_lk_token)
             if token is not None:
                 _lauf_kontext_cv.reset(token)
 
@@ -4864,8 +4908,18 @@ KRITISCH – Ausfuehrungs-Regeln:
                         _log(f"Auto-Learning (headless) fehlgeschlagen: {le}")
 
         except Exception as e:
-            _hl_error = str(e).strip() or type(e).__name__
-            collected_texts.append(f"Fehler: {str(e)}")
+            # Bis 2026-11-23 schrieb dieser Zweig GAR NICHTS ins Journal und ins
+            # Fehlerlog nur den Typnamen – ein gescheiterter Cron-/Messenger-
+            # Lauf war nicht nachvollziehbar. Jetzt wie im Chat-Weg: Typ,
+            # lesbare Ursache (samt LLM-Vermerk) und Traceback.
+            import traceback as _tbm
+            _hl_tb = _tbm.format_exc()
+            _hl_error = _log_kontext.fehlertext(e)
+            _log(f"EXCEPTION {type(e).__name__}: {_hl_error}\n{_hl_tb}")
+            agent_span.attributes["error.type"] = type(e).__name__
+            agent_span.attributes["error.traceback"] = _hl_tb[-4000:]
+            agent_span.attributes["model"] = self.current_model
+            collected_texts.append(f"Fehler: {_hl_error}")
         finally:
             self.state = AgentState.IDLE
             # IM FINALLY, damit auch ein abgebrochener oder gescheiterter Lauf

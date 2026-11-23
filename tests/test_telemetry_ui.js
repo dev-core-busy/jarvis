@@ -75,6 +75,8 @@ const BODIES = {
 };
 
 const calls = [];        // jede fetch-Anfrage: {method, url}
+// Antwort von /api/telemetry/errors – Abschnitt 10 setzt eigene Eintraege.
+let FEHLER = [];
 
 function makeFetch() {
     return (url, opts) => {
@@ -87,7 +89,7 @@ function makeFetch() {
         if (url.startsWith('/api/telemetry/spans')) return j([
             { span_id: '1', name: 'agent:Haupt', kind: 'agent', duration_ms: 20, status: 'ok' },
         ]);
-        if (url.startsWith('/api/telemetry/errors')) return j([]);
+        if (url.startsWith('/api/telemetry/errors')) return j(FEHLER);
         if (url.startsWith('/api/logs/retention')) return j({
             days: 90, last_run_ts: 1785858000, removed: {},
             conv_log: { count: 2, oldest_ts: 1785000000, bytes: 4096 },
@@ -332,6 +334,46 @@ function makeFetch() {
     }
     check('zugeklappt bleibt zu und wird NICHT geladen: Dienst-Journal', !geholt.includes('/api/logs/journal'),
         JSON.stringify(geholt));
+
+    // ── 10) Fehlerlog: wer und wodurch (backend/log_kontext.py, 2026-11-23) ──
+    // Vorfall ECHT 11:21: der Eintrag zeigte nur "agent:Hauptagent / ReadTimeout".
+    section('10) Fehlerlog nennt Herkunft (wer/Adresse/Kanal/Anfrage/Chat) oder "System"');
+    FEHLER = [
+        { span_id: 'a', name: 'agent:Hauptagent', kind: 'agent', duration_ms: 180020, status: 'error',
+          ts: 1795429268, error: 'Gegenstelle hat innerhalb des Lese-Zeitlimits nicht geantwortet – LLM-Aufruf: Server llm.beispiel.de:8443',
+          attributes: { task: 'Probeauftrag', 'error.type': 'ReadTimeout', model: 'modell-x', 'llm.profil': 'Hausprofil' },
+          kontext: { wer: 'max.muster', ip: '192.0.2.7', kanal: 'browser', weg: 'WS /ws', chat: 'chat42', agent: '606f997a' } },
+        { span_id: 'b', name: 'tool:x', kind: 'tool', duration_ms: 5, status: 'error', ts: 1795429000,
+          error: 'kaputt', attributes: {}, kontext: {} },
+        { span_id: 'c', name: 'agent:Hauptagent', kind: 'agent', duration_ms: 9, status: 'error', ts: 1795428000,
+          error: 'x', attributes: { task: 'Cron-Probe' }, kontext: { wer: 'erika.muster', auftrag: 'cron:probe42' } },
+    ];
+    doc.getElementById('tele-errors-body').style.display = 'block';
+    await mgr._loadErrors();
+    await sleep(20);
+    const karten = [...doc.getElementById('tele-errors-body').querySelectorAll('.conv-log-header')]
+        .map(hdr => ({ kopf: hdr, detail: hdr.nextElementSibling }));
+    check('(Positivkontrolle) drei Fehler-Karten gezeichnet', karten.length === 3, String(karten.length));
+    const karte = (marke) => karten.find(k => (k.kopf.textContent + k.detail.textContent).includes(marke));
+    const a = karte('Probeauftrag'), b = karte('kaputt'), c = karte('Cron-Probe');
+    check('(Positivkontrolle) jede Karte auffindbar', !!(a && b && c));
+    if (a && b && c) {
+        const werA = a.kopf.querySelector('.tele-err-wer');
+        check('Kopfzeile nennt den Benutzer (ohne Aufklappen sichtbar)', !!werA && werA.textContent === 'max.muster',
+            werA ? werA.textContent : 'fehlt');
+        const d = a.detail.textContent;
+        for (const [was, w] of [['Wer', 'max.muster'], ['Adresse', '192.0.2.7'], ['Kanal', 'browser'],
+                                ['Anfrage', 'WS /ws'], ['Chat', 'chat42'], ['LLM-Profil', 'Hausprofil']]) {
+            check(`Detail nennt ${was}: ${w}`, d.includes(was) && d.includes(w), d.slice(0, 300));
+        }
+        check('Ursache samt Server steht im Detail', d.includes('Lese-Zeitlimits') && d.includes('llm.beispiel.de:8443'));
+        const werB = b.kopf.querySelector('.tele-err-wer');
+        check('ohne Kontext: ausdruecklich "System", keine leere Stelle',
+            !!werB && /System/.test(werB.textContent), werB ? werB.textContent : 'fehlt');
+        check('Cron-Lauf: Auftrag steht im Detail', c.detail.textContent.includes('cron:probe42')
+            && c.detail.textContent.includes('erika.muster'), c.detail.textContent.slice(0, 300));
+    }
+    FEHLER = [];
 
     // ── Ergebnis ─────────────────────────────────────────────────────────────
     const bad = results.filter(r => !r.ok);

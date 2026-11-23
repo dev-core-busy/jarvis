@@ -410,9 +410,21 @@ class JarvisTelemetryManager {
                 const errShown = esc(sp.error) || `<span style="opacity:0.55;">${window.t('telemetry.no_error_msg')}</span>`;
                 const task = a.task ? esc(a.task) : '';
                 const tb = a['error.traceback'] ? esc(a['error.traceback']) : '';
+                // Wer/wodurch (backend/log_kontext.py): Herkunft des Laufs, in dem
+                // der Fehler entstand. Ohne Kontext ist es ein Systemvorgang –
+                // das wird ausdruecklich gesagt statt eine leere Zeile zu lassen.
+                const k = sp.kontext || {};
+                const wer = k.wer ? esc(k.wer) : window.t('telemetry.err_system');
                 const rows = [];
+                rows.push([window.t('telemetry.err_wer'), wer]);
+                if (k.ip)          rows.push([window.t('telemetry.err_ip'), esc(k.ip)]);
+                if (k.kanal)       rows.push([window.t('telemetry.err_kanal'), esc(k.kanal)]);
+                if (k.weg)         rows.push([window.t('telemetry.err_weg'), esc(k.weg)]);
+                if (k.auftrag)     rows.push([window.t('telemetry.err_auftrag'), esc(k.auftrag)]);
+                if (k.chat)        rows.push([window.t('telemetry.err_chat'), esc(k.chat)]);
                 if (task)          rows.push([window.t('telemetry.err_task'),  task]);
                 if (a.model)       rows.push([window.t('telemetry.err_model'), esc(a.model)]);
+                if (a['llm.profil']) rows.push([window.t('telemetry.err_profil'), esc(a['llm.profil'])]);
                 if (a['agent.id']) rows.push(['Agent-ID', esc(a['agent.id'])]);
                 if (a.steps != null) rows.push([window.t('telemetry.steps_abbr'), esc(a.steps)]);
                 const detailRows = rows.map(([k, v]) =>
@@ -428,6 +440,7 @@ class JarvisTelemetryManager {
   <div class="conv-log-header" style="display:flex;align-items:center;gap:7px;padding:7px 11px;cursor:pointer;user-select:none;">
     <span class="conv-log-chevron" style="color:var(--text-muted);font-size:0.68rem;flex-shrink:0;">▶</span>
     <span style="font-family:var(--font-mono);font-size:0.78rem;color:var(--text-primary);flex-shrink:0;">${esc(sp.name)}</span>
+    <span class="tele-err-wer" style="flex-shrink:0;font-size:0.76rem;color:var(--text-muted);white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;">${wer}</span>
     <span style="flex:1;font-size:0.8rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${task}</span>
     <span style="flex-shrink:0;font-size:0.8rem;color:var(--danger);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;">${errShown}</span>
     <span style="flex-shrink:0;font-size:0.71rem;color:var(--text-muted);">${sp.duration_ms} ms</span>

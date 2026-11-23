@@ -288,6 +288,16 @@ def umhuellen(original):
                 resp = await original(self, *args, **kwargs)
                 fehler = False
                 return resp
+            except BaseException as e:
+                # Die EINE Stelle, durch die jeder LLM-Aufruf geht: hier wird
+                # vermerkt, WAS gerufen wurde (Anbieter, Server, Modell, Dauer,
+                # Zeitlimit) – sonst sagt ein ReadTimeout im Fehlerlog nichts.
+                try:
+                    from backend import log_kontext
+                    log_kontext.llm_aufruf_vermerken(e, self, modell, time.monotonic() - t0)
+                except Exception:  # noqa: BLE001
+                    pass
+                raise
             finally:
                 _in_erfassung.reset(marke)
                 try:

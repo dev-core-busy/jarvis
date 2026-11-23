@@ -43,6 +43,12 @@ for _fremd in ("httpx", "httpcore", "urllib3", "sentence_transformers",
 from backend import url_geheimnis as _url_geheimnis
 _url_geheimnis.installieren()
 
+# Wer/wodurch an JEDER Protokollzeile (Festlegung 2026-11-23, backend/log_kontext.py):
+# stdout-Huelle fuer alle print-Zeilen, Filter + Format fuer die Logger. NACH
+# basicConfig, sonst saehe der Filter den Handler nicht.
+from backend import log_kontext as _log_kontext
+_log_kontext.installieren()
+
 # BSI H6-Rest: TLS 1.3 nur mit TR-02102-2-Suiten. Die Startstelle hat
 # OPENSSL_CONF gesetzt, uvicorn den Kontext schon gebaut – hier wird die
 # Variable entfernt, damit Kindprozesse (Shell, Sandbox) sie nicht erben.
@@ -1409,9 +1415,21 @@ class _AnfragePfadMiddleware:
             await self.app(scope, receive, send)
             return
         marke = _sitzung.ANFRAGE_PFAD.set(str(scope.get("path") or ""))
+        # Herkunft fuer jede Protokollzeile dieser Anfrage (log_kontext): Adresse
+        # und Weg hier, der Benutzer kommt aus verify_token dazu.
+        lk = _log_kontext.oeffnen(ip=_log_kontext.ip_aus_scope(scope),
+                                  weg=_log_kontext.weg_aus_scope(scope))
         try:
             await self.app(scope, receive, send)
+        except Exception as e:
+            # Unbehandelter Fehler: uvicorn protokolliert ihn erst DRAUSSEN, wo
+            # dieser Kontext schon zu ist – dort fehlte, wer ihn ausgeloest hat.
+            # Eine gekennzeichnete Zeile hier, der Traceback bleibt bei uvicorn.
+            print(f"[HTTP] Unbehandelter Fehler {type(e).__name__}: "
+                  f"{_log_kontext.fehlertext(e)}", flush=True)
+            raise
         finally:
+            _log_kontext.schliessen(lk)
             _sitzung.ANFRAGE_PFAD.reset(marke)
 
 
@@ -1715,6 +1733,8 @@ def verify_token(token: str) -> str | None:
             _halter = _admin_anfrage.get()
             if _halter is not None:
                 _halter.setdefault("sitzung", _norm_login(username))
+            # Wer: ab hier traegt jede Protokollzeile der Anfrage den Benutzer
+            _log_kontext.ergaenzen(wer=_norm_login(username))
             return username
         return None
     except Exception:

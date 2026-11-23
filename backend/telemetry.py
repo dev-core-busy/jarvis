@@ -51,6 +51,14 @@ class TraceSpan:
         self.attributes: dict[str, Any] = {}
         self.status: str = "ok"
         self.error: str | None = None
+        # Wer/wodurch (backend/log_kontext.py): beim START gelesen – dort steht
+        # der Span im Lauf, der ihn verursacht. Ohne das zeigte das Fehlerlog
+        # nur "agent:Hauptagent / ReadTimeout" (ECHT 2026-11-23 11:21).
+        try:
+            from backend import log_kontext
+            self.kontext: dict = log_kontext.aktuell()
+        except Exception:  # noqa: BLE001
+            self.kontext = {}
 
     def end(self, status: str = "ok", error: str | None = None):
         self.end_time = time.time()
@@ -69,6 +77,7 @@ class TraceSpan:
             "status": self.status,
             "error": self.error,
             "attributes": self.attributes,
+            "kontext": self.kontext,
         }
 
 

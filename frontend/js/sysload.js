@@ -235,6 +235,12 @@
         if (!vorlage) return String(b.text || '');
         return vorlage.replace(/\{(\w+)\}/g, function (_, k) {
             var v = w[k];
+            // {marke} kommt nicht vom Server: der Name der Oberflaeche (branding.js)
+            if (k === 'marke') {
+                var m = 'Jarvis';
+                try { if (window.jarvisMarke) m = window.jarvisMarke() || m; } catch (e) { /* Rueckfall bleibt */ }
+                return m;
+            }
             if (k === 'zuletzt') return ueZeit(v);
             if (k === 'ablauf') return ueZeit(v).split(',')[0];
             if (Array.isArray(v)) return v.join(', ');

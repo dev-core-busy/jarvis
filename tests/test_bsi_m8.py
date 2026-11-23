@@ -378,21 +378,99 @@ check("setup_broker.sh setzt adm/systemd-journal nicht mehr",
       schleifen and not any(("adm" in z.split()) or ("systemd-journal" in z) for z in schleifen), schleifen)
 
 # Kein Backend-Code liest das Systemjournal selbst (ausser ueber den Broker)
-treffer = []
-for p in (ROOT / "backend").rglob("*.py"):
-    if "broker" in p.parts:
-        continue
-    baum = ast.parse(p.read_text(encoding="utf-8"))
-    # Docstrings/blosse Ausdrucks-Zeichenketten sind Begruendung, kein Aufruf
+#
+# EINE Ausnahme, und die wird gemessen statt geglaubt: ``backend/ueberwachung.py``
+# (Haertung B13) laeuft als root per ``jarvis-ueberwachung.timer`` aus der
+# root-eigenen Broker-Kopie und liest dort das Journal. Der Dienst importiert
+# dasselbe Modul nur, um die Zustandsdatei zu lesen. Zugesagt ist also: keine
+# Funktion, die das Backend aufruft, erreicht (auch nicht ueber Zwischenaufrufe)
+# eine Funktion mit journalctl-Aufruf – und auf Modulebene steht keiner.
+ROOT_MODULE = {"backend/ueberwachung.py": "/usr/local/lib/jarvis-broker/backend/ueberwachung.py"}
+
+
+def _journal_stellen(baum):
+    """Knoten, die einen journalctl-Aufruf bilden (Docstrings ausgenommen)."""
     doku = {id(n.value) for n in ast.walk(baum) if isinstance(n, ast.Expr)
             and isinstance(n.value, ast.Constant)}
     for n in ast.walk(baum):
         if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in doku \
                 and n.value.startswith("journalctl"):
-            treffer.append(str(p.relative_to(ROOT)))
+            yield n
         if isinstance(n, ast.List) and n.elts and isinstance(n.elts[0], ast.Constant) \
                 and n.elts[0].value == "journalctl":
-            treffer.append(str(p.relative_to(ROOT)))
+            yield n
+
+
+def _backend_nutzt(modul_name):
+    """Namen, die Backend-Code (ausser dem Modul selbst und dem Broker) aus
+    ``backend.<modul_name>`` verwendet."""
+    namen = set()
+    for q in (ROOT / "backend").rglob("*.py"):
+        if "broker" in q.parts or q.stem == modul_name:
+            continue
+        b = ast.parse(q.read_text(encoding="utf-8"))
+        aliase = set()
+        for n in ast.walk(b):
+            if isinstance(n, ast.ImportFrom) and n.module in ("backend", None):
+                aliase |= {a.asname or a.name for a in n.names if a.name == modul_name}
+            if isinstance(n, ast.ImportFrom) and n.module == "backend." + modul_name:
+                namen |= {a.name for a in n.names}
+            if isinstance(n, ast.Import):
+                for a in n.names:
+                    if a.name == "backend." + modul_name:
+                        aliase.add(a.asname or a.name)
+        for n in ast.walk(b):
+            if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) \
+                    and n.value.id in aliase:
+                namen.add(n.attr)
+    return namen
+
+
+def _erreichbar(baum, start):
+    """Transitive Huelle der Modulfunktionen, die von ``start`` aus genannt
+    (aufgerufen oder als Wert weitergereicht) werden."""
+    funk = {n.name: n for n in baum.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    kanten = {name: {x.id for x in ast.walk(f) if isinstance(x, ast.Name) and x.id in funk}
+              for name, f in funk.items()}
+    gesehen, offen = set(), [s for s in start if s in funk]
+    while offen:
+        k = offen.pop()
+        if k not in gesehen:
+            gesehen.add(k)
+            offen.extend(kanten[k] - gesehen)
+    return gesehen, funk
+
+
+treffer = []
+for p in (ROOT / "backend").rglob("*.py"):
+    if "broker" in p.parts:
+        continue
+    rel = str(p.relative_to(ROOT))
+    baum = ast.parse(p.read_text(encoding="utf-8"))
+    stellen = list(_journal_stellen(baum))
+    if not stellen:
+        continue
+    if rel not in ROOT_MODULE:
+        treffer.extend([rel] * len(stellen))
+        continue
+    # Ausnahme: welche Funktionen tragen den Aufruf?
+    funk = {n.name: n for n in baum.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    traeger = {name for name, f in funk.items()
+               if any(id(s) in {id(x) for x in ast.walk(f)} for s in stellen)}
+    in_funktion = {id(x) for f in funk.values() for x in ast.walk(f)}
+    check("%s: journalctl nur innerhalb von Funktionen (nichts beim Import)" % rel,
+          all(id(s) in in_funktion for s in stellen), traeger)
+    haertung = (ROOT / "deploy" / "security" / "system_haertung.sh").read_text(encoding="utf-8")
+    check("%s: laeuft als root aus der Broker-Kopie (Positivkontrolle)" % rel,
+          ROOT_MODULE[rel] in haertung, ROOT_MODULE[rel])
+    nutzt = _backend_nutzt(p.stem)
+    check("%s: Backend-Nutzung gefunden (Positivkontrolle)" % rel, bool(nutzt), nutzt)
+    root_weg, _ = _erreichbar(baum, {"main"})
+    check("%s: der Aufrufgraph sieht den Weg main -> journalctl (Positivkontrolle)" % rel,
+          bool(traeger) and traeger <= root_weg, (traeger, sorted(root_weg)))
+    backend_weg, _ = _erreichbar(baum, nutzt)
+    check("%s: keine vom Backend genutzte Funktion erreicht journalctl" % rel,
+          not (traeger & backend_weg), sorted(traeger & backend_weg))
 check("Backend ruft journalctl nicht selbst auf (nur der Broker)", not treffer, treffer)
 
 shutil.rmtree(TMP, ignore_errors=True)

@@ -84,7 +84,7 @@ ALLE.push({ id: 'lesbar', art: 'unlesbar', stufe: 'warnung', text: 'x', werte: {
 
 const warte = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function seite({ admin, antwort, sichtbar = true, lang = 'de' }) {
+async function seite({ admin, antwort, sichtbar = true, lang = 'de', marke = null }) {
     const dom = new JSDOM('<!doctype html><body><div class="topbar-left"><div id="cpu-bar" class="jv-cpu-bar"></div></div></body>',
                           { url: 'https://h/portal', runScripts: 'outside-only', pretendToBeVisual: sichtbar });
     const w = dom.window;
@@ -106,6 +106,7 @@ async function seite({ admin, antwort, sichtbar = true, lang = 'de' }) {
     w.eval(fs.readFileSync(I18N, 'utf8'));
     if (w.applyLang) { try { w.applyLang(lang); } catch (e) { /* ohne DOM-Ziele */ } }
     w._lang = lang;
+    if (marke) w.jarvisMarke = () => marke;   // Schnittstelle von branding.js
     w.eval(fs.readFileSync(SYSLOAD, 'utf8'));
     await warte(80);
     return { w, abrufe, bar: w.document.getElementById('cpu-bar') };
@@ -132,7 +133,7 @@ const ANTW = (stufe, befunde) => ({ ok: true, eingerichtet: true, stufe, zeit: 1
     abschnitt('2. Fenster: jeder Befund, DE und EN');
     for (const lang of ['de', 'en']) {
         // umgekehrt: Hinweise und Warnungen zuerst – die Sortierung muss das Modul leisten
-        const p = await seite({ admin: true, antwort: ANTW('alarm', ALLE.slice().reverse()), lang });
+        const p = await seite({ admin: true, antwort: ANTW('alarm', ALLE.slice().reverse()), lang, marke: 'Fabrikam' });
         p.w.JarvisSysLoad.oeffnen();
         await warte(120);
         const ab = p.w.document.querySelector('.jv-ue');
@@ -152,6 +153,12 @@ const ANTW = (stufe, befunde) => ({ ok: true, eingerichtet: true, stufe, zeit: 1
                                    : b.art === 'in_drop' && b.stufe === 'warnung' ? 'in_drop_voll' : b.art)
                          .filter(a => p.w.t('ue.art_' + a) === 'ue.art_' + a);
         pruefe(!ohne.length, lang + ': jede Befundart hat eine Uebersetzung', ohne.join(', '));
+        // {marke} ist kein Serverwert: ohne eigene Aufloesung setzt der Werte-Ersatz
+        // einen Leerstring ein ("  selbst wollte …") – das faengt "kein offener
+        // {platzhalter}" nicht.
+        const z_marke = zeilen.find(z => /(wollte ins Netz|tried to reach the network)/.test(z));
+        if (!z_marke) abbruch(lang + ': Zeile des Befunds out_dienst nicht gefunden');
+        pruefe(/Fabrikam (selbst|itself)/.test(z_marke), lang + ': out_dienst nennt den gebrandeten Namen', z_marke);
         const erste = ab.querySelector('li b');
         pruefe(erste && erste.textContent === (lang === 'de' ? 'Alarm' : 'Alarm'),
                lang + ': Alarme stehen oben, mit Stufe als Text');

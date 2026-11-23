@@ -899,10 +899,9 @@
                 });
             }
         }
-        // "Text kopieren" nur, wenn der Zeiger AUF Text dieser Sprechblase
-        // steht (gleiche Regel wie /chat).
-        const knoten = window.JarvisChatLib?.textUnterPunkt?.(ev) || null;
-        if (txt && knoten && bubble && bubble.contains(knoten)) {
+        // "Text kopieren" nur, wenn der Zeiger IN der Sprechblase steht
+        // (gleiche Regel wie /chat).
+        if (txt && window.JarvisChatLib?.punktInBlase?.(ev, bubble)) {
             items.push({
                 label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
                 onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),

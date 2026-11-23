@@ -1749,18 +1749,17 @@
         // Bubble-Eintraege (Text kopieren, Loeschen) bleiben darunter erreichbar.
         // Bei einem Treffer entfaellt "Bearbeiten": ein Bild bearbeitet man nicht.
         const medien = window.JarvisChatLib?.mediaCtxItems?.(ev) || [];
-        // "Text kopieren" nur, wenn der Zeiger AUF Text dieser Sprechblase
-        // steht – auf dem Rand, dem Zeitstempel oder dem Leerraum daneben
-        // ist unklar, WELCHER Text gemeint waere.
-        const knoten = window.JarvisChatLib?.textUnterPunkt?.(ev) || null;
-        const ueberText = !!(txt && knoten && bubble && bubble.contains(knoten));
+        // "Text kopieren" nur, wenn der Zeiger IN der Sprechblase steht
+        // (Text, Rand, Leerraum der Blase) – nicht auf dem Zeitstempel oder
+        // dem freien Raum der Zeile daneben.
+        const inBlase = !!(txt && window.JarvisChatLib?.punktInBlase?.(ev, bubble));
         const kopieren = {
             label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
             onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),
         };
         if (medien.length) {
             items.push(...medien);
-            if (ueberText) items.push(kopieren);
+            if (inBlase) items.push(kopieren);
             items.push(_ctxPdfItem());
             items.push({
                 label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,
@@ -1774,7 +1773,7 @@
                 onClick: () => _editUserBubble(row, bubble),
             });
         }
-        if (ueberText) items.push(kopieren);
+        if (inBlase) items.push(kopieren);
         items.push(_ctxPdfItem());
         items.push({
             label: (window.t ? window.t('bubble.ctx.delete') : 'Löschen'), icon: JarvisIcons.trash(), danger: true,

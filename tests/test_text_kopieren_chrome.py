@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Waechter: "Text kopieren" steht nur im Menue, wenn der Zeiger AUF Text steht (2026-11-23).
+"""Waechter: "Text kopieren" steht im Menue, wenn der Zeiger IN der Sprechblase steht (2026-11-23).
 
-DER FEHLER, DEN DAS VERHINDERT: das Kontextmenue einer Sprechblase bot
-"Text kopieren" bei jedem Rechtsklick in der Zeile an – auf dem Rand der
-Blase, im Leerraum neben der letzten Zeile, auf dem Zeitstempel. Dort ist
-nicht eindeutig, WELCHER Text gemeint ist (Meldung des Betreibers). Seitdem
-fragt `chatlib.textUnterPunkt(ev)`, ob unter dem Zeiger ein Zeichen liegt,
-und /chat (`_buildBubbleCtxItems`) und /userchat (`_buildDmCtxItems`) nehmen
-den Eintrag nur auf, wenn dieses Zeichen IN der Sprechblase steht.
+DER FEHLER, DEN DAS VERHINDERT: Der Eintrag soll bei Rechtsklick auf die
+Sprechblase erscheinen – egal ob auf Text, Rand, Innenabstand oder Leerraum
+der Blase – und NICHT ausserhalb der Blase (Zeitstempel, freier Raum der
+Zeile daneben). Eine erste Fassung pruefte stattdessen, ob unter dem Zeiger
+ein ZEICHEN liegt, und liess den Eintrag auf dem Rand der Blase weg
+(Meldung des Betreibers). Seitdem fragt `chatlib.punktInBlase(ev, blase)`
+die Flaeche der Blase ab; /chat (`_buildBubbleCtxItems`) und /userchat
+(`_buildDmCtxItems`) nehmen den Eintrag genau dann auf.
 
-Gemessen im ECHTEN Chrome, weil jsdom kein Layout rechnet und
-`caretRangeFromPoint` dort nicht existiert. Die Probeseite laedt das echte
-chatlib.js und icons.js und die beiden Menue-Funktionen, aus chat.js bzw.
-userchat.js geschnitten. Klickpunkte:
+Gemessen im ECHTEN Chrome, weil jsdom kein Layout rechnet. Die Probeseite
+laedt das echte chatlib.js und icons.js und die beiden Menue-Funktionen, aus
+chat.js bzw. userchat.js geschnitten. Klickpunkte:
 
-* mitten auf einem Zeichen                 -> Eintrag da (Positivkontrolle)
-* Innenabstand der Blase                    -> kein Eintrag
-* Leerraum rechts neben dem kurzen Text     -> kein Eintrag
+* mitten auf einem Zeichen                  -> Eintrag da
+* Innenabstand der Blase                    -> Eintrag da
+* Leerraum der Blase rechts neben dem Text  -> Eintrag da
 * Zeitstempel (Text, aber NICHT die Blase)  -> kein Eintrag
+* Zeile rechts neben der Blase              -> kein Eintrag
 * Long-Press (touchstart-artiges Ereignis)  -> gleiche Regel ueber touches[0]
 
-"Chat als PDF" und "Löschen" stehen in JEDEM Fall im Menue – sonst waere ein
-leeres Menue auch "ohne Text kopieren".
+"Chat als PDF" und "Löschen" stehen in JEDEM Fall im Menue.
 
 CHATLIB_JS / CHAT_JS / USERCHAT_JS legen sabotierte KOPIEN vor (Gegenprobe).
 Exit 0 = bestanden, 1 = FAIL, 2 = konnte nicht laufen.
@@ -145,6 +145,7 @@ __TEILE__</script>
       innenrand:   [b.left + 8, b.top + 8],
       leerraum:    [Math.min(tr.right + 60, b.right - 40), tr.top + tr.height / 2],
       zeitstempel: [zr.left + 5, zr.top + zr.height / 2],
+      nebenblase:  [b.right + 100, b.top + b.height / 2],
     };
     var msg = { from: 'ich', text: blase.textContent, msg_id: 'm1' };
     Object.keys(punkte).forEach(function (k) {
@@ -153,7 +154,8 @@ __TEILE__</script>
       var lang = { touches: [{ clientX: x, clientY: y, target: ev.target }], target: ev.target };
       var lbl = function (items) { return (items || []).map(function (i) { return i.label; }); };
       aus.punkte[k] = {
-        knoten: !!lib.textUnterPunkt(ev),
+        inBlase: !!lib.punktInBlase(ev, blase),
+        elementInBlase: blase.contains(ev.target),
         chat: lbl(_buildBubbleCtxItems(row, blase, 'user', ev)),
         chatBot: lbl(_buildBubbleCtxItems(row, blase, 'bot', ev)),
         userchat: lbl(_buildDmCtxItems(row, blase, msg, ev)),
@@ -200,26 +202,35 @@ with tempfile.TemporaryDirectory(dir=str(Path.home()), prefix=".text-kopieren-",
 if w.get("fehler"):
     abbruch(f"Probeseite warf: {w['fehler'][:400]}")
 P = w.get("punkte") or {}
-if set(P) != {"zeichen", "innenrand", "leerraum", "zeitstempel"}:
+INNEN = ("zeichen", "innenrand", "leerraum")
+AUSSEN = ("zeitstempel", "nebenblase")
+if set(P) != set(INNEN + AUSSEN):
     abbruch(f"Messpunkte unvollstaendig: {sorted(P)}")
 
 KOPIE, PDF, LOESCHEN = "Text kopieren", "Chat als PDF", "Löschen"
 
-# Positivkontrolle der Messmethode: auf dem Zeichen MUSS ein Knoten kommen,
-# sonst sind alle "kein Eintrag"-Pruefungen trivial wahr.
-if not P["zeichen"]["knoten"]:
-    abbruch("auf einem Zeichen liefert textUnterPunkt nichts – Messung blind")
+# Positivkontrolle der Messpunkte: unabhaengig von punktInBlase muss das
+# Element unter jedem Innenpunkt in der Blase liegen und unter jedem
+# Aussenpunkt nicht – sonst misst der Test an falschen Stellen.
+for ort in INNEN:
+    if not P[ort]["elementInBlase"]:
+        abbruch(f"Messpunkt {ort} liegt nicht in der Blase – Messung blind")
+for ort in AUSSEN:
+    if P[ort]["elementInBlase"]:
+        abbruch(f"Messpunkt {ort} liegt in der Blase – Messung blind")
 
-print("\nAuf einem Zeichen")
-for k in ("chat", "chatBot", "userchat", "langChat"):
-    check(KOPIE in P["zeichen"][k], f"{k}: 'Text kopieren' steht im Menue", P["zeichen"][k])
-
-for ort, titel in (("innenrand", "Innenabstand der Blase"),
-                   ("leerraum", "Leerraum neben dem Text"),
-                   ("zeitstempel", "Zeitstempel (Text ausserhalb der Blase)")):
-    print(f"\n{titel}")
-    if ort != "zeitstempel":
-        check(not P[ort]["knoten"], "textUnterPunkt meldet keinen Text")
+TITEL = {"zeichen": "Auf einem Zeichen", "innenrand": "Innenabstand der Blase",
+         "leerraum": "Leerraum der Blase neben dem Text",
+         "zeitstempel": "Zeitstempel (ausserhalb der Blase)",
+         "nebenblase": "Zeile neben der Blase"}
+for ort in INNEN:
+    print(f"\n{TITEL[ort]}")
+    check(P[ort]["inBlase"], "punktInBlase meldet: in der Blase")
+    for k in ("chat", "chatBot", "userchat", "langChat"):
+        check(KOPIE in P[ort][k], f"{k}: 'Text kopieren' steht im Menue", P[ort][k])
+for ort in AUSSEN:
+    print(f"\n{TITEL[ort]}")
+    check(not P[ort]["inBlase"], "punktInBlase meldet: ausserhalb")
     for k in ("chat", "chatBot", "userchat", "langChat"):
         check(KOPIE not in P[ort][k], f"{k}: kein 'Text kopieren'", P[ort][k])
 

@@ -23,6 +23,8 @@ Textvorkommen:
  9. D5: MemorySwapMax=0 fuer Dienst und Broker, Swap-Zeilen der fstab mit
     eigener Marke auskommentiert (und mit SWAP_ERLAUBT=ja genau diese wieder
     zurueck), swapoff ueber eine ATTRAPPE nur bei genug freiem Speicher.
+10. E2 (Teil): eigene fstab-Zeile fuer /dev/shm mit noexec (fremde Zeile wird
+    gemeldet, nicht geaendert), remount ueber eine mount-ATTRAPPE.
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 Das zu pruefende Skript kann ueber JARVIS_SYSTEM_HAERTUNG_SKRIPT umgelenkt
@@ -121,6 +123,24 @@ echo "$*" >> "$s.log"
 """
 
 
+# Attrappe fuer mount (E2): protokolliert jeden Aufruf neben der Ersatzdatei
+# fuer die Optionen von /dev/shm (<datei>.log) und schreibt die neuen Optionen
+# hinein - wie ein echtes "mount -o remount,...".
+MOUNT_ATTRAPPE = r"""#!/bin/bash
+o="${JARVIS_SHM_OPTIONEN:?}"
+echo "$*" >> "$o.log"
+[ "$1" = "-o" ] && [ "$3" = "/dev/shm" ] || exit 1
+echo "rw,${2#remount,},inode64" > "$o"
+"""
+
+
+def mount_aufrufe(opts):
+    try:
+        return [z for z in Path(str(opts) + ".log").read_text().splitlines() if z.strip()]
+    except OSError:
+        return []
+
+
 def swapoff_aufrufe(swaps):
     try:
         return [z for z in Path(str(swaps) + ".log").read_text().splitlines() if z.strip()]
@@ -143,13 +163,16 @@ def pam_aufrufe(wurzel):
 
 
 def lauf(modus, wurzel, skript=None, test=True, attrappe=True, ipv6_conf=None, nm=None,
-         swaps=None, meminfo=None):
+         swaps=None, meminfo=None, shm=None):
     env = {k: v for k, v in os.environ.items()
            if k not in ("JARVIS_HAERTUNG_TEST", "JARVIS_SYS_WURZEL")}
     for k in ("JARVIS_VISUDO", "JARVIS_PAM_AUTH_UPDATE", "JARVIS_IP", "JARVIS_IPV6_CONF",
               "JARVIS_NMCLI", "JARVIS_NMCLI_STAND", "JARVIS_PROC_SWAPS", "JARVIS_MEMINFO",
-              "JARVIS_SWAPOFF"):
+              "JARVIS_SWAPOFF", "JARVIS_MOUNT", "JARVIS_SHM_OPTIONEN"):
         env.pop(k, None)
+    if test and shm is not None:
+        env["JARVIS_SHM_OPTIONEN"] = str(shm)
+        env["JARVIS_MOUNT"] = str(MOUNT_ATTRAPPE_PFAD)
     if test and swaps is not None:
         env["JARVIS_PROC_SWAPS"] = str(swaps)
         env["JARVIS_SWAPOFF"] = str(SWAPOFF_ATTRAPPE_PFAD)
@@ -306,6 +329,10 @@ pruefe(bool(re.search(r'(?m)^PROC_SWAPS="/proc/swaps"\nMEMINFO="/proc/meminfo"\n
                       r'if \[ -n "\$TEST" \]; then\n\s*PROC_SWAPS="\$\{JARVIS_PROC_SWAPS:-\}"\n'
                       r'\s*MEMINFO="\$\{JARVIS_MEMINFO:-\}"\n\s*SWAPOFF="\$\{JARVIS_SWAPOFF:-\}"\nfi$', _sk)),
        "JARVIS_PROC_SWAPS/JARVIS_MEMINFO/JARVIS_SWAPOFF nur im Testmodus, dort ohne Vorgabe leer")
+pruefe(bool(re.search(r'(?m)^MOUNT="mount"\nSHM_OPTIONEN=""\n'
+                      r'if \[ -n "\$TEST" \]; then\n\s*MOUNT="\$\{JARVIS_MOUNT:-\}"\n'
+                      r'\s*SHM_OPTIONEN="\$\{JARVIS_SHM_OPTIONEN:-\}"\nfi$', _sk)),
+       "JARVIS_MOUNT/JARVIS_SHM_OPTIONEN nur im Testmodus, dort ohne Vorgabe leer")
 
 sandkasten = Path(tempfile.mkdtemp(prefix="sys_haertung_"))
 PAM_ATTRAPPE_PFAD = sandkasten / "pam-auth-update-attrappe"
@@ -320,6 +347,9 @@ NM_ATTRAPPE_PFAD.chmod(0o755)
 SWAPOFF_ATTRAPPE_PFAD = sandkasten / "swapoff-attrappe"
 SWAPOFF_ATTRAPPE_PFAD.write_text(SWAPOFF_ATTRAPPE, encoding="utf-8")
 SWAPOFF_ATTRAPPE_PFAD.chmod(0o755)
+MOUNT_ATTRAPPE_PFAD = sandkasten / "mount-attrappe"
+MOUNT_ATTRAPPE_PFAD.write_text(MOUNT_ATTRAPPE, encoding="utf-8")
+MOUNT_ATTRAPPE_PFAD.chmod(0o755)
 try:
     W = sandkasten / "a"
     W.mkdir()
@@ -756,7 +786,10 @@ try:
     SWAP_Z = "UUID=2222 none            swap    sw              0       0"
     HAND_Z = "# /swapfile none swap sw 0 0"
     TAB_Z = "/dev/sdb1\tnone\tswap\tdefaults\t0\t0"
-    FSTAB_ALT = "# /etc/fstab\n%s\n%s\n%s\n%s\n" % (ROOT_Z, SWAP_Z, HAND_Z, TAB_Z)
+    SHM_Z = "tmpfs /dev/shm tmpfs defaults,nosuid,nodev,noexec 0 0"
+    # Mit richtiger /dev/shm-Zeile: E2 laesst die Datei dann in Ruhe, und die
+    # D5-Pruefungen "Zeichen fuer Zeichen gleich" messen nur D5.
+    FSTAB_ALT = "# /etc/fstab\n%s\n%s\n%s\n%s\n%s\n" % (ROOT_Z, SWAP_Z, HAND_Z, TAB_Z, SHM_Z)
     fstab.write_text(FSTAB_ALT, encoding="utf-8")
     fstab.chmod(0o640)
     rc, out = lauf("--pruefen", W9)
@@ -765,7 +798,7 @@ try:
     pruefe("/swapfile" not in out, "--pruefen: eine schon auskommentierte Zeile ist kein Befund")
     pruefe(fstab.read_text(encoding="utf-8") == FSTAB_ALT, "--pruefen aendert die fstab nicht")
     rc, out = lauf("--anwenden", W9)
-    erwartet = "# /etc/fstab\n%s\n#haertung-D5# %s\n%s\n#haertung-D5# %s\n" % (ROOT_Z, SWAP_Z, HAND_Z, TAB_Z)
+    erwartet = "# /etc/fstab\n%s\n#haertung-D5# %s\n%s\n#haertung-D5# %s\n%s\n" % (ROOT_Z, SWAP_Z, HAND_Z, TAB_Z, SHM_Z)
     pruefe(fstab.read_text(encoding="utf-8") == erwartet,
            "--anwenden: genau die Swap-Zeilen mit Marke auskommentiert, alles andere Zeichen fuer Zeichen gleich")
     pruefe(oct(fstab.stat().st_mode & 0o777) == "0o640", "Rechte der fstab bleiben (640)")
@@ -829,6 +862,48 @@ try:
     # Testmodus ohne Ersatzdateien: das echte /proc/swaps wird nicht gelesen
     rc, out = lauf("--pruefen", W9)
     pruefe("SWAP an" not in out, "Testmodus ohne JARVIS_PROC_SWAPS: kein Swap des Pruefrechners in der Ausgabe")
+
+    # ── 10. E2 /dev/shm ohne Ausfuehrung ─────────────────────────────────────
+    print("[10] E2 /dev/shm")
+    W10 = sandkasten / "shm"
+    (W10 / "etc").mkdir(parents=True)
+    fs = W10 / "etc/fstab"
+    GRUND = "# /etc/fstab\nUUID=1111 / ext4 errors=remount-ro 0 1\n"
+    fs.write_text(GRUND, encoding="utf-8")
+    fs.chmod(0o644)
+    shm = sandkasten / "shm_optionen"
+    shm.write_text("rw,nosuid,nodev,inode64\n")
+    rc, out = lauf("--pruefen", W10, shm=shm)
+    pruefe(rc == 1 and "FEHLT       %s: /dev/shm mit noexec" % fs in out and "AUSFUEHRBAR /dev/shm" in out,
+           "--pruefen meldet fehlende fstab-Zeile und ausfuehrbares /dev/shm (Exit %d)" % rc)
+    pruefe(fs.read_text(encoding="utf-8") == GRUND and not mount_aufrufe(shm), "--pruefen aendert nichts")
+    rc, out = lauf("--anwenden", W10, shm=shm)
+    soll_e2 = ["UUID=1111 / ext4 errors=remount-ro 0 1", "tmpfs /dev/shm tmpfs defaults,nosuid,nodev,noexec 0 0"]
+    pruefe(zeilen(fs) == soll_e2 and fs.read_text(encoding="utf-8").startswith(GRUND),
+           "--anwenden haengt genau die /dev/shm-Zeile an, der Rest bleibt (%s)" % zeilen(fs))
+    pruefe(mount_aufrufe(shm) == ["-o remount,nosuid,nodev,noexec /dev/shm"],
+           "--anwenden haengt /dev/shm einmal mit nosuid,nodev,noexec neu ein (%s)" % mount_aufrufe(shm))
+    st = fs.stat().st_mtime_ns
+    time.sleep(0.02)
+    rc, out = lauf("--anwenden", W10, shm=shm)
+    pruefe(fs.stat().st_mtime_ns == st and len(mount_aufrufe(shm)) == 1,
+           "zweiter Lauf: fstab unberuehrt, kein weiteres remount")
+    rc, out = lauf("--pruefen", W10, shm=shm)
+    pruefe(rc == 0 and "/dev/shm" not in out.replace("ok          ", ""),
+           "danach --pruefen 'alles umgesetzt' (Exit %d)" % rc)
+
+    # Fremde Zeile ohne noexec: melden, nicht aendern
+    FREMD = GRUND + "tmpfs /dev/shm tmpfs defaults,nosuid 0 0\n"
+    fs.write_text(FREMD, encoding="utf-8")
+    rc, out = lauf("--anwenden", W10, shm=shm)
+    pruefe(fs.read_text(encoding="utf-8") == FREMD, "fremde /dev/shm-Zeile bleibt unveraendert")
+    rc, out = lauf("--pruefen", W10, shm=shm)
+    pruefe(rc == 1 and "ohne nodev noexec" in out and "nicht von diesem Skript" in out,
+           "fremde Zeile ohne nodev/noexec wird mit den fehlenden Optionen gemeldet (Exit %d)" % rc)
+
+    # Testmodus ohne Ersatzdatei: das /dev/shm des Pruefrechners bleibt unberuehrt
+    rc, out = lauf("--pruefen", W10)
+    pruefe("AUSFUEHRBAR" not in out, "Testmodus ohne JARVIS_SHM_OPTIONEN: kein /dev/shm des Pruefrechners in der Ausgabe")
 finally:
     shutil.rmtree(sandkasten, ignore_errors=True)
 

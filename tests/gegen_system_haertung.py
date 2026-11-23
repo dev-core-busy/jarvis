@@ -156,6 +156,18 @@ PROBEN = [
      'if true; then\n    PROC_SWAPS=', 1),
     ("Testmodus liest das echte /proc/swaps", '    PROC_SWAPS="${JARVIS_PROC_SWAPS:-}"',
      '    PROC_SWAPS="${JARVIS_PROC_SWAPS:-/proc/swaps}"', 1),
+    # E2 /dev/shm ohne Ausfuehrung
+    ("shm: fstab-Zeile ohne noexec", 'SHM_ZEILE="tmpfs /dev/shm tmpfs defaults,nosuid,nodev,noexec 0 0"',
+     'SHM_ZEILE="tmpfs /dev/shm tmpfs defaults,nosuid,nodev 0 0"', 1),
+    ("shm: remount ohne noexec", '"$MOUNT" -o remount,nosuid,nodev,noexec /dev/shm', '"$MOUNT" -o remount,nosuid,nodev /dev/shm', 1),
+    ("shm: fremde Zeile wird ueberschrieben", '    if [ -z "$opts" ]; then\n        if [ "$aktion" = "pruefen" ]; then\n            echo "  FEHLT       $FSTAB: /dev/shm',
+     '    if true; then\n        if [ "$aktion" = "pruefen" ]; then\n            echo "  FEHLT       $FSTAB: /dev/shm', 1),
+    ("shm: fremde Zeile ohne noexec nicht gemeldet", 'for o in nosuid nodev noexec; do', 'for o in nosuid nodev; do', 1),
+    ("shm: --pruefen blind fuer fstab", "    shm_fstab pruefen\n", "", 1),
+    ("shm: --pruefen blind fuer Laufzeit", "    shm_system pruefen\n", "", 1),
+    ("shm: kein remount", '    shm_system anwenden\n        return 0', '        return 0', 1),
+    ("shm: remount auch bei schon noexec", '    case ",$opts," in *",noexec,"*) return 0 ;; esac\n', "", 1),
+    ("JARVIS_MOUNT auch im Produktivlauf", 'if [ -n "$TEST" ]; then\n    MOUNT=', 'if true; then\n    MOUNT=', 1),
 ]
 
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Systemhaertung B1-B8, B13, B14, D5 und D8 der Checkliste "hardening" (Confluence, Seite 342048622)
+# Systemhaertung B1-B8, B13, B14, D5, D8 und E2 (Teil) der Checkliste "hardening" (Confluence, Seite 342048622)
 # – als root.
 #
 #   bash system_haertung.sh --pruefen     nur melden, nichts aendern
@@ -48,6 +48,10 @@
 #       Dienste lauschen dort). Eine Schnittstelle unter NetworkManager bekommt
 #       ipv6.method disabled - sonst setzt NM disable_ipv6 bei jeder Verbindung
 #       wieder auf 0 (DEV 22.11.2026: Datei mit all=1 seit Juni, ens192 trotzdem 0).
+#   E2  (Teil) /dev/shm ohne Ausfuehrung: eigene fstab-Zeile mit
+#       nosuid,nodev,noexec (systemd-remount-fs uebernimmt sie beim Start),
+#       im laufenden System per remount. Eine schon vorhandene, FREMDE
+#       /dev/shm-Zeile ohne noexec wird gemeldet, nicht geaendert.
 #
 # WAS ES BEWUSST NICHT TUT – jeweils gemessen am 18.11.2026:
 #   * Kein Eingriff in apt: Remove-Unused-Dependencies verwaltet Jarvis selbst
@@ -61,6 +65,10 @@
 #     ::1, und "localhost" loest zuerst nach ::1 auf. Gemessen 22.11.2026: auf
 #     ECHT hat ens192 nur eine Link-local-Adresse, keine Route ausser fe80::/64,
 #     DNS nur ueber IPv4 - an entfernten Zielen aendert die Abschaltung nichts.
+#   * Kein noexec auf /tmp (E2): gemessen auf DEV 23.11.2026 brechen damit
+#     direkt aufgerufene Skripte der Sandbox (./skript), Bibliotheken aus /tmp
+#     (ctypes) und cmake-Laufproben beim Bauen von Paketen (dlib ueber pip) -
+#     und /var/tmp und das Home des Dienstes bleiben ohnehin ausfuehrbar.
 #   * Kein Neustart von jarvis.service: LimitCORE=0 wirkt erst mit dem
 #     naechsten Neustart, und den bestimmt der Betreiber.
 #   * Kein aideinit im --anwenden: der Lauf dauert 15-20 Minuten und gehoert
@@ -145,6 +153,17 @@ fi
 SWAP_RESERVE_KB=2097152
 FSTAB="$W/etc/fstab"
 SWAP_MARKE="#haertung-D5# "
+# E2: Optionen von /dev/shm lesen und neu einhaengen. Im Testmodus NUR ueber
+# die Ersatzdatei und die mount-Attrappe des Waechters, ohne Vorgabe leer -
+# nie das /dev/shm des Pruefrechners.
+MOUNT="mount"
+SHM_OPTIONEN=""
+if [ -n "$TEST" ]; then
+    MOUNT="${JARVIS_MOUNT:-}"
+    SHM_OPTIONEN="${JARVIS_SHM_OPTIONEN:-}"
+fi
+SHM_KOMMENTAR="# Haertung E2 (Checkliste 27) - deploy/security/system_haertung.sh: /dev/shm ohne Ausfuehrung"
+SHM_ZEILE="tmpfs /dev/shm tmpfs defaults,nosuid,nodev,noexec 0 0"
 BROKER_CONF="$W/etc/jarvis/broker.conf"
 
 # ── Inhalte ──────────────────────────────────────────────────────────────────
@@ -808,11 +827,72 @@ swap_system() {
     done
 }
 
+# shm_fstab pruefen|anwenden: eigene fstab-Zeile fuer /dev/shm (E2). Eine
+# vorhandene Zeile eines anderen bleibt unangetastet - fehlt ihr eine der drei
+# Optionen, wird das gemeldet (sonst gewaenne beim Start die fremde Zeile).
+shm_fstab() {
+    local aktion="$1" opts o fehlt=""
+    [ -f "$FSTAB" ] || return 0
+    opts="$(awk '!/^[[:space:]]*#/ && $2 == "/dev/shm" {print $4}' "$FSTAB" | tail -1)"
+    if [ -z "$opts" ]; then
+        if [ "$aktion" = "pruefen" ]; then
+            echo "  FEHLT       $FSTAB: /dev/shm mit noexec"
+            abweichungen=$((abweichungen + 1))
+        elif fstab_schreiben "$(cat "$FSTAB")
+$SHM_KOMMENTAR
+$SHM_ZEILE"; then
+            echo "  ergaenzt     $FSTAB: /dev/shm mit nosuid,nodev,noexec"
+            geaendert="$geaendert FSTAB"
+        else
+            echo "WARNUNG: $FSTAB nicht geschrieben" >&2
+        fi
+        return 0
+    fi
+    for o in nosuid nodev noexec; do
+        case ",$opts," in *",$o,"*) ;; *) fehlt="$fehlt $o" ;; esac
+    done
+    if [ -n "$fehlt" ]; then
+        echo "  WEICHT AB   $FSTAB: /dev/shm-Zeile ohne$fehlt (nicht von diesem Skript - nicht geaendert)"
+        abweichungen=$((abweichungen + 1))
+    fi
+}
+
+# shm_optionen: die WIRKSAMEN Optionen von /dev/shm (leer = unbekannt)
+shm_optionen() {
+    if [ -n "$TEST" ]; then
+        [ -n "$SHM_OPTIONEN" ] && cat "$SHM_OPTIONEN" 2>/dev/null
+    else
+        findmnt -no OPTIONS /dev/shm 2>/dev/null
+    fi
+}
+
+# shm_system pruefen|anwenden: /dev/shm im laufenden System (E2). Die
+# fstab-Zeile wirkt erst beim naechsten Start; bis dahin traegt das remount.
+shm_system() {
+    local aktion="$1" opts
+    opts="$(shm_optionen)"
+    [ -n "$opts" ] || return 0
+    case ",$opts," in *",noexec,"*) return 0 ;; esac
+    if [ "$aktion" = "pruefen" ]; then
+        echo "  AUSFUEHRBAR /dev/shm ($opts)"
+        abweichungen=$((abweichungen + 1))
+        return 0
+    fi
+    [ -n "$MOUNT" ] || return 0
+    if "$MOUNT" -o remount,nosuid,nodev,noexec /dev/shm; then
+        echo "  noexec       /dev/shm"
+    else
+        echo "WARNUNG: /dev/shm liess sich nicht mit noexec neu einhaengen" >&2
+    fi
+}
+
 system_pruefen() {
     pam_pruefen
     ipv6_system pruefen
     swap_fstab pruefen
     swap_system pruefen
+    shm_fstab pruefen
+    shm_system pruefen
     [ -n "$TEST" ] && return 0
     # D5: wirkt MemorySwapMax=0 in der LAUFENDEN Unit? Der Drop-in allein
     # beweist es nicht (ohne daemon-reload steht memory.swap.max auf "max").
@@ -866,9 +946,11 @@ system_pruefen() {
 anwenden_system() {
     pam_aktivieren
     swap_fstab anwenden
+    shm_fstab anwenden
     if [ -n "$TEST" ]; then
         ipv6_system anwenden
         swap_system anwenden
+        shm_system anwenden
         return 0
     fi
     # D5: erst MemorySwapMax=0 und die geaenderte fstab bei systemd bekannt
@@ -876,6 +958,7 @@ anwenden_system() {
     # entfernt die erzeugte .swap-Unit), dann den Swap abschalten.
     case " $geaendert " in *" SWAP_DROPIN "*|*" FSTAB "*) systemctl daemon-reload ;; esac
     swap_system anwenden
+    shm_system anwenden
     case " $geaendert " in *" SYSCTL "*|*" SYSCTL_IPV6 "*)
         if sysctl --system 2>&1 | grep -iE "error|invalid|unknown"; then
             echo "WARNUNG: sysctl --system meldet Fehler (siehe oben)" >&2

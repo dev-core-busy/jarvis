@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Systemhaertung B1-B8, B13, B14 und D8 der Checkliste "hardening" (Confluence, Seite 342048622)
+# Systemhaertung B1-B8, B13, B14, D5 und D8 der Checkliste "hardening" (Confluence, Seite 342048622)
 # – als root.
 #
 #   bash system_haertung.sh --pruefen     nur melden, nichts aendern
@@ -29,7 +29,19 @@
 #       geaendert. root bleibt ausgenommen (Notzugang ueber die Konsole).
 #       Die Web-Anmeldung lokaler Konten bekommt einen eigenen PAM-Dienst
 #       jarvis-web OHNE faillock (Begruendung bei PAM_WEB).
-#   D8  IPv6 aus auf allen Schnittstellen ausser Loopback (eigene Datei
+#   D5  Kein Swap: jarvis.service und jarvis-broker.service bekommen
+#       MemorySwapMax=0 (eigener Drop-in 75-swap.conf - im Speicher beider
+#       liegen die entpackten Geheimnisse). Dazu wird der Swap abgeschaltet:
+#       die swap-Zeilen in /etc/fstab werden mit "#haertung-D5# " auskommentiert
+#       und swapoff laeuft - aber NUR, wenn danach genug Speicher frei bleibt
+#       (MemAvailable minus belegter Swap >= SWAP_RESERVE_KB) und nicht
+#       SWAP_ERLAUBT=ja in /etc/jarvis/broker.conf steht. Mit SWAP_ERLAUBT=ja
+#       werden nur die eigenen Kommentare zurueckgenommen (swapon -a holt ihn
+#       sofort zurueck). Gemessen auf ECHT 23.11.2026: 16 GB RAM, der Dienst lag
+#       seit August hoechstens bei 7,6 GB (systemd "memory peak" je Lauf); die
+#       Spitze im Juli (14,6 GB + 4,3 GB Swap) war der behobene OOM-Fehler beim
+#       Neuaufbau des FAISS-Index.
+#   D8 IPv6 aus auf allen Schnittstellen ausser Loopback (eigene Datei
 #       /etc/sysctl.d/90-haertung-ipv6.conf) - aber NUR, wenn das Netz kein
 #       IPv6 nutzt: keine globale IPv6-Adresse, keine IPv6-Standardroute und
 #       nicht IPV6_ERLAUBT=ja in /etc/jarvis/broker.conf. ::1 bleibt (lokale
@@ -116,6 +128,23 @@ if [ -n "$TEST" ]; then
     IPV6_CONF="${JARVIS_IPV6_CONF:-}"
     NMCLI="${JARVIS_NMCLI:-}"
 fi
+# Fuer den Laufzeitteil von D5 (swap_system) dasselbe: /proc/swaps,
+# /proc/meminfo und swapoff im Testmodus NUR als Ersatz des Waechters, ohne
+# Vorgabe leer - dann laeuft der Teil im Testmodus gar nicht.
+PROC_SWAPS="/proc/swaps"
+MEMINFO="/proc/meminfo"
+SWAPOFF="swapoff"
+if [ -n "$TEST" ]; then
+    PROC_SWAPS="${JARVIS_PROC_SWAPS:-}"
+    MEMINFO="${JARVIS_MEMINFO:-}"
+    SWAPOFF="${JARVIS_SWAPOFF:-}"
+fi
+# Was nach dem Abschalten mindestens frei bleiben muss (2 GB). swapoff holt
+# jede ausgelagerte Seite zurueck; reicht der Speicher nicht, greift waehrend
+# swapoff der OOM-Killer - deshalb wird VORHER gerechnet.
+SWAP_RESERVE_KB=2097152
+FSTAB="$W/etc/fstab"
+SWAP_MARKE="#haertung-D5# "
 BROKER_CONF="$W/etc/jarvis/broker.conf"
 
 # ── Inhalte ──────────────────────────────────────────────────────────────────
@@ -221,6 +250,13 @@ DROPIN='# Haertung B5 (Checkliste 64, 103) - deploy/security/system_haertung.sh
 # Wirksam erst mit dem naechsten Neustart von jarvis.service.
 [Service]
 LimitCORE=0'
+
+SWAP_DROPIN='# Haertung D5 (Checkliste 28, 103) - deploy/security/system_haertung.sh
+# Nichts aus dem Speicher dieses Dienstes geht in den Swap: dort liegen die
+# entpackten Geheimnisse (Hauptschluessel, LLM-Schluessel, Sitzungen).
+# Eigener Drop-in: haertung_installieren.sh raeumt nur seine eigenen ab.
+[Service]
+MemorySwapMax=0'
 
 AUDIT='## Haertung B6 (Checkliste 72, 73, 74) - deploy/security/system_haertung.sh
 ## Pruefbefehl ausserhalb eines Terminals: ausearch --input-logs -k <schluessel>
@@ -426,6 +462,17 @@ ipv6_grund() {
 }
 IPV6_GRUND="$(ipv6_grund)"
 
+# swap_grund: warum der Swap bleiben soll (leer = darf weg). Nur die
+# ausdrueckliche Entscheidung in broker.conf - ob der Speicher reicht, wird
+# erst beim Abschalten gemessen (swap_system), weil es sich laufend aendert.
+swap_grund() {
+    local wert
+    wert="$(sed -n 's/^[[:space:]]*SWAP_ERLAUBT[[:space:]]*=[[:space:]]*//p' "$BROKER_CONF" 2>/dev/null \
+            | tail -1 | tr -d '"'"'" | tr -d '[:space:]')"
+    [ "$wert" = "ja" ] && echo "SWAP_ERLAUBT=ja in /etc/jarvis/broker.conf"
+}
+SWAP_GRUND="$(swap_grund)"
+
 # ── Ziele: Pfad | Modus | Inhalt-Variable ────────────────────────────────────
 ZIELE="
 etc/sudoers.d/10-haertung|0440|SUDOERS
@@ -445,6 +492,8 @@ etc/pam.d/jarvis-web|0644|PAM_WEB
 usr/share/pam-configs/jarvis-faillock|0644|FAILLOCK
 usr/share/pam-configs/jarvis-faillock-vorab|0644|FAILLOCK_VORAB
 etc/sysctl.d/90-haertung-ipv6.conf|0644|SYSCTL_IPV6
+etc/systemd/system/jarvis.service.d/75-swap.conf|0644|SWAP_DROPIN
+etc/systemd/system/jarvis-broker.service.d/75-swap.conf|0644|SWAP_DROPIN
 "
 
 abweichungen=0
@@ -676,10 +725,106 @@ ipv6_aus() {
     fi
 }
 
+# fstab_schreiben <inhalt>: /etc/fstab atomar ersetzen, Rechte und
+# Eigentuemer wie vorher (die Datei gehoert dem System, nicht diesem Skript).
+fstab_schreiben() {
+    local tmp
+    tmp="$(mktemp "$(dirname "$FSTAB")/.haertung.XXXXXX")" || return 1
+    printf '%s\n' "$1" > "$tmp"
+    chmod --reference="$FSTAB" "$tmp"
+    [ -z "$TEST" ] && chown --reference="$FSTAB" "$tmp"
+    mv -f "$tmp" "$FSTAB"
+}
+
+# swap_fstab pruefen|anwenden: Swap-Zeilen in /etc/fstab (D5). Auskommentiert
+# wird mit einer eigenen Marke - nur DIESE Zeilen nimmt SWAP_ERLAUBT=ja wieder
+# zurueck; eine von Hand auskommentierte Zeile bleibt, wie sie ist.
+swap_fstab() {
+    local aktion="$1" aktiv eigene spec
+    [ -f "$FSTAB" ] || return 0
+    aktiv="$(awk '!/^[[:space:]]*#/ && $3 == "swap" {print $1}' "$FSTAB")"
+    eigene="$(grep -c "^$SWAP_MARKE" "$FSTAB")"
+    if [ -n "$SWAP_GRUND" ]; then
+        if [ "$eigene" -eq 0 ]; then
+            echo "  bleibt an   Swap ($SWAP_GRUND)"
+        elif [ "$aktion" = "pruefen" ]; then
+            echo "  WEICHT AB   $FSTAB: $eigene Swap-Zeile(n) von D5 auskommentiert (Swap soll bleiben: $SWAP_GRUND)"
+            abweichungen=$((abweichungen + 1))
+        elif fstab_schreiben "$(sed "s/^$SWAP_MARKE//" "$FSTAB")"; then
+            echo "  zurueck      $FSTAB: $eigene Swap-Zeile(n) wieder aktiv ($SWAP_GRUND)"
+            echo "  HINWEIS: Swap kommt mit dem naechsten Start zurueck (oder sofort: swapon -a)"
+            geaendert="$geaendert FSTAB"
+        else
+            echo "WARNUNG: $FSTAB nicht geschrieben" >&2
+        fi
+        return 0
+    fi
+    [ -z "$aktiv" ] && return 0
+    if [ "$aktion" = "pruefen" ]; then
+        for spec in $aktiv; do
+            echo "  SWAP        $FSTAB: $spec (wird beim Start eingeschaltet)"
+            abweichungen=$((abweichungen + 1))
+        done
+        return 0
+    fi
+    if fstab_schreiben "$(awk -v m="$SWAP_MARKE" '!/^[[:space:]]*#/ && $3 == "swap" {print m $0; next} {print}' "$FSTAB")"; then
+        echo "  auskommentiert $FSTAB: $(echo $aktiv)"
+        geaendert="$geaendert FSTAB"
+    else
+        echo "WARNUNG: $FSTAB nicht geschrieben" >&2
+    fi
+}
+
+# swap_system pruefen|anwenden: der WIRKSAME Swap (D5). swapoff nur, wenn
+# danach genug Speicher frei bleibt - gerechnet aus MemAvailable und dem
+# belegten Swap, bevor irgendetwas abgeschaltet wird.
+swap_system() {
+    local aktion="$1" geraete belegt verfuegbar g
+    [ -n "$SWAP_GRUND" ] && return 0
+    [ -n "$PROC_SWAPS" ] && [ -f "$PROC_SWAPS" ] || return 0
+    geraete="$(awk 'NR > 1 {print $1}' "$PROC_SWAPS")"
+    [ -z "$geraete" ] && return 0
+    belegt="$(awk 'NR > 1 {s += $4} END {print s + 0}' "$PROC_SWAPS")"
+    if [ "$aktion" = "pruefen" ]; then
+        for g in $geraete; do
+            echo "  SWAP an     $g"
+            abweichungen=$((abweichungen + 1))
+        done
+        return 0
+    fi
+    [ -n "$SWAPOFF" ] || return 0
+    verfuegbar="$(awk '/^MemAvailable:/ {print $2}' "$MEMINFO" 2>/dev/null)"
+    if [ -z "$verfuegbar" ] || [ $((verfuegbar - belegt)) -lt "$SWAP_RESERVE_KB" ]; then
+        echo "WARNUNG: Swap bleibt an - zu wenig freier Speicher (verfuegbar $(( ${verfuegbar:-0} / 1024 )) MB," \
+             "im Swap $((belegt / 1024)) MB, Reserve $((SWAP_RESERVE_KB / 1024)) MB)" >&2
+        return 0
+    fi
+    for g in $geraete; do
+        if "$SWAPOFF" "$g"; then
+            echo "  aus          Swap $g ($((belegt / 1024)) MB zurueckgeholt)"
+        else
+            echo "WARNUNG: swapoff $g fehlgeschlagen" >&2
+        fi
+    done
+}
+
 system_pruefen() {
     pam_pruefen
     ipv6_system pruefen
+    swap_fstab pruefen
+    swap_system pruefen
     [ -n "$TEST" ] && return 0
+    # D5: wirkt MemorySwapMax=0 in der LAUFENDEN Unit? Der Drop-in allein
+    # beweist es nicht (ohne daemon-reload steht memory.swap.max auf "max").
+    local u m
+    for u in jarvis jarvis-broker; do
+        systemctl is-active --quiet "$u.service" || continue
+        m="$(cat "/sys/fs/cgroup/system.slice/$u.service/memory.swap.max" 2>/dev/null)"
+        if [ -n "$m" ] && [ "$m" != "0" ]; then
+            echo "  SWAP        $u.service darf in den Swap (memory.swap.max = $m)"
+            abweichungen=$((abweichungen + 1))
+        fi
+    done
     local p
     for p in $PAKETE; do
         if ! dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "ok installed"; then
@@ -720,10 +865,17 @@ system_pruefen() {
 
 anwenden_system() {
     pam_aktivieren
+    swap_fstab anwenden
     if [ -n "$TEST" ]; then
         ipv6_system anwenden
+        swap_system anwenden
         return 0
     fi
+    # D5: erst MemorySwapMax=0 und die geaenderte fstab bei systemd bekannt
+    # machen (daemon-reload setzt memory.swap.max der laufenden Units und
+    # entfernt die erzeugte .swap-Unit), dann den Swap abschalten.
+    case " $geaendert " in *" SWAP_DROPIN "*|*" FSTAB "*) systemctl daemon-reload ;; esac
+    swap_system anwenden
     case " $geaendert " in *" SYSCTL "*|*" SYSCTL_IPV6 "*)
         if sysctl --system 2>&1 | grep -iE "error|invalid|unknown"; then
             echo "WARNUNG: sysctl --system meldet Fehler (siehe oben)" >&2

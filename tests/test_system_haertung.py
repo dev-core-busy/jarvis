@@ -19,6 +19,10 @@ Textvorkommen:
     Aktivierung ueber eine pam-auth-update-ATTRAPPE: einmal, danach nicht
     mehr (idempotent), Abweichung im PAM-Stapel wird gemeldet und repariert,
     und bei altem Jarvis-Code (Dienst "login") bleibt faillock AUS.
+ 8. D8: IPv6 aus mit Schranke (siehe Abschnitt [8]).
+ 9. D5: MemorySwapMax=0 fuer Dienst und Broker, Swap-Zeilen der fstab mit
+    eigener Marke auskommentiert (und mit SWAP_ERLAUBT=ja genau diese wieder
+    zurueck), swapoff ueber eine ATTRAPPE nur bei genug freiem Speicher.
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 Das zu pruefende Skript kann ueber JARVIS_SYSTEM_HAERTUNG_SKRIPT umgelenkt
@@ -107,6 +111,23 @@ exit 1
 """
 
 
+# Attrappe fuer swapoff (D5): protokolliert jeden Aufruf neben der
+# Ersatzdatei fuer /proc/swaps (<swaps>.log) und nimmt das Geraet dort heraus -
+# wie das echte Werkzeug, das den Eintrag in /proc/swaps verschwinden laesst.
+SWAPOFF_ATTRAPPE = r"""#!/bin/bash
+s="${JARVIS_PROC_SWAPS:?}"
+echo "$*" >> "$s.log"
+{ head -1 "$s"; tail -n +2 "$s" | awk -v g="$1" '$1 != g'; } > "$s.neu" && mv "$s.neu" "$s"
+"""
+
+
+def swapoff_aufrufe(swaps):
+    try:
+        return [z for z in Path(str(swaps) + ".log").read_text().splitlines() if z.strip()]
+    except OSError:
+        return []
+
+
 def nm_modify(stand):
     try:
         return [z for z in (Path(stand) / "log").read_text().splitlines() if " modify " in " " + z + " "]
@@ -121,12 +142,19 @@ def pam_aufrufe(wurzel):
         return []
 
 
-def lauf(modus, wurzel, skript=None, test=True, attrappe=True, ipv6_conf=None, nm=None):
+def lauf(modus, wurzel, skript=None, test=True, attrappe=True, ipv6_conf=None, nm=None,
+         swaps=None, meminfo=None):
     env = {k: v for k, v in os.environ.items()
            if k not in ("JARVIS_HAERTUNG_TEST", "JARVIS_SYS_WURZEL")}
     for k in ("JARVIS_VISUDO", "JARVIS_PAM_AUTH_UPDATE", "JARVIS_IP", "JARVIS_IPV6_CONF",
-              "JARVIS_NMCLI", "JARVIS_NMCLI_STAND"):
+              "JARVIS_NMCLI", "JARVIS_NMCLI_STAND", "JARVIS_PROC_SWAPS", "JARVIS_MEMINFO",
+              "JARVIS_SWAPOFF"):
         env.pop(k, None)
+    if test and swaps is not None:
+        env["JARVIS_PROC_SWAPS"] = str(swaps)
+        env["JARVIS_SWAPOFF"] = str(SWAPOFF_ATTRAPPE_PFAD)
+    if test and meminfo is not None:
+        env["JARVIS_MEMINFO"] = str(meminfo)
     if test and attrappe:
         env["JARVIS_PAM_AUTH_UPDATE"] = str(PAM_ATTRAPPE_PFAD)
     if test:
@@ -274,6 +302,10 @@ pruefe(bool(re.search(r'(?m)^IPV6_CONF="/proc/sys/net/ipv6/conf"\nNMCLI="nmcli"\
                       r'if \[ -n "\$TEST" \]; then\n\s*IPV6_CONF="\$\{JARVIS_IPV6_CONF:-\}"\n'
                       r'\s*NMCLI="\$\{JARVIS_NMCLI:-\}"\nfi$', _sk)),
        "JARVIS_IPV6_CONF/JARVIS_NMCLI nur im Testmodus, dort ohne Vorgabe leer")
+pruefe(bool(re.search(r'(?m)^PROC_SWAPS="/proc/swaps"\nMEMINFO="/proc/meminfo"\nSWAPOFF="swapoff"\n'
+                      r'if \[ -n "\$TEST" \]; then\n\s*PROC_SWAPS="\$\{JARVIS_PROC_SWAPS:-\}"\n'
+                      r'\s*MEMINFO="\$\{JARVIS_MEMINFO:-\}"\n\s*SWAPOFF="\$\{JARVIS_SWAPOFF:-\}"\nfi$', _sk)),
+       "JARVIS_PROC_SWAPS/JARVIS_MEMINFO/JARVIS_SWAPOFF nur im Testmodus, dort ohne Vorgabe leer")
 
 sandkasten = Path(tempfile.mkdtemp(prefix="sys_haertung_"))
 PAM_ATTRAPPE_PFAD = sandkasten / "pam-auth-update-attrappe"
@@ -285,6 +317,9 @@ IP_ATTRAPPE_PFAD.chmod(0o755)
 NM_ATTRAPPE_PFAD = sandkasten / "nmcli-attrappe"
 NM_ATTRAPPE_PFAD.write_text(NM_ATTRAPPE, encoding="utf-8")
 NM_ATTRAPPE_PFAD.chmod(0o755)
+SWAPOFF_ATTRAPPE_PFAD = sandkasten / "swapoff-attrappe"
+SWAPOFF_ATTRAPPE_PFAD.write_text(SWAPOFF_ATTRAPPE, encoding="utf-8")
+SWAPOFF_ATTRAPPE_PFAD.chmod(0o755)
 try:
     W = sandkasten / "a"
     W.mkdir()
@@ -705,6 +740,95 @@ try:
     # Testmodus ohne Ersatzverzeichnis: das echte /proc wird nicht gelesen
     rc, out = lauf("--pruefen", W6)
     pruefe("IPv6 auf" not in out, "Testmodus ohne JARVIS_IPV6_CONF: kein Wert des Pruefrechners in der Ausgabe")
+
+    # ── 9. D5 kein Swap ──────────────────────────────────────────────────────
+    print("[9] D5 Swap")
+    for unit in ("jarvis.service", "jarvis-broker.service"):
+        d5 = W / "etc/systemd/system" / (unit + ".d") / "75-swap.conf"
+        pruefe(zeilen(d5) == ["[Service]", "MemorySwapMax=0"],
+               "%s: eigener Drop-in mit MemorySwapMax=0 (%s)" % (unit, zeilen(d5)))
+        pruefe(d5.exists() and oct(d5.stat().st_mode & 0o777) == "0o644", "%s: Drop-in mit Modus 644" % unit)
+
+    W9 = sandkasten / "swap"
+    (W9 / "etc").mkdir(parents=True)
+    fstab = W9 / "etc/fstab"
+    ROOT_Z = "UUID=1111 /               ext4    errors=remount-ro 0       1"
+    SWAP_Z = "UUID=2222 none            swap    sw              0       0"
+    HAND_Z = "# /swapfile none swap sw 0 0"
+    TAB_Z = "/dev/sdb1\tnone\tswap\tdefaults\t0\t0"
+    FSTAB_ALT = "# /etc/fstab\n%s\n%s\n%s\n%s\n" % (ROOT_Z, SWAP_Z, HAND_Z, TAB_Z)
+    fstab.write_text(FSTAB_ALT, encoding="utf-8")
+    fstab.chmod(0o640)
+    rc, out = lauf("--pruefen", W9)
+    pruefe(rc == 1 and "SWAP        %s: UUID=2222" % fstab in out and "SWAP        %s: /dev/sdb1" % fstab in out,
+           "--pruefen meldet jede aktive Swap-Zeile, auch mit Tabulatoren (Exit %d)" % rc)
+    pruefe("/swapfile" not in out, "--pruefen: eine schon auskommentierte Zeile ist kein Befund")
+    pruefe(fstab.read_text(encoding="utf-8") == FSTAB_ALT, "--pruefen aendert die fstab nicht")
+    rc, out = lauf("--anwenden", W9)
+    erwartet = "# /etc/fstab\n%s\n#haertung-D5# %s\n%s\n#haertung-D5# %s\n" % (ROOT_Z, SWAP_Z, HAND_Z, TAB_Z)
+    pruefe(fstab.read_text(encoding="utf-8") == erwartet,
+           "--anwenden: genau die Swap-Zeilen mit Marke auskommentiert, alles andere Zeichen fuer Zeichen gleich")
+    pruefe(oct(fstab.stat().st_mode & 0o777) == "0o640", "Rechte der fstab bleiben (640)")
+    st = fstab.stat().st_mtime_ns
+    time.sleep(0.02)
+    rc, out = lauf("--anwenden", W9)
+    pruefe(fstab.stat().st_mtime_ns == st and "auskommentiert" not in out,
+           "zweiter Lauf laesst die fstab unberuehrt")
+    rc, out = lauf("--pruefen", W9)
+    pruefe("SWAP  " not in out, "danach --pruefen ohne Swap-Befund in der fstab")
+
+    (W9 / "etc/jarvis").mkdir()
+    (W9 / "etc/jarvis/broker.conf").write_text("SWAP_ERLAUBT='ja'\n", encoding="utf-8")
+    rc, out = lauf("--pruefen", W9)
+    pruefe(rc == 1 and "von D5 auskommentiert" in out and "SWAP_ERLAUBT" in out,
+           "SWAP_ERLAUBT=ja: --pruefen meldet die eigenen Kommentare als Widerspruch (Exit %d)" % rc)
+    rc, out = lauf("--anwenden", W9)
+    pruefe(fstab.read_text(encoding="utf-8") == FSTAB_ALT,
+           "SWAP_ERLAUBT=ja: --anwenden stellt genau den alten Stand her (von Hand auskommentierte Zeile bleibt)")
+    rc, out = lauf("--pruefen", W9)
+    pruefe("bleibt an   Swap" in out and "SWAP  " not in out, "danach 'bleibt an', kein Swap-Befund")
+
+    # Laufzeitteil ueber Ersatzdateien und die swapoff-Attrappe
+    swaps = sandkasten / "swaps"
+    meminfo = sandkasten / "meminfo"
+    KOPF = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+    BELEGT = 336696
+
+    def swaps_an():
+        swaps.write_text(KOPF + "/dev/sda5                               partition\t5363708\t\t%d\t\t-2\n" % BELEGT)
+
+    def mem(verfuegbar):
+        meminfo.write_text("MemTotal:       16383272 kB\nMemAvailable:   %d kB\n" % verfuegbar)
+
+    rc, out = lauf("--pruefen", W9, swaps=swaps, meminfo=meminfo)
+    swaps_an(); mem(10000000)
+    rc, out = lauf("--anwenden", W9, swaps=swaps, meminfo=meminfo)
+    pruefe(not swapoff_aufrufe(swaps), "SWAP_ERLAUBT=ja: kein swapoff")
+    shutil.rmtree(W9 / "etc/jarvis")
+
+    rc, out = lauf("--pruefen", W9, swaps=swaps, meminfo=meminfo)
+    pruefe(rc == 1 and "SWAP an     /dev/sda5" in out, "--pruefen meldet den aktiven Swap (Exit %d)" % rc)
+    pruefe(not swapoff_aufrufe(swaps), "--pruefen ruft kein swapoff")
+    mem(2097152 + BELEGT - 1)
+    rc, out = lauf("--anwenden", W9, swaps=swaps, meminfo=meminfo)
+    pruefe(not swapoff_aufrufe(swaps) and "zu wenig freier Speicher" in out,
+           "1 kB unter der Reserve: kein swapoff, Warnung nennt den Grund")
+    meminfo.write_text("MemTotal:       16383272 kB\n")
+    rc, out = lauf("--anwenden", W9, swaps=swaps, meminfo=meminfo)
+    pruefe(not swapoff_aufrufe(swaps) and "zu wenig freier Speicher" in out,
+           "MemAvailable unbekannt: kein swapoff")
+    mem(2097152 + BELEGT)
+    rc, out = lauf("--anwenden", W9, swaps=swaps, meminfo=meminfo)
+    pruefe(swapoff_aufrufe(swaps) == ["/dev/sda5"], "genau an der Reserve: swapoff /dev/sda5 einmal (%s)"
+           % swapoff_aufrufe(swaps))
+    rc, out = lauf("--anwenden", W9, swaps=swaps, meminfo=meminfo)
+    pruefe(len(swapoff_aufrufe(swaps)) == 1, "zweiter Lauf ruft kein swapoff mehr")
+    rc, out = lauf("--pruefen", W9, swaps=swaps, meminfo=meminfo)
+    pruefe(rc == 0 and "SWAP" not in out, "danach --pruefen 'alles umgesetzt' (Exit %d)" % rc)
+
+    # Testmodus ohne Ersatzdateien: das echte /proc/swaps wird nicht gelesen
+    rc, out = lauf("--pruefen", W9)
+    pruefe("SWAP an" not in out, "Testmodus ohne JARVIS_PROC_SWAPS: kein Swap des Pruefrechners in der Ausgabe")
 finally:
     shutil.rmtree(sandkasten, ignore_errors=True)
 

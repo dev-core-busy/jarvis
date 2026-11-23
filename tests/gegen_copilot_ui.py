@@ -41,6 +41,15 @@ gegen_ablage.abraeumen_bei_ende(SICHERUNG, marke=MARKE)
 JS = "frontend/js/copilot.js"
 CSS = "frontend/css/style.css"
 HTML = "frontend/settings.html"
+
+
+def _einbindung(modul: str) -> str:
+    """Die Einbindungszeile von `modul` in settings.html, wie sie heute dasteht
+    (mit dem aktuellen ?v=). Nicht genau einmal vorhanden -> leerer Anker, den
+    die Trefferkontrolle als nicht deutbar meldet."""
+    funde = re.findall(r'^[ \t]*<script src="/static/js/' + re.escape(modul) + r'\?v=\d+"></script>\n',
+                       (ROOT / HTML).read_text(encoding="utf-8"), re.M)
+    return funde[0] if len(funde) == 1 else ""
 I18N = "frontend/js/i18n.js"
 
 DATEIEN = (JS, CSS, HTML, I18N)
@@ -156,9 +165,11 @@ PROBEN: list[tuple[str, str, str, str, str]] = [
      "",
      "ein gesperrter Knopf ist SICHTBAR gesperrt"),
 
+    # Anker OHNE festen Cache-Buster (2026-11-23: v=1 -> v=2 liess die Probe 0x
+    # treffen, "nicht deutbar"): die Einbindungszeile wird aus der Datei gelesen.
     ("das Skript ist nicht mehr eingebunden",
      HTML,
-     '    <script src="/static/js/copilot.js?v=1"></script>\n',
+     _einbindung("copilot.js"),
      "",
      "copilot.js ist in settings.html eingebunden"),
 

@@ -97,6 +97,12 @@ async function seite(opt) {
     return { w, d: w.document, fehler, ug, gm, $: (id) => w.document.getElementById(id) };
 }
 const offen = (m) => !!(m && m.classList.contains('open'));
+// ⚠ NIE UNGEPRUEFT DEREFERENZIEREN (2026-11-23): fehlte ein Popup, weil das
+// Modul kaputt ist, brach der Waechter nach den FAILs mit einem TypeError ab -
+// Exit 2 ("konnte nicht laufen") statt Exit 1 ("Befund"). Fehlt ein Element,
+// liefern diese Helfer einen Wert, an dem die Pruefung sauber scheitert.
+const zi = (el) => (el ? parseInt(el.style.zIndex, 10) : NaN);
+const txt = (el) => (el && el.textContent) || '';
 const esc = (s) => s.d.dispatchEvent(new s.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 function chipKnopf(s, feld, wert) {
     const inp = s.$(feld);
@@ -164,7 +170,8 @@ check('zweites Escape: Mitgliedschaften zu', !offen(gmod));
 // Mitgliedschaften aus der Mitgliederliste: wieder oben drauf
 if (gb) gb.click();
 await schlaf(30);
-if (mb && s.$('ldap-members-list').querySelector('.ldap-groups-btn')) s.$('ldap-members-list').querySelector('.ldap-groups-btn').click();
+const _ml = s.$('ldap-members-list');
+if (mb && _ml && _ml.querySelector('.ldap-groups-btn')) _ml.querySelector('.ldap-groups-btn').click();
 await schlaf(30);
 check('aus der Mitgliederliste: Mitgliedschaften von bob', s.ug.length >= 2 && s.ug[s.ug.length - 1].user === 'bob', JSON.stringify(s.ug));
 check('... und wieder ganz oben',
@@ -186,7 +193,7 @@ await schlaf(30);
 check('Klick oeffnet die Mitgliedschaften', s.ug.length === n0 + 1 && offen(s.$('ldap-groups-modal')));
 check('Klick schaltet die Auswahl NICHT um', cb && cb.checked === vorher, cb && (vorher + ' -> ' + cb.checked));
 check('Mitgliedschaften ueber dem Picker',
-      parseInt(s.$('ldap-groups-modal').style.zIndex, 10) > parseInt(s.$('ldap-picker-modal').style.zIndex, 10));
+      zi(s.$('ldap-groups-modal')) > zi(s.$('ldap-picker-modal')));
 esc(s);
 check('Escape schliesst zuerst die Mitgliedschaften, der Picker bleibt',
       !offen(s.$('ldap-groups-modal')) && offen(s.$('ldap-picker-modal')));
@@ -219,13 +226,13 @@ check('Fehler verschwindet nicht von selbst', inf && /nicht im Verzeichnis/.test
 s = await seite({ ug: () => json(Object.assign({}, ANTWORT, { indirekt: null, primaer: null })) });
 s.w.LdapPicker.gruppenVon('erika.muster');
 await schlaf(30);
-const t2 = s.$('ldap-groups-modal').textContent;
+const t2 = txt(s.$('ldap-groups-modal'));
 check('indirekt null -> "nicht ermittelt" genannt', /nicht ermittelt/.test(t2), t2.slice(0, 400));
 check('Primärgruppe null -> kein Abschnitt', !/Primärgruppe/.test(t2));
 s = await seite({ ug: () => json(Object.assign({}, ANTWORT, { direkt: [], indirekt: [] })) });
 s.w.LdapPicker.gruppenVon('erika.muster');
 await schlaf(30);
-const t3 = s.$('ldap-groups-modal').textContent;
+const t3 = txt(s.$('ldap-groups-modal'));
 check('keine direkten Gruppen -> ausdruecklich gesagt', /Keine direkten Gruppen/.test(t3));
 check('leere indirekte Liste -> kein Abschnitt', !/verschachtelte Gruppen/.test(t3));
 check('keine JS-Fehler', s.fehler.length === 0, s.fehler.join(' | '));

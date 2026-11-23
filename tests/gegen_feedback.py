@@ -58,14 +58,6 @@ BACKEND = ["python3", str(ROOT / "tests" / "test_feedback.py")]
 UI = ["node", str(ROOT / "tests" / "test_feedback_ui.js")]
 
 # (Name, Datei, alt, neu, Kommando)
-def _ohne_in_allsettingstabs(quelle):
-    """(alt, neu): die EINE `const allSettingsTabs = [...]`-Zeile ohne `tabFeedback`.
-    Ohne Treffer bleibt `alt` leer -> Trefferkontrolle meldet die Probe."""
-    zeilen = re.findall(r"^[ \t]*const allSettingsTabs = \[.*$", quelle, re.M)
-    if len(zeilen) != 1 or len(re.findall(r"\btabFeedback\b", zeilen[0])) != 1:
-        return "", ""
-    return zeilen[0], re.sub(r"\btabFeedback, ", "", zeilen[0])
-
 
 PROBEN = [
     # ── Backend ────────────────────────────────────────────────────────────
@@ -168,10 +160,16 @@ PROBEN = [
     ("eine Reiter-Sektion ist nicht gebunden", "frontend/js/app.js",
      "                { hdr: 'fb-sect-abg-hdr',  body: 'fb-sect-abg-body',  tog: 'fb-sect-abg-tog'  },\n",
      "", BACKEND),
-    # Anker = die allSettingsTabs-Zeile selbst, nicht ihre Nachbarn: mit
-    # `tabNewsfeed` dahinter traf der alte Text-Anker 0x (2026-11-06).
-    ("das Panel steht nicht in allSettingsTabs", "frontend/js/app.js",
-     _ohne_in_allsettingstabs, None, BACKEND),
+    # ⚠ NEU GEZIELT 2026-11-23: seit 2026-11-15 sammelt app.js allSettingsTabs
+    # aus dem DOM (jedes .settings-tab-content), die Handliste ist nur noch
+    # Ergaenzung. Die alte Probe nahm `tabFeedback` aus der Handliste - das
+    # bricht nichts mehr, und ihr Anker (eine EINZEILIGE Liste) traf seitdem
+    # nicht (Bilanz 87/88). Sabotiert werden jetzt die beiden Haelften der
+    # Zusage, die test_feedback.py heute prueft.
+    ("allSettingsTabs nicht mehr aus dem DOM gesammelt", "frontend/js/app.js",
+     "Array.from(document.querySelectorAll('.settings-tab-content'))", "[]", BACKEND),
+    ("das Feedback-Panel verliert die Reiter-Klasse", "frontend/settings.html",
+     'id="settings-tab-feedback" class="settings-tab-content"', 'id="settings-tab-feedback" class="st-panel"', BACKEND),
     # ⚠ ENTFALLEN 2026-09-14 mit dem Freigabe-Block selbst: die Probe zielte auf
     # dessen Hinweistext. Eine Probe, die ihr Ziel nicht mehr findet, bleibt
     # sonst dauerhaft als "trifft nicht" stehen und verwaessert die Bilanz.

@@ -22,6 +22,18 @@ const path = require('path');
 const { JSDOM } = require('./lib/jsdom_laden')();
 const sitzungLaden = require('./lib/sitzung_laden');
 
+// ⚠ AUSSCHNITT DER settings.html (2026-11-23, Laufzeit): alles ausser den Inhalten fremder Reiter.
+// Die volle Seite (690 KB, ~5700 Elemente) kostete je Aufbau ~0,9 s plus
+// applyLang ueber alle Reiter; gelesen wird hier nur der genannte Teil
+// (tests/lib/seite_ausschnitt.js). Fehlt er, ist das ein Abbruch, kein
+// leerer und damit trivial gruener Lauf.
+const _SEITE_VOLL = require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend', 'settings.html'), 'utf8');
+const _SEITE_AUS = require('./lib/seite_ausschnitt').ohneReiter(_SEITE_VOLL, ['settings-tab-fehleranalyse']);
+if (_SEITE_AUS.fehlend.length) {
+    console.log('ABBRUCH: settings.html ohne ' + _SEITE_AUS.fehlend.join(', ') + ' - Messaufbau defekt (Exit 2)');
+    process.exit(2);
+}
+
 const ROOT = path.resolve(__dirname, '..');
 const lies = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
@@ -49,7 +61,7 @@ const NUTZLAST = '<img src=x onerror="window.__xss=1">';
 
 async function aufbau(opts) {
     opts = opts || {};
-    const dom = new JSDOM(lies('frontend/settings.html'), {
+    const dom = new JSDOM(_SEITE_AUS.html, {
         url: 'https://localhost/settings', runScripts: 'outside-only', pretendToBeVisual: true,
     });
     const w = dom.window;

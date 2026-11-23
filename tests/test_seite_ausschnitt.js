@@ -169,5 +169,62 @@ pruefe('H: die Seite hat weniger als die Haelfte der Elemente',
        HSD.querySelectorAll('*').length * 2 < VOLL.querySelectorAll('*').length,
        [HSD.querySelectorAll('*').length, VOLL.querySelectorAll('*').length]);
 
+console.log('── H: ohneReiter mit huelle: true');
+const HH = ohneReiter(RAHMEN, ['tab-p'], { huelle: true });
+const HHD = doc(HH.html);
+const q = HHD.getElementById('tab-q');
+pruefe('H/huelle: der fremde Reiter steht noch da, mit seinen Attributen',
+       !!q && q.className === 'settings-tab-content' && !!HHD.getElementById('tab-tief')
+       && HHD.getElementById('tab-tief').className === 'settings-tab-content gross');
+pruefe('H/huelle: ...aber leer (kein Kind, kein Text)',
+       !!q && q.childNodes.length === 0 && !HHD.getElementById('qi')
+       && HHD.getElementById('tab-tief').childNodes.length === 0);
+pruefe('H/huelle: der behaltene Reiter bleibt knotengleich',
+       !!HHD.getElementById('tab-p') && HHD.getElementById('tab-p').outerHTML === RORIG.getElementById('tab-p').outerHTML);
+pruefe('H/huelle: entfernt nennt die geleerten Reiter',
+       HH.entfernt.slice().sort().join(',') === 'tab-q,tab-tief', HH.entfernt);
+const HSH = doc(ohneReiter(HTML, [], { huelle: true }).html);
+const alleReiter = [...VOLL.querySelectorAll('.settings-tab-content[id]')].map((e) => e.id);
+const huellenFehlen = alleReiter.filter((id) => !HSH.getElementById(id));
+pruefe('H/huelle: an der echten settings.html steht JEDER Reiter als Element', huellenFehlen.length === 0
+       && alleReiter.length >= 5, huellenFehlen.slice(0, 5));
+pruefe('H/huelle: ...und jeder ist leer',
+       [...HSH.querySelectorAll('.settings-tab-content')].every((e) => e.childNodes.length === 0));
+
+console.log('── I: mitReitern (JSDOM-Huelle)');
+const { mitReitern } = require('./lib/seite_ausschnitt');
+const M = mitReitern(require('./lib/jsdom_laden')(), ['tab-p']);
+// Ein Abbruch der Huelle (Exit 2 bei fehlendem Reiter) wird HIER zur FAIL-Zeile:
+// ist ohneReiter kaputt, soll das als Befund mit Bilanz enden, nicht als Abbruch
+// des ganzen Waechters (Register: ein Absturz ist kein Biss).
+let MD = null;
+{
+    const _exit = process.exit;
+    process.exit = (c) => { throw new Error('Exit ' + c); };
+    try { MD = new M.JSDOM(RAHMEN).window.document; }
+    catch (e) { pruefe('I: die Huelle baut die Probeseite auf', false, String(e.message)); }
+    finally { process.exit = _exit; }
+}
+if (!MD) MD = doc('<!doctype html><html><body></body></html>');
+pruefe('I: eine Seite mit Reitern wird gekuerzt (fremder Reiter weg, eigener da)',
+       !MD.getElementById('tab-q') && !MD.getElementById('tab-tief') && !!MD.getElementById('tab-p')
+       && MD.getElementById('tab-p').outerHTML === RORIG.getElementById('tab-p').outerHTML);
+pruefe('I: ...alles ausserhalb bleibt (Maske, Knoepfe, Nachbar)',
+       !!MD.getElementById('maske') && MD.querySelectorAll('.settings-tab-btn').length === 2 && !!MD.getElementById('neben'));
+const OHNE = '<!doctype html><html><head></head><body><div id="x" class="y">z</div></body></html>';
+pruefe('I: eine Seite ohne Reiter geht unveraendert durch',
+       new M.JSDOM(OHNE).window.document.documentElement.outerHTML === doc(OHNE).documentElement.outerHTML);
+pruefe('I: der Zaehler nennt Aufbauten und Kuerzungen', M.ausschnittZaehler.aufbauten === 2
+       && M.ausschnittZaehler.gekuerzt === 1, JSON.stringify(M.ausschnittZaehler));
+pruefe('I: die Klasse bleibt ein JSDOM (instanceof, statische Methoden)',
+       new M.JSDOM(OHNE) instanceof JSDOM && typeof M.JSDOM.fragment === 'function');
+const kind = require('child_process').spawnSync(process.execPath, ['-e',
+    "const {mitReitern}=require('./tests/lib/seite_ausschnitt');"
+    + "const M=mitReitern(require('./tests/lib/jsdom_laden')(),['gibt-es-nicht']);"
+    + "new M.JSDOM('<div class=\"settings-tab-content\" id=\"a\"></div>');console.log('weiter')"],
+    { cwd: ROOT, encoding: 'utf8' });
+pruefe('I: fehlt ein behaltener Reiter, endet der Lauf mit Exit 2 (nicht leer gruen)',
+       kind.status === 2 && /ABBRUCH/.test(kind.stdout) && !/weiter/.test(kind.stdout), [kind.status, kind.stdout.slice(0, 120)]);
+
 bilanz();
 process.exit(fail === 0 ? 0 : 1);

@@ -59,9 +59,21 @@ function konsole(z) {
     return vc;
 }
 
+// ⚠ settings.html OHNE die Inhalte fremder Reiter (2026-11-23, Laufzeit):
+// Anmeldemaske und Zahnrad sitzen ausserhalb der Reiter (486 von 690 KB).
+// "KI & System" bleibt fuer A ganz - app.js bindet dort beim Laden ohne
+// Null-Pruefung (tests/lib/seite_ausschnitt.js, ohneReiter). Die Pruefungen
+// auf den TEXT der Seite (unten) lesen weiter die volle SETTINGS.
+const { ohneReiter } = require('./lib/seite_ausschnitt');
+const _OHNE = { a: ohneReiter(SETTINGS, ['settings-tab-profiles']), c: ohneReiter(SETTINGS, []) };
+if (_OHNE.a.fehlend.length || _OHNE.a.entfernt.length < 5 || _OHNE.c.entfernt.length < 5) {
+    console.log('ABBRUCH (Exit 2): settings.html ohne erkennbare Reiter / ohne "KI & System"');
+    process.exit(2);
+}
+
 // ── A: Anmeldemaske ─────────────────────────────────────────────────────────
 function anmeldeSeite(antworten) {
-    const html = SETTINGS.replace(/<script[\s\S]*?<\/script>/g, '');
+    const html = _OHNE.a.html.replace(/<script[\s\S]*?<\/script>/g, '');
     const z = { posts: [], fehler: [], nav: 0 };
     const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'https://jarvis.test/',
                                   virtualConsole: konsole(z) });
@@ -90,7 +102,8 @@ function absenden(d, w) {
  * Liste von Antworten auf POST /api/admin/erhoehen. */
 function zahnradSeite(seite, url, me, erh) {
     const z = { posts: [], fehler: [], nav: 0, me: 0 };
-    const html = lies('frontend/' + seite).replace(/<script[\s\S]*?<\/script>/g, '');
+    const html = (seite === 'settings.html' ? _OHNE.c.html : lies('frontend/' + seite))
+        .replace(/<script[\s\S]*?<\/script>/g, '');
     const dom = new JSDOM(html, { runScripts: 'outside-only', url, virtualConsole: konsole(z) });
     const w = dom.window;
     sitzungLaden(w, { token: 'tok-1' });

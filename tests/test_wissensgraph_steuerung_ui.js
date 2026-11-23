@@ -28,7 +28,10 @@ const pruefe = (b, t, d) => {
 const abschnitt = (t) => console.log('\n' + t);
 const ROOT = path.resolve(__dirname, '..');
 const lies = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
-const { JSDOM, VirtualConsole } = require('./lib/jsdom_laden')();
+// settings.html in jsdom ohne die Inhalte fremder Reiter (2026-11-23, Laufzeit;
+// tests/lib/seite_ausschnitt.js, mitReitern). Textpruefungen lesen weiter die volle Seite.
+const { JSDOM, VirtualConsole } = require('./lib/seite_ausschnitt')
+    .mitReitern(require('./lib/jsdom_laden')(), ['settings-tab-knowledge']);
 const sitzungLaden = require('./lib/sitzung_laden');
 const warte = (ms) => new Promise(r => setTimeout(r, ms));
 

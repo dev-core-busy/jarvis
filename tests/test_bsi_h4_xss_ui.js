@@ -23,7 +23,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const { JSDOM, VirtualConsole } = require('./lib/jsdom_laden')();
+// settings.html in jsdom ohne die Inhalte fremder Reiter (2026-11-23, Laufzeit;
+// tests/lib/seite_ausschnitt.js, mitReitern). Textpruefungen lesen weiter die volle Seite.
+const { JSDOM, VirtualConsole } = require('./lib/seite_ausschnitt')
+    .mitReitern(require('./lib/jsdom_laden')(), ['settings-tab-vision']);
 
 const ROOT = path.resolve(__dirname, '..');
 let ok = 0, fail = 0, BILANZ = false;

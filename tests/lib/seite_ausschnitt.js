@@ -127,14 +127,24 @@ function ausschnitt(html, ids, opt) {
  *  greift beim Laden und in seinen Ablaeufen auf Dutzende Elemente ausserhalb
  *  der Reiter zu, viele ohne Null-Pruefung (Anmeldemaske, Sicherheitsband,
  *  main-screen ...). Eine Liste "was app.js braucht" waere ein Ratespiel, das
- *  jede neue Stelle in app.js bricht. Die Reiter dagegen fasst app.js nur ueber
- *  null-gepruefte Verweise an - und sie sind 486 von 690 KB der Seite.
+ *  jede neue Stelle in app.js bricht. Die Reiter dagegen fasst app.js fast nur
+ *  ueber null-gepruefte Verweise an - und sie sind 486 von 690 KB der Seite.
+ *  AUSNAHME (2026-11-23 gemessen): setupSettings() bindet den Anbieter-Schalter
+ *  in "KI & System" OHNE Null-Pruefung - wer app.js ganz laufen laesst,
+ *  behaelt `settings-tab-profiles` (sonst TypeError beim Laden).
  *  Ein Aufbau sinkt damit von ~0,9 auf ~0,3 s.
  *
  *  Liefert { html, fehlend, entfernt, vorher, nachher } - `fehlend` nennt jede
  *  id aus `behalten`, die kein Reiter traegt (Positivkontrolle der Aufrufer,
- *  wie bei ausschnitt), `entfernt` die ids der weggefallenen Reiter. */
-function ohneReiter(html, behalten) {
+ *  wie bei ausschnitt), `entfernt` die ids der weggefallenen Reiter.
+ *
+ *  `opt.huelle: true` (2026-11-23): fremde Reiter bleiben als LEERE HUELLE
+ *  stehen - das Element mit allen Attributen (id, class, style), ohne Kinder.
+ *  Fuer Proben, die nur messen, WELCHER Reiter aktiv/sichtbar ist
+ *  (`#settings-tab-<x>.active`), aber keinen Inhalt lesen: ohne Huelle fehlte
+ *  das Panel, das app.js umschaltet. `entfernt` nennt dann die geleerten. */
+function ohneReiter(html, behalten, opt) {
+    opt = opt || {};
     const p5 = parse5();
     const doc = p5.parse(String(html));
     const bleibt = new Set(behalten || []);
@@ -149,6 +159,7 @@ function ohneReiter(html, behalten) {
             const id = _attr(c, "id");
             if (id !== null && bleibt.has(id)) { gefunden.add(id); return true; }
             entfernt.push(id);
+            if (opt.huelle) { c.childNodes = []; return true; }
             return false;
         });
         for (const c of k.childNodes) stapel.push(c);
@@ -158,4 +169,51 @@ function ohneReiter(html, behalten) {
              vorher: String(html).length, nachher: aus.length };
 }
 
-module.exports = { ausschnitt, ohneReiter, parse5 };
+/** Das jsdom-Modul mit einer JSDOM-Klasse, die jede Seite MIT
+ *  Einstellungs-Reitern vor dem Aufbau durch ohneReiter(html, behalten, opt)
+ *  schickt; jede andere Seite geht unveraendert durch.
+ *
+ *      const { JSDOM } = require('./lib/seite_ausschnitt')
+ *          .mitReitern(require('./lib/jsdom_laden')(), ['settings-tab-x']);
+ *
+ *  ⚠ WARUM AM KONSTRUKTOR UND NICHT AM QUELLTEXT (2026-11-23): ueber 30
+ *  Waechter bauen settings.html auf, jeder mit eigener Schreibweise (lies(),
+ *  readFileSync, Variable, vorher bearbeiteter Text). Viele lesen DENSELBEN
+ *  Text zusaetzlich fuer Textpruefungen ueber die ganze Seite - wer den Text
+ *  beim Einlesen kuerzt, verkleinert still deren Messgebiet. Gekuerzt wird
+ *  deshalb nur, was jsdom aufbaut.
+ *
+ *  Fehlt eine id aus `behalten`, endet der Lauf mit Exit 2 (Messaufbau
+ *  defekt) - ein Waechter, dessen Reiter fehlt, liefe sonst auf einer leeren
+ *  Seite trivial gruen. Ergebnisse werden je Text zwischengespeichert (die
+ *  Waechter bauen dieselbe Seite oft mehrfach). `ausschnittZaehler` nennt,
+ *  wie oft gekuerzt wurde - fuer Positivkontrollen der Aufrufer. */
+function mitReitern(jsdomModul, behalten, opt) {
+    const Basis = jsdomModul.JSDOM;
+    const zaehler = { aufbauten: 0, gekuerzt: 0 };
+    const merker = new Map();
+    const IST_REITERSEITE = /class="[^"]*\bsettings-tab-content\b/;
+    class JSDOM extends Basis {
+        constructor(html, o) {
+            zaehler.aufbauten++;
+            let h = html;
+            if (typeof h === "string" && IST_REITERSEITE.test(h)) {
+                if (!merker.has(h)) {
+                    const A = ohneReiter(h, behalten, opt);
+                    if (A.fehlend.length) {
+                        console.log("ABBRUCH: Seite ohne " + A.fehlend.join(", ")
+                                    + " - Ausschnitt nicht herstellbar, Messaufbau defekt (Exit 2)");
+                        process.exit(2);
+                    }
+                    merker.set(h, A.html);
+                }
+                h = merker.get(h);
+                zaehler.gekuerzt++;
+            }
+            super(h, o);
+        }
+    }
+    return Object.assign({}, jsdomModul, { JSDOM, ausschnittZaehler: zaehler });
+}
+
+module.exports = { ausschnitt, ohneReiter, mitReitern, parse5 };

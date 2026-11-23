@@ -525,13 +525,30 @@ function loadScript(dom, rel) {
         w.close();
     }
 
+    // ⚠ AUSSCHNITT STATT VOLLER settings.html (2026-11-23): Abschnitt 14 und 21
+    // pruefen allein SapManager im SAP-Reiter; die volle Seite kostete je
+    // Aufbau ~0,9 s. Fehlt der Reiter, ist das ein Abbruch (Exit 2), kein
+    // leerer und damit trivial gruener Lauf.
+    let _einstellungenHtml = null;
+    function einstellungenHtml() {
+        if (_einstellungenHtml) return _einstellungenHtml;
+        const A = require('./lib/seite_ausschnitt').ausschnitt(
+            fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8'), ['settings-tab-sap']);
+        if (A.fehlend.length) {
+            console.log('ABBRUCH: settings.html ohne #settings-tab-sap - Messaufbau defekt');
+            process.exit(2);
+        }
+        return (_einstellungenHtml = A.html);
+    }
+
     // ══ 14. Einstellungen → SAP: Sichtbarkeits-Kaestchen ═════════════
     section('14. Einstellungen → SAP: Sichtbarkeit');
     {
         // settings.html ohne die eigenen Skripte laden ('outside-only'):
         // app.js & Co. wuerden hier nur Zeit kosten und fremde Poll-Timer
-        // starten. Geprueft wird allein SapManager.
-        const html = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+        // starten. Geprueft wird allein SapManager - auf dem Ausschnitt des
+        // SAP-Reiters (einstellungenHtml, Begruendung dort).
+        const html = einstellungenHtml();
         let savedBody = null;
         const s = new JSDOM(html, {
             url: 'https://localhost/settings',
@@ -1512,7 +1529,7 @@ function loadScript(dom, rel) {
     // ══ 21. Einstellungen → SAP: Schalter und Liste ══════════════════
     section('21. Einstellungen → SAP: Kachel-Anmeldung');
     async function einstellungen(cfg, konten, confirmAntwort) {
-        const html = fs.readFileSync(path.join(ROOT, 'frontend/settings.html'), 'utf8');
+        const html = einstellungenHtml();
         const posts = [], fragen = [];
         const s = new JSDOM(html, {
             url: 'https://localhost/settings', runScripts: 'outside-only',

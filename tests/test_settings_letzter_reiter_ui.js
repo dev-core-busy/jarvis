@@ -59,8 +59,23 @@ const NOTBREMSE_MS = 120000;
 // Gewartet wird jetzt auf das ECHTE Ende: app.js legt openModal als
 // `window._openSettingsModal` ab und ruft es von dort; die Eigenschaft wird
 // vorher abgefangen, und der Lauf wartet auf das Promise genau dieses Aufrufs.
+// ⚠ ALLE REITER ALS LEERE HUELLE (2026-11-23): gemessen wird nur, WELCHER
+// Knopf und welches Panel `.active` tragen - kein Inhalt eines Reiters. Die
+// volle Seite kostete je Aufbau ~0,9 s plus applyLang ueber alle Reiter, bei
+// sieben Aufbauten der groesste Teil der Laufzeit. Knoepfe, Rahmen und jedes
+// Panel-Element (mit id/class/style) bleiben. GANZ bleibt "KI & System":
+// setupSettings() in app.js bindet dort den Anbieter-Schalter OHNE
+// Null-Pruefung (tests/lib/seite_ausschnitt.js, ohneReiter).
+const { ohneReiter } = require('./lib/seite_ausschnitt');
+const SEITE = ohneReiter(lies('frontend/settings.html'), ['settings-tab-profiles'], { huelle: true });
+if (SEITE.fehlend.length || SEITE.entfernt.length < 5) {
+    console.log('ABBRUCH: settings.html ohne "KI & System" oder ohne erkennbare Reiter ('
+                + JSON.stringify(SEITE.fehlend) + ', ' + SEITE.entfernt.length + ') - Messaufbau defekt');
+    process.exit(2);
+}
+
 async function lade(gemerkt, sprung) {
-    const dom = new JSDOM(lies('frontend/settings.html'),
+    const dom = new JSDOM(SEITE.html,
         { url: 'https://x/settings', runScripts: 'outside-only',
           virtualConsole: stilleKonsole() });
     const w = dom.window;

@@ -30,6 +30,18 @@ const REPO = path.resolve(__dirname, '..');
 const { JSDOM } = require('./lib/jsdom_laden')();
 const sitzungLaden = require('./lib/sitzung_laden');
 
+// ⚠ AUSSCHNITT DER settings.html (2026-11-23, Laufzeit): alles ausser den Inhalten fremder Reiter.
+// Die volle Seite (690 KB, ~5700 Elemente) kostete je Aufbau ~0,9 s plus
+// applyLang ueber alle Reiter; gelesen wird hier nur der genannte Teil
+// (tests/lib/seite_ausschnitt.js). Fehlt er, ist das ein Abbruch, kein
+// leerer und damit trivial gruener Lauf.
+const _SEITE_VOLL = require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend', 'settings.html'), 'utf8');
+const _SEITE_AUS = require('./lib/seite_ausschnitt').ohneReiter(_SEITE_VOLL, ['settings-tab-security']);
+if (_SEITE_AUS.fehlend.length) {
+    console.log('ABBRUCH: settings.html ohne ' + _SEITE_AUS.fehlend.join(', ') + ' - Messaufbau defekt (Exit 2)');
+    process.exit(2);
+}
+
 let ok = 0, fail = 0, bilanz = false;
 function check(name, cond, detail) {
     if (cond) { ok++; console.log('  \x1b[32m✓\x1b[0m ' + name); }
@@ -55,7 +67,7 @@ for (const k of ['security.totp_setup_btn', 'security.totp_scan_hint']) {
 
 // ── B: Verhalten ────────────────────────────────────────────────────────────
 function aufbauen(zustand) {
-    const dom = new JSDOM(SETTINGS, { runScripts: 'outside-only', url: 'https://jarvis.beispiel.de/settings' });
+    const dom = new JSDOM(_SEITE_AUS.html, { runScripts: 'outside-only', url: 'https://jarvis.beispiel.de/settings' });
     const w = dom.window;
     sitzungLaden(w, { token: 'testtoken' });
     w.eval(I18N);

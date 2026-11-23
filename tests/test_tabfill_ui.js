@@ -476,11 +476,47 @@ abschnitt('6. REGEL: jedes Platzhalterfeld im MARKUP ist eine Entscheidung');
         if ((el.getAttribute('type') || '').toLowerCase() === 'password') return 'kennwort';
         return 'offen';
     };
-    const felder = (html) => {
+    // Die Referenz: der volle jsdom-Baum. Nur noch fuer den Abgleich unten.
+    const felderJsdom = (html) => {
         const dom = new JSDOM(html);
         const r = Array.from(dom.window.document.querySelectorAll('input[placeholder], textarea[placeholder]'))
             .map(el => ({ id: el.id || el.className, e: entscheidung(el) }));
         dom.window.close();
+        return r;
+    };
+    // ⚠ GEMESSEN WIRD MIT parse5 – DEM PARSER, DEN jsdom SELBST BENUTZT – OHNE
+    // DEN jsdom-BAUM DARUEBER (2026-11-23): ein JSDOM je Seite kostete fuer die
+    // 22 Seiten 8 s, parse5 allein 0,8 s, und dieser Abschnitt las jede Seite
+    // zwei- bis dreimal. Es laeuft hier kein Skript und kein Stil; gelesen werden
+    // nur Attribute. Nachgebildet wird `querySelectorAll('input[placeholder],
+    // textarea[placeholder]')`: HTML-Elemente in Dokumentreihenfolge, NICHT in
+    // <template>-Inhalte hinein (parse5 legt sie unter `content` ab, nicht unter
+    // `childNodes` – wie jsdom). KEINE Namensraum-Pruefung: ein Typselektor
+    // trifft auch ein <input> in <svg> (CSS, und jsdom tut es; der Abgleich hat
+    // eine erste Fassung mit Namensraum-Pruefung sofort abgewiesen). Ob die
+    // Nachbildung dasselbe liefert wie jsdom, prueft der Abgleich direkt nach
+    // der Positivkontrolle an einer echten Seite.
+    const p5 = require('./lib/seite_ausschnitt').parse5();
+    const element = (k) => {
+        const attr = (n) => { const a = (k.attrs || []).find(x => x.name === n); return a ? a.value : null; };
+        return { getAttribute: attr, hasAttribute: (n) => attr(n) !== null,
+                 id: attr('id') || '', className: attr('class') || '' };
+    };
+    const _felder = new Map();
+    const felder = (html) => {
+        if (_felder.has(html)) return _felder.get(html);
+        const r = [], stapel = [p5.parse(html)];
+        while (stapel.length) {
+            const k = stapel.pop();
+            if ((k.tagName === 'input' || k.tagName === 'textarea')
+                && (k.attrs || []).some(a => a.name === 'placeholder')) {
+                const el = element(k);
+                r.push({ id: el.id || el.className, e: entscheidung(el) });
+            }
+            const kinder = k.childNodes || [];
+            for (let i = kinder.length - 1; i >= 0; i--) stapel.push(kinder[i]);
+        }
+        _felder.set(html, r);
         return r;
     };
     // Positivkontrolle der Messvorrichtung.
@@ -492,6 +528,16 @@ abschnitt('6. REGEL: jedes Platzhalterfeld im MARKUP ist eine Entscheidung');
     const pkOk = pk === 'a:offen b:tabfill c:nein d:kennwort e:widerspruch f:widerspruch';
     pruefe(pkOk, 'Positivkontrolle: die Sonde unterscheidet alle Faelle', pk);
     if (!pkOk) { console.log('\n  ABBRUCH: Messvorrichtung unbrauchbar.'); process.exit(2); }
+    // Abgleich der Nachbildung mit jsdom: Sonderfaelle (template, svg,
+    // Grossschreibung, Klasse statt id) und eine ECHTE Seite mit vielen Feldern.
+    const RAND = '<template><input id="t" placeholder="x"></template><svg><input id="s" placeholder="x"/></svg>'
+        + '<div><textarea class="k" placeholder="y" data-tabfill></textarea></div><INPUT ID="u" PLACEHOLDER="z">';
+    const echt = fs.readFileSync(path.join(ROOT, 'frontend/sap.html'), 'utf8');
+    const gleich = (h) => JSON.stringify(felder(h)) === JSON.stringify(felderJsdom(h));
+    const abgleich = gleich(RAND) && gleich(echt) && felder(echt).length >= 10;
+    pruefe(abgleich, 'Positivkontrolle: die parse5-Messung liefert dasselbe wie jsdom (Sonderfaelle + sap.html)',
+        JSON.stringify(felder(RAND)) + ' / ' + JSON.stringify(felderJsdom(RAND)));
+    if (!abgleich) { console.log('\n  ABBRUCH: Messvorrichtung weicht von jsdom ab.'); process.exit(2); }
 
     const seiten = fs.readdirSync(path.join(ROOT, 'frontend')).filter(n => n.endsWith('.html'))
         .concat(fs.readdirSync(path.join(ROOT, 'frontend/addin')).filter(n => n.endsWith('.html'))

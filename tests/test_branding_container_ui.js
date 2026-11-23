@@ -21,7 +21,10 @@
 require('./lib/bilanz')();   // Absturz -> Exit 2, nicht 1
 const fs = require('fs');
 const path = require('path');
-const { JSDOM } = require('./lib/jsdom_laden')();
+// settings.html in jsdom ohne die Inhalte fremder Reiter (2026-11-23, Laufzeit;
+// tests/lib/seite_ausschnitt.js, mitReitern). Textpruefungen lesen weiter die volle Seite.
+const { JSDOM } = require('./lib/seite_ausschnitt')
+    .mitReitern(require('./lib/jsdom_laden')(), ['settings-tab-branding']);
 
 // Eine Gegenprobe kann eine sabotierte KOPIE von frontend/ ueber BR_ROOT geben.
 const ROOT = process.env.BR_ROOT || path.resolve(__dirname, '..');

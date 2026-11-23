@@ -97,7 +97,19 @@ for (const f of SEITEN) {
 // was danach im DOM steht, aus dem MERKER – genau die Zusage "sofort".
 function seite(f, opt) {
     opt = opt || {};
-    const html = lies('frontend/' + f).replace(/<script\b[\s\S]*?<\/script>/g, '');
+    // settings.html ohne die Inhalte ihrer Reiter (2026-11-23, Laufzeit): die
+    // Kopfzeile sitzt ausserhalb, und die Reiter sind 486 von 690 KB. Fehlt
+    // dabei Erwartetes, faellt es als Abbruch auf, nicht als leere Seite.
+    let roh = lies('frontend/' + f);
+    if (f === 'settings.html') {
+        if (!seite._ohne) {
+            const A = require('./lib/seite_ausschnitt').ohneReiter(roh, []);
+            if (A.entfernt.length < 5) abbruch('settings.html: keine Reiter erkannt – Ausschnitt waere die volle Seite');
+            seite._ohne = A.html;
+        }
+        roh = seite._ohne;
+    }
+    const html = roh.replace(/<script\b[\s\S]*?<\/script>/g, '');
     const dom = new JSDOM(html, { url: 'https://jarvis.beispiel.de/' + f.replace('.html', ''),
                                   runScripts: 'outside-only', pretendToBeVisual: true });
     const w = dom.window;

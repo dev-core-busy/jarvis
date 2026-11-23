@@ -35,6 +35,18 @@ function section(t) { console.log('\n\x1b[1m' + t + '\x1b[0m'); }
 function abbruch(g) { console.log('ABBRUCH: ' + g); BILANZ = true; process.exit(2); }
 const schlaf = (ms) => new Promise(r => setTimeout(r, ms));
 const WACH = require('./lib/wachhund')(() => { console.log('ABBRUCH: Lauf haengt'); process.exit(2); }, 60000);
+
+// ⚠ AUSSCHNITT DER settings.html (2026-11-23, Laufzeit): alles ausser den Inhalten fremder Reiter.
+// Die volle Seite (690 KB, ~5700 Elemente) kostete je Aufbau ~0,9 s plus
+// applyLang ueber alle Reiter; gelesen wird hier nur der genannte Teil
+// (tests/lib/seite_ausschnitt.js). Fehlt er, ist das ein Abbruch, kein
+// leerer und damit trivial gruener Lauf.
+const _SEITE_VOLL = require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend', 'settings.html'), 'utf8');
+const _SEITE_AUS = require('./lib/seite_ausschnitt').ohneReiter(_SEITE_VOLL, []);
+if (_SEITE_AUS.fehlend.length) {
+    console.log('ABBRUCH: settings.html ohne ' + _SEITE_AUS.fehlend.join(', ') + ' - Messaufbau defekt (Exit 2)');
+    process.exit(2);
+}
 process.on('exit', (c) => { if (!BILANZ && c === 0) { console.log('ABBRUCH ohne Bilanz'); process.exitCode = 2; } });
 
 const MODULE = ['frontend/js/i18n.js', 'frontend/js/icons.js', 'frontend/js/ldap_picker.js'];
@@ -57,7 +69,7 @@ async function seite(opt) {
     const vc = new VirtualConsole();
     const fehler = [];
     vc.on('jsdomError', (e) => fehler.push(String(e && e.message)));
-    const dom = new JSDOM(lies('frontend/settings.html'), {
+    const dom = new JSDOM(_SEITE_AUS.html, {
         url: 'https://localhost/settings', runScripts: 'outside-only', virtualConsole: vc, pretendToBeVisual: true });
     const w = dom.window;
     const ug = [], gm = [];

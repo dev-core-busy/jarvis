@@ -32,6 +32,18 @@ function bilanz(code) {
     process.exit(code === undefined ? (fail ? 1 : 0) : code);
 }
 const wachhund = require('./lib/wachhund')(() => { console.log('  ✗ ABBRUCH: Wachhund nach 40 s'); bilanz(2); }, 40000);
+
+// ⚠ AUSSCHNITT DER settings.html (2026-11-23, Laufzeit): alles ausser den Inhalten fremder Reiter.
+// Die volle Seite (690 KB, ~5700 Elemente) kostete je Aufbau ~0,9 s plus
+// applyLang ueber alle Reiter; gelesen wird hier nur der genannte Teil
+// (tests/lib/seite_ausschnitt.js). Fehlt er, ist das ein Abbruch, kein
+// leerer und damit trivial gruener Lauf.
+const _SEITE_VOLL = require('fs').readFileSync(require('path').join(__dirname, '..', 'frontend', 'settings.html'), 'utf8');
+const _SEITE_AUS = require('./lib/seite_ausschnitt').ohneReiter(_SEITE_VOLL, ['settings-tab-telemetry']);
+if (_SEITE_AUS.fehlend.length) {
+    console.log('ABBRUCH: settings.html ohne ' + _SEITE_AUS.fehlend.join(', ') + ' - Messaufbau defekt (Exit 2)');
+    process.exit(2);
+}
 wachhund.unref && wachhund.unref();
 
 const HTML = lies('frontend/settings.html');
@@ -65,7 +77,7 @@ const DATEN = {
 };
 
 function baue(daten) {
-    const dom = new JSDOM(HTML, { url: 'https://x/settings', runScripts: 'outside-only' });
+    const dom = new JSDOM(_SEITE_AUS.html, { url: 'https://x/settings', runScripts: 'outside-only' });
     const w = dom.window;
     const rufe = [];
     w.fetch = (url) => {

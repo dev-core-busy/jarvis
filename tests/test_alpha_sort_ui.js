@@ -15,7 +15,10 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { JSDOM } = require('./lib/jsdom_laden')();
+// settings.html in jsdom ohne die Inhalte fremder Reiter (2026-11-23, Laufzeit;
+// tests/lib/seite_ausschnitt.js, mitReitern). Textpruefungen lesen weiter die volle Seite.
+const { JSDOM } = require('./lib/seite_ausschnitt')
+    .mitReitern(require('./lib/jsdom_laden')(), [], { huelle: true });
 
 const WURZEL = path.resolve(__dirname, '..');
 const FE = path.join(WURZEL, 'frontend');

@@ -304,6 +304,25 @@ check("Umzuordnung ohne Dateiaenderung leitet neu ab", st["ergebnis"] == "fertig
 g.close()
 I.lauf([], quellen=QUELLEN, prozesse=1, ordner_schutz=False)
 
+# Ende eines Laufs: die Arbeits-Threads melden sich ab und wecken die
+# Hauptschleife. Ohne Abmeldung wartete jeder Lauf nach der letzten Datei die
+# volle Status-Frist im get() ab (2026-11-23: +2 s je Lauf, dieser Waechter
+# 34 statt 10 s). Gemessen mit kuenstlich langer Frist: mit Abmeldung endet der
+# Lauf weit vor ihr, ohne fruehestens nach ihr – ein Abstand, keine feste Zeit.
+_frist_alt = I.STATUS_ALLE_S
+I.STATUS_ALLE_S = 30.0
+try:
+    with (QA / "a.sql").open("a") as _fh:
+        _fh.write("-- Weckprobe\n")
+    _t = time.monotonic()
+    st = I.lauf([], quellen=QUELLEN, prozesse=1, ordner_schutz=False)
+    _dauer = time.monotonic() - _t
+finally:
+    I.STATUS_ALLE_S = _frist_alt
+check("Lauf mit neuer Datei endet ohne die Status-Frist abzuwarten",
+      st["ergebnis"] == "fertig" and st["dateien_neu"] == 1 and _dauer < 15.0,
+      (st["ergebnis"], st["dateien_neu"], round(_dauer, 2)))
+
 
 def bestand(ordner):
     con = S.roh_oeffnen()

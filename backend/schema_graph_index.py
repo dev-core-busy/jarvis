@@ -486,25 +486,31 @@ def _zerlegen(con, todo: list, n_proz: int, abbruch: threading.Event, st: dict, 
     sperre = threading.Lock()
 
     def schleife():
-        a = _Arbeiter()
-        with sperre:
-            arbeiter.append(a)
-        while not abbruch.is_set():
-            try:
-                t = auftraege.get_nowait()
-            except queue.Empty:
-                break
-            ergebnisse.put(("start", t, None))
-            erg = a.zerlegen(t[0])
-            ergebnisse.put(("ende", t, erg))
-            if erg.get("abgestuerzt"):
-                a.beenden()
-                if abbruch.is_set():
+        try:
+            a = _Arbeiter()
+            with sperre:
+                arbeiter.append(a)
+            while not abbruch.is_set():
+                try:
+                    t = auftraege.get_nowait()
+                except queue.Empty:
                     break
-                a = _Arbeiter()
-                with sperre:
-                    arbeiter.append(a)
-        a.beenden()
+                ergebnisse.put(("start", t, None))
+                erg = a.zerlegen(t[0])
+                ergebnisse.put(("ende", t, erg))
+                if erg.get("abgestuerzt"):
+                    a.beenden()
+                    if abbruch.is_set():
+                        break
+                    a = _Arbeiter()
+                    with sperre:
+                        arbeiter.append(a)
+            a.beenden()
+        finally:
+            # Abmeldung weckt die Hauptschleife SOFORT. Ohne sie wartete jeder
+            # Lauf nach der letzten Datei die volle STATUS_ALLE_S im get() ab
+            # (2026-11-23 gemessen: +2 s je Lauf, 30 Laeufe im Waechter).
+            ergebnisse.put(("weg", ("", 0, 0), None))
 
     threads = [threading.Thread(target=schleife, name=f"schema-graph-arbeiter-{i}", daemon=True)
                for i in range(min(n_proz, len(todo)))]
@@ -512,13 +518,19 @@ def _zerlegen(con, todo: list, n_proz: int, abbruch: threading.Event, st: dict, 
         th.start()
     t0 = time.time()
     letzter_commit = letzter_status = time.time()
+    abgemeldet = 0
     try:
-        while any(th.is_alive() for th in threads) or not ergebnisse.empty():
+        # Laeuft, bis jeder Arbeits-Thread sich abgemeldet hat (is_alive bleibt
+        # Rueckfall, falls einer ohne Abmeldung endet) und die Schlange leer ist.
+        while ((abgemeldet < len(threads) and any(th.is_alive() for th in threads))
+               or not ergebnisse.empty()):
             try:
                 art, (p, g, m), erg = ergebnisse.get(timeout=STATUS_ALLE_S)
             except queue.Empty:
                 art = None
-            if art == "start":
+            if art == "weg":
+                abgemeldet += 1
+            elif art == "start":
                 # Versuch VOR dem Zerlegen vermerken (Negativ-Cache gegen eine
                 # Datei, die den Arbeitsprozess beendet – auch wenn danach der
                 # ganze Dienst stirbt).

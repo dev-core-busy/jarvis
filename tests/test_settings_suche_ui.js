@@ -124,9 +124,30 @@ const KORPUS = [
 
 function tickCount(n) { let p = Promise.resolve(); for (let i = 0; i < n; i++) p = p.then(() => {}); return p; }
 
+// ⚠ AUSSCHNITT: nur der Einstellungs-Dialog (#settings-modal samt Kopf), nicht
+// die ganze Seite (2026-11-23: 13 Aufbauten zu je ~0,85 s waren 11 von 16 s).
+// Die Suche (settings_search.js::baueOberflaeche) nimmt NUR Elemente in einem
+// #settings-tab-* auf, dessen Knopf sichtbar ist – beides liegt vollstaendig im
+// Dialog. Was ausserhalb liegt (Anmeldung, Chat, andere Dialoge), kann keinen
+// Treffer erzeugen. Abschnitte, die die GANZE Seite lesen, lesen den Text
+// weiterhin direkt (lies('settings.html')), nicht diesen Ausschnitt.
+const { ausschnitt } = require('./lib/seite_ausschnitt');
+let _AUSSCHNITT = null;
+function seitenHtml() {
+    if (_AUSSCHNITT) return _AUSSCHNITT;
+    const A = ausschnitt(lies('settings.html'), ['settings-modal']);
+    if (A.fehlend.length) {
+        console.log('ABBRUCH: #settings-modal fehlt in settings.html – Ausschnitt waere leer');
+        bilanz = true;
+        process.exit(2);
+    }
+    _AUSSCHNITT = A.html;
+    return _AUSSCHNITT;
+}
+
 async function seite(korpus, opt) {
     const o = opt || {};
-    const dom = new JSDOM(lies('settings.html'), {
+    const dom = new JSDOM(seitenHtml(), {
         url: 'https://localhost/settings',
         runScripts: 'outside-only',
     });

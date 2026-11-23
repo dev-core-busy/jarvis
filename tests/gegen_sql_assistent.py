@@ -137,9 +137,19 @@ PROBEN = [
     ("Endpunkt nur an require_auth", MA, W_ZUG,
      'async def sql_tabelle(name: str = "", schemata: str = "", user: str = Depends(require_schema_access)):',
      'async def sql_tabelle(name: str = "", schemata: str = "", user: str = Depends(require_auth)):'),
+    # Die Auswahl-Zeile steht in /api/sql/frage UND /api/sql/pruefen woertlich
+    # gleich – der Anker traegt deshalb die Zeile davor (2026-11-23: beide
+    # Proben fanden ihren Anker doppelt und wurden still uebersprungen).
     ("Frage sieht alle Schemata statt der Auswahl", MA, W_ZUG,
+     '    cfg = await asyncio.to_thread(_schema_cfg)\n'
      '    erlaubt = await asyncio.to_thread(_sql_auswahl, body.get("schemata"))',
+     '    cfg = await asyncio.to_thread(_schema_cfg)\n'
      '    erlaubt = {s["id"] for s in cfg["schemata"]}'),
+    ("Pruefen sieht alle Schemata statt der Auswahl", MA, W_ZUG,
+     '    dialekt = dialekt.strip().lower()\n'
+     '    erlaubt = await asyncio.to_thread(_sql_auswahl, body.get("schemata"))',
+     '    dialekt = dialekt.strip().lower()\n'
+     '    erlaubt = {s["id"] for s in _schema_cfg()["schemata"]}'),
     ("Freigabe leer = alle", MA, W_ZUG,
      "    grp = config.get_setting(\"schema_allowed_group\", \"\").strip()\n    if not users_raw and not grp:\n        return False",
      "    grp = config.get_setting(\"schema_allowed_group\", \"\").strip()\n    if not users_raw and not grp:\n        return True"),
@@ -253,7 +263,18 @@ PROBEN = [
     ("Seite: Netzfehler roh ('Failed to fetch')", SJ, W_UI, "            .catch(netzfehler(url))\n", ""),
     ("Reiter: Netzfehler roh ('Failed to fetch')", SA, W_ADM,
      "        return fetch(url, opt).catch(function () { throw new Error(netzText(url)); });", "        return fetch(url, opt);"),
-    ("Vorbehalt sieht gruen aus", SJ, W_UI, "            pill.className = 'sq-pill is-warn';", "            pill.className = 'sq-pill is-ok';"),
+    # Zwei gelbe Zweige mit derselben Zeile (Syntax ungeprueft / Join ohne
+    # Beleg) – der Anker traegt den Kommentar davor, sonst doppelt (2026-11-23).
+    ("Vorbehalt sieht gruen aus", SJ, W_UI,
+     "            // Nur gegen das Schema geprueft: darf nicht wie \"alles geprueft\" aussehen\n"
+     "            pill.className = 'sq-pill is-warn';",
+     "            // Nur gegen das Schema geprueft: darf nicht wie \"alles geprueft\" aussehen\n"
+     "            pill.className = 'sq-pill is-ok';"),
+    ("Join ohne Beleg sieht gruen aus", SJ, W_UI,
+     "            // Zustand – mit ZEICHEN und TEXT, nicht nur Farbe.\n"
+     "            pill.className = 'sq-pill is-warn';",
+     "            // Zustand – mit ZEICHEN und TEXT, nicht nur Farbe.\n"
+     "            pill.className = 'sq-pill is-ok';"),
     ("Hauswissen unmaskiert", SJ, W_UI, "+ hw.map(function (h) { return esc(h.titel) + ' ('", "+ hw.map(function (h) { return h.titel + ' ('"),
     ("Reiter filtert mit dem Dateimuster statt mit den Server-Endungen", SA, W_ADM,
      "            if (Array.isArray(vom) && vom.length) return vom.slice();\n", ""),

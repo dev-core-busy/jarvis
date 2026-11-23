@@ -71,6 +71,19 @@ _ZUSTAND_WORT = ("skill", "enabled")
 EIN_HTTP = re.compile(r"/api/skills/[\w.-]+/enable")
 
 
+_KNOTEN = [None, []]
+
+
+def _knoten(baum):
+    """ast.walk(baum) als Liste, fuer den zuletzt gefragten Baum gemerkt: die
+    Messfunktionen laufen je Datei hintereinander ueber DENSELBEN Baum, und
+    jeder Durchlauf kostete ueber alle Dateien ~1,5 s. Die Baeume werden nie
+    veraendert; gemerkt wird nur EINER (kein Speicher fuer alle)."""
+    if _KNOTEN[0] is not baum:
+        _KNOTEN[0], _KNOTEN[1] = baum, list(ast.walk(baum))
+    return _KNOTEN[1]
+
+
 def _texte(knoten):
     """Alle Namen und Zeichenketten unterhalb eines AST-Knotens."""
     raus = []
@@ -87,7 +100,7 @@ def _texte(knoten):
 def _zustandsnamen(baum):
     """Variablen, denen ein aus dem Skill-Zustand gelesener Wert zugewiesen wird."""
     raus = set()
-    for k in ast.walk(baum):
+    for k in _knoten(baum):
         if not isinstance(k, (ast.Assign, ast.AnnAssign)):
             continue
         wert = k.value
@@ -111,7 +124,7 @@ def _ersetzt_config(baum):
     der Aufruf landet in der Attrappe. Ein echter HTTP-Aufruf bleibt davon
     ausdruecklich UNBERUEHRT: der geht am Prozess vorbei an den Dienst.
     """
-    for k in ast.walk(baum):
+    for k in _knoten(baum):
         if isinstance(k, ast.Assign):
             for z in k.targets:
                 if (isinstance(z, ast.Subscript)
@@ -142,23 +155,51 @@ def _pfad_treffer(knoten, muster):
     return False
 
 
+def _baum(quelle):
+    """Syntaxbaum zu einem Quelltext – oder der schon geparste Baum selbst.
+
+    Die Messfunktionen nehmen beides: Zeichenketten fuer ihre Kontrollen,
+    Baeume aus dem Vorlauf (jede Datei EINMAL geparst). None = Syntaxfehler.
+    """
+    if isinstance(quelle, ast.AST):
+        return quelle
+    try:
+        return ast.parse(quelle)
+    except SyntaxError:
+        return None
+
+
+def _pfad_moeglich(knoten, muster):
+    """Steht im Baum UEBERHAUPT ein Pfad-Literal, das `muster` trifft?
+
+    Nur eine Abkuerzung, keine eigene Regel: `_pfad_treffer` sucht dieselben
+    Literale je Aufruf im Teilbaum seiner Argumente, und ohne ein einziges
+    passendes Literal im ganzen Baum kann es nirgends treffen. Ein Durchgang
+    statt einem je Aufruf – verschachtelte Aufrufe machten die Suche
+    quadratisch (2026-11-23 gemessen: 17 von 17 s Laufzeit in ast.walk).
+    """
+    return any(isinstance(t, ast.Constant) and isinstance(t.value, str)
+               and "\n" not in t.value and muster.search(t.value) for t in knoten)
+
+
 def schaltet_ein(quelle):
     """(aendert_echten_zustand, arbeitet_mit_attrappe).
 
     Ein `def` ist kein Aufruf – genau daran ist die alte Textregel gescheitert.
     """
-    try:
-        baum = ast.parse(quelle)
-    except SyntaxError:
+    baum = _baum(quelle)
+    if baum is None:
         return (False, False)
     attrappe = _ersetzt_config(baum)
     echt = False
-    for k in ast.walk(baum):
+    knoten = _knoten(baum)
+    moeglich = _pfad_moeglich(knoten, EIN_HTTP)
+    for k in knoten:
         if not isinstance(k, ast.Call):
             continue
         # HTTP: der Pfad ist meist zusammengesetzt (BASIS + "/api/skills/…"),
         # deshalb den ganzen Aufruf-Teilbaum absuchen, nicht nur direkte Argumente.
-        if _pfad_treffer(k, EIN_HTTP):
+        if moeglich and _pfad_treffer(k, EIN_HTTP):
             return (True, attrappe)
         f = k.func
         name = f.attr if isinstance(f, ast.Attribute) else \
@@ -168,60 +209,12 @@ def schaltet_ein(quelle):
     return (echt, attrappe)
 
 
-print("\033[1m1. Wer einen Skill EINSCHALTET, muss den Vorzustand lesen\033[0m")
+# ── Messfunktionen der Abschnitte 2 und 2b ──────────────────────────────────
+# Sie stehen VOR Abschnitt 1, weil jede Datei unter tests/ nur EINMAL geparst
+# wird (Vorlauf unten) – dreimal ast.parse ueber ~830 Dateien kostete 12 von
+# 17 s Laufzeit (2026-11-23 gemessen).
 
-# Positiv- UND Negativkontrolle der Messfunktion selbst – ohne sie waere nicht
-# zu unterscheiden, ob die Regel greift oder ob sie nur nichts findet.
-_E_HTTP = "S.post(BASIS + '/api/skills/x/enable', timeout=90)\n"
-_E_PY = "config.save_skill_state('x', {'enabled': True})\n"
-_E_ATTRAPPE = ("import sys, types\n_m = types.ModuleType('backend.config')\n"
-               "sys.modules['backend.config'] = _m\n"
-               "class F:\n"
-               "    def get_skill_states(self):\n        return {}\n"
-               "    def save_skill_state(self, n, s):\n        pass\n")
-_E_ATTRAPPE_HTTP = _E_ATTRAPPE + "S.post(B + '/api/skills/x/enable')\n"
-check("die Messfunktion erkennt ein Einschalten per HTTP", schaltet_ein(_E_HTTP)[0])
-check("sie erkennt einen echten save_skill_state-Aufruf", schaltet_ein(_E_PY)[0])
-check("⚠ eine Attrappen-METHODE zaehlt NICHT als Zustandsaenderung",
-      schaltet_ein(_E_ATTRAPPE) == (False, True), str(schaltet_ein(_E_ATTRAPPE)))
-check("ein HTTP-Aufruf zaehlt auch dann, wenn eine Attrappe danebensteht",
-      schaltet_ein(_E_ATTRAPPE_HTTP)[0])
-
-dateien = sorted(p for p in (ROOT / "tests").glob("*.py")
-                 if p.name != Path(__file__).name)
-# Nur zum BERICHTEN, nicht zum Urteilen: sieht die Datei ueberhaupt nach
-# Skill-Zustand aus? Eine ausgeblendete Menge, die niemand nennt, ist genau die
-# Falschaussage, die dieser Waechter verhindern soll (Register: cron_list).
-SIEHT_AUS = re.compile(r"/api/skills/[\w.-]+/enable|save_skill_state|enable_skill")
-geprueft = betroffen = 0
-hermetisch = []
-for p in dateien:
-    quelle = ohne_kommentare(p.read_text(encoding="utf-8", errors="replace"))
-    echt, attrappe = schaltet_ein(quelle)
-    if not echt:
-        if attrappe and SIEHT_AUS.search(quelle):
-            hermetisch.append(p.name)
-        continue
-    betroffen += 1
-    geprueft += 1
-    try:
-        namen = _zustandsnamen(ast.parse(quelle))
-    except SyntaxError:
-        namen = set()
-    check("%s liest den Skill-Zustand, bevor es ihn aendert" % p.name,
-          bool(namen),
-          "schaltet ein, ohne nachzusehen was vorher galt")
-
-if hermetisch:
-    print("  \033[2m(%d Skript(e) arbeiten nur mit Attrappen und hinterlassen "
-          "keinen echten Zustand: %s)\033[0m" % (len(hermetisch), ", ".join(hermetisch)))
-
-check("es gibt ueberhaupt Skripte dieser Art (Positivkontrolle)", betroffen > 0,
-      "kein Skript gefunden – der Waechter prueft dann nichts")
-
-
-print("\n\033[1m2. Kein hartes 'disable' zum Aufraeumen\033[0m")
-
+# Abschnitt 2:
 # Der eigentliche Schaden: `disable` im Aufraeumzweig BEHAUPTET, der Skill sei
 # vorher aus gewesen. Erlaubt ist es nur, wenn im selben Skript auch der Fall
 # "war an" behandelt wird – also ein bedingtes Wiederherstellen.
@@ -237,11 +230,16 @@ def schaltet_ab(quelle):
     # jeden Gegenproben-Harness, der den Pfad als Sabotage-Anker in einer
     # Zeichenkette traegt – dieselbe Falle wie in Abschnitt 1. Gemessen wird
     # jetzt ein AUFRUF mit einem echten Pfad-Literal.
-    try:
-        baum = ast.parse(quelle)
-    except SyntaxError:
+    baum = _baum(quelle)
+    if baum is None:
         return False
-    for k in ast.walk(baum):
+    knoten = _knoten(baum)
+    if not _pfad_moeglich(knoten, HART_HTTP):
+        # Ohne Pfad-Literal bleibt nur die Python-Form: derselbe Namensvergleich
+        # wie in _ist_abschalten, ohne die (hier sicher erfolglose) Literalsuche.
+        return any(isinstance(k, ast.Call) and (getattr(k.func, "attr", None) == "disable_skill"
+                   or getattr(k.func, "id", None) == "disable_skill") for k in knoten)
+    for k in knoten:
         if isinstance(k, ast.Call) and _ist_abschalten(k):
             return True
     return False
@@ -311,14 +309,13 @@ def stellt_fallabhaengig_her(quelle):
     ausgeschlossen wird, ist der gemeldete Fall: ein Skript, das den Vorzustand
     NIRGENDS in eine Schaltentscheidung einfliessen laesst.
     """
-    try:
-        baum = ast.parse(quelle)
-    except SyntaxError:
+    baum = _baum(quelle)
+    if baum is None:
         return False
     namen = _zustandsnamen(baum)
     if not namen:
         return False
-    for k in ast.walk(baum):
+    for k in _knoten(baum):
         if not isinstance(k, (ast.If, ast.IfExp)):
             continue
         if not (set(_texte(k.test)) & namen):
@@ -331,6 +328,123 @@ def stellt_fallabhaengig_her(quelle):
                         return True
     return False
 
+
+
+# Abschnitt 2b:
+# ⚠ NEUE ZUSTANDSART, am 2026-09-11 bezahlt. Der Waechter kannte nur
+# Skill-Schalter – meine Live-Probe zur Fragen-Reihenfolge hat die Folge der
+# sechs echten Fragen umgedreht und am Ende nur die MENGE zurueckgeprueft
+# (`sorted(...) == sorted(...)`). Eine Messung, die ihren Gegenstand verstellt
+# und dann etwas ANDERES zurueckprueft, ist keine Wiederherstellung.
+#
+# Geprueft wird die EIGENSCHAFT, nicht ein Wortlaut: wer die Reihenfolge
+# schreibt, muss sie (a) vorher merken, (b) am Ende wieder senden und (c) auf
+# IDENTITAET pruefen – `sorted()` allein genuegt ausdruecklich nicht.
+SORT_MERKT = re.compile(r"\bvorher\b|\bvorgefunden|\bVORHER\b|\bfolge_vor\b")
+SORT_IDENT = re.compile(r"==\s*vorher\b|vorher\s*==|nach\s*==\s*vorher")
+# ⚠ DRITTE HAELFTE, von einer Gegenprobe gefunden: "merkt" und "prueft auf
+# Identitaet" bleiben wahr, wenn nur das ZURUECKSTELLEN fehlt – der Waechter
+# war damit fuer genau den Fall blind, den es zu verhindern gilt.
+SORT_ZURUECK = re.compile(r'"ids":\s*vorher\b|ids=vorher\b|sortieren\([^)]*vorher')
+
+
+def schreibt_reihenfolge(quelle: str) -> bool:
+    """⚠ EIN ECHTER AUFRUF, KEIN VORKOMMEN. Ein Gegenproben-Harness traegt
+    `amf.sortieren(...)` und den Endpunkt-Pfad als SABOTAGE-ANKER in
+    Zeichenketten – er fasst keine Daten an und stellt sich ueber seine
+    Datei-Sicherung wieder her. Wer das Muster im Text sucht, meldet ihn und
+    baut sich einen Fehlalarm (beim Bau dieser Regel gemessen)."""
+    baum = _baum(quelle)
+    if baum is None:
+        return False
+    for k in _knoten(baum):
+        if not isinstance(k, ast.Call):
+            continue
+        f = k.func
+        if isinstance(f, ast.Attribute) and f.attr == "sortieren":
+            return True                      # echter Aufruf der Sortierfunktion
+        # Ein HTTP-Aufruf: EIN Argument ist genau der Pfad (keine Codezeile),
+        # ein anderes nennt POST.
+        lits = [a.value for a in k.args
+                if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+        pfad = any(x.strip().startswith("/api/") and "\n" not in x
+                   and x.rstrip("/").endswith("reihenfolge") for x in lits)
+        if pfad and any(x == "POST" for x in lits):
+            return True
+    return False
+
+
+
+print("\033[1m1. Wer einen Skill EINSCHALTET, muss den Vorzustand lesen\033[0m")
+
+# Positiv- UND Negativkontrolle der Messfunktion selbst – ohne sie waere nicht
+# zu unterscheiden, ob die Regel greift oder ob sie nur nichts findet.
+_E_HTTP = "S.post(BASIS + '/api/skills/x/enable', timeout=90)\n"
+_E_PY = "config.save_skill_state('x', {'enabled': True})\n"
+_E_ATTRAPPE = ("import sys, types\n_m = types.ModuleType('backend.config')\n"
+               "sys.modules['backend.config'] = _m\n"
+               "class F:\n"
+               "    def get_skill_states(self):\n        return {}\n"
+               "    def save_skill_state(self, n, s):\n        pass\n")
+_E_ATTRAPPE_HTTP = _E_ATTRAPPE + "S.post(B + '/api/skills/x/enable')\n"
+check("die Messfunktion erkennt ein Einschalten per HTTP", schaltet_ein(_E_HTTP)[0])
+check("sie erkennt einen echten save_skill_state-Aufruf", schaltet_ein(_E_PY)[0])
+check("⚠ eine Attrappen-METHODE zaehlt NICHT als Zustandsaenderung",
+      schaltet_ein(_E_ATTRAPPE) == (False, True), str(schaltet_ein(_E_ATTRAPPE)))
+check("ein HTTP-Aufruf zaehlt auch dann, wenn eine Attrappe danebensteht",
+      schaltet_ein(_E_ATTRAPPE_HTTP)[0])
+
+dateien = sorted(p for p in (ROOT / "tests").glob("*.py")
+                 if p.name != Path(__file__).name)
+# Nur zum BERICHTEN, nicht zum Urteilen: sieht die Datei ueberhaupt nach
+# Skill-Zustand aus? Eine ausgeblendete Menge, die niemand nennt, ist genau die
+# Falschaussage, die dieser Waechter verhindern soll (Register: cron_list).
+SIEHT_AUS = re.compile(r"/api/skills/[\w.-]+/enable|save_skill_state|enable_skill")
+
+
+def _auswerten(p):
+    """Alle Urteile ueber EINE Datei aus EINEM Syntaxbaum; der Baum wird danach
+    verworfen (alle ~830 Baeume zugleich hielten ~450 MB)."""
+    quelle = ohne_kommentare(p.read_text(encoding="utf-8", errors="replace"))
+    baum = _baum(quelle)
+    ein = schaltet_ein(baum if baum is not None else quelle)
+    ab = schaltet_ab(baum) if baum is not None else False
+    return {
+        "quelle": quelle,
+        "ein": ein,
+        "namen": (_zustandsnamen(baum) if baum is not None else set()) if ein[0] else None,
+        "ab": ab,
+        "fall": stellt_fallabhaengig_her(baum) if ab else None,
+        "sort": schreibt_reihenfolge(baum) if baum is not None else False,
+    }
+
+
+AUSWERTUNG = {p: _auswerten(p) for p in dateien}
+geprueft = betroffen = 0
+hermetisch = []
+for p in dateien:
+    quelle = AUSWERTUNG[p]["quelle"]
+    echt, attrappe = AUSWERTUNG[p]["ein"]
+    if not echt:
+        if attrappe and SIEHT_AUS.search(quelle):
+            hermetisch.append(p.name)
+        continue
+    betroffen += 1
+    geprueft += 1
+    namen = AUSWERTUNG[p]["namen"]
+    check("%s liest den Skill-Zustand, bevor es ihn aendert" % p.name,
+          bool(namen),
+          "schaltet ein, ohne nachzusehen was vorher galt")
+
+if hermetisch:
+    print("  \033[2m(%d Skript(e) arbeiten nur mit Attrappen und hinterlassen "
+          "keinen echten Zustand: %s)\033[0m" % (len(hermetisch), ", ".join(hermetisch)))
+
+check("es gibt ueberhaupt Skripte dieser Art (Positivkontrolle)", betroffen > 0,
+      "kein Skript gefunden – der Waechter prueft dann nichts")
+
+
+print("\n\033[1m2. Kein hartes 'disable' zum Aufraeumen\033[0m")
 
 # Positiv- UND Negativkontrolle der Messfunktion selbst: ohne sie waere nicht
 # zu unterscheiden, ob die Regel greift oder ob sie nur nichts findet.
@@ -359,66 +473,21 @@ check("ein echter Aufruf zaehlt sehr wohl (Gegenkontrolle)",
       schaltet_ab("sm.disable_skill('x')\n"))
 
 for p in dateien:
-    quelle = ohne_kommentare(p.read_text(encoding="utf-8", errors="replace"))
-    if not schaltet_ab(quelle):
+    if not AUSWERTUNG[p]["ab"]:
         continue
     geprueft += 1
     check("%s schaltet nicht blind ab" % p.name,
-          stellt_fallabhaengig_her(quelle),
+          AUSWERTUNG[p]["fall"],
           "das Abschalten haengt an keiner Bedingung ueber den gelesenen "
           "Vorzustand – genau der gemeldete Fehler")
 
 
 print("\n\033[1m2b. Eine geaenderte REIHENFOLGE gehoert zurueckgestellt\033[0m")
 
-# ⚠ NEUE ZUSTANDSART, am 2026-09-11 bezahlt. Der Waechter kannte nur
-# Skill-Schalter – meine Live-Probe zur Fragen-Reihenfolge hat die Folge der
-# sechs echten Fragen umgedreht und am Ende nur die MENGE zurueckgeprueft
-# (`sorted(...) == sorted(...)`). Eine Messung, die ihren Gegenstand verstellt
-# und dann etwas ANDERES zurueckprueft, ist keine Wiederherstellung.
-#
-# Geprueft wird die EIGENSCHAFT, nicht ein Wortlaut: wer die Reihenfolge
-# schreibt, muss sie (a) vorher merken, (b) am Ende wieder senden und (c) auf
-# IDENTITAET pruefen – `sorted()` allein genuegt ausdruecklich nicht.
-SORT_MERKT = re.compile(r"\bvorher\b|\bvorgefunden|\bVORHER\b|\bfolge_vor\b")
-SORT_IDENT = re.compile(r"==\s*vorher\b|vorher\s*==|nach\s*==\s*vorher")
-# ⚠ DRITTE HAELFTE, von einer Gegenprobe gefunden: "merkt" und "prueft auf
-# Identitaet" bleiben wahr, wenn nur das ZURUECKSTELLEN fehlt – der Waechter
-# war damit fuer genau den Fall blind, den es zu verhindern gilt.
-SORT_ZURUECK = re.compile(r'"ids":\s*vorher\b|ids=vorher\b|sortieren\([^)]*vorher')
-
-
-def schreibt_reihenfolge(quelle: str) -> bool:
-    """⚠ EIN ECHTER AUFRUF, KEIN VORKOMMEN. Ein Gegenproben-Harness traegt
-    `amf.sortieren(...)` und den Endpunkt-Pfad als SABOTAGE-ANKER in
-    Zeichenketten – er fasst keine Daten an und stellt sich ueber seine
-    Datei-Sicherung wieder her. Wer das Muster im Text sucht, meldet ihn und
-    baut sich einen Fehlalarm (beim Bau dieser Regel gemessen)."""
-    try:
-        baum = ast.parse(quelle)
-    except SyntaxError:
-        return False
-    for k in ast.walk(baum):
-        if not isinstance(k, ast.Call):
-            continue
-        f = k.func
-        if isinstance(f, ast.Attribute) and f.attr == "sortieren":
-            return True                      # echter Aufruf der Sortierfunktion
-        # Ein HTTP-Aufruf: EIN Argument ist genau der Pfad (keine Codezeile),
-        # ein anderes nennt POST.
-        lits = [a.value for a in k.args
-                if isinstance(a, ast.Constant) and isinstance(a.value, str)]
-        pfad = any(x.strip().startswith("/api/") and "\n" not in x
-                   and x.rstrip("/").endswith("reihenfolge") for x in lits)
-        if pfad and any(x == "POST" for x in lits):
-            return True
-    return False
-
-
 betroffen_s = 0
 for p in dateien:
-    quelle = ohne_kommentare(p.read_text(encoding="utf-8", errors="replace"))
-    if not schreibt_reihenfolge(quelle):
+    quelle = AUSWERTUNG[p]["quelle"]
+    if not AUSWERTUNG[p]["sort"]:
         continue
     betroffen_s += 1
     geprueft += 2

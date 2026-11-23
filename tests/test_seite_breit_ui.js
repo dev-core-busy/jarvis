@@ -67,12 +67,25 @@ function ohneHas(css) {
     });
 }
 
-async function baue(datei, speicher) {
+// Je Stylesheet EINMAL bereinigt: der :has-Filter ueber style.css/theme.css
+// kostete je Aufbau ~70 ms, bei 70 Aufbauten 5 von 14 s (2026-11-23 gemessen).
+const _CSS = new Map();
+function cssInline(f) {
+    if (!_CSS.has(f)) _CSS.set(f, ohneHas(lies('frontend/css/' + f)));
+    return _CSS.get(f);
+}
+
+// `mitCss: false` fuer Aufbauten, die nur Klassen und Attribute lesen
+// (Abschnitt 6): seite_breit.js liest keinen berechneten Stil, das Ergebnis
+// haengt also nicht am CSS – nur die Deckelung in Abschnitt 4 misst es.
+// Das Parsen von ~400 KB Stil je Aufbau war der zweite grosse Posten.
+async function baue(datei, speicher, opt) {
+    const mitStil = !(opt && opt.mitCss === false);
     const html = lies('frontend/' + datei + '.html');
     // Eingebundene Stylesheets inline einsetzen – jsdom laedt keine <link>s,
     // und die Deckelung von `.ja-main` steht in jira_addon.css.
-    const mitCss = html.replace(/<link rel="stylesheet" href="\/static\/css\/([\w.-]+\.css)\?v=\d+">/g,
-        (m, f) => '<style>' + ohneHas(lies('frontend/css/' + f)) + '</style>');
+    const LINK = /<link rel="stylesheet" href="\/static\/css\/([\w.-]+\.css)\?v=\d+">/g;
+    const mitCss = html.replace(LINK, (m, f) => mitStil ? '<style>' + cssInline(f) + '</style>' : '');
     const d = new JSDOM(mitCss, { url: 'https://x/' + datei, runScripts: 'outside-only' });
     const w = d.window;
     if (speicher === 'gesperrt') {
@@ -177,17 +190,17 @@ const KARTE = '[class$="-card"], [class*="-card "], .ja-card, .st-card, .wi-sect
         w.close();
 
         // 6. gemerkter Zustand
-        const g = await baue(s, { [LS]: '1' });
+        const g = await baue(s, { [LS]: '1' }, { mitCss: false });
         c('frisch geladen mit gemerktem "1": startet breit',
           g.d.body.classList.contains('jv-breit')
           && g.d.getElementById('jv-max').getAttribute('aria-pressed') === 'true');
         g.w.close();
-        const f = await baue(s, { ['jarvis_breit_andere']: '1' });
+        const f = await baue(s, { ['jarvis_breit_andere']: '1' }, { mitCss: false });
         c('… der Zustand einer ANDEREN Seite wirkt hier nicht',
           !f.d.body.classList.contains('jv-breit'));
         f.w.close();
         let wurf = null, gs = null;
-        try { gs = await baue(s, 'gesperrt'); gs.d.getElementById('jv-max').click(); }
+        try { gs = await baue(s, 'gesperrt', { mitCss: false }); gs.d.getElementById('jv-max').click(); }
         catch (e) { wurf = e; }
         c('gesperrter Speicher: kein Fehler, Knopf wirkt trotzdem',
           !wurf && gs && gs.d.body.classList.contains('jv-breit'), wurf && wurf.message);

@@ -763,16 +763,7 @@ async function start() {
      * zeigt, soll sehen, WESSEN Anmeldung er beendet. Ohne bekannten Namen
      * bleibt es beim schlichten „Abmelden" – ein „undefined abmelden" waere
      * schlimmer als kein Name. */
-    const titel = abmeldeTitel(z.benutzer);
-    el.abmelden.title = titel;
-    el.abmelden.setAttribute("aria-label", titel);
-    /* OHNE `await`: der Hinweis ist eine Auskunft, kein Arbeitsschritt – er
-     * darf `start()` nicht aufhalten (dort haengen gleich danach die
-     * Tab-Zuhoerer der Leiste, und die sind eine Sicherheitsschranke). */
-    updateHinweis();
-    // Das Pulldown gleich füllen – nicht erst beim Öffnen des Zahnrads:
-    // sonst steht dort „Standard“, obwohl Vorlagen hinterlegt sind.
-    vorlagenLaden();
+    angemeldetEinrichten(z.benutzer);
     /* GEMERKTES GILT NUR FÜR DAS TICKET, ZU DEM ES GEHÖRT.
      *
      * Vorgabe des Nutzers 2026-08-28: passt der gemerkte Text nicht zum
@@ -854,6 +845,32 @@ function abmeldeTitel(wer) {
   // Kein Name: das schlichte Wort. „undefined abmelden" waere schlimmer als
   // kein Name - und ein leerer Vorsatz („ abmelden") sieht wie ein Fehler aus.
   return n ? n + " abmelden" : "Abmelden";
+}
+
+/** Was zu einer bestehenden Anmeldung gehoert: Abmelde-Titel, Update-Hinweis
+ * und das Vorlagen-Pulldown.
+ *
+ * ⚠ EINE FUNKTION FUER BEIDE WEGE IN DEN ARBEITSBEREICH. Bis 2026-11-23 stand
+ * das nur in `start()`, also nur fuer ein Fenster, das SCHON angemeldet
+ * aufging. Nach einer frischen Anmeldung ueber den Knopf lief es nie: das
+ * Pulldown "Vorlage" trug nur den Eintrag aus dem Markup, bis ein Klick auf
+ * das Zahnrad `vorlagenLaden()` ausloeste (gemeldet). Zwei Kopien desselben
+ * Blocks liefen beim naechsten Feld wieder auseinander.
+ *
+ * Alles OHNE `await`: es sind Auskuenfte, kein Arbeitsschritt - `start()`
+ * registriert gleich danach die Tab-Zuhoerer der Leiste, und die sind eine
+ * Sicherheitsschranke. */
+function angemeldetEinrichten(benutzer) {
+  /* „[Benutzer] abmelden" – dasselbe Muster wie im Portal
+   * (portal.html::pt-logout). Ohne bekannten Namen bleibt es beim schlichten
+   * „Abmelden" (siehe `abmeldeTitel`). */
+  const titel = abmeldeTitel(benutzer);
+  el.abmelden.title = titel;
+  el.abmelden.setAttribute("aria-label", titel);
+  updateHinweis();
+  // Das Pulldown gleich füllen – nicht erst beim Öffnen des Zahnrads:
+  // sonst steht dort nur „Zusammenfassen“, obwohl Vorlagen hinterlegt sind.
+  vorlagenLaden();
 }
 
 /** Sagt es, wenn der Server eine NEUERE Fassung ausliefert.
@@ -1600,6 +1617,13 @@ $("btn-anmelden").addEventListener("click", async () => {
     el.totp.value = "";
     brandingHolen(basis);
     zeige(true);
+    /* Derselbe Aufbau wie beim Oeffnen eines schon angemeldeten Fensters:
+     * Vorlagen laden (sonst nur „Zusammenfassen“ im Pulldown, gemeldet
+     * 2026-11-23) und - in der Leiste - den Tab-Wechsel beobachten, sonst
+     * bliebe ein Ergebnis nach einem Wechsel neben dem falschen Ticket stehen,
+     * bis das Fenster neu geoeffnet wird. */
+    angemeldetEinrichten((el.benutzer.value || "").trim());
+    leisteBeobachten();
     melde(a.erlaubt ? "" : a.hinweis);
     if (a.erlaubt && !_key) {
       melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");

@@ -245,7 +245,7 @@ def _():
 @probe("Version nicht hochgezaehlt (niemand erfaehrt vom neuen Haken)")
 def _():
     for f in ("browser-addon/manifest.json", "browser-addon/manifest.firefox.json"):
-        ersetze(f, '"version": "0.10.0"', '"version": "0.9.0"')
+        ersetze(f, '"version": "0.10.1"', '"version": "0.9.0"')
 
 
 @probe("die Anleitung im Portal nennt den Haken nicht")

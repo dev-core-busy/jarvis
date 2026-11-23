@@ -1621,7 +1621,7 @@ section("9) Zugriffsrecht: erst merken, dann fragen, dann anmelden");
   const { teile: t4, drin: d4 } = popupTeile(
     ['melde', 'sperre', 'zeige', 'hostMuster', 'hatZugriff',
      'zugriffAnzeigen', 'zugriffSichern'],
-    ['frage', 'brandingHolen']);
+    ['frage', 'brandingHolen', 'angemeldetEinrichten', 'leisteBeobachten']);
   for (const name of ['melde', 'sperre', 'zeige', 'hostMuster', 'hatZugriff',
                       'zugriffAnzeigen', 'zugriffSichern']) {
     check(d4.has(name), 'popup.js hat ' + name + '()');
@@ -1662,6 +1662,10 @@ section("9) Zugriffsrecht: erst merken, dann fragen, dann anmelden");
           return { ok: true };
         }
         function brandingHolen() {}
+        // Attrappen mit Spur: gemessen wird, DASS die Anmeldung den Aufbau
+        // des Arbeitsbereichs anstoesst (Vorlagen, Tab-Beobachtung).
+        function angemeldetEinrichten(wer) { spur.push("einrichten:" + wer); }
+        function leisteBeobachten() { spur.push("beobachten"); }
         let _laeuft = false;
 ` + teile.join('\n') + `
         return (async () => {
@@ -1689,6 +1693,16 @@ section("9) Zugriffsrecht: erst merken, dann fragen, dann anmelden");
     check(r.spur.includes('anmelden'), 'und die Anmeldung laeuft durch');
     check(r.angemeldet === true, 'der Arbeitsbereich ist danach offen');
     check(r.kennwortFeld === '', 'das Kennwort verlaesst das Feld');
+    /* Gemeldet 2026-11-23: nach der Anmeldung trug das Pulldown "Vorlage" nur
+     * einen Eintrag, erst das Zahnrad lud die Liste. Der Aufbau, den `start()`
+     * fuer ein schon angemeldetes Fenster macht, muss auch hier laufen. */
+    const iA = r.spur.indexOf('anmelden');
+    const iE = r.spur.indexOf('einrichten:alice');
+    check(iA >= 0 && iE > iA,
+          'nach der Anmeldung wird der Arbeitsbereich eingerichtet (Vorlagen)',
+          JSON.stringify(r.spur));
+    check(r.spur.indexOf('beobachten') > iA,
+          'und die Tab-Beobachtung der Leiste angestossen', JSON.stringify(r.spur));
   }
 
   // b) Recht fehlt und wird erteilt: merken → fragen → anmelden, in DIESER
@@ -1714,10 +1728,38 @@ section("9) Zugriffsrecht: erst merken, dann fragen, dann anmelden");
     const r = await anmeldeKlick(false, false);
     check(!r.spur.includes('anmelden'),
           'ohne Recht wird gar nicht erst angemeldet', JSON.stringify(r.spur));
+    check(!r.spur.some(x => /^einrichten/.test(x)),
+          'und ohne Anmeldung wird nichts eingerichtet', JSON.stringify(r.spur));
     check(/Zugriffsrecht/.test(r.meldung),
           'und der Grund steht im Fenster', r.meldung);
     check(/Anmelden/.test(r.meldung),
           'samt dem Weg zurueck (erneut druecken)', r.meldung);
+  }
+
+  /* EIN Aufbau fuer beide Wege in den Arbeitsbereich: `start()` und der
+   * Anmelde-Knopf rufen dieselbe Funktion, und die laedt die Vorlagen.
+   * Ausgefuehrt statt gelesen: mit Attrappen fuer ihre Aufrufe. */
+  {
+    const ein = schneidePopup('angemeldetEinrichten');
+    check(!!ein, 'popup.js hat angemeldetEinrichten()');
+    const startRumpf = schneidePopup('start') || '';
+    check(/\bangemeldetEinrichten\(/.test(startRumpf),
+          'start() richtet ueber dieselbe Funktion ein');
+    if (ein) {
+      const spur = [];
+      const f = new Function('spur', `
+        const el = { abmelden: { title: "", setAttribute(k, v) { this[k] = v; } } };
+        function abmeldeTitel(w) { return w ? w + " abmelden" : "Abmelden"; }
+        function updateHinweis() { spur.push("hinweis"); }
+        function vorlagenLaden() { spur.push("vorlagen"); }
+        ` + ein + `
+        angemeldetEinrichten("alice");
+        return el.abmelden.title;`);
+      const titel = f(spur);
+      check(spur.includes('vorlagen'), 'angemeldetEinrichten laedt die Vorlagen',
+            JSON.stringify(spur));
+      check(titel === 'alice abmelden', 'und setzt den Abmelde-Titel', titel);
+    }
   }
 
   /* Der Hinweis ueber dem Knopf: er muss VOR dem Klick dastehen, sonst liest
@@ -5221,7 +5263,11 @@ section("22) Abmelde-Symbol und Update-Hinweis (2026-09-02)");
           at("  bob  "));
   }
   const st = ohneKommentare(schneidePopup("start") || "");
-  check(/abmeldeTitel\(z\.benutzer\)/.test(st),
+  /* Seit 2026-11-23 ueber `angemeldetEinrichten` (ein Aufbau fuer start()
+   * UND den Anmelde-Knopf): die Kette start -> Einrichten -> Titel. */
+  const ein = ohneKommentare(schneidePopup("angemeldetEinrichten") || "");
+  check(/angemeldetEinrichten\(z\.benutzer\)/.test(st)
+        && /abmeldeTitel\(benutzer\)/.test(ein),
         "und start() belegt ihn aus dem Benutzernamen des Zustands");
   check(/benutzer: s\.benutzer \|\| ""/.test(BG),
         "der Hintergrund gibt den Benutzernamen im Zustand heraus");

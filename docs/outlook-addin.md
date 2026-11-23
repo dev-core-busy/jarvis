@@ -136,7 +136,7 @@ denselben Daten wie im Browser. Ab dann meldet sich das Fenster von selbst an
 
 | Reiter | Inhalt |
 |---|---|
-| **Nachricht** | Betreff und Absender der markierten Mail, **Antwort vorschlagen** (Abschnitt 5.2), Auswahl einer aktiven Regel, **Jetzt verarbeiten** |
+| **Nachricht** | Betreff und Absender der markierten Mail, **Auswerten** mit einer Vorlage (Abschnitt 5.2), **Antwort vorschlagen** (Abschnitt 5.3), Auswahl einer aktiven Regel, **Jetzt verarbeiten** |
 | **Regeln** | Regeln anlegen, ändern, pausieren, Testlauf, löschen – vollständig wie in `/email` |
 | **Postfach** | eigene Zugangsdaten, Ordner, Verbindungstest |
 | **Protokoll** | die letzten Läufe mit Ergebnis |
@@ -193,7 +193,30 @@ selben Arbeitsplatz und ist deshalb kein zweiter Faktor.
 `GET /api/addin/links` (beides nur für Administratoren). Ohne das meldete sich
 der neue Inhaber weiterhin als der alte Benutzer an.
 
-### 5.2 Antwort vorschlagen – erst ansehen, dann in Outlook senden
+### 5.2 Auswerten – „Zusammenfassen", „Kurz (Team-Leitung)" und eigene Vorlagen
+
+Ganz oben im Reiter **Nachricht** steht **„Auswerten"**: eine **Vorlage** wählen,
+klicken, und das Ergebnis erscheint im Fenster (markier- und kopierbar, aber nicht
+bearbeitbar – es ist eine Auskunft, kein Entwurf). Das Add-in liest die Mail
+selbst aus Outlook; der Server öffnet kein Postfach, der Lauf hat **keine
+Werkzeuge** und sendet nichts. Das Ergebnis sieht nur der Benutzer selbst.
+
+**Gepflegt werden die Vorlagen in der Kachel „E-Mail"** (`/email`, Karte
+„Auswertungen für das Outlook-Add-in") – nach demselben Muster wie die Vorlagen
+der Jira-Erweiterung:
+
+* **Gemeinsame** Vorlagen gelten für alle Benutzer; anlegen, ändern und löschen
+  darf sie nur ein Administrator (Haken „Für alle Benutzer").
+* **Eigene** Vorlagen legt jeder Benutzer selbst an; niemand sonst sieht sie.
+* Der **Stern** markiert die persönliche Vorauswahl im Add-in – auch an einer
+  gemeinsamen Vorlage, und er gilt nur für den, der ihn setzt.
+* Ein frischer Server bringt drei Vorschläge mit: **Zusammenfassen**,
+  **Kurz (Team-Leitung)**, **Aufgaben und Fristen**. Eine gelöschte Vorgabe
+  kommt nicht zurück.
+* Die Anweisung darf höchstens 2000 Zeichen lang sein (sie geht in jeden Auftrag);
+  ein zu langer Text wird abgewiesen, nicht gekürzt.
+
+### 5.3 Antwort vorschlagen – erst ansehen, dann in Outlook senden
 
 Im Reiter **Nachricht** steht über dem Regel-Block der Knopf **„Antwort
 vorschlagen"**. Das Add-in liest die markierte Mail aus Outlook, Jarvis formuliert
@@ -373,6 +396,11 @@ Mail hängen. Und was fest angehängt wird, soll kein Modell aussuchen.
   Werkzeuge der Regel beschränkt. Über diesen Weg gibt es keine Systemrechte.
 * Das Kennwort des Postfachs wird nie angezeigt und von keiner Schnittstelle
   herausgegeben – nur „gesetzt: ja/nein".
+* Die **Auswertung** mit einer Vorlage läuft ohne jedes Werkzeug (auch ohne
+  Wissenssuche) und gibt ihr Ergebnis nur dem Benutzer zurück. Geschickt wird die
+  **Kennung** der Vorlage, nie ihr Text – aufgelöst wird nur unter den Vorlagen,
+  die der Benutzer benutzen darf. `data/email_vorlagen.json` steht in allen
+  Sandbox-Sperrlisten (der Text geht in fremde Aufträge).
 * Der **Antwort-Vorschlag** läuft ohne jedes Werkzeug und kann deshalb nichts
   auslösen; der **Versand** läuft ohne Sprachmodell und geht ausschließlich an
   den Absender der beantworteten Nachricht.
@@ -471,8 +499,11 @@ als ein neues und muss einmal neu installiert werden (das alte vorher entfernen)
 | `backend/main.py` | Routen `/addin/manifest.xml`, `/addin/taskpane.html`, Endpunkt `POST /api/email/rules/{id}/run_message` |
 | `backend/mail_runner.py` | `nachricht_lauf()` – eine benannte Nachricht verarbeiten, mit derselben Buchhaltung wie der Zeitplan |
 | `backend/mail_runner.py` | `antwort_vorschlag()` / `antwort_senden()` – Vorschau ohne Werkzeuge, Versand ohne Sprachmodell |
+| `backend/mail_vorlagen.py` | Auswertungs-Vorlagen: gemeinsame + eigene, persönlicher Standard; Endpunkte `/api/email/vorlagen*` |
+| `backend/mail_runner.py` | `vorlage_auswerten()` – Auswertung ohne Werkzeuge, Endpunkt `POST /api/email/auswerten` |
 | `frontend/addin/taskpane.html` | Aufgabenfenster (Markup und Gestaltung) |
 | `frontend/addin/addin.js` | Anmeldung, Outlook-Kontext, Regeln, Postfach, Protokoll |
 | `frontend/addin/icon-*.png` → `/addin/icon-<n>.png` | Symbole; ohne Branding-Logo die eingebauten |
 | `tests/test_outlook_addin.py` | Wächter Manifest/Fenster (192 Prüfungen) |
 | `tests/test_addin_sso.py` | Wächter kennwortlose Anmeldung + Antwort-Vorschau (112 Prüfungen, echte Signaturen) |
+| `tests/test_mail_vorlagen.py` + `test_mail_vorlagen_ui.js` | Wächter Auswertungs-Vorlagen (Bestand, Lauf, Rechte, Kachel, Add-in) |

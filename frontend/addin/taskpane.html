@@ -150,6 +150,11 @@
         .ad-btn-danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger);
             background: color-mix(in srgb, var(--danger) 10%, transparent); }
         .ad-btn-block { display: block; width: 100%; text-align: center; }
+        /* Ergebnis einer Auswertung: lesbar, markierbar, nicht bearbeitbar. */
+        .ad-ausw { width: 100%; box-sizing: border-box; resize: vertical;
+            background: var(--bg-secondary); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+            font: inherit; font-size: 12.5px; line-height: 1.5; }
         .ad-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
         /* Zwei Pulldowns nebeneinander (Format + Signatur). Das Fenster ist 320 px
            schmal - unter 260 px wird daraus eine Spalte, sonst stehen zwei
@@ -559,7 +564,7 @@
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/auswahlliste.js?v=1"></script>
-<script src="/static/js/i18n.js?v=515"></script>
+<script src="/static/js/i18n.js?v=516"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <!-- Branding: setzt Markenfarben, Marken-Namen (.brand-app-name) und das
@@ -567,6 +572,6 @@
      Seiten. `/api/branding` haengt an KEINER Anmeldung, die Marke steht also
      schon auf dem Anmeldebildschirm richtig da. -->
 <script src="/static/js/branding.js?v=31"></script>
-<script src="/static/addin/addin.js?v=22"></script>
+<script src="/static/addin/addin.js?v=23"></script>
 </body>
 </html>

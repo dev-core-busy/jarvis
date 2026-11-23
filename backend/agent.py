@@ -7420,7 +7420,7 @@ KRITISCH – Ausfuehrungs-Regeln:
                       "credentials", "ad_cache.json", "license.json", ".instanz",
                       "knowledge_sync.json", "agent_roles.json", "security_state.json",
                       "scheduled_jobs.json", "file_watchers.json", ".owners.json",
-                      "jira_vorlagen.json")
+                      "jira_vorlagen.json", "email_vorlagen.json")
 
         def _ist_geheim(pfad) -> bool:
             low = pfad.name.lower()

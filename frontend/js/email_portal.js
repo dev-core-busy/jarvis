@@ -44,6 +44,11 @@
     var _stilEdit = null;    // welcher Stil ist offen ('neu' = neuer Stil)
     var _signaturen = [];    // benannte Signaturen des Postfachs
     var _sigEdit = null;     // welche Signatur ist offen ('neu' = neue)
+    // Auswertungs-Vorlagen des Outlook-Add-ins (/api/email/vorlagen): gemeinsame
+    // (nur Admins aendern) + eigene, dazu der persoenliche Standard (Stern).
+    var _vorl = { global: [], eigene: [], darf_global: false, standard: '' };
+    var _vorlEdit = null;    // welche Vorlage ist offen ('neu' = neue)
+    var _vorlHeim = null;    // Heimatplatz des wandernden Formulars
 
     function $(id) { return document.getElementById(id); }
     function T(key, fallback) {
@@ -131,6 +136,7 @@
         ladeStatus();
         ladeRegeln();
         ladeLog();
+        ladeVorlagen();
         if (window.refreshBranding) { try { window.refreshBranding(); } catch (e) {} }
     }
 
@@ -784,6 +790,182 @@
     }
 
     /* Auswahlfeld im Regel-Formular neu befuellen (falls es offen steht). */
+    /* ── Auswertungs-Vorlagen des Outlook-Add-ins ─────────────────────── */
+    /* Gegenstueck zu den Jira-Vorlagen. Was jemand AENDERN darf, entscheidet
+       der Server (mail_vorlagen.speichern/loeschen); hier wird es nur
+       ANGEZEIGT: Stift und Muelleimer erscheinen an gemeinsamen Vorlagen nur
+       fuer Administratoren. Den Stern darf jeder an jede Vorlage setzen - er
+       markiert die eigene Wahl, nicht die Vorlage. */
+    function ladeVorlagen() {
+        return hole('/api/email/vorlagen')
+            .then(function (d) {
+                _vorl = {
+                    global: d.global || [], eigene: d.eigene || [],
+                    darf_global: !!d.darf_global, standard: d.standard || '',
+                    text_max: d.text_max || 2000, name_max: d.name_max || 60
+                };
+                zeichneVorlagen();
+            })
+            .catch(function (e) { melde('em-vorl-status', e.message, 'fehler'); });
+    }
+
+    function vorlageFinden(id) {
+        var alle = _vorl.eigene.map(function (v) { return { v: v, global: false }; })
+            .concat(_vorl.global.map(function (v) { return { v: v, global: true }; }));
+        return alle.filter(function (e) { return e.v.id === id; })[0] || null;
+    }
+
+    function zeichneVorlagen() {
+        var box = $('em-vorl-list');
+        if (!box) return;
+        vorlFormularHeim();
+        var alle = _vorl.eigene.map(function (v) { return { v: v, global: false }; })
+            .concat(_vorl.global.map(function (v) { return { v: v, global: true }; }));
+        if (!alle.length) {
+            box.innerHTML = '<div class="em-empty">' + esc(T('mvorl.none',
+                'Noch keine Vorlage angelegt.')) + '</div>';
+            return;
+        }
+        box.innerHTML = alle.map(function (e) {
+            var ist = _vorl.standard === e.v.id;
+            var darf = !e.global || _vorl.darf_global;
+            var vorschau = (e.v.text || '').replace(/\s+/g, ' ').slice(0, 110);
+            return '<div class="em-stil-card' + (ist ? ' is-std' : '') +
+                '" data-vorl="' + esc(e.v.id) + '">' +
+                '<div class="em-stil-row"><div class="em-stil-main">' +
+                '<div class="em-stil-name">' + esc(e.v.name) +
+                (e.global ? '<span class="em-badge">' + esc(T('mvorl.shared', 'gemeinsam')) + '</span>' : '') +
+                '</div>' +
+                '<div class="em-stil-meta">' + esc(vorschau) + '</div>' +
+                '</div><div class="em-stil-acts">' +
+                '<button class="em-icon-btn" data-act="std" aria-pressed="' + (ist ? 'true' : 'false') +
+                '" title="' + esc(ist ? T('mvorl.star_unset', 'Vorauswahl aufheben')
+                    : T('mvorl.star_set', 'Als meine Vorauswahl im Add-in markieren')) + '">' +
+                JarvisIcons.star(ist) + '</button>' +
+                (darf ? '<button class="em-icon-btn" data-act="edit" title="' +
+                    esc(T('common.edit', 'Bearbeiten')) + '">' + JarvisIcons.pencil() + '</button>' +
+                    '<button class="em-icon-btn is-danger" data-act="del" title="' +
+                    esc(T('common.delete', 'Löschen')) + '">' + JarvisIcons.trash() + '</button>' : '') +
+                '</div></div></div>';
+        }).join('');
+        box.querySelectorAll('.em-icon-btn').forEach(function (knopf) {
+            knopf.addEventListener('click', function () {
+                var karte = knopf.closest('.em-stil-card');
+                var id = karte.getAttribute('data-vorl');
+                var act = knopf.getAttribute('data-act');
+                if (act === 'edit') oeffneVorlFormular(id, karte);
+                else if (act === 'del') loescheVorlage(id);
+                else if (act === 'std') setzeVorlStandard(_vorl.standard === id ? '' : id);
+            });
+        });
+        if (_vorlEdit && _vorlEdit !== 'neu') {
+            var k = box.querySelector('.em-stil-card[data-vorl="' + _vorlEdit + '"]');
+            if (k) k.appendChild($('em-vorl-edit'));
+        }
+    }
+
+    function vorlFormularHeim() {
+        var f = $('em-vorl-edit');
+        if (!f) return;
+        if (!_vorlHeim) _vorlHeim = f.parentNode;
+        if (f.parentNode !== _vorlHeim) _vorlHeim.appendChild(f);
+    }
+
+    function schliesseVorlFormular() {
+        _vorlEdit = null;
+        var f = $('em-vorl-edit');
+        if (!f) return;
+        vorlFormularHeim();
+        f.innerHTML = '';
+        f.className = 'hidden';
+    }
+
+    function oeffneVorlFormular(id, karte) {
+        var f = $('em-vorl-edit');
+        if (!f) return;
+        // Zweiter Klick auf denselben Eintrag schliesst wieder.
+        if (_vorlEdit === (id || 'neu')) { schliesseVorlFormular(); return; }
+        if (!_vorlHeim) _vorlHeim = f.parentNode;
+        _vorlEdit = id || 'neu';
+        var e = id ? vorlageFinden(id) : null;
+        var v = e ? e.v : {};
+        f.className = id ? 'em-stil-edit' : '';
+        f.innerHTML =
+            '<div class="em-field" style="margin-top:12px;"><label>'
+            + esc(T('mvorl.name', 'Name')) + '</label>'
+            + '<input data-tabfill type="text" id="em-v-name" maxlength="' + (_vorl.name_max || 60)
+            + '" placeholder="' + esc(T('mvorl.name_ph', 'z. B. Kurz (Team-Leitung)')) + '"></div>'
+            + '<div class="em-field" style="margin-top:10px;"><label>'
+            + esc(T('mvorl.text', 'Anweisung')) + '</label>'
+            + '<textarea data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" id="em-v-text" rows="5" maxlength="'
+            + (_vorl.text_max || 2000) + '" placeholder="'
+            + esc(T('mvorl.text_ph', 'Worauf soll die Auswertung hinauslaufen?')) + '"></textarea>'
+            + '<span class="em-hint">' + esc(T('mvorl.text_hint',
+                'Bestimmt nur, was aus der E-Mail herausgezogen wird – sie löst nie eine Aktion aus.'))
+            + ' <span id="em-v-count"></span></span></div>'
+            + (_vorl.darf_global ? '<div class="em-field" style="margin-top:10px;"><label>'
+                + '<input type="checkbox" id="em-v-global" style="width:auto;margin-right:8px;">'
+                + esc(T('mvorl.global', 'Für alle Benutzer (gemeinsame Vorlage)'))
+                + '</label></div>' : '')
+            + '<div class="em-row"><button class="em-btn em-btn-primary" id="em-v-save">'
+            + esc(id ? T('common.save', 'Speichern') : T('mvorl.create', 'Vorlage anlegen'))
+            + '</button><button class="em-btn" id="em-v-cancel">'
+            + esc(T('common.cancel', 'Abbrechen')) + '</button>'
+            + '<span class="em-status" id="em-v-status"></span></div>';
+        $('em-v-name').value = v.name || '';
+        $('em-v-text').value = v.text || '';
+        if ($('em-v-global')) $('em-v-global').checked = !!(e && e.global);
+        zaehlerBinden($('em-v-text'), $('em-v-count'), (_vorl.text_max || 2000));
+        $('em-v-save').addEventListener('click', function () { speichereVorlage(id); });
+        $('em-v-cancel').addEventListener('click', schliesseVorlFormular);
+        if (karte) karte.appendChild(f); else vorlFormularHeim();
+        $('em-v-name').focus();
+    }
+
+    function speichereVorlage(id) {
+        var daten = {
+            id: id || '',
+            name: (($('em-v-name') || {}).value || '').trim(),
+            text: (($('em-v-text') || {}).value || ''),
+            global: !!(($('em-v-global') || {}).checked)
+        };
+        // Ohne Haken (Nicht-Admin) bleibt eine gemeinsame Vorlage gemeinsam -
+        // der Benutzer darf sie ohnehin nicht aendern, der Server weist es ab.
+        melde('em-v-status', T('common.saving', 'Speichere…'));
+        return sende('/api/email/vorlagen', 'POST', daten)
+            .then(function () {
+                schliesseVorlFormular();
+                melde('em-vorl-status', T('mvorl.saved', '✓ Vorlage gespeichert.'), 'ok');
+                return ladeVorlagen();
+            })
+            .catch(function (e) { melde('em-v-status', e.message, 'fehler'); });
+    }
+
+    function setzeVorlStandard(id) {
+        return sende('/api/email/vorlagen/standard', 'POST', { id: id })
+            .then(function (d) {
+                _vorl.standard = (d && d.standard) || '';
+                zeichneVorlagen();
+            })
+            .catch(function (e) { melde('em-vorl-status', e.message, 'fehler'); });
+    }
+
+    function loescheVorlage(id) {
+        var e = vorlageFinden(id);
+        if (!e) return Promise.resolve();
+        var frage = e.global
+            ? T('mvorl.del_confirm_global', 'Diese gemeinsame Vorlage wirklich löschen? Sie verschwindet für alle Benutzer.')
+            : T('mvorl.del_confirm', 'Diese Vorlage wirklich löschen?');
+        if (!window.confirm(frage + '\n\n' + (e.v.name || ''))) return Promise.resolve();
+        return sende('/api/email/vorlagen/' + encodeURIComponent(id), 'DELETE')
+            .then(function () {
+                if (_vorlEdit === id) schliesseVorlFormular();
+                melde('em-vorl-status', T('mvorl.deleted', 'Vorlage entfernt.'), 'ok');
+                return ladeVorlagen();
+            })
+            .catch(function (e2) { melde('em-vorl-status', e2.message, 'fehler'); });
+    }
+
     function fuelleSigWahl() {
         var sel = $('em-f-sig');
         if (!sel) return;
@@ -1415,6 +1597,14 @@
         if (sigNeu) sigNeu.addEventListener('click', function () {
             oeffneSigFormular(null, null);
         });
+        // Eigene Variable (Register: geteilte `var` in Closures).
+        var vorlNeu = $('em-vorl-neu');
+        if (vorlNeu) vorlNeu.addEventListener('click', function () {
+            oeffneVorlFormular(null, null);
+        });
+        // Die Liste setzt ihre Texte per T() zusammen - applyLang() erreicht
+        // sie nicht. Neu zeichnen genuegt, die Daten sind sprachunabhaengig.
+        window.addEventListener('jarvis-lang-changed', function () { zeichneVorlagen(); });
         var sigImp = $('em-sig-import');
         if (sigImp) sigImp.addEventListener('click', function () {
             uebernehmeSig(false);

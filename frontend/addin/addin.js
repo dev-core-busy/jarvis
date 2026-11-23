@@ -88,6 +88,13 @@
                              // Sprachwechsel neu auf.
     var _vorschlag = null;   // {text, an, betreff} – Antwort-Vorschlag,
                              // solange er nicht gesendet/verworfen ist
+    // Auswertungs-Vorlagen (/api/email/vorlagen, gepflegt in der Kachel
+    // E-Mail). `null` = noch nicht geladen – das ist etwas anderes als eine
+    // leere Liste, und die Anzeige darf das nicht verwechseln.
+    var _vorl = null;        // { liste: [{id, name, global}], standard }
+    var _vorlFehler = '';    // warum die Liste nicht geladen werden konnte
+    var _vorlWahl = '';      // im Pulldown gewaehlt (ueberlebt das Neuzeichnen)
+    var _auswertung = null;  // { text, vorlage } – letztes Ergebnis
     var _tab = 'mail';
     var _laeuft = false;
 
@@ -647,6 +654,147 @@
         binde();
         ladeStatus().then(zeichneNachricht);
         ladeRegeln();
+        ladeVorlagen();
+    }
+
+    /* ── Auswertungs-Vorlagen ("Zusammenfassen", "Kurz (Team-Leitung)") ── */
+    function ladeVorlagen() {
+        return hole('/api/email/vorlagen')
+            .then(function (d) {
+                var liste = (d.eigene || []).map(function (v) {
+                    return { id: v.id, name: v.name, global: false };
+                }).concat((d.global || []).map(function (v) {
+                    return { id: v.id, name: v.name, global: true };
+                }));
+                _vorl = { liste: liste, standard: d.standard || '' };
+                _vorlFehler = '';
+                zeichneNachricht();
+            })
+            .catch(function (e) {
+                if (String(e.message) === '401') return;
+                _vorlFehler = e.message || String(e);
+                zeichneNachricht();
+            });
+    }
+
+    /* Vorlage fuer das Pulldown: die eigene Wahl, sonst der persoenliche
+       Standard (Stern in der Kachel), sonst die erste. Eine Wahl, die es nicht
+       mehr gibt (in der Kachel geloescht), faellt auf den Standard zurueck. */
+    function vorlVorauswahl() {
+        if (!_vorl || !_vorl.liste.length) return '';
+        var gibt = function (id) {
+            return !!id && _vorl.liste.some(function (v) { return v.id === id; });
+        };
+        if (gibt(_vorlWahl)) return _vorlWahl;
+        if (gibt(_vorl.standard)) return _vorl.standard;
+        return _vorl.liste[0].id;
+    }
+
+    function auswertungBlock() {
+        var teile = [];
+        teile.push('<div class="ad-sep"></div>');
+        teile.push('<div class="ad-h">' + esc(T('addin.eval_head', 'Auswerten')) + '</div>');
+        if (_vorlFehler) {
+            teile.push('<div class="ad-warn">' + esc(_vorlFehler) + '</div>');
+            return teile.join('');
+        }
+        if (!_vorl) {
+            // Noch nicht geladen – nichts behaupten.
+            return teile.join('');
+        }
+        if (!_vorl.liste.length) {
+            teile.push('<div class="ad-empty">' + esc(T('addin.eval_none',
+                'Es ist keine Vorlage hinterlegt. Lege in der Kachel „E-Mail“ eine an.')) + '</div>');
+            return teile.join('');
+        }
+        var gewaehlt = vorlVorauswahl();
+        teile.push('<div class="ad-field" style="margin-top:8px;"><label>' +
+            esc(T('addin.eval_pick', 'Vorlage')) + '</label>' +
+            '<select id="ad-eval-vorl">' + _vorl.liste.map(function (v) {
+                return '<option value="' + esc(v.id) + '"' + (v.id === gewaehlt ? ' selected' : '') +
+                    '>' + esc(v.name) + '</option>';
+            }).join('') + '</select></div>');
+        teile.push('<button class="ad-btn ad-btn-primary ad-btn-block" id="ad-eval-run">' +
+            esc(T('addin.eval_run', 'Auswerten')) + '</button>');
+        if (_auswertung) {
+            teile.push('<p class="ad-hint" style="margin-top:8px;">' +
+                esc(T('addin.eval_used', 'Vorlage')) + ': ' + esc(_auswertung.vorlage || '') + '</p>');
+            // readonly-Textfeld statt <div>: markieren und kopieren geht damit
+            // auch dort, wo die Zwischenablage-Schnittstelle gesperrt ist
+            // (Aufgabenfenster in WebView2/iframe).
+            teile.push('<textarea id="ad-eval-text" class="ad-ausw" rows="10" readonly></textarea>');
+            teile.push('<div class="ad-row" style="margin-top:6px;">' +
+                '<button class="ad-btn" id="ad-eval-copy">' + esc(T('addin.eval_copy', 'Kopieren')) + '</button>' +
+                '<button class="ad-btn" id="ad-eval-close">' + esc(T('addin.eval_close', 'Schließen')) + '</button></div>');
+        } else {
+            teile.push('<p class="ad-hint" style="margin-top:6px;">' + esc(T('addin.eval_safe',
+                'Das Ergebnis siehst nur du – es wird nichts gesendet. Vorlagen pflegst du in der Kachel „E-Mail“.')) + '</p>');
+        }
+        teile.push('<p class="ad-status" id="ad-eval-status" style="margin-top:8px;"></p>');
+        return teile.join('');
+    }
+
+    function auswertungBinden() {
+        var sel = $('ad-eval-vorl');
+        if (sel) sel.addEventListener('change', function () { _vorlWahl = sel.value; });
+        var los = $('ad-eval-run');
+        if (los) los.addEventListener('click', auswerten);
+        var ta = $('ad-eval-text');
+        if (ta && _auswertung) ta.value = _auswertung.text || '';
+        var kop = $('ad-eval-copy');
+        if (kop) kop.addEventListener('click', auswertungKopieren);
+        var zu = $('ad-eval-close');
+        if (zu) zu.addEventListener('click', function () { _auswertung = null; zeichneNachricht(); });
+    }
+
+    /* Die Nachricht auswerten. Inhalt aus Outlook (wie beim Antwortvorschlag),
+       der Server oeffnet kein Postfach; der Lauf hat keine Werkzeuge und sendet
+       nichts. Geschickt wird die KENNUNG der Vorlage, nie ihr Text. */
+    function auswerten() {
+        if (_laeuft || !_office) return;
+        var vid = (($('ad-eval-vorl') || {}).value || '');
+        if (!vid) return;
+        _vorlWahl = vid;
+        _laeuft = true;
+        var knopf = $('ad-eval-run');
+        if (knopf) knopf.disabled = true;
+        melde('ad-eval-status', T('addin.eval_working', 'Werte die Nachricht aus…'));
+        nachrichtLesen()
+            .then(function (n) {
+                return sende('/api/email/auswerten', 'POST', {
+                    nachricht: n, postfach: postfachAdresse(),
+                    vorlage: vid, lang: sprache()
+                });
+            })
+            .then(function (d) {
+                _auswertung = { text: d.text || '', vorlage: d.vorlage || '' };
+                _laeuft = false;
+                zeichneNachricht();
+            })
+            .catch(function (e) {
+                _laeuft = false;
+                if (String(e.message) !== '401') melde('ad-eval-status', e.message, 'fehler');
+                if ($('ad-eval-run')) $('ad-eval-run').disabled = false;
+            });
+    }
+
+    function auswertungKopieren() {
+        var ta = $('ad-eval-text');
+        if (!ta) return;
+        var ok = function () { melde('ad-eval-status', T('addin.eval_copied', '✓ Kopiert.'), 'ok'); };
+        var altweg = function () {
+            try {
+                ta.focus(); ta.select();
+                if (document.execCommand && document.execCommand('copy')) { ok(); return; }
+            } catch (e) { /* faellt unten auf den Hinweis */ }
+            melde('ad-eval-status', T('addin.eval_copy_fail',
+                'Kopieren ist hier nicht möglich – markiere den Text und kopiere ihn von Hand.'), 'fehler');
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(ta.value).then(ok, altweg);
+        } else {
+            altweg();
+        }
     }
 
     /* Feld-Erklaerungen (ⓘ) – EIN delegierter Listener statt Bindung je Knopf,
@@ -852,6 +1000,11 @@
         // Konto, EWS und Kennung zaehlen nur noch fuer den Regel-Lauf unten.
         var aktive = _regeln.filter(function (r) { return r.enabled !== false; });
 
+        // ── Auswerten (Vorlagen aus der Kachel E-Mail) ──
+        // Steht ZUERST: lesen kommt vor antworten, und wie der Vorschlag
+        // braucht es weder Postfach noch Serverzugriff.
+        teile.push(auswertungBlock());
+
         // ── Antwort vorschlagen ──
         // Steht VOR dem Regel-Block und haengt bewusst NICHT an einer Regel:
         // eine Antwort zu entwerfen ist der haeufigste Wunsch, und wer noch
@@ -968,6 +1121,7 @@
         }
 
         box.innerHTML = teile.join('');
+        auswertungBinden();
         if ($('ad-run-msg')) $('ad-run-msg').addEventListener('click', verarbeiteNachricht);
         if ($('ad-reply-make')) $('ad-reply-make').addEventListener('click', antwortVorschlagen);
         if ($('ad-reply-stil')) {

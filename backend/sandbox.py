@@ -214,6 +214,10 @@ _APP_DENY_REL = (
     #  - `email_log.jsonl` enthaelt Absender und Betreffzeilen fremder Post.
     "data/email_accounts.json", "data/.mailkey",
     "data/email_rules.json", "data/email_state.json", "data/email_log.jsonl",
+    # Auswertungs-Vorlagen des Outlook-Add-ins (backend/mail_vorlagen.py):
+    # der Text geht in den Auftrag JEDER Auswertung, die gemeinsamen fuer alle
+    # Benutzer – gleiche Begruendung wie data/jira_vorlagen.json.
+    "data/email_vorlagen.json",
     # Persoenliche SAP-Zugaenge (backend/sap_accounts.py): `sap_accounts.json` +
     # `.sapkey` sind zusammen das KLARTEXT-Kennwort jedes hinterlegten
     # SAP-Benutzers – der Schluessel ohne die Datei ist nutzlos und umgekehrt,
@@ -460,6 +464,7 @@ PRIVATE_FILES = ("data/scheduled_jobs.json", "data/file_watchers.json",
                  "data/knowledge_sync.json", "data/jira_vorlagen.json",
                  "data/email_accounts.json", "data/email_rules.json",
                  "data/email_state.json", "data/email_log.jsonl",
+                 "data/email_vorlagen.json",
                  "data/addin_links.json", "data/sap_accounts.json",
                  "data/jira_accounts.json", "data/vemas_accounts.json",
                  "data/confluence_accounts.json",
@@ -911,6 +916,8 @@ SHELL_SECRET_PATHS = re.compile(
     # zusammen den Klartext), fremde Regel-Prompts, fremde Absender/Betreffe.
     r'email_accounts\.json\b|\.mailkey\b|email_rules\.json\b|'
     r'email_state\.json\b|email_log\.jsonl\b|'
+    # Auswertungs-Vorlagen des Add-ins: Prompt-Abschnitt fuer alle Benutzer.
+    r'email_vorlagen\.json\b|'
     # Outlook-Add-in: Postfach → Jarvis-Konto. Beschreibbar waere das die
     # kuerzeste Rechteerhoehung im Verzeichnis (siehe _APP_DENY_REL).
     r'addin_links\.json\b|'

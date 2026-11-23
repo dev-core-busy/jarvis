@@ -262,6 +262,7 @@ AUSNAHMEN = {
     ("backend/jira_assist.py", "*"): "Positivliste, nur lesend",
     ("backend/claude_subagent.py", "*"): "filesystem + Sandbox-Shell ohne Netz",
     ("backend/mail_runner.py", "antwort_vorschlag"): "keine Werkzeuge (set())",
+    ("backend/mail_runner.py", "vorlage_auswerten"): "keine Werkzeuge (set()), Ergebnis nur an den Benutzer",
     ("backend/main.py", "excel_ask_endpoint"): "nur excel_vorschlag",
     ("backend/agent.py", "_delegate_to_role"): "erbt Kanal bzw. Auftrag des Aufrufers",
 }

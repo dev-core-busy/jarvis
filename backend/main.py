@@ -1991,6 +1991,9 @@ _ACTION_DETAILS = [
     ("POST",   rf"/api/email/rules/{_ID}/run(_message)?", "E-Mail · Regel ausgeführt"),
     ("POST",   r"/api/email/rules",                     "E-Mail · Regel angelegt"),
     ("POST",   r"/api/email/(signatures(/import)?|styles)", "E-Mail · Vorlage angelegt"),
+    ("POST",   r"/api/email/auswerten",                 "E-Mail · Nachricht ausgewertet"),
+    ("POST",   r"/api/email/vorlagen",                  "E-Mail · Auswertungs-Vorlage gespeichert"),
+    ("DELETE", rf"/api/email/vorlagen/{_ID}",           "E-Mail · Auswertungs-Vorlage gelöscht"),
     # Feedback, Meldungen
     ("POST",   r"/api/feedback(/abgabe)?",              "Feedback · abgegeben"),
     ("POST",   r"/api/newsfeed/ausblenden",             "Newsfeed · ausgeblendet"),
@@ -18670,6 +18673,124 @@ async def email_reply_form(request: Request,
     return JSONResponse({"ok": True, "format": format_,
                          "html": rumpf_html or mail_body.text_zu_html(rumpf_text),
                          "text": rumpf_text})
+
+
+# ── Auswertungs-Vorlagen des Outlook-Add-ins (backend/mail_vorlagen.py) ────
+# Gepflegt in der Kachel E-Mail (/email), benutzt im Aufgabenfenster.
+# Bauart wie /api/jira/assist/vorlagen: gemeinsame (nur Admins) + eigene,
+# persoenlicher Standard. Schranke ist die E-Mail-Freigabe – ohne sie gibt es
+# weder die Kachel noch das Add-in.
+
+@app.get("/api/email/vorlagen")
+async def email_vorlagen_get(user: str = Depends(require_email_access)):
+    """Die Vorlagen, die dieser Benutzer benutzen darf (gemeinsame + eigene)."""
+    from backend import mail_vorlagen
+    try:
+        return JSONResponse({"ok": True,
+                             **mail_vorlagen.liste(user, _is_admin_user(user))})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Vorlagen nicht lesbar: %s" % e},
+                            status_code=500)
+
+
+@app.post("/api/email/vorlagen")
+async def email_vorlagen_save(request: Request,
+                              user: str = Depends(require_email_access)):
+    """Eine Vorlage anlegen oder aendern.
+
+    ``global: true`` verlangt Administratorrechte – die Pruefung sitzt im
+    Modul (``mail_vorlagen.speichern``), damit sie nicht an einem zweiten
+    Aufrufer vergessen werden kann.
+    """
+    from backend import mail_vorlagen
+    try:
+        b = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    b = b or {}
+    try:
+        v = mail_vorlagen.speichern(
+            user=user, name=str(b.get("name") or ""), text=str(b.get("text") or ""),
+            vid=str(b.get("id") or ""), global_=bool(b.get("global")),
+            ist_admin=_is_admin_user(user))
+    except mail_vorlagen.VorlagenFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    if bool(b.get("global")):
+        # Nur GEMEINSAME Vorlagen: sie gehen in die Auftraege aller Benutzer.
+        _aktivitaet(user, "email", "gemeinsame_vorlage_gespeichert",
+                    str(v.get("name") or ""), vorlage=v.get("id"))
+    return JSONResponse({"ok": True, "vorlage": v})
+
+
+@app.delete("/api/email/vorlagen/{vorlage_id}")
+async def email_vorlagen_del(vorlage_id: str, user: str = Depends(require_email_access)):
+    """Eine Vorlage loeschen – eigene immer, gemeinsame nur als Administrator.
+
+    Fremd und unbekannt antworten gleich (404): ob es eine fremde Vorlage
+    gibt, ist selbst eine Information.
+    """
+    from backend import mail_vorlagen
+    if not mail_vorlagen.loeschen(user, vorlage_id, _is_admin_user(user)):
+        return JSONResponse({"ok": False, "error": "Die Vorlage wurde nicht gefunden."},
+                            status_code=404)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/email/vorlagen/standard")
+async def email_vorlagen_standard(request: Request,
+                                  user: str = Depends(require_email_access)):
+    """Persoenliche Standard-Vorlage setzen (``id`` leer = aufheben)."""
+    from backend import mail_vorlagen
+    try:
+        b = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    try:
+        st = mail_vorlagen.standard_setzen(user, str((b or {}).get("id") or ""),
+                                           _is_admin_user(user))
+    except mail_vorlagen.VorlagenFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    return JSONResponse({"ok": True, "standard": st})
+
+
+@app.post("/api/email/auswerten")
+async def email_auswerten(request: Request, user: str = Depends(require_email_access)):
+    """Die markierte Nachricht mit einer Vorlage auswerten (Outlook-Add-in).
+
+    Den Inhalt liest das Add-in SELBST aus Outlook und schickt ihn als
+    ``nachricht`` – der Server oeffnet kein Postfach. Der Lauf hat **keine
+    Werkzeuge** und sendet nichts (``mail_runner.vorlage_auswerten``); die
+    Vorlage kommt ueber ihre KENNUNG, nie als Text aus dem Rumpf.
+    """
+    from backend import mail_client, mail_runner
+    hinweis = _email_skill_hinweis()
+    if hinweis:
+        return JSONResponse(hinweis, status_code=400)
+    try:
+        b = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": "Ungueltiger Rumpf."}, status_code=400)
+    b = b or {}
+    nachricht = b.get("nachricht")
+    if not isinstance(nachricht, dict):
+        return JSONResponse({"ok": False, "error": "Es fehlt die Nachricht."},
+                            status_code=400)
+    vid = str(b.get("vorlage") or "").strip()[:32]
+    if not vid:
+        return JSONResponse({"ok": False, "error": "Es ist keine Vorlage gewählt."},
+                            status_code=400)
+    try:
+        daten = await mail_runner.vorlage_auswerten(
+            user, vid, nachricht, postfach=str(b.get("postfach") or ""),
+            lang=str(b.get("lang") or "de")[:5], ist_admin=_is_admin_user(user))
+    except mail_client.MailFehler as f:
+        return JSONResponse({"ok": False, "error": str(f)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        from backend.llm import scrub_secrets  # noqa: PLC0415
+        return JSONResponse({"ok": False, "error": "Auswertung fehlgeschlagen: %s"
+                                                   % scrub_secrets(str(e))},
+                            status_code=500)
+    return JSONResponse({"ok": True, **daten})
 
 
 @app.post("/api/email/reply/send")

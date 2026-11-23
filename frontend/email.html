@@ -440,6 +440,28 @@
             </div>
         </div>
 
+        <!-- ═══ Auswertungs-Vorlagen des Outlook-Add-ins (2026-11-23) ═══
+             Gegenstueck zu den Vorlagen der Jira-Erweiterung: das Add-in
+             bietet sie im Nachrichten-Reiter zur Auswahl an ("Zusammenfassen",
+             "Kurz (Team-Leitung)"). Gepflegt wird HIER – gemeinsame nur von
+             Administratoren (Schranke in mail_vorlagen.speichern), eigene von
+             jedem. Der Stern ist die persoenliche Vorauswahl im Add-in. -->
+        <div class="em-card" data-klapp="vorlagen">
+            <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
+                <h2 data-i18n="mvorl.head">Auswertungen für das Outlook-Add-in</h2>
+                <span class="em-caret" aria-hidden="true">&#9662;</span>
+            </div>
+            <div class="em-card-body">
+                <p class="em-hint" data-i18n-html="mvorl.hint">Benannte Anweisungen, mit denen das Outlook-Add-in die markierte E-Mail auswertet – zum Beispiel „Zusammenfassen“ oder „Kurz (Team-Leitung)“. Das Ergebnis siehst nur du, es wird nichts gesendet. <b>Gemeinsame</b> Vorlagen legt die Administration für alle an, eigene kannst du jederzeit ergänzen. Der Stern markiert deine Vorauswahl im Add-in.</p>
+                <div id="em-vorl-list" style="margin-top:10px;"></div>
+                <div class="em-row">
+                    <button class="em-btn" id="em-vorl-neu" data-i18n="mvorl.new">Neue Vorlage</button>
+                    <span class="em-status" id="em-vorl-status"></span>
+                </div>
+                <div id="em-vorl-edit" class="hidden"></div>
+            </div>
+        </div>
+
         <!-- ═══ Regeln ═══ -->
         <div class="em-card" data-klapp="rules">
             <div class="em-card-head" role="button" tabindex="0" aria-expanded="true">
@@ -559,14 +581,14 @@
 <script src="/static/js/syspackages.js?v=25"></script>
 <script src="/static/js/sysload.js?v=8"></script>
 <script src="/static/js/fusszeile.js?v=1"></script>
-<script src="/static/js/i18n.js?v=515"></script>
+<script src="/static/js/i18n.js?v=516"></script>
 <script src="/static/js/seite_breit.js?v=1"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
 <script src="/static/js/theme.js?v=3"></script>
 <script src="/static/js/branding.js?v=31"></script>
 <script src="/static/js/sessions.js?v=10"></script>
 <script src="/static/js/logo_home.js?v=1"></script>
-<script src="/static/js/email_portal.js?v=20"></script>
+<script src="/static/js/email_portal.js?v=21"></script>
 <script src="/static/js/settings_btn.js?v=10"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist).
      Der Ein/Aus-Schalter haengt sich VOR #btn-theme-toggle – deshalb muss der

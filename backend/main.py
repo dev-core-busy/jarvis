@@ -1733,7 +1733,12 @@ def verify_token(token: str) -> str | None:
             _halter = _admin_anfrage.get()
             if _halter is not None:
                 _halter.setdefault("sitzung", _norm_login(username))
-            # Wer: ab hier traegt jede Protokollzeile der Anfrage den Benutzer
+            # Wer: ab hier traegt jede Protokollzeile der Anfrage den Benutzer.
+            # SELBST importiert: verify_token wird von rund 15 Pruefstaenden aus
+            # main.py geschnitten – ein Modulname aus dem Kopf von main.py fehlt
+            # dort, und der breite except unten machte daraus still "Token
+            # ungueltig" (2026-11-23 an zwei Waechtern gesehen).
+            from backend import log_kontext as _log_kontext
             _log_kontext.ergaenzen(wer=_norm_login(username))
             return username
         return None

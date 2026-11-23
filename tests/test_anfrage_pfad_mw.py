@@ -44,6 +44,9 @@ except Exception as e:  # noqa: BLE001
     sys.exit(2)
 
 from backend import sitzung_token as ST  # noqa: E402
+# Seit 2026-11-23 oeffnet die Middleware auch den Protokoll-Kontext
+# (backend/log_kontext.py) – das ECHTE Modul, keine Attrappe.
+from backend import log_kontext as LK  # noqa: E402
 
 BAUM = ast.parse((ROOT / "backend" / "main.py").read_text(encoding="utf-8"))
 klasse = next((n for n in BAUM.body if isinstance(n, ast.ClassDef)
@@ -51,7 +54,7 @@ klasse = next((n for n in BAUM.body if isinstance(n, ast.ClassDef)
 if klasse is None:
     print("ABBRUCH: _AnfragePfadMiddleware nicht in main.py")
     sys.exit(2)
-NS = {"_sitzung": ST}
+NS = {"_sitzung": ST, "_log_kontext": LK}
 exec(compile(ast.fix_missing_locations(ast.Module(body=[klasse], type_ignores=[])),  # noqa: S102
              "main.py<auszug>", "exec"), NS)
 

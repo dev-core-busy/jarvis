@@ -86,9 +86,12 @@ const PROBEN = [
     },
     {
         name: "der Exit-Code wird von einem exit-Handler ueberschrieben",
-        datei: "tests/test_lic_panel_ui.js",
+        // Die Datei muss den exit-Handler VOR dem Laden von jsdom registrieren –
+        // sonst endet der Lauf ohne jsdom, bevor der sabotierte Handler existiert,
+        // und die Probe bleibt stumm (so mit test_bsi_h10_ui.js, 2026-11-23).
+        datei: "tests/test_chat_pdf_ui.js",
         um: (s) => s.replace("process.on('exit', (code) => {", "process.on('exit', () => {")
-                    .replace("if (!bilanz && code === 0) {", "if (!bilanz) {"),
+                    .replace("if (!_bilanz && code === 0) {", "if (!_bilanz) {"),
         erwartet: /jede Datei endet ohne jsdom mit Exit 2/,
     },
     {

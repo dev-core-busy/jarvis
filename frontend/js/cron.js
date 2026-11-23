@@ -57,7 +57,7 @@ window.cronManager = new (class JarvisCronManager {
             <div class="kb-section">
                 <div class="kb-section-header kb-collapse-header" id="cron-sect-jobs-hdr">
                     <h3>${window.t('cron.section_jobs')}</h3>
-                    <span class="sk-openclaw-toggle" id="cron-sect-jobs-tog">▶</span>
+                    <span class="sk-sektion-toggle" id="cron-sect-jobs-tog">▶</span>
                 </div>
                 <div id="cron-sect-jobs-body" style="display:none;">
                     <p class="kb-hint" style="margin-top:6px;">${window.t('cron.jobs_hint')}</p>
@@ -157,7 +157,7 @@ window.cronManager = new (class JarvisCronManager {
             <div class="kb-section">
                 <div class="kb-section-header kb-collapse-header" id="cron-sect-watch-hdr">
                     <h3>${window.t('cron.section_watcher')}</h3>
-                    <span class="sk-openclaw-toggle" id="cron-sect-watch-tog">▶</span>
+                    <span class="sk-sektion-toggle" id="cron-sect-watch-tog">▶</span>
                 </div>
                 <div id="cron-sect-watch-body" style="display:none;">
                     <p class="kb-hint" style="margin-top:6px;">${window.t('cron.watcher_hint')}</p>

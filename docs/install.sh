@@ -320,7 +320,7 @@ else
             # NICHT mehr per `curl … setup_24.x | bash` (Netz-Skript als root,
             # ungeprueft): nach dem Klonen installiert deploy/security/
             # node_aktualisieren.sh – Schluessel gegen Fingerabdruck, Pin, Linie
-            # = ZIEL, dasselbe Skript wie auf den Servern und im Dockerfile.
+            # = ZIEL, dasselbe Skript wie auf den Servern.
             NODE_UEBER_SKRIPT=1
             info "Node.js folgt nach dem Klonen (geprüfte Paketquelle)."
         elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then

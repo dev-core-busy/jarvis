@@ -4,7 +4,6 @@
  * Layout orientiert an KI-Profile + Wissen:
  *  - "Installierte Skills"  = enabled:true  → profile-card-Stil, Toggle + Config + Info + Entfernen
  *  - "Mögliche Skills"      = enabled:false → durchsuchbare Liste mit Kategorie-Pills
- *  - "OpenClaw Marketplace" = aufklappbare Sektion unterhalb (alle LLM-Provider)
  *
  * API:
  *  GET  /api/skills                → { skills: [...] }
@@ -12,13 +11,11 @@
  *  POST /api/skills/{name}/disable → deaktivieren
  *  GET  /api/skills/{name}/config  → { config: {...} }
  *  POST /api/skills/{name}/config  → config speichern
- *  GET  /api/openclaw/llm-check    → { local: bool, provider, reason }
- *  GET  /api/openclaw/workflow-task?description=... → { task: string }
  */
 (function () {
     'use strict';
 
-    // Maskierung fuer ALLES, was aus Skill-Manifesten, dem OpenClaw-Markt,
+    // Maskierung fuer ALLES, was aus Skill-Manifesten,
     // Agenten-Meldungen oder Benutzereingaben kommt (Pentest-Vorbereitung
     // 2026-11-05): ein importiertes Manifest mit `<img onerror=...>` im Namen
     // lief sonst auf der Admin-Seite. Dazu ' fuer Attribute in '...'.
@@ -151,7 +148,6 @@
             this.skills          = [];
             this.searchVal       = '';
             this.categoryFilter  = 'all';
-            this._ocCollapsed    = true;   // OpenClaw initial zugeklappt
             this._availCollapsed = true;   // Mögliche Skills initial zugeklappt
             this._instCollapsed  = true;   // Installierte Skills initial zugeklappt
         }
@@ -194,7 +190,6 @@
             this._renderInstalled();
             this._renderCategoryPills();
             this._renderAvailable();
-            this._renderOpenClawSection();
             this._bindSectionToggles();
         }
 
@@ -254,7 +249,6 @@
             const catLabel  = CATEGORY_LABELS[skill.category] || skill.category || '';
             const toolCount = (skill.tools || []).length;
 
-            const isOpenClaw = skill.source === 'openclaw';
             // Fehlende Abhaengigkeiten (vom Backend mitgeliefert): system_packages
             // werden NUR beim Einschalten installiert – ein laengst aktiver Skill,
             // der nachtraeglich eine Systemabhaengigkeit bekommt, braucht einen
@@ -265,8 +259,7 @@
                 : '';
 
             const item = document.createElement('div');
-            item.className = 'sk-item' + (isOpenClaw ? ' sk-item-oc' : '')
-                + (skill.enabled ? '' : ' sk-item-disabled');
+            item.className = 'sk-item' + (skill.enabled ? '' : ' sk-item-disabled');
             // Adresse der Zeile. Ohne sie ist ein einzelner Eintrag von aussen
             // nicht auffindbar – die Suche im Kopf der Einstellungen springt
             // genau hierher, wenn ein Skill keinen eigenen Konfigurationspunkt
@@ -278,7 +271,6 @@
                     <span class="sk-item-name">${_esc(skill.name)}</span>
                     ${skill.enabled ? '' : `<span class="sk-badge-off">${window.t('skills.disabled')}</span>`}
                     ${isSystem ? '<span class="sk-badge-sys">System</span>' : ''}
-                    ${isOpenClaw ? '<span class="sk-badge-oc">OpenClaw</span>' : ''}
                     <span class="sk-item-cat">${_esc(catLabel)}</span>
                     <span class="sk-item-tools">${toolCount} Tool${toolCount !== 1 ? 's' : ''}</span>
                     <span class="sk-item-desc">${_esc(skill.description || '')}</span>
@@ -432,297 +424,6 @@
             item.querySelector('.sk-btn-add')
                 .addEventListener('click', () => this._activate(dirName));
             return item;
-        }
-
-        // ── OpenClaw Marketplace Sektion ──────────────────────────────
-
-        _renderOpenClawSection() {
-            // Nach der gesamten "Mögliche Skills"-Sektion einfügen
-            let ocEl = document.getElementById('sk-openclaw-section');
-            if (!ocEl) {
-                const availSection = document.getElementById('sk-available-section');
-                if (!availSection) return;
-                ocEl = document.createElement('div');
-                ocEl.id = 'sk-openclaw-section';
-                ocEl.className = 'sk-openclaw-section';
-                availSection.parentNode.insertBefore(ocEl, availSection.nextSibling);
-            }
-
-            const bodyHTML = this._ocCollapsed ? '' : `
-                <div class="sk-openclaw-body">
-                    <p class="sk-openclaw-hint">
-                        ${window.t('skills.mkt_hint') || 'Skills durchsuchen, prüfen und bei Bedarf importieren.'}
-                    </p>
-                    <label class="sk-openclaw-label">${window.t('skills.mkt_label') || 'Welchen Skill suchst du?'}
-                        <small>${window.t('skills.mkt_label_hint') || '(leer = populäre Skills anzeigen)'}</small>
-                    </label>
-                    <textarea data-tabfill-nein="Aufzaehlung mehrerer Beispiele – als Feldinhalt Unsinn" id="sk-oc-description" class="sk-openclaw-textarea"
-                        placeholder='${window.t('skills.mkt_ph') || 'z. B. "Skill für Telegram" oder "PDF-Analyse"'}'
-                        rows="2"></textarea>
-                    <button id="sk-oc-search-btn" class="sk-openclaw-btn">
-                        🔍 ${window.t('skills.mkt_search_btn') || 'Skills suchen'}
-                    </button>
-                    <div id="sk-oc-results" class="sk-oc-results"></div>
-                </div>`;
-
-            ocEl.innerHTML = `
-                <div class="sk-openclaw-header" id="sk-oc-header">
-                    <span class="sk-openclaw-title">${window.t('skills.marketplace')}</span>
-                    <span class="sk-openclaw-toggle">${this._ocCollapsed ? '▶' : '▼'}</span>
-                </div>
-                ${bodyHTML}`;
-
-            // Header-Klick: aufklappen / zuklappen
-            ocEl.querySelector('#sk-oc-header').addEventListener('click', () => {
-                this._ocCollapsed = !this._ocCollapsed;
-                this._renderOpenClawSection();
-                if (!this._ocCollapsed) {
-                    // Marketplace aufgeklappt
-                }
-            });
-
-            // Such-Button nur wenn aufgeklappt
-            if (!this._ocCollapsed) {
-                const searchBtn = ocEl.querySelector('#sk-oc-search-btn');
-                if (searchBtn) {
-                    searchBtn.addEventListener('click', () => {
-                        const desc = ocEl.querySelector('#sk-oc-description')?.value || '';
-                        this._openClawSearch(desc);
-                    });
-                }
-                // Enter in Textarea löst Suche aus
-                const textarea = ocEl.querySelector('#sk-oc-description');
-                if (textarea) {
-                    textarea.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            searchBtn?.click();
-                        }
-                    });
-                }
-            }
-        }
-
-        async _checkLLM() {
-            const token    = window.JarvisSitzung.token();
-            const statusEl = document.getElementById('sk-oc-llm-status');
-            const importBtn = document.getElementById('sk-oc-import-btn');
-            if (!statusEl) return;
-            try {
-                const resp = await fetch('/api/openclaw/llm-check', {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                if (data.local) {
-                    statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-local';
-                    statusEl.textContent = window.t('skills.llm_local');
-                    if (importBtn) importBtn.disabled = false;
-                } else {
-                    statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-cloud';
-                    statusEl.textContent = window.t('skills.llm_cloud');
-                    if (importBtn) importBtn.disabled = true;
-                }
-            } catch (e) {
-                if (statusEl) {
-                    statusEl.className = 'sk-openclaw-llm-status sk-openclaw-llm-cloud';
-                    statusEl.textContent = '❌ LLM-Check fehlgeschlagen';
-                }
-            }
-        }
-
-        async _openClawSearch(descriptionText) {
-            const token = window.JarvisSitzung.token();
-            const resultsEl = document.getElementById('sk-oc-results');
-            const searchBtn = document.getElementById('sk-oc-search-btn');
-            if (!resultsEl) return;
-
-            // Such-Feedback
-            if (searchBtn) { searchBtn.disabled = true; searchBtn.textContent = window.t('skills.searching'); }
-            resultsEl.innerHTML = '<div class="sk-oc-loading">🔍 Suche auf OpenClaw…</div>';
-
-            try {
-                const desc = encodeURIComponent(descriptionText.trim() || '');
-                const resp = await fetch(`/api/openclaw/search?q=${desc}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await resp.json();
-                const skills = data.results || [];
-
-                if (skills.length === 0) {
-                    resultsEl.innerHTML = `<div class="sk-oc-empty">${window.t('skills.mkt_none')}</div>`;
-                    return;
-                }
-
-                resultsEl.innerHTML = skills.map((s, i) => `
-                    <div class="sk-oc-card">
-                        <div class="sk-oc-card-info">
-                            <strong>${_esc(s.name || 'Unbenannt')}</strong>
-                            <span class="sk-oc-card-desc">${_esc(s.description || '')}</span>
-                            ${s.author ? `<span class="sk-oc-card-meta">von ${_esc(s.author)}</span>` : ''}
-                            ${s.stars != null ? `<span class="sk-oc-card-meta">⭐ ${_esc(s.stars)}</span>` : ''}
-                        </div>
-                        <button class="sk-oc-import-btn" data-idx="${i}">📥 Importieren</button>
-                    </div>`).join('');
-
-                // Import-Buttons
-                resultsEl.querySelectorAll('.sk-oc-import-btn').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        const idx = parseInt(btn.dataset.idx);
-                        const skill = skills[idx];
-                        btn.disabled = true;
-                        btn.textContent = '⏳ Import…';
-                        this._openClawImport(skill);
-                    });
-                });
-            } catch (e) {
-                console.error('OpenClaw Suche Fehler:', e);
-                resultsEl.innerHTML = '<div class="sk-oc-empty">❌ Suche fehlgeschlagen.</div>';
-            } finally {
-                if (searchBtn) { searchBtn.disabled = false; searchBtn.textContent = `🔍 ${window.t('skills.mkt_search_btn') || 'Skills suchen'}`; }
-            }
-        }
-
-        async _openClawImport(skillInfo) {
-            const token = window.JarvisSitzung.token();
-
-            let taskText = '';
-            try {
-                const desc = encodeURIComponent(skillInfo.name || skillInfo.description || '');
-                const taskResp = await fetch(`/api/openclaw/workflow-task?description=${desc}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const taskData = await taskResp.json();
-                taskText = taskData.task || '';
-            } catch (e) {
-                console.error('Workflow-Task Fehler:', e);
-                return;
-            }
-
-            this._showImportModal(taskText, skillInfo.name || 'OpenClaw Skill-Import');
-        }
-
-        // ── Import-Modal mit Mini-Chat ────────────────────────────────
-
-        _showImportModal(taskText, title) {
-            // Ggf. vorhandenes Modal entfernen
-            const existing = document.getElementById('sk-import-overlay');
-            if (existing) existing.remove();
-
-            const overlay = document.createElement('div');
-            overlay.id = 'sk-import-overlay';
-            overlay.innerHTML = `
-                <div class="sk-import-panel" role="dialog" aria-modal="true">
-                    <div class="sk-import-header">
-                        <span class="sk-import-title">🛒 OpenClaw Skill Import</span>
-                        <button class="sk-import-close" title="${window.t('common.close')}">✕</button>
-                    </div>
-                    <div class="sk-import-log" id="sk-import-log">
-                        <div class="sk-import-msg sk-import-msg-info">
-                            🤖 ${window.t('skills.import_start')}
-                        </div>
-                    </div>
-                    <div class="sk-import-input-row">
-                        <textarea data-tabfill-nein="Eingabezeile fuer Nachricht/Frage – der Platzhalter ist eine Aufforderung" id="sk-import-input" class="sk-import-input"
-                            placeholder="Antwort eingeben (Enter = Senden, Shift+Enter = Zeilenumbruch)…"
-                            rows="2"></textarea>
-                        <button id="sk-import-send" class="sk-import-send-btn" title="Senden">➤</button>
-                    </div>
-                    <div class="sk-import-footer">
-                        <button id="sk-import-reload" class="btn-secondary sk-import-footer-btn">
-                            📋 Skills neu laden
-                        </button>
-                        <button id="sk-import-close2" class="btn-secondary sk-import-footer-btn">
-                            ${window.t('common.close')}
-                        </button>
-                    </div>
-                </div>`;
-
-            document.body.appendChild(overlay);
-
-            // Logging-Helper
-            const logEl = overlay.querySelector('#sk-import-log');
-            let _streamBuf = null; // Aktiver Streaming-Block
-
-            const addMsg = (html, type = 'agent') => {
-                _streamBuf = null; // Streaming-Puffer zurücksetzen
-                const msg = document.createElement('div');
-                msg.className = `sk-import-msg sk-import-msg-${type}`;
-                msg.innerHTML = html;
-                logEl.appendChild(msg);
-                logEl.scrollTop = logEl.scrollHeight;
-                return msg;
-            };
-
-            // WS-Listener – horcht auf jarvis-ws-message Events
-            const wsListener = (e) => {
-                const data = e.detail;
-                if (!data) return;
-
-                if (data.type === 'status') {
-                    // Status-Nachrichten vom Agenten (Haupt-Kanal für Jarvis-Antworten)
-                    const msg = data.message || '';
-                    if (!msg.trim()) return;
-
-                    // Tool-Aufrufe und technische Statusmeldungen etwas dezenter darstellen
-                    const isTool   = msg.startsWith('🔧') || msg.startsWith('📋');
-                    const isSystem = msg.startsWith('🚀') || msg.startsWith('🧠') ||
-                                     msg.startsWith('⏸') || msg.startsWith('▶') ||
-                                     msg.startsWith('⏹') || msg.startsWith('⚡');
-
-                    const type = isTool ? 'tool' : (isSystem ? 'sys' : 'agent');
-                    addMsg(`<span>${_esc(msg)}</span>`, type);
-
-                } else if (data.type === 'error') {
-                    addMsg(`❌ ${_esc(data.message || 'Fehler')}`, 'error');
-                }
-            };
-            window.addEventListener('jarvis-ws-message', wsListener);
-
-            // Task an Agenten senden
-            if (typeof window.sendJarvisTask === 'function') {
-                window.sendJarvisTask(taskText);
-            } else {
-                addMsg(window.t('skills.ws_error'), 'error');
-            }
-
-            // Follow-up-Nachricht senden
-            const inputEl = overlay.querySelector('#sk-import-input');
-            const sendFollowup = () => {
-                const text = inputEl.value.trim();
-                if (!text) return;
-                addMsg(`<span>${_esc(text)}</span>`, 'user');
-                inputEl.value = '';
-                if (typeof window.sendJarvisTask === 'function') {
-                    window.sendJarvisTask(text);
-                }
-            };
-            overlay.querySelector('#sk-import-send').addEventListener('click', sendFollowup);
-            inputEl.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFollowup(); }
-            });
-
-            // Skills neu laden
-            overlay.querySelector('#sk-import-reload').addEventListener('click', async () => {
-                await this.loadSkills();
-                addMsg('📋 Skill-Liste neu geladen.', 'info');
-            });
-
-            // Schließen-Logik
-            const close = () => {
-                window.removeEventListener('jarvis-ws-message', wsListener);
-                overlay.remove();
-            };
-            overlay.querySelector('.sk-import-close').addEventListener('click', close);
-            overlay.querySelector('#sk-import-close2').addEventListener('click', close);
-
-            // Escape-Taste
-            const onKey = (e) => {
-                if (e.key === 'Escape') {
-                    close();
-                    document.removeEventListener('keydown', onKey);
-                }
-            };
-            document.addEventListener('keydown', onKey);
         }
 
         // ─── Info-Popup ───────────────────────────────────────────────

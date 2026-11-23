@@ -4,7 +4,7 @@
 WARUM (2026-10-21, Paket-Empfehlung eines Dritten, Phase 1): requirements.txt
 nennt Grenzen und teils gar keine Version. Jede Installation loest neu auf –
 DEV und ECHT unterschieden sich an diesem Tag in 58 von 160 gemeinsamen
-Paketen, das Docker-Image und die CI in noch anderen. Die Lock-Datei legt EINEN
+Paketen, die CI in noch anderen. Die Lock-Datei legt EINEN
 Stand fest, und ``pip install --require-hashes`` nimmt nur genau die Dateien an,
 deren Pruefsumme darin steht.
 

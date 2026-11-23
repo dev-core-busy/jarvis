@@ -1791,7 +1791,7 @@ body.light :is(.ja-sect, .sp-sect, .vm-sect, .chs-sect, .sec-sub) > summary:hove
 .ja-card, .ja-sect,              /* /jira-addon, /confluence-addon, /ai-mouse, /feedback, /wissensgraph */
 .sup-ai-card,                    /* /support */
 .kb-section,                     /* /settings: die Container der Reiter */
-.sk-openclaw-section {           /* Skills, Protokolle: dieselbe Container-Gestalt */
+.sk-sektion {           /* Skills, Protokolle: dieselbe Container-Gestalt */
     box-shadow: var(--shadow-md);
 }
 /* Karten in einem Klappabschnitt (/jira-addon) liegen schon auf einer
@@ -1984,12 +1984,12 @@ body .wi-section { margin-bottom: var(--jv-abstand); }
 #settings-modal .modal-body { padding-top: var(--jv-oben); }
 #settings-modal .kb-container { gap: var(--jv-abstand); padding-top: 0; }
 #settings-modal .kb-section { padding-top: 12px; padding-bottom: 12px; }
-/* Protokolle/Skills: `.sk-openclaw-section` brachte zusaetzlich 12 px Rand
+/* Protokolle/Skills: `.sk-sektion` brachte zusaetzlich 12 px Rand
    mit – im Flex-Gap addierte sich das zu ~36 px. Die Kopfzeile bekommt
    Hoehe und Innenabstand der uebrigen Container-Koepfe. */
-#settings-modal .kb-container > .sk-openclaw-section { margin-top: 0; }
-#settings-modal .sk-openclaw-section > .kb-folder-header,
-#settings-modal .sk-openclaw-section > .sk-openclaw-header {
+#settings-modal .kb-container > .sk-sektion { margin-top: 0; }
+#settings-modal .sk-sektion > .kb-folder-header,
+#settings-modal .sk-sektion > .sk-sektion-header {
     padding: 12px 1.25rem; min-height: 50px; box-sizing: border-box;
 }
 

@@ -119,14 +119,10 @@ ADMIN: dict[str, list[tuple[str, str]]] = {
         ("get", "/api/vision/training/status"), ("get", "/api/vision/events"),
         ("post", "/api/vision/cleanup"),
     ],
-    # revoke entzieht dem ganzen System den Google-Zugriff; gog-setup schreibt
-    # OAuth-Zugangsdaten.
+    # revoke entzieht dem ganzen System den Google-Zugriff.
     "Google (Zugangsdaten, Widerruf)": [
         ("get", "/api/google/status"), ("post", "/api/google/device-start"),
         ("get", "/api/google/device-status"), ("post", "/api/google/revoke"),
-        ("get", "/api/google/gog-status"), ("post", "/api/google/gog-setup"),
-        ("post", "/api/google/gog-auth-url"), ("post", "/api/google/gog-auth-exchange"),
-        ("delete", "/api/google/gog-account"),
     ],
     # Abfrage mit den SERVER-Zugangsdaten: umgeht die Rechte des Benutzers im
     # Zielsystem vollstaendig.
@@ -152,7 +148,6 @@ ADMIN: dict[str, list[tuple[str, str]]] = {
         ("get", "/api/update/status"), ("get", "/api/update/settings"),
         ("get", "/api/update/verlauf"),
         ("post", "/api/vnc/unlock"), ("get", "/api/mcp/servers"),
-        ("get", "/api/openclaw/search"), ("get", "/api/openclaw/workflow-task"),
     ],
     # Telemetrie: Prompts, Tool-Argumente und Fehler ALLER Benutzer.
     "Telemetrie / Diagnose": [
@@ -250,7 +245,7 @@ GUARDED_PREFIXES = [
     "/api/telemetry", "/api/conv_log", "/api/audit_log", "/api/logs/",
     "/api/instructions", "/api/whatsapp/", "/api/vision/", "/api/google/",
     "/api/confluence/", "/api/jira/", "/api/kundenverwaltung/", "/api/mcp/",
-    "/api/openclaw/", "/api/broker/",
+    "/api/broker/",
     # /api/system/ (2026-08-31, mit dem Paketbericht): was dort haengt, sagt
     # etwas ueber die MASCHINE aus oder greift in sie ein - Dienst-Neustart,
     # Paketbestand samt exakter Versionen. Letzterer ist die Aufklaerungsliste

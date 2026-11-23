@@ -374,12 +374,12 @@ const KERN = [
         pruefe(/--jv-oben:\s*16px/.test(css) && /--jv-abstand:\s*16px/.test(css), 'Masse: 16 px oben und zwischen Containern');
         pruefe(/#settings-modal \.settings-tabs\s*\{\s*margin-bottom:\s*0;?\s*\}/.test(css), '/settings: Reiterleiste ohne 32-px-Rand');
         pruefe(/#settings-modal \.kb-container\s*\{[^}]*gap:\s*var\(--jv-abstand\)/.test(css), '/settings: Container-Abstand = --jv-abstand');
-        pruefe(/#settings-modal \.kb-container > \.sk-openclaw-section\s*\{\s*margin-top:\s*0;?\s*\}/.test(css), '/settings: Protokolle ohne Zusatzrand');
+        pruefe(/#settings-modal \.kb-container > \.sk-sektion\s*\{\s*margin-top:\s*0;?\s*\}/.test(css), '/settings: Protokolle ohne Zusatzrand');
         const st = lies('frontend/settings.html');
         // Bis zum NAECHSTEN Reiter schneiden – die Klasse des eigenen Reiters
         // steht in derselben Zeile wie seine Id.
         const tele = (st.split('id="settings-tab-telemetry"')[1] || '').split('id="settings-tab-')[0];
-        pruefe(tele.length > 1000 && !/class="sk-openclaw-section"[^>]*style="[^"]*margin/.test(tele),
+        pruefe(tele.length > 1000 && !/class="sk-sektion"[^>]*style="[^"]*margin/.test(tele),
                'Protokolle: kein Inline-Rand an den Containern');
     }
 

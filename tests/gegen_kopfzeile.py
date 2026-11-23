@@ -62,8 +62,8 @@ PROBEN = [
      "frontend/js/kopfzeile.js", "        document.addEventListener('DOMContentLoaded', benutzerZeigen);\n", ""),
     ("Protokolle: Zusatzrand der Container wieder da",
      "frontend/css/theme.css",
-     "#settings-modal .kb-container > .sk-openclaw-section { margin-top: 0; }",
-     "#settings-modal .kb-container > .sk-openclaw-section { margin-top: 12px; }"),
+     "#settings-modal .kb-container > .sk-sektion { margin-top: 0; }",
+     "#settings-modal .kb-container > .sk-sektion { margin-top: 12px; }"),
     ("/settings: 32 px unter der Reiterleiste wieder da",
      "frontend/css/theme.css", "#settings-modal .settings-tabs { margin-bottom: 0; }",
      "#settings-modal .settings-tabs { margin-bottom: 2rem; }"),
@@ -80,13 +80,13 @@ PROBEN = [
     ("Desktop auch fuer Nicht-Admins",
      "frontend/js/kopfzeile.js", "vnc = knopf(kl + ' jv-kopf-nuradmin', {", "vnc = knopf(kl, {"),
     ("Dokumente-Modul auf /tracks nicht eingebunden",
-     "frontend/tracks.html", '<script src="/static/js/info_files.js?v=8"></script>\n', ""),
+     "frontend/tracks.html", '<script src="/static/js/info_files.js?v=9"></script>\n', ""),
     ("VEMAS: Abfrage wieder als Karte statt Klapp-Container",
      "frontend/vemas.html",
      '        <details class="vm-sect" id="vm-sect-abfrage" open>\n',
      '        <details class="vm-card" id="vm-sect-abfrage" open>\n'),
     ("Chat bindet kopfzeile.js nicht ein",
-     "frontend/chat.html", '    <script src="/static/js/kopfzeile.js?v=2"></script>\n', ""),
+     "frontend/chat.html", '    <script src="/static/js/kopfzeile.js?v=3"></script>\n', ""),
 ]
 DATEIEN = sorted({p[1] for p in PROBEN})
 

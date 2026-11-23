@@ -113,7 +113,7 @@ _SECRET_NAMES = {
     ".env", "settings.json", "memory.json", "auth_state.json",
     "credentials.json", "id_rsa", "id_ed25519", "id_dsa", ".htpasswd",
     ".netrc", "shadow", "gshadow", "sudoers",
-    # Signierschluessel der Sitzungstokens und Docker-Erstkennwort: wer sie
+    # Signierschluessel der Sitzungstokens und (Altbestand) Erstkennwort: wer sie
     # liest, meldet sich als beliebiger Benutzer an (2026-09-28).
     ".secret_key", ".erstkennwort",
 }
@@ -269,7 +269,8 @@ _APP_DENY_REL = (
     # Tickets fuer Jarvis aus ("Silver Ticket") und meldet sich damit als
     # BELIEBIGER Domaenenbenutzer an – ohne Kennwort, ohne DC, ohne Spur im AD.
     "data/kerberos",
-    # Google-OAuth (backend/google_auth.py, gog-Setup in main.py): das
+    # Google-OAuth (backend/google_auth.py; frueher auch das gog-Setup, dessen
+    # gog_client_secret.json als Altbestand noch liegen kann): das
     # client_secret und das Zugriffstoken des verbundenen Google-Kontos.
     # Gesperrt wird das VERZEICHNIS, nicht die beiden heutigen Namen:
     # _SECRET_NAMES fuehrte nur 'credentials.json' (die Datei von
@@ -562,7 +563,7 @@ PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
                         "data/.aimouse_sign.pfx", "data/.aimousesignkey",
                         # SECRET_KEY signiert JEDES Sitzungstoken: wer ihn liest,
                         # stellt sich ein Admin-Token aus. auth_state.json traegt
-                        # die 2FA-Geheimnisse, .erstkennwort das Docker-Erstkennwort.
+                        # die 2FA-Geheimnisse, .erstkennwort ein Erstkennwort (Altbestand).
                         # Auf DEV am 2026-09-28 gemessen: alle drei 0644, lesbar
                         # fuer jarvis_sandbox.
                         "data/.secret_key", "data/auth_state.json",
@@ -941,7 +942,7 @@ SHELL_SECRET_PATHS = re.compile(
     # Kennwoerter der Netzwerk-Freigaben: .mountkey entschluesselt die
     # password_enc-Felder in settings.json (das ohnehin gesperrt ist).
     r'\.mountkey\b|'
-    # Signierschluessel der Sitzungstokens und Docker-Erstkennwort (2026-09-28)
+    # Signierschluessel der Sitzungstokens und Erstkennwort-Altbestand (2026-09-28)
     r'\.secret_key\b|\.erstkennwort\b|'
     # Short Tracks: fremde Dump-Prompts samt Werkzeug-Zuschnitt (beschreibbar
     # waere das ein Dump mit `shell` unter fremder Kennung) und die

@@ -276,7 +276,7 @@ check("Kennwortwechsel: Ersatz-Token sofort gueltig", ver(neu_t) == "carl")
 check("Kennwortwechsel: Epoche auf Platte",
       "carl" in NS["_REVOKED_FILE"].read_text())
 
-# Rueckgabe der Endpunkte: beide Zweige (Docker und Linux) liefern das Token
+# Rueckgabe des Endpunkts: jeder Erfolgszweig liefert das Token
 cp = _fn("change_password")
 rueck = [n for n in ast.walk(cp) if isinstance(n, ast.Return)]
 
@@ -300,9 +300,9 @@ mit_token = [r for r in erfolg
              if any(isinstance(k, ast.Constant) and k.value == "token"
                     and isinstance(v, ast.Call) and getattr(v.func, "id", "") == "_sitzungen_nach_kennwortwechsel"
                     for k, v in zip(_antwort_dict(r).keys, _antwort_dict(r).values))]
-check("change_password: es gibt Erfolgs-Rueckgaben (Positivkontrolle)", len(erfolg) >= 2)
+check("change_password: es gibt Erfolgs-Rueckgaben (Positivkontrolle)", len(erfolg) >= 1)
 check("change_password: JEDE Erfolgs-Rueckgabe traegt das Ersatz-Token",
-      len(erfolg) >= 2 and len(mit_token) == len(erfolg))
+      len(erfolg) >= 1 and len(mit_token) == len(erfolg))
 
 # Aufraeumen der Epochen statt Aufheben beim Login
 frisch()

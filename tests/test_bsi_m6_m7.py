@@ -19,7 +19,7 @@
         (sonst sperrte sich jeder Bestandsserver aus); die eigene Sitzung
         ausserhalb der Netze bricht ab.
   M6  Node-LTS, Sicherheits-CI, Dependabot, Abhaengigkeits-Untergrenzen.
-      - Alle Node-Quellen (Dockerfile, Bridge-Dockerfile, install.sh) nennen
+      - Alle Node-Quellen (install.sh) nennen
         dieselbe Linie wie ``node_aktualisieren.sh`` (ZIEL), ZIEL >= MINDEST >= 22;
         ``--pruefen`` gegen eine Node-Attrappe (20 -> Exit 1, 24 -> Exit 0).
       - ``.github/workflows/sicherheit.yml`` als YAML: Ausloeser, Schritte fuer
@@ -492,26 +492,7 @@ if not (m_ziel and m_min):
 ziel, mindest = int(m_ziel.group(1)), int(m_min.group(1))
 check("MINDEST >= 22 (Node 20 seit 30.04.2026 ohne Updates)", mindest >= 22, mindest)
 check("ZIEL >= MINDEST und gerade (LTS-Linie)", ziel >= mindest and ziel % 2 == 0, ziel)
-# Das Haupt-Image installiert Node seit 2026-10-21 ueber node_aktualisieren.sh
-# selbst (Linie = ZIEL, Schluessel gegen Fingerabdruck) statt ueber das
-# NodeSource-setup-Skript per Pipe. Geprueft wird deshalb, dass es das Skript
-# KOPIERT UND AUSFUEHRT und keine eigene Node-Quelle mehr fuehrt.
-df = ohne_kommentare((ROOT / "Dockerfile").read_text(encoding="utf-8"))
-check("Dockerfile kopiert node_aktualisieren.sh ins Image",
-      re.search(r"(?m)^COPY\s+deploy/security/node_aktualisieren\.sh\s+(\S+)", df) is not None)
-_df_ziel = re.search(r"(?m)^COPY\s+deploy/security/node_aktualisieren\.sh\s+(\S+)", df)
-check("Dockerfile fuehrt das kopierte Skript aus",
-      bool(_df_ziel) and re.search(r"\bbash\s+%s\b" % re.escape(_df_ziel.group(1)), df) is not None)
-check("Dockerfile ohne eigene NodeSource-Quelle (setup_NN.x / node_NN.x)",
-      not re.search(r"(setup|node)_\d+\.x", df), re.findall(r"(?:setup|node)_\d+\.x", df))
-check("Dockerfile: kein Netz-Skript per Pipe in eine Shell",
-      not re.search(r"\|\s*(sudo\s+)?(ba)?sh\b", df))
-check("Dockerfile auf derselben Debian-Linie wie die Server (trixie)",
-      re.search(r"(?m)^FROM\s+debian:trixie(-slim)?\s*$", df) is not None,
-      re.findall(r"(?m)^FROM\s+\S+", df))
 quellen = {
-    "services/whatsapp-bridge/Dockerfile": re.findall(
-        r"(?m)^FROM node:(\d+)", (ROOT / "services/whatsapp-bridge/Dockerfile").read_text()),
     "docs/install.sh": re.findall(r"setup_(\d+)\.x", ohne_kommentare((ROOT / "docs/install.sh").read_text())),
 }
 for datei, funde in quellen.items():
@@ -953,7 +934,7 @@ abschnitt("M6.3 Dependabot")
 db = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))
 upd = db.get("updates") or []
 oeko = {u.get("package-ecosystem") for u in upd}
-check("pip, npm, github-actions, docker", {"pip", "npm", "github-actions", "docker"} <= oeko, oeko)
+check("pip, npm, github-actions, gomod", {"pip", "npm", "github-actions", "gomod"} <= oeko, oeko)
 pip_u = next((u for u in upd if u.get("package-ecosystem") == "pip"), {})
 np_ign = [i for i in pip_u.get("ignore") or [] if i.get("dependency-name") == "numpy"]
 check("numpy >= 2.1 ausgeschlossen (DEV-VM ohne SSE4.2)",

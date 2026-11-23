@@ -32,7 +32,6 @@ Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a fu
 - **Specialised Role Agents**: Named roles with their own system prompt, tool subset, LLM profile and thinking depth; the main agent delegates a subtask and waits for the result. A role can only narrow permissions, never widen them
 - **Charts & Diagrams**: Interactive charts rendered in the chat from CSV/Excel files (grouping, sorting, European number formats, PNG export); validation happens before drawing so the model can correct itself. Mermaid diagrams for flows and structures
 - **WhatsApp Integration**: Bidirectional messaging via Baileys, voice transcription with faster-whisper
-- **OpenClaw Skill Marketplace**: Import community skills from ClawHub, auto-convert to native Jarvis tools
 - **Face Recognition**: Real-time face detection and recognition using dlib/face_recognition with configurable actions
 - **Browser Automation**: CDP-based browser control with xdotool fallback
 - **Telemetry & Tracing**: Built-in OpenTelemetry tracing for agent runs, tool calls, and LLM interactions
@@ -48,11 +47,6 @@ Jarvis is a self-hosted AI agent that runs on any Linux server. It provides a fu
 - WhatsApp: Node.js, Baileys v7, faster-whisper
 
 ## Installation
-
-Docker:
-```
-docker pull ghcr.io/dev-core-busy/jarvis:master
-```
 
 Install script (Debian/Ubuntu/Fedora/Arch):
 ```

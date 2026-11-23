@@ -18,7 +18,7 @@ vorher. Einschalten = mehr Funktion, Ausschalten = zurück auf Anfang.
 
 WAS HIER VORHER STAND (bis 2026-08-10)
 --------------------------------------
-Ein OpenClaw-Import mit vier Werkzeugen (``orchestrate_task``, ``agent_status``,
+Ein importierter Fremd-Skill mit vier Werkzeugen (``orchestrate_task``, ``agent_status``,
 ``agent_collect``, ``agent_list``), die **Verzeichnisse anlegten und wieder
 einlasen** – ``agent-workspaces/<session>/<agent>/{inbox,outbox,status.json}``.
 Sie starteten keinen Agenten: der Hauptagent sollte jede „Sub-Agenten"-Rolle

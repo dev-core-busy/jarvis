@@ -2,11 +2,11 @@
 """Waechter: auth_state.json – keine verlorene Aenderung, kein Hash im Event-Loop.
 
 Code-Review 2026-11-01:
-* Die Umstellung des Docker-Kennworts bei der Anmeldung lud den GANZEN Zustand,
+* Eine Kennwort-Umstellung bei der Anmeldung lud den GANZEN Zustand,
   aenderte ihn und schrieb ihn zurueck – ohne Sperre gegen andere Schreiber
   (TOTP-Vormerkung, Anmeldeschutz, Kennwortwechsel). Der zuletzt Speichernde
   loeschte die Aenderung des anderen.
-* ``change_password`` rechnete den scrypt-Hash (~32 MB) direkt im async-Handler.
+* ``change_password`` rechnete einen teuren Schritt direkt im async-Handler.
 
 Was festgehalten wird:
 
@@ -16,7 +16,8 @@ Was festgehalten wird:
    sonst saehe die Messung einen Wettlauf gar nicht.
 2. REGEL (AST): ``_load_auth_state``/``_save_auth_state`` halten die Sperre;
    jede Funktion, die laedt UND speichert, tut beides unter der Sperre.
-3. REGEL (AST): kein async-Handler ruft ``kennwort_hash`` direkt.
+3. REGEL (AST): ``change_password`` setzt das Linux-Kennwort nur per
+   ``asyncio.to_thread`` (chpasswd blockiert), nie direkt im Event-Loop.
 
 ``backend.main`` wird NICHT importiert.
 
@@ -165,25 +166,20 @@ roh = [n.lineno for n in ast.walk(BAUM)
        and n.func.id in ("_save_auth_state_ungesperrt", "_load_auth_state_ungesperrt")]
 check(len(roh) == 2, f"die ungesperrten Fassungen ruft nur ihr Wrapper ({len(roh)} Aufrufe)")
 
-# ─── 3. Regel: kein Kennwort-Hash im Event-Loop ─────────────────────────────
-print("\n3. kein kennwort_hash direkt in einem async-Handler")
-direkt = []
-for n in ast.walk(BAUM):
-    if isinstance(n, ast.AsyncFunctionDef):
-        for c in ast.walk(n):
-            if isinstance(c, ast.Call):
-                f = c.func
-                if (isinstance(f, ast.Attribute) and f.attr == "kennwort_hash") or \
-                   (isinstance(f, ast.Name) and f.id == "kennwort_hash"):
-                    direkt.append(f"{n.name} (Zeile {c.lineno})")
-check(not direkt, f"kennwort_hash nur ueber asyncio.to_thread ({direkt})")
+# ─── 3. Regel: kein blockierender Kennwortwechsel im Event-Loop ─────────────
+print("\n3. change_password setzt das Kennwort nur ueber asyncio.to_thread")
 cp = next((n for n in ast.walk(BAUM)
            if isinstance(n, ast.AsyncFunctionDef) and n.name == "change_password"), None)
+check(cp is not None, "change_password ist ein async-Handler (Positivkontrolle)")
 via_thread = cp is not None and any(
     isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == "to_thread"
-    and c.args and isinstance(c.args[0], ast.Attribute) and c.args[0].attr == "kennwort_hash"
+    and c.args and isinstance(c.args[0], ast.Name) and c.args[0].id == "_change_linux_password"
     for c in ast.walk(cp))
-check(via_thread, "change_password rechnet den Hash per asyncio.to_thread (Positivkontrolle)")
+check(via_thread, "change_password ruft _change_linux_password per asyncio.to_thread")
+direkt = [] if cp is None else [c.lineno for c in ast.walk(cp)
+          if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+          and c.func.id == "_change_linux_password"]
+check(not direkt, f"... und nie direkt im Event-Loop ({direkt})")
 
 # ─── 4. Ueber Prozesse: die echte Sperre gegen einen zweiten Prozess ────────
 print("\n4. auth_state_sperre.Sperre wirkt gegen einen ANDEREN Prozess")

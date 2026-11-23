@@ -152,7 +152,6 @@ def umgebung_setzen():
     """
     lic.STATE_FILE = TMP / "license.json"
     lic.ROOT_PUB_FILE = TMP / "root.pub"
-    lic.INSTANZ_FILE = TMP / ".instanz"
     lic.ROOT_PUB_FILE.write_text(pub_b64(ROOT) + "\n")
     lic.STATUS_URL = "file://" + str(STATUS_DATEI)
     lic._hwid_cache = "H1-aaaaaaaaaaaa-bbbbbbbbbbbb-cccccccccccc"
@@ -164,8 +163,11 @@ def umgebung_setzen():
     # ohne dass irgendetwas rot wird. Genau das zeigte die Gegenprobe: den
     # Namen aus der Aufzaehlung zu nehmen kostete 0 FAIL.
     pfade = [n for n in vars(lic) if n.endswith("_FILE")]
-    if len(pfade) < 3:
-        print(f"ABBRUCH: nur {len(pfade)} *_FILE gefunden – der Schnitt greift nicht")
+    # Positivkontrolle ueber die bekannten Namen statt einer Mindestanzahl: die
+    # Zahl sank mit der Instanz-Datei (Docker entfernt) – eine feste Zahl haette
+    # hier jede Streichung als "Schnitt greift nicht" gemeldet.
+    if not {"STATE_FILE", "ROOT_PUB_FILE"} <= set(pfade):
+        print(f"ABBRUCH: *_FILE-Schnitt findet {pfade} – der Schnitt greift nicht")
         sys.exit(2)
     for name in pfade:
         p = Path(getattr(lic, name))
@@ -371,107 +373,27 @@ pruefe(sum(1 for t in (lic.hwid_teile(echt) or []) if t != "-") >= 2,
        "echtes System liefert mindestens zwei Merkmale", echt)
 
 # ═══════════════════════════════════════════════════════════════════════════
-print("\n\033[1m2b. Instanz-Kennung im Container (D1)\033[0m")
+print("\n\033[1m2b. Die Lizenz haengt an der Hardware-Kennung\033[0m")
 #
-# Im Container ist "2 von 3" strukturell nicht erfuellbar. Statt die Toleranz
-# aufzuweichen (das traefe auch jedes Blech-System) bekommt der Container eine
-# eigene Kennung aus dem Daten-Volume. Sie ist SCHWAECHER – das eigene Praefix
-# ist genau dafuer da, dass man es sieht.
-
-def im_docker(an: bool):
-    """Docker-Modus stellen – ueber die Umgebung, wie im Betrieb."""
-    if an:
-        os.environ["JARVIS_DOCKER"] = "1"
-    else:
-        os.environ.pop("JARVIS_DOCKER", None)
-
-# Vorgabe: ohne Container aendert sich NICHTS. Das ist die wichtigste Zusage
-# dieses Abschnitts – die Absenkung darf nicht auf Blech durchschlagen.
-im_docker(False)
-Path(lic.INSTANZ_FILE).unlink(missing_ok=True)
-pruefe(not lic.docker_modus() or Path("/.dockerenv").exists(),
-       "ohne JARVIS_DOCKER kein Container-Modus (sofern nicht wirklich einer)")
-if not lic.docker_modus():
-    pruefe(lic.kennung() == lic.hwid(), "ohne Container gilt die Hardware-Kennung")
-    pruefe(lic.bindungsart() == "hardware", "Bindungsart ohne Container: hardware")
-    pruefe(not Path(lic.INSTANZ_FILE).exists(),
-           "ohne Container wird KEINE Instanz-Datei angelegt")
-
-im_docker(True)
-k1 = lic.kennung()
-pruefe(lic.docker_modus(), "JARVIS_DOCKER=1 wird erkannt")
-pruefe(re.fullmatch(r"D1-[0-9a-f]{32}", k1) is not None,
-       "im Container gilt eine Instanz-Kennung D1-<32 Hex>", k1)
-pruefe(lic.bindungsart() == "instanz", "Bindungsart im Container: instanz")
-pruefe(Path(lic.INSTANZ_FILE).exists(), "die Instanz-Datei wird angelegt")
-pruefe(os.stat(lic.INSTANZ_FILE).st_mode & 0o777 == 0o600,
-       "Instanz-Datei ist 0600", oct(os.stat(lic.INSTANZ_FILE).st_mode & 0o777))
-
-# ⚠ DAS IST DER GANZE ZWECK: sie ueberlebt den Neubau des Containers. Ein
-# zweiter Aufruf (und ein Prozess, der die Datei neu liest) muss dieselbe
-# Kennung liefern – sonst entstuenden lauter scheinbar neue Installationen.
-pruefe(lic.kennung() == k1, "zweiter Aufruf liefert dieselbe Kennung")
-lic._hwid_cache = ""                     # wie ein frischer Prozess
-pruefe(lic.kennung() == k1, "nach einem Neustart liefert sie dieselbe Kennung")
-lic._hwid_cache = H
-
-# Eindeutig je Installation: ein anderes Volume ergibt eine andere Kennung.
-alt_datei = lic.INSTANZ_FILE
-lic.INSTANZ_FILE = TMP / ".instanz-zwei"
-k2 = lic.kennung()
-pruefe(k2 != k1 and re.fullmatch(r"D1-[0-9a-f]{32}", k2) is not None,
-       "ein anderes Volume ergibt eine andere Kennung", f"{k1} / {k2}")
-lic.INSTANZ_FILE = alt_datei
-
-# Vergleich: exakt, keine Toleranz – bei einem Merkmal gibt es kein "2 von 3".
-pruefe(lic.hwid_passt(k1, k1), "Instanz-Kennung passt auf sich selbst")
-pruefe(not lic.hwid_passt(k1, k2), "fremde Instanz-Kennung passt nicht")
-pruefe(not lic.hwid_passt(k1, H) and not lic.hwid_passt(H, k1),
-       "D1 und H1 passen nie aufeinander (Betriebsart-Wechsel ist ein Umzug)")
-pruefe(not lic.hwid_passt("D1-" + "0" * 31, "D1-" + "0" * 31),
-       "verstümmelte Instanz-Kennung passt nicht – auch nicht auf sich selbst")
-pruefe(lic.hwid_passt(k1.upper(), k1), "Großschreibung beim Eintragen ist kein Supportfall")
-pruefe(lic.bindungsart(k1) == "instanz" and lic.bindungsart(H) == "hardware"
-       and lic.bindungsart("X9-abc") == "unbekannt",
-       "bindungsart() unterscheidet die Formate")
-
-# Fail-safe: laesst sich die Datei nicht anlegen, darf keine wechselnde
-# Kennung entstehen – eine, die sich bei jedem Start aendert, waere schlimmer
-# als keine (sie erzeugt lauter scheinbar neue Installationen).
-#
-# ⚠ DIE LAGE WIRD RECHTEUNABHAENGIG HERGESTELLT: ein `chmod 0o500` auf das
-# Elternverzeichnis hindert **root** nicht am Schreiben, und auf DEV laeuft
-# dieser Test als root – er meldete dort zwei Fehler, die es nicht gibt. Ein
-# Elternteil, der eine DATEI ist, trifft jeden Benutzer gleich.
-sperr_datei = TMP / "kein-verzeichnis"
-sperr_datei.write_text("ich bin eine Datei, kein Verzeichnis\n")
-lic.INSTANZ_FILE = sperr_datei / "tiefer" / ".instanz"
-try:
-    pruefe(lic.instanz_kennung() == "",
-           "nicht anlegbare Datei liefert KEINE geratene Kennung")
-    pruefe(lic.kennung() == lic.hwid(),
-           "ohne Instanz-Datei gilt wieder die Hardware-Kennung (fail-safe)")
-finally:
-    lic.INSTANZ_FILE = alt_datei
-    im_docker(False)
-
-# Die Statusdatei-Sicht: `zustand()` gibt die Bindungsart heraus, damit das
-# Panel sagen kann, WORAN die Lizenz haengt.
+# Die Instanz-Kennung `D1-…` gab es nur fuer den Docker-Betrieb (entfernt
+# 2026-11-23). Eine solche Kennung darf weder eintragbar sein noch passen –
+# sonst bliebe eine schwache Bindung als Hintertuer stehen.
+pruefe(lic.kennung() == lic.hwid(), "kennung() ist die Hardware-Kennung")
+pruefe(lic.bindungsart() == "hardware", "Bindungsart: hardware")
+pruefe(lic.bindungsart("D1-" + "a" * 32) == "unbekannt" and lic.bindungsart("X9-abc") == "unbekannt",
+       "bindungsart() kennt kein D1 mehr")
+pruefe(not lic.hwid_passt("D1-" + "a" * 32, "D1-" + "a" * 32),
+       "eine D1-Kennung passt nicht – auch nicht auf sich selbst")
+pruefe(lic.hwid_passt(H, H), "Positivkontrolle: H1 passt auf sich selbst")
 pruefe("bindungsart" in lic.zustand(), "zustand() nennt die Bindungsart")
-
-# Der Lizenz-Manager prueft die Eingabe des Bedieners mit DIESER Regel – eine
-# D1-Kennung muss eintragbar sein, sonst bleibt der Kunde ohne erkennbaren
-# Grund auf FREE (genau das war am 2026-09-17 der Fall).
-pruefe(lic.kennung_format_ok("D1-" + "a" * 32) and lic.kennung_format_ok(H)
-       and lic.kennung_format_ok(hw_kennung(A, B, "")),
-       "kennung_format_ok() nimmt beide Formate an")
-pruefe(not lic.kennung_format_ok("D1-" + "a" * 31)
+pruefe(lic.kennung_format_ok(H) and lic.kennung_format_ok(hw_kennung(A, B, "")),
+       "kennung_format_ok() nimmt H1 an")
+pruefe(not lic.kennung_format_ok("D1-" + "a" * 32)
        and not lic.kennung_format_ok("X9-abc") and not lic.kennung_format_ok(""),
-       "kennung_format_ok() weist Unbrauchbares ab")
+       "kennung_format_ok() weist D1 und Unbrauchbares ab")
 
 # ── REGEL statt Liste: niemand fragt `hwid()` direkt ───────────────────────
-# Sonst entsteht ein halber Umbau, bei dem eine Stelle die Maschine meint und
-# die naechste die Instanz – und beide sehen fuer sich richtig aus. Geprueft
+# Kommt je eine zweite Bindungsart hinzu, aendert sich so nur kennung(). Geprueft
 # ueber den Syntaxbaum, damit auch eine KUENFTIGE Aufrufstelle auffaellt.
 import ast as _ast
 
@@ -495,8 +417,8 @@ _gefunden = [n for n in _ast.walk(_baum)
 pruefe(len(_gefunden) >= 3, "Positivkontrolle: der AST-Schnitt sieht die Aufrufe",
        f"{len(_gefunden)} gefunden")
 
-# Die Instanz-Datei ist ein Geheimnis und gehoert in ALLE drei Sperrlisten –
-# wer sie liest, kann die Bindung auf ein anderes System uebertragen.
+# Eine Instanz-Datei aus dem frueheren Docker-Betrieb (Altbestand) bleibt
+# gesperrt: wer sie liest, koennte eine alte Bindung uebertragen.
 try:
     import backend.sandbox as _sb
     pruefe("data/.instanz" in _sb._APP_DENY_REL, "Instanz-Datei steht in _APP_DENY_REL")

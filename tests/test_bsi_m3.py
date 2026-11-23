@@ -271,7 +271,7 @@ NS = {
     "_sicherheits_log": types.SimpleNamespace(ereignis=lambda *a, **k: {}),
     "_revoked_logins": {}, "_save_revocations": lambda: None, "_WIDERRUF_ALLE": "*",
     "_sitzung_herkunft": contextvars.ContextVar("_sh", default=None),
-    "ALLOWED_USERS": {"jarvis"}, "DESKTOP_USER": "jarvis", "_DOCKER_MODE": True,
+    "ALLOWED_USERS": {"jarvis"}, "DESKTOP_USER": "jarvis",
     "_norm_login": lambda n: (n or "").split("@")[0].split("\\")[-1].strip().lower(),
     "_display_name": lambda u: u,
     "authenticate_linux_user": _auth,

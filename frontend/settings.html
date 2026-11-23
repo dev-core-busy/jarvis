@@ -20,11 +20,11 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=76">
-    <link rel="stylesheet" href="/static/css/update_widget.css?v=9">
+    <link rel="stylesheet" href="/static/css/theme.css?v=77">
+    <link rel="stylesheet" href="/static/css/update_widget.css?v=10">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
-    <link rel="stylesheet" href="/static/css/style.css?v=239">
+    <link rel="stylesheet" href="/static/css/style.css?v=240">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1734,7 +1734,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-list-hdr">
                                 <h3 data-i18n="profile.section_list">LLM-Profile</h3>
-                                <span class="sk-openclaw-toggle" id="prof-sect-list-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="prof-sect-list-tog">▶</span>
                             </div>
                             <div id="prof-sect-list-body" class="kb-collapse-body" style="display:none;">
                                 <div style="margin-bottom:10px;">
@@ -1761,7 +1761,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-tuning-hdr">
                                 <h3 data-i18n="profile.section_tuning">System-Einstellungen</h3>
-                                <span class="sk-openclaw-toggle" id="prof-sect-tuning-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="prof-sect-tuning-tog">▶</span>
                             </div>
                             <div id="prof-sect-tuning-body" class="kb-collapse-body" style="display:none;">
 
@@ -2115,11 +2115,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <code id="lic-hwid" style="flex:1;min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.8rem;word-break:break-all;">–</code>
                                         <button class="btn-secondary btn-small" id="btn-lic-copy-hwid" type="button" style="flex:0 0 auto;padding:4px 12px;font-size:0.78rem;" data-i18n="license.copy">Kopieren</button>
                                     </div>
-                                    <!-- Nur im Container sichtbar: dort haengt die Bindung am
-                                         Datenverzeichnis, nicht an der Maschine. Der Admin soll das
-                                         SEHEN – eine Anzeige, die "Hardware" sagt und Instanz meint,
-                                         ist eine Falschaussage. -->
-                                    <p id="lic-bind-hint" hidden style="margin:-4px 0 10px;font-size:0.76rem;color:var(--text-secondary);line-height:1.5;" data-i18n="license.instanz_hint">Im Container gibt es keine stabile Hardware-Kennung. Die Bindung hängt am Datenverzeichnis – wer es kopiert, überträgt sie mit.</p>
 
                                     <label style="display:block;font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;" data-i18n="license.key_label">Lizenzschlüssel</label>
                                     <textarea data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="lic-token" rows="3" spellcheck="false" autocomplete="off" placeholder="JARVIS-LIC-1.…" style="width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:0.78rem;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;"></textarea>
@@ -2162,7 +2157,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-api-hdr">
                                 <h3 data-i18n="profile.section_key">Agent API Key</h3>
-                                <span class="sk-openclaw-toggle" id="prof-sect-api-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="prof-sect-api-tog">▶</span>
                             </div>
                             <div id="prof-sect-api-body" class="kb-collapse-body" style="display:none;">
                                 <small class="tab-note" style="opacity:0.7;display:block;margin-bottom:10px;">
@@ -2186,7 +2181,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-ssl-hdr">
                                 <h3 data-i18n="profile.section_ssl">HTTPS / SSL-Zertifikat</h3>
-                                <span class="sk-openclaw-toggle" id="prof-sect-ssl-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="prof-sect-ssl-tog">▶</span>
                             </div>
                             <div id="prof-sect-ssl-body" class="kb-collapse-body" style="display:none;">
                                 <div id="ssl-status" style="margin-bottom:12px; padding:10px; border-radius:8px; background:var(--bg-glass); border:1px solid var(--border); font-size:0.85rem;">
@@ -2377,7 +2372,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="instr-sect">
                             <div class="kb-section-header kb-collapse-header" id="instr-sect-hdr">
                                 <h3 data-i18n="instructions.sect">Anweisungen</h3>
-                                <span class="sk-openclaw-toggle" id="instr-sect-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="instr-sect-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="instr-sect-body">
                         <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
@@ -2401,12 +2396,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div id="sk-notification" class="kb-notification" style="display: none;"></div>
 
                         <!-- Mögliche Skills (aufklappbar) -->
-                        <div class="sk-openclaw-section" id="sk-available-section">
-                            <div class="sk-openclaw-header" id="sk-available-header">
-                                <span class="sk-openclaw-title" data-i18n="skills.available">📦 Mögliche Skills</span>
-                                <span class="sk-openclaw-toggle" id="sk-available-toggle">▶</span>
+                        <div class="sk-sektion" id="sk-available-section">
+                            <div class="sk-sektion-header" id="sk-available-header">
+                                <span class="sk-sektion-title" data-i18n="skills.available">📦 Mögliche Skills</span>
+                                <span class="sk-sektion-toggle" id="sk-available-toggle">▶</span>
                             </div>
-                            <div class="sk-openclaw-body" id="sk-available-body" style="display:none;">
+                            <div class="sk-sektion-body" id="sk-available-body" style="display:none;">
                                 <p class="kb-hint" style="margin: 0 0 0.5rem 0;" data-i18n-html="skills.select_hint">Skill auswählen und per <strong>Hinzufügen</strong> aktivieren.</p>
                                 <div class="sk-search-row">
                                     <input data-tabfill-nein="Suchfeld – der Platzhalter beschreibt, wonach gesucht wird" type="text" id="sk-search" class="kb-input sk-search-input"
@@ -2419,12 +2414,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         </div>
 
                         <!-- Installierte Skills (aufklappbar) -->
-                        <div class="sk-openclaw-section" id="sk-installed-section">
-                            <div class="sk-openclaw-header" id="sk-installed-header">
-                                <span class="sk-openclaw-title" data-i18n="skills.installed">✅ Installierte Skills</span>
-                                <span class="sk-openclaw-toggle" id="sk-installed-toggle">▶</span>
+                        <div class="sk-sektion" id="sk-installed-section">
+                            <div class="sk-sektion-header" id="sk-installed-header">
+                                <span class="sk-sektion-title" data-i18n="skills.installed">✅ Installierte Skills</span>
+                                <span class="sk-sektion-toggle" id="sk-installed-toggle">▶</span>
                             </div>
-                            <div class="sk-openclaw-body" id="sk-installed-body" style="display:none;">
+                            <div class="sk-sektion-body" id="sk-installed-body" style="display:none;">
                                 <div id="sk-installed-list" class="sk-list">
                                     <div class="kb-loading">Lade...</div>
                                 </div>
@@ -2443,7 +2438,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-status-hdr">
                                     <h3 data-i18n="wa.status_connection">Status &amp; Verbindung</h3>
-                                    <span class="sk-openclaw-toggle" id="wa-sect-status-tog">▶</span>
+                                    <span class="sk-sektion-toggle" id="wa-sect-status-tog">▶</span>
                                 </div>
                                 <div id="wa-sect-status-body" class="kb-collapse-body" style="display:none;">
                                     <div class="wa-status-card glass" style="margin-bottom:12px;">
@@ -2494,7 +2489,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-cfg-hdr">
                                     <h3 data-i18n="wa.section_processing">Nachrichten-Verarbeitung</h3>
-                                    <span class="sk-openclaw-toggle" id="wa-sect-cfg-tog">▶</span>
+                                    <span class="sk-sektion-toggle" id="wa-sect-cfg-tog">▶</span>
                                 </div>
                                 <div id="wa-sect-cfg-body" class="kb-collapse-body" style="display:none;">
                                     <p class="kb-hint" data-i18n="wa.section_processing_hint">Welche Nachrichten {marke} beantwortet, von wem, und mit welchem Whisper-Modell Sprachnachrichten transkribiert werden. Der Debug-Modus steckt oben unter „Logs &amp; Debug“.</p>
@@ -2506,7 +2501,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="wa-sect-logs-hdr">
                                     <h3 data-i18n="wa.logs_debug">Logs &amp; Debug</h3>
-                                    <span class="sk-openclaw-toggle" id="wa-sect-logs-tog">▶</span>
+                                    <span class="sk-sektion-toggle" id="wa-sect-logs-tog">▶</span>
                                 </div>
                                 <div id="wa-sect-logs-body" class="kb-collapse-body" style="display:none;">
                                     <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
@@ -2556,7 +2551,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-stats-hdr">
                                 <h3 data-i18n="knowledge.section_stats">Statistiken</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-stats-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="kb-sect-stats-tog">▶</span>
                             </div>
                             <div id="kb-sect-stats-body" class="kb-collapse-body" style="display:none;">
                                 <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
@@ -2593,7 +2588,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" data-dzg-sektion style="display:none;">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-cfb-hdr">
                                 <h3 data-i18n="wissen.sec_cfbind">Dynamische Confluence-Einbindung</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-cfb-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="kb-sect-cfb-tog">▶</span>
                             </div>
                             <div id="kb-sect-cfb-body" class="kb-collapse-body" style="display:none;">
                                 <div class="form-group" data-dienstzugang="confluence_einbindung">
@@ -2618,7 +2613,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-wg-hdr">
                                 <h3 data-i18n="wissensgraph.settings_section">Wissensgraph</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-wg-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="kb-sect-wg-tog">▶</span>
                             </div>
                             <div id="kb-sect-wg-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint" data-i18n-html="wissensgraph.settings_hint">Baut aus den Wissensdokumenten Begriffe und ihre Verbindungen. Ansehen, Prüfliste und Export: <a href="/wissensgraph">Wissensgraph</a> (für Wissenseditoren).</p>
@@ -2674,7 +2669,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-folder-hdr">
                                 <h3 data-i18n="knowledge.section_folders">Ordner</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-folder-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="kb-sect-folder-tog">▶</span>
                             </div>
                             <div id="kb-sect-folder-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint" data-i18n-html="knowledge.folders_hint">Wissens-Ordner liegen alle unter <code>data/rag/</code> – angezeigt wird nur der Name darunter. Netzwerk-Freigaben werden weiter unten eingebunden.</p>
@@ -2698,7 +2693,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-net-hdr">
                                 <h3 data-i18n="knowledge.section_shares">Netzwerk-Freigaben</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-net-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="kb-sect-net-tog">▶</span>
                             </div>
                             <div id="kb-sect-net-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint" data-i18n="knowledge.shares_hint">Externe SMB/NFS/WebDAV-Freigaben als Wissensquellen einbinden.</p>
@@ -2725,7 +2720,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="kb-sect-webdav-hdr">
                                 <h3 data-i18n="knowledge.section_webdav">WebDAV-Server</h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-webdav-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="kb-sect-webdav-tog">▶</span>
                             </div>
                             <div id="kb-sect-webdav-body" class="kb-collapse-body" style="display:none;">
                             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
@@ -2762,7 +2757,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             data-i18n-title="kbsync.info_title" data-i18n-aria="kbsync.info_title"
                                             title="Funktionsweise, Einrichtung und Sicherheit – druckbar"
                                             data-klick="kbsync-info-oeffnen">❓</button></h3>
-                                <span class="sk-openclaw-toggle" id="kb-sect-sync-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="kb-sect-sync-tog">▶</span>
                             </div>
                             <div id="kb-sect-sync-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint" data-i18n="kbsync.hint">Holt Wissensordner, die ein Administrator an einem anderen {marke}-Standort freigegeben hat. Einbahnstraße: der entfernte Stand überschreibt die lokale Kopie, der lokale Ordner ist deshalb schreibgeschützt.</p>
@@ -2863,7 +2858,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="mcp-sect">
                         <div class="kb-section-header kb-collapse-header" id="mcp-sect-hdr">
                             <h3 data-i18n="mcp.sect">MCP-Server</h3>
-                            <span class="sk-openclaw-toggle" id="mcp-sect-tog">▼</span>
+                            <span class="sk-sektion-toggle" id="mcp-sect-tog">▼</span>
                         </div>
                         <div class="kb-collapse-body" id="mcp-sect-body">
                         <!-- Erklaerung, WANN und WIE die Werkzeuge eines Servers benutzt
@@ -2896,7 +2891,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-feed-hdr">
                                     <h3><span class="vis-status-dot vis-dot-off" id="vis-status-dot"></span> <span data-i18n="vis.feed_title">Kamera-Feed</span></h3>
-                                    <span class="sk-openclaw-toggle" id="vis-sect-feed-tog">▶</span>
+                                    <span class="sk-sektion-toggle" id="vis-sect-feed-tog">▶</span>
                                 </div>
                                 <div id="vis-sect-feed-body" class="kb-collapse-body" style="display:none;">
                                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -2929,7 +2924,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-train-hdr">
                                     <h3 data-i18n="vis.training_title">Training</h3>
-                                    <span class="sk-openclaw-toggle" id="vis-sect-train-tog">▶</span>
+                                    <span class="sk-sektion-toggle" id="vis-sect-train-tog">▶</span>
                                 </div>
                                 <div id="vis-sect-train-body" class="kb-collapse-body" style="display:none;">
                                     <div style="margin-bottom:10px;">
@@ -2991,7 +2986,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-faces-hdr">
                                     <h3 data-i18n="vis.known_faces">Bekannte Gesichter</h3>
-                                    <span class="sk-openclaw-toggle" id="vis-sect-faces-tog">▶</span>
+                                    <span class="sk-sektion-toggle" id="vis-sect-faces-tog">▶</span>
                                 </div>
                                 <div id="vis-sect-faces-body" class="kb-collapse-body" style="display:none;">
                                     <div id="vis-profiles-list" class="vis-profiles-list">
@@ -3004,7 +2999,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-section">
                                 <div class="kb-section-header kb-collapse-header is-collapsed" id="vis-sect-cfg-hdr">
                                     <h3 data-i18n="vis.cam_settings">Kamera-Einstellungen</h3>
-                                    <span class="sk-openclaw-toggle" id="vis-sect-cfg-tog">▶</span>
+                                    <span class="sk-sektion-toggle" id="vis-sect-cfg-tog">▶</span>
                                 </div>
                                 <div id="vis-sect-cfg-body" class="kb-collapse-body" style="display:none;">
                                     <div class="vis-settings-grid">
@@ -3105,7 +3100,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="br-sect-name">
                             <div class="kb-section-header kb-collapse-header" id="br-sect-name-hdr">
                                 <h3 data-i18n="branding.sect_name">Namen</h3>
-                                <span class="sk-openclaw-toggle" id="br-sect-name-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="br-sect-name-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="br-sect-name-body">
                                 <div class="form-group">
@@ -3124,7 +3119,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="br-sect-namelogo">
                             <div class="kb-section-header kb-collapse-header" id="br-sect-namelogo-hdr">
                                 <h3 data-i18n="branding.namelogo_heading">Logo statt Firmenname</h3>
-                                <span class="sk-openclaw-toggle" id="br-sect-namelogo-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="br-sect-namelogo-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="br-sect-namelogo-body">
                                 <p class="kb-hint" data-i18n="branding.namelogo_hint">Optionales Schriftzug-/Wortmarken-Logo, das den Firmennamen-Text in Kopfzeile und Login durch ein Bild ersetzt. Ohne Angabe wird der Firmenname als Text angezeigt.</p>
@@ -3150,7 +3145,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="br-sect-logo">
                             <div class="kb-section-header kb-collapse-header" id="br-sect-logo-hdr">
                                 <h3 data-i18n="branding.logo_heading">Logo / Kreis-Element</h3>
-                                <span class="sk-openclaw-toggle" id="br-sect-logo-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="br-sect-logo-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="br-sect-logo-body">
                                 <div class="form-group">
@@ -3187,7 +3182,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="br-sect-farben">
                             <div class="kb-section-header kb-collapse-header" id="br-sect-farben-hdr">
                                 <h3 data-i18n="branding.sect_colors">Farben</h3>
-                                <span class="sk-openclaw-toggle" id="br-sect-farben-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="br-sect-farben-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="br-sect-farben-body">
                                 <h4 style="margin:4px 0 8px;" data-i18n="branding.colors_dark">Dunkelmodus</h4>
@@ -3212,7 +3207,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="br-sect-portal">
                             <div class="kb-section-header kb-collapse-header" id="br-sect-portal-hdr">
                                 <h3 data-i18n="branding.sect_portal">Portalseite</h3>
-                                <span class="sk-openclaw-toggle" id="br-sect-portal-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="br-sect-portal-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="br-sect-portal-body">
                                 <h4 style="margin:4px 0 8px;" data-i18n="branding.video_heading">Animation</h4>
@@ -3252,7 +3247,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="br-sect-pptx">
                             <div class="kb-section-header kb-collapse-header" id="br-sect-pptx-hdr">
                                 <h3 data-i18n="branding.pptx_heading">PowerPoint-Vorlage</h3>
-                                <span class="sk-openclaw-toggle" id="br-sect-pptx-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="br-sect-pptx-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="br-sect-pptx-body">
                                 <p class="kb-hint" data-i18n="branding.pptx_hint">Der Agent erzeugt Präsentationen mit einer Vorlage: 16:9, echte Masterfolien, Farben und Schrift aus dem Branding. Ohne eigene Vorlage wird sie automatisch aus der Markenfarbe erzeugt. Lade hier eine echte Firmenvorlage hoch, um sie zu ersetzen – Layouts, Farben und Platzhalter kommen dann von dort.</p>
@@ -3275,7 +3270,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="br-sect-docx">
                             <div class="kb-section-header kb-collapse-header" id="br-sect-docx-hdr">
                                 <h3 data-i18n="branding.docx_heading">Word-Vorlage</h3>
-                                <span class="sk-openclaw-toggle" id="br-sect-docx-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="br-sect-docx-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="br-sect-docx-body">
                                 <p class="kb-hint" data-i18n="branding.docx_hint">Der Agent erzeugt Word-Dokumente mit einer Vorlage: A4, Formatvorlagen für Titel, Überschriften und Aufzählungen, Logo in der Kopfzeile und Seitenzahl in der Fußzeile – Farben und Schrift aus dem Branding. Ohne eigene Vorlage wird sie automatisch erzeugt. Lade hier eine echte Firmenvorlage hoch, um sie zu ersetzen – Formatvorlagen, Kopf- und Fußzeile kommen dann von dort.</p>
@@ -3298,7 +3293,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="br-sect-font">
                             <div class="kb-section-header kb-collapse-header" id="br-sect-font-hdr">
                                 <h3 data-i18n="branding.font_heading">Schriften</h3>
-                                <span class="sk-openclaw-toggle" id="br-sect-font-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="br-sect-font-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="br-sect-font-body">
                                 <p class="kb-hint" data-i18n="branding.font_hint">Die Vorlagen verwenden die Hausschrift. Ist sie auf dem Server nicht vorhanden, setzt der PDF-Export eine Ersatzschrift ein – Zeilenumbrüche und Textlängen weichen dann ab. Lade die Schriftdateien hier hoch; sie bleiben auf diesem Server. Nur Schriften hochladen, deren Lizenz die Nutzung auf einem Server erlaubt.</p>
@@ -3327,7 +3322,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="cf-sect-conn">
                             <div class="kb-section-header kb-collapse-header" id="cf-sect-conn-hdr">
                                 <h3 data-i18n="jira.sect_conn">Verbindung</h3>
-                                <span class="sk-openclaw-toggle" id="cf-sect-conn-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="cf-sect-conn-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="cf-sect-conn-body">
                         <!-- Nur-Lesen wie bei SAP: kein Schalter, sondern eine Zusage.
@@ -3376,7 +3371,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="cf-sect-acc">
                             <div class="kb-section-header kb-collapse-header" id="cf-sect-acc-hdr">
                                 <h3 data-i18n="cfacc.h">Persönliche Confluence-Zugänge</h3>
-                                <span class="sk-openclaw-toggle" id="cf-sect-acc-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="cf-sect-acc-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="cf-sect-acc-body">
                                 <p class="kb-hint" data-i18n-html="cfacc.intro">Der oben hinterlegte Token ist der <b>gemeinsame Zugang</b> und nur noch der Rückfall. Wer im Bereich <b>Confluence → Mein Confluence-Zugang</b> einen eigenen Token hinterlegt, arbeitet damit und sieht genau die Seiten, für die er in Confluence berechtigt ist.</p>
@@ -3387,7 +3382,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="cf-sect-search">
                             <div class="kb-section-header kb-collapse-header" id="cf-sect-search-hdr">
                                 <h3 data-i18n="cf.sect_search">Durchsuchen</h3>
-                                <span class="sk-openclaw-toggle" id="cf-sect-search-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="cf-sect-search-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="cf-sect-search-body">
                                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -3416,7 +3411,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="sap-sect-conn">
                             <div class="kb-section-header kb-collapse-header" id="sap-sect-conn-hdr">
                                 <h3 data-i18n="jira.sect_conn">Verbindung</h3>
-                                <span class="sk-openclaw-toggle" id="sap-sect-conn-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sap-sect-conn-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="sap-sect-conn-body">
                         <div class="form-group">
@@ -3634,7 +3629,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="sap-sect-acc">
                             <div class="kb-section-header kb-collapse-header" id="sap-sect-acc-hdr">
                                 <h3 data-i18n="sapacc.h">Persönliche SAP-Zugänge</h3>
-                                <span class="sk-openclaw-toggle" id="sap-sect-acc-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sap-sect-acc-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="sap-sect-acc-body">
                                 <p class="kb-hint" data-i18n-html="sapacc.intro">Der oben hinterlegte Zugang ist der <b>gemeinsame Lesezugang</b> und nur der Rückfall. Wer im Bereich <b>SAP → Mein SAP-Zugang</b> einen eigenen Zugang hinterlegt, arbeitet damit und sieht genau die Daten, für die er in SAP berechtigt ist.</p>
@@ -3646,7 +3641,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="sap-sect-data">
                             <div class="kb-section-header kb-collapse-header" id="sap-sect-data-hdr">
                                 <h3 data-i18n="sap.sect_data">Daten abfragen</h3>
-                                <span class="sk-openclaw-toggle" id="sap-sect-data-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sap-sect-data-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="sap-sect-data-body">
                                 <!-- Datenzugriff: OData -->
@@ -3684,7 +3679,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="sap-sect-rep">
                             <div class="kb-section-header kb-collapse-header" id="sap-sect-rep-hdr">
                                 <h3 data-i18n="sap.sect_rep">Reporting-/BI-Anbindung</h3>
-                                <span class="sk-openclaw-toggle" id="sap-sect-rep-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sap-sect-rep-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="sap-sect-rep-body">
                                 <p class="kb-hint">Fertige Verbindungsangaben, mit denen Power&nbsp;BI, Tableau, Qlik &amp; Co. dasselbe SAP-System über die Standard-Schnittstellen (OData/SQL/BW) anbinden.</p>
@@ -3702,7 +3697,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="sap-sect-vis">
                             <div class="kb-section-header kb-collapse-header" id="sap-sect-vis-hdr">
                                 <h3 data-i18n="sap.vis_head">Sichtbare Analysen im Bereich /sap</h3>
-                                <span class="sk-openclaw-toggle" id="sap-sect-vis-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sap-sect-vis-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="sap-sect-vis-body">
                                 <p class="kb-hint" data-i18n-html="sap.vis_hint">Bestimmt, welche Analyse-Vorlagen die Anwender im Bereich <strong>/sap</strong> im Pulldown sehen. Abgewählte Vorlagen verschwinden dort und lassen sich auch nicht mehr über den Verlauf starten. Kategorien ohne sichtbare Vorlage werden ausgeblendet. Die freie Frage bleibt immer möglich.</p>
@@ -3729,7 +3724,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="vemas-sect-conn">
                             <div class="kb-section-header kb-collapse-header" id="vemas-sect-conn-hdr">
                                 <h3 data-i18n="jira.sect_conn">Verbindung</h3>
-                                <span class="sk-openclaw-toggle" id="vemas-sect-conn-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="vemas-sect-conn-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="vemas-sect-conn-body">
                         <div class="form-group">
@@ -3890,7 +3885,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="vemas-sect-acc">
                             <div class="kb-section-header kb-collapse-header" id="vemas-sect-acc-hdr">
                                 <h3 data-i18n="vemasacc.h">Persönliche VEMAS-Zugänge</h3>
-                                <span class="sk-openclaw-toggle" id="vemas-sect-acc-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="vemas-sect-acc-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="vemas-sect-acc-body">
                                 <p class="kb-hint" data-i18n-html="vemasacc.intro">Der oben hinterlegte Zugang ist der <b>gemeinsame Zugang</b> und nur der Rückfall. Wer im Bereich <b>VEMAS → Mein VEMAS-Zugang</b> eigene Zugangsdaten hinterlegt, arbeitet damit und sieht genau die Daten, für die er in VEMAS berechtigt ist.</p>
@@ -3902,7 +3897,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="vemas-sect-query">
                             <div class="kb-section-header kb-collapse-header" id="vemas-sect-query-hdr">
                                 <h3 data-i18n="vemas.sect_query">Abfrage testen</h3>
-                                <span class="sk-openclaw-toggle" id="vemas-sect-query-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="vemas-sect-query-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="vemas-sect-query-body">
                                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -3924,7 +3919,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="vemas-sect-vis">
                             <div class="kb-section-header kb-collapse-header" id="vemas-sect-vis-hdr">
                                 <h3 data-i18n="vemas.vis_head">Sichtbare Abfragen im Bereich /vemas</h3>
-                                <span class="sk-openclaw-toggle" id="vemas-sect-vis-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="vemas-sect-vis-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="vemas-sect-vis-body">
                                 <p class="kb-hint" data-i18n-html="vemas.vis_hint">Bestimmt, welche Vorlagen die Anwender im Bereich <strong>/vemas</strong> im Pulldown sehen. Abgewählte Vorlagen verschwinden dort und lassen sich auch nicht mehr über den Verlauf starten. Kategorien ohne sichtbare Vorlage werden ausgeblendet. Die freie Frage bleibt immer möglich.</p>
@@ -3958,7 +3953,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="ji-sect-conn">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-conn-hdr">
                                 <h3 data-i18n="jira.sect_conn">Verbindung</h3>
-                                <span class="sk-openclaw-toggle" id="ji-sect-conn-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="ji-sect-conn-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="ji-sect-conn-body">
                                 <div class="form-group">
@@ -4041,7 +4036,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="ji-sect-acc">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-acc-hdr">
                                 <h3 data-i18n="jacc.h">Persönliche Jira-Zugänge</h3>
-                                <span class="sk-openclaw-toggle" id="ji-sect-acc-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="ji-sect-acc-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="ji-sect-acc-body">
                                 <p class="kb-hint" data-i18n-html="jacc.intro">Der oben hinterlegte Token ist der <b>gemeinsame Zugang</b> und nur noch der Rückfall. Wer unter <b>Jira → Mein Jira-Zugang</b> einen eigenen Token hinterlegt, arbeitet damit – im Chat, in der Ticketsuche und in der Browser-Erweiterung, und sieht genau die Vorgänge, für die er in Jira berechtigt ist.</p>
@@ -4061,7 +4056,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="ji-sect-tools">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-tools-hdr">
                                 <h3 data-i18n="jtool.h">Werkzeug-Bereiche freischalten</h3>
-                                <span class="sk-openclaw-toggle" id="ji-sect-tools-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="ji-sect-tools-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="ji-sect-tools-body">
                                 <p class="kb-hint" data-i18n-html="jtool.intro">Ohne Freigabe wertet der Assistent <b>allein den Ticketinhalt</b> aus – er kann nichts nachschlagen. Was hier freigeschaltet ist, kann ein Benutzer <b>je Vorlage</b> anhaken. Alle Bereiche sind <b>nur lesend</b> und arbeiten mit den Rechten des jeweiligen Benutzers (sein Jira-Token, sein SAP-Zugang).</p>
@@ -4084,7 +4079,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="ji-sect-share">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-share-hdr">
                                 <h3 data-i18n="jshare.h">Browser Plugin Bereitstellung</h3>
-                                <span class="sk-openclaw-toggle" id="ji-sect-share-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="ji-sect-share-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="ji-sect-share-body">
                                 <p class="kb-hint" data-i18n-html="jshare.intro">Liegt das fertige Paket auf einer <b>Netzfreigabe</b>, trage hier den Pfad ein. Die Anleitung unter <b>Jira-Assistent</b> zeigt ihn dann zum Kopieren an – <b>statt</b> des Download-Knopfes. Bleiben die Felder leer, ändert sich nichts.</p>
@@ -4134,7 +4129,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="ji-sect-vorl">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-vorl-hdr">
                                 <h3 data-i18n="jvorl.h">Browser Plugin Vorlagen</h3>
-                                <span class="sk-openclaw-toggle" id="ji-sect-vorl-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="ji-sect-vorl-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="ji-sect-vorl-body">
                                 <p class="kb-hint" data-i18n-html="jvorl.intro">Benannte Vorlagen bestimmen, <b>was</b> die Erweiterung erzeugt: eine Zusammenfassung für den Bearbeiter („kurz für die Leitung“, „technisch mit Verlauf“) oder einen Antwortentwurf an den Melder. Das <b>Startsymbol</b> im Fenster führt die gewählte Vorlage aus. Sie erscheinen im Pulldown der Browser-Erweiterung. <b>Gemeinsame</b> Vorlagen gelten für alle Benutzer und werden hier gepflegt; eigene darf jeder zusätzlich im Fenster der Erweiterung anlegen.</p>
@@ -4220,7 +4215,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="ji-sect-larch">
                             <div class="kb-section-header kb-collapse-header" id="ji-sect-larch-hdr">
                                 <h3 data-i18n="jlarch.h">Lösungsarchiv</h3>
-                                <span class="sk-openclaw-toggle" id="ji-sect-larch-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="ji-sect-larch-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="ji-sect-larch-body">
                                 <p class="kb-hint" data-i18n-html="jlarch.intro">Wertet die <b>geschlossenen und gelösten</b> Tickets eines Jira-Bereichs nach Zeitplan aus: Problem und Lösungsweg werden <b>ohne Personen- und Kundendaten</b> herausgezogen, gleichartige Fälle in einem Eintrag gesammelt und gezählt. Erst wenn ein Problem den <b>Schwellwert</b> erreicht, wandert die Lösung in die Wissensdatenbank – und, falls eingeschaltet, in den Wissensgraphen. Einzelfälle bleiben draußen.</p>
@@ -4376,7 +4371,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="em-sect-conn">
                             <div class="kb-section-header kb-collapse-header" id="em-sect-conn-hdr">
                                 <h3 data-i18n="mailadm.sect_conn">Verbindung zum Exchange</h3>
-                                <span class="sk-openclaw-toggle" id="em-sect-conn-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="em-sect-conn-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="em-sect-conn-body">
                                 <div class="form-group">
@@ -4481,7 +4476,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="em-sect-areas">
                             <div class="kb-section-header kb-collapse-header" id="em-sect-areas-hdr">
                                 <h3 data-i18n="mailadm.sect_areas">Werkzeuge für Regeln freigeben</h3>
-                                <span class="sk-openclaw-toggle" id="em-sect-areas-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="em-sect-areas-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="em-sect-areas-body">
                                 <p class="kb-hint" style="margin-bottom:10px;" data-i18n-html="mailadm.areas_hint">Eine Regel entscheidet mit einem Sprachmodell, was mit einer eingehenden Nachricht geschieht. Hier legen Sie fest, <b>welche Werkzeuge ein Regel-Lauf höchstens benutzen darf</b>; der Benutzer kann je Regel nur aus diesen Bereichen auswählen. <b>Der Mailtext ist Fremdtext</b> – je größer der Werkzeugsatz, desto größer die Angriffsfläche einer präparierten E-Mail. Im Zweifel nur „E-Mail" und „Wissensdatenbank".</p>
@@ -4499,7 +4494,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="em-sect-schutz">
                             <div class="kb-section-header kb-collapse-header" id="em-sect-schutz-hdr">
                                 <h3 data-i18n="mailadm.sect_schutz">Schutz vor Datenabfluss</h3>
-                                <span class="sk-openclaw-toggle" id="em-sect-schutz-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="em-sect-schutz-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="em-sect-schutz-body">
                                 <p class="kb-hint" style="margin-bottom:10px;" data-i18n-html="mailadm.schutz_hint">Eine Regel sendet <b>nur dann direkt</b>, wenn jeder Empfänger in einer der unten genannten Domänen liegt oder am Gespräch beteiligt ist. Alles andere legt sie als <b>Entwurf</b> ab – der Postfach-Inhaber prüft und sendet selbst. Ebenfalls nur als Entwurf: Mails mit Zugangsdaten oder Sperrbegriffen, Anhänge an externe Empfänger und jeder externe Versand einer Regel, die Firmenwissen lesen darf. Regel-Texte, Stile und Signaturen mit solchen Inhalten werden gar nicht erst gespeichert.</p>
@@ -4545,7 +4540,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="em-sect-addin">
                             <div class="kb-section-header kb-collapse-header" id="em-sect-addin-hdr">
                                 <h3 data-i18n="mailadm.sect_addin">Outlook-Add-in Bereitstellung</h3>
-                                <span class="sk-openclaw-toggle" id="em-sect-addin-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="em-sect-addin-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="em-sect-addin-body">
                                 <p class="kb-hint" style="margin-bottom:10px;" data-i18n-html="mailadm.addin_intro">Das Add-in bringt <code>/email</code> als Aufgabenfenster nach Outlook. Die Manifest-Datei wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Üblich im Haus ist <b>eine Ablage im Netz</b>: legen Sie die Datei einmal dorthin und tragen Sie den Ordner unten ein – dann sieht jeder Benutzer im Bereich <b>E-Mail</b> nur noch diesen Pfad. Bleibt das Feld leer, holt sich jeder die Datei selbst.</p>
@@ -4600,7 +4595,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="em-sect-server">
                             <div class="kb-section-header kb-collapse-header" id="em-sect-server-hdr">
                                 <h3 data-i18n="mailadm.sect_server">Serverzugriff auf Postfächer (vorübergehend)</h3>
-                                <span class="sk-openclaw-toggle" id="em-sect-server-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="em-sect-server-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="em-sect-server-body">
                                 <p class="kb-hint" data-i18n-html="mailadm.server_hint">Das Outlook-Add-in liest die markierte Nachricht selbst und öffnet die Antwort in Outlook – dafür braucht der Server <b>keinen</b> Zugriff auf das Postfach. Nur die hier gewählten Benutzer behalten ihn vorerst: für Regeln, die Mail-Werkzeuge im Chat und das Postfach im Bereich E-Mail. Wählbar sind nur Benutzer mit E-Mail-Berechtigung (Sicherheit → Berechtigungen). <b>Niemand gewählt = niemand.</b></p>
@@ -4616,7 +4611,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             <div class="kb-section-header kb-collapse-header" id="em-sect-accounts-hdr">
                                 <h3 data-i18n="mailadm.sect_accounts">Angebundene Postfächer</h3>
                                 <span class="kb-hint" id="em-acc-count" style="margin-left:auto;margin-right:10px;"></span>
-                                <span class="sk-openclaw-toggle" id="em-sect-accounts-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="em-sect-accounts-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="em-sect-accounts-body">
                                 <p class="kb-hint" style="margin-bottom:10px;" data-i18n-html="mailadm.accounts_hint">Wer sein Postfach hinterlegt hat und wie viele Regeln laufen. <b>Inhalte und Regel-Texte sind hier absichtlich nicht zu sehen</b> – sie gehören dem jeweiligen Benutzer.</p>
@@ -4648,7 +4643,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="xa-sect-install">
                             <div class="kb-section-header kb-collapse-header" id="xa-sect-install-hdr">
                                 <h3>Add-in verteilen</h3>
-                                <span class="sk-openclaw-toggle" id="xa-sect-install-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="xa-sect-install-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="xa-sect-install-body">
                                 <p class="kb-hint" style="margin-bottom:10px;">Das Manifest wird bei jedem Abruf <b>für diesen Server</b> erzeugt – die enthaltenen Adressen zeigen auf ihn. Es muss in einem Ordner liegen, den der Arbeitsplatz lesen kann, und dieser Ordner wird einmalig in den Excel-Optionen als vertrauenswürdiger Katalog eingetragen (per Gruppenrichtlinie ausrollbar). Üblich ist <b>eine Freigabe im Netz</b> für alle – tragen Sie deren Pfad unten ein, dann sieht jeder Benutzer auf <code>/excel</code> nur noch diesen Pfad. Bleibt das Feld leer, holt sich jeder das Manifest selbst und legt es in einen eigenen Ordner.</p>
@@ -4726,7 +4721,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="xa-sect-limits">
                             <div class="kb-section-header kb-collapse-header" id="xa-sect-limits-hdr">
                                 <h3>Grenzen</h3>
-                                <span class="sk-openclaw-toggle" id="xa-sect-limits-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="xa-sect-limits-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="xa-sect-limits-body">
                                 <div class="form-group">
@@ -4749,7 +4744,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="xa-sect-info">
                             <div class="kb-section-header kb-collapse-header" id="xa-sect-info-hdr">
                                 <h3>Was der Assistent darf – und was nicht</h3>
-                                <span class="sk-openclaw-toggle" id="xa-sect-info-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="xa-sect-info-tog">▶</span>
                             </div>
                             <div class="kb-collapse-body" id="xa-sect-info-body" style="display:none;">
                                 <ul class="xa-facts">
@@ -4779,7 +4774,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="am-sect-tools">
                             <div class="kb-section-header kb-collapse-header" id="am-sect-tools-hdr">
                                 <h3 data-i18n="amtool.h">Werkzeug-Bereiche freischalten</h3>
-                                <span class="sk-openclaw-toggle" id="am-sect-tools-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="am-sect-tools-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="am-sect-tools-body">
                                 <p class="kb-hint" data-i18n-html="amtool.intro">Ohne Freigabe ist jede Anfrage <b>genau ein Modellaufruf mit dem Bildausschnitt</b> – kein Agent, keine Werkzeuge. Das ist der Normalfall und für die meisten Häuser die richtige Einstellung. Was hier freigeschaltet ist, gilt für <b>jeden</b> Lauf; alle Bereiche sind <b>nur lesend</b> und arbeiten mit den Rechten des jeweiligen Benutzers.</p>
@@ -4802,7 +4797,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="am-sect-share">
                             <div class="kb-section-header kb-collapse-header" id="am-sect-share-hdr">
                                 <h3 data-i18n="amshare.h">Bereitstellung im Netz</h3>
-                                <span class="sk-openclaw-toggle" id="am-sect-share-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="am-sect-share-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="am-sect-share-body">
                                 <p class="kb-hint" data-i18n-html="amshare.intro">Liegt hier ein Pfad, zeigt die Kachel <b>AI-Maus</b> ihn statt des Download-Knopfes an. Der Grund ist die Sicherheitswarnung beim ersten Start: Windows markiert jede über den <b>Browser</b> geladene Datei, und SmartScreen fragt dann nach. Eine von einer <b>Netzfreigabe</b> kopierte Datei trägt diese Markierung nicht – die Warnung bleibt aus.</p>
@@ -4862,7 +4857,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="am-sect-sign">
                             <div class="kb-section-header kb-collapse-header" id="am-sect-sign-hdr">
                                 <h3 data-i18n="amsign.h">Code-Signatur</h3>
-                                <span class="sk-openclaw-toggle" id="am-sect-sign-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="am-sect-sign-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="am-sect-sign-body">
                                 <p class="kb-hint" data-i18n-html="amsign.intro">Ist hier ein Zertifikat hinterlegt, wird die Anwendung <b>nach jedem Bau</b> signiert. Damit sieht der Benutzer in den Dateieigenschaften, von wem sie stammt, und eine nachträgliche Veränderung fällt auf. Für ein Zertifikat der <b>Firmen-CA</b> ist das der übliche Weg – die Domänenrechner vertrauen ihr bereits.</p>
@@ -4960,7 +4955,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="am-sect-vorg">
                             <div class="kb-section-header kb-collapse-header" id="am-sect-vorg-hdr">
                                 <h3 data-i18n="amvorg.h">Vorgabe-Fragen für neue Benutzer</h3>
-                                <span class="sk-openclaw-toggle" id="am-sect-vorg-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="am-sect-vorg-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="am-sect-vorg-body">
                                 <p class="kb-hint" data-i18n-html="amvorg.intro">Diese Einträge bekommt ein Benutzer <b>beim ersten Start</b> von AI-Maus in sein Menü kopiert. Ab dann gehören sie ihm: er darf sie ändern, ergänzen und löschen – seine Fassung bleibt erhalten.</p>
@@ -4976,7 +4971,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="am-sect-info">
                             <div class="kb-section-header kb-collapse-header" id="am-sect-info-hdr">
                                 <h3 data-i18n="amtool.state_h">Zustand</h3>
-                                <span class="sk-openclaw-toggle" id="am-sect-info-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="am-sect-info-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="am-sect-info-body">
                                 <div id="amtool-state"></div>
@@ -4999,7 +4994,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="fb-sect-form">
                             <div class="kb-section-header kb-collapse-header" id="fb-sect-form-hdr">
                                 <h3 data-i18n="fbadm.h">Formulare</h3>
-                                <span class="sk-openclaw-toggle" id="fb-sect-form-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="fb-sect-form-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="fb-sect-form-body">
                                 <p class="kb-hint" data-i18n-html="fbadm.intro">Ein Formular ist eine <b>Tabelle</b>: du legst die <b>Spalten</b> fest, der Benutzer legt beliebig viele <b>Zeilen</b> an und füllt sie aus. Zwei Spaltentypen stehen zur Wahl – ein <b>Textfeld</b> und eine <b>5-Sterne-Bewertung</b>.</p>
@@ -5019,7 +5014,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="fb-sect-abg">
                             <div class="kb-section-header kb-collapse-header" id="fb-sect-abg-hdr">
                                 <h3 data-i18n="fbadm.abg_h">Abgaben</h3>
-                                <span class="sk-openclaw-toggle" id="fb-sect-abg-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="fb-sect-abg-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="fb-sect-abg-body">
                                 <p class="kb-hint" data-i18n-html="fbadm.abg_intro">Alle Abgaben zu einem Formular – neueste zuerst. Der Benutzer selbst sieht in seiner Kachel <b>nur die eigenen</b>.</p>
@@ -5035,7 +5030,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="fb-sect-info">
                             <div class="kb-section-header kb-collapse-header" id="fb-sect-info-hdr">
                                 <h3 data-i18n="fbadm.state_h">Zustand</h3>
-                                <span class="sk-openclaw-toggle" id="fb-sect-info-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="fb-sect-info-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="fb-sect-info-body">
                                 <div id="fbadm-state"></div>
@@ -5056,7 +5051,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="nf-sect-list">
                             <div class="kb-section-header kb-collapse-header" id="nf-sect-list-hdr">
                                 <h3 data-i18n="nfadm.h">Meldungen</h3>
-                                <span class="sk-openclaw-toggle" id="nf-sect-list-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="nf-sect-list-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="nf-sect-list-body">
                                 <p class="kb-hint" data-i18n-html="nfadm.intro">Jede Meldung hat eine <b>Überschrift</b> und <b>ein bis drei Sätze</b> Text. Im Portal erscheinen die <b>neuesten aktiven</b> als Laufband – wie viele, legt <b>Anzeige</b> fest (Vorgabe: drei). <b>Bearbeiten gilt als Neuigkeit:</b> die Meldung rückt nach vorn und erscheint auch bei Benutzern wieder, die den Newsfeed ausgeblendet haben. Das Erstellungsdatum bleibt dabei stehen. <b>Deaktivieren</b> nimmt eine Meldung aus dem Portal; sichtbar wird sie erst nach dem nächsten Bearbeiten wieder.</p>
@@ -5072,7 +5067,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="nf-sect-anz">
                             <div class="kb-section-header kb-collapse-header" id="nf-sect-anz-hdr">
                                 <h3 data-i18n="nfadm.anz_h">Anzeige</h3>
-                                <span class="sk-openclaw-toggle" id="nf-sect-anz-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="nf-sect-anz-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="nf-sect-anz-body">
                                 <div class="form-group">
@@ -5114,7 +5109,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="sq-sect-schemata">
                             <div class="kb-section-header kb-collapse-header" id="sq-sect-schemata-hdr">
                                 <h3 data-i18n="sqladm.schemas_h">Schemata</h3>
-                                <span class="sk-openclaw-toggle" id="sq-sect-schemata-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sq-sect-schemata-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="sq-sect-schemata-body">
                                 <p class="kb-hint" data-i18n="sqladm.schemas_hint">Lege je Datenbank ein Schema an und speichere. Danach nimmt die Ablage in seinem Container Dateien, ganze Ordner (die Ordnerstruktur bleibt erhalten) oder ZIP-Archive an. Nach jedem Hochladen und Löschen wird dieses Schema automatisch neu erfasst. Ein Schema zu entfernen löscht auch seine Dateien.</p>
@@ -5135,7 +5130,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="sq-sect-allg">
                             <div class="kb-section-header kb-collapse-header" id="sq-sect-allg-hdr">
                                 <h3 data-i18n="sqladm.general_h">Für alle Schemata</h3>
-                                <span class="sk-openclaw-toggle" id="sq-sect-allg-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sq-sect-allg-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="sq-sect-allg-body">
                                 <p class="kb-hint" data-i18n="sqladm.general_hint">Diese beiden Vorgaben gelten für den ganzen Server. Dialekt, Dateimuster, Beziehungen und Höchstzahlen stellst du je Schema ein – in seinem Container oben.</p>
@@ -5161,7 +5156,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="tr-sect-limits">
                             <div class="kb-section-header kb-collapse-header" id="tr-sect-limits-hdr">
                                 <h3 data-i18n="tracksadm.sect_limits">Grenzen</h3>
-                                <span class="sk-openclaw-toggle" id="tr-sect-limits-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="tr-sect-limits-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="tr-sect-limits-body">
                                 <div class="form-group">
@@ -5190,7 +5185,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="tr-sect-areas">
                             <div class="kb-section-header kb-collapse-header" id="tr-sect-areas-hdr">
                                 <h3 data-i18n="tracksadm.sect_areas">Werkzeug-Bereiche freischalten</h3>
-                                <span class="sk-openclaw-toggle" id="tr-sect-areas-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="tr-sect-areas-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="tr-sect-areas-body">
                                 <p class="kb-hint" data-i18n-html="tracksadm.areas_hint">Ein Benutzer kann je Ablage nur aus den hier freigeschalteten Bereichen wählen. <b>Ohne Freigabe gilt allein „Lesen + Dokumente erzeugen"</b> – das ist die Vorgabe und die engste Einstellung. Der Inhalt einer abgelegten Datei ist Fremdtext: je weiter der Werkzeugkasten, desto größer die Angriffsfläche einer präparierten Datei. <b>„Shell / Python" ist der weiteste Bereich</b> und sollte nur dort freigeschaltet werden, wo Tabellen-Auswertungen wirklich gebraucht werden.</p>
@@ -5203,7 +5198,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="tr-sect-over">
                             <div class="kb-section-header kb-collapse-header" id="tr-sect-over-hdr">
                                 <h3 data-i18n="tracksadm.sect_over">Übersicht</h3>
-                                <span class="sk-openclaw-toggle" id="tr-sect-over-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="tr-sect-over-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="tr-sect-over-body">
                                 <p class="kb-hint" data-i18n="tracksadm.over_hint">Globale Ablagen und die Anzahl der eigenen Ablagen je Benutzer. Deren Aufgaben-Texte werden hier absichtlich nicht angezeigt.</p>
@@ -5225,7 +5220,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="kv-sect-api">
                             <div class="kb-section-header kb-collapse-header" id="kv-sect-api-hdr">
                                 <h3 data-i18n="kv.section_ibs">Kundenverwaltung (IBS) API</h3>
-                                <span class="sk-openclaw-toggle" id="kv-sect-api-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="kv-sect-api-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="kv-sect-api-body">
                                 <!-- IBS/Kundenverwaltung: schaltet die Checkbox 'IBS Tickets' unter /support frei -->
@@ -5256,7 +5251,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="kv-sect-search">
                             <div class="kb-section-header kb-collapse-header" id="kv-sect-search-hdr">
                                 <h3 data-i18n="kv.search_title">Tickets suchen</h3>
-                                <span class="sk-openclaw-toggle" id="kv-sect-search-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="kv-sect-search-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="kv-sect-search-body">
                                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -5281,7 +5276,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <h3 data-i18n="support.sect_conf">Konfiguration</h3>
                                 <span style="display:flex;align-items:center;gap:10px;">
                                     <button type="button" id="support-api-help-btn" title="API-Zugriffe (REST) anzeigen" aria-label="API-Zugriffe anzeigen" style="flex:0 0 auto;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:700;font-size:1rem;cursor:pointer;line-height:1;">?</button>
-                                    <span class="sk-openclaw-toggle" id="sup-sect-conf-tog">▼</span>
+                                    <span class="sk-sektion-toggle" id="sup-sect-conf-tog">▼</span>
                                 </span>
                             </div>
                             <div class="kb-collapse-body" id="sup-sect-conf-body">
@@ -5339,7 +5334,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="skcfg-sect-google">
                             <div class="kb-section-header kb-collapse-header" id="skcfg-sect-google-hdr">
                                 <h3 data-i18n="skillcfg.section_credentials">OAuth-Zugangsdaten</h3>
-                                <span class="sk-openclaw-toggle" id="skcfg-sect-google-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="skcfg-sect-google-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="skcfg-sect-google-body">
                                 <div id="skcfg-google"></div>
@@ -5349,7 +5344,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="google-sect-conn">
                             <div class="kb-section-header kb-collapse-header" id="google-sect-conn-hdr">
                                 <h3 data-i18n="skillcfg.section_connection">Verbindung</h3>
-                                <span class="sk-openclaw-toggle" id="google-sect-conn-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="google-sect-conn-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="google-sect-conn-body">
                                 <div id="google-status-container"></div>
@@ -5370,7 +5365,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="skcfg-sect-copilot">
                             <div class="kb-section-header kb-collapse-header" id="skcfg-sect-copilot-hdr">
                                 <h3 data-i18n="copilot.abschnitt_anwendung">Entra-Anwendung</h3>
-                                <span class="sk-openclaw-toggle" id="skcfg-sect-copilot-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="skcfg-sect-copilot-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="skcfg-sect-copilot-body">
                                 <!-- Die Einrichtungsschritte stehen HIER und nicht nur in docs/copilot.md:
@@ -5388,7 +5383,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="copilot-sect-conn">
                             <div class="kb-section-header kb-collapse-header" id="copilot-sect-conn-hdr">
                                 <h3 data-i18n="skillcfg.section_connection">Verbindung</h3>
-                                <span class="sk-openclaw-toggle" id="copilot-sect-conn-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="copilot-sect-conn-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="copilot-sect-conn-body">
                                 <div id="copilot-status-container"></div>
@@ -5404,7 +5399,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="skcfg-sect-telegram">
                             <div class="kb-section-header kb-collapse-header" id="skcfg-sect-telegram-hdr">
                                 <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
-                                <span class="sk-openclaw-toggle" id="skcfg-sect-telegram-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="skcfg-sect-telegram-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="skcfg-sect-telegram-body">
                                 <div id="skcfg-telegram"></div>
@@ -5420,7 +5415,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="skcfg-sect-browser_control">
                             <div class="kb-section-header kb-collapse-header" id="skcfg-sect-browser_control-hdr">
                                 <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
-                                <span class="sk-openclaw-toggle" id="skcfg-sect-browser_control-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="skcfg-sect-browser_control-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="skcfg-sect-browser_control-body">
                                 <div id="skcfg-browser_control"></div>
@@ -5439,7 +5434,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="skcfg-sect-claude_subagent">
                             <div class="kb-section-header kb-collapse-header" id="skcfg-sect-claude_subagent-hdr">
                                 <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
-                                <span class="sk-openclaw-toggle" id="skcfg-sect-claude_subagent-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="skcfg-sect-claude_subagent-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="skcfg-sect-claude_subagent-body">
                                 <div id="skcfg-claude_subagent"></div>
@@ -5455,7 +5450,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="roles-sect">
                             <div class="kb-section-header kb-collapse-header" id="roles-sect-hdr">
                                 <h3 data-i18n="roles.sect">Rollen</h3>
-                                <span class="sk-openclaw-toggle" id="roles-sect-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="roles-sect-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="roles-sect-body">
                                 <div id="roles-skill-warn" style="display:none;font-size:.8rem;color:var(--warning);margin-bottom:10px;"></div>
@@ -5532,7 +5527,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="skcfg-sect-agent_autonomy_kit">
                             <div class="kb-section-header kb-collapse-header" id="skcfg-sect-agent_autonomy_kit-hdr">
                                 <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
-                                <span class="sk-openclaw-toggle" id="skcfg-sect-agent_autonomy_kit-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="skcfg-sect-agent_autonomy_kit-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="skcfg-sect-agent_autonomy_kit-body">
                                 <div id="skcfg-agent_autonomy_kit"></div>
@@ -5554,7 +5549,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="skcfg-sect-avatar">
                             <div class="kb-section-header kb-collapse-header" id="skcfg-sect-avatar-hdr">
                                 <h3 data-i18n="skillcfg.section_settings">Einstellungen</h3>
-                                <span class="sk-openclaw-toggle" id="skcfg-sect-avatar-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="skcfg-sect-avatar-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="skcfg-sect-avatar-body">
                                 <div id="skcfg-avatar"></div>
@@ -5573,7 +5568,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="fa-sect-lauf">
                             <div class="kb-section-header kb-collapse-header" id="fa-sect-lauf-hdr">
                                 <h3 data-i18n="fa.sect_lauf">Gemeldeten Lauf auswählen</h3>
-                                <span class="sk-openclaw-toggle" id="fa-sect-lauf-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="fa-sect-lauf-tog">▼</span>
                             </div>
                             <div class="kb-collapse-body" id="fa-sect-lauf-body">
                                 <div class="fa-zeile">
@@ -5648,14 +5643,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              der Inhalt steht als #tv-overlay am Ende von <body> – ausserhalb
                              des Reiters, damit die Einstellungssuche die Felder darin nicht
                              als Sprungziel aufnimmt (sie sind nur im offenen Fenster sichtbar). ── -->
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header tv-oeffner" style="cursor:pointer;" data-klick="tv-oeffnen" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="tv-overlay" data-i18n-title="tv.oeffnen_title" title="Öffnet die Analyse in einem Fenster über der ganzen Seite">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="tv.title">Token-Verbrauch-Analyse</span>
                                 <span class="tv-oeffner-hinweis" data-i18n="tv.oeffnen">Öffnen</span>
                                 <span class="kb-folder-arrow">▶</span>
                             </div>
                         </div>
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="tele-convlog-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.llm_history">LLM-Verlauf</span>
                                 <span style="margin-left:auto;margin-right:8px;">
@@ -5672,7 +5667,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                             <div id="tele-convlog-body" style="display:none;max-height:420px;overflow-y:auto;"><div class="kb-loading">Lade…</div></div>
                         </div>
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="tele-errors-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.error_log">Fehler-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5698,7 +5693,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              global fuer alle Benutzer gilt und keine Diagnose ist. -->
 
                         <!-- ── Audit-Log ── -->
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="audit-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.audit_log">Tool-Audit-Log</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5766,7 +5761,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              Oberflaeche waere der Weg, Spuren zu beseitigen. Kein Symbol
                              im Kopf: Emojis sind verboten, und keines aus icons.js traegt
                              diese Bedeutung (das Schloss heisst dort "beschraenkt"). -->
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="sprot-klappen">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="telemetry.sprot_title">Sicherheitsprotokoll</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5828,7 +5823,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                              /api/security/csp. Kein Symbol im Kopf (Emojis verboten). ── -->
                         <!-- Aktivitaeten (2026-11-04): wer hat was an gemeinsamen Bestaenden
                              geaendert – backend/aktivitaet.py, GET /api/logs/aktivitaet. -->
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="akt">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.akt.titel">Aktivitäten</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5877,7 +5872,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="journal">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.journal.titel">Dienst-Journal</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5926,7 +5921,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="csp">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.csp.titel">Inhaltssicherheit (CSP-Verstöße)</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5959,7 +5954,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="updates">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.updates.titel">Update-Verlauf</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -5990,7 +5985,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="ssh">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.ssh.titel">SSH-Anmeldungen</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -6034,7 +6029,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="fixes">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.fixes.titel">Selbstkorrekturen des Agenten</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -6065,7 +6060,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
-                        <div class="sk-openclaw-section">
+                        <div class="sk-sektion">
                             <div class="kb-folder-header" style="cursor:pointer;" data-klick="plog-klappen" data-plog="abh">
                                 <span class="kb-folder-path" style="font-weight:600;" data-i18n="plog.abh.titel">Abhängigkeitsprüfung</span>
                                 <span style="margin-left:auto;margin-right:8px;display:flex;gap:4px;" data-klick="nicht-klappen">
@@ -6110,7 +6105,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-pw-hdr">
                                 <h3 data-i18n="security.section_pw">Kennwort ändern</h3>
-                                <span class="sk-openclaw-toggle" id="sec-sect-pw-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="sec-sect-pw-tog">▶</span>
                             </div>
                             <div id="sec-sect-pw-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint" data-i18n-html="security.pw_change_hint">Ändert das Linux-Benutzerkonto <code>jarvis</code> – gilt für die Web-Oberfläche und SSH-Login. <strong>Nicht</strong> das WebDAV-Passwort.</p>
@@ -6155,7 +6150,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-ad-hdr">
                                 <h3 data-i18n="security.section_ad">Berechtigungen (lokal und Active Directory / LDAP)</h3>
-                                <span class="sk-openclaw-toggle" id="sec-sect-ad-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="sec-sect-ad-tog">▶</span>
                             </div>
                             <div id="sec-sect-ad-body" class="kb-collapse-body" style="display:none;">
                                 <p class="kb-hint" data-i18n="security.ad_hint">Domain-Login für Windows- und Android-App. {marke}-Server muss nur im gleichen Netzwerk wie der Domain-Controller sein – kein Domain-Beitritt erforderlich.</p>
@@ -6374,7 +6369,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-2fa-hdr">
                                 <h3 data-i18n="security.section_2fa">Zwei-Faktor-Authentifizierung (2FA)</h3>
-                                <span class="sk-openclaw-toggle" id="sec-sect-2fa-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="sec-sect-2fa-tog">▶</span>
                             </div>
                             <div id="sec-sect-2fa-body" class="kb-collapse-body" style="display:none;">
                                 <div id="totp-settings-status" style="margin-bottom:12px;">
@@ -6420,7 +6415,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="sec-sect-incidents-hdr">
                                 <h3 data-i18n="security.section_incidents">Angriffsprävention und Sicherheitsvorfälle</h3>
-                                <span class="sk-openclaw-toggle" id="sec-sect-incidents-tog">▶</span>
+                                <span class="sk-sektion-toggle" id="sec-sect-incidents-tog">▶</span>
                             </div>
                             <div id="sec-sect-incidents-body" class="kb-collapse-body" style="display:none;">
                                 <button type="button" id="sec-secdoc-btn" class="sec-btn"
@@ -6535,7 +6530,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header" id="sec-sect-broker-hdr">
                                 <h3><span data-i18n="security.section_broker">Root-Freigaben (Root-Broker)</span> <span id="sec-broker-pending-badge" style="display:none;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:0.72rem;font-weight:700;background:rgba(var(--warning-rgb),0.18);border:1px solid rgba(var(--warning-rgb),0.5);color:var(--text-primary);"></span></h3>
-                                <span class="sk-openclaw-toggle" id="sec-sect-broker-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sec-sect-broker-tog">▼</span>
                             </div>
                             <div id="sec-sect-broker-body" class="kb-collapse-body">
                                 <button type="button" id="sec-brkdoc-btn" class="sec-btn"
@@ -6571,7 +6566,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header" id="sec-sect-ssh-hdr">
                                 <h3><span data-i18n="security.section_ssh">Fernzugang (SSH)</span> <span id="sec-ssh-badge" class="sec-ssh-badge" style="display:none;"></span></h3>
-                                <span class="sk-openclaw-toggle" id="sec-sect-ssh-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sec-sect-ssh-tog">▼</span>
                             </div>
                             <div id="sec-sect-ssh-body" class="kb-collapse-body">
                                 <p class="kb-hint" data-i18n="security.ssh_desc">Legt fest, wie man sich per SSH (Kommandozeile) am Server anmelden kann. Empfohlen ist die Anmeldung nur mit Schlüssel und nur aus den Netzen der Administration. Jede Änderung wirkt zuerst als Test: Ohne Bestätigung innerhalb von fünf Minuten kehrt der Server von selbst zum vorherigen Stand zurück. Für jede Änderung brauchst du den Freigabe-Code der Root-Freigaben.</p>
@@ -6669,7 +6664,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                         <div class="kb-section" id="sec-sect-rem-box" style="display:none;">
                             <div class="kb-section-header kb-collapse-header" id="sec-sect-rem-hdr">
                                 <h3><span data-i18n="security.section_reminders">Erinnerungen per Messenger</span></h3>
-                                <span class="sk-openclaw-toggle" id="sec-sect-rem-tog">▼</span>
+                                <span class="sk-sektion-toggle" id="sec-sect-rem-tog">▼</span>
                             </div>
                             <div id="sec-sect-rem-body" class="kb-collapse-body">
                                 <p class="kb-hint" data-i18n="security.reminders_desc">Zeitgesteuerte Aufträge darf nur ein Administrator anlegen – sonst könnte sich ein Netzwerk-Benutzer (oder eine untergeschobene Nachricht) einen Agenten einrichten, der außerhalb jeder Sitzung dauerhaft läuft. Hier freigegebene Absender dürfen sich trotzdem EINMALIGE Erinnerungen an sich selbst setzen: zur Fälligkeit wird nur diese Nachricht verschickt, es läuft keine Aufgabe und kein Werkzeug. Eine Zeile pro Absender – WhatsApp als Telefonnummer (+491701234567), Telegram als tg:123456789.</p>
@@ -6843,9 +6838,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=514"></script>
+    <script src="/static/js/i18n.js?v=515"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
-    <script src="/static/js/cron.js?v=38"></script>
+    <script src="/static/js/cron.js?v=39"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=5"></script>
     <script src="/static/js/sicherheitsprotokoll.js?v=5"></script>
@@ -6853,10 +6848,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/token_verbrauch.js?v=5"></script>
     <script src="/static/js/fehleranalyse.js?v=4"></script>
     <script src="/static/js/kbgroups.js?v=6"></script>
-    <script src="/static/js/skills.js?v=56"></script>
+    <script src="/static/js/skills.js?v=57"></script>
     <script src="/static/js/chatlib.js?v=27"></script>
     <script src="/static/js/skillcfg.js?v=19"></script>
-    <script src="/static/js/google.js?v=17"></script>
+    <script src="/static/js/google.js?v=18"></script>
     <script src="/static/js/copilot.js?v=2"></script>
     <script src="/static/js/whatsapp.js?v=20"></script>
     <script src="/static/js/knowledge.js?v=145"></script>
@@ -6878,7 +6873,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/feedback_admin.js?v=8"></script>
     <script src="/static/js/newsfeed.js?v=4"></script>
     <script src="/static/js/newsfeed_admin.js?v=3"></script>
-    <script src="/static/js/sql_admin.js?v=9"></script>
+    <script src="/static/js/sql_admin.js?v=10"></script>
     <script src="/static/js/kundenverwaltung.js?v=10"></script>
     <script src="/static/js/support_admin.js?v=13"></script>
     <script src="/static/js/telemetry.js?v=16"></script>
@@ -6897,7 +6892,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- Gemeinsame Titelleiste (kopfzeile.js, oben hinter sitzung.js): /settings
          hat seit 2026-11-16 dieselben Kernelemente wie jede Bereichsseite –
          Update-Pille, CPU (samt Systemauslastung) und ⓘ fuer Admins. -->
-    <script src="/static/js/update_widget.js?v=10"></script>
+    <script src="/static/js/update_widget.js?v=11"></script>
     <script src="/static/js/cpubar.js?v=4"></script>
     <script src="/static/js/sysload.js?v=8"></script>
     <script src="/static/js/syspackages.js?v=25"></script>
@@ -6910,7 +6905,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=3"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=267"></script>
+    <script src="/static/js/app.js?v=268"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

@@ -344,37 +344,6 @@ const gleich = () => new Promise((r) => setImmediate(r));
         w.close();
     }
 
-    abschnitt('4b. Docker-Image ohne git: Hinweis statt Knopf (gemeldet 2026-10-26)');
-    {   // Positivkontrolle: OHNE image-Merkmal stehen Knopf und Auswahl da
-        const w = starte(0, false);
-        for (let i = 0; i < 6; i++) await gleich();
-        if (!w.document.getElementById('upd-check-btn') || !w.document.getElementById('upd-schedule')) {
-            console.log('ABBRUCH: Regelfall rendert Knopf/Auswahl nicht - Messung blind'); process.exit(2);
-        }
-        w.close();
-    }
-    {
-        const w = starte(0, false, null, { image: true, current_hash: '', branch: '' });
-        for (let i = 0; i < 6; i++) await gleich();
-        const d = w.document;
-        const body = d.getElementById('upd-body');
-        pruefe(/update\.image_hinweis/.test(body.textContent), 'Image-Betrieb: Hinweis steht im Popup');
-        pruefe(/docker compose pull/.test(body.textContent), '... samt Befehl fuer den Docker-Host');
-        pruefe(!d.getElementById('upd-apply-btn') && !d.getElementById('upd-check-btn'),
-               '... und KEIN Aktualisieren-/Pruef-Knopf');
-        pruefe(!d.getElementById('upd-schedule'), '... und KEINE Auto-Update-Auswahl');
-        pruefe(!d.getElementById('version-pill').classList.contains('up-to-date'),
-               '... Pill nicht gruen (Stand unbekannt)');
-        w.close();
-    }
-    {
-        const I18N = lies('frontend/js/i18n.js');
-        for (const k of ['update.image_titel', 'update.image_hinweis']) {
-            const n = (I18N.match(new RegExp("^\\s*'" + k.replace('.', '\\.') + "':", 'gm')) || []).length;
-            pruefe(n === 2, "'" + k + "' genau zweimal (DE+EN)", String(n));
-        }
-    }
-
     abschnitt('4c. Commit-Liste: je Commit ein Satz, Rest beziffert (2026-10-30)');
     {
         const liste = [

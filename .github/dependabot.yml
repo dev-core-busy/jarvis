@@ -57,21 +57,6 @@ updates:
     commit-message:
       prefix: 'chore(ci)'
 
-  - package-ecosystem: docker
-    directories:
-      - /
-      - /services/whatsapp-bridge
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 0
-    ignore:
-      # Node nur auf LTS-Linien (gerade Hauptversionen) – ein Sprung auf eine
-      # ungerade "Current"-Linie hat nach 6 Monaten kein Update mehr
-      - dependency-name: node
-        update-types: ['version-update:semver-major']
-    commit-message:
-      prefix: 'chore(docker)'
-
   # gomod fehlte hier bis 2026-10-10. Folge: die Go-Abhaengigkeiten des
   # Windows-Clients standen nie unter Beobachtung und fielen so weit zurueck
   # (x/image 0.18 bei 0.41, x/net 0.25 bei 0.55), dass daraus ein HIGH-Befund

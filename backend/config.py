@@ -244,8 +244,6 @@ class Config:
     }
 
     # Sicherheit & Server
-    # Kein Standardwert: backend/main.py bzw. standard_zugang entscheidet (2026-09-28)
-    JARVIS_PASSWORD: str = os.getenv("JARVIS_PASSWORD", "")
     # Leer ODER oeffentlich bekannter Beispielwert -> Zufallsschluessel aus
     # data/.secret_key (siehe backend/secret_key.py, Vorfall 2026-09-28).
     SECRET_KEY: str = _secret_aufloesen(
@@ -262,7 +260,7 @@ class Config:
     # (NICHT bei benutzerausgelöstem Stopp). 0 = deaktiviert.
     AUTO_RETRY_MAX: int = int(os.getenv("AUTO_RETRY_MAX", "2"))
     AUTO_RETRY_DELAY_SEC: float = float(os.getenv("AUTO_RETRY_DELAY_SEC", "2.0"))
-    # Im Docker-Modus settings.json im persistenten Data-Volume speichern
+    # Datenverzeichnis per DATA_DIR umlenkbar (Vorgabe: <Projekt>/data)
     _data_dir = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT / "data")))
     SETTINGS_FILE = _data_dir / "settings.json"
 

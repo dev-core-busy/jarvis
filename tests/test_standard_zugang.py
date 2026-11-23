@@ -15,13 +15,15 @@ Anlass (gemeldet 2026-09-28, nach dem SECRET_KEY-Befund):
 - Docker veroeffentlichte 6080: websockify ohne Anmeldung vor x11vnc ``-nopw``
   (``-listen 0.0.0.0``) = Desktop ohne Kennwort. Die Haertung vom 2026-08-18
   (``test_desktop_zugang``) hatte nur die beiden Startskripte erfasst.
+  (Der Docker-Betrieb ist seit 2026-11-23 entfernt; die lokale Anmeldung
+  laeuft nur noch ueber PAM.)
 
 Gemessen – moeglichst AUSGEFUEHRT, sonst am Syntaxbaum, Regeln ueber ALLE Dateien:
 1. ``standard_zugang`` im Sandkasten.
 2. Login erzwingt den Wechsel bei Standardkennwort (AST, Reihenfolge).
 3. install.sh-Funktionen mit bash + Attrappe fuer ``getent`` ausgefuehrt.
 4. Jeder x11vnc-Start (Shell + Python) nur loopback, jeder websockify-Start
-   nur 127.0.0.1, kein Compose/Dockerfile veroeffentlicht 5900/6080.
+   nur 127.0.0.1.
 5. Keine Doku, kein Skript nennt ein festes Kennwort fuer ``jarvis``.
 """
 import ast
@@ -88,7 +90,7 @@ def ohne_sh_kommentare(s):
 
 def fortsetzungen_zusammen(s):
     """Backslash-Fortsetzungen zu EINER Zeile – ein Aufruf ueber mehrere Zeilen
-    ist sonst nur zur Haelfte sichtbar (docker/entrypoint.sh)."""
+    ist sonst nur zur Haelfte sichtbar."""
     return re.sub(r"\\\n\s*", " ", s)
 
 
@@ -104,28 +106,15 @@ sandkasten = Path(tempfile.mkdtemp(prefix="stdzugang_"))
 print("1. standard_zugang im Sandkasten")
 for k in ("jarvis", "JARVIS", " jarvis ", "", "password", "Passwort"):
     check(f"{k!r} gilt als Standardkennwort", sz.ist_standardkennwort(k, "jarvis") is True)
+# "jarvis" muss AUS DER LISTE kommen, nicht nur ueber Kennwort == Benutzername:
+# ein AD-Konto "anna" mit Kennwort "jarvis" ist genauso oeffentlich bekannt.
+check("'jarvis' gilt auch fuer einen anderen Benutzer als Standard",
+      sz.ist_standardkennwort("jarvis", "anna") is True)
 check("Kennwort == Benutzername gilt als Standard",
       sz.ist_standardkennwort("andreas", "Andreas") is True)
 check("ein individuelles Kennwort gilt NICHT als Standard",
       sz.ist_standardkennwort("Tr0cken-Blume-17", "jarvis") is False)
 
-d = sandkasten / "a" / "data" / ".erstkennwort"
-k1 = sicher(sz.docker_erstkennwort, "jarvis", d)
-if not isinstance(k1, str):
-    print(f"ABBRUCH: docker_erstkennwort lief nicht: {k1}")
-    sys.exit(2)
-check("Docker: JARVIS_PASSWORD=jarvis wird NICHT angenommen", k1 != "jarvis" and len(k1) >= 12, k1)
-check("Docker: Erstkennwort liegt in der Datei, 0600",
-      d.exists() and d.read_text().strip() == k1 and stat.S_IMODE(d.stat().st_mode) == 0o600)
-check("Docker: zweiter Start liefert DASSELBE Erstkennwort", sicher(sz.docker_erstkennwort, "", d) == k1)
-k2 = sicher(sz.docker_erstkennwort, "", sandkasten / "b" / ".erstkennwort")
-check("Docker: zwei Container bekommen verschiedene Erstkennwoerter", isinstance(k2, str) and k2 != k1)
-check("Docker: ein eigenes JARVIS_PASSWORD gilt",
-      sicher(sz.docker_erstkennwort, "Tr0cken-Blume-17", sandkasten / "c" / ".e") == "Tr0cken-Blume-17")
-dj = sandkasten / "d" / ".erstkennwort"
-dj.parent.mkdir(parents=True)
-dj.write_text("jarvis")
-check("Docker: 'jarvis' in der Datei wird ersetzt", sicher(sz.docker_erstkennwort, "", dj) != "jarvis")
 
 # ─── 2. Login / Kennwortregeln (AST) ────────────────────────────────────────
 print("2. backend/main.py: Wechsel wird am KENNWORT erzwungen")
@@ -191,10 +180,11 @@ if len(login) == 1:
 stark = [f for f in ast.walk(baum) if isinstance(f, ast.FunctionDef) and f.name == "_validate_password_strength"]
 check("Kennwortregel lehnt jedes Standardkennwort ab (gleiche Quelle)",
       len(stark) == 1 and any(ist_aufruf(n, "ist_standardkennwort") for n in ast.walk(stark[0])))
-jp = [n for n in baum.body if isinstance(n, ast.Assign)
+# Lokale Anmeldung nur ueber PAM: kein Web-Kennwort aus der Umgebung, das ein
+# Vorgabewert sein koennte (frueherer Docker-Weg, entfernt 2026-11-23).
+jp = [n.lineno for n in ast.walk(baum) if isinstance(n, ast.Assign)
       and any(isinstance(t, ast.Name) and t.id == "_JARVIS_PASSWORD" for t in n.targets)]
-check("Docker-Kennwort kommt aus docker_erstkennwort (kein fester Vorgabewert)",
-      len(jp) == 1 and any(ist_aufruf(n, "docker_erstkennwort") for n in ast.walk(jp[0])))
+check("kein eigenes Web-Kennwort _JARVIS_PASSWORD neben PAM", not jp, str(jp))
 check("kein os.getenv('JARVIS_PASSWORD', <nicht leer>) in backend/",
       not re.search(r"getenv\(\s*[\"']JARVIS_PASSWORD[\"']\s*,\s*[\"'][^\"']+[\"']",
                     "\n".join((WURZEL / r).read_text(encoding="utf-8") for r in dateien(r".*\.py")
@@ -245,7 +235,7 @@ check("Abschlussmeldung nennt das erzeugte Erstkennwort",
 
 # ─── 4. Desktop-Nebenwege ───────────────────────────────────────────────────
 print("4. Kein Weg zum Desktop an der Anmeldung vorbei (alle Startstellen)")
-SHELL = dateien(r".*\.sh", r"Dockerfile")
+SHELL = dateien(r".*\.sh")
 x_starts, w_starts = [], []
 for rel in SHELL:
     code = fortsetzungen_zusammen(ohne_sh_kommentare((WURZEL / rel).read_text(encoding="utf-8")))
@@ -256,13 +246,13 @@ for rel in SHELL:
         if re.search(r"(^|\s)(\S*/)?(python3? -m )?websockify\s", s) and "--web" in s:
             w_starts.append((rel, s))
 # Seit BSI H11-Rest starten die Server-Skripte x11vnc nicht mehr selbst
-# (backend/desktop_control.x11vnc_starten); uebrig sind run.sh (Nicht-root) und Docker.
-check("Positivkontrolle: x11vnc-Starts gefunden (run.sh und Docker)",
-      {"docker/entrypoint.sh", "run.sh"} <= {r for r, _ in x_starts}, str(len(x_starts)))
+# (backend/desktop_control.x11vnc_starten); uebrig ist run.sh (Nicht-root).
+check("Positivkontrolle: x11vnc-Start in run.sh gefunden",
+      "run.sh" in {r for r, _ in x_starts}, str(len(x_starts)))
 schlecht = [(r, s[:90]) for r, s in x_starts if "-localhost" not in s or re.search(r"-listen\s+0\.0\.0\.0", s)]
 check("jeder x11vnc-Start (Shell) bindet nur loopback", not schlecht, str(schlecht))
-check("Positivkontrolle: websockify-Starts gefunden (inkl. Docker, run.sh)",
-      {"docker/entrypoint.sh", "run.sh"} <= {r for r, _ in w_starts}, str({r for r, _ in w_starts}))
+check("Positivkontrolle: websockify-Start in run.sh gefunden",
+      "run.sh" in {r for r, _ in w_starts}, str({r for r, _ in w_starts}))
 schlecht = []
 for r, s in w_starts:
     # das erste Argument nach den --optionen, das eine Portangabe ist
@@ -293,18 +283,9 @@ for rel in dateien(r".*\.py"):
 check("Positivkontrolle: x11vnc-Start in Python gefunden (seit H11-Rest genau eine Startstelle)", py_starts >= 1, str(py_starts))
 check("jeder x11vnc-Start (Python) bindet nur loopback", not py_schlecht, str(py_schlecht))
 
-for rel in dateien(r"docker-compose.*\.ya?ml"):
-    txt = (WURZEL / rel).read_text(encoding="utf-8")
-    offen = re.findall(r"^\s*-\s*[\"']?(?:[\d.]+:)?\d+:(5900|6080)[\"']?", ohne_sh_kommentare(txt), re.M)
-    check(f"{rel}: veroeffentlicht weder 5900 noch 6080", not offen, str(offen))
-DF = ohne_sh_kommentare((WURZEL / "Dockerfile").read_text(encoding="utf-8"))
-exp = " ".join(re.findall(r"^EXPOSE\s+(.*)$", DF, re.M))
-check("Positivkontrolle: Dockerfile hat EXPOSE", "443" in exp, exp)
-check("Dockerfile: EXPOSE ohne 5900/6080", not re.search(r"\b(5900|6080)\b", exp), exp)
-
 # ─── 5. kein festes Kennwort in Doku und Skripten ───────────────────────────
 print("5. Kein festes Kennwort fuer 'jarvis' in Doku, Skripten, Vorlagen")
-TEXTE = dateien(r".*\.(md|html|sh|ya?ml)", r"Dockerfile", r"\.env\.example")
+TEXTE = dateien(r".*\.(md|html|sh|ya?ml)", r"\.env\.example")
 check("Positivkontrolle: Doku und Skripte gefunden",
       {"README.md", "docs/index.html", "docs/install.sh", ".env.example"} <= set(TEXTE))
 funde = []

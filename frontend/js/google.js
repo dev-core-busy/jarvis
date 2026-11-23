@@ -1,14 +1,11 @@
 /**
  * Jarvis Google Apps – Settings-Tab UI
  *
- * Sektion 1: Jarvis Google Apps (Device Flow OAuth)
- * Sektion 2: OpenClaw Gmail / gog  (nur wenn Skill aktiviert)
+ * Google Apps (Device Flow OAuth)
  */
 class JarvisGoogleManager {
     constructor() {
         this._devicePollTimer  = null;
-        this._gogPollTimer     = null;
-        this._gogEmail         = '';
     }
 
     async init() {
@@ -22,29 +19,11 @@ class JarvisGoogleManager {
         if (!container) return;
         container.innerHTML = '<div class="kb-loading">' + window.t('google.loading') + '</div>';
 
-        // Beide Stati parallel laden
-        const [jarvisStatus, gogStatus, gogEnabled] = await Promise.all([
-            this._fetchJson('/api/google/status'),
-            this._fetchJson('/api/google/gog-status'),
-            this._isGogEnabled(),
-        ]);
-
-        let html = '';
-
-        // ── Sektion 1: Jarvis Google Apps ──
-        html += this._renderJarvisSection(jarvisStatus);
-
-        // ── Sektion 2: OpenClaw Gmail (gog) – nur wenn aktiviert ──
-        if (gogEnabled) {
-            html += '<div class="google-section-divider"></div>';
-            html += this._renderGogSection(gogStatus);
-        }
-
-        container.innerHTML = html;
-        this._attachGogListeners();
+        const jarvisStatus = await this._fetchJson('/api/google/status');
+        container.innerHTML = this._renderJarvisSection(jarvisStatus);
     }
 
-    // ─── Sektion 1: Jarvis Google Apps ────────────────────────────
+    // ─── Google Apps ──────────────────────────────────────────────
 
     _renderJarvisSection(status) {
         if (!status) return this._errorCard(window.t('google.jarvis_title'), window.t('google.conn_error'));
@@ -99,243 +78,6 @@ class JarvisGoogleManager {
             <div class="google-section-label">${window.t('google.jarvis_title')}</div>
             ${card}
         </div>`;
-    }
-
-    // ─── Sektion 2: OpenClaw Gmail (gog) ──────────────────────────
-
-    _renderGogSection(gogStatus) {
-        // gog-Status auswerten
-        const accounts  = gogStatus?.data?.accounts || [];
-        const connected = accounts.length > 0;
-        const email     = connected ? (accounts[0]?.email || accounts[0] || '') : '';
-
-        // Credentials vorhanden?
-        const hasCreds = gogStatus?.ok !== false;
-
-        let card = '';
-
-        if (connected) {
-            // ── Verbunden ──
-            card = `
-                <div class="google-card google-card-ok">
-                    <div class="google-card-icon">✅</div>
-                    <div class="google-card-body">
-                        <div class="google-card-title">${window.t('google.gog_connected')}</div>
-                        <div class="google-card-email" id="gog-email-display">${email}</div>
-                        <div class="google-card-services">
-                            <span class="google-service-badge">Gmail</span>
-                            <span class="google-service-badge">Calendar</span>
-                            <span class="google-service-badge">Drive</span>
-                        </div>
-                    </div>
-                    <button class="kb-btn-action google-btn-revoke" id="gog-remove-btn">${window.t('google.disconnect')}</button>
-                </div>`;
-        } else {
-            // ── Setup-Formular ──
-            card = `
-                <div class="google-card google-card-idle gog-setup-card">
-                    <div class="google-card-body" style="width:100%">
-                        <div class="google-card-title">${window.t('google.gog_setup_title')}</div>
-                        <div class="google-card-desc">${window.t('google.gog_setup_desc')}</div>
-
-                        <div class="gog-form">
-                            <div class="gog-form-row">
-                                <label class="gog-label">${window.t('google.label_client_id')}</label>
-                                <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="gog-client-id" class="gog-input" type="text"
-                                    placeholder="1234….apps.googleusercontent.com" autocomplete="off">
-                            </div>
-                            <div class="gog-form-row">
-                                <label class="gog-label">${window.t('google.label_client_secret')}</label>
-                                <input id="gog-client-secret" class="gog-input" type="password"
-                                    placeholder="GOCSPX-…" autocomplete="off">
-                            </div>
-                            <div class="gog-form-row">
-                                <label class="gog-label">${window.t('google.label_gmail_account')}</label>
-                                <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="gog-email" class="gog-input" type="email"
-                                    placeholder="deine@gmail.com" autocomplete="off">
-                            </div>
-
-                            <div class="gog-btn-row">
-                                <button id="gog-save-btn" class="gog-btn gog-btn-primary">
-                                    ${window.t('google.save_credentials')}
-                                </button>
-                                <button id="gog-connect-btn" class="gog-btn gog-btn-connect" disabled>
-                                    ${window.t('google.connect_gmail')}
-                                </button>
-                            </div>
-
-                            <div id="gog-status-msg" class="gog-status-msg" style="display:none;"></div>
-                        </div>
-                    </div>
-                </div>`;
-        }
-
-        return `<div class="google-section">
-            <div class="google-section-label">OpenClaw Gmail <span class="gog-badge">gog v0.11</span></div>
-            ${card}
-        </div>`;
-    }
-
-    // ─── Event-Listener nach Render ───────────────────────────────
-
-    _attachGogListeners() {
-        const saveBtn    = document.getElementById('gog-save-btn');
-        const connectBtn = document.getElementById('gog-connect-btn');
-        const removeBtn  = document.getElementById('gog-remove-btn');
-
-        if (saveBtn)    saveBtn.addEventListener('click',    () => this._gogSave());
-        if (connectBtn) connectBtn.addEventListener('click', () => this._gogConnect());
-        if (removeBtn)  removeBtn.addEventListener('click',  () => this._gogRemove());
-    }
-
-    // ─── gog Aktionen ─────────────────────────────────────────────
-
-    async _gogSave() {
-        const clientId     = document.getElementById('gog-client-id')?.value.trim();
-        const clientSecret = document.getElementById('gog-client-secret')?.value.trim();
-        const email        = document.getElementById('gog-email')?.value.trim();
-
-        if (!clientId || !clientSecret || !email) {
-            this._gogMsg(window.t('google.fill_all_fields'), 'warn'); return;
-        }
-
-        this._gogMsg(window.t('google.saving_credentials'), 'info');
-        const saveBtn = document.getElementById('gog-save-btn');
-        if (saveBtn) saveBtn.disabled = true;
-
-        const result = await this._fetchJson('/api/google/gog-setup', {
-            method: 'POST',
-            body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, email }),
-        });
-
-        if (saveBtn) saveBtn.disabled = false;
-
-        if (!result || result.error || !result.ok) {
-            this._gogMsg('❌ ' + window.t('google.error_label') + ': ' + (result?.error || window.t('google.unknown')), 'error'); return;
-        }
-
-        this._gogEmail = email;
-        this._gogMsg(window.t('google.credentials_saved'), 'success');
-        const connectBtn = document.getElementById('gog-connect-btn');
-        if (connectBtn) connectBtn.disabled = false;
-    }
-
-    async _gogConnect() {
-        const email = this._gogEmail
-            || document.getElementById('gog-email')?.value.trim();
-
-        if (!email) {
-            this._gogMsg(window.t('google.save_first'), 'warn'); return;
-        }
-
-        const connectBtn = document.getElementById('gog-connect-btn');
-        if (connectBtn) { connectBtn.disabled = true; connectBtn.textContent = window.t('google.loading_url'); }
-
-        // Schritt 1: Auth-URL vom Server holen
-        const result = await this._fetchJson('/api/google/gog-auth-url', {
-            method: 'POST',
-            body: JSON.stringify({ email }),
-        });
-
-        if (connectBtn) { connectBtn.disabled = false; connectBtn.textContent = window.t('google.connect_gmail'); }
-
-        if (!result || !result.ok) {
-            this._gogMsg('❌ ' + (result?.error || window.t('google.auth_url_error')), 'error');
-            return;
-        }
-
-        // Remote-Flow UI anzeigen
-        this._renderRemoteFlow(result.auth_url, email);
-    }
-
-    _renderRemoteFlow(authUrl, email) {
-        // Setup-Card durch Remote-Flow-Card ersetzen
-        const card = document.querySelector('.gog-setup-card');
-        if (!card) return;
-
-        card.innerHTML = `
-            <div class="google-card-body" style="width:100%">
-                <div class="google-card-title">${window.t('google.connect_account_3steps')}</div>
-
-                <div class="google-flow-steps" style="margin-top:0.85rem">
-                    <div class="google-flow-step">
-                        <span class="google-flow-num">1</span>
-                        <span>${window.t('google.flow_step_open_link')}</span>
-                    </div>
-                </div>
-                <a href="${authUrl}" target="_blank" class="gog-auth-link">
-                    ${window.t('google.sign_in_google')}
-                </a>
-
-                <div class="google-flow-steps" style="margin-top:0.85rem">
-                    <div class="google-flow-step">
-                        <span class="google-flow-num">2</span>
-                        <span>${window.t('google.flow_step_localhost')}</span>
-                    </div>
-                    <div class="google-flow-step">
-                        <span class="google-flow-num">3</span>
-                        <span>${window.t('google.flow_step_paste')}</span>
-                    </div>
-                </div>
-
-                <div class="gog-form-row" style="margin-top:0.5rem">
-                    <input data-tabfill-nein="Formmuster mit Platzhalterteilen – uebernommen waere es falsch" id="gog-redirect-url" class="gog-input" type="text"
-                        placeholder="http://localhost:…?code=…&scope=…" autocomplete="off">
-                </div>
-
-                <div class="gog-btn-row" style="margin-top:0.6rem">
-                    <button id="gog-exchange-btn" class="gog-btn gog-btn-connect">
-                        ${window.t('google.finish_connection')}
-                    </button>
-                    <button class="gog-btn"
-                        data-gm-aktion="abbrechen">${window.t('google.cancel')}</button>
-                </div>
-                <div id="gog-status-msg" class="gog-status-msg" style="display:none;"></div>
-            </div>`;
-
-        // Exchange-Button Listener
-        const exchangeBtn = document.getElementById('gog-exchange-btn');
-        if (exchangeBtn) {
-            exchangeBtn.addEventListener('click', () => this._gogExchange(email));
-        }
-    }
-
-    async _gogExchange(email) {
-        const redirectUrl = document.getElementById('gog-redirect-url')?.value.trim();
-        if (!redirectUrl) {
-            this._gogMsg(window.t('google.paste_redirect_url'), 'warn'); return;
-        }
-
-        const btn = document.getElementById('gog-exchange-btn');
-        if (btn) { btn.disabled = true; btn.textContent = window.t('google.connecting'); }
-        this._gogMsg(window.t('google.authenticating'), 'info');
-
-        const result = await this._fetchJson('/api/google/gog-auth-exchange', {
-            method: 'POST',
-            body: JSON.stringify({ email, redirect_url: redirectUrl }),
-        });
-
-        if (!result || !result.ok) {
-            this._gogMsg('❌ ' + (result?.error || window.t('google.error_label')), 'error');
-            if (btn) { btn.disabled = false; btn.textContent = window.t('google.finish_connection'); }
-            return;
-        }
-
-        this._gogMsg(window.t('google.connected_success'), 'success');
-        setTimeout(() => this._renderAll(), 900);
-    }
-
-    async _gogRemove() {
-        const emailEl = document.getElementById('gog-email-display');
-        const email   = emailEl?.textContent.trim() || '';
-        if (!email) { await this._renderAll(); return; }
-        if (!confirm(window.t('google.confirm_disconnect_gog').replace('{email}', email))) return;
-
-        await this._fetchJson('/api/google/gog-account', {
-            method: 'DELETE',
-            body: JSON.stringify({ email }),
-        });
-        await this._renderAll();
     }
 
     // ─── Jarvis Google Apps (Device Flow) ─────────────────────────
@@ -420,13 +162,6 @@ class JarvisGoogleManager {
 
     // ─── Hilfsfunktionen ──────────────────────────────────────────
 
-    async _isGogEnabled() {
-        const data = await this._fetchJson('/api/skills');
-        const skills = data?.skills || data || [];
-        const s = Array.isArray(skills) ? skills.find(x => x.dir_name === 'openclaw_gmail') : null;
-        return s?.enabled === true;
-    }
-
     async _fetchJson(url, opts = {}) {
         const token = window.JarvisSitzung.token();
         const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) };
@@ -434,14 +169,6 @@ class JarvisGoogleManager {
             const r = await fetch(url, { ...opts, headers });
             return await r.json();
         } catch { return null; }
-    }
-
-    _gogMsg(text, type = 'info') {
-        const el = document.getElementById('gog-status-msg');
-        if (!el) return;
-        el.style.display = text ? '' : 'none';
-        el.textContent   = text;
-        el.className     = `gog-status-msg gog-msg-${type}`;
     }
 
     _errorCard(title, msg) {
@@ -464,7 +191,6 @@ class JarvisGoogleManager {
     const AKTIONEN = {
         revokeJarvis:  (gm) => gm.revokeJarvis(),
         connectJarvis: (gm) => gm.connectJarvis(),
-        abbrechen:     (gm) => gm._renderAll(),
         abbrechenPoll: (gm) => { gm._stopDevicePoll(); gm._renderAll(); },
     };
     document.addEventListener('click', (e) => {

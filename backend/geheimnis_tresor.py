@@ -29,7 +29,7 @@ ZWEI ANWENDUNGEN:
     beim Lesen zurueck. config.py tut das an der Dateigrenze; im Speicher und
     fuer alle Aufrufer bleibt alles wie bisher.
 
-OHNE HAUPTSCHLUESSEL (Entwicklungsrechner, Docker ohne Datei, Dienst vor dem
+OHNE HAUPTSCHLUESSEL (Entwicklungsrechner, Dienst vor dem
 ersten Broker-Lauf) bleibt alles wie VOR M5: roher Schluessel, Klartext-Felder.
 Das ist bewusst KEIN fail-closed: ein fehlender Schluessel darf die Anwendung
 nicht lahmlegen, und schlechter als vorher wird nichts. Den Zustand meldet
@@ -55,7 +55,7 @@ from pathlib import Path
 PRAEFIX_SCHLUESSEL = b"JGK1:"
 PRAEFIX_WERT = "JGS1:"
 CREDENTIAL_NAME = "geheimnis"
-# Ueberschreibbar fuer Docker (kein systemd) und Tests.
+# Ueberschreibbar fuer Tests.
 ROOT_DATEI = Path(os.environ.get("JARVIS_GEHEIMNIS_DATEI") or "/etc/jarvis/geheimnis.key")
 
 

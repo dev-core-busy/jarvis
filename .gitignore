@@ -98,8 +98,6 @@ yarn-error.log*
 Thumbs.db
 
 # ─── Binaries (separat installieren) ────────────────────────────────────────
-skills/openclaw_gmail/gog
-skills_from_openclaw/
 *.exe
 
 # ─── Downloads (werden on-the-fly bereitgestellt) ────────────────────────────

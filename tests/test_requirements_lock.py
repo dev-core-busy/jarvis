@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Waechter: requirements.lock passt zu requirements.txt und traegt Hashes.
 
-WARUM (2026-10-21): die Lock-Datei legt den einen Stand fest, aus dem Docker,
+WARUM (2026-10-21): die Lock-Datei legt den einen Stand fest, aus dem die
 CI und (Phase 2) die Server installieren – ``pip install --require-hashes``.
 Damit sie das leisten kann, muss sie
   - fuer JEDES Paket mindestens einen sha256-Hash tragen (sonst bricht
@@ -17,10 +17,10 @@ Das meldet "veraltet", sobald irgendein Paket eine neue Version veroeffentlicht 
 eine Zeitbombe als Waechter. Geprueft wird die Vertraeglichkeit, nicht die
 Aktualitaet.
 
-Dazu die VERBRAUCHER: Dockerfile und Sicherheits-CI installieren aus der Lock
+Dazu der VERBRAUCHER: die Sicherheits-CI installiert aus der Lock
 mit --require-hashes und nicht (mehr) aus requirements.txt.
 
-Lauf:  python3 tests/test_requirements_lock.py [lock] [requirements.txt] [Dockerfile] [workflow]
+Lauf:  python3 tests/test_requirements_lock.py [lock] [requirements.txt] [workflow]
 Exit 0 = passt, 1 = Verstoss, 2 = konnte nicht laufen
 """
 import re
@@ -30,8 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LOCK = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "requirements.lock"
 REQ = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "requirements.txt"
-DOCKERFILE = Path(sys.argv[3]) if len(sys.argv) > 3 else ROOT / "Dockerfile"
-WORKFLOW = Path(sys.argv[4]) if len(sys.argv) > 4 else ROOT / ".github" / "workflows" / "sicherheit.yml"
+WORKFLOW = Path(sys.argv[3]) if len(sys.argv) > 3 else ROOT / ".github" / "workflows" / "sicherheit.yml"
 
 try:
     from packaging.requirements import Requirement
@@ -106,7 +105,7 @@ if probe != {"alpha": ("1.2.3", 2), "beta-paket": ("2.0+cpu", 1), "gamma": ("0.1
     abbruch(f"Lock-Leser liest die Probe falsch: {probe}")
 print("  Lock-Leser erkennt Eintraege, Hash-Zahl und den Eintrag OHNE Hash")
 
-for p in (LOCK, REQ, DOCKERFILE, WORKFLOW):
+for p in (LOCK, REQ, WORKFLOW):
     if not p.is_file():
         abbruch(f"{p} fehlt")
 lock_text = LOCK.read_text(encoding="utf-8")
@@ -151,7 +150,7 @@ vorab = sorted(f"{n}=={v}" for n, (v, _) in lock.items()
                if Version(v).is_prerelease or Version(v).is_devrelease)
 pruefe("keine Vorab-/Entwicklungsversion (ECHT trug pydantic 2.14.0a1)", not vorab, vorab)
 
-print("\n\033[1mVerbraucher installieren aus der Lock\033[0m")
+print("\n\033[1mVerbraucher installiert aus der Lock\033[0m")
 
 
 def befehle(text: str) -> list[str]:
@@ -161,7 +160,7 @@ def befehle(text: str) -> list[str]:
     return [z.strip() for z in ohne.splitlines() if re.search(r"\bpip install\b", z)]
 
 
-for name, pfad in (("Dockerfile", DOCKERFILE), ("Sicherheits-CI", WORKFLOW)):
+for name, pfad in (("Sicherheits-CI", WORKFLOW),):
     bs = befehle(pfad.read_text(encoding="utf-8"))
     aus_lock = [b for b in bs if re.search(r"-r\s+requirements\.lock\b", b)]
     pruefe(f"{name}: installiert aus requirements.lock",

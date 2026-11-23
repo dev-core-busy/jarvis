@@ -3468,28 +3468,6 @@ select.input-field {
     border-color: rgba(var(--fg-rgb), 0.08);
 }
 
-/* OpenClaw Marketplace Skills – deutlich markiert */
-.sk-item.sk-item-oc {
-    background: rgba(234, 179, 8, 0.06);
-    border-left: 3px solid rgba(234, 179, 8, 0.5);
-}
-.sk-item.sk-item-oc:hover {
-    background: rgba(234, 179, 8, 0.12);
-    border-color: rgba(var(--fg-rgb), 0.08);
-    border-left-color: rgba(234, 179, 8, 0.7);
-}
-.sk-badge-oc {
-    font-size: 0.6rem;
-    font-weight: 600;
-    padding: 0.05rem 0.35rem;
-    border-radius: 4px;
-    background: rgba(234, 179, 8, 0.18);
-    color: #eab308;
-    border: 1px solid rgba(234, 179, 8, 0.35);
-    flex-shrink: 0;
-    white-space: nowrap;
-}
-
 /* Installiert, aber DEAKTIVIERT – neutral gedämpft (dark/light + branding-sicher,
    nur --fg-rgb/--text-muted, keine harten Farben, kein Akzent) */
 .sk-item.sk-item-disabled {
@@ -6609,169 +6587,7 @@ body.light .kb-cl-spanne { color: #5b6678; }
     gap: 0.5rem;
 }
 
-.google-section-divider {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 1.25rem 0;
-}
 
-.gog-badge {
-    font-size: 0.62rem;
-    font-weight: 600;
-    padding: 0.1rem 0.4rem;
-    border-radius: 20px;
-    background: rgba(var(--accent-rgb),0.15);
-    border: 1px solid rgba(var(--accent-rgb),0.3);
-    color: var(--accent);
-    text-transform: none;
-    letter-spacing: 0;
-}
-
-/* ─── gog Setup-Formular ──────────────────────────────────────────── */
-
-.gog-setup-card {
-    flex-direction: column;
-    align-items: flex-start;
-}
-
-.gog-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
-    margin-top: 0.85rem;
-    width: 100%;
-}
-
-.gog-form-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.gog-label {
-    font-size: 0.78rem;
-    color: var(--text-secondary);
-    min-width: 100px;
-    flex-shrink: 0;
-}
-
-.gog-input {
-    flex: 1;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    font-size: 0.82rem;
-    padding: 0.35rem 0.6rem;
-    font-family: var(--font-mono);
-    transition: border-color 0.15s;
-    min-width: 0;
-}
-
-.gog-input:focus {
-    outline: none;
-    border-color: var(--accent);
-}
-
-.gog-input::placeholder {
-    color: var(--text-muted, rgba(var(--fg-rgb), 0.25));
-    font-style: italic;
-}
-
-/* Buttons */
-.gog-btn-row {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.4rem;
-    flex-wrap: wrap;
-}
-
-.gog-btn {
-    font-size: 0.8rem;
-    font-weight: 500;
-    padding: 0.4rem 0.9rem;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
-    background: var(--bg-glass);
-    color: var(--text-primary);
-}
-
-.gog-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-.gog-btn-primary {
-    border-color: rgba(var(--accent-rgb),0.4);
-    color: var(--accent);
-}
-
-.gog-btn-primary:hover:not(:disabled) {
-    background: rgba(var(--accent-rgb),0.12);
-    border-color: var(--accent);
-}
-
-.gog-btn-connect {
-    border-color: rgba(16,185,129,0.4);
-    color: #34d399;
-}
-
-.gog-btn-connect:hover:not(:disabled) {
-    background: rgba(16,185,129,0.1);
-    border-color: #10b981;
-}
-
-/* Status-Meldungen */
-.gog-status-msg {
-    font-size: 0.8rem;
-    padding: 0.4rem 0.6rem;
-    border-radius: var(--radius-sm);
-    margin-top: 0.2rem;
-}
-
-.gog-msg-info    { color: var(--text-secondary); }
-.gog-msg-success { color: #34d399; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); }
-.gog-msg-warn    { color: #fbbf24; background: rgba(245,158,11,0.08);  border: 1px solid rgba(245,158,11,0.2); }
-.gog-msg-error   { color: #f87171; background: rgba(239,68,68,0.08);   border: 1px solid rgba(239,68,68,0.2); }
-
-/* VNC-Hinweis-Box */
-.gog-vnc-hint {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    margin-top: 0.85rem;
-    padding: 0.75rem 1rem;
-    background: rgba(var(--accent-rgb),0.07);
-    border: 1px solid rgba(var(--accent-rgb),0.25);
-    border-radius: var(--radius-md);
-}
-
-.gog-vnc-icon {
-    font-size: 1.5rem;
-    flex-shrink: 0;
-    line-height: 1;
-}
-
-.gog-vnc-text {
-    font-size: 0.82rem;
-    color: var(--text-primary);
-    line-height: 1.5;
-}
-
-.gog-vnc-text a {
-    color: var(--accent);
-    text-decoration: none;
-}
-
-.gog-vnc-text a:hover { text-decoration: underline; }
-
-.gog-spinner {
-    font-size: 0.78rem;
-    color: var(--text-secondary);
-    margin-top: 0.4rem;
-}
 
 /* code in google-card-body generell */
 .google-card-body code {
@@ -6780,29 +6596,6 @@ body.light .kb-cl-spanne { color: #5b6678; }
     border-radius: 4px;
     font-size: 0.78rem;
     font-family: var(--font-mono);
-}
-
-/* Auth-Link Button (Remote Flow) */
-.gog-auth-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin: 0.6rem 0;
-    padding: 0.5rem 1.1rem;
-    background: rgba(16,185,129,0.1);
-    border: 1px solid rgba(16,185,129,0.35);
-    border-radius: var(--radius-md);
-    color: #34d399;
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-decoration: none;
-    transition: background 0.15s, border-color 0.15s;
-}
-
-.gog-auth-link:hover {
-    background: rgba(16,185,129,0.18);
-    border-color: #10b981;
-    text-decoration: none;
 }
 
 /* ─── Skill Info-Button ─────────────────────────────────────────── */
@@ -7111,11 +6904,11 @@ body.light .kb-cl-spanne { color: #5b6678; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   OpenClaw Marketplace Sektion
+   Aufklappbare Abschnitte (Skills, Protokolle und weitere Reiter)
    ═══════════════════════════════════════════════════════════════════ */
 /* Flaeche, Rahmen und Ecken wie .kb-section (2026-11-15): Skills und
    Protokolle sollen dieselben Container zeigen wie die uebrigen Reiter. */
-.sk-openclaw-section {
+.sk-sektion {
     margin-top: 0.75rem;
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -7126,13 +6919,13 @@ body.light .kb-cl-spanne { color: #5b6678; }
 /* Protokolle: die Kopfzeile ihrer Container (.kb-folder-header, eigentlich die
    Zeile eines Wissensordners) bekommt Abstand und Schrift der uebrigen
    Container-Koepfe statt der Ordnerpfad-Schrift (2026-11-15). */
-.sk-openclaw-section > .kb-folder-header { padding: 0.55rem 0.75rem 0.55rem 1rem; }
-.sk-openclaw-section > .kb-folder-header .kb-folder-path {
+.sk-sektion > .kb-folder-header { padding: 0.55rem 0.75rem 0.55rem 1rem; }
+.sk-sektion > .kb-folder-header .kb-folder-path {
     font-family: inherit;
     font-size: 0.95rem;
 }
 
-.sk-openclaw-header {
+.sk-sektion-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -7142,366 +6935,27 @@ body.light .kb-cl-spanne { color: #5b6678; }
     transition: background 0.15s;
 }
 
-.sk-openclaw-header:hover {
+.sk-sektion-header:hover {
     background: rgba(var(--fg-rgb), 0.04);
 }
 
-.sk-openclaw-title {
+.sk-sektion-title {
     font-size: 0.88rem;
     font-weight: 600;
     color: var(--text-primary, #e8e3ff);
 }
 
-.sk-openclaw-toggle {
+.sk-sektion-toggle {
     font-size: 0.7rem;
     color: var(--text-muted, rgba(var(--fg-rgb), 0.35));
 }
 
-.sk-openclaw-body {
+.sk-sektion-body {
     padding: 0.9rem 1rem 1rem;
     border-top: 1px solid var(--border, rgba(var(--fg-rgb), 0.08));
     display: flex;
     flex-direction: column;
     gap: 0.65rem;
-}
-
-/* LLM-Status-Badge */
-.sk-openclaw-llm-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.3rem 0.7rem;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    width: fit-content;
-}
-
-.sk-openclaw-llm-checking {
-    background: rgba(var(--fg-rgb), 0.06);
-    color: var(--text-secondary, rgba(var(--fg-rgb), 0.6));
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
-}
-
-.sk-openclaw-llm-local {
-    background: rgba(34,197,94,0.12);
-    color: #4ade80;
-    border: 1px solid rgba(34,197,94,0.25);
-}
-
-.sk-openclaw-llm-cloud {
-    background: rgba(234,179,8,0.1);
-    color: #fbbf24;
-    border: 1px solid rgba(234,179,8,0.2);
-}
-
-.sk-openclaw-hint {
-    font-size: 0.82rem;
-    color: var(--text-secondary, rgba(var(--fg-rgb), 0.55));
-    margin: 0;
-    line-height: 1.5;
-}
-
-.sk-openclaw-label {
-    font-size: 0.82rem;
-    color: var(--text-secondary, rgba(var(--fg-rgb), 0.65));
-    font-weight: 500;
-}
-
-.sk-openclaw-label small {
-    font-weight: 400;
-    color: var(--text-muted, rgba(var(--fg-rgb), 0.35));
-    margin-left: 0.3rem;
-}
-
-.sk-openclaw-textarea {
-    width: 100%;
-    padding: 0.5rem 0.7rem;
-    border-radius: 7px;
-    border: 1px solid var(--border, rgba(var(--fg-rgb), 0.12));
-    background: var(--bg-input, rgba(var(--fg-rgb), 0.05));
-    color: var(--text-primary, #e8e3ff);
-    font-size: 0.85rem;
-    font-family: inherit;
-    resize: vertical;
-    min-height: 52px;
-    transition: border-color 0.15s;
-    box-sizing: border-box;
-}
-
-.sk-openclaw-textarea:focus {
-    outline: none;
-    border-color: var(--accent, #7c6af7);
-}
-
-.sk-openclaw-btn {
-    align-self: flex-start;
-    padding: 0.45rem 1.1rem;
-    border-radius: 7px;
-    border: none;
-    background: var(--accent, #7c6af7);
-    color: #fff;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.15s, transform 0.1s;
-}
-
-.sk-openclaw-btn:hover:not(:disabled) {
-    opacity: 0.88;
-    transform: translateY(-1px);
-}
-
-.sk-openclaw-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-    transform: none;
-}
-
-/* ── OpenClaw Suchergebnisse ───────────────────────────────────── */
-.sk-oc-results {
-    margin-top: 0.8rem;
-    display: flex; flex-direction: column; gap: 0.5rem;
-}
-.sk-oc-loading, .sk-oc-empty {
-    padding: 1rem; text-align: center;
-    color: var(--text-secondary); font-size: 0.9rem;
-}
-.sk-oc-card {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0.6rem 0.8rem; gap: 0.8rem;
-    background: var(--bg-glass, rgba(var(--fg-rgb), 0.04));
-    border: 1px solid rgba(var(--fg-rgb), 0.08);
-    border-radius: 8px;
-    transition: border-color 0.2s;
-}
-.sk-oc-card:hover { border-color: var(--accent-primary, #7c6af7); }
-.sk-oc-card-info {
-    display: flex; flex-direction: column; gap: 0.15rem;
-    min-width: 0; flex: 1;
-}
-.sk-oc-card-info strong {
-    color: var(--text-primary); font-size: 0.95rem;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.sk-oc-card-desc {
-    color: var(--text-secondary); font-size: 0.8rem;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
-.sk-oc-card-meta {
-    color: var(--text-muted, #666); font-size: 0.75rem;
-}
-.sk-oc-import-btn {
-    flex-shrink: 0;
-    padding: 0.35rem 0.8rem; border-radius: 6px;
-    border: 1px solid var(--accent-primary, #7c6af7);
-    background: transparent; color: var(--accent-primary, #7c6af7);
-    font-size: 0.8rem; cursor: pointer;
-    transition: all 0.2s;
-}
-.sk-oc-import-btn:hover:not(:disabled) {
-    background: var(--accent-primary, #7c6af7); color: #fff;
-}
-.sk-oc-import-btn:disabled {
-    opacity: 0.4; cursor: not-allowed;
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   OpenClaw Import-Modal (Mini-Chat)
-   ═══════════════════════════════════════════════════════════════════ */
-#sk-import-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1100;
-    background: rgba(var(--shadow-rgb), 0.6);
-    backdrop-filter: blur(3px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.sk-import-panel {
-    width: min(520px, 92vw);
-    max-height: 82vh;
-    background: var(--bg-glass, rgba(20,18,40,0.97));
-    border: 1px solid var(--border, rgba(var(--fg-rgb), 0.12));
-    border-radius: 14px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 20px 60px rgba(var(--shadow-rgb), 0.5);
-    animation: sk-import-in 0.2s ease;
-}
-
-@keyframes sk-import-in {
-    from { opacity: 0; transform: scale(0.95) translateY(8px); }
-    to   { opacity: 1; transform: scale(1) translateY(0); }
-}
-
-.sk-import-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border, rgba(var(--fg-rgb), 0.08));
-    flex-shrink: 0;
-}
-
-.sk-import-title {
-    font-size: 0.92rem;
-    font-weight: 700;
-    color: var(--text-primary, #e8e3ff);
-}
-
-.sk-import-close {
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--text-muted, rgba(var(--fg-rgb), 0.4));
-    cursor: pointer;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.15s;
-}
-
-.sk-import-close:hover {
-    background: rgba(var(--fg-rgb), 0.08);
-    color: var(--text-primary, #e8e3ff);
-}
-
-/* Chat-Log */
-.sk-import-log {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0.75rem 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    min-height: 180px;
-    max-height: 45vh;
-}
-
-.sk-import-log::-webkit-scrollbar { width: 4px; }
-.sk-import-log::-webkit-scrollbar-track { background: transparent; }
-.sk-import-log::-webkit-scrollbar-thumb { background: rgba(var(--fg-rgb), 0.12); border-radius: 2px; }
-
-.sk-import-msg {
-    font-size: 0.83rem;
-    line-height: 1.55;
-    padding: 0.3rem 0.5rem;
-    border-radius: 6px;
-    word-break: break-word;
-}
-
-.sk-import-msg-agent {
-    color: var(--text-primary, #e8e3ff);
-    background: rgba(124,106,247,0.08);
-    border-left: 2px solid var(--accent, #7c6af7);
-    padding-left: 0.6rem;
-}
-
-.sk-import-msg-user {
-    color: var(--text-primary, #e8e3ff);
-    background: rgba(var(--fg-rgb), 0.05);
-    border-left: 2px solid rgba(var(--fg-rgb), 0.2);
-    padding-left: 0.6rem;
-    text-align: right;
-    border-left: none;
-    border-right: 2px solid rgba(var(--fg-rgb), 0.25);
-    padding-right: 0.6rem;
-}
-
-.sk-import-msg-tool {
-    color: var(--text-secondary, rgba(var(--fg-rgb), 0.55));
-    font-size: 0.78rem;
-    font-family: monospace;
-    background: rgba(var(--fg-rgb), 0.06);
-}
-
-.sk-import-msg-sys {
-    color: var(--text-muted, rgba(var(--fg-rgb), 0.38));
-    font-size: 0.77rem;
-    font-style: italic;
-}
-
-.sk-import-msg-info {
-    color: var(--text-muted, rgba(var(--fg-rgb), 0.45));
-    font-size: 0.8rem;
-    font-style: italic;
-    text-align: center;
-}
-
-.sk-import-msg-error {
-    color: #f87171;
-    background: rgba(248,113,113,0.08);
-    border-left: 2px solid rgba(248,113,113,0.4);
-    padding-left: 0.6rem;
-}
-
-/* Input-Zeile */
-.sk-import-input-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: flex-end;
-    padding: 0.6rem 0.75rem;
-    border-top: 1px solid var(--border, rgba(var(--fg-rgb), 0.08));
-    flex-shrink: 0;
-}
-
-.sk-import-input {
-    flex: 1;
-    padding: 0.45rem 0.65rem;
-    border-radius: 7px;
-    border: 1px solid var(--border, rgba(var(--fg-rgb), 0.12));
-    background: var(--bg-input, rgba(var(--fg-rgb), 0.05));
-    color: var(--text-primary, #e8e3ff);
-    font-size: 0.83rem;
-    font-family: inherit;
-    resize: none;
-    transition: border-color 0.15s;
-}
-
-.sk-import-input:focus {
-    outline: none;
-    border-color: var(--accent, #7c6af7);
-}
-
-.sk-import-send-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 7px;
-    border: none;
-    background: var(--accent, #7c6af7);
-    color: #fff;
-    cursor: pointer;
-    font-size: 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    transition: opacity 0.15s;
-}
-
-.sk-import-send-btn:hover {
-    opacity: 0.85;
-}
-
-/* Footer-Buttons */
-.sk-import-footer {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0.55rem 0.75rem;
-    border-top: 1px solid var(--border, rgba(var(--fg-rgb), 0.06));
-    flex-shrink: 0;
-}
-
-.sk-import-footer-btn {
-    font-size: 0.8rem;
-    padding: 0.35rem 0.75rem;
 }
 
 /* ═══════════════════════════════════════════════════════════════════

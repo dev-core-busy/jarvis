@@ -420,7 +420,7 @@
             if (!karte) return;
             var kopfEl = karte.querySelector('.kb-collapse-header');
             var rumpf = karte.querySelector('.kb-collapse-body');
-            var tog = karte.querySelector('.sk-openclaw-toggle');
+            var tog = karte.querySelector('.sk-sektion-toggle');
             if (!kopfEl || !rumpf) return;
             var zu = rumpf.style.display !== 'none';
             rumpf.style.display = zu ? 'none' : '';
@@ -476,7 +476,7 @@
                     + ' role="button" tabindex="0" aria-expanded="' + (zu ? 'false' : 'true') + '">'
                     + '<h3 class="sqadm-titel">' + esc(s.name || t('sqladm.new_schema', 'Neues Schema')) + '</h3>'
                     + '<span class="sqadm-kopf-re"><span class="sqadm-kopfinfo"></span>'
-                    + '<span class="sk-openclaw-toggle">' + (zu ? '▶' : '▼') + '</span></span></div>';
+                    + '<span class="sk-sektion-toggle">' + (zu ? '▶' : '▼') + '</span></span></div>';
                 var nameHtml = '<div class="sqadm-kopf">'
                     + '<input data-tabfill-nein="Beschreibung dessen, was hineingehoert – kein Wert" type="text" class="config-input sqadm-name" maxlength="80" autocomplete="off" value="'
                     + esc(s.name) + '" placeholder="' + esc(t('sqladm.name_ph', 'Name, z. B. ERP-Datenbank')) + '"'

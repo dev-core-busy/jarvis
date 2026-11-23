@@ -167,7 +167,7 @@ async function oeffne(d, name) {
            'Ausnahme: Kennung unter Details, nicht unter Paket');
 
     abschnitt('7. Kein Loeschweg');
-    pruefe(namen.every((n) => !d.querySelector('[data-plog="' + n + '"]').closest('.sk-openclaw-section')
+    pruefe(namen.every((n) => !d.querySelector('[data-plog="' + n + '"]').closest('.sk-sektion')
         .querySelector('.jv-ico-trash, .is-danger')), 'kein Muelleimer in den neuen Abschnitten');
 
     abschnitt('8. Sprachwechsel');

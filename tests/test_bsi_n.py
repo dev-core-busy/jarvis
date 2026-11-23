@@ -748,7 +748,9 @@ NS4 = {
     "_sitzung_kontext": contextvars.ContextVar("_sk", default=None),
     "_is_admin_user": lambda u: False, "_konto_ist_admin": lambda u: False,
     "_validate_password_strength": lambda pw, u: [],
-    "_DOCKER_MODE": True,
+    # Kennwortwechsel setzt das Linux-Kennwort (chpasswd) – hier eine Attrappe
+    # mit der echten Signatur (benutzer, kennwort) -> bool.
+    "_change_linux_password": lambda u, pw: True,
     "_load_auth_state": lambda: {}, "_save_auth_state": lambda s: None,
     # seit 2026-11-01: Kennwortwechsel schreibt gesperrt (echte Signatur: aenderung(state))
     "_AUTH_STATE_LOCK": __import__("threading").RLock(),
@@ -757,8 +759,8 @@ NS4 = {
     "_totp_vormerken": lambda u: {"secret": "S", "qr_code": "q", "uri": "u"},
     # BSI H4: Token-Antworten laufen ueber _sitzung_antwort – mit dem ECHTEN Modul
     "_sitzung_cookie": __import__("backend.sitzung_cookie", fromlist=["x"]),
-    # Docker-Kennwortwechsel hasht ueber main._standard_zugang (Modul-Import in main.py)
-    # – das ECHTE Modul, keine Attrappe: es hat keine Abhaengigkeiten auf Modulebene
+    # main._standard_zugang (Modul-Import in main.py) – das ECHTE Modul, keine
+    # Attrappe: es hat keine Abhaengigkeiten auf Modulebene
     "_standard_zugang": __import__("backend.standard_zugang", fromlist=["x"]),
 }
 NS4.setdefault("_json_objekt", _json_objekt_aus_main(NS4.get("HTTPException")))
@@ -839,8 +841,7 @@ def _befehl(datei, anfang):
 
 
 for datei, anfang in (("start_jarvis.sh", r"exec \./venv/bin/python -m uvicorn "),
-                      ("run.sh", r"python -m uvicorn "),
-                      ("docker/entrypoint.sh", r"exec /venv/bin/uvicorn ")):
+                      ("run.sh", r"python -m uvicorn ")):
     b = _befehl(datei, anfang)
     check("%s: uvicorn-Aufruf gefunden" % datei, b is not None)
     if b:

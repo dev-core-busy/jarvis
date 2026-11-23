@@ -74,16 +74,6 @@ PROBEN = [
          "        have.append(vid)\n",
          "        if len(eigen) >= MAX_JE_BENUTZER:\n            geaendert = True\n"
          "            continue\n        have.append(vid)\n")]),
-    ("[2] gemeinsame Temp-Datei + replace", [
-        ("backend/license.py",
-         '        tmp = INSTANZ_FILE.with_name("%s.%s.tmp" % (INSTANZ_FILE.name, neu[:8]))\n'
-         "        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n",
-         '        tmp = INSTANZ_FILE.with_suffix(".tmp")\n'
-         "        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)\n"),
-        ("backend/license.py",
-         "        try:\n            os.link(tmp, INSTANZ_FILE)\n        except FileExistsError:",
-         "        try:\n            os.replace(tmp, INSTANZ_FILE); tmp = None\n"
-         "        except FileExistsError:")]),
     ("[3] Nicht-Strings wieder still verworfen", [
         ("backend/main.py",
          "    if any(not isinstance(g, str) for g in groups):\n",

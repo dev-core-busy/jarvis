@@ -11,7 +11,6 @@
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)](https://github.com/dev-core-busy/jarvis/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey?logo=linux)](https://www.linux.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen)](https://github.com/dev-core-busy/jarvis/pulls)
-[![OpenClaw Compatible](https://img.shields.io/badge/OpenClaw-Compatible-6366f1)](https://github.com/dev-core-busy/jarvis#openclaw-skill-ecosystem)
 
 *Control your Linux desktop with natural language. Receive tasks via WhatsApp. Search your knowledge base. Automate everything.*
 
@@ -200,7 +199,7 @@ Send Jarvis a voice note or text message on WhatsApp, get a response back. Voice
 Drop PDFs, DOCX files, or plain text into watched folders. Jarvis indexes them into a **FAISS** index (`multilingual-e5-small`, 384-dim, cosine) and answers with a **hybrid search**: two semantic channels plus a lexical **BM25** channel, fused by Reciprocal Rank Fusion. Pure embeddings are structurally weak on exact identifiers such as error codes or `@STR_UCASE`; BM25 covers exactly that. Multi-folder support, incremental re-indexing on file changes, crash-safe resume, and a TF-IDF fallback when no vector stack is available.
 
 ### 🧩 Modular Skill System
-Skills are self-contained Python packages that extend Jarvis with new capabilities. Install, enable, disable, and configure them through the UI without touching config files. Compatible with [OpenClaw](https://github.com/steipete/gogcli) skills.
+Skills are self-contained Python packages that extend Jarvis with new capabilities. Install, enable, disable, and configure them through the UI without touching config files.
 
 ### 👁️ Vision & Face Recognition
 The optional **Vision Skill** adds real-time face recognition via dlib/face_recognition. Define per-person actions (webhook, LLM prompt, log-only) with configurable cooldown and tolerance. Works with USB cameras or IP cameras.
@@ -222,7 +221,7 @@ Built to be opened to a whole team — every restriction is **enforced in code**
 - Session in an HttpOnly cookie with CSRF token; maximum lifetime (default 12 h) and idle timeout (default 120 min), revocable per session
 
 ### 🌐 Google Workspace Integration
-Manage Gmail, Google Calendar, and Google Drive through natural language commands — powered by the openclaw/gog CLI.
+Manage Gmail, Google Calendar, and Google Drive through natural language commands — via the official Google APIs.
 
 ### 🤖 Browser Automation
 Full browser control via CDP (Chrome DevTools Protocol) and xdotool. The agent can navigate websites, fill forms, click elements, and extract information.
@@ -485,7 +484,6 @@ OLLAMA_BASE_URL=http://localhost:11434
 
 # ── Authentication ──────────────────────────────────────────────
 JARVIS_USERNAME=jarvis
-JARVIS_PASSWORD=                # Docker only; empty = random initial password (docker logs), change enforced at first login
 SECRET_KEY=                     # leave empty: a random key is generated into data/.secret_key
 
 # ── WhatsApp ────────────────────────────────────────────────────
@@ -667,31 +665,6 @@ Beyond skills, the backend also exposes an **MCP client** (`backend/mcp_client.p
 
 1. Place the skill folder under `skills/`
 2. Enable in the web UI under Settings → Skills (hot-reload, no restart needed)
-
----
-
-## 🔌 OpenClaw Skill Ecosystem
-
-> **Jarvis is fully compatible with the [OpenClaw](https://github.com/steipete/gogcli) skill format.**
-
-OpenClaw is a growing ecosystem of AI agent skills. Jarvis can import any OpenClaw skill package directly.
-
-### Built-in OpenClaw Skills
-
-| Skill | Description |
-|---|---|
-| `openclaw_gmail` | Full Gmail integration via gog CLI (send, read, search, manage) |
-| `agent_orchestrator` | Orchestrate multiple sub-agents for complex parallel tasks |
-| `agent_autonomy_kit` | Heartbeat monitoring, task queuing, autonomous operation |
-
-### Importing an OpenClaw Skill
-
-```bash
-# Drop it into the skills/ directory
-cp -r my_openclaw_skill/ skills/
-
-# Enable in UI: Settings → Skills → toggle ON
-```
 
 ---
 
@@ -1199,7 +1172,6 @@ Jarvis is built on the shoulders of excellent open-source projects:
 | noVNC | MPL-2.0 | https://github.com/novnc/noVNC |
 | websockify | LGPL-3.0 | https://github.com/novnc/websockify |
 | xdotool | MIT | https://github.com/jordansissel/xdotool |
-| openclaw/gog CLI | MIT | https://github.com/steipete/gogcli |
 | Openbox | GPL-2.0 | http://openbox.org |
 | x11vnc | GPL-2.0 | https://github.com/LibVNC/x11vnc |
 

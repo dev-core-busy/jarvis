@@ -1,9 +1,8 @@
 /* UI-Waechter: Fremdtext in Admin-Oberflaechen bleibt TEXT (Pentest-Vorbereitung 2026-11-05).
  *
  * Befund D6: skills.js setzte Name, Beschreibung, Kategorie, Hilfetexte und
- * Werkzeugnamen aus Skill-Manifesten roh in innerHTML – Manifeste kommen auch
- * aus OpenClaw-Importen, also aus Fremdquellen. Ebenso die Treffer der
- * OpenClaw-Suche und die Agenten-Meldungen im Import-Dialog. knowledge.js
+ * Werkzeugnamen aus Skill-Manifesten roh in innerHTML – Manifeste koennen aus
+ * Fremdquellen stammen (damals auch aus einem Skill-Markt). knowledge.js
  * setzte den Dateinamen im Datei-Ansichtsfenster roh (Quelle: Dateinamen der
  * Wissensdatenbank, kbmatrix.js). cron.js die Ereignisnamen eines Waechters.
  *

@@ -155,7 +155,7 @@ Wer über Tailscale administriert, nimmt `100.64.0.0/10` mit auf.
 - **Sicherheits-CI** `.github/workflows/sicherheit.yml` (Push, PR, wöchentlich):
   Wächter-Sammellauf (`tests/ci_lauf.py`), `pip-audit`, `npm audit` der Bridge,
   CycloneDX-SBOM (Python + npm, als Artefakt), `bandit` (nur hoch/hoch), `gitleaks`
-  über die ganze Historie. Dazu `.github/dependabot.yml` (pip, npm, Actions, Docker).
+  über die ganze Historie. Dazu `.github/dependabot.yml` (pip, npm, Actions, Go).
 - **Ausnahmen sind Dateien mit Grund**, keine Schalter: `tests/ci_ausnahmen.txt`
   (Wächter, die beim Einrichten schon rot waren – ein Rückstand, kein Freibrief),
   `deploy/security/pip_audit_ausnahmen.txt` (mit Prüfdatum; danach wird die CI rot),
@@ -213,9 +213,8 @@ heißt: alle Kennwörter, Tokens und LLM-Schlüssel neu eintragen.
 **Umzug:** Datei nach `/etc/jarvis/geheimnis.key` (root, 0600) kopieren, **bevor** der
 Broker auf dem neuen Server zum ersten Mal startet – sonst legt er einen neuen an.
 
-**Ohne Hauptschlüssel** (Docker ohne systemd, Entwicklungsrechner) bleibt alles wie vor
-M5 (Klartext bzw. rohe Schlüsseldatei). Docker: `JARVIS_GEHEIMNIS_DATEI` auf eine
-eingehängte Schlüsseldatei zeigen lassen. Bereits verpackte Werte gehen ohne Schlüssel
+**Ohne Hauptschlüssel** (Entwicklungsrechner) bleibt alles wie vor
+M5 (Klartext bzw. rohe Schlüsseldatei). Bereits verpackte Werte gehen ohne Schlüssel
 nicht verloren – sie bleiben verpackt stehen und sind nur nicht benutzbar.
 
 **Anzeigen** eines gespeicherten Geheimnisses (Auge am Feld) verlangt eine erneute

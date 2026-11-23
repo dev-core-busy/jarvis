@@ -154,7 +154,6 @@ async function webhookProbe() {
     check(!erg && fehler, 'fremdes Zertifikat: abgewiesen', erg && JSON.stringify(erg));
     check(b.gesehen.length === 0, '... und das Geheimnis ging NICHT hinaus');
     b.srv.close();
-    check(!/NODE_TLS_REJECT_UNAUTHORIZED=0/.test(fs.readFileSync(path.join(W, 'docker/entrypoint.sh'), 'utf8')
-        .split('\n').filter(z => !z.trim().startsWith('#')).join('\n')),
-          'docker/entrypoint.sh schaltet die TLS-Pruefung nicht mehr prozessweit ab');
+    // NODE_TLS_REJECT_UNAUTHORIZED=0 in Startskripten prueft test_bsi_m12.py
+    // (deploy/*.sh, *.sh im Wurzelverzeichnis).
 }

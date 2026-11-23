@@ -31,8 +31,6 @@ FW = "deploy/security/firewall.sh"
 HI = "deploy/security/haertung_installieren.sh"
 NODE = "deploy/security/node_aktualisieren.sh"
 SJR = "start_jarvis_root.sh"
-DF = "Dockerfile"
-BDF = "services/whatsapp-bridge/Dockerfile"
 INST = "docs/install.sh"
 WF = ".github/workflows/sicherheit.yml"
 DB = ".github/dependabot.yml"
@@ -110,14 +108,6 @@ PROBEN = [
     ("ungueltiges Netz still verworfen", FW,
      '            *)    echo "SSH_NETZE ungueltig: $zeile" >&2; exit 1 ;;\n', '            *)    ;;\n'),
     # ── M6: Node ──
-    ("Dockerfile wieder per setup-Skript in die Shell", DF,
-     '    && JARVIS_DIR=/nicht-vorhanden bash /tmp/node_aktualisieren.sh \\\n',
-     '    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\\n'),
-    ("Dockerfile kopiert das Skript, fuehrt es aber nicht aus", DF,
-     '    && JARVIS_DIR=/nicht-vorhanden bash /tmp/node_aktualisieren.sh \\\n',
-     '    && true \\\n'),
-    ("Dockerfile zurueck auf bookworm", DF, 'FROM debian:trixie-slim\n', 'FROM debian:bookworm-slim\n'),
-    ("Bridge-Image zurueck auf node:20", BDF, 'FROM node:24-slim\n', 'FROM node:20-slim\n'),
     ("install.sh zurueck auf Node 20 (rpm)", INST,
      '            curl -fsSL https://rpm.nodesource.com/setup_24.x | $SUDO bash - >/dev/null 2>&1\n',
      '            curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO bash - >/dev/null 2>&1\n'),
@@ -288,6 +278,8 @@ PROBEN = [
     ("go.mod ohne toolchain-Zeile", GOMOD, '\ntoolchain go1.27.4\n', '\n'),
     ("kein Pull-Request-Ausloeser", WF,
      '  pull_request:\n    branches: [master]\n', ''),
+    ("Dependabot ohne Go-Oekosystem", DB,
+     "  - package-ecosystem: gomod\n", "  - package-ecosystem: cargo\n"),
     ("Dependabot ohne numpy-Grenze", DB,
      "      - dependency-name: numpy\n        versions: ['>=2.1']\n", ''),
     ("pip-audit-Ausnahme ohne Grund erlaubt", PA,
@@ -323,7 +315,7 @@ PROBEN = [
     ("mcp ohne Untergrenze", REQ, _MCP_ZEILE, 'mcp>=1.5.0,<2\n'),
 ]
 
-DATEIEN = [SSH, FW, HI, NODE, SJR, DF, BDF, INST, WF, DB, PA, CI, REQ, GOMOD, AGR, GWP, "backend/main.py", "tests/test_bsi_m6_m7.py"]
+DATEIEN = [SSH, FW, HI, NODE, SJR, INST, WF, DB, PA, CI, REQ, GOMOD, AGR, GWP, "backend/main.py", "tests/test_bsi_m6_m7.py"]
 
 
 def md5(pfad: str) -> str:

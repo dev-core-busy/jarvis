@@ -2,7 +2,7 @@
     "name": "Agent Autonomy Kit",
     "description": "Proaktives Aufgaben-Management via QUEUE.md (High/Medium/Low-Priorität, Ready/InProgress/Blocked/Done) und tägliche Aktivitätslogs. Ermöglicht dem Agenten selbstständiges Arbeiten ohne Nutzer-Prompts.",
     "version": "1.0.0",
-    "author": "ryancampbell (via OpenClaw, Wrapper: Jarvis)",
+    "author": "ryancampbell (Wrapper: Jarvis)",
     "module": "main",
     "tools": [
         "queue_add",
@@ -13,7 +13,6 @@
     ],
     "category": "automation",
     "icon": "brain",
-    "source": "openclaw",
     "system": false,
     "enabled": false,
     "config_schema": {

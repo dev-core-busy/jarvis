@@ -213,10 +213,10 @@ check("(Positivkontrolle) Kommentarfilter laesst echten Code stehen",
 nfunde = [str(p.relative_to(ROOT)) for p in node
           if re.search(_NODE_MUSTER, _ohne_kommentare_js(p.read_text(encoding="utf-8", errors="replace")))]
 check("Node: kein rejectUnauthorized:false (%d Dateien)" % len(node), not nfunde, nfunde)
-# Startskripte, die Node-Prozesse starten (Code-Review 2026-10-18: docker/
-# entrypoint.sh setzte NODE_TLS_REJECT_UNAUTHORIZED=0 fuer die ganze Bridge –
+# Startskripte, die Node-Prozesse starten (Code-Review 2026-10-18: ein
+# Startskript setzte NODE_TLS_REJECT_UNAUTHORIZED=0 fuer die ganze Bridge –
 # der Geltungsbereich oben sah nur *.js). Kommentarzeilen zaehlen nicht.
-skripte = [p for d in ("docker", "deploy") for p in (ROOT / d).rglob("*.sh")] + \
+skripte = [p for p in (ROOT / "deploy").rglob("*.sh")] + \
           [p for p in ROOT.glob("*.sh")]
 if len(skripte) < 3:
     abbruch("nur %d Startskripte gefunden" % len(skripte))
@@ -225,23 +225,6 @@ sfunde = [str(p.relative_to(ROOT)) for p in skripte
                  for z in p.read_text(encoding="utf-8", errors="replace").splitlines()
                  if not z.lstrip().startswith("#"))]
 check("Skripte: kein NODE_TLS_REJECT_UNAUTHORIZED=0 (%d Dateien)" % len(skripte), not sfunde, sfunde)
-# Compose-Dateien (2026-10-29): die docker-compose.yml im Wurzelverzeichnis
-# setzte den Wert als environment-Eintrag weiter, nachdem er aus entrypoint.sh
-# entfernt war – der Container erbte ihn trotzdem. YAML-Form "KEY: 0" und
-# Listenform "KEY=0" zaehlen beide.
-_COMPOSE_MUSTER = r"NODE_TLS_REJECT_UNAUTHORIZED['\"]?\s*[:=]\s*['\"]?0"
-compose = sorted(set(ROOT.glob("*compose*.y*ml")) | set((ROOT / "docs").rglob("*compose*.y*ml")))
-if len(compose) < 2:
-    abbruch("nur %d Compose-Dateien gefunden" % len(compose))
-check("(Positivkontrolle) Compose-Muster trifft beide Schreibweisen",
-      all(re.search(_COMPOSE_MUSTER, z) for z in
-          ('      NODE_TLS_REJECT_UNAUTHORIZED: "0"', "      - NODE_TLS_REJECT_UNAUTHORIZED=0"))
-      and not re.search(_COMPOSE_MUSTER, '      NODE_TLS_REJECT_UNAUTHORIZED: "1"'))
-cfunde = [str(p.relative_to(ROOT)) for p in compose
-          if any(re.search(_COMPOSE_MUSTER, z)
-                 for z in p.read_text(encoding="utf-8", errors="replace").splitlines()
-                 if not z.lstrip().startswith("#"))]
-check("Compose: kein NODE_TLS_REJECT_UNAUTHORIZED=0 (%d Dateien)" % len(compose), not cfunde, cfunde)
 
 # ═════════════════════════════════════════════════════════════════════════════
 print("\n[B] Trigger-Webhook")

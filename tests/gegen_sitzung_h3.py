@@ -77,11 +77,11 @@ PROBEN = [
     ("Ersatz-Token in derselben Sekunde wie die Epoche", H3, MAIN,
      "    return generate_token(username, ts=rev + 1, mit_2fa=mit_2fa, ohne_admin=ohne_admin)\n",
      "    return generate_token(username, ts=rev, mit_2fa=mit_2fa, ohne_admin=ohne_admin)\n"),
-    ("Docker-Zweig ohne Ersatz-Token", H3, MAIN,
-     "        print(f\"[AUTH] Docker-Kennwort für '{username}' erfolgreich geändert.\", flush=True)\n"
-     "        return _sitzung_antwort(request, {\"success\": True, \"token\": _sitzungen_nach_kennwortwechsel(username, request)})\n",
-     "        print(f\"[AUTH] Docker-Kennwort für '{username}' erfolgreich geändert.\", flush=True)\n"
-     "        return _sitzung_antwort(request, {\"success\": True})\n"),
+    ("Kennwortwechsel ohne Ersatz-Token", H3, MAIN,
+     "    print(f\"[AUTH] Kennwort für '{username}' erfolgreich geändert.\", flush=True)\n"
+     "    return _sitzung_antwort(request, {\"success\": True, \"token\": _sitzungen_nach_kennwortwechsel(username, request)})\n",
+     "    print(f\"[AUTH] Kennwort für '{username}' erfolgreich geändert.\", flush=True)\n"
+     "    return _sitzung_antwort(request, {\"success\": True})\n"),
     ("AD-Login hebt den Widerruf wieder auf", H3, MAIN,
      "                    print(f\"[AUTH] AD-Login erfolgreich: {bind_user}\", flush=True)\n",
      "                    if _revoked_logins.pop(plain_key, None) is not None:\n"

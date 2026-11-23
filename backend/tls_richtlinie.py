@@ -15,7 +15,7 @@ Nebenwirkung, gewollt: jede dieser Suites setzt TLS 1.2 voraus. Ein TLS-1.0/1.1-
 Handshake findet damit keine gemeinsame Suite – unabhaengig davon, welche
 Mindestversion die OpenSSL-Konfiguration des Systems vorgibt.
 
-EINE Quelle: ``start_jarvis.sh`` und ``docker/entrypoint.sh`` tragen denselben
+EINE Quelle: ``start_jarvis.sh`` traegt denselben
 Ausdruck als Text (eine Shell kann ihn nicht importieren);
 ``tests/test_bsi_tls.py`` prueft die Gleichheit an allen Startstellen.
 

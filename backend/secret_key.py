@@ -122,8 +122,8 @@ def nur_lesen(env_wert: str, datei: Path) -> str | None:
 
 
 def _hauptfernet():
-    """Hauptschluessel (BSI M5) – None ohne ihn (Entwicklungsrechner, Docker
-    ohne Datei, Prozess ausserhalb des Dienstes)."""
+    """Hauptschluessel (BSI M5) – None ohne ihn (Entwicklungsrechner,
+    Prozess ausserhalb des Dienstes)."""
     try:
         from backend import geheimnis_tresor as _t
         return _t.hauptfernet()

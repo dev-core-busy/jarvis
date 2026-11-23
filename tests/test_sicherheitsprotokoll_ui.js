@@ -187,7 +187,7 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 60));
     pruefe(sel.value === 'anmeldung', 'Auswahl bleibt nach dem Neuzeichnen stehen');
 
     abschnitt('3. Kein Loeschweg');
-    const sektion = kopf.closest('.sk-openclaw-section');
+    const sektion = kopf.closest('.sk-sektion');
     pruefe(!sektion.querySelector('.jv-ico-trash, .is-danger'), 'kein Muelleimer / kein Gefahrenknopf im Abschnitt');
     pruefe(!rufe.some((r) => r.url.startsWith('/api/security/log') && r.methode !== 'GET'), 'nur GET-Aufrufe');
 

@@ -1,4 +1,4 @@
-# ── LOCK-DATEI (2026-10-21): Docker und Sicherheits-CI installieren NICHT aus
+# ── LOCK-DATEI (2026-10-21): die Sicherheits-CI installiert NICHT aus
 # dieser Datei, sondern aus requirements.lock (exakte Versionen + Hashes,
 # --require-hashes). Diese Datei bleibt die QUELLE: wer hier eine Grenze oder ein
 # Paket aendert, erzeugt die Lock neu – python3 deploy/lock_erneuern.py (uv
@@ -126,7 +126,7 @@ setuptools>=84.1.0
 # (2.13.0 seit 2026-10-29: behebt CVE-2025-3000, auf der DEV-VM ohne SSE4.2/AVX
 # geprueft. Vorher 2.12.0 = Stand von ECHT seit 2026-10-21 – sonst stufte der
 # Lock-Modus ECHT auf 2.10 herab. Die Fassung hier ist die EINE Quelle:
-# lock_erneuern.py und das Dockerfile lesen sie.)
+# lock_erneuern.py liest sie.)
 # sentence-transformers zieht sonst das CUDA-Rad und damit 18 proprietaere
 # NVIDIA-Pakete (~6 GB) auf eine VM OHNE GPU – torch.cuda.is_available() ist hier
 # False, sie werden nie geladen. Nachgemessen 2026-07-31: venv 8,4 GB -> 2,4 GB.

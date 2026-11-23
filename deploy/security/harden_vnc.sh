@@ -72,7 +72,7 @@ for f in "${DATEIEN[@]}"; do
         fi
         # `-localhost` direkt hinter `x11vnc` einfuegen: die Option gilt
         # unabhaengig von der Reihenfolge, und so wird kein Argument zerlegt,
-        # das ueber Zeilenumbrueche fortgesetzt wird (docker/entrypoint.sh).
+        # das ueber Zeilenumbrueche fortgesetzt wird.
         sed -i "${nr}s/x11vnc /x11vnc -localhost /" "$f"
         geaendert=$((geaendert + 1))
         echo "  ergaenzt  $f:$nr"

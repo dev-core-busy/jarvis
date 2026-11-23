@@ -1,6 +1,6 @@
 # Sicherheits-CI (BSI M6): Waechter, Abhaengigkeits-Audit, SBOM, SAST, Secret-Scan.
 #
-# Vorher lief in der CI nur der Docker-Bau – keine Tests, kein pip-audit/npm audit,
+# Vorher lief in der CI nur ein Image-Bau – keine Tests, kein pip-audit/npm audit,
 # keine SBOM, kein Secret-Scanning (BSI-Abgleich ECHT, 2026-09-29).
 #
 # Ausnahmen sind DATEIEN im Repo, nicht Schalter in diesem Workflow – jede mit Grund:

@@ -24,7 +24,7 @@ Erlaubt sind die Namen, unter denen der Server tatsaechlich erreichbar ist:
 
 * ``auto`` (Vorgabe): abweisen, wenn das Server-Zertifikat von einer CA stammt
   (dann sind die Namen festgelegt, wie auf ECHT); bei einem selbst signierten
-  oder unlesbaren Zertifikat (DEV, Docker, Erstinstallation) nur melden – dort
+  oder unlesbaren Zertifikat (DEV, Erstinstallation) nur melden – dort
   greift man oft ueber eine Adresse zu, die der Server nicht von sich kennt,
   und ein Abweisen sperrte die Installation aus.
 * ``erzwingen``: immer abweisen. ``melden``: nie abweisen, nur protokollieren.

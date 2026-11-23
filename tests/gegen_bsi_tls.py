@@ -29,7 +29,6 @@ ROOT = Path(__file__).resolve().parent.parent
 WAECHTER = ROOT / "tests" / "test_bsi_tls.py"
 RL = "backend/tls_richtlinie.py"
 START = "start_jarvis.sh"
-DOCKER = "docker/entrypoint.sh"
 RUNSH = "run.sh"
 MAIN = "backend/main.py"
 RUNPY = "run_jarvis.py"
@@ -56,8 +55,6 @@ PROBEN = [
     ("start_jarvis.sh mit abweichender Liste", START,
      "    --ssl-ciphers %s \\\n" % SUITES,
      "    --ssl-ciphers 'ECDHE-RSA-AES256-GCM-SHA384' \\\n"),
-    ("docker/entrypoint.sh ohne --ssl-ciphers", DOCKER,
-     "    --ssl-ciphers %s \\\n" % SUITES, ''),
     ("run.sh ohne --ssl-ciphers", RUNSH,
      " --ssl-ciphers %s --no-server-header" % SUITES, " --no-server-header"),
     ("main.py uvicorn.run ohne ssl_ciphers", MAIN,
@@ -78,8 +75,6 @@ PROBEN = [
      '        os.environ.pop("OPENSSL_CONF", None)\n', ''),
     ("start_jarvis.sh ohne OPENSSL_CONF", START,
      '[ -r ./backend/openssl_tls.cnf ] && [ -r /etc/ssl/openssl.cnf ] && export OPENSSL_CONF="$JARVIS_DIR/backend/openssl_tls.cnf"\n', ''),
-    ("docker/entrypoint.sh ohne OPENSSL_CONF", DOCKER,
-     '[ -r /app/backend/openssl_tls.cnf ] && [ -r /etc/ssl/openssl.cnf ] && export OPENSSL_CONF="/app/backend/openssl_tls.cnf"\n', ''),
     ("run.sh ohne OPENSSL_CONF", RUNSH,
      '[ -r ./backend/openssl_tls.cnf ] && [ -r /etc/ssl/openssl.cnf ] && export OPENSSL_CONF="$SCRIPT_DIR/backend/openssl_tls.cnf"\n', ''),
     ("run_jarvis.py ohne konfig_fuer_start", RUNPY,
@@ -90,7 +85,7 @@ PROBEN = [
      "if _tls_richtlinie.konfig_uebernehmen():\n", "if True:\n"),
 ]
 
-DATEIEN = [RL, START, DOCKER, RUNSH, MAIN, RUNPY, CNF, "tests/test_bsi_tls.py"]
+DATEIEN = [RL, START, RUNSH, MAIN, RUNPY, CNF, "tests/test_bsi_tls.py"]
 
 
 def md5(pfad: str) -> str:

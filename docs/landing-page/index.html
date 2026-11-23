@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="favicon.png">
     <title>Jarvis – Selbst gehosteter KI-Chatbot für Linux, autonom per Skill</title>
-    <meta name="description" content="Jarvis ist ein selbst gehosteter KI-Chatbot mit enormem Funktionsumfang für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, E-Mail-Regeln für Exchange samt Outlook-Add-in, RAG-Wissensdatenbank mit Wissensgraph, Sicherheitslücken-Prüfung und das OpenClaw Skill-Ökosystem. Autonom arbeitet er erst mit dem Skill Agent Autonomy Kit. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
+    <meta name="description" content="Jarvis ist ein selbst gehosteter KI-Chatbot mit enormem Funktionsumfang für Linux – Desktop-Steuerung via VNC, Multi-LLM (Gemini, Claude, Ollama), WhatsApp-Integration, E-Mail-Regeln für Exchange samt Outlook-Add-in, RAG-Wissensdatenbank mit Wissensgraph und Sicherheitslücken-Prüfung. Autonom arbeitet er erst mit dem Skill Agent Autonomy Kit. Selbst gehostet und datenschutzfreundlich: OCR, Sprachtranskription, Embeddings und Gesichtserkennung laufen lokal; mit lokalem Modell bleibt alles offline.">
     <meta name="keywords" content="AI chatbot, KI-Chatbot, AI Agent, KI Agent, autonomous agent, desktop automation, LLM, Gemini, Claude, Anthropic, OpenAI, Ollama, RAG, WhatsApp Bot, Python, FastAPI, Linux, self-hosted, VNC, multi-agent, skill system, chatbot, voice assistant, Elastic License 2.0, jarvis, knowledge graph, GraphRAG, CVE check, Jira, Exchange, Outlook add-in, email automation, SAP analysis, charts">
     <meta name="author" content="Andreas Bender">
     <meta name="robots" content="index, follow">
@@ -15,7 +15,7 @@
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://jarvis-ai.info/">
     <meta property="og:title" content="Jarvis – Self-hosted AI Chatbot for Linux, Autonomous via Skill">
-    <meta property="og:description" content="Self-hosted AI chatbot for Linux with a huge feature set, autonomous only via the Agent Autonomy Kit skill. Controls desktop via VNC, supports Gemini/Claude/Ollama, WhatsApp integration, Exchange email rules with an Outlook add-in, RAG knowledge base, extensible via OpenClaw skills.">
+    <meta property="og:description" content="Self-hosted AI chatbot for Linux with a huge feature set, autonomous only via the Agent Autonomy Kit skill. Controls desktop via VNC, supports Gemini/Claude/Ollama, WhatsApp integration, Exchange email rules with an Outlook add-in, RAG knowledge base, extensible via skills.">
     <meta property="og:image" content="https://jarvis-ai.info/img/split_view.png">
     <meta property="og:image:width" content="1920">
     <meta property="og:image:height" content="1080">
@@ -26,7 +26,7 @@
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Jarvis – Self-hosted AI Chatbot for Linux, Autonomous via Skill">
-    <meta name="twitter:description" content="Self-hosted AI chatbot for Linux, autonomous via skill. VNC desktop control, multi-LLM, WhatsApp, RAG, OpenClaw skills.">
+    <meta name="twitter:description" content="Self-hosted AI chatbot for Linux, autonomous via skill. VNC desktop control, multi-LLM, WhatsApp, RAG, skills.">
     <meta name="twitter:image" content="https://jarvis-ai.info/img/split_view.png">
 
     <!-- Structured Data -->
@@ -66,7 +66,6 @@
         "Vulnerability checks of installed packages (Debian Security Tracker, OSV, Node.js) with optional remediation",
         "MCP (Model Context Protocol) tool server integration",
         "Multi-agent orchestration with sub-agents",
-        "OpenClaw skill marketplace",
         "Face recognition with dlib",
         "Browser automation via CDP",
         "Real-time telemetry and tracing",
@@ -88,12 +87,12 @@
         {
           "@type": "Question",
           "name": "What is Jarvis AI?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Jarvis is a self-hosted AI chatbot for Linux with a huge feature set. It controls a full desktop environment via VNC, supports multiple LLM providers (Google Gemini, Anthropic Claude, OpenRouter, Ollama), and can be extended with skills from the OpenClaw marketplace." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Jarvis is a self-hosted AI chatbot for Linux with a huge feature set. It controls a full desktop environment via VNC, supports multiple LLM providers (Google Gemini, Anthropic Claude, OpenRouter, Ollama), and can be extended with skills." }
         },
         {
           "@type": "Question",
           "name": "How do I install Jarvis?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Run 'curl -fsSL https://jarvis-ai.info/install.sh | bash' on any Debian/Ubuntu/Fedora/Arch Linux server. Alternatively use Docker: 'docker pull ghcr.io/dev-core-busy/jarvis:master'. The install script also handles updates – just re-run it." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Run 'curl -fsSL https://jarvis-ai.info/install.sh | bash' on any Debian/Ubuntu/Fedora/Arch Linux server. The install script also handles updates – just re-run it." }
         },
         {
           "@type": "Question",
@@ -286,28 +285,6 @@
         }
         .feature-badge span.dot { width: 6px; height: 6px; background: #fff; border-radius: 50%; animation: pulse 2s infinite; }
 
-        /* OpenClaw */
-        .openclaw-section { background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(6,182,212,0.08) 100%); border-top: 1px solid rgba(99,102,241,0.2); border-bottom: 1px solid rgba(6,182,212,0.2); }
-        .openclaw-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
-        @media (max-width: 768px) { .openclaw-inner { grid-template-columns: 1fr; gap: 32px; } }
-        .openclaw-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(6,182,212,0.25)); border: 1px solid rgba(99,102,241,0.4); border-radius: 20px; font-size: 0.78rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--accent-hover); margin-bottom: 20px; }
-        .openclaw-title { font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 700; margin-bottom: 16px; }
-        .openclaw-desc { color: var(--text-secondary); font-size: 0.975rem; line-height: 1.75; margin-bottom: 24px; }
-        .openclaw-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-        .compare-card { padding: 18px; border-radius: var(--radius-md); border: 1px solid var(--border); }
-        .compare-card.before { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.2); }
-        .compare-card.after  { background: rgba(16,185,129,0.06); border-color: rgba(16,185,129,0.2); }
-        .compare-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
-        .compare-card.before .compare-label { color: var(--danger); }
-        .compare-card.after  .compare-label { color: var(--success); }
-        .compare-card ul { display: flex; flex-direction: column; gap: 6px; }
-        .compare-card li { font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: flex-start; gap: 6px; }
-        .compare-card li::before { content: "•"; flex-shrink: 0; margin-top: 1px; }
-        .compare-card.before li::before { color: var(--danger); }
-        .compare-card.after  li::before { color: var(--success); }
-        .openclaw-skills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
-        .skill-pill { display: flex; align-items: center; gap: 6px; padding: 6px 14px; background: var(--bg-glass-med); border: 1px solid var(--border); border-radius: 20px; font-size: 0.8rem; color: var(--text-secondary); transition: all var(--transition); }
-        .skill-pill:hover { border-color: var(--accent); color: var(--text-primary); }
 
         /* Screenshots */
         .screenshots-section { background: var(--bg-secondary); }
@@ -330,10 +307,6 @@
 
         /* Install */
         .install-card { background: var(--bg-glass); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: 40px; max-width: 720px; margin: 0 auto; }
-        .install-tabs { display: flex; gap: 8px; margin-bottom: 28px; background: rgba(0,0,0,0.3); border-radius: var(--radius-md); padding: 5px; }
-        .install-tab { flex: 1; padding: 10px 16px; background: none; border: none; border-radius: calc(var(--radius-md) - 3px); color: var(--text-muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all var(--transition); font-family: var(--font-body); }
-        .install-tab.active { background: var(--accent); color: #fff; }
-        .install-tab:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text-primary); }
         .install-panel { display: none; }
         .install-panel.active { display: block; }
         .code-block { background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px 22px; margin: 16px 0; overflow-x: auto; }
@@ -452,7 +425,6 @@
             section { padding: 56px 16px; }
             .hero-title { letter-spacing: 6px; }
             .grid-2col { grid-template-columns: 1fr; }
-            .openclaw-compare { grid-template-columns: 1fr; }
         }
         /* Kopfleiste auf schmalen Handys: GitHub nur als Symbol, sonst ragt sie ueber den Rand */
         @media (max-width: 400px) {
@@ -474,7 +446,6 @@
         <a href="#bsi" class="t-en" style="color:var(--success);font-weight:700;">🛡️ BSI</a>
         <a href="#privacy"     class="t-de">Datenschutz</a>
         <a href="#privacy"     class="t-en">Privacy</a>
-        <a href="#openclaw">OpenClaw</a>
         <a href="#screenshots" class="t-de">Screenshots</a>
         <a href="#screenshots" class="t-en">Screenshots</a>
         <a href="#chat" style="color:#BB86FC;font-weight:600;">💬 Chat</a>
@@ -532,7 +503,6 @@
             <span class="badge badge-bsi">🛡️ BSI-gehärtet</span>
             <span class="badge">ELv2</span>
             <span class="badge">v1.0.0</span>
-            <span class="badge">OpenClaw-Compatible</span>
         </div>
     </div>
 </section>
@@ -681,8 +651,8 @@
                 <div class="feature-icon">📦</div>
                 <div class="feature-title t-de">Sichere Lieferkette</div>
                 <div class="feature-title t-en">Secure supply chain</div>
-                <div class="feature-desc t-de">Updates werden nur mit gültiger Signatur angenommen. Automatische Prüfung jeder Änderung: Abhängigkeits-Audit, SBOM, statische Analyse und Secret-Scan. Das Docker-Image installiert seine Abhängigkeiten aus einer Lock-Datei mit Prüfsummen, und im Betrieb prüft die <a href="#cve" style="color:var(--cyan);">Sicherheitslücken-Prüfung</a> die installierten Pakete.</div>
-                <div class="feature-desc t-en">Updates are only accepted with a valid signature. Every change is checked automatically: dependency audit, SBOM, static analysis and secret scanning. The Docker image installs its dependencies from a lock file with checksums, and in operation the <a href="#cve" style="color:var(--cyan);">vulnerability check</a> examines the installed packages.</div>
+                <div class="feature-desc t-de">Updates werden nur mit gültiger Signatur angenommen. Automatische Prüfung jeder Änderung: Abhängigkeits-Audit, SBOM, statische Analyse und Secret-Scan. Die Abhängigkeiten werden aus einer Lock-Datei mit Prüfsummen installiert, und im Betrieb prüft die <a href="#cve" style="color:var(--cyan);">Sicherheitslücken-Prüfung</a> die installierten Pakete.</div>
+                <div class="feature-desc t-en">Updates are only accepted with a valid signature. Every change is checked automatically: dependency audit, SBOM, static analysis and secret scanning. Dependencies are installed from a lock file with checksums, and in operation the <a href="#cve" style="color:var(--cyan);">vulnerability check</a> examines the installed packages.</div>
             </div>
         </div>
         <p class="bsi-fuss">
@@ -707,8 +677,8 @@
             <p class="t-de">Welches KI-Modell dahintersteckt, bestimmst du. Gemini, Claude, OpenRouter, Ollama – oder jeder andere OpenAI-kompatible Anbieter. <strong>Lokale Modelle bleiben vollständig auf deiner Maschine</strong>; kein Byte deiner Daten verlässt den Server.</p>
             <p class="t-en">You decide which AI model powers it. Gemini, Claude, OpenRouter, Ollama – or any other OpenAI-compatible provider. <strong>Local models stay completely on your machine</strong>; not a single byte of your data leaves the server.</p>
 
-            <p class="t-de">Das Skill-System macht Jarvis erweiterbar: Neue Fähigkeiten lassen sich als Python-Module nachladen, ohne den Core anzufassen. Das OpenClaw-Ökosystem liefert fertige Skills für Gmail, Google Drive, Kalender und mehr – einfach importieren, aktivieren, nutzen.</p>
-            <p class="t-en">The skill system makes Jarvis extensible: new capabilities can be loaded as Python modules without touching the core. The OpenClaw ecosystem delivers ready-made skills for Gmail, Google Drive, calendar and more – just import, enable, use.</p>
+            <p class="t-de">Das Skill-System macht Jarvis erweiterbar: Neue Fähigkeiten lassen sich als Python-Module nachladen, ohne den Core anzufassen.</p>
+            <p class="t-en">The skill system makes Jarvis extensible: new capabilities can be loaded as Python modules without touching the core.</p>
 
             <p class="t-de"><strong>Autonom wird Jarvis erst durch einen Skill.</strong> Ohne den Skill <code>Agent Autonomy Kit</code> bleibt er ein Chatbot, wenn auch einer mit enormem Funktionsumfang: Er arbeitet ab, was du ihm aufträgst oder als Auftrag eingerichtet hast, und wartet dann auf den nächsten. Erst der Skill gibt ihm eine Aufgabenliste, aus der er sich die nächste Aufgabe selbst holt. Ab Werk ist er ausgeschaltet.</p>
             <p class="t-en"><strong>Jarvis only becomes autonomous through a skill.</strong> Without the <code>Agent Autonomy Kit</code> skill it remains a chatbot, albeit one with a huge feature set: it carries out what you ask of it or have set up as a job, then waits for the next one. Only the skill gives it a task list from which it picks its next task itself. It is off by default.</p>
@@ -921,8 +891,8 @@
                 <div class="feature-icon">🔌</div>
                 <div class="feature-title t-de">Skill-System</div>
                 <div class="feature-title t-en">Skill System</div>
-                <div class="feature-desc t-de">Erweiterbar durch Skills: Shell, Dateisystem, Browser-CDP, WhatsApp, Gmail, Google Drive – und viele mehr über OpenClaw.</div>
-                <div class="feature-desc t-en">Extendable via skills: Shell, filesystem, Browser-CDP, WhatsApp, Gmail, Google Drive – and many more via OpenClaw.</div>
+                <div class="feature-desc t-de">Erweiterbar durch Skills: Shell, Dateisystem, Browser-CDP, WhatsApp, Gmail, Google Drive – und viele mehr.</div>
+                <div class="feature-desc t-en">Extendable via skills: Shell, filesystem, Browser-CDP, WhatsApp, Gmail, Google Drive – and many more.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">💬</div>
@@ -1125,73 +1095,6 @@
     </div>
 </section>
 
-<section id="openclaw" class="openclaw-section">
-    <div class="container">
-        <div class="openclaw-inner">
-            <div class="reveal">
-                <div class="openclaw-badge">
-                    🛒
-                    <span class="t-de">OpenClaw Skill-Ökosystem</span>
-                    <span class="t-en">OpenClaw Skill Ecosystem</span>
-                </div>
-                <h2 class="openclaw-title">
-                    <span class="t-de">Skills importieren,<br><span class="accent-text">nicht neu erfinden</span></span>
-                    <span class="t-en">Import skills,<br><span class="accent-text">don't reinvent them</span></span>
-                </h2>
-                <p class="openclaw-desc t-de">
-                    Jarvis ist vollständig kompatibel mit dem <strong>OpenClaw Skill-Marktplatz</strong>.
-                    Bestehende Skills können direkt importiert und als native Jarvis-Tools verwendet werden –
-                    kein manuelles Schreiben von Boilerplate, kein Vendor-Lock-in.
-                </p>
-                <p class="openclaw-desc t-en">
-                    Jarvis is fully compatible with the <strong>OpenClaw skill marketplace</strong>.
-                    Existing skills can be imported directly and used as native Jarvis tools –
-                    no manual boilerplate writing, no vendor lock-in.
-                </p>
-                <div class="openclaw-skills">
-                    <div class="skill-pill"><span>📧</span> openclaw_gmail</div>
-                    <div class="skill-pill"><span>🎭</span> agent_orchestrator</div>
-                    <div class="skill-pill"><span>⚡</span> agent_autonomy_kit</div>
-                    <div class="skill-pill">
-                        <span>📦</span>
-                        <span class="t-de">+ eigene Skills</span>
-                        <span class="t-en">+ custom skills</span>
-                    </div>
-                </div>
-            </div>
-            <div class="openclaw-compare reveal">
-                <div class="compare-card before">
-                    <div class="compare-label t-de">❌ Ohne OpenClaw</div>
-                    <div class="compare-label t-en">❌ Without OpenClaw</div>
-                    <ul>
-                        <li class="t-de">Jedes Tool von Null schreiben</li>
-                        <li class="t-en">Write every tool from scratch</li>
-                        <li class="t-de">API-Docs manuell lesen</li>
-                        <li class="t-en">Manually read API docs</li>
-                        <li class="t-de">Auth-Flows selbst implementieren</li>
-                        <li class="t-en">Implement auth flows yourself</li>
-                        <li class="t-de">Fehlerbehandlung neu erfinden</li>
-                        <li class="t-en">Reinvent error handling</li>
-                    </ul>
-                </div>
-                <div class="compare-card after">
-                    <div class="compare-label t-de">✅ Mit OpenClaw</div>
-                    <div class="compare-label t-en">✅ With OpenClaw</div>
-                    <ul>
-                        <li class="t-de">Skill suchen &amp; in Sekunden importieren</li>
-                        <li class="t-en">Search &amp; import skill in seconds</li>
-                        <li class="t-de">Sofort einsatzbereit</li>
-                        <li class="t-en">Ready to use immediately</li>
-                        <li class="t-de">Community-getestete Qualität</li>
-                        <li class="t-en">Community-tested quality</li>
-                        <li class="t-de">Jarvis konvertiert automatisch</li>
-                        <li class="t-en">Jarvis auto-converts skills</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
 
 <section id="screenshots" class="screenshots-section">
     <div class="container">
@@ -1361,23 +1264,13 @@
             <span class="t-en">Quick Start</span>
         </h2>
         <p class="section-sub reveal">
-            <span class="t-de">Docker oder Install-Skript – in Minuten einsatzbereit auf jedem Linux-Server.</span>
-            <span class="t-en">Docker or install script – ready in minutes on any Linux server.</span>
+            <span class="t-de">Ein Install-Skript – in Minuten einsatzbereit auf jedem Linux-Server.</span>
+            <span class="t-en">One install script – ready in minutes on any Linux server.</span>
         </p>
         <div class="install-card reveal">
 
-            <!-- Tab-Umschalter -->
-            <div class="install-tabs">
-                <button class="install-tab active" onclick="switchInstallTab('docker', this)">
-                    🐳 Docker <span class="t-de">(Empfohlen)</span><span class="t-en">(Recommended)</span>
-                </button>
-                <button class="install-tab" onclick="switchInstallTab('script', this)">
-                    🐧 <span class="t-de">Install-Skript</span><span class="t-en">Install Script</span>
-                </button>
-            </div>
-
             <!-- ── Panel: Install-Skript ── -->
-            <div id="install-panel-script" class="install-panel">
+            <div id="install-panel-script" class="install-panel active">
 
                 <!-- Hauptbefehl -->
                 <div style="margin-bottom: 28px;">
@@ -1448,82 +1341,6 @@
                     <span class="t-de">🔍 Skript vorher ansehen: </span>
                     <span class="t-en">🔍 Inspect script first: </span>
                     <a href="https://jarvis-ai.info/install.sh" target="_blank" style="color:var(--accent);">jarvis-ai.info/install.sh</a>
-                    &nbsp;·&nbsp;
-                    <a href="https://github.com/dev-core-busy/jarvis" style="color:var(--accent)">GitHub</a>
-                </p>
-            </div>
-
-            <!-- ── Panel: Docker ── -->
-            <div id="install-panel-docker" class="install-panel active">
-
-                <!-- Schritt 1: Herunterladen & Starten -->
-                <div style="margin-bottom:20px;">
-                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
-                        <span class="t-de">▶ Installieren &amp; Starten – zeigt am Ende Benutzer und Kennwort</span>
-                        <span class="t-en">▶ Install &amp; start – shows username and password at the end</span>
-                    </div>
-                    <div class="code-block" style="border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.05); display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
-                        <code style="color: var(--cyan); font-size: 0.88rem; white-space:pre;">curl -fsSL https://jarvis-ai.info/downloads/docker-install.sh | bash</code>
-                        <button onclick="(function(btn){navigator.clipboard.writeText('curl -fsSL https://jarvis-ai.info/downloads/docker-install.sh | bash').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:rgba(13,13,26,0.5);border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;position:sticky;right:0;" onmouseover="this.style.background='rgba(6,182,212,0.25)'" onmouseout="this.style.background='rgba(13,13,26,0.5)'">⧉</button>
-                    </div>
-                </div>
-
-                <!-- Update -->
-                <div style="margin-bottom:24px;">
-                    <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
-                        <span class="t-de">▶ Update auf neueste Version</span>
-                        <span class="t-en">▶ Update to latest version</span>
-                    </div>
-                    <div class="code-block" style="border-color: rgba(6,182,212,0.35); background: rgba(6,182,212,0.05); display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
-                        <code style="color: var(--cyan); font-size: 0.88rem;">docker compose pull && docker compose down && docker compose up -d</code>
-                        <button onclick="(function(btn){navigator.clipboard.writeText('docker compose pull && docker compose down && docker compose up -d').then(function(){btn.textContent='✓';btn.style.color='#4ade80';setTimeout(function(){btn.textContent='⧉';btn.style.color='';},1800);})})(this)" title="Kopieren" style="background:rgba(13,13,26,0.5);border:1px solid rgba(6,182,212,0.3);color:var(--cyan);cursor:pointer;border-radius:6px;padding:4px 9px;font-size:1rem;flex-shrink:0;transition:background 0.2s;position:sticky;right:0;" onmouseover="this.style.background='rgba(6,182,212,0.25)'" onmouseout="this.style.background='rgba(13,13,26,0.5)'">⧉</button>
-                    </div>
-                </div>
-
-                <!-- Vorteile -->
-                <div class="grid-2col">
-                    <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
-                        <div style="font-size:0.75rem; font-weight:700; color:#22d3ee; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
-                            <span class="t-de">🐳 Vorteile:</span>
-                            <span class="t-en">🐳 Advantages:</span>
-                        </div>
-                        <ul style="display:flex; flex-direction:column; gap:5px; list-style:none;">
-                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Keine Abhängigkeits-Konflikte</span><span class="t-en">No dependency conflicts</span></li>
-                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Läuft auf jedem Docker-Host</span><span class="t-en">Runs on any Docker host</span></li>
-                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Updates: <code style="font-size:0.78rem;">docker compose pull</code></span><span class="t-en">Updates via <code style="font-size:0.78rem;">docker compose pull</code></span></li>
-                            <li style="font-size:0.82rem; color:var(--text-secondary); display:flex; gap:7px;"><span style="color:var(--success)">✓</span> <span class="t-de">Vollständig isoliert</span><span class="t-en">Fully isolated</span></li>
-                        </ul>
-                    </div>
-                    <div style="padding:14px; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md);">
-                        <div style="font-size:0.75rem; font-weight:700; color:var(--cyan); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">
-                            <span class="t-de">Danach im Browser:</span>
-                            <span class="t-en">Then open in browser:</span>
-                        </div>
-                        <div style="padding:10px 14px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px;">
-                            <span style="font-size:0.8rem; color:var(--success); font-weight:600;">🌐 </span>
-                            <span style="font-size:0.82rem; color:var(--cyan); font-family:var(--font-mono);">https://&lt;server-ip&gt;</span>
-                            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
-                                <span class="t-de">Benutzername: <strong style="color:var(--text-secondary)">jarvis</strong><br>Das Kennwort wird nach der Installation angezeigt.</span>
-                                <span class="t-en">Username: <strong style="color:var(--text-secondary)">jarvis</strong><br>The password is shown after the installation.</span>
-                            </div>
-                        </div>
-                        <div style="margin-top:10px; font-size:0.75rem; color:var(--text-muted);">
-                            <span class="t-de">Voraussetzung: Docker + Docker Compose</span>
-                            <span class="t-en">Requires: Docker + Docker Compose</span>
-                        </div>
-                    </div>
-                </div>
-
-                <p style="font-size:0.82rem; color:var(--text-muted); text-align:center;">
-                    <a href="docker.html" style="color:var(--accent);">
-                        <span class="t-de">📖 Ausführliche Docker-Anleitung</span>
-                        <span class="t-en">📖 Detailed Docker Guide</span>
-                    </a>
-                    &nbsp;·&nbsp;
-                    <a href="https://github.com/dev-core-busy/jarvis/blob/master/docker-compose.yml" target="_blank" style="color:var(--accent);">
-                        <span class="t-de">🔍 docker-compose.yml</span>
-                        <span class="t-en">🔍 docker-compose.yml</span>
-                    </a>
                     &nbsp;·&nbsp;
                     <a href="https://github.com/dev-core-busy/jarvis" style="color:var(--accent)">GitHub</a>
                 </p>
@@ -1835,8 +1652,8 @@
                 </ul>
                 <a href="https://jarvis-ai.info/downloads/jarvis.exe" class="btn-windows">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
-                    <span class="t-de">Download · Portable EXE · v0.896</span>
-                    <span class="t-en">Download · Portable EXE · v0.896</span>
+                    <span class="t-de">Download · Portable EXE · v0.897</span>
+                    <span class="t-en">Download · Portable EXE · v0.897</span>
                 </a>
                 <span class="btn-windows-note t-de">Windows 10/11 · 64-bit · Portable – kein Setup nötig</span>
                 <span class="btn-windows-note t-en">Windows 10/11 · 64-bit · Portable – no installer needed</span>
@@ -1929,12 +1746,6 @@
         btn.classList.add('active');
     }
 
-    function switchInstallTab(name, btn) {
-        document.querySelectorAll('.install-panel').forEach(p => p.classList.remove('active'));
-        document.querySelectorAll('.install-tab').forEach(b => b.classList.remove('active'));
-        document.getElementById('install-panel-' + name).classList.add('active');
-        btn.classList.add('active');
-    }
 
     const observer = new IntersectionObserver(entries => {
         entries.forEach(e => {

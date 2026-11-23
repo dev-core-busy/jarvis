@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Waechter: Nebenbefunde aus dem Code-Review 2026-09-28.
 
-Vier Befunde, jeder an der WIRKUNG gemessen (nicht am Vorkommen einer Zeile):
+Drei Befunde, jeder an der WIRKUNG gemessen (nicht am Vorkommen einer Zeile):
 
   [1] ai_mouse_fragen: bei voller Liste schrieb JEDES Lesen die Datei neu.
-  [2] license.instanz_kennung: zwei gleichzeitige Erstaufrufe teilten eine
-      Temp-Datei – verschiedene Antworten, eine davon "".
+  [2] (entfallen 2026-11-23: license.instanz_kennung gab es nur fuer Docker)
   [3] /api/knowledge/assignments: `{"groups": [1]}` wurde zu `[]` normiert und
       nahm der Datei ALLE Gruppen.
   [4] Anhaenge: ein altes, leeres Kennungs-Verzeichnis konnte zwischen
@@ -114,54 +113,6 @@ check("volle Liste: drei Lesevorgaenge schreiben nichts (ist: %d)" % len(_schrei
 _d = json.loads(_datei.read_text(encoding="utf-8"))
 check("volle Liste: die Vorgabe bleibt als 'noch nicht bekommen' stehen",
       "v-neu" not in (_d.get("vorgaben_bekommen") or {}).get(amf._norm("anna"), []))
-
-
-# ── [2] license.instanz_kennung: erste Kennung gewinnt ────────────────────────
-print("\n[2] Instanz-Kennung bei gleichzeitigem Erstaufruf")
-try:
-    from backend import license as lic
-except Exception as e:  # noqa: BLE001
-    abbruch("backend.license nicht importierbar: %s" % e)
-
-lic.INSTANZ_FILE = TMP / "data" / ".instanz"
-_echt_link, _echt_replace = os.link, os.replace
-_innen: list = []
-_gerufen = threading.Event()
-
-
-def _mit_zwischenruf(echt):
-    # Genau EIN verschachtelter Erstaufruf, und zwar an der Stelle, an der der
-    # aeussere seine Datei gerade einsetzen will – das ist das Wettrennen.
-    # ⚠ Die Marke VOR dem Aufruf setzen: der innere Aufruf kommt an dieselbe
-    # Stelle, und ohne Marke riefe er sich selbst bis zum RecursionError.
-    def f(a, b, *args, **kw):
-        if not _gerufen.is_set() and Path(b) == lic.INSTANZ_FILE:
-            _gerufen.set()
-            _innen.append(lic.instanz_kennung())
-        return echt(a, b, *args, **kw)
-    return f
-
-
-os.link = _mit_zwischenruf(_echt_link)
-os.replace = _mit_zwischenruf(_echt_replace)
-try:
-    _aussen = lic.instanz_kennung()
-finally:
-    os.link, os.replace = _echt_link, _echt_replace
-
-check("Positivkontrolle: der Zwischenruf fand statt", len(_innen) == 1)
-_datei_k = ""
-try:
-    _datei_k = "D1-" + lic.INSTANZ_FILE.read_text().strip()
-except Exception:  # noqa: BLE001
-    pass
-check("beide Aufrufer bekommen eine Kennung (aussen=%r)" % _aussen,
-      bool(_aussen) and bool(_innen and _innen[0]))
-check("beide bekommen DIESELBE", bool(_innen) and _aussen == _innen[0])
-check("und es ist die, die in der Datei steht", _aussen == _datei_k)
-check("keine Temp-Datei bleibt liegen",
-      [p.name for p in lic.INSTANZ_FILE.parent.iterdir()] == [".instanz"])
-check("ein spaeterer Aufruf liest dieselbe", lic.instanz_kennung() == _aussen)
 
 
 # ── [3] /api/knowledge/assignments: Nicht-Strings loeschen keine Gruppen ──────

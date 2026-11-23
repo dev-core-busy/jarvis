@@ -57,23 +57,10 @@ import httpx
 
 import psutil
 
-# ─── Docker-Modus: PAM durch ENV-Variable ersetzen ───────────────────
-_DOCKER_MODE = os.getenv("JARVIS_DOCKER", "0") == "1"
-# Kein festes Standardkennwort im Docker-Modus (Vorfall 2026-09-28):
-# fehlt JARVIS_PASSWORD oder lautet es "jarvis", gilt ein Zufallskennwort
-# aus data/.erstkennwort (backend/standard_zugang.py).
+# Lokale Anmeldung ausschliesslich ueber PAM (Linux-Konto).
 from backend import standard_zugang as _standard_zugang
-_JARVIS_PASSWORD = (
-    _standard_zugang.docker_erstkennwort(
-        os.getenv("JARVIS_PASSWORD", ""),
-        Path(__file__).parent.parent / "data" / ".erstkennwort")
-    if _DOCKER_MODE else "")
-
-if not _DOCKER_MODE:
-    import pam as _pam_module
-    _pam = _pam_module.pam()
-else:
-    _pam = None
+import pam as _pam_module
+_pam = _pam_module.pam()
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response, StreamingResponse
@@ -4556,35 +4543,9 @@ def authenticate_linux_user(username: str, password: str, details: dict | None =
     aber keine Zugriffsberechtigung hat (z.B. nicht in der AD-Whitelist). Damit
     kann der Aufrufer 'Keine Anmeldeberechtigung' statt 'Passwort falsch' melden."""
 
-    # ─── 1. Lokale Authentifizierung (PAM / Docker) – immer zuerst ───
+    # ─── 1. Lokale Authentifizierung (PAM) – immer zuerst ───
     if username in ALLOWED_USERS:
-        local_ok = False
-        if _DOCKER_MODE:
-            state = _load_auth_state()
-            docker_pw = state.get("docker_password", {}).get(username)
-            if docker_pw is not None:
-                # scrypt mit Salz (standard_zugang.kennwort_pruefen). Ein Altwert
-                # (ungesalzenes SHA-256, bis 2026-10-29) gilt weiter und wird bei
-                # der ersten gelungenen Anmeldung umgeschrieben – sonst bliebe er
-                # auf jeder Bestandsinstallation liegen, bis jemand das Kennwort aendert.
-                local_ok, veraltet = _standard_zugang.kennwort_pruefen(password, docker_pw)
-                if local_ok and veraltet:
-                    # Hash VOR der Sperre (teuer), Schreiben UNTER ihr auf einem
-                    # frisch geladenen Stand – und nur, wenn dort noch derselbe
-                    # Altwert steht (ein gleichzeitiger Kennwortwechsel gewinnt).
-                    neu_hash = _standard_zugang.kennwort_hash(password)
-
-                    def _umstellen(st, _alt=docker_pw, _neu=neu_hash):
-                        dp = st.setdefault("docker_password", {})
-                        if dp.get(username) == _alt:
-                            dp[username] = _neu
-
-                    _auth_state_aendern(_umstellen)
-                    print(f"[AUTH] Docker-Kennwort fuer '{username}' auf scrypt umgestellt.", flush=True)
-            else:
-                local_ok = password == _JARVIS_PASSWORD
-        else:
-            local_ok = _pam.authenticate(username, password, service=_pam_dienst())
+        local_ok = _pam.authenticate(username, password, service=_pam_dienst())
         if local_ok:
             print(f"[AUTH] Lokaler Login erfolgreich: {username}", flush=True)
             return True
@@ -6012,7 +5973,7 @@ async def _login_ablauf(request: Request):
         except Exception as e:  # noqa: BLE001
             print("[Add-in] Verknuepfung nicht moeglich: %s" % e, flush=True)
 
-    # Desktop-Session im Hintergrund wechseln (nur im Nicht-Docker-Modus).
+    # Desktop-Session im Hintergrund wechseln.
     #
     # VORGABE 2026-08-18: am lokalen Desktop arbeiten NUR der lokale Benutzer
     # `jarvis` und – ueber genau dessen Sitzung – die Administratoren.
@@ -6027,7 +5988,7 @@ async def _login_ablauf(request: Request):
     #
     # Das ZIEL ist deshalb fest `DESKTOP_USER`, nie der angemeldete Name: der
     # Administrator bekommt die Sitzung, die es wirklich gibt.
-    if not _DOCKER_MODE and (username in ALLOWED_USERS or _is_admin_user(username)):
+    if username in ALLOWED_USERS or _is_admin_user(username):
         asyncio.get_event_loop().run_in_executor(None, switch_desktop_session,
                                                  DESKTOP_USER)
     # is_admin = Rechte DIESER Sitzung (frisch angemeldet: nie – die gibt es erst
@@ -7712,23 +7673,6 @@ async def change_password(request: Request, username: str = Depends(require_auth
         return JSONResponse({"success": False, "error": "Neues Kennwort muss sich vom aktuellen unterscheiden."}, status_code=400)
 
     # Kennwort setzen
-    if _DOCKER_MODE:
-        # Im Docker-Modus: Kennwort als scrypt-Hash mit Salz in data/auth_state.json.
-        # Der Hash (N=2^15, ~32 MB) laeuft im Thread – im Event-Loop hielte er
-        # jede andere Anfrage an (Code-Review 2026-11-01). Kennwort und
-        # must_change_password gehen in EINER gesperrten Aenderung auf die Platte.
-        neu_hash = await asyncio.to_thread(_standard_zugang.kennwort_hash, new_password)
-
-        def _setzen():
-            with _AUTH_STATE_LOCK:
-                _auth_state_aendern(
-                    lambda st: st.setdefault("docker_password", {}).__setitem__(username, neu_hash))
-                _set_user_auth_state(username, {"must_change_password": False})
-
-        await asyncio.to_thread(_setzen)
-        print(f"[AUTH] Docker-Kennwort für '{username}' erfolgreich geändert.", flush=True)
-        return _sitzung_antwort(request, {"success": True, "token": _sitzungen_nach_kennwortwechsel(username, request)})
-
     ok = await asyncio.to_thread(_change_linux_password, username, new_password)
     if not ok:
         return JSONResponse({"success": False, "error": "Kennwort konnte nicht gesetzt werden."}, status_code=500)
@@ -7830,10 +7774,8 @@ async def update_apply(user: str = Depends(require_local_auth)):
 @app.get("/api/update/settings")
 async def update_settings_get(user: str = Depends(require_local_auth)):
     """Gibt Auto-Update-Einstellungen zurück."""
-    from backend.update_manager import image_betrieb
     auto_schedule = config.get_setting("auto_update_schedule", "never")
-    return JSONResponse({"auto_update_schedule": auto_schedule,
-                         "image": image_betrieb()})
+    return JSONResponse({"auto_update_schedule": auto_schedule})
 
 
 @app.post("/api/update/settings")
@@ -7850,13 +7792,6 @@ async def update_settings_set(request: Request, user: str = Depends(require_loca
     # erlaubt – ein bestehender Auftrag muss auch mit kleinerer Lizenz wieder
     # abschaltbar sein, sonst laeuft er weiter und die Sperre haette den
     # gegenteiligen Effekt.
-    # Im Image-Betrieb (Docker ohne git) liefe der Auftrag ins Leere: er ruft
-    # `git pull` in /opt/jarvis auf. "never" bleibt erlaubt, damit ein alter
-    # Auftrag aus der Zeit vor dieser Sperre abschaltbar ist.
-    if schedule != "never":
-        from backend.update_manager import image_betrieb, IMAGE_HINWEIS
-        if image_betrieb():
-            return JSONResponse({"error": IMAGE_HINWEIS, "image": True}, status_code=409)
     if schedule != "never":
         from backend import license as _lic
         erlaubt, grund = _lic.auto_update_erlaubt()
@@ -30549,232 +30484,6 @@ async def copilot_trennen(user: str = Depends(require_auth)):
     """Löst die eigene Verbindung – der Eintrag wird entfernt."""
     from backend import copilot_client as cc
     return JSONResponse({"ok": cc.trennen(user)})
-
-
-# ─── OpenClaw Gmail (gog) Setup-Endpoints ────────────────────────────
-
-import subprocess as _sp
-from pathlib import Path as _Path
-
-_GOG_BIN          = _Path(__file__).parent.parent / "skills" / "openclaw_gmail" / "gog"
-_GOG_CREDS_PATH   = _Path(__file__).parent.parent / "data" / "google_auth" / "gog_client_secret.json"
-_gog_connect_proc = None   # laufender gog-auth-add Prozess
-
-
-def _run_gog(*args, timeout: int = 10) -> dict:
-    """Führt gog-Befehl synchron aus, gibt JSON-Dict oder Fehler zurück."""
-    if not _GOG_BIN.exists():
-        return {"ok": False, "error": "gog-Binary nicht gefunden"}
-    try:
-        import os as _os
-        _gog_env = _os.environ.copy()
-        _gog_env["GOG_KEYRING_BACKEND"] = "file"
-        _gog_env["GOG_KEYRING_PASSWORD"] = "jarvis-gog-keyring"
-        r = _sp.run(
-            [str(_GOG_BIN), "--json", "--no-input", *args],
-            capture_output=True, text=True, timeout=timeout,
-            env=_gog_env,
-        )
-        out = r.stdout.strip()
-        err = r.stderr.strip()
-        if r.returncode != 0:
-            return {"ok": False, "error": err or out or f"Exit {r.returncode}"}
-        if out:
-            try:
-                import json as _json
-                return {"ok": True, "data": _json.loads(out)}
-            except Exception:
-                return {"ok": True, "data": out}
-        return {"ok": True, "data": {}}
-    except _sp.TimeoutExpired:
-        return {"ok": False, "error": "Timeout"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-@app.get("/api/google/gog-status")
-async def gog_status(user: str = Depends(require_local_auth)):
-    """Gibt verbundene gog-Konten zurück."""
-    import asyncio as _aio
-    result = await _aio.to_thread(_run_gog, "auth", "list")
-    return JSONResponse(result)
-
-
-@app.post("/api/google/gog-setup")
-async def gog_setup(request: Request, user: str = Depends(require_local_auth)):
-    """Speichert OAuth-Credentials als client_secret.json + registriert bei gog."""
-    import asyncio as _aio, json as _json
-    body = await _json_objekt(request)
-    client_id     = body.get("client_id", "").strip()
-    client_secret = body.get("client_secret", "").strip()
-    email         = body.get("email", "").strip()
-
-    if not client_id or not client_secret or not email:
-        return JSONResponse({"ok": False, "error": "client_id, client_secret und email sind erforderlich"}, status_code=400)
-
-    # client_secret.json im erwarteten Google-Format erstellen
-    creds_json = {
-        "installed": {
-            "client_id":      client_id,
-            "client_secret":  client_secret,
-            "redirect_uris":  ["http://localhost"],
-            "auth_uri":       "https://accounts.google.com/o/oauth2/auth",
-            "token_uri":      "https://oauth2.googleapis.com/token",
-        }
-    }
-    _GOG_CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _GOG_CREDS_PATH.write_text(_json.dumps(creds_json, indent=2))
-
-    # E-Mail in Skill-Config speichern
-    from backend.config import config as _cfg
-    _cfg.save_skill_state("openclaw_gmail", {"config": {"account": email, "max_results": "10"}})
-
-    # gog auth credentials registrieren
-    result = await _aio.to_thread(_run_gog, "auth", "credentials", "set", str(_GOG_CREDS_PATH))
-    if not result["ok"]:
-        return JSONResponse(result, status_code=500)
-
-    # Bug-Workaround: gog schreibt client_id in beide Felder – direkt korrigieren
-    import pathlib as _pl
-    _gog_creds = _pl.Path.home() / ".config" / "gogcli" / "credentials.json"
-    _gog_creds.parent.mkdir(parents=True, exist_ok=True)
-    _gog_creds.write_text(_json.dumps({"client_id": client_id, "client_secret": client_secret}, indent=2))
-
-    return JSONResponse({"ok": True, "email": email})
-
-
-@app.post("/api/google/gog-auth-url")
-async def gog_get_auth_url(request: Request, user: str = Depends(require_local_auth)):
-    """Remote-Flow Schritt 1: Gibt die Google-Auth-URL zurück (kein Browser auf Server nötig)."""
-    import asyncio as _aio
-    body  = await _json_objekt(request)
-    email = body.get("email", "").strip()
-    if not email:
-        return JSONResponse({"ok": False, "error": "email fehlt"}, status_code=400)
-    if not _GOG_BIN.exists():
-        return JSONResponse({"ok": False, "error": "gog-Binary nicht gefunden"}, status_code=500)
-
-    # gog auth add --remote --step 1 gibt die Auth-URL auf stdout/stderr aus
-    try:
-        import os as _os
-        _gog_env = _os.environ.copy()
-        _gog_env["GOG_KEYRING_BACKEND"] = "file"
-        _gog_env["GOG_KEYRING_PASSWORD"] = "jarvis-gog-keyring"
-        r = _sp.run(
-            [str(_GOG_BIN), "auth", "add", email,
-             "--services", "gmail,calendar,drive",
-             "--remote", "--step", "1", "--force-consent"],
-            capture_output=True, text=True, timeout=15,
-            env=_gog_env,
-        )
-        output = (r.stdout + r.stderr).strip()
-        # Auth-URL aus Output extrahieren (beginnt mit https://accounts.google.com)
-        import re as _re
-        match = _re.search(r'https://accounts\.google\.com\S+', output)
-        if match:
-            return JSONResponse({"ok": True, "auth_url": match.group(0), "email": email})
-        # Fallback: ganzen Output zurückgeben
-        return JSONResponse({"ok": False, "error": output or "Keine URL gefunden"})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-
-@app.post("/api/google/gog-auth-exchange")
-async def gog_auth_exchange(request: Request, user: str = Depends(require_local_auth)):
-    """Remote-Flow Schritt 2: Tauscht Redirect-URL gegen Token."""
-    import asyncio as _aio
-    body         = await _json_objekt(request)
-    email        = body.get("email", "").strip()
-    redirect_url = body.get("redirect_url", "").strip()
-    if not email or not redirect_url:
-        return JSONResponse({"ok": False, "error": "email und redirect_url erforderlich"}, status_code=400)
-
-    result = await _aio.to_thread(
-        _run_gog,
-        "auth", "add", email,
-        "--services", "gmail,calendar,drive",
-        "--remote", "--step", "2",
-        f"--auth-url={redirect_url}",
-        timeout=20,
-    )
-    return JSONResponse(result)
-
-
-@app.delete("/api/google/gog-account")
-async def gog_remove_account(request: Request, user: str = Depends(require_local_auth)):
-    """Entfernt ein gog-Konto."""
-    import asyncio as _aio
-    body  = await _json_objekt(request)
-    email = body.get("email", "").strip()
-    if not email:
-        return JSONResponse({"ok": False, "error": "email fehlt"}, status_code=400)
-    result = await _aio.to_thread(_run_gog, "auth", "remove", email)
-    return JSONResponse(result)
-
-
-# ─── OpenClaw Marketplace ─────────────────────────────────────────────
-
-@app.get("/api/openclaw/search")
-async def openclaw_search(q: str = "", user: str = Depends(require_local_auth)):
-    """Sucht Skills auf OpenClaw Marketplace.
-    Gibt Ergebnisliste zurück – Import erfolgt separat.
-    """
-
-    import urllib.request, json as _json
-    query = q.strip() or "popular"
-    search_url = f"https://clawhub.ai/api/search?q={urllib.parse.quote(query)}"
-    try:
-        req = urllib.request.Request(search_url, headers={"User-Agent": "Jarvis/0.8"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = _json.loads(resp.read().decode())
-            raw = data.get("results", data if isinstance(data, list) else [])
-            # Einheitliches Format fuer Frontend
-            results = []
-            for s in raw[:20]:
-                results.append({
-                    "name": s.get("displayName") or s.get("name") or s.get("slug", ""),
-                    "slug": s.get("slug", ""),
-                    "description": s.get("summary") or s.get("description", ""),
-                    "stars": round(s.get("score", 0), 1) if s.get("score") else None,
-                    "author": s.get("author", ""),
-                    "url": f"https://clawhub.ai/skills/{s.get('slug', '')}",
-                })
-    except Exception as e:
-        results = []
-        print(f"[WARN] ClawHub API nicht erreichbar ({e})")
-
-    return JSONResponse({"results": results, "query": query})
-
-
-@app.get("/api/openclaw/workflow-task")
-async def openclaw_workflow_task(
-    description: str = "",
-    user: str = Depends(require_local_auth),
-):
-    """Gibt den fertigen Agent-Task-Text zurück, der den Import-Workflow ausführt.
-    Liest data/workflows/import_openclaw_skill.md und bettet ihn in den Task ein.
-    """
-    workflow_path = _Path(__file__).parent.parent / "data" / "workflows" / "import_openclaw_skill.md"
-    if workflow_path.exists():
-        workflow_md = workflow_path.read_text(encoding="utf-8", errors="replace")
-    else:
-        workflow_md = "(Workflow-Datei nicht gefunden – nutze allgemeines Vorgehen)"
-
-    target_dir = str(_Path(__file__).parent.parent / "skills_from_openclaw")
-    desc_text  = description.strip() or "Zeige mir verfügbare und beliebte OpenClaw Skills"
-
-    task_text = f"""Führe folgenden OpenClaw Skill-Import-Workflow exakt und vollständig aus:
-
---- WORKFLOW-ANWEISUNGEN START ---
-{workflow_md}
---- WORKFLOW-ANWEISUNGEN ENDE ---
-
-Nutzerwunsch: "{desc_text}"
-Ziel-Verzeichnis für importierte Skills: {target_dir}
-
-Starte jetzt mit Schritt 1 (Skill-Entdeckung und Websuche)."""
-
-    return JSONResponse({"task": task_text})
 
 
 # ─── Vision (Gesichtserkennung) ──────────────────────────────────────

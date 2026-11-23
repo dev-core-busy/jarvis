@@ -81,7 +81,7 @@
         if (!window.JarvisKopf) return;
         window.JarvisKopf.merke('update', {
             jarvis_version: d.jarvis_version, has_update: !!d.has_update,
-            commits_behind: d.commits_behind, ok: !!d.ok, image: !!d.image,
+            commits_behind: d.commits_behind, ok: !!d.ok,
             zeit: Date.now()
         });
         if (d.jarvis_version) window.JarvisKopf.merke('version', d.jarvis_version);
@@ -106,7 +106,6 @@
         pille(d);
         merken(d);
         if (!body || _ansicht === 'verlauf') return;
-        if (d.image) { buildImageBody(); return; }
         fetch('/api/update/settings', { headers: auth() })
             .then(function (r) { return r.json(); })
             .then(function (s) { buildBody(d, s.auto_update_schedule || 'never'); })
@@ -124,8 +123,7 @@
         if (widget) {
             widget.classList.toggle('has-update', !!d.has_update);
             // gruen nur bei bestaetigtem 'aktuell' (ok + kein Update); bei Fehler neutral
-            // Im Image-Betrieb (Docker) ist der Stand unbekannt - also nicht gruen.
-            widget.classList.toggle('up-to-date', !d.has_update && !!d.ok && !d.image);
+            widget.classList.toggle('up-to-date', !d.has_update && !!d.ok);
             widget.title = d.has_update
                 ? T('update.widget_title_avail', { n: d.commits_behind })
                 : T('update.widget_title_ok');
@@ -275,18 +273,6 @@
             _verlaufLimit = Math.min(200, _verlaufLimit + 50);
             zeigeVerlauf();
         });
-    }
-
-    /* Docker-Container ohne git: aktualisiert wird ueber ein neues Image auf dem
-       Host. Kein Knopf und keine Auto-Update-Auswahl - beides liefe ins Leere. */
-    function buildImageBody() {
-        body.innerHTML =
-            '<div class="upd-status-row"><span class="upd-dot image"></span>'
-            + '<span style="font-size:.82rem;color:var(--text-primary);">' + esc(T('update.image_titel')) + '</span></div>'
-            + '<p class="kb-hint" style="margin:0;">' + esc(T('update.image_hinweis')) + '</p>'
-            + '<code class="upd-image-befehl">docker compose pull &amp;&amp; docker compose up -d</code>';
-        var f = foot();
-        if (f) f.innerHTML = '';
     }
 
     function applyUpdate() {

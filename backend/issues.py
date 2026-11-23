@@ -37,7 +37,7 @@ from typing import Any
 from backend.config import config, PROJECT_ROOT
 
 # ─── Pfade ──────────────────────────────────────────────────────────────
-# config._data_dir respektiert DATA_DIR-Env (Docker), Fallback PROJECT_ROOT/data
+# config._data_dir respektiert DATA_DIR-Env, Fallback PROJECT_ROOT/data
 _DATA_DIR = getattr(config, "_data_dir", None) or (PROJECT_ROOT / "data")
 ISSUES_FILE = _DATA_DIR / "issues.json"
 # Pro Admin: zuletzt gesehener Issue-Erstellzeitpunkt (fuer die Badge bei NEUEN

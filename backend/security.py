@@ -43,7 +43,7 @@ def _collect_server_ips():
     except Exception:
         pass
 
-    # 4. Default Gateway (Docker Host IP)
+    # 4. Default Gateway
     try:
         result = subprocess.run(
             ["ip", "route"], capture_output=True, text=True, timeout=3

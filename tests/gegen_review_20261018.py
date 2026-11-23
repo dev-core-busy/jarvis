@@ -232,16 +232,13 @@ PROBEN = [
      "        return list(zeilen[:anfang + ende])\n", KOM),
     ("C Skill-Module wieder je Agent ausgefuehrt", "backend/skills/loader.py",
      "        if not frisch and eintrag is not None and eintrag[0] == stempel:\n", "        if False:\n", SKC),
-    # ── Frontend / Bridge / Docker ──
+    # ── Frontend / Bridge ──
     ("F chatlib: Adresse ohne Attribut-Escape", "frontend/js/chatlib.js",
      "                return _hold(`<img src=\"${_A(safe)}\" alt=\"${_A(alt)}\"",
      "                return _hold(`<img src=\"${safe}\" alt=\"${alt}\"", CHA),
     ("F Webhook ohne Zertifikats-Pin", SCH,
      "            checkServerIdentity: (_host, zert) => (zert && zert.fingerprint256 === pin.fp)\n",
      "            checkServerIdentity: () => undefined && (pin.fp)\n", WBJ),
-    ("F Docker schaltet TLS-Pruefung wieder ab", "docker/entrypoint.sh",
-     "    export JARVIS_WEBHOOK=\"https://localhost/api/whatsapp/incoming\"\n",
-     "    export JARVIS_WEBHOOK=\"https://localhost/api/whatsapp/incoming\"\n    export NODE_TLS_REJECT_UNAUTHORIZED=0\n", M12),
     # ── Wissen ──
     ("W Gruppen-Manifest wieder fail-open", "backend/knowledge_groups.py",
      "    data = _atomar.lesen(MANIFEST_PATH, vorgabe=_default_manifest,\n                         pruefen=lambda d: isinstance(d, dict))\n",

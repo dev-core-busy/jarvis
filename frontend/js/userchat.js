@@ -877,7 +877,7 @@
 
         // ── Kontextmenue (Rechtsklick / Long-Press) ────────────────
         if (window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
-            window.JarvisChatLib.setupBubbleContextMenu(row, () => _buildDmCtxItems(row, bubble, msg));
+            window.JarvisChatLib.setupBubbleContextMenu(row, (ev) => _buildDmCtxItems(row, bubble, msg, ev));
         }
 
         // Im Auswahlmodus neue eigene Bubble direkt mit Checkbox versehen
@@ -886,7 +886,7 @@
     }
 
     // ─── Kontextmenue: Bearbeiten/Loeschen/Kopieren/Antworten ─────
-    function _buildDmCtxItems(row, bubble, msg) {
+    function _buildDmCtxItems(row, bubble, msg, ev) {
         const items = [];
         const mine = _isMe(msg.from);
         const txt  = (msg.text || '').trim();
@@ -899,7 +899,10 @@
                 });
             }
         }
-        if (txt) {
+        // "Text kopieren" nur, wenn der Zeiger AUF Text dieser Sprechblase
+        // steht (gleiche Regel wie /chat).
+        const knoten = window.JarvisChatLib?.textUnterPunkt?.(ev) || null;
+        if (txt && knoten && bubble && bubble.contains(knoten)) {
             items.push({
                 label: (window.t ? window.t('bubble.ctx.copy') : 'Text kopieren'), icon: '⧉',
                 onClick: () => window.JarvisChatLib?.copyTextToClipboard?.(txt),

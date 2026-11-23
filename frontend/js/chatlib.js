@@ -1107,6 +1107,45 @@
     /* Kontextmenue-Eintraege fuer das angeklickte Medium.
      * Rueckgabe [] wenn nichts Passendes getroffen wurde – dann haengt der
      * Aufrufer nur seine eigenen Eintraege (Text kopieren, Loeschen …) an. */
+    /* Liegt der Punkt des Ereignisses WIRKLICH auf einem Zeichen?
+     * Rueckgabe: der Textknoten unter dem Zeiger, sonst null.
+     *
+     * `caretRangeFromPoint` allein genuegt nicht: es liefert auch neben dem
+     * Text (Rand der Sprechblase, Leerraum hinter dem Zeilenende) die
+     * NAECHSTE Einfuegemarke, also einen Textknoten. Deshalb wird das Zeichen
+     * vor und hinter der Marke vermessen und nur gezaehlt, wenn sein Rechteck
+     * den Punkt enthaelt. Reiner Leerraum zaehlt nicht als Text.
+     * Long-Press uebergibt ein touchstart-Ereignis – dort steht der Punkt in
+     * `touches[0]`. */
+    function textUnterPunkt(ev) {
+        if (!ev) return null;
+        const t = (ev.touches && ev.touches[0]) || ev;
+        const x = t.clientX, y = t.clientY;
+        if (typeof x !== 'number' || typeof y !== 'number') return null;
+        let node = null, off = 0;
+        try {
+            if (document.caretPositionFromPoint) {
+                const p = document.caretPositionFromPoint(x, y);
+                if (p) { node = p.offsetNode; off = p.offset; }
+            } else if (document.caretRangeFromPoint) {
+                const r = document.caretRangeFromPoint(x, y);
+                if (r) { node = r.startContainer; off = r.startOffset; }
+            }
+        } catch (_) { return null; }
+        if (!node || node.nodeType !== 3) return null;
+        const daten = node.data || '';
+        const r = document.createRange();
+        for (const i of [off - 1, off]) {
+            if (i < 0 || i >= daten.length || !daten[i].trim()) continue;
+            r.setStart(node, i); r.setEnd(node, i + 1);
+            const rects = r.getClientRects ? r.getClientRects() : [];
+            for (const q of rects) {
+                if (x >= q.left && x <= q.right && y >= q.top && y <= q.bottom) return node;
+            }
+        }
+        return null;
+    }
+
     function mediaCtxItems(ev) {
         const ziel = ev && (ev.target || (ev.touches && ev.touches[0] && ev.touches[0].target));
         if (!ziel || !ziel.closest) return [];
@@ -1679,6 +1718,7 @@
         copyTextToClipboard: copyTextToClipboard,
         createSelectionController: createSelectionController,
         mediaCtxItems: mediaCtxItems,
+        textUnterPunkt: textUnterPunkt,
         copyElementAsImage: copyElementAsImage,
         installAttachmentDrag: installAttachmentDrag,
         exportTranscriptPdf: exportTranscriptPdf,

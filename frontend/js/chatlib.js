@@ -1673,6 +1673,9 @@
         exitEditMode: exitEditMode,
         setupBubbleContextMenu: setupBubbleContextMenu,
         hideBubbleContextMenu: _hideCtxMenu,
+        // Dasselbe Menue frei positioniert – fuer Flaechen ausserhalb einer
+        // Sprechblase (Hintergrund des Verlaufs in /chat).
+        showContextMenuAt: _showCtxMenuAt,
         copyTextToClipboard: copyTextToClipboard,
         createSelectionController: createSelectionController,
         mediaCtxItems: mediaCtxItems,

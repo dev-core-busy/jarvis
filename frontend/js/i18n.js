@@ -5458,6 +5458,7 @@ const _I18N = {
         'bubble.export_pdf':      'Als PDF exportieren',
         'bubble.popup_blocked':   'Bitte Pop-ups erlauben, um als PDF zu exportieren.',
         'bubble.ctx.delete':      'Löschen',
+        'bubble.ctx.select':      'Nachrichten auswählen',
         // Kompletter Verlauf als PDF (Kontextmenue in /chat)
         'chatpdf.ctx':            'Chat als PDF',
         'chatpdf.you':            'Du',
@@ -11214,6 +11215,7 @@ const _I18N = {
         'bubble.export_pdf':      'Export as PDF',
         'bubble.popup_blocked':   'Please allow pop-ups to export as PDF.',
         'bubble.ctx.delete':      'Delete',
+        'bubble.ctx.select':      'Select messages',
         // Vollstaendiges Protokoll als PDF (Kontextmenue in /chat)
         'chatpdf.ctx':            'Chat as PDF',
         'chatpdf.you':            'You',

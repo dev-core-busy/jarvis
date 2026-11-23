@@ -1780,6 +1780,41 @@
         return items;
     }
 
+    // Rechtsklick auf den HINTERGRUND des Verlaufs (grau, zwischen und neben
+    // den Sprechblasen): dort hing bisher kein Handler, es kam das Browser-
+    // Menue. Jetzt dasselbe eigene Menue mit den Eintraegen, die sich nicht auf
+    // eine einzelne Nachricht beziehen. Klicks auf eine Zeile behandelt deren
+    // eigener Handler (der stoppt die Weitergabe); laesst er das Ereignis
+    // bewusst durch (Bearbeiten-Modus, SHIFT), greift hier dieselbe Ausnahme.
+    function _hintergrundCtxItems() {
+        const zeilen = messagesEl.querySelectorAll('.msg-row');
+        // Ohne Nachrichten gibt es nichts zu exportieren oder auszuwaehlen –
+        // dann bleibt das Browser-Menue, statt ein leeres zu zeigen.
+        if (!zeilen.length) return [];
+        const items = [_ctxPdfItem()];
+        if (!_selCtl.isActive()) {
+            items.push({
+                label: (window.t ? window.t('bubble.ctx.select') : 'Nachrichten auswählen'),
+                // Haekchen im Kasten als SVG (kein Emoji – das rendert je nach System bunt)
+                icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg>',
+                onClick: () => _selCtl.enter(),
+            });
+        }
+        return items;
+    }
+    messagesEl.addEventListener('contextmenu', (e) => {
+        if (e.shiftKey) return;
+        const ziel = e.target;
+        if (ziel && ziel.closest && ziel.closest('.msg-row, input, textarea, [contenteditable="true"]')) return;
+        const lib = window.JarvisChatLib;
+        if (!lib || !lib.showContextMenuAt) return;
+        const items = _hintergrundCtxItems();
+        if (!items.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        lib.showContextMenuAt(e.clientX, e.clientY, items);
+    });
+
     // Loescht NUR die angeklickte Bubble (analog Android-App-Verhalten).
     // Nachfolgende Antworten/Dialoge bleiben erhalten. Backend-Agent-History
     // wird nicht angetastet (User-Anker/Tool-Call-Verkettung bleibt intakt).

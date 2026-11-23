@@ -358,6 +358,12 @@
         const _csNewBtn = $('cs-new');
         if (_csNewBtn && !_csNewBtn._wired) { _csNewBtn._wired = true; _csNewBtn.addEventListener('click', _newSession); }
         // Auswahlmodus der Verlaufsleiste (mehrere Chats zusammen loeschen)
+        // Eigenes Kontextmenue in der ganzen Verlaufsleiste (Zeilen + Flaeche)
+        const _csSide = $('chat-sidebar');
+        if (_csSide && !_csSide._ctxWired && window.JarvisChatLib && window.JarvisChatLib.setupBubbleContextMenu) {
+            _csSide._ctxWired = true;
+            window.JarvisChatLib.setupBubbleContextMenu(_csSide, _csCtxItems);
+        }
         const _csSelBtn = $('cs-selmode');
         if (_csSelBtn && !_csSelBtn._wired) { _csSelBtn._wired = true; _csSelBtn.addEventListener('click', () => _selModus(!_selMode)); }
         const _csSelDel = $('cs-seldel');
@@ -2721,6 +2727,9 @@
             const item = document.createElement('div');
             item.className = 'cs-item' + (s.id === _activeSid ? ' active' : '')
                            + (_selMode && _selIds.has(s.id) ? ' cs-picked' : '');
+            // Kennung an der Zeile: das Kontextmenue der Leiste (_csCtxItems)
+            // findet darueber den Chat, auf den geklickt wurde.
+            item.dataset.sid = s.id;
             // Im Auswahlmodus ersetzt das Kaestchen die Aktionsknoepfe: ein
             // Muelleimer je Zeile NEBEN einer Mehrfachauswahl liesse offen,
             // welche der beiden Loeschungen ein Klick ausloest.
@@ -2770,6 +2779,92 @@
             del.addEventListener('click', (e) => { e.stopPropagation(); _deleteSession(s); });
             list.appendChild(item);
         });
+    }
+
+    /* ─── Kontextmenue der Verlaufsleiste ─────────────────────────────────
+       Ersetzt das Browser-Menue in der ganzen linken Leiste. Auf einer
+       Chat-Zeile: Aktionen fuer DIESEN Chat (dieselben Wege wie die Knoepfe
+       an der Zeile). Auf freier Flaeche: Aktionen fuer die Leiste. Im
+       Auswahlmodus: nur Auswahl-Aktionen – ein Einzel-Loeschen neben einer
+       Mehrfachauswahl liesse offen, was ein Klick loescht (gleiche Regel wie
+       die ausgeblendeten Zeilenknoepfe). SHIFT laesst das Browser-Menue durch
+       (setupBubbleContextMenu), Long-Press oeffnet dasselbe Menue.           */
+    function _csCtxItems(ev) {
+        const T = (k, f) => (window.t ? window.t(k) : f);
+        const ziel = ev && (ev.target || (ev.touches && ev.touches[0] && ev.touches[0].target));
+        // Im Eingabefeld (Ziehgriff, kuenftige Suche) bleibt das Browser-Menue:
+        // dort braucht man Einfuegen/Rechtschreibung.
+        if (ziel && ziel.closest && ziel.closest('textarea, input[type="text"], input[type="search"]')) return [];
+        const zeile = ziel && ziel.closest ? ziel.closest('.cs-item') : null;
+        const sid = zeile && zeile.dataset ? zeile.dataset.sid : '';
+        const s = sid ? _sessions.find(x => x.id === sid) : null;
+        const ico = window.JarvisIcons || {};
+        const haken = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12l3 3 5-6"/></svg>';
+        const plus = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+        const zahnrad = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+        const items = [];
+
+        if (_selMode) {
+            if (s) {
+                const drin = _selIds.has(s.id);
+                items.push({
+                    label: drin ? T('chat.ctx_unpick', 'Auswahl aufheben') : T('chat.ctx_pick', 'Auswählen'),
+                    icon: haken,
+                    onClick: () => _selSetze(s.id, !drin),
+                });
+            }
+            if (_selIds.size) {
+                items.push({
+                    label: T('chat.delete_selected', 'Löschen ({n})').replace('{n}', String(_selIds.size)),
+                    icon: ico.trash ? ico.trash() : '', danger: true,
+                    onClick: () => _deleteSelected(),
+                });
+            }
+            items.push({
+                label: T('chat.ctx_select_end', 'Auswahl beenden'),
+                icon: ico.close ? ico.close() : '',
+                onClick: () => _selModus(false),
+            });
+            return items;
+        }
+
+        if (!s) {
+            items.push({ label: T('chat.ctx_new', 'Neuer Chat'), icon: plus, onClick: () => _newSession() });
+            if (_sessions.length) {
+                items.push({ label: T('chat.ctx_select', 'Mehrere auswählen'), icon: haken, onClick: () => _selModus(true) });
+            }
+            items.push({ label: T('chat.welcome_restore', 'Beispiel-Prompts'), icon: ico.prompt ? ico.prompt(false) : '', onClick: () => _restoreWelcome() });
+            items.push({ label: T('chat.ctx_settings', 'Chat-Einstellungen'), icon: zahnrad, onClick: () => _openChatSettings() });
+            return items;
+        }
+
+        items.push({
+            label: s.has_prompt ? T('chat.ctx_prompt_edit', 'Prompt bearbeiten') : T('chat.ctx_prompt', 'Prompt festlegen'),
+            icon: ico.prompt ? ico.prompt(!!s.has_prompt) : '',
+            onClick: () => _openSessionPrompt(s),
+        });
+        items.push({
+            label: T('chat.rename', 'Umbenennen'),
+            icon: ico.pencil ? ico.pencil() : '',
+            onClick: () => _renameSession(s),
+        });
+        // PDF nur fuer den OFFENEN Chat: der Export liest die angezeigten
+        // Sprechblasen, ein anderer Chat ist gar nicht im DOM.
+        if (s.id === _activeSid && messagesEl && messagesEl.querySelector('.msg-row')) {
+            items.push(_ctxPdfItem());
+        }
+        items.push({
+            label: T('chat.ctx_select', 'Mehrere auswählen'),
+            icon: haken,
+            // Der angeklickte Chat ist gleich ausgewaehlt – das ist die Absicht.
+            onClick: () => { _selModus(true); _selSetze(s.id, true); },
+        });
+        items.push({
+            label: T('chat.delete', 'Löschen'),
+            icon: ico.trash ? ico.trash() : '', danger: true,
+            onClick: () => _deleteSession(s),
+        });
+        return items;
     }
 
     /* ─── Auswahlmodus: mehrere Chats zusammen loeschen ────────────────────

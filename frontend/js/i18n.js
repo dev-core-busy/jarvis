@@ -1,10 +1,16 @@
 /**
- * Jarvis i18n – Deutsch / English UI Übersetzungen
+ * Jarvis i18n – Deutsch / English / Français UI Übersetzungen
+ *
+ * Das franzoesische Woerterbuch liegt in i18n_fr.js (direkt nach dieser Datei
+ * eingebunden, haengt sich als _I18N.fr an). Fehlt dort ein Schluessel, gilt
+ * Englisch, dann Deutsch – ein Franzose liest Englisch eher als Deutsch.
  *
  * Nutzung:
  *   window.t('key')              → übersetzter String
- *   window.setLang('en'|'de')    → Sprache wechseln + UI neu rendern
+ *   window.setLang('de'|'en'|'fr') → Sprache wechseln + UI neu rendern
  *   window.applyLang()           → manuell nach dynamischem Re-Render aufrufen
+ *
+ * Das Backend kennt nur de/en: Aufrufe mit ?lang= schicken fuer fr 'en'.
  *
  * HTML:  <span data-i18n="key"></span>
  *        <input data-i18n-placeholder="key">
@@ -11787,11 +11793,17 @@ const _I18N = {
 
 window._lang = localStorage.getItem('jarvis_lang') || 'de';
 
-/** Gibt den übersetzten String zurück (Fallback: Deutsch, dann Key selbst). */
+/** Rueckfallkette je Sprache: fr faellt auf Englisch, dann Deutsch. */
+var _I18N_RUECKFALL = { de: ['de'], en: ['en', 'de'], fr: ['fr', 'en', 'de'] };
+
+/** Gibt den übersetzten String zurück (Fallback je Sprache, dann Key selbst). */
 window.t = function(key) {
-    return (_I18N[window._lang] && _I18N[window._lang][key])
-        || (_I18N.de[key])
-        || key;
+    var kette = _I18N_RUECKFALL[window._lang] || [window._lang, 'de'];
+    for (var i = 0; i < kette.length; i++) {
+        var w = _I18N[kette[i]] && _I18N[kette[i]][key];
+        if (w) return w;
+    }
+    return key;
 };
 
 /** Wendet alle data-i18n-Attribute auf das Dokument an. */
@@ -11799,7 +11811,9 @@ window.applyLang = function() {
     // Sprach-Attribut fuer CSS-Sprachbloecke (.i18n-de / .i18n-en):
     // html[data-lang="en"] blendet .i18n-de aus und umgekehrt. Wird fuer
     // lange Fliesstext-Inhalte (z.B. API-Dokumentation) statt Einzel-Keys genutzt.
+    // Fuer fr gibt es keine eigenen Bloecke – theme.css zeigt dort .i18n-en.
     document.documentElement.setAttribute('data-lang', window._lang);
+    document.documentElement.setAttribute('lang', window._lang);
     // Textinhalt
     document.querySelectorAll('[data-i18n]').forEach(el => {
         el.textContent = window.t(el.dataset.i18n);
@@ -11846,6 +11860,9 @@ window.applyLang = function() {
     document.querySelectorAll('.lang-toggle-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.lang === window._lang);
     });
+    // Sprachauswahl als Klappmenue: sichtbar ist nur die aktive Sprache, ein
+    // Klick darauf bietet die uebrigen an (theme.css blendet sie sonst aus).
+    document.querySelectorAll('.lang-toggle').forEach(_sprachGruppeOrdnen);
     // Signal fuer Inhalte, die NICHT ueber data-i18n laufen: serverseitig
     // uebersetzte Listen (z.B. der SAP-Analysekatalog) und alles, was ein
     // Modul selbst zusammenbaut. applyLang() erreicht die nicht – ohne dieses
@@ -11857,6 +11874,53 @@ window.applyLang = function() {
                                              { detail: { lang: window._lang } }));
     } catch (e) { /* aeltere Browser ohne CustomEvent-Konstruktor */ }
 };
+
+/**
+ * Ordnet eine .lang-toggle-Gruppe als Klappmenue: der Knopf der aktiven Sprache
+ * steht vorn (er ist der einzige sichtbare), die uebrigen bekommen ihre Zeile im
+ * aufgeklappten Menue (--lt-i). Kennt die Gruppe die aktuelle Sprache nicht
+ * (z. B. Muell in localStorage), gilt Deutsch als aktiv – t() faellt ja ebenso
+ * auf Deutsch zurueck, und ohne aktiven Knopf waere die Gruppe unsichtbar.
+ */
+function _sprachGruppeOrdnen(gruppe) {
+    var knoepfe = Array.prototype.filter.call(gruppe.children, function (k) {
+        return k.classList && k.classList.contains('lang-toggle-btn');
+    });
+    if (!knoepfe.length) return;
+    var aktiv = knoepfe.filter(function (k) { return k.classList.contains('active'); })[0];
+    if (!aktiv) {
+        aktiv = knoepfe.filter(function (k) { return k.dataset.lang === 'de'; })[0] || knoepfe[0];
+        aktiv.classList.add('active');
+    }
+    // Feste Folge der angebotenen Sprachen (DE, EN, FR) – unabhaengig davon,
+    // in welcher Reihenfolge vorher gewechselt wurde.
+    var FOLGE = ['de', 'en', 'fr'];
+    var rang = function (k) { var r = FOLGE.indexOf(k.dataset.lang); return r < 0 ? FOLGE.length : r; };
+    knoepfe.sort(function (a, b) { return rang(a) - rang(b); });
+    // Die uebrigen ans Ende haengen – damit steht der aktive Knopf von selbst vorn.
+    knoepfe.forEach(function (k) { if (k !== aktiv) gruppe.appendChild(k); });
+    var i = 0;
+    knoepfe.forEach(function (k) {
+        if (k === aktiv) {
+            k.style.removeProperty('--lt-i');
+            k.setAttribute('aria-haspopup', 'true');
+            k.setAttribute('aria-expanded', gruppe.classList.contains('offen') ? 'true' : 'false');
+        } else {
+            k.style.setProperty('--lt-i', String(i++));
+            k.removeAttribute('aria-haspopup');
+            k.removeAttribute('aria-expanded');
+        }
+    });
+}
+
+/** Schliesst alle offenen Sprachmenues ausser `ausser`. */
+function _sprachMenuesSchliessen(ausser) {
+    document.querySelectorAll('.lang-toggle.offen').forEach(function (g) {
+        if (g === ausser) return;
+        g.classList.remove('offen');
+        _sprachGruppeOrdnen(g);
+    });
+}
 
 function _onInvalid(e) {
     e.target.setCustomValidity(window.t('validation.required'));
@@ -11873,15 +11937,31 @@ window.setLang = function(lang) {
     window.applyLang();
 };
 
-// Sprachknoepfe mit data-setlang="de|en" (BSI H4, 2026-10-04): ersetzt das
+// Sprachknoepfe mit data-setlang="de|en|fr" (BSI H4, 2026-10-04): ersetzt das
 // fruehere onclick="window.setLang('de')" – die Content-Security-Policy laesst
 // keine Inline-Handler zu. EIN delegierter Zuhoerer auf document, damit auch
 // spaeter eingefuegte Knoepfe greifen. Opt-in ueber das eigene Attribut, NICHT
 // ueber .lang-toggle-btn: /api bindet seine Sprachknoepfe selbst und wuerde sonst
 // doppelt umschalten.
+// In einer .lang-toggle-Gruppe ist der Knopf der AKTIVEN Sprache der Ausloeser
+// des Klappmenues: sein Klick oeffnet/schliesst die Auswahl, statt dieselbe
+// Sprache noch einmal zu setzen. Ein Klick daneben oder Esc schliesst sie.
 document.addEventListener('click', function (e) {
     var b = e.target && e.target.closest ? e.target.closest('[data-setlang]') : null;
-    if (b) window.setLang(b.getAttribute('data-setlang'));
+    var gruppe = b && b.closest ? b.closest('.lang-toggle') : null;
+    _sprachMenuesSchliessen(gruppe);
+    if (!b) return;
+    var lang = b.getAttribute('data-setlang');
+    if (gruppe && b.classList.contains('active')) {
+        gruppe.classList.toggle('offen');
+        _sprachGruppeOrdnen(gruppe);
+        return;
+    }
+    if (gruppe) gruppe.classList.remove('offen');
+    window.setLang(lang);
+});
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') _sprachMenuesSchliessen(null);
 });
 
 // ─── Auto-Apply nach DOM-Ready ─────────────────────────────────────────────

@@ -460,10 +460,13 @@
         // Sprachwechsel: statische Texte macht applyLang (data-i18n), die dynamisch
         // gerenderten Endpunkt-Bloecke werden komplett neu aufgebaut. Die Endpunkt-
         // Beschreibungen selbst stammen aus den Backend-Docstrings (nur Deutsch).
-        document.querySelectorAll('.lang-toggle-btn').forEach(function (b) {
-            b.addEventListener('click', function () {
-                if (window.setLang) window.setLang(b.getAttribute('data-lang'));
-                if (spec) { setCount(); render(); }
-            });
+        // Die Knoepfe tragen data-setlang (Klappmenue aus i18n.js); neu gebaut
+        // wird nur bei einem echten Wechsel – applyLang() feuert das Ereignis
+        // auch ohne Sprachwechsel.
+        var _gerendertIn = window._lang;
+        window.addEventListener('jarvis-lang-changed', function () {
+            if (window._lang === _gerendertIn) return;
+            _gerendertIn = window._lang;
+            if (spec) { setCount(); render(); }
         });
     })();

@@ -1516,7 +1516,7 @@
     }
 
     function _pdfSkelett(titel, akzent, ladeText) {
-        return '<!doctype html><html lang="' + (global._lang === 'en' ? 'en' : 'de') + '"><head>'
+        return '<!doctype html><html lang="' + ({ en: 'en', fr: 'fr' }[global._lang] || 'de') + '"><head>'
             + '<meta charset="utf-8">'
             // Ohne <base> loesen relative Adressen (Bilder, die nicht eingebettet
             // werden konnten) gegen "about:blank" auf und sind damit tot.

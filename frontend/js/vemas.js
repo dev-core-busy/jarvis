@@ -416,7 +416,7 @@
         loadVisibility: function () {
             var self = this;
             var box = $('vemas-vis-list'); if (!box) return;
-            var lg = (localStorage.getItem('jarvis_lang') === 'en') ? 'en' : 'de';
+            var lg = /^(en|fr)$/.test(localStorage.getItem('jarvis_lang') || '') ? 'en' : 'de';   // Server kennt nur de/en
             fetch('/api/vemas/analyses/catalog?lang=' + lg, { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {

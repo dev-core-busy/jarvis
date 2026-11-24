@@ -36,7 +36,7 @@ window.Protokolle = (function () {
         if (wert === undefined || wert === null || wert === '') return '—';
         var d = typeof wert === 'number' ? new Date(wert * 1000) : new Date(wert);
         if (isNaN(d.getTime())) return String(wert);
-        var lang = window._lang === 'en' ? 'en-GB' : 'de-DE';
+        var lang = ({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE');
         try { return d.toLocaleString(lang, { dateStyle: 'short', timeStyle: 'medium' }); }
         catch (e) { return String(wert); }
     }

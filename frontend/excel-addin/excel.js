@@ -2581,7 +2581,7 @@
             } catch (e2) { }
         });
         if ((e = $('xl-lang'))) e.addEventListener('click', function () {
-            var neu = (window._lang === 'en') ? 'de' : 'en';
+            var neu = { de: 'en', en: 'fr' }[window._lang] || 'de';   // DE → EN → FR → DE
             if (window.setLang) window.setLang(neu);
             var b = $('xl-lang');
             if (b) b.textContent = neu.toUpperCase();

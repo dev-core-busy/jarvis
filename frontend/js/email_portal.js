@@ -55,7 +55,10 @@
         var s = window.t ? window.t(key) : null;
         return (s && s !== key) ? s : fallback;
     }
-    function sprache() { return (window._lang === 'en') ? 'en' : 'de'; }
+    // UI-Sprache (de/en/fr) – fuer die Wechselerkennung und die Anzeige.
+    function sprache() { return ({ en: 'en', fr: 'fr' })[window._lang] || 'de'; }
+    // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
+    function serverSprache() { return sprache() === 'de' ? 'de' : 'en'; }
     function token() {
         for (var i = 0; i < TOKEN_KEYS.length; i++) {
             var v = localStorage.getItem(TOKEN_KEYS[i]);
@@ -142,7 +145,7 @@
 
     /* ── Postfach ──────────────────────────────────────────────────────── */
     function ladeStatus() {
-        return hole('/api/email/status?lang=' + sprache())
+        return hole('/api/email/status?lang=' + serverSprache())
             .then(function (d) {
                 _status = d;
                 _bereiche = d.bereiche || [];
@@ -1054,7 +1057,7 @@
 
     /* ── Regeln ────────────────────────────────────────────────────────── */
     function ladeRegeln() {
-        return hole('/api/email/rules?lang=' + sprache())
+        return hole('/api/email/rules?lang=' + serverSprache())
             .then(function (d) {
                 _regeln = d.regeln || [];
                 if (d.bereiche) { _bereiche = d.bereiche; _bereicheLang = sprache(); }

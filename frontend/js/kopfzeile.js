@@ -430,11 +430,12 @@
             if (nach && nach.parentNode === g) g.insertBefore(e, nach); else g.appendChild(e);
         };
 
-        // DE/EN: erstes Element der Gruppe (auf /settings hinter dem Suchfeld).
+        // DE/EN/FR: erstes Element der Gruppe (auf /settings hinter dem Suchfeld).
         if (!wirt.querySelector('.lang-toggle')) {
             var lt = el('div', { 'class': 'lang-toggle', id: 'jv-kopf-lang' },
                 '<button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>'
-                + '<button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>');
+                + '<button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>'
+                + '<button class="lang-toggle-btn" data-lang="fr" data-setlang="fr" title="Français">FR</button>');
             var such = g.querySelector('.st-such-wrap');
             if (such) nachDem(such, lt); else g.insertBefore(lt, g.firstChild);
             var lang = window._lang || (function () { try { return localStorage.getItem('jarvis_lang'); } catch (e) { return ''; } })() || 'de';

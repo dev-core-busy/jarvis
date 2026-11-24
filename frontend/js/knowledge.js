@@ -1195,7 +1195,7 @@ class JarvisKnowledgeManager {
         // Tausendertrenner nach der OBERFLAECHEN-Sprache, nicht nach der des
         // Systems: ohne Angabe zeigte ein englischer Browser "47,110" in einer
         // deutschen Oberflaeche (gefunden von der Sicherheits-CI, Locale C).
-        const z = (n) => (n || 0).toLocaleString(window._lang === 'en' ? 'en-GB' : 'de-DE');
+        const z = (n) => (n || 0).toLocaleString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE'));
         const spar = (b.summe || 0) - (b.summe_neu || 0);
         const sparTok = (b.token_summe || 0) - (b.token_summe_neu || 0);
         const wz = (b.werkzeuge || []).slice(0, 8).map(w =>
@@ -3570,7 +3570,7 @@ class JarvisKnowledgeManager {
     /** Unix-Zeitstempel → lokale Datums-/Uhrzeit-Anzeige. */
     _fmtDateTime(ts) {
         try {
-            return new Date(ts * 1000).toLocaleString(window._lang === 'en' ? 'en-GB' : 'de-DE',
+            return new Date(ts * 1000).toLocaleString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE'),
                 { day: '2-digit', month: '2-digit', year: 'numeric',
                   hour: '2-digit', minute: '2-digit', second: '2-digit' });
         } catch (_) { return ''; }

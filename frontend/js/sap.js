@@ -467,7 +467,7 @@
             var self = this;
             var box = $('sap-vis-list'); if (!box) return;
             var lg = (function () {
-                try { return localStorage.getItem('jarvis_lang') || 'de'; } catch (e) { return 'de'; }
+                try { return localStorage.getItem('jarvis_lang') === 'fr' ? 'en' : (localStorage.getItem('jarvis_lang') || 'de'); } catch (e) { return 'de'; }
             })();
             box.innerHTML = '<span class="kb-hint">' + esc(window.t ? window.t('common.loading') : 'Lädt…') + '</span>';
             fetch('/api/sap/analyses/catalog?lang=' + encodeURIComponent(lg), { headers: authHeaders() })

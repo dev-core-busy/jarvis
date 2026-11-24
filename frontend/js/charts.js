@@ -206,7 +206,7 @@
         try { l = localStorage.getItem('jarvis_lang') || ''; } catch (e) { /* ignoriert */ }
         if (!l && window.currentLang) l = window.currentLang;
         if (!l) l = (document.documentElement.getAttribute('lang') || '');
-        return /^en/i.test(l) ? 'en-US' : 'de-DE';
+        return /^en/i.test(l) ? 'en-US' : (/^fr/i.test(l) ? 'fr-FR' : 'de-DE');
     }
 
     // Zahl fuer die MENSCHLICHE Anzeige. `compact` nur fuer Achsen-Ticks:

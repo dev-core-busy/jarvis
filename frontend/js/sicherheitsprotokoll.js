@@ -56,7 +56,7 @@ window.sicherheitsProtokoll = (function () {
     }
 
     function zeit(ts) {
-        var lang = window._lang === 'en' ? 'en-GB' : 'de-DE';
+        var lang = ({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE');
         try {
             return new Date(ts * 1000).toLocaleString(lang, { dateStyle: 'short', timeStyle: 'medium' });
         } catch (e) {

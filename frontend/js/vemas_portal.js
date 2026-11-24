@@ -40,8 +40,10 @@
         });
     }
     function lang() {
-        return (localStorage.getItem('jarvis_lang') === 'en') ? 'en' : 'de';
+        return ({ en: 'en', fr: 'fr' })[localStorage.getItem('jarvis_lang')] || 'de';
     }
+    // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
+    function serverLang() { return (lang() === 'en' || lang() === 'fr') ? 'en' : 'de'; }
     function toPortal() { window.location.replace('/portal'); }
 
     var _catalog = null;     // {categories, analyses, tools}
@@ -176,11 +178,12 @@
 
     // ── Katalog: Abfragen + Zielwerkzeuge ───────────────────────────
     function loadCatalog() {
-        fetch('/api/vemas/analyses?lang=' + encodeURIComponent(lang()), { headers: authHeaders() })
+        fetch('/api/vemas/analyses?lang=' + encodeURIComponent(serverLang()), { headers: authHeaders() })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d) return;
                 _catalog = d;
+                _catalog.uiLang = lang();   // Merker fuer den Sprachwechsel-Zuhoerer
                 fillAnalyses();
                 fillTools();
                 applyDesc();
@@ -331,7 +334,7 @@
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 analysis_id: a ? a.id : '', question: q,
-                tool: tool, lang: lang()
+                tool: tool, lang: serverLang()
             }),
             signal: _abort.signal
         })
@@ -1165,7 +1168,7 @@
         // den Katalog jedes Mal zweimal.
         window.addEventListener('jarvis-lang-changed', function (e) {
             var lg = (e && e.detail && e.detail.lang) || lang();
-            if (_catalog && _catalog.lang === (lg === 'en' ? 'en' : 'de')) return;
+            if (_catalog && _catalog.uiLang === lg) return;
             localStorage.setItem(PREF_ANALYSIS, $('vm-analysis') ? $('vm-analysis').value : '');
             loadCatalog();
             renderHistory();

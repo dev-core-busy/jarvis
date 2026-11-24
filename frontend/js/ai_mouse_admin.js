@@ -745,7 +745,7 @@
                 if (!isNaN(datum.getTime())) {
                     var sprache = (window.getLang && window.getLang()) || 'de';
                     text += ' (' + t('amshare.ver_built', 'gebaut am') + ' '
-                        + datum.toLocaleString(sprache === 'en' ? 'en-GB' : 'de-DE',
+                        + datum.toLocaleString({ en: 'en-GB', fr: 'fr-FR' }[sprache] || 'de-DE',
                             { dateStyle: 'medium', timeStyle: 'short' }) + ')';
                 }
             }

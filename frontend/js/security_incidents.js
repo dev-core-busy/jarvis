@@ -32,7 +32,7 @@
         return v.split('{marke}').join(marke);
     }
     function fmtTs(ts) {
-        try { return new Date((ts || 0) * 1000).toLocaleString((window._lang === 'en') ? 'en-GB' : 'de-DE'); }
+        try { return new Date((ts || 0) * 1000).toLocaleString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE')); }
         catch (e) { return '' + ts; }
     }
     function chanLabel(ch) {

@@ -50,7 +50,10 @@
         var s = window.t ? window.t(key) : null;
         return (s && s !== key) ? s : fallback;
     }
-    function sprache() { return (window._lang === 'en') ? 'en' : 'de'; }
+    // UI-Sprache (de/en/fr) – fuer die Wechselerkennung und die Anzeige.
+    function sprache() { return ({ en: 'en', fr: 'fr' })[window._lang] || 'de'; }
+    // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
+    function serverSprache() { return sprache() === 'de' ? 'de' : 'en'; }
     /* Abruf-Schluessel GENAU DIESER Adresse in ?token= (frontend/js/dlkey.js,
        Pentest F-20). Kein Rueckfall auf das Sitzungstoken – der Server weist
        es ab; ohne das Modul bleibt die Adresse ohne Schluessel. */
@@ -210,7 +213,7 @@
     // `_istAdmin` bleibt: es steuert, wer GLOBALE Ablagen aendern darf.
 
     function ladeStatus() {
-        return hole('/api/tracks/status?lang=' + sprache()).then(function (d) {
+        return hole('/api/tracks/status?lang=' + serverSprache()).then(function (d) {
             _status = d;
             _dumps = d.dumps || [];
             _bereiche = d.bereiche || [];
@@ -228,7 +231,7 @@
         b = Number(b) || 0;
         if (b < 1024) return b + ' B';
         if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
-        return (b / (1024 * 1024)).toFixed(1).replace('.', sprache() === 'de' ? ',' : '.') + ' MB';
+        return (b / (1024 * 1024)).toFixed(1).replace('.', sprache() === 'en' ? '.' : ',') + ' MB';
     }
 
     function typenText(d) {

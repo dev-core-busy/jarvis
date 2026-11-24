@@ -569,10 +569,17 @@
             + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     }
 
+    // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
+    function supServerLang() {
+        var l = localStorage.getItem('jarvis_lang') || 'de';
+        return (l === 'en' || l === 'fr') ? 'en' : 'de';
+    }
+
     function relTime(ts) {
         var diff = Math.floor(Date.now() / 1000) - (ts || 0);
-        var en = (localStorage.getItem('jarvis_lang') || 'de') === 'en';
-        var pre = en ? '' : 'vor ', post = en ? ' ago' : '';
+        var spr = localStorage.getItem('jarvis_lang') || 'de';
+        var pre = { en: '', fr: 'il y a ' }[spr], post = spr === 'en' ? ' ago' : '';
+        if (pre === undefined) pre = 'vor ';
         if (diff < 60) return T('sup.now', 'gerade eben');
         if (diff < 3600) return pre + Math.floor(diff / 60) + ' ' + T('sup.min', 'Min') + post;
         if (diff < 86400) return pre + Math.floor(diff / 3600) + ' ' + T('sup.hours', 'Std') + post;
@@ -717,7 +724,7 @@
             body: JSON.stringify(Object.assign({ text: text, jira_all: allJira, jira_open: openJira,
                                    confluence: useConf, rag: useRag, ibs: useIbs,
                                    sap: useSap, vemas: useVemas, ai: useAi,
-                                   lang: (localStorage.getItem('jarvis_lang') || 'de'),
+                                   lang: supServerLang(),
                                    jira_limit: clampNum(getNumPref('tickets') === null ? _supDefault.tickets : getNumPref('tickets'), 1, _supMax.tickets),
                                    summary_lines: clampNum(getNumPref('sumlines') === null ? _supMax.sum : getNumPref('sumlines'), 2, _supMax.sum) },
                                    kbSel !== null ? { kb_groups: kbSel } : {})),
@@ -943,7 +950,7 @@
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ key: key, source: 'JIRA',
-                lang: (localStorage.getItem('jarvis_lang') || 'de'), lines: lines })
+                lang: supServerLang(), lines: lines })
         })
             .then(function (r) { if (r.status === 401) { logout(); return null; } return r.json(); })
             .then(function (d) {

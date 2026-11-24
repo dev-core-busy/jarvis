@@ -47,7 +47,7 @@ window.TokenVerbrauch = (function () {
         return window.authToken || (window.JarvisSitzung && window.JarvisSitzung.token());
     }
 
-    function sprache() { return window._lang === 'en' ? 'en-GB' : 'de-DE'; }
+    function sprache() { return ({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE'); }
 
     function zahl(n) {
         try { return new Intl.NumberFormat(sprache()).format(n || 0); }

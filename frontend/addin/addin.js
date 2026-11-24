@@ -103,7 +103,10 @@
         var s = window.t ? window.t(key) : null;
         return (s && s !== key) ? s : fallback;
     }
-    function sprache() { return (window._lang === 'en') ? 'en' : 'de'; }
+    // UI-Sprache (de/en/fr) – fuer die Wechselerkennung und die Anzeige.
+    function sprache() { return ({ en: 'en', fr: 'fr' })[window._lang] || 'de'; }
+    // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
+    function serverSprache() { return sprache() === 'de' ? 'de' : 'en'; }
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
@@ -763,7 +766,7 @@
             .then(function (n) {
                 return sende('/api/email/auswerten', 'POST', {
                     nachricht: n, postfach: postfachAdresse(),
-                    vorlage: vid, lang: sprache()
+                    vorlage: vid, lang: serverSprache()
                 });
             })
             .then(function (d) {
@@ -846,7 +849,7 @@
             } catch (e) { }
         });
         $('ad-lang').addEventListener('click', function () {
-            var neu = sprache() === 'de' ? 'en' : 'de';
+            var neu = { de: 'en', en: 'fr' }[sprache()] || 'de';   // DE → EN → FR → DE
             if (window.setLang) window.setLang(neu);
             $('ad-lang').textContent = neu.toUpperCase();
             // Der Bereichskatalog kommt uebersetzt vom SERVER – applyLang()
@@ -908,7 +911,7 @@
 
     /* ── Zustand / Marke ──────────────────────────────────────────────── */
     function ladeStatus() {
-        return hole('/api/email/status?lang=' + sprache())
+        return hole('/api/email/status?lang=' + serverSprache())
             .then(function (d) {
                 _status = d;
                 _konto = d.konto || null;
@@ -1302,7 +1305,7 @@
     /* ── Reiter: Regeln ───────────────────────────────────────────────── */
     function ladeRegeln() {
         melde('ad-rules-status', T('common.loading', 'Lädt…'));
-        return hole('/api/email/rules?lang=' + sprache())
+        return hole('/api/email/rules?lang=' + serverSprache())
             .then(function (d) {
                 _regeln = d.regeln || [];
                 if (d.bereiche) { _bereiche = d.bereiche; _bereicheLang = sprache(); }

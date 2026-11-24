@@ -64,6 +64,13 @@ const AUSNAHMEN = {
     // security.ad_adm_* standen hier bis 2026-11-02; die Schluessel sind mit dem
     // Container "alte Benutzerberechtigungen" entfallen.
     'knowledge.autoindex_notaus':       'Umgebungsvariable JARVIS_RAG_AUTOINDEX (Notschalter)',
+    // Die Datei heisst jarvis.cer (wie cert.download). In DE/EN fallen diese
+    // Schluessel durch den Regex von werte() (zwei Punkte im Namen); FR wird
+    // ausgewertet und sieht sie – eingeordnet 2026-11-24.
+    'cert.pwin.1':                      'die Datei heisst jarvis.cer (Content-Disposition)',
+    'cert.pbrowser.4':                  'die Datei heisst jarvis.cer (Content-Disposition)',
+    'cert.win.step1':                   'die Datei heisst jarvis.cer (Content-Disposition)',
+    'cert.browser.step4':               'die Datei heisst jarvis.cer (Content-Disposition)',
 };
 
 /* Nicht-DOM-Senken: dort wirkt der TreeWalker von branding.js nicht. */
@@ -89,12 +96,20 @@ function werte(lang) {
     return out;
 }
 const DE = werte('de'), EN = werte('en');
+// FR liegt seit 2026-11-24 in einer eigenen Datei (i18n_fr.js, haengt sich als
+// _I18N.fr an). Ausgewertet statt per Regex gelesen: die Schluessel stehen dort
+// in doppelten Anfuehrungszeichen (JSON-Form).
+let FR = {};
+try {
+    FR = new Function('var _I18N = {};\n' + lies('frontend/js/i18n_fr.js') + '\nreturn _I18N.fr;')() || {};
+} catch (e) { FR = {}; }
 
 // ══════════════════════════════════════════════════════════════════════════
 abschnitt('1) Grundlage – das Woerterbuch wird ueberhaupt gelesen');
 // ══════════════════════════════════════════════════════════════════════════
 pruefe(Object.keys(DE).length > 500, 'der de-Block liefert Werte', String(Object.keys(DE).length));
 pruefe(Object.keys(EN).length > 500, 'der en-Block liefert Werte', String(Object.keys(EN).length));
+pruefe(Object.keys(FR).length > 500, 'der fr-Block liefert Werte', String(Object.keys(FR).length));
 // Positivkontrolle: der Platzhalter ist ueberhaupt in Gebrauch. Ohne diese
 // Zeile waere ein leeres Ergebnis unten aus dem falschen Grund gruen.
 const mitMarke = Object.keys(DE).filter((k) => /\{marke/.test(DE[k]));
@@ -103,7 +118,7 @@ pruefe(mitMarke.length >= 10, 'der Platzhalter {marke} ist in Gebrauch', String(
 // ══════════════════════════════════════════════════════════════════════════
 abschnitt('2) REGEL: kein Vorgabe-Produktname in einem Oberflaechen-Text');
 // ══════════════════════════════════════════════════════════════════════════
-for (const [lang, tab] of [['de', DE], ['en', EN]]) {
+for (const [lang, tab] of [['de', DE], ['en', EN], ['fr', FR]]) {
     const schuldig = Object.keys(tab)
         .filter((k) => /jarvis/i.test(tab[k]))
         .filter((k) => !(k in AUSNAHMEN));
@@ -114,7 +129,7 @@ for (const [lang, tab] of [['de', DE], ['en', EN]]) {
 // Eine Ausnahme, die gar nicht mehr zutrifft, ist eine stille Freigabe fuer
 // die Zukunft – sie gehoert heraus.
 const unnoetig = Object.keys(AUSNAHMEN)
-    .filter((k) => !(/jarvis/i.test(DE[k] || '') || /jarvis/i.test(EN[k] || '')));
+    .filter((k) => !(/jarvis/i.test(DE[k] || '') || /jarvis/i.test(EN[k] || '') || /jarvis/i.test(FR[k] || '')));
 pruefe(unnoetig.length === 0, 'keine Ausnahme ohne Anlass', unnoetig.join(', '));
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -126,6 +141,8 @@ const nurDe = mitMarke.filter((k) => !/\{marke/.test(EN[k] || ''));
 const nurEn = Object.keys(EN).filter((k) => /\{marke/.test(EN[k]) && !/\{marke/.test(DE[k] || ''));
 pruefe(nurDe.length === 0, 'kein Schluessel mit {marke} nur auf Deutsch', nurDe.join(', '));
 pruefe(nurEn.length === 0, 'kein Schluessel mit {marke} nur auf Englisch', nurEn.join(', '));
+const ohneFr = mitMarke.filter((k) => !/\{marke/.test(FR[k] || ''));
+pruefe(ohneFr.length === 0, 'jeder Schluessel mit {marke} traegt ihn auch auf Franzoesisch', ohneFr.join(', '));
 
 // ══════════════════════════════════════════════════════════════════════════
 abschnitt('4) Nicht-DOM-Senken loesen den Platzhalter am Aufrufort auf');
@@ -315,6 +332,8 @@ const JS_AUSNAHMEN = [
     { datei: 'frontend/js/app.js',  text: 'I am Jarvis, your AI assistant',    grund: 'Vorschau, danach replace(/Jarvis/g)' },
     { datei: 'frontend/js/chat.js', text: 'ich bin Jarvis, dein KI-Assistent', grund: 'Vorschau, danach replace(/Jarvis/g)' },
     { datei: 'frontend/js/chat.js', text: 'I am Jarvis, your AI assistant',    grund: 'Vorschau, danach replace(/Jarvis/g)' },
+    { datei: 'frontend/js/app.js',  text: 'je suis Jarvis, votre assistant IA', grund: 'Vorschau, danach replace(/Jarvis/g)' },
+    { datei: 'frontend/js/chat.js', text: 'je suis Jarvis, votre assistant IA', grund: 'Vorschau, danach replace(/Jarvis/g)' },
     { datei: 'frontend/js/chat.js', text: 'Hallo! Ich bin Jarvis.',            grund: 'chat.greeting, applyAssistantName' },
     // Kopfzeilennamen des Drahtformats – kein Anzeigename.
     { datei: 'frontend/js/email.js',       text: 'X-Jarvis-Cert-Warn', grund: 'HTTP-Kopfzeile' },
@@ -375,7 +394,7 @@ for (const d of JS_WURZELN) {
     }
     for (const f of fs.readdirSync(voll).filter((x) => x.endsWith('.js'))) {
         const pfad = d + '/' + f;
-        if (pfad === 'frontend/js/i18n.js') continue;   // Abschnitt 2 prueft die Werte
+        if (pfad === 'frontend/js/i18n.js' || pfad === 'frontend/js/i18n_fr.js') continue;   // Abschnitt 2 prueft die Werte
         jsGelesen++;
         let treffer;
         try { treffer = markenStrings(lies(pfad)); }

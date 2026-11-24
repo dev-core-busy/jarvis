@@ -193,7 +193,7 @@
                 },
                 body: JSON.stringify({
                     prompt: text, kontext: kontext,
-                    lang: (window._lang === 'en') ? 'en' : 'de'
+                    lang: (window._lang === 'en' || window._lang === 'fr') ? 'en' : 'de'
                 })
             });
             var d = await r.json().catch(function () { return {}; });

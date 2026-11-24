@@ -90,7 +90,7 @@
         if (!g) return '';
         const teile = [];
         const num = (n) => Number(n).toLocaleString(
-            (window.currentLang === 'en' ? 'en-US' : 'de-DE'));
+            ({ en: 'en-US', fr: 'fr-FR' }[window._lang || window.currentLang] || 'de-DE'));
         if (g.kontext_tokens) teile.push(`${tt('caps.context', 'Kontext')}: ${num(g.kontext_tokens)} ${tt('caps.tokens', 'Token')}`);
         if (g.ausgabe_tokens) teile.push(`${tt('caps.output', 'Ausgabe')}: ${num(g.ausgabe_tokens)} ${tt('caps.tokens', 'Token')}`);
         if (g.parameter) teile.push(`${tt('caps.params', 'Größe')}: ${esc(g.parameter)}`);

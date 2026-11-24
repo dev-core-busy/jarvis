@@ -200,6 +200,8 @@
             const voice = chatTtsVoice.value;
             let previewText = window._lang === 'en'
                 ? 'Hello, I am Jarvis, your AI assistant.'
+                : window._lang === 'fr'
+                ? 'Bonjour, je suis Jarvis, votre assistant IA.'
                 : 'Hallo, ich bin Jarvis, dein KI-Assistent.';
             // Branding: separater Assistenten-Name ersetzt "Jarvis" in der Vorschau
             if (window.brandAssistantName) previewText = previewText.replace(/Jarvis/g, window.brandAssistantName);

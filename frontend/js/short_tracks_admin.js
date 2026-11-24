@@ -39,7 +39,10 @@
         var s = window.t ? window.t(key) : null;
         return (s && s !== key) ? s : fallback;
     }
-    function sprache() { return (window._lang === 'en') ? 'en' : 'de'; }
+    // UI-Sprache (de/en/fr) – fuer die Wechselerkennung und die Anzeige.
+    function sprache() { return ({ en: 'en', fr: 'fr' })[window._lang] || 'de'; }
+    // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
+    function serverSprache() { return sprache() === 'de' ? 'de' : 'en'; }
     function melde(id, text, art) {
         var e = $(id);
         if (!e) return;
@@ -77,7 +80,7 @@
         // Auswahl verwerfen.
         if (_laeuft) return Promise.resolve();
         _laeuft = true;
-        return hole('/api/tracks/admin/overview?lang=' + sprache()).then(function (d) {
+        return hole('/api/tracks/admin/overview?lang=' + serverSprache()).then(function (d) {
             _daten = d;
             zeichne();
         }).catch(function (e) {

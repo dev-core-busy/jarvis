@@ -93,9 +93,34 @@
 }
 
 /* ─── Sprachbloecke (lange Fliesstext-Inhalte, z.B. API-Doku) ─────────
-   i18n.js applyLang() setzt html[data-lang]. Default (kein Attribut) = DE. */
-html[data-lang="en"] .i18n-de { display: none !important; }
-html:not([data-lang="en"]) .i18n-en { display: none !important; }
+   i18n.js applyLang() setzt html[data-lang]. Default (kein Attribut) = DE.
+   Franzoesisch hat keine eigenen Bloecke und zeigt die englischen. */
+html[data-lang="en"] .i18n-de,
+html[data-lang="fr"] .i18n-de { display: none !important; }
+html:not([data-lang="en"]):not([data-lang="fr"]) .i18n-en { display: none !important; }
+
+/* ─── Sprachauswahl als Klappmenue (i18n.js _sprachGruppeOrdnen) ───────
+   Sichtbar ist nur die aktive Sprache; ein Klick darauf klappt die uebrigen
+   unter dem Knopf auf (--lt-i = Zeile im Menue). Die Menuezeilen liegen
+   ueber dem Inhalt und brauchen deshalb eine deckende Flaeche. */
+.lang-toggle { position: relative; }
+.lang-toggle:not(.offen) > .lang-toggle-btn:not(.active) { display: none; }
+.lang-toggle.offen > .lang-toggle-btn:not(.active) {
+    position: absolute;
+    left: -1px;
+    right: -1px;
+    top: calc(100% + 4px + var(--lt-i, 0) * 28px);
+    height: 26px;
+    z-index: 1000;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-hover);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(var(--shadow-rgb), 0.35);
+    color: var(--text-primary);
+}
+.lang-toggle.offen > .lang-toggle-btn:not(.active):hover {
+    background: rgba(var(--accent-rgb), 0.35);
+}
 
 /* ─── Der Akzent-Verlauf muss AUF BODY neu berechnet werden ──────────────
    `--gradient` steht oben in `:root` (= <html>) und verweist auf `var(--accent)`.

@@ -58,7 +58,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
-            tesseract-ocr tesseract-ocr-deu poppler-utils wngerman bubblewrap ffmpeg openssh-server nftables >/dev/null
+            tesseract-ocr tesseract-ocr-deu tesseract-ocr-fra poppler-utils wngerman bubblewrap ffmpeg openssh-server nftables >/dev/null
           # Ubuntu 24.04 sperrt unprivilegierte User-Namespaces per AppArmor;
           # Debian (die Server) nicht. unshare -r / bwrap brauchen sie.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true

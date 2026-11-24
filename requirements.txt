@@ -27,7 +27,7 @@ psutil==6.1.1
 # tests/test_pillow_brotli.py. Sobald ein Pillow mit Brotli >= 1.2.1 erscheint:
 # Untergrenze hier anheben, Lock neu erzeugen, Ausnahme streichen.
 pillow>=12.3.0         # Sicherheits-Untergrenze 2026-10-01 (vorher ==11.1.0)
-pytesseract==0.3.13   # Bild-OCR fuer Wissensbasis; benoetigt System-Paket: tesseract-ocr (+ tesseract-ocr-deu/-eng)
+pytesseract==0.3.13   # Bild-OCR fuer Wissensbasis; benoetigt System-Paket: tesseract-ocr (+ tesseract-ocr-deu/-eng/-fra)
 pdf2image==1.17.0     # OCR-Fallback fuer gescannte PDFs (rendert Seiten zu Bildern); benoetigt System-Paket: poppler-utils
 python-multipart>=0.0.30   # Sicherheits-Untergrenze 2026-10-01 (vorher ==0.0.20)
 websockets==14.2

@@ -491,8 +491,8 @@ class BildTextErsetzenTool(BaseTool):
                 },
                 "quellsprache": {
                     "type": "string",
-                    "description": "Sprache IM BILD als tesseract-Kuerzel: 'eng' (Vorgabe) "
-                                   "oder 'deu'. Nur eine angeben - zwei Sprachmodelle "
+                    "description": "Sprache IM BILD als tesseract-Kuerzel: 'eng' (Vorgabe), "
+                                   "'deu' oder 'fra'. Nur eine angeben - zwei Sprachmodelle "
                                    "gleichzeitig erkennen messbar schlechter.",
                 },
             },
@@ -517,7 +517,8 @@ class BildTextErsetzenTool(BaseTool):
             return ("HINWEIS_AN_NUTZER: Fuer das Ersetzen von Text im Bild wird die "
                     "Texterkennung (tesseract) gebraucht, sie ist auf diesem Server nicht "
                     "verfuegbar. Ein Administrator kann sie mit "
-                    "'apt install tesseract-ocr tesseract-ocr-deu' nachinstallieren.")
+                    "'apt install tesseract-ocr tesseract-ocr-deu tesseract-ocr-fra' "
+                    "nachinstallieren.")
         try:
             from PIL import Image  # noqa: F401
         except Exception:

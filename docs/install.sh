@@ -192,7 +192,7 @@ ${RESET}
 if [[ $UPDATE_MODE -eq 1 ]]; then
     echo -e "  ${GREEN}${BOLD}🔄 UPDATE-MODUS${RESET} – bestehende Installation erkannt: ${CYAN}$INSTALL_DIR${RESET}
   ${DIM}Geschaetzte Update-Dauer: $(_fmt_time $(_total_estimate))${RESET}
-  ${DIM}(System-Pakete werden uebersprungen, nur Code + Python-Pakete aktualisiert)${RESET}
+  ${DIM}(System-Pakete werden uebersprungen – nur fehlende OCR-Sprachdateien kommen dazu –, Code + Python-Pakete aktualisiert)${RESET}
 "
 else
     echo -e "  ${DIM}Geschaetzte Installationsdauer: $(_fmt_time $(_total_estimate))${RESET}
@@ -261,6 +261,32 @@ else
         run_with_spinner "Build-Tools installieren" 20 \
             $SUDO pacman -S --noconfirm base-devel python-pip || true
     fi
+fi
+
+# ── Texterkennung (OCR) mit Sprachdateien ───────────────────────────────────
+# Laeuft BEWUSST auch im Update-Modus: kommt eine Sprache hinzu (fra seit
+# 2026-11-24, Uebersetzen von Text im Bild), bekommt eine bestehende Instanz sie
+# sonst nie. Installiert wird nur, was fehlt – ein Update ohne Luecke ruft apt
+# gar nicht erst auf.
+if [[ "$PKG_MGR" == "apt-get" ]]; then
+    OCR_FEHLT=()
+    for p in tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng tesseract-ocr-fra; do
+        dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || OCR_FEHLT+=("$p")
+    done
+    if [[ ${#OCR_FEHLT[@]} -eq 0 ]]; then
+        success "Texterkennung (deu/eng/fra) vorhanden"
+    elif run_with_spinner "Texterkennung installieren (${OCR_FEHLT[*]})" 20 \
+        $SUDO apt-get install -y "${OCR_FEHLT[@]}"; then
+        success "Texterkennung installiert: ${OCR_FEHLT[*]}"
+    else
+        warn "Texterkennung unvollständig – bitte nachinstallieren: apt-get install -y ${OCR_FEHLT[*]}"
+    fi
+elif [[ $UPDATE_MODE -eq 0 && ( "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ) ]]; then
+    $SUDO $INSTALL tesseract tesseract-langpack-deu tesseract-langpack-fra >/dev/null 2>&1 \
+        || warn "Texterkennung (tesseract) bitte manuell installieren."
+elif [[ $UPDATE_MODE -eq 0 && "$PKG_MGR" == "pacman" ]]; then
+    $SUDO pacman -S --noconfirm tesseract tesseract-data-deu tesseract-data-eng tesseract-data-fra >/dev/null 2>&1 \
+        || warn "Texterkennung (tesseract) bitte manuell installieren."
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════

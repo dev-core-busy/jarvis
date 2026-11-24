@@ -1257,18 +1257,33 @@ def _check_rate_limit(ip: str) -> bool:
     return _anmelde_schutz.ip_wartezeit(ip) == 0
 
 
+def _mail_sicherheit(art: str, **felder) -> None:
+    """Sicherheitsmeldung per E-Mail (nur Metadaten, backend/sicherheit_mail.py).
+    Import im Rumpf: mehrere Waechter fuehren _record_login_attempt geschnitten
+    aus – ein Modul-Alias waere dort ein NameError mitten in der Anmeldung."""
+    try:
+        from backend import sicherheit_mail
+        sicherheit_mail.melden(art, **felder)
+    except Exception as e:  # noqa: BLE001
+        print(f"[Sicherheit] Mail-Meldung nicht abgegeben: {e}", flush=True)
+
+
 def _record_login_attempt(ip: str, username: str = ""):
     """Zeichnet einen Fehlversuch auf – fuer die IP und (falls genannt) das Konto."""
     if _anmelde_schutz.fehlversuch(ip, _norm_login(username) if username else ""):
         _sicherheits_log.ereignis("konto_gesperrt", benutzer=_norm_login(username), ip=ip,
                                   ergebnis="gesperrt",
                                   dauer_s=_anmelde_schutz.KONTO_SPERRE_S)
+        _mail_sicherheit("konto_gesperrt_anmeldung", benutzer=_norm_login(username), ip=ip,
+                         kanal="Anmeldung")
     # Password Spraying: EINMAL je Angriff melden (Sicherheitsprotokoll mit
     # Hash-Kette + Journal); die Admin-Ansicht zeigt die Lage, solange sie gilt.
     lage = _anmelde_schutz.sprueh_neu_melden()
     if lage:
         _sicherheits_log.ereignis("spruehangriff", ip=ip, ergebnis="erkannt",
                                   konten=lage["konten"], bis=lage["bis"])
+        _mail_sicherheit("spruehangriff", ip=ip, kanal="Anmeldung",
+                         anzahl="%s Konten" % lage["konten"])
         print(f"[Anmeldeschutz] SPRUEHANGRIFF erkannt: Fehlversuche fuer "
               f"{lage['konten']} verschiedene Konten in "
               f"{_anmelde_schutz.SPRUEH_FENSTER_S // 60} min – Anmeldungen gebremst "
@@ -11284,6 +11299,52 @@ async def broker_rdp(request: Request, user: str = Depends(require_local_auth)):
     return JSONResponse({"ok": bool(res.get("ok")), "rc": res.get("rc"),
                          "meldung": res.get("meldung") or res.get("error", ""),
                          "ausgabe": res.get("ausgabe", "")},
+                        status_code=200 if res.get("ok") else 409)
+
+
+@app.get("/api/broker/mailversand/status")
+async def broker_mailversand_status(request: Request, user: str = Depends(require_local_auth)):
+    """E-Mail-Versand (backend/mail_meldung.py): Postfix installiert/aktiv, lauscht
+    (soll leer sein), Warteschlange, Empfaenger, Relay, Meldungsarten, letzte Sendungen.
+    Liest nur (Admin)."""
+    from backend import broker_client
+    res = await broker_client.call("broker.mailversand_status", {}, user=user, timeout=60)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error", "Broker nicht erreichbar")},
+                            status_code=502)
+    res.pop("type", None)
+    return JSONResponse(res)
+
+
+@app.post("/api/broker/mailversand")
+async def broker_mailversand(request: Request, user: str = Depends(require_local_auth)):
+    """E-Mail-Versand einrichten/speichern/testen (Admin). Body: {aktion:
+    einrichten|speichern|test, empfaenger, relay, quellen, nachweis}. Ob der
+    Freigabe-Code noetig ist, entscheidet der BROKER (meta.py)."""
+    try:
+        body = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        body = {}
+    aktion = str(body.get("aktion") or "").strip()
+    if aktion not in ("einrichten", "speichern", "test"):
+        return JSONResponse({"ok": False, "error": "aktion: einrichten|speichern|test"}, status_code=400)
+    quellen = body.get("quellen")
+    args = {"aktion": aktion, "by": user,
+            "nachweis": str(body.get("nachweis") or "").strip()[:12],
+            "empfaenger": str(body.get("empfaenger") or "")[:2000],
+            "relay": str(body.get("relay") or "")[:300],
+            "quellen": [str(q)[:40] for q in quellen][:10] if isinstance(quellen, list) else []}
+    from backend import broker_client
+    res = await broker_client.call("broker.mailversand", args, user=user,
+                                   timeout=900 if aktion == "einrichten" else 120)
+    if not res.get("ok") and res.get("grund"):
+        return JSONResponse({"ok": False, "grund": res.get("grund"),
+                             "error": res.get("error", "")}, status_code=403)
+    return JSONResponse({"ok": bool(res.get("ok")), "gesendet": res.get("gesendet"),
+                         "gedrosselt": res.get("gedrosselt"),
+                         "meldung": res.get("meldung") or res.get("error", ""),
+                         "schritte": res.get("schritte") or [],
+                         "gespeichert": res.get("gespeichert")},
                         status_code=200 if res.get("ok") else 409)
 
 

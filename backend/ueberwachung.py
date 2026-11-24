@@ -568,6 +568,34 @@ def melden(meldungen: list[tuple[str, str]]) -> None:
     syslog.closelog()
 
 
+def _mail_modul():
+    """mail_meldung liegt neben dieser Datei – als Skript (Broker-Kopie, -I)
+    ohne Paket, im Test als ``backend.mail_meldung``."""
+    try:
+        from backend import mail_meldung  # type: ignore
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import mail_meldung  # type: ignore
+    return mail_meldung
+
+
+def mail_melden(meldungen: list[tuple[str, str]]) -> dict | None:
+    """Dieselben Zeilen wie im Journal als EINE Mail (Quelle "ueberwachung"),
+    also auch nur bei einer Aenderung. Ob die Quelle an ist, entscheidet
+    mail_meldung; ein Fehler dort haelt die Ueberwachung nie an."""
+    if not meldungen:
+        return None
+    try:
+        mm = _mail_modul()
+        oberste = max((s for s, _ in meldungen), key=lambda s: {"alarm": 3, "warnung": 2}.get(s, 1))
+        erste = next(t for s, t in meldungen if s == oberste)
+        betreff = erste if len(meldungen) == 1 else "%s (+%d weitere)" % (erste, len(meldungen) - 1)
+        return mm.senden("ueberwachung", betreff, "\n".join(t for _, t in meldungen))
+    except Exception as e:  # noqa: BLE001
+        print("Mail nicht verschickt: %s" % e, file=sys.stderr)
+        return None
+
+
 def lauf(pfad: Path = ZUSTAND_DATEI) -> int:
     konf = konf_laden()
     vorher = _lesen_roh(pfad)
@@ -575,6 +603,7 @@ def lauf(pfad: Path = ZUSTAND_DATEI) -> int:
     zustand, meldungen = auswerten(sammeln(konf, vorher), vorher, konf, jetzt)
     schreiben(zustand, pfad)
     melden(meldungen)
+    mail_melden(meldungen)
     for stufe, text in meldungen:
         print(text)
     print("Stufe: %s, %d Befund(e)" % (zustand["stufe"], len(zustand["befunde"])))

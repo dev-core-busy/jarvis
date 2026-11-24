@@ -93,7 +93,18 @@ for n in ast.walk(baum):
         importe |= {a.name.split(".")[0] for a in n.names}
     elif isinstance(n, ast.ImportFrom) and n.module:
         importe.add(n.module.split(".")[0])
-fremd = importe - set(sys.stdlib_module_names) - {"__future__"}
+# Einzige Ausnahme: das Mailmodul daneben (backend/mail_meldung.py) – es muss
+# dann SELBST nur die Standardbibliothek benutzen, sonst waere die Ausnahme ein Loch.
+NACHBAR = {"backend", "mail_meldung"}
+fremd = importe - set(sys.stdlib_module_names) - {"__future__"} - NACHBAR
+_mm = ast.parse((MOD.parent / "mail_meldung.py").read_text(encoding="utf-8"))
+_mm_importe = set()
+for n in ast.walk(_mm):
+    if isinstance(n, ast.Import):
+        _mm_importe |= {a.name.split(".")[0] for a in n.names}
+    elif isinstance(n, ast.ImportFrom) and n.module:
+        _mm_importe.add(n.module.split(".")[0])
+fremd |= {"mail_meldung:" + m for m in _mm_importe - set(sys.stdlib_module_names) - {"__future__"}}
 pruefe(not fremd, "nur Standardbibliothek (laeuft als root mit System-Python aus der Broker-Kopie)%s"
        % (" – fremd: %s" % sorted(fremd) if fremd else ""))
 leer, _ = ue.auswerten(eingabe(), {}, KONF, JETZT)

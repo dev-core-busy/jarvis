@@ -764,7 +764,7 @@ NS4 = {
     "_standard_zugang": __import__("backend.standard_zugang", fromlist=["x"]),
 }
 NS4.setdefault("_json_objekt", _json_objekt_aus_main(NS4.get("HTTPException")))
-exec(_funktionen("_check_rate_limit", "_record_login_attempt", "_konto_sperre_antwort",
+exec(_funktionen("_check_rate_limit", "_record_login_attempt", "_mail_sicherheit", "_konto_sperre_antwort",
                  "_kennwort_schranke", "_kennwort_fehlversuch", "_sitzung_antwort",
                  "change_password", "totp_disable", "totp_setup",
                  "_sitzung_ist_app", "_totp_app_sperre"), NS4)

@@ -288,7 +288,7 @@ NS = {
     # Aktion/Objekt misst tests/test_sprot_aussagekraft.py.
     "re": re, "app": types.SimpleNamespace(router=types.SimpleNamespace(routes=[])),
 }
-exec(_ausfuehrbar("_antwort_json", "_anmeldung_protokollieren", "_record_login_attempt",
+exec(_ausfuehrbar("_antwort_json", "_anmeldung_protokollieren", "_record_login_attempt", "_mail_sicherheit",
                   "_admin_pruefung_merken", "_sicherheits_protokoll_mw", "_routing_pfad",
                   "_sprot_route", "_sprot_aktion", "_sprot_wert", "_sprot_details",
                   zuweisungen=("_AENDERNDE_METHODEN", "_KONTO_PFADE", "_SPROT_ABKUERZUNG")), NS)

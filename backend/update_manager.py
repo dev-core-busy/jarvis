@@ -647,7 +647,12 @@ def _apply_update_gesperrt() -> dict:
     return erg
 
 
-_BROKER_PFADE = ("backend/broker/", "start_jarvis_root.sh", "deploy/security/")
+# Dazu die Module, die als root AUS DER BROKER-KOPIE laufen (Timer/Drop-ins
+# rufen /usr/local/lib/jarvis-broker/backend/<datei>): ohne Broker-Neustart
+# bliebe dort der alte Stand (2026-11-24 beim E-Mail-Versand gefunden – fuer
+# ueberwachung.py und aide_abgleich.py galt die Luecke schon vorher).
+_BROKER_PFADE = ("backend/broker/", "start_jarvis_root.sh", "deploy/security/",
+                 "backend/mail_meldung.py", "backend/ueberwachung.py", "backend/aide_abgleich.py")
 
 
 def _broker_betroffen(vorher_hash: str) -> bool:

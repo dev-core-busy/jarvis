@@ -637,6 +637,38 @@ if [ "${JARVIS_AIMOUSE_AUTO:-1}" != "0" ] && [ -f "$AIMOUSE_BUILD" ] && id jarvi
     ) &
 fi
 
+# 6j. E-Mail-Versand sicherstellen (backend/mail_meldung.py, seit 2026-11-24)
+#
+# WARUM HIER: Ein Server ohne Mailserver verschickt keine Warnung, keinen
+# AIDE-Befund und keine Sicherheitsmeldung – und das faellt niemandem auf,
+# weil eine ausbleibende Mail wie "alles ruhig" aussieht. Dieselbe Begruendung
+# wie bei 6c/6d/6i: bei mehreren Servern skaliert nur eine Automatik, und der
+# Update-Weg startet den Broker bei Aenderungen an mail_meldung.py mit neu
+# (update_manager._BROKER_PFADE).
+#   * Postfix fehlt -> --einrichten: installiert und konfiguriert. Ohne
+#     eingetragenen Empfaenger geht dabei NICHTS hinaus (root -> /dev/null);
+#     Empfaenger und Relay sind je Server Einstellung (KI & System ->
+#     E-Mail-Versand), nicht Code.
+#   * Postfix da -> --anwenden: zieht die Konfiguration auf den Stand des
+#     aktuellen Codes nach (idempotent, schreibt nur bei Abweichung).
+# Aus der ROOT-EIGENEN Kopie ($CODE_DIR, Befund K1). Fail-OPEN mit Meldung, im
+# Hintergrund (apt darf den Broker-Start nicht aufhalten). Abschaltbar mit
+# JARVIS_MAILVERSAND_AUTO=0.
+MAIL_PROG="$CODE_DIR/backend/mail_meldung.py"
+if [ "${JARVIS_MAILVERSAND_AUTO:-1}" != "0" ] && [ -f "$MAIL_PROG" ]; then
+    (
+        if [ -x /usr/sbin/postfix ]; then MAIL_AKTION=--anwenden; else MAIL_AKTION=--einrichten; fi
+        AUSGABE="$(PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -I "$MAIL_PROG" "$MAIL_AKTION" 2>&1)"
+        RC=$?
+        if [ "$RC" -eq 0 ]; then
+            echo "[Mailversand] $MAIL_AKTION: ok"
+        else
+            printf '%s\n' "$AUSGABE" | tail -4 | sed 's/^/[Mailversand] /' >&2
+            echo "[Mailversand] WARNUNG: $MAIL_AKTION gescheitert (rc=$RC) – es werden keine Meldungen per E-Mail verschickt. Von Hand: python3 -I $MAIL_PROG $MAIL_AKTION" >&2
+        fi
+    ) &
+fi
+
 # 6f. Internet-Sperre: veraltete Regel nachziehen
 #
 # ⚠ DER FIX VOM 2026-09-04 KOMMT SONST AUF KEINEM SERVER AN. Er steckt im

@@ -62,8 +62,13 @@ if (AUSSCHNITT.fehlend.length) bilanz(2);
     pruefe(!!pakete && !!reiter && reiter.contains(pakete), 'Container steht im Reiter KI & System');
     const sektionen = reiter ? Array.from(reiter.querySelectorAll('.kb-section')) : [];
     const i = (x) => sektionen.indexOf(x);
-    pruefe(!!tuning && !!api && i(pakete) === i(tuning) + 1 && i(api) === i(pakete) + 1,
-           'Container liegt direkt zwischen System-Einstellungen und Agent API Key', [i(tuning), i(pakete), i(api)].join(','));
+    // Seit 2026-11-24 darf zwischen ihm und Agent API Key genau der Container
+    // "E-Mail-Versand" stehen (mailversand.js) – sonst nichts.
+    const mail = kopf('prof-sect-mail-hdr');
+    const dazwischen = sektionen.slice(i(pakete) + 1, i(api)).filter((x) => x !== mail);
+    pruefe(!!tuning && !!api && i(pakete) === i(tuning) + 1 && i(api) > i(pakete) && dazwischen.length === 0,
+           'Container liegt zwischen System-Einstellungen und Agent API Key (dazwischen hoechstens E-Mail-Versand)',
+           [i(tuning), i(pakete), i(api)].join(','));
     const titel = pakete ? pakete.querySelector('.kb-section-header h3') : null;
     pruefe(!!titel && titel.getAttribute('data-i18n') === 'profile.section_pakete'
            && titel.textContent.trim() === 'Paket-Updates und Integrität', 'Titel "Paket-Updates und Integrität" mit i18n-Schluessel');

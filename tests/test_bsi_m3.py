@@ -299,7 +299,7 @@ exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "_konto
                  "admin_erhoehen", "admin_erhoehung_beenden", "_erhoehung_protokoll",
                  "_ist_app_anmeldung", "_ist_ai_maus_anmeldung", "_user_is_admin",
                  "_is_admin_user", "_admin_verweigert_text", "require_local_auth",
-                 "_check_rate_limit", "_record_login_attempt", "_konto_sperre_antwort",
+                 "_check_rate_limit", "_record_login_attempt", "_mail_sicherheit", "_konto_sperre_antwort",
                  # A1/A2 (2026-11-05): Reservierung vor der Pruefung, Bremsen-Ueberlauf
                  "_anmelde_reservierung", "_bremse_ueberlauf_antwort",
                  "_totp_vormerken", "_totp_qr_daten", "login", "_login_ablauf", "_anmeldung_protokollieren",

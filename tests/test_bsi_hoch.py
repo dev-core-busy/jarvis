@@ -206,7 +206,7 @@ exec(compile(_funktionen("totp_setup", "_totp_vormerken", "_totp_qr_daten",
                          "totp_verify", "totp_disable",
                          "_sitzung_ist_app", "_totp_app_sperre",
                          "_totp_fehlertext", "_kennwort_schranke", "_kennwort_fehlversuch",
-                         "_check_rate_limit", "_record_login_attempt",
+                         "_check_rate_limit", "_record_login_attempt", "_mail_sicherheit",
                          "_konto_sperre_antwort"),
              "main.py", "exec"), _ns2)
 _setup, _verify, _disable = _ns2["totp_setup"], _ns2["totp_verify"], _ns2["totp_disable"]

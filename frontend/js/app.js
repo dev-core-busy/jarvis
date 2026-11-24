@@ -709,6 +709,8 @@
                 // Automatische Sicherheitsupdates, offene Paket-Updates und
                 // Integritaetspruefung (seit 2026-11-24 eigener Container)
                 { hdr: 'prof-sect-pakete-hdr', body: 'prof-sect-pakete-body', tog: 'prof-sect-pakete-tog' },
+                // E-Mail-Versand (mailversand.js, seit 2026-11-24)
+                { hdr: 'prof-sect-mail-hdr', body: 'prof-sect-mail-body', tog: 'prof-sect-mail-tog' },
                 { hdr: 'prof-sect-api-hdr',  body: 'prof-sect-api-body',  tog: 'prof-sect-api-tog'  },
                 { hdr: 'prof-sect-ssl-hdr',  body: 'prof-sect-ssl-body',  tog: 'prof-sect-ssl-tog'  },
             ]);
@@ -989,6 +991,8 @@
                     if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
                     // Schalter "RDP erlauben" (fernzugang.js) – dieselbe Lage
                     if (window.RdpSchalter) window.RdpSchalter.onShow();
+                    // E-Mail-Versand (mailversand.js) – dieselbe Lage
+                    if (window.MailVersand) window.MailVersand.onShow();
                     if (window.agentKeysOnShow) window.agentKeysOnShow();
                 } else if (target === 'instructions' && tabInstructions) {
                     tabInstructions.style.display = '';
@@ -1684,6 +1688,8 @@
             if (window.SecurityIncidents) window.SecurityIncidents.onShowUnattended();
             // Ebenso der Schalter "RDP erlauben" (fernzugang.js, idempotent)
             if (window.RdpSchalter) window.RdpSchalter.onShow();
+            // Ebenso der E-Mail-Versand (mailversand.js, idempotent)
+            if (window.MailVersand) window.MailVersand.onShow();
             // Aus demselben Grund die Agent-API-Keys: ist ihr Abschnitt gemerkt
             // aufgeklappt, fiel nie ein Klick auf die Kopfzeile und die Liste blieb
             // auf "Laedt…" (2026-08-12 auf ECHT gemeldet).

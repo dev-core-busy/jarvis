@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""Waechter fuer den E-Mail-Versand (backend/mail_meldung.py und seine Anschluesse).
+
+Alles laeuft in einem Sandkasten (JARVIS_MAIL_WURZEL); Befehle (sendmail,
+postconf, systemctl …) gehen an eine Attrappe von ``mail_meldung._lauf`` mit
+der ECHTEN Signatur, die jeden Aufruf festhaelt.
+
+Die Zusagen:
+  1. Eingaben: Adressen, Relay und Quellen werden geprueft, Unbekanntes abgewiesen.
+  2. Freigabe-Code: noetig, sobald Meldungen woanders hingehen oder wegfallen
+     (Empfaenger, Relay, Quelle aus) – nicht beim blossen Einschalten einer Quelle.
+     Gemessen ueber den ECHTEN Broker-Weg (meta.behandeln).
+  3. Postfix: lauscht nicht nach aussen (loopback-only, SMTP-Eingang aus),
+     nur root darf abgeben, Relay wie eingestellt.
+  4. root-Weiterleitung folgt der Quelle "system"; fremde root-Zeilen werden
+     markiert auskommentiert, das Ergebnis ist stabil (zweimal = gleich).
+  5. Senden: ausgeschaltete Quelle / kein Empfaenger -> nichts; Drosselung je
+     Stunde, Zurueckgehaltenes wird in der naechsten Mail genannt.
+  6. Sicherheitsmeldungen tragen nur die festen Felder, einzeilig – nie Inhalte.
+  7. AIDE erklaert nur den byteweise selbst geschriebenen Stand.
+  8. Anschluesse: Ueberwachung und AIDE-Abgleich rufen das Modul; security_guard,
+     main.py und sicherheit_mail geben nur Metadaten weiter.
+
+Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
+"""
+import ast
+import json
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+OK = FAIL = 0
+
+
+def pruefe(bed, text):
+    global OK, FAIL
+    if bed:
+        OK += 1
+        print("  OK   " + text)
+    else:
+        FAIL += 1
+        print("  FAIL " + text)
+
+
+def abbruch(text):
+    print("ABBRUCH: " + text)
+    sys.exit(2)
+
+
+TMP = Path(tempfile.mkdtemp(prefix="mail_meldung_"))
+W = TMP / "w"
+os.environ["JARVIS_MAIL_WURZEL"] = str(W)
+os.environ["JARVIS_BROKER_CONF"] = "/etc/jarvis/broker.conf"
+sys.path.insert(0, str(REPO))
+try:
+    from backend import mail_meldung as mm
+finally:
+    pass
+
+if not str(mm._p(mm.BROKER_CONF)).startswith(str(TMP)):
+    abbruch("broker.conf liegt nicht im Sandkasten: %s" % mm._p(mm.BROKER_CONF))
+
+AUFRUFE = []
+
+
+class Erg:
+    def __init__(self, rc=0, out="", err=""):
+        self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+def lauf_attrappe(befehl, timeout=60, eingabe=None, umgebung=None):
+    AUFRUFE.append({"befehl": list(befehl), "eingabe": eingabe})
+    if befehl[0] == "hostname":
+        return Erg(0, "probe.beispiel.de\n")
+    if befehl[:2] == ["postconf", "-M"]:
+        return Erg(0, "smtp inet n - y - - smtpd\n")
+    return Erg(0, "")
+
+
+mm._lauf = lauf_attrappe
+
+
+def konf_setzen(text):
+    p = mm._p(mm.BROKER_CONF)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+
+
+def postfix_da():
+    for f in (mm.POSTFIX, mm.SENDMAIL):
+        mm._p(f).parent.mkdir(parents=True, exist_ok=True)
+        mm._p(f).write_text("", encoding="utf-8")
+
+
+def gesendet():
+    return [a for a in AUFRUFE if a["befehl"][0] == mm.SENDMAIL]
+
+
+try:
+    # ── 0. Positivkontrolle ──────────────────────────────────────────────────
+    print("[0] Positivkontrolle")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_RELAY=relay.beispiel.de\n")
+    postfix_da()
+    AUFRUFE.clear()
+    e = mm.senden("ueberwachung", "B13 ALARM: Probe", "Zeile 1")
+    if not (e.get("gesendet") and len(gesendet()) == 1):
+        abbruch("Grundfall sendet nicht: %s" % e)
+    pruefe(True, "Grundfall: eine Meldung geht an sendmail")
+    m = gesendet()[0]
+    pruefe(m["befehl"][-1] == "a@beispiel.de" and "--" in m["befehl"],
+           "Empfaenger hinter '--' (keine Option aus einer Adresse)")
+    pruefe("Subject: [Jarvis probe] B13 ALARM: Probe" in m["eingabe"], "Betreff traegt Servername und Text")
+    pruefe("Auto-Submitted: auto-generated" in m["eingabe"], "als automatische Nachricht gekennzeichnet")
+    pruefe(mm.konf()["quellen"] == list(mm.QUELLEN), "ohne MAIL_QUELLEN sind alle Quellen an")
+
+    # ── 1. Eingaben ──────────────────────────────────────────────────────────
+    print("[1] Eingaben")
+    pruefe(mm.empfaenger_pruefen("a@b.de, c@d.de;a@b.de")[0] == ["a@b.de", "c@d.de"],
+           "Liste mit Komma/Semikolon, Doppelte entfernt")
+    pruefe(mm.empfaenger_pruefen("a@b.de -oQ/tmp")[1] != "", "Option als Adresse abgewiesen")
+    pruefe(mm.empfaenger_pruefen("x@localhost")[1] != "", "Adresse ohne Domaene abgewiesen")
+    pruefe(mm.empfaenger_pruefen(",".join("a%d@b.de" % i for i in range(11)))[1] != "",
+           "mehr als %d Empfaenger abgewiesen" % mm.EMPFAENGER_MAX)
+    pruefe(mm.relay_pruefen("mail.firma.local")[0] == "mail.firma.local:25", "Relay ohne Port -> :25")
+    pruefe(mm.relay_pruefen("[mail.firma.local]:587")[0] == "mail.firma.local:587", "Relay [host]:port")
+    # ohne Leerzeichen: sonst scheitert es schon am ersten Muster, und die
+    # Zeichenpruefung des Namens bliebe ungemessen (Gegenprobe 2026-11-24)
+    pruefe(mm.relay_pruefen("mail;rm")[1] != "", "Relay mit Fremdzeichen abgewiesen")
+    pruefe(mm.relay_pruefen("-oX")[1] != "", "Relay mit fuehrendem Bindestrich abgewiesen")
+    pruefe(mm.relay_pruefen("host:70000")[1] != "", "Port ausserhalb abgewiesen")
+    pruefe(mm.quellen_pruefen(["aide", "unbekannt"])[1] != "", "unbekannte Quelle abgewiesen")
+    pruefe(mm.quellen_pruefen(["system", "aide"])[0] == ["aide", "system"], "Quellen in fester Reihenfolge")
+
+    # ── 2. Freigabe-Code ueber den echten Broker-Weg ─────────────────────────
+    print("[2] Freigabe-Code (meta.behandeln)")
+    from backend.broker import freigabe, meta, policy
+    CODES = []
+    freigabe.pruefen = lambda code, *a, **k: (CODES.append(code) or code == "123456",
+                                              "" if code == "123456" else "nachweis_falsch")
+    policy.audit = lambda *a, **k: None
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_RELAY=relay.beispiel.de:25\nMAIL_QUELLEN=aide\n")
+    alt = mm.konf()
+    pruefe(mm.ist_lockerung(alt, ["a@beispiel.de"], "relay.beispiel.de:25", ["aide", "system"]) is False,
+           "nur Quelle einschalten ist keine Lockerung")
+    pruefe(mm.ist_lockerung(alt, ["b@beispiel.de"], "relay.beispiel.de:25", ["aide"]), "anderer Empfaenger = Lockerung")
+    pruefe(mm.ist_lockerung(alt, ["a@beispiel.de"], "anders.beispiel.de:25", ["aide"]), "anderer Relay = Lockerung")
+    pruefe(mm.ist_lockerung(alt, ["a@beispiel.de"], "relay.beispiel.de:25", []), "Quelle aus = Lockerung")
+    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "boese@beispiel.de",
+                                              "relay": "relay.beispiel.de", "quellen": ["aide"]})
+    pruefe(not r.get("ok") and r.get("grund") == "nachweis_falsch", "Empfaenger aendern ohne Code abgewiesen")
+    pruefe(mm.konf()["empfaenger"] == ["a@beispiel.de"], "… und broker.conf unveraendert")
+    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "a@beispiel.de",
+                                              "relay": "relay.beispiel.de", "quellen": ["aide", "sicherheit"]})
+    pruefe(r.get("ok") and mm.konf()["quellen"] == ["aide", "sicherheit"],
+           "Quelle einschalten ohne Code gespeichert")
+    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "b@beispiel.de",
+                                              "relay": "relay.beispiel.de", "quellen": ["aide"],
+                                              "nachweis": "123456"})
+    pruefe(r.get("ok") and mm.konf()["empfaenger"] == ["b@beispiel.de"] and mm.konf()["quellen"] == ["aide"],
+           "mit Code: Empfaenger geaendert, Quelle aus")
+    os.chmod(mm._p(mm.BROKER_CONF), 0o644)
+    meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "b@beispiel.de",
+                                          "relay": "relay.beispiel.de", "quellen": ["aide", "system"]})
+    pruefe(mm._p(mm.BROKER_CONF).stat().st_mode & 0o777 == 0o644, "broker.conf behaelt ihre Rechte")
+    r = meta.behandeln("broker.mailversand", {"aktion": "einrichten"})
+    pruefe(not r.get("ok") and r.get("grund"), "Einrichten ohne Code abgewiesen")
+    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "x y",
+                                              "relay": "", "quellen": [], "nachweis": "123456"})
+    pruefe(not r.get("ok") and "gueltige" in r.get("meldung", ""), "ungueltige Adresse abgewiesen")
+
+    # ── 3. Postfix-Konfiguration ─────────────────────────────────────────────
+    print("[3] Postfix")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_RELAY=relay.beispiel.de:25\n")
+    AUFRUFE.clear()
+    e = mm.anwenden()
+    pruefe(e.get("ok"), "anwenden laeuft durch: %s" % e.get("meldung"))
+    cf = mm._p(mm.MAIN_CF).read_text()
+    zeilen = {z.split("=", 1)[0].strip(): z.split("=", 1)[1].strip() for z in cf.splitlines()
+              if "=" in z and not z.startswith("#")}
+    pruefe(zeilen.get("inet_interfaces") == "loopback-only", "inet_interfaces = loopback-only")
+    pruefe(zeilen.get("authorized_submit_users") == "root", "nur root darf abgeben")
+    pruefe(zeilen.get("relayhost") == "[relay.beispiel.de]:25", "relayhost aus broker.conf")
+    pruefe("." in zeilen.get("myhostname", ""), "myhostname voll qualifiziert")
+    pruefe(any(a["befehl"][:2] == ["postconf", "-M#"] and a["befehl"][2] == "smtp/inet" for a in AUFRUFE),
+           "SMTP-Eingang wird abgeschaltet (postconf -M# smtp/inet)")
+    pruefe(mm._p(mm.AIDE_DROPIN).read_text().count("MAILCMD=true") == 1,
+           "Debians AIDE-Tagesbericht stillgelegt (Drop-in)")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_RELAY=\n")
+    mm.anwenden()
+    pruefe("relayhost = \n" in mm._p(mm.MAIN_CF).read_text(), "leerer Relay = direkte Zustellung")
+
+    # ── 4. root-Weiterleitung ────────────────────────────────────────────────
+    print("[4] root-Weiterleitung")
+    k_an = {"empfaenger": ["a@beispiel.de", "b@beispiel.de"], "relay": "", "quellen": list(mm.QUELLEN)}
+    k_aus = dict(k_an, quellen=["aide"])
+    alt_txt = "# Kopf\npostmaster: root\nroot: alter@beispiel.de\n"
+    a1 = mm.aliases(alt_txt, k_an)
+    pruefe("root: a@beispiel.de, b@beispiel.de" in a1, "Quelle system an: root an die Empfaenger")
+    pruefe(mm._AUSKOMMENTIERT + "root: alter@beispiel.de" in a1, "fremde root-Zeile markiert auskommentiert")
+    pruefe(sum(1 for z in a1.splitlines() if z.startswith("root:")) == 1, "genau eine wirksame root-Zeile")
+    pruefe(mm.aliases(a1, k_an) == a1, "stabil: zweimal angewandt = gleich")
+    a2 = mm.aliases(a1, k_aus)
+    pruefe("root: /dev/null" in a2 and "a@beispiel.de" not in a2.split(mm._MARKE_AN)[1],
+           "Quelle system aus: root ins Leere")
+    pruefe(a2.count("postmaster: root") == 1, "postmaster nicht verdoppelt")
+
+    # ── 5. Senden und Drosselung ─────────────────────────────────────────────
+    print("[5] Senden")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_QUELLEN=aide\n")
+    AUFRUFE.clear()
+    e = mm.senden("ueberwachung", "x", "y")
+    pruefe(not e.get("gesendet") and not gesendet(), "ausgeschaltete Quelle: nichts verschickt")
+    konf_setzen("MAIL_QUELLEN=aide\n")
+    e = mm.senden("aide", "x", "y")
+    pruefe(not e.get("gesendet") and not gesendet(), "ohne Empfaenger: nichts verschickt")
+    e = mm.senden("unbekannt", "x", "y")
+    pruefe(not e.get("ok") and not gesendet(), "unbekannte Quelle abgewiesen")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\n")
+    mm._p(mm.ZUSTAND).unlink(missing_ok=True)
+    grenze = mm.GRENZE_JE_STUNDE["sicherheit"]
+    ergebnisse = [mm.senden("sicherheit", "S%d" % i, "t") for i in range(grenze + 3)]
+    pruefe(len(gesendet()) == grenze, "Drosselung: %d von %d verschickt (Grenze %d)"
+           % (len(gesendet()), grenze + 3, grenze))
+    pruefe(all(r.get("gedrosselt") for r in ergebnisse[grenze:]), "darueber als gedrosselt gemeldet")
+    z = json.loads(mm._p(mm.ZUSTAND).read_text())
+    z["drossel"]["sicherheit"]["start"] -= 3601
+    mm._p(mm.ZUSTAND).write_text(json.dumps(z))
+    AUFRUFE.clear()
+    mm.senden("sicherheit", "neu", "t")
+    pruefe(gesendet() and "3 weitere Meldung(en)" in gesendet()[0]["eingabe"],
+           "naechste Stunde: Zurueckgehaltenes wird genannt")
+    AUFRUFE.clear()
+    mm._p(mm.POSTFIX).unlink()
+    e = mm.senden("aide", "x", "y")
+    pruefe(not e.get("ok") and not gesendet(), "ohne Postfix: Fehler statt stiller Erfolg")
+    postfix_da()
+
+    # ── 6. Sicherheitsmeldungen ──────────────────────────────────────────────
+    print("[6] Sicherheitsmeldungen")
+    mm._p(mm.ZUSTAND).unlink(missing_ok=True)
+    AUFRUFE.clear()
+    e = mm.sicherheit({"art": "konto_gesperrt_angriff", "benutzer": "probe\nBcc: x@y.de",
+                       "kanal": "web", "muster": "heuristic/persona", "snippet": "GEHEIMER PROMPT",
+                       "detail": "rm -rf /", "task": "AUFTRAGSTEXT"})
+    pruefe(e.get("gesendet"), "Sicherheitsmeldung verschickt")
+    txt = gesendet()[0]["eingabe"] if gesendet() else ""
+    pruefe("GEHEIMER PROMPT" not in txt and "rm -rf" not in txt and "AUFTRAGSTEXT" not in txt,
+           "keine Inhalte (snippet/detail/task) in der Mail")
+    pruefe("\nBcc:" not in txt, "Feldwerte einzeilig – kein eingeschleuster Kopf")
+    pruefe("heuristic/persona" in txt and "Kanal:" in txt, "Metadaten stehen drin")
+    pruefe(not mm.sicherheit({"art": "frei_erfunden"}).get("ok"), "unbekannte Art abgewiesen")
+
+    # ── 7. AIDE-Erklaerung ───────────────────────────────────────────────────
+    print("[7] AIDE")
+    pruefe(mm.erklaert(mm.MAIN_CF), "selbst geschriebene main.cf ist erklaert")
+    mm._p(mm.MAIN_CF).write_text(mm._p(mm.MAIN_CF).read_text() + "relayhost = [boese]\n")
+    pruefe(not mm.erklaert(mm.MAIN_CF), "nachtraeglich geaenderte main.cf NICHT erklaert")
+    pruefe(not mm.erklaert("/etc/passwd"), "fremde Datei nicht erklaert")
+
+    # ── 8. Anschluesse ───────────────────────────────────────────────────────
+    print("[8] Anschluesse")
+    from backend import ueberwachung
+    gerufen = []
+    mm_orig = mm.senden
+    mm.senden = lambda q, b, t: gerufen.append((q, b, t)) or {"ok": True}
+    ueberwachung.mail_melden([("warnung", "B13 WARNUNG: a"), ("alarm", "B13 ALARM: b")])
+    pruefe(gerufen and gerufen[0][0] == "ueberwachung" and gerufen[0][1].startswith("B13 ALARM: b"),
+           "Ueberwachung: eine Mail, Betreff nach der hoechsten Stufe")
+    gerufen.clear()
+    ueberwachung.mail_melden([])
+    pruefe(not gerufen, "Ueberwachung ohne Aenderung: keine Mail")
+    lauf_src = ast.parse((REPO / "backend/ueberwachung.py").read_text())
+    lauf_fn = next((f for f in ast.walk(lauf_src) if isinstance(f, ast.FunctionDef) and f.name == "lauf"), None)
+    pruefe(lauf_fn is not None and any(isinstance(c, ast.Call) and getattr(c.func, "id", "") == "mail_melden"
+                                       for c in ast.walk(lauf_fn)), "ueberwachung.lauf ruft mail_melden")
+    mm.senden = mm_orig
+
+    from backend import aide_abgleich as aa
+    t = aa.mail_text({"zustand": "offen", "offen_anzahl": 2, "bericht": {"summe": {"geaendert": 5}},
+                      "offen": [{"art": "geaendert", "pfad": "/etc/x", "warum": "Inhalt weicht ab"}]})
+    pruefe(t and "2 nicht erklaerte" in t[0] and "/etc/x" in t[1], "AIDE offen: Betreff und Pfadliste")
+    pruefe(aa.mail_text({"zustand": "uebernommen"}) is None and aa.mail_text({"zustand": "unveraendert"}) is None,
+           "AIDE sauber: keine Mail")
+    pruefe(aa.mail_text({"zustand": "fehler", "grund": "kaputt"})[0].startswith("AIDE-Abgleich fehlgeschlagen"),
+           "AIDE Fehler: Mail")
+    np_fn = next((f for f in ast.walk(ast.parse((REPO / "backend/aide_abgleich.py").read_text()))
+                  if isinstance(f, ast.FunctionDef) and f.name == "nach_pruefung"), None)
+    pruefe(np_fn is not None and any(isinstance(c, ast.Call) and getattr(c.func, "id", "") == "mail_melden"
+                                     for c in ast.walk(np_fn)), "aide_abgleich.nach_pruefung ruft mail_melden")
+
+    from backend import sicherheit_mail as sm
+    from backend import broker_client
+    abgabe = []
+    broker_client.call_sync = lambda op, args=None, **k: abgabe.append((op, args)) or {"ok": True}
+    sm._aufruf({"art": "spruehangriff"})
+    pruefe(abgabe and abgabe[0][0] == "broker.mail_melden", "Dienst gibt ueber den Broker ab")
+    abgabe.clear()
+    sm._aufruf_orig = sm._aufruf
+    sm_args = []
+    import threading
+    alt_thread = threading.Thread
+
+    class SofortThread:
+        def __init__(self, target=None, args=(), **k):
+            self.t, self.a = target, args
+
+        def start(self):
+            sm_args.append(self.a[0])
+
+    sm.threading.Thread = SofortThread
+    sm.melden("konto_gesperrt_angriff", benutzer="u", snippet="INHALT", task="AUFTRAG")
+    sm.threading.Thread = alt_thread
+    pruefe(sm_args and set(sm_args[0]) <= {"art"} | set(sm.FELDER) and "INHALT" not in json.dumps(sm_args),
+           "sicherheit_mail reicht nur feste Felder weiter")
+    pruefe(not sm.melden("frei_erfunden"), "sicherheit_mail: unbekannte Art -> nichts")
+    pruefe(set(sm.ARTEN) == set(mm.SICHERHEIT_ARTEN), "Dienst und Broker kennen dieselben Arten")
+
+    sg = ast.parse((REPO / "backend/security_guard.py").read_text())
+    def ruft_mail(fname, art):
+        f = next((x for x in ast.walk(sg) if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  and x.name == fname), None)
+        return f is not None and any(isinstance(c, ast.Call) and getattr(c.func, "id", "") == "_mail"
+                                     and c.args and getattr(c.args[0], "value", None) == art
+                                     for c in ast.walk(f))
+    pruefe(ruft_mail("_record", "konto_gesperrt_angriff"), "security_guard._record meldet neue Sperre")
+    pruefe(ruft_mail("record_violation", "konto_gesperrt_verstoss"), "record_violation meldet Auto-Sperre")
+    pruefe(ruft_mail("inspect", "angriff_protokolliert"), "inspect meldet hartes Muster ohne Sperre")
+    for fname in ("_record", "record_violation", "inspect"):
+        f = next(x for x in ast.walk(sg) if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)) and x.name == fname)
+        kw = {k.arg for c in ast.walk(f) if isinstance(c, ast.Call) and getattr(c.func, "id", "") == "_mail"
+              for k in c.keywords}
+        pruefe(kw and kw <= set(sm.FELDER), "%s: nur Metadaten-Felder (%s)" % (fname, ", ".join(sorted(kw))))
+    hm = (REPO / "backend/main.py").read_text()
+    pruefe('_mail_sicherheit("konto_gesperrt_anmeldung"' in hm and '_mail_sicherheit("spruehangriff"' in hm,
+           "main.py meldet Kontosperre und Spruehangriff")
+    # ── 9. Ausrollen auf andere Server ohne Handarbeit ───────────────────────
+    print("[9] Automatik")
+    start = (REPO / "start_jarvis_root.sh").read_text()
+    m6j = start.split("# 6j. E-Mail-Versand sicherstellen", 1)
+    block = m6j[1].split("\n# 6", 1)[0] if len(m6j) == 2 else ""
+    pruefe(bool(block), "start_jarvis_root.sh hat den Schritt 6j")
+    pruefe('MAIL_PROG="$CODE_DIR/backend/mail_meldung.py"' in block,
+           "6j ruft das Modul aus der root-eigenen Kopie ($CODE_DIR), nicht aus /opt/jarvis")
+    pruefe("MAIL_AKTION=--anwenden; else MAIL_AKTION=--einrichten" in block,
+           "6j: vorhanden -> anwenden, fehlt -> einrichten")
+    pruefe(block.rstrip().endswith(") &\nfi"), "6j laeuft im Hintergrund (haelt den Broker-Start nicht auf)")
+    pruefe("JARVIS_MAILVERSAND_AUTO" in block, "6j abschaltbar")
+    um = ast.parse((REPO / "backend/update_manager.py").read_text())
+    pf = next((n.value for n in ast.walk(um) if isinstance(n, ast.Assign)
+               and any(getattr(t, "id", "") == "_BROKER_PFADE" for t in n.targets)), None)
+    werte = {e.value for e in getattr(pf, "elts", []) if isinstance(e, ast.Constant)}
+    fehlt = {"backend/mail_meldung.py", "backend/ueberwachung.py", "backend/aide_abgleich.py",
+             "start_jarvis_root.sh", "backend/broker/"} - werte
+    pruefe(not fehlt, "Update startet den Broker bei Aenderung der root-Module neu (%s)" % (", ".join(sorted(fehlt)) or "alle da"))
+    mm.main.__doc__  # noqa: B018
+    pruefe("--einrichten" in mm.__doc__ and "--anwenden" in mm.__doc__, "Kommandozeile kennt --einrichten/--anwenden")
+finally:
+    shutil.rmtree(TMP, ignore_errors=True)
+
+print("\nERGEBNIS: %d OK, %d FAIL" % (OK, FAIL))
+sys.exit(1 if FAIL else 0)

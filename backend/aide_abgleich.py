@@ -441,6 +441,22 @@ def _paket_geaendert(k: dict, paket: str) -> bool:
     return (b.get("versionen") or {}).get(paket) != k["dpkg"]["versionen"].get(paket)
 
 
+def _mail_erklaert(pfad: str) -> bool:
+    """Datei, die backend/mail_meldung.py geschrieben hat – byteweise genau
+    der dort vermerkte Stand (Pruefsumme). Ohne das Modul: nie erklaert."""
+    try:
+        try:
+            from backend import mail_meldung  # type: ignore
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import mail_meldung  # type: ignore
+    except Exception:  # noqa: BLE001
+        return False
+    if W and not mail_meldung.W:
+        return False
+    return mail_meldung.erklaert(pfad)
+
+
 def einteilen(e: dict, k: dict) -> str | None:
     """Grund, warum der Eintrag erklaert ist – oder ``None`` (nicht erklaert)."""
     pfad, art = e["pfad"], e["art"]
@@ -458,6 +474,8 @@ def einteilen(e: dict, k: dict) -> str | None:
             return "Verzeichnisinhalt"
         if merkmale & {"p", "u", "g", "l", "A", "X", "E"}:
             return None
+    if typ == "f" and art in ("neu", "geaendert") and _mail_erklaert(pfad):
+        return "Jarvis-Mailversand (eigene Konfiguration)"
     rel = _code_rel(pfad)
     if rel is not None:
         baum = k.get("baum")
@@ -673,8 +691,57 @@ def nach_pruefung() -> int:
     _protokoll("AIDE-Abgleich: %s – %d neu, %d entfernt, %d geaendert, davon %d nicht erklaert%s"
                % (z["zustand"], summe.get("neu", 0), summe.get("entfernt", 0), summe.get("geaendert", 0),
                   z.get("offen_anzahl", 0), (" (" + z["grund"] + ")") if z.get("grund") else ""))
+    mail_melden(z)
     # Ein interner Fehler soll an der Unit sichtbar werden (B13: Unit failed)
     return 1 if z["zustand"] == "fehler" else 0
+
+
+MAIL_EINTRAEGE = 40
+
+
+def mail_text(z: dict) -> tuple[str, str] | None:
+    """(Betreff, Text) fuer "offen" und "fehler" – sonst None (nichts zu melden)."""
+    summe = z.get("bericht", {}).get("summe", {})
+    if z.get("zustand") == "fehler":
+        return ("AIDE-Abgleich fehlgeschlagen",
+                "Der Abgleich der taeglichen Integritaetspruefung ist gescheitert:\n  %s\n\n"
+                "Der bisherige Vergleichsstand bleibt bestehen." % (z.get("grund") or "unbekannt"))
+    if z.get("zustand") != "offen":
+        return None
+    n = int(z.get("offen_anzahl") or 0)
+    zeilen = ["Die Integritaetspruefung hat Aenderungen gefunden, die weder ein Paket noch der",
+              "signierte Stand von Jarvis erklaert. Der Vergleichsstand wurde NICHT uebernommen.", "",
+              "Gesamt: %d neu, %d entfernt, %d geaendert – davon %d nicht erklaert."
+              % (summe.get("neu", 0), summe.get("entfernt", 0), summe.get("geaendert", 0), n)]
+    if z.get("grund"):
+        zeilen.append("Hinweis: %s" % z["grund"])
+    zeilen.append("")
+    for o in (z.get("offen") or [])[:MAIL_EINTRAEGE]:
+        zeilen.append("  [%s] %s – %s" % (o.get("art", "?"), o.get("pfad", "?"), o.get("warum", "")))
+    if n > MAIL_EINTRAEGE:
+        zeilen.append("  … und %d weitere (vollstaendige Liste in der Oberflaeche)" % (n - MAIL_EINTRAEGE))
+    zeilen += ["", "Durchsicht und Uebernahme: Einstellungen -> KI & System -> Paket-Updates und",
+               "Integritaet -> Integritaetspruefung (AIDE)."]
+    return ("AIDE: %d nicht erklaerte Aenderung(en)" % n, "\n".join(zeilen))
+
+
+def mail_melden(z: dict) -> dict | None:
+    """Meldung per E-Mail (Quelle "aide"); im Testmodus (W) nie. Wirft nie."""
+    if W:
+        return None
+    try:
+        inhalt = mail_text(z)
+        if not inhalt:
+            return None
+        try:
+            from backend import mail_meldung  # type: ignore
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import mail_meldung  # type: ignore
+        return mail_meldung.senden("aide", inhalt[0], inhalt[1])
+    except Exception as e:  # noqa: BLE001
+        print("Mail nicht verschickt: %s" % e, flush=True)
+        return None
 
 
 def uebernehmen(kennung: str, wer: str) -> dict:

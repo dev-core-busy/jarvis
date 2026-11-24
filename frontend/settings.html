@@ -2246,6 +2246,42 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </div>
                         </div>
 
+                        <!-- E-Mail-Versand (2026-11-24): Warnungen, AIDE, Sicherheitsverletzungen
+                             und Systemmeldungen per E-Mail. Logik: mailversand.js (window.MailVersand),
+                             Broker: backend/broker/meta.py (broker.mailversand*), Regeln und
+                             Postfix-Konfiguration: backend/mail_meldung.py. -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-mail-hdr">
+                                <h3 data-i18n="mv.titel">E-Mail-Versand</h3>
+                                <span class="sk-sektion-toggle" id="prof-sect-mail-tog">▶</span>
+                            </div>
+                            <div id="prof-sect-mail-body" class="kb-collapse-body" style="display:none;">
+                                <div class="tuning-group" id="mv-block">
+                                    <div id="mv-status" class="kb-hint" style="margin:0 0 6px;" data-i18n="mv.laedt">Status wird geladen…</div>
+                                    <button type="button" id="mv-einrichten" class="sec-btn primary" style="display:none;margin-bottom:8px;" data-i18n="mv.einrichten">Mailserver einrichten</button>
+                                    <label for="mv-empfaenger" class="systab-label" data-i18n="mv.empf_label">Empfänger</label>
+                                    <input data-tabfill-nein="Beispieladresse, kein Wert" type="text" id="mv-empfaenger" class="systab-feld" autocomplete="off" spellcheck="false" style="width:100%;margin-bottom:8px;" data-i18n-placeholder="mv.empf_ph" placeholder="z. B. it-sicherheit@firma.local – mehrere mit Komma">
+                                    <label for="mv-relay" class="systab-label" data-i18n="mv.relay_label">Weiterleitender Mailserver</label>
+                                    <input data-tabfill-nein="Beispiel fuer das Format, kein Wert" type="text" id="mv-relay" class="systab-feld" autocomplete="off" spellcheck="false" style="width:100%;" data-i18n-placeholder="mv.relay_ph" placeholder="z. B. mail.firma.local oder mail.firma.local:25">
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin:2px 0 10px;" data-i18n="mv.relay_hint">Leer bedeutet direkte Zustellung an den Empfänger – Firmen-Mailfilter weisen solche Nachrichten meist ab.</small>
+                                    <div class="systab-label" data-i18n="mv.quellen_titel">Diese Meldungen verschicken</div>
+                                    <div id="mv-quellen">
+                                        <label class="kb-form-checkbox-label" style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;"><input type="checkbox" data-quelle="ueberwachung" style="width:auto;margin-top:3px;"><span data-i18n="mv.q_ueberwachung">Serverüberwachung – Alarme und Warnungen zu Diensten, Speicherplatz, Zertifikat, Anmeldeversuchen und Firewall</span></label>
+                                        <label class="kb-form-checkbox-label" style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;"><input type="checkbox" data-quelle="aide" style="width:auto;margin-top:3px;"><span data-i18n="mv.q_aide">Integritätsprüfung (AIDE) – nicht erklärte Dateiänderungen und Fehler der Prüfung</span></label>
+                                        <label class="kb-form-checkbox-label" style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;"><input type="checkbox" data-quelle="sicherheit" style="width:auto;margin-top:3px;"><span data-i18n="mv.q_sicherheit">Sicherheitsverletzungen – gesperrte Konten, Angriffsversuche, Sprühangriffe auf die Anmeldung</span></label>
+                                        <label class="kb-form-checkbox-label" style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;"><input type="checkbox" data-quelle="system" style="width:auto;margin-top:3px;"><span data-i18n="mv.q_system">System – Meldungen des Betriebssystems (automatische Updates, Neustart-Hinweise, geplante Aufgaben)</span></label>
+                                    </div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                                        <button type="button" id="mv-speichern" class="sec-btn primary" data-i18n="mv.speichern">Speichern</button>
+                                        <button type="button" id="mv-test" class="sec-btn" data-i18n="mv.test">Testnachricht senden</button>
+                                    </div>
+                                    <div id="mv-result" class="sec-ssh-result" style="display:none;margin-top:8px;"></div>
+                                    <div id="mv-letzte" style="margin-top:10px;"></div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="mv.hinweis">Der Server verschickt seine Meldungen über einen eigenen, lokalen Mailserver. Er nimmt nur Nachrichten dieses Servers an und ist von außen nicht erreichbar. Gemeldet werden nur Änderungen, nie Inhalte von Chats oder Dokumenten; viele gleichartige Meldungen werden je Stunde begrenzt. Empfänger oder Mailserver ändern und eine Meldungsart abschalten verlangt den Freigabe-Code der Root-Freigaben.</small>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Agent API Key -->
                         <div class="kb-section">
                             <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-api-hdr">
@@ -6943,8 +6979,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=3"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=531"></script>
-    <script src="/static/js/i18n_fr.js?v=7"></script>
+    <script src="/static/js/i18n.js?v=532"></script>
+    <script src="/static/js/i18n_fr.js?v=8"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=41"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6987,6 +7023,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=49"></script>
     <script src="/static/js/fernzugang.js?v=5"></script>
+    <script src="/static/js/mailversand.js?v=1"></script>
     <script src="/static/js/totp_admin.js?v=6"></script>
     <script src="/static/js/ldap_picker.js?v=18"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
@@ -7011,7 +7048,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=3"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=273"></script>
+    <script src="/static/js/app.js?v=274"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

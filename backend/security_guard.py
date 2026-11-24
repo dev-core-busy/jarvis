@@ -390,6 +390,7 @@ def _record(user: str, channel: str, method: str, pattern: str, text: str) -> di
         "pattern": pattern,
         "snippet": _inhalt((text or "")[:500]),
     }
+    neu_gesperrt = False
     with _lock:
         state = _load()
         blk = state.setdefault("blocked", {})
@@ -397,6 +398,7 @@ def _record(user: str, channel: str, method: str, pattern: str, text: str) -> di
         if _k is not None:
             blk[_k].setdefault("incidents", []).append(incident)
         else:
+            neu_gesperrt = True
             blk[norm_user(user) or user] = {
                 "reason": pattern,
                 "method": method,
@@ -407,7 +409,19 @@ def _record(user: str, channel: str, method: str, pattern: str, text: str) -> di
         _save(state)
     print(f"[SecurityGuard] VORFALL ({method}/{pattern}) – Account gesperrt: "
           f"{user} [{channel}]", flush=True)
+    if neu_gesperrt:
+        _mail("konto_gesperrt_angriff", benutzer=user, kanal=channel,
+              muster=f"{method}/{pattern}")
     return incident
+
+
+def _mail(art: str, **felder) -> None:
+    """Sicherheitsmeldung per E-Mail (nur Metadaten, backend/sicherheit_mail.py)."""
+    try:
+        from backend import sicherheit_mail
+        sicherheit_mail.melden(art, **felder)
+    except Exception as e:  # noqa: BLE001
+        print(f"[SecurityGuard] Mail-Meldung fehlgeschlagen: {e}", flush=True)
 
 
 # ── Eingefuegter / zitierter Fremdtext (Pentest C6, 2026-11-05) ─────────────
@@ -551,6 +565,11 @@ async def inspect(text: str, user: str, channel: str,
               + (f" – eingefuegter Text ({eingefuegt}), keine Sperre" if eingefuegt else "")
               + (" – weiches Muster, keine Sperre" if (weich and not heur) else ""),
               flush=True)
+        # Ein HARTES Muster ohne Sperre (kein Konto, z. B. WhatsApp) ist ein
+        # Angriffsversuch; eingefuegter Fremdtext und weiche Muster nicht.
+        if heur and not eingefuegt:
+            _mail("angriff_protokolliert", benutzer=user, kanal=channel,
+                  muster=f"{method}/{pattern}")
         return (True, incident)
 
     incident = _record(user, channel, method, pattern, text)
@@ -667,6 +686,8 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
                 }
                 blocked_now = True
         _save(state)
+    if blocked_now:
+        _mail("konto_gesperrt_verstoss", benutzer=user, kanal=channel, muster=kind, ip=ip)
     tag = "AUTO-BLOCK" if blocked_now else ("GRENZE" if not escalate else "VERSTOSS")
     print(f"[SecurityGuard] {tag} ({kind}) [{channel}/{user}] {(detail or '')[:80]}", flush=True)
     return {"blocked": blocked_now, "count": len(allv.get(key, []))}

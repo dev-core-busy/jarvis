@@ -184,7 +184,7 @@ NS = {"JSONResponse": _Antwort, "Depends": lambda x: None, "require_auth": None,
 exec(compile(_funktionen("totp_show", "totp_setup", "_totp_vormerken", "_totp_qr_daten",
                          "_sitzung_ist_app", "_totp_app_sperre", "_totp_fehlertext",
                          "_kennwort_schranke", "_kennwort_fehlversuch",
-                         "_check_rate_limit", "_record_login_attempt",
+                         "_check_rate_limit", "_record_login_attempt", "_mail_sicherheit",
                          "_konto_sperre_antwort", "_totp_im_broker", "_totp_secret_lesbar"),
              "main.py", "exec"), NS)
 _show = NS["totp_show"]

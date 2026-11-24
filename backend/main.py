@@ -10913,6 +10913,101 @@ async def security_unattended_teardown(user: str = Depends(require_local_auth)):
     return JSONResponse(res, status_code=200 if res.get("ok") else 500)
 
 
+@app.get("/api/security/updates")
+async def security_updates_status(user: str = Depends(require_local_auth)):
+    """Offene Paket-Updates, Dienste mit altem Programmstand und Zustand des AIDE-Abgleichs (Admin).
+
+    Aendert nichts: ``apt-get -s upgrade`` (Trockenlauf), ``needrestart -b -r l``
+    (nur auflisten) und der gespeicherte Zustand des Abgleichs.
+    """
+    from backend import broker_client
+    upd, aide = await asyncio.gather(
+        broker_client.call("paket_updates_status", {}, user=user, timeout=240),
+        broker_client.call("aide_status", {}, user=user, timeout=60))
+    if not upd.get("ok"):
+        return JSONResponse({"ok": False, "error": upd.get("error") or upd.get("stderr")}, status_code=502)
+    erg = dict(upd.get("result") or {})
+    erg["aide"] = (aide.get("result") or {}) if aide.get("ok") else {"fehler": aide.get("error") or aide.get("stderr")}
+    return JSONResponse(erg)
+
+
+@app.post("/api/security/updates/einspielen")
+async def security_updates_einspielen(user: str = Depends(require_local_auth)):
+    """Spielt alle offenen Paket-Updates ein (Admin, root).
+
+    Nur vorhandene Pakete, Trockenlauf vorher (plant apt eine Entfernung, laeuft
+    nichts), kein Aufraeumen, kein Neustart. Danach wird die AIDE-Pruefung
+    angestossen; ihr Abgleich uebernimmt den neuen Stand nur, wenn jede
+    Aenderung erklaert ist.
+    """
+    from backend import broker_client
+    # ``timeout`` im Argument hebt den Broker-Deckel fuer diese lange Op; der
+    # Aufruf-Deckel setzt den Socket-Timeout (wie cve_pruefung.beheben).
+    bres = await broker_client.call("paket_updates_einspielen", {"timeout": 2900}, user=user, timeout=3000)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
+    res = bres.get("result") or {}
+    _sprot_angaben(pakete=len(res.get("eingespielt") or []))
+    return JSONResponse(res, status_code=200 if res.get("ok") else 500)
+
+
+@app.post("/api/security/updates/neustart")
+async def security_updates_neustart(request: Request, user: str = Depends(require_local_auth)):
+    """Startet einen Dienst neu, der noch einen alten Programmstand geladen hat (Admin, root).
+
+    Rumpf ``{"dienst": "<name>.service"}``. Der Broker startet nur, was
+    needrestart in diesem Augenblick nennt, nie dbus, logind, die
+    Desktop-Anmeldung oder einen einmaligen Auftrag.
+    """
+    from backend import broker_client
+    try:
+        rumpf = await request.json()
+    except Exception:  # noqa: BLE001
+        rumpf = {}
+    dienst = str((rumpf or {}).get("dienst") or "")[:120] if isinstance(rumpf, dict) else ""
+    _sprot_angaben(dienst=dienst)
+    bres = await broker_client.call("dienst_neustart", {"dienst": dienst}, user=user, timeout=240)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
+    res = bres.get("result") or {}
+    return JSONResponse(res, status_code=200 if res.get("ok") else 409)
+
+
+@app.post("/api/security/aide/pruefen")
+async def security_aide_pruefen(user: str = Depends(require_local_auth)):
+    """Stoesst die AIDE-Pruefung jetzt an; der Abgleich laeuft danach von selbst (Admin, root)."""
+    from backend import broker_client
+    bres = await broker_client.call("aide_pruefen", {}, user=user, timeout=60)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
+    res = bres.get("result") or {}
+    return JSONResponse(res, status_code=200 if res.get("ok") else 409)
+
+
+@app.post("/api/security/aide/uebernehmen")
+async def security_aide_uebernehmen(request: Request, user: str = Depends(require_local_auth)):
+    """Uebernimmt nicht erklaerte AIDE-Aenderungen nach Durchsicht als neuen Vergleichsstand (Admin, root).
+
+    Rumpf ``{"kennung": "<16 Hex>"}`` – die Kennung des Abgleichs, den der
+    Administrator gesehen hat. Liegt inzwischen ein neuerer Bericht vor, lehnt
+    der Broker ab. Wer und wie viele Eintraege stehen im Sicherheitsprotokoll.
+    """
+    from backend import broker_client
+    try:
+        rumpf = await request.json()
+    except Exception:  # noqa: BLE001
+        rumpf = {}
+    kennung = str((rumpf or {}).get("kennung") or "")[:32] if isinstance(rumpf, dict) else ""
+    bres = await broker_client.call("aide_uebernehmen", {"kennung": kennung, "wer": _display_name(user)},
+                                    user=user, timeout=120)
+    if not bres.get("ok"):
+        return JSONResponse({"ok": False, "error": bres.get("error") or bres.get("stderr")}, status_code=502)
+    res = bres.get("result") or {}
+    z = res.get("zustand") or {}
+    _sprot_angaben(kennung=kennung, eintraege=z.get("offen_anzahl"))
+    return JSONResponse(res, status_code=200 if res.get("ok") else 409)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Root-Broker – auditierbare Freigabeliste fuer Root-Operationen
 # ═══════════════════════════════════════════════════════════════════════════

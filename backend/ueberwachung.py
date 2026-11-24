@@ -64,6 +64,11 @@ from pathlib import Path
 
 ZUSTAND_DATEI = Path("/var/lib/jarvis-ueberwachung/zustand.json")
 KONF_DATEI = Path("/etc/jarvis/ueberwachung.conf")
+# AIDE-Abgleich (Nachlauf von dailyaidecheck.service, backend/aide_abgleich.py)
+AIDE_ZUSTAND = Path("/var/lib/jarvis-aide/abgleich.json")
+AIDE_DROPIN = Path("/etc/systemd/system/dailyaidecheck.service.d/80-jarvis-abgleich.conf")
+# Der Timer laeuft taeglich um 01:50 mit bis zu 2 h Zufallsverzug (Debian-Unit)
+AIDE_VERALTET_S = 2 * 86400 + 3 * 3600
 
 TAKT_S = 300                 # Abstand der Laeufe (Timer)
 VERALTET_S = 3 * TAKT_S      # drei verpasste Laeufe = der Waechter steht
@@ -253,6 +258,11 @@ def sammeln(konf: dict, vorher: dict) -> dict:
     eing["cursor"] = {"ssh": c_ssh, "kern": c_kern}
     eing["uid_dienst"] = _uid(konf["DIENSTBENUTZER"])
     eing["uid_sandbox"] = _sandbox_uids(konf["SANDBOX_PRAEFIX"])
+    try:
+        eing["aide_eingerichtet"] = AIDE_DROPIN.stat().st_mtime
+    except OSError:
+        eing["aide_eingerichtet"] = None
+    eing["aide"] = _lesen_roh(AIDE_ZUSTAND) or None
     return eing
 
 
@@ -473,6 +483,28 @@ def auswerten(eing: dict, vorher: dict, konf: dict, jetzt: float) -> tuple[dict,
                                zuletzt=es[-1]["zeit"]))
     if konf.get("_konf_fehler"):
         befunde.append(_befund("konf", "konf_fehler", "warnung", konf["_konf_fehler"]))
+
+    # AIDE-Abgleich: ein offener Abgleich wartet auf die Durchsicht eines
+    # Administrators – bis dahin bleibt der alte Stand, und jede Nacht meldet
+    # AIDE dieselben Aenderungen weiter. Ein Abgleich, der nicht mehr laeuft,
+    # ist selbst ein Befund (dieselbe Ueberlegung wie VERALTET_S).
+    if eing.get("aide_eingerichtet"):
+        a = eing.get("aide") or {}
+        zeit = a.get("zeit") or 0
+        if a.get("zustand") == "offen":
+            befunde.append(_befund("aide", "aide_offen", "warnung",
+                                   "AIDE: %d Aenderung(en) seit dem letzten Stand nicht erklaert (Pruefung %s) – "
+                                   "Durchsicht unter Einstellungen > System > Paket-Updates"
+                                   % (a.get("offen_anzahl", 0), _uhr(zeit)),
+                                   anzahl=a.get("offen_anzahl", 0), kennung=a.get("kennung", "")))
+        elif a.get("zustand") == "fehler":
+            befunde.append(_befund("aide", "aide_fehler", "warnung",
+                                   "AIDE-Abgleich gescheitert: %s" % (a.get("grund") or "?")))
+        juengst = zeit or eing["aide_eingerichtet"]
+        if jetzt - juengst > AIDE_VERALTET_S:
+            befunde.append(_befund("aide_alt", "aide_veraltet", "warnung",
+                                   "AIDE-Abgleich seit %s nicht mehr gelaufen" % _uhr(juengst),
+                                   zuletzt=juengst))
 
     # "seit" und "gemeldet" aus dem Vorzustand fortfuehren; Meldungen bei Aenderung
     alt = {b["id"]: b for b in (vorher.get("befunde") or [])}

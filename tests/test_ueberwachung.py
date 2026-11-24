@@ -198,6 +198,29 @@ pruefe(list(ids(s)) == ["platz:/"], "/var/log auf demselben Dateisystem wird nic
 s, _ = ue.auswerten(eingabe(platz={"/": platz(50 * 10**9), "/var/log": platz(3 * 10**9, geraet=2)}), {}, KONF, JETZT)
 pruefe(ids(s) == {"platz:/var/log": "alarm"}, "eigenes Dateisystem fuer /var/log wird eigens geprueft")
 
+# ── 4b. AIDE-Abgleich (24.11.2026) ───────────────────────────────────────────
+print("[4b] AIDE-Abgleich")
+EIN = JETZT - 10 * 86400
+s, _ = ue.auswerten(eingabe(aide_eingerichtet=EIN, aide={"zeit": JETZT - 3600, "zustand": "offen", "offen_anzahl": 7}),
+                    {}, KONF, JETZT)
+pruefe(ids(s).get("aide") == "warnung" and "7 Aenderung" in next(b["text"] for b in s["befunde"] if b["id"] == "aide"),
+       "offener Abgleich: Warnung mit Zahl")
+s, _ = ue.auswerten(eingabe(aide_eingerichtet=EIN, aide={"zeit": JETZT - 3600, "zustand": "fehler", "grund": "x"}),
+                    {}, KONF, JETZT)
+pruefe(ids(s).get("aide") == "warnung", "gescheiterter Abgleich: Warnung")
+s, _ = ue.auswerten(eingabe(aide_eingerichtet=EIN, aide={"zeit": JETZT - 3600, "zustand": "uebernommen"}),
+                    {}, KONF, JETZT)
+pruefe("aide" not in ids(s) and "aide_alt" not in ids(s), "uebernommener Abgleich: kein Befund")
+s, _ = ue.auswerten(eingabe(aide_eingerichtet=EIN, aide={"zeit": JETZT - ue.AIDE_VERALTET_S - 60, "zustand": "uebernommen"}),
+                    {}, KONF, JETZT)
+pruefe(ids(s).get("aide_alt") == "warnung", "Abgleich laenger nicht gelaufen: Warnung")
+s, _ = ue.auswerten(eingabe(aide_eingerichtet=JETZT - ue.AIDE_VERALTET_S - 60, aide=None), {}, KONF, JETZT)
+pruefe(ids(s).get("aide_alt") == "warnung", "eingerichtet, aber nie gelaufen: Warnung")
+s, _ = ue.auswerten(eingabe(aide_eingerichtet=JETZT - 3600, aide=None), {}, KONF, JETZT)
+pruefe("aide_alt" not in ids(s), "frisch eingerichtet, erste Nacht noch nicht vorbei: kein Befund")
+s, _ = ue.auswerten(eingabe(aide_eingerichtet=None, aide={"zeit": 0, "zustand": "offen"}), {}, KONF, JETZT)
+pruefe("aide" not in ids(s) and "aide_alt" not in ids(s), "nicht eingerichtet: kein Befund")
+
 # ── 5. Zertifikat ────────────────────────────────────────────────────────────
 print("[5] Zertifikat")
 for tage, soll in ((5, "alarm"), (20, "warnung"), (400, None), (-2, "alarm")):

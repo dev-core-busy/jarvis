@@ -163,13 +163,15 @@ def pam_aufrufe(wurzel):
 
 
 def lauf(modus, wurzel, skript=None, test=True, attrappe=True, ipv6_conf=None, nm=None,
-         swaps=None, meminfo=None, shm=None):
+         swaps=None, meminfo=None, shm=None, aide_prog=False):
     env = {k: v for k, v in os.environ.items()
            if k not in ("JARVIS_HAERTUNG_TEST", "JARVIS_SYS_WURZEL")}
     for k in ("JARVIS_VISUDO", "JARVIS_PAM_AUTH_UPDATE", "JARVIS_IP", "JARVIS_IPV6_CONF",
               "JARVIS_NMCLI", "JARVIS_NMCLI_STAND", "JARVIS_PROC_SWAPS", "JARVIS_MEMINFO",
-              "JARVIS_SWAPOFF", "JARVIS_MOUNT", "JARVIS_SHM_OPTIONEN"):
+              "JARVIS_SWAPOFF", "JARVIS_MOUNT", "JARVIS_SHM_OPTIONEN", "JARVIS_AIDE_PROG_PRUEFEN"):
         env.pop(k, None)
+    if test and aide_prog:
+        env["JARVIS_AIDE_PROG_PRUEFEN"] = "1"
     if test and shm is not None:
         env["JARVIS_SHM_OPTIONEN"] = str(shm)
         env["JARVIS_MOUNT"] = str(MOUNT_ATTRAPPE_PFAD)
@@ -513,8 +515,35 @@ try:
                    ("/opt/sentinelone/log/agent.log", "LowLog+ANF+ARF")):
         pruefe(gruppe(p_) == g_, "AIDE-Gruppe %s fuer %s (ist %s)" % (g_, p_, gruppe(p_)))
     for p_ in ("/tmp/jarvis-arbeit/0c8b14b2/x", "/tmp/jarvis-anhaenge/0c8b14b2/x",
-               "/run/credentials/jarvis.service/geheimnis", "/run/systemd/propagate/jarvis.service/x"):
+               "/run/credentials/jarvis.service/geheimnis", "/run/systemd/propagate/jarvis.service/x",
+               # 24.11.2026: fluechtige Dateisysteme und gemessenes Laufzeitrauschen
+               "/tmp/lo_jarvis_x/user/registrymodifications.xcu", "/run/udev/links/x", "/dev/cpu/0",
+               "/var/lib/jarvis-broker/quelle/.git/objects/0e/fee", "/var/lib/jarvis-broker/quelle/.git/FETCH_HEAD",
+               "/usr/local/lib/jarvis-broker/backend/__pycache__/m.cpython-313.pyc",
+               "/opt/sentinelone/configuration/policy.conf", "/opt/sentinelone/assets/x.data",
+               "/opt/sentinelone/crash_dumps/.current/agent", "/var/lib/lightdm/.Xauthority",
+               "/var/lib/upower/history.dat", "/var/lib/NetworkManager/seen-bssids",
+               "/var/lib/systemd/timers/stamp-x.timer", "/var/cache/apt/pkgcache.bin",
+               "/var/lib/apt/lists/x_Packages", "/var/lib/jarvis-aide/abgleich.json"):
         pruefe(ausgenommen(p_), "AIDE nimmt aus: %s" % p_)
+    # ... und was trotz der neuen Ausnahmen erfasst bleiben MUSS
+    for p_ in ("/var/lib/jarvis-broker/quelle/backend/main.py", "/usr/local/lib/jarvis-broker/backend/ops.py",
+               "/opt/sentinelone/bin/sentinelctl", "/opt/sentinelone/lib/x.so", "/boot/grub/grub.cfg",
+               "/var/lib/dpkg/status", "/var/lib/jarvis-broker/zaehler.json", "/etc/apt/sources.list",
+               "/var/lib/AccountsService/users/beispiel", "/usr/share/.aaa.pdf", "/root/.bashrc"):
+        pruefe(not ausgenommen(p_), "AIDE prueft weiter: %s" % p_)
+    for p_ in ("/var/log/lightdm/lightdm.log", "/var/log/cups/access_log"):
+        pruefe(gruppe(p_) == "LowLog+ANF+ARF", "AIDE fuehrt %s als rotierendes Protokoll (ist %s)" % (p_, gruppe(p_)))
+
+    # 4f''' AIDE-Abgleich als Nachlauf der taeglichen Pruefung
+    ab = zeilen(W / "etc/systemd/system/dailyaidecheck.service.d/80-jarvis-abgleich.conf")
+    pruefe("[Service]" in ab, "Abgleich: Drop-in fuer dailyaidecheck.service mit [Service]")
+    _post = [z for z in ab if z.startswith("ExecStartPost=")]
+    pruefe(_post == ["ExecStartPost=+/usr/bin/python3 -I /usr/local/lib/jarvis-broker/backend/aide_abgleich.py --nach-pruefung"],
+           "Abgleich: genau EIN ExecStartPost, als root ('+'), System-Python isoliert, aus der "
+           "root-eigenen Broker-Kopie (%s)" % _post)
+    pruefe(not any(z.startswith("ExecStart=") for z in ab),
+           "Abgleich: der Drop-in ersetzt die Pruefung selbst NICHT (kein ExecStart=)")
     for p_ in ("/var/log/auth.log", "/var/log/syslog", "/opt/sentinelone/bin/sentinelctl"):
         pruefe(not ausgenommen(p_) and gruppe(p_) is None,
                "AIDE laesst %s bei der Debian-Vorgabe (keine eigene Regel, keine Ausnahme)" % p_)
@@ -598,6 +627,8 @@ try:
     _pakete = re.search(r'(?m)^PAKETE="([^"]*)"', _text)
     pruefe(bool(_pakete) and "libpam-pwquality" in _pakete.group(1).split(),
            "Paket libpam-pwquality steht in PAKETE")
+    pruefe(bool(_pakete) and "apt-listchanges" in _pakete.group(1).split(),
+           "Paket apt-listchanges steht in PAKETE (B2)")
     web = [" ".join(z.split()) for z in zeilen(W / "etc/pam.d/jarvis-web")]
     pruefe(web == ["auth required pam_unix.so", "account required pam_unix.so"],
            "jarvis-web: genau pam_unix fuer auth und account (%s)" % web)
@@ -904,6 +935,27 @@ try:
     # Testmodus ohne Ersatzdatei: das /dev/shm des Pruefrechners bleibt unberuehrt
     rc, out = lauf("--pruefen", W10)
     pruefe("AUSFUEHRBAR" not in out, "Testmodus ohne JARVIS_SHM_OPTIONEN: kein /dev/shm des Pruefrechners in der Ausgabe")
+
+    # ── 11. AIDE-Abgleich nur mit Programm in der Broker-Kopie ───────────────
+    # Ohne das Programm liefe der Nachlauf jede Nacht in einen Fehler und
+    # markierte die AIDE-Pruefung als gescheitert.
+    print("[11] AIDE-Abgleich: Drop-in nur mit Programm")
+    W11 = sandkasten / "k"
+    W11.mkdir()
+    dropin = W11 / "etc/systemd/system/dailyaidecheck.service.d/80-jarvis-abgleich.conf"
+    prog = W11 / "usr/local/lib/jarvis-broker/backend/aide_abgleich.py"
+    rc, out = lauf("--anwenden", W11, aide_prog=True)
+    pruefe(rc == 0 and not dropin.exists(), "ohne Programm: --anwenden richtet den Drop-in NICHT ein (Exit %d)" % rc)
+    pruefe("aide_abgleich.py fehlt" in out, "ohne Programm: --anwenden sagt laut, warum")
+    rc, out = lauf("--pruefen", W11, aide_prog=True)
+    pruefe(rc == 1 and "FEHLT" in out and "aide_abgleich.py" in out,
+           "ohne Programm: --pruefen meldet es als Abweichung (Exit %d)" % rc)
+    prog.parent.mkdir(parents=True)
+    prog.write_text("# Platzhalter\n", encoding="utf-8")
+    rc, out = lauf("--anwenden", W11, aide_prog=True)
+    pruefe(rc == 0 and dropin.is_file(), "mit Programm: --anwenden richtet den Drop-in ein (Exit %d)" % rc)
+    rc, out = lauf("--pruefen", W11, aide_prog=True)
+    pruefe(rc == 0, "mit Programm: --pruefen danach 'alles umgesetzt' (Exit %d)" % rc)
 finally:
     shutil.rmtree(sandkasten, ignore_errors=True)
 

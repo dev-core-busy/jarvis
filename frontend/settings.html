@@ -2052,6 +2052,30 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.unattended_desc">Spielt Debian-Sicherheitspatches automatisch ein (unattended-upgrades). Bewusst eng gefasst: nur die Sicherheits-Quelle – keine allgemeinen Versionssprünge unter dem laufenden Dienst, kein automatischer Neustart und kein automatisches Aufräumen von Paketen (Letzteres würde Abhängigkeiten des Agenten entfernen, etwa cmake/boost für die Gesichtserkennung, ffmpeg für die Sprachausgabe oder LibreOffice-Teile). Die tägliche Aktualisierung des Paketindex bleibt beim Ausschalten aktiv – ein veralteter Index lässt Paketinstallationen mit „404 Not Found“ scheitern.</small>
                                 </div>
 
+                                <!-- Offene Paket-Updates und AIDE-Abgleich (2026-11-24).
+                                     Logik: security_incidents.js (loadUpdates/renderUpdates/...),
+                                     Backend: backend/paket_updates.py, backend/aide_abgleich.py.
+                                     Ergebnisse stehen direkt unter den Knoepfen (sec-upd-result). -->
+                                <div class="tuning-group" id="sec-upd">
+                                    <h4 class="tuning-group-title" data-i18n="security.section_updates">Paket-Updates und Integritätsprüfung</h4>
+                                    <div id="sec-upd-status" class="kb-hint" style="margin:0 0 4px;" data-i18n="security.upd_laedt">Wird geladen…</div>
+                                    <div id="sec-upd-liste"></div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                        <button type="button" id="sec-upd-einspielen" class="sec-btn primary" data-i18n="security.upd_einspielen">Alle einspielen</button>
+                                        <button type="button" id="sec-upd-neu" class="sec-btn" data-i18n="security.upd_neu_laden">Liste aktualisieren</button>
+                                    </div>
+                                    <div id="sec-upd-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
+                                    <div id="sec-upd-neustart" style="margin-top:10px;"></div>
+                                    <div id="sec-aide-status" class="kb-hint" style="margin:12px 0 4px;"></div>
+                                    <div id="sec-aide-liste"></div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                        <button type="button" id="sec-aide-pruefen" class="sec-btn" data-i18n="security.aide_pruefen">Prüfung jetzt starten</button>
+                                        <button type="button" id="sec-aide-uebernehmen" class="sec-btn danger" style="display:none;" data-i18n="security.aide_uebernehmen">Nach Durchsicht übernehmen</button>
+                                    </div>
+                                    <div id="sec-aide-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.upd_desc">Zeigt alle Updates, die auf dem Server bereitliegen – auch die, die die Automatik bewusst nicht einspielt. „Alle einspielen“ hebt nur vorhandene Pakete, entfernt nichts und startet nichts neu. Danach prüft die Integritätsprüfung (AIDE) das System: Änderungen, die ein Paket oder der signierte Stand dieser Anwendung erklärt, werden automatisch zum neuen Vergleichsstand. Alles andere wird hier zur Durchsicht vorgelegt und erst nach Ihrer Bestätigung übernommen.</small>
+                                </div>
+
                                 <!-- RDP erlauben (xrdp, Port 3389), Vorgabe AUS (2026-11-17).
                                      Logik: fernzugang.js (window.RdpSchalter), Broker:
                                      backend/broker/fernzugang.py (rdp/rdp_status), Regel:
@@ -6839,7 +6863,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=522"></script>
+    <script src="/static/js/i18n.js?v=523"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=39"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6880,7 +6904,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=17"></script>
     <script src="/static/js/branding.js?v=31"></script>
     <script src="/static/js/theme.js?v=3"></script>
-    <script src="/static/js/security_incidents.js?v=46"></script>
+    <script src="/static/js/security_incidents.js?v=47"></script>
     <script src="/static/js/fernzugang.js?v=4"></script>
     <script src="/static/js/totp_admin.js?v=6"></script>
     <script src="/static/js/ldap_picker.js?v=18"></script>

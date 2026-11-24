@@ -38,7 +38,9 @@ MOUNT_OPTS = "ro,nosuid,nodev,noexec"
 # (shell_root, systemctl, chpasswd, mount_share, certbot, switch_session) werden
 # weiterhin vollstaendig auditiert.
 READONLY_OPS = {"sandbox_status", "egress_status", "apt_upgrades_status",
-                "tika_status", "unlock_screen", "vnc_restart"}
+                "tika_status", "unlock_screen", "vnc_restart",
+                # Offene Updates und AIDE-Zustand: reine Abfragen beim Oeffnen der Seite
+                "paket_updates_status", "aide_status"}
 
 
 # Obergrenze fuer das Op-Argument ``timeout`` (Sekunden): dieselbe wie die
@@ -578,6 +580,47 @@ def _op_apt_upgrades_status(args, stream):
     from backend import apt_upgrades
     return {"ok": True, "rc": 0,
             "result": apt_upgrades.status(live=bool(args.get("live"))),
+            "stdout": "", "stderr": ""}
+
+
+def _op_paket_updates_status(args, stream):
+    from backend import paket_updates
+    return {"ok": True, "rc": 0, "result": paket_updates.status(), "stdout": "", "stderr": ""}
+
+
+def _op_paket_updates_einspielen(args, stream):
+    """Alle offenen Updates einspielen (``backend/paket_updates.py``): nur
+    vorhandene Pakete, Trockenlauf ohne Entfernung, kein Aufraeumen, kein
+    Neustart. Danach wird die AIDE-Pruefung angestossen."""
+    from backend import paket_updates
+    return {"ok": True, "rc": 0, "result": paket_updates.einspielen(), "stdout": "", "stderr": ""}
+
+
+def _op_dienst_neustart(args, stream):
+    """Einen Dienst neu starten, den needrestart in diesem Augenblick nennt.
+    Die Pruefung (Name, Sperrliste, kein Oneshot) liegt in
+    ``paket_updates.dienst_neustart`` und vertraut dem Backend nichts an."""
+    from backend import paket_updates
+    return {"ok": True, "rc": 0, "result": paket_updates.dienst_neustart(str(args.get("dienst") or "")),
+            "stdout": "", "stderr": ""}
+
+
+def _op_aide_status(args, stream):
+    from backend import aide_abgleich
+    return {"ok": True, "rc": 0, "result": aide_abgleich.status(), "stdout": "", "stderr": ""}
+
+
+def _op_aide_pruefen(args, stream):
+    from backend import aide_abgleich
+    return {"ok": True, "rc": 0, "result": aide_abgleich.pruefung_starten(), "stdout": "", "stderr": ""}
+
+
+def _op_aide_uebernehmen(args, stream):
+    """Einen OFFENEN AIDE-Abgleich nach Durchsicht uebernehmen – nur mit der
+    Kennung, die der Administrator gesehen hat (``aide_abgleich.uebernehmen``)."""
+    from backend import aide_abgleich
+    return {"ok": True, "rc": 0,
+            "result": aide_abgleich.uebernehmen(str(args.get("kennung") or ""), str(args.get("wer") or "")),
             "stdout": "", "stderr": ""}
 
 
@@ -1606,6 +1649,38 @@ _REGISTRY = {
     "apt_upgrades_status": (
         _op_apt_upgrades_status, lambda a: "apt_upgrades_status",
         lambda a: "Status der automatischen Sicherheitsupdates abfragen (inkl. Trockenlauf)",
+        True, (),
+    ),
+    "paket_updates_status": (
+        _op_paket_updates_status, lambda a: "paket_updates_status",
+        lambda a: "Offene Paket-Updates und Dienste mit altem Stand abfragen",
+        True, (),
+    ),
+    "paket_updates_einspielen": (
+        _op_paket_updates_einspielen, lambda a: "paket_updates_einspielen",
+        lambda a: "Alle offenen Paket-Updates einspielen (nur vorhandene Pakete, nichts entfernen, "
+                  "kein Aufraeumen, kein Neustart; danach AIDE-Pruefung)",
+        True, (),
+    ),
+    "dienst_neustart": (
+        _op_dienst_neustart, lambda a: "dienst_neustart",
+        lambda a: "Dienst mit altem Programmstand neu starten: %s" % str(a.get("dienst") or "")[:120],
+        True, (),
+    ),
+    "aide_status": (
+        _op_aide_status, lambda a: "aide_status",
+        lambda a: "Zustand des AIDE-Abgleichs abfragen",
+        True, (),
+    ),
+    "aide_pruefen": (
+        _op_aide_pruefen, lambda a: "aide_pruefen",
+        lambda a: "AIDE-Pruefung jetzt anstossen (Abgleich laeuft danach)",
+        True, (),
+    ),
+    "aide_uebernehmen": (
+        _op_aide_uebernehmen, lambda a: "aide_uebernehmen",
+        lambda a: "Nicht erklaerte AIDE-Aenderungen nach Durchsicht als neuen Stand uebernehmen "
+                  "(Kennung %s)" % str(a.get("kennung") or "")[:16],
         True, (),
     ),
     "cve_beheben": (

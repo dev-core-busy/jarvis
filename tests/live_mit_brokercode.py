@@ -16,6 +16,7 @@ Nur Standardbibliothek (HOTP nach RFC 4226 wie backend/broker/freigabe.py).
 
 Aufruf (root, auf DEV):
     python3 tests/live_mit_brokercode.py tests/live_bsi_m5_dev.py
+    python3 tests/live_mit_brokercode.py tests/live_paket_updates_dev.py lesen
 Exit = Exit der Probe; 2 = konnte nicht laufen.
 """
 import base64
@@ -57,15 +58,17 @@ def _broker_letzter() -> int:
 def main() -> int:
     if os.geteuid() != 0:
         abbruch("muss als root laufen (Broker-Schluessel ist root-eigen)")
-    if len(sys.argv) != 2:
-        abbruch("Aufruf: live_mit_brokercode.py <probe>")
+    if len(sys.argv) < 2:
+        abbruch("Aufruf: live_mit_brokercode.py <probe> [argumente der probe ...]")
     try:
         roh = SCHLUESSEL.read_text(encoding="ascii").strip().upper()
         schluessel = base64.b32decode(roh + "=" * (-len(roh) % 8))
     except Exception as e:  # noqa: BLE001
         abbruch("Broker-Schluessel nicht lesbar: %s" % e)
     probe = str((JARVIS / sys.argv[1]) if not sys.argv[1].startswith("/") else sys.argv[1])
-    cmd = ["bash", str(JARVIS / "deploy" / "als_dienst.sh"), str(JARVIS / "venv" / "bin" / "python"), probe]
+    # Weitere Argumente gehen unveraendert an die Probe (z. B. eine Phase)
+    cmd = ["bash", str(JARVIS / "deploy" / "als_dienst.sh"), str(JARVIS / "venv" / "bin" / "python"), probe,
+           *sys.argv[2:]]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=str(JARVIS))
     ausgegeben = 0

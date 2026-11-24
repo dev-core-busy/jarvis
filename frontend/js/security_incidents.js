@@ -53,7 +53,7 @@
         onShow: function () { this._bind(); this.load(); },
         // Nur der Teil, der im Reiter "KI & System" gebraucht wird (der
         // Update-Schalter liegt dort). _bind() ist idempotent (this._bound).
-        onShowUnattended: function () { this._bind(); this.loadUnattended(false); this.loadCve(); },
+        onShowUnattended: function () { this._bind(); this.loadUnattended(false); this.loadCve(); this.loadUpdates(); },
 
         _bind: function () {
             if (this._bound) return;
@@ -139,6 +139,20 @@
                 if (window.JarvisIcons) uuJetzt.innerHTML = JarvisIcons.play();
                 uuJetzt.addEventListener('click', function () { Mgr.jetztUnattended(); });
             }
+            // Offene Paket-Updates und AIDE-Abgleich
+            var updEin = $('sec-upd-einspielen');
+            if (updEin) updEin.addEventListener('click', function () { Mgr.einspielenUpdates(); });
+            var updNeu = $('sec-upd-neu');
+            if (updNeu) updNeu.addEventListener('click', function () { Mgr.loadUpdates(); });
+            var updNs = $('sec-upd-neustart');
+            if (updNs) updNs.addEventListener('click', function (e) {
+                var b = e.target.closest ? e.target.closest('button[data-dienst]') : null;
+                if (b) Mgr.neustartDienst(b.getAttribute('data-dienst'));
+            });
+            var aidePr = $('sec-aide-pruefen');
+            if (aidePr) aidePr.addEventListener('click', function () { Mgr.aidePruefen(); });
+            var aideUe = $('sec-aide-uebernehmen');
+            if (aideUe) aideUe.addEventListener('click', function () { Mgr.aideUebernehmen(); });
             // Sicherheitsluecken-Pruefung: Vorgaben speichern
             var cveSave = $('cve-speichern');
             if (cveSave) cveSave.addEventListener('click', function () { Mgr.saveCve(); });
@@ -1166,6 +1180,227 @@
                     + 'Debian-Sicherheitspatches müssen danach von Hand eingespielt werden. '
                     + 'Die tägliche Aktualisierung des Paketindex bleibt aktiv.'
             });
+        },
+
+        // ── Offene Paket-Updates und AIDE-Abgleich ──────────────────────
+        // Backend: backend/paket_updates.py + backend/aide_abgleich.py ueber
+        // GET /api/security/updates (aendert nichts).
+        _updStand: null,
+        _aideWecker: null,
+
+        loadUpdates: function () {
+            var box = $('sec-upd-status');
+            if (box) box.textContent = T('security.upd_laedt', 'Wird geladen…');
+            fetch('/api/security/updates', { headers: authHeaders() })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) { Mgr.renderUpdates(d); })
+                .catch(function () { Mgr.renderUpdates(null); });
+        },
+
+        renderUpdates: function (d) {
+            var box = $('sec-upd-status'), liste = $('sec-upd-liste'), ns = $('sec-upd-neustart');
+            if (!box) return;
+            Mgr._updStand = d;
+            var ein = $('sec-upd-einspielen');
+            if (!d || d.ok === false) {
+                box.textContent = T('security.upd_fehler', 'Offene Updates nicht ermittelbar') + (d && d.fehler ? ': ' + d.fehler : '.');
+                if (liste) liste.innerHTML = '';
+                if (ein) ein.disabled = true;
+                Mgr.renderAide(d && d.aide);
+                return;
+            }
+            var pakete = d.pakete || [];
+            var sich = pakete.filter(function (p) { return p.sicherheit; }).length;
+            var kopf;
+            if (!pakete.length) kopf = _P('ok') + '<b>' + esc(T('security.upd_keine', 'Keine offenen Updates')) + '</b>';
+            else kopf = _P('warn') + '<b>' + esc(T('security.upd_anzahl', '{n} offene Updates').replace('{n}', pakete.length)) + '</b>'
+                + (sich ? ' · ' + esc(T('security.upd_davon_sich', 'davon {n} aus der Sicherheitsquelle').replace('{n}', sich)) : '');
+            if (d.index_alter) {
+                kopf += '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
+                    + esc(T('security.upd_index', 'Paketliste vom')) + ' ' + esc(fmtTs(d.index_alter)) + '</div>';
+            }
+            box.innerHTML = kopf;
+            if (ein) ein.disabled = !pakete.length;
+            if (liste) {
+                var h = '';
+                if (pakete.length) {
+                    h += '<div class="sec-scrollbox" style="max-height:220px;font-size:0.76rem;line-height:1.6;margin-top:6px;">';
+                    pakete.forEach(function (p) {
+                        h += '<div><b>' + esc(p.name) + '</b> <span style="color:var(--text-muted);">'
+                            + esc(p.von || '–') + ' → ' + esc(p.nach) + ' · ' + esc(p.quelle || '') + '</span>'
+                            + (p.sicherheit ? ' <b>' + esc(T('security.upd_sicherheit', 'Sicherheit')) + '</b>' : '') + '</div>';
+                    });
+                    h += '</div>';
+                }
+                if ((d.zurueckgehalten || []).length) {
+                    h += '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
+                        + esc(T('security.upd_zurueck', 'Zurückgehalten (brauchen neue oder entfernte Pakete, werden nicht eingespielt)'))
+                        + ': ' + esc(d.zurueckgehalten.join(', ')) + '</div>';
+                }
+                liste.innerHTML = h;
+            }
+            if (ns) {
+                var n = d.neustart || {}, dienste = n.dienste || [], t = '';
+                if (n.kernel_neustart || d.server_neustart) {
+                    t += '<div>' + _P('warn') + esc(T('security.upd_server_neustart',
+                        'Ein neuer Kernel oder eine Systembibliothek ist installiert – wirksam erst nach einem Neustart des Servers.'))
+                        + (n.kernel_neu ? ' (' + esc(n.kernel_aktuell || '?') + ' → ' + esc(n.kernel_neu) + ')' : '') + '</div>';
+                }
+                if (dienste.length) {
+                    t += '<div style="margin-top:4px;">' + esc(T('security.upd_dienste',
+                        'Diese Dienste laufen noch mit dem alten Programmstand:')) + '</div>'
+                        + '<div style="line-height:2;">';
+                    dienste.forEach(function (x) {
+                        t += '<div><code>' + esc(x.name) + '</code> ';
+                        if (x.neustartbar) {
+                            t += '<button type="button" class="sec-btn small" data-dienst="' + esc(x.name) + '">'
+                                + esc(T('security.upd_neustart_btn', 'Neu starten')) + '</button>';
+                        } else {
+                            t += '<span style="color:var(--text-muted);">' + esc(T('security.upd_nur_server', 'nur mit einem Neustart des Servers')) + '</span>';
+                        }
+                        t += '</div>';
+                    });
+                    t += '</div>';
+                } else if (n.verfuegbar === false) {
+                    t += '<div style="color:var(--text-muted);">' + esc(T('security.upd_kein_needrestart',
+                        'Ob Dienste neu starten müssen, ist auf diesem Server nicht ermittelbar.')) + '</div>';
+                }
+                ns.innerHTML = t;
+            }
+            Mgr.renderAide(d.aide);
+        },
+
+        renderAide: function (a) {
+            var box = $('sec-aide-status'), liste = $('sec-aide-liste'), ue = $('sec-aide-uebernehmen');
+            if (!box) return;
+            if (ue) ue.style.display = 'none';
+            if (liste) liste.innerHTML = '';
+            if (!a || a.fehler) {
+                box.innerHTML = '<b>' + esc(T('security.aide_titel', 'Integritätsprüfung (AIDE)')) + '</b><br>'
+                    + esc(T('security.aide_unbekannt', 'Zustand nicht ermittelbar')) + (a && a.fehler ? ': ' + esc(a.fehler) : '');
+                return;
+            }
+            var z = a.zustand || {}, h = '<b>' + esc(T('security.aide_titel', 'Integritätsprüfung (AIDE)')) + '</b><br>';
+            if (!a.eingerichtet) {
+                h += _P('aus') + esc(T('security.aide_nicht_eingerichtet',
+                    'Der automatische Abgleich ist auf diesem Server nicht eingerichtet (Härtung B7).'));
+            } else if (a.laeuft) {
+                h += _P('warn') + esc(T('security.aide_laeuft', 'Die Prüfung läuft gerade – das dauert einige Minuten.'));
+                // Nachladen, solange sie laeuft – nur ein Wecker zugleich, und nur
+                // solange der Abschnitt im Dokument steht.
+                if (!Mgr._aideWecker) {
+                    Mgr._aideWecker = setTimeout(function () {
+                        Mgr._aideWecker = null;
+                        if ($('sec-aide-status')) Mgr.loadUpdates();
+                    }, 60000);
+                }
+            } else if (!z.zustand) {
+                h += _P('aus') + esc(T('security.aide_noch_nie', 'Noch kein Abgleich gelaufen.'));
+            } else if (z.zustand === 'uebernommen') {
+                h += _P('ok') + esc(T('security.aide_uebernommen', 'Alle Änderungen erklärt, neuer Vergleichsstand übernommen'))
+                    + (z.uebernommen_von && z.uebernommen_von !== 'automatisch'
+                        ? ' (' + esc(T('security.aide_von', 'von')) + ' ' + esc(z.uebernommen_von) + ')' : '');
+            } else if (z.zustand === 'unveraendert') {
+                h += _P('ok') + esc(T('security.aide_unveraendert', 'Keine Änderungen seit dem letzten Stand'));
+            } else if (z.zustand === 'offen') {
+                h += _P('warn') + '<b>' + esc(T('security.aide_offen', '{n} Änderungen nicht erklärt – bitte durchsehen')
+                    .replace('{n}', z.offen_anzahl || 0)) + '</b>';
+                if (z.grund) h += '<br>' + esc(z.grund);
+                if (ue) { ue.style.display = ''; ue.setAttribute('data-kennung', z.kennung || ''); }
+            } else {
+                h += _P('err') + esc(T('security.aide_fehler', 'Abgleich gescheitert')) + (z.grund ? ': ' + esc(z.grund) : '');
+            }
+            var zeilen = [];
+            if (typeof z.zeit === 'number') zeilen.push(T('security.aide_letzter', 'Letzter Abgleich') + ': ' + fmtTs(z.zeit));
+            if (typeof a.naechste_pruefung === 'number') zeilen.push(T('security.aide_naechste', 'Nächste Prüfung') + ': ' + fmtTs(a.naechste_pruefung));
+            var erk = z.erklaert || {}, erkTxt = Object.keys(erk).map(function (k) { return k + ' ' + erk[k]; }).join(' · ');
+            if (erkTxt) zeilen.push(T('security.aide_erklaert', 'Erklärt') + ': ' + erkTxt);
+            if (z.quelle) zeilen.push(T('security.aide_quelle', 'Signierter Stand der Anwendung') + ': ' + z.quelle);
+            zeilen.forEach(function (t) {
+                h += '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:2px;">' + esc(t) + '</div>';
+            });
+            box.innerHTML = h;
+            if (liste && z.zustand === 'offen' && (z.offen || []).length) {
+                var art = { neu: T('security.aide_art_neu', 'neu'), entfernt: T('security.aide_art_entfernt', 'entfernt'),
+                    geaendert: T('security.aide_art_geaendert', 'geändert') };
+                var l = '<div class="sec-scrollbox" style="max-height:260px;font-size:0.74rem;line-height:1.6;margin-top:6px;">';
+                z.offen.forEach(function (e) {
+                    l += '<div><code>' + esc(e.pfad) + '</code> <span style="color:var(--text-muted);">'
+                        + esc(art[e.art] || e.art) + ' · ' + esc(e.warum || '') + '</span></div>';
+                });
+                if ((z.offen_anzahl || 0) > z.offen.length) {
+                    l += '<div style="color:var(--text-muted);">' + esc(T('security.aide_weitere', '… und {n} weitere')
+                        .replace('{n}', z.offen_anzahl - z.offen.length)) + '</div>';
+                }
+                liste.innerHTML = l + '</div>';
+            }
+        },
+
+        // Ergebnis eines Aufrufs mit JSON-Rumpf direkt unter seinem Knopf
+        _postJson: function (url, rumpf, resultId, okMsg, failMsg, nachher) {
+            var out = $(resultId);
+            fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify(rumpf || {}) })
+                .then(function (r) { return r.json().catch(function () { return {}; }); })
+                .then(function (d) {
+                    d = d || {};
+                    if (out) {
+                        out.style.display = 'block';
+                        out.style.borderColor = d.ok ? 'rgba(var(--success-rgb),0.5)' : 'rgba(var(--danger-rgb),0.5)';
+                        out.style.background = d.ok ? 'rgba(var(--success-rgb),0.1)' : 'rgba(var(--danger-rgb),0.1)';
+                        out.innerHTML = '<b>' + esc(d.ok ? okMsg : failMsg) + '</b>'
+                            + (!d.ok && (d.fehler || d.error) ? '<br>' + esc(d.fehler || d.error) : '');
+                    }
+                    if (nachher) nachher(d);
+                })
+                .catch(function () {
+                    if (out) { out.style.display = 'block'; out.textContent = T('security.upd_netz', 'Keine Antwort vom Server.'); }
+                });
+        },
+
+        einspielenUpdates: function () {
+            var n = ((Mgr._updStand || {}).pakete || []).length;
+            Mgr._runAction({
+                url: '/api/security/updates/einspielen', btn: 'sec-upd-einspielen', result: 'sec-upd-result',
+                busy: T('security.upd_busy', 'Updates werden eingespielt – das kann mehrere Minuten dauern…'),
+                okMsg: T('security.upd_ok', 'Updates eingespielt.'),
+                failMsg: T('security.upd_fail', 'Einspielen unvollständig – Details:'),
+                render: function () { Mgr.loadUpdates(); },
+                confirm: T('security.upd_confirm', '{n} Updates jetzt einspielen?\n\n'
+                    + 'Nur vorhandene Pakete werden gehoben, nichts wird entfernt, kein Dienst wird neu gestartet. '
+                    + 'Danach startet die Integritätsprüfung.').replace('{n}', n)
+            });
+        },
+
+        neustartDienst: function (dienst) {
+            if (!dienst) return;
+            var selbst = dienst === 'jarvis.service' || dienst === 'jarvis-broker.service';
+            var frage = T('security.upd_neustart_confirm', '{dienst} jetzt neu starten?').replace('{dienst}', dienst)
+                + (selbst ? '\n\n' + T('security.upd_neustart_selbst',
+                    'Das ist diese Anwendung selbst: sie ist danach einige Sekunden nicht erreichbar.') : '');
+            if (!window.confirm(frage)) return;
+            Mgr._postJson('/api/security/updates/neustart', { dienst: dienst }, 'sec-upd-result',
+                T('security.upd_neustart_ok', 'Neustart ausgelöst.'), T('security.upd_neustart_fail', 'Neustart nicht möglich'),
+                function (d) { if (d.ok && !d.verzoegert) Mgr.loadUpdates(); });
+        },
+
+        aidePruefen: function () {
+            Mgr._postJson('/api/security/aide/pruefen', {}, 'sec-aide-result',
+                T('security.aide_gestartet', 'Prüfung gestartet – das Ergebnis erscheint hier nach einigen Minuten.'),
+                T('security.aide_start_fail', 'Prüfung nicht gestartet'),
+                function () { Mgr.loadUpdates(); });
+        },
+
+        aideUebernehmen: function () {
+            var z = (((Mgr._updStand || {}).aide || {}).zustand) || {};
+            var b = $('sec-aide-uebernehmen');
+            var kennung = (b && b.getAttribute('data-kennung')) || '';
+            if (!window.confirm(T('security.aide_confirm', '{n} nicht erklärte Änderungen als neuen Vergleichsstand übernehmen?\n\n'
+                    + 'Bestätigen Sie nur, wenn Sie jede Änderung zuordnen können. Ihr Name steht danach im Sicherheitsprotokoll.')
+                    .replace('{n}', z.offen_anzahl || 0))) return;
+            Mgr._postJson('/api/security/aide/uebernehmen', { kennung: kennung }, 'sec-aide-result',
+                T('security.aide_ue_ok', 'Neuer Vergleichsstand übernommen.'), T('security.aide_ue_fail', 'Nicht übernommen'),
+                function () { Mgr.loadUpdates(); });
         },
 
         // Sichtbare Laenge der Verstossliste; der Rest ist per Scrollbalken erreichbar.

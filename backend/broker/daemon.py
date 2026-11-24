@@ -76,7 +76,10 @@ LANGE_OPS = frozenset({"sandbox_lauf", "shell_root", "certbot_obtain", "tika_set
                        "cve_beheben",
                        # apt-get update + unattended-upgrade: bis zu 30 Minuten
                        # (apt_upgrades.jetzt_ausfuehren)
-                       "apt_upgrades_jetzt"})
+                       "apt_upgrades_jetzt",
+                       # apt-get update + upgrade aller offenen Pakete: bis zu 50 Minuten
+                       # (paket_updates.einspielen)
+                       "paket_updates_einspielen"})
 LANG_MAX = int(os.environ.get("JARVIS_BROKER_LANG_MAX", "24"))
 _KURZ = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="broker-kurz")
 _LANG = concurrent.futures.ThreadPoolExecutor(max_workers=LANG_MAX, thread_name_prefix="broker-lang")

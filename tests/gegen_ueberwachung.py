@@ -56,6 +56,12 @@ PROBEN = [
     ("SSH: Folgelauf zaehlt dieselbe Verbindung erneut", "ue",
      'if v["schluessel"] not in gezaehlt]', "]", 1),
     ("Ausgang Dienstbenutzer nur Warnung", "ue", '("out_dienst", "alarm",', '("out_dienst", "warnung",', 1),
+    # AIDE-Abgleich (24.11.2026)
+    ("AIDE: offener Abgleich stumm", "ue", '        if a.get("zustand") == "offen":', '        if False:', 1),
+    ("AIDE: gescheiterter Abgleich stumm", "ue", '        elif a.get("zustand") == "fehler":', '        elif False:', 1),
+    ("AIDE: veralteter Abgleich stumm", "ue", "        if jetzt - juengst > AIDE_VERALTET_S:", "        if False:", 1),
+    ("AIDE: nie gelaufen gilt als frisch", "ue", "        juengst = zeit or eing[\"aide_eingerichtet\"]",
+     "        juengst = zeit or jetzt", 1),
     ("Sandbox und Fremde vertauscht", "ue",
      '"out_sandbox" if z["uid"] in sandbox else "out_fremd"', '"out_fremd" if z["uid"] in sandbox else "out_sandbox"', 1),
     ("Dienst: startend gilt als ausgefallen", "ue",

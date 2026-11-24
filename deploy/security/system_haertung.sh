@@ -12,12 +12,20 @@
 # WAS ES TUT (je Massnahme der Liste):
 #   B1  sudo protokolliert nach /var/log/sudo.log (woechentlich rotiert)
 #   B2  needrestart – nur AUFLISTEN, nie selbst neu starten
+#       apt-listchanges zeigt vor dem Einspielen die NEWS.Debian der Pakete an
+#       (Debian-Vorgabe which=news, confirm=false: es fragt nie nach, ohne
+#       Terminal oeffnet es keinen Pager - unattended-upgrades und die
+#       Broker-Laeufe warten also nicht). Bis 24.11.2026 fehlte es in PAKETE,
+#       obwohl B2 es nennt - auf ECHT war es deshalb nie installiert.
 #   B3  nicht benoetigte Kernel-Module gesperrt
 #   B4  Kernel-Werte (/etc/sysctl.d/90-haertung.conf)
 #   B5  keine Speicherabbilder (Limits, coredump.conf, LimitCORE fuer jarvis)
 #   B6  auditd mit Regeln auf Anmeldung, Rechte, Units und den Hauptschluessel;
 #       Speicher 20 x 50 MB statt der Vorgabe 5 x 8 MB (siehe AUDITD_WERTE)
-#   B7  AIDE mit Ausnahmen fuer Netzfreigaben, Pseudo-Dateisysteme und Caches
+#   B7  AIDE mit Ausnahmen fuer Netzfreigaben, fluechtige Dateisysteme und
+#       Caches; dazu der Abgleich als Nachlauf der taeglichen Pruefung
+#       (Drop-in 80-jarvis-abgleich.conf, backend/aide_abgleich.py): der neue
+#       Stand wird nur uebernommen, wenn jede Aenderung erklaert ist
 #   B8  lynis installiert (der Lauf und seine Bewertung sind Handarbeit)
 #   B13 Ueberwachung: jarvis-ueberwachung.timer ruft alle 5 Minuten
 #       backend/ueberwachung.py aus der ROOT-EIGENEN Broker-Kopie auf (nicht
@@ -100,7 +108,7 @@ if [ -z "$TEST" ]; then
     fi
 fi
 
-PAKETE="needrestart auditd audispd-plugins aide aide-common lynis libpam-pwquality"
+PAKETE="needrestart apt-listchanges auditd audispd-plugins aide aide-common lynis libpam-pwquality"
 
 # Werkzeug fuer die sudoers-Pruefung. Im Produktivlauf IMMER das visudo des
 # Systems - die Variable wird dort nicht gelesen, sonst waehlte die Umgebung das
@@ -313,15 +321,45 @@ AIDE='# Haertung B7 (Checkliste 76) - deploy/security/system_haertung.sh
 !/opt/jarvis/.*/__pycache__
 !/home/jarvis
 
-# Pseudo- und FUSE-Dateisysteme: ein Lesezugriff kann BLOCKIEREN (gemessen:
-# aide --init hing 30 Minuten an /run/vmblock-fuse/dev). /run/user traegt gvfs
-# und das Dokumentenportal der Desktop-Sitzung. SentinelOne haengt tracefs und
-# bpf unter /opt/sentinelone ein - die Programmdateien des Agenten bleiben
-# erfasst, nur die Einhaengepunkte nicht.
-!/run/vmblock-fuse
-!/run/user
+# Fluechtige Dateisysteme: /tmp und /run (tmpfs) und /dev (devtmpfs)
+# ueberleben keinen Neustart. Ein Vergleich ueber Tage meldet dort nur
+# Laufzeitreste (gemessen 24.11.2026: auf ECHT 260 von 590 Eintraegen, auf DEV
+# ueber 2.000), und eine DAUERHAFTE Veraenderung kann dort nicht liegen.
+# --pruefen meldet, wenn /tmp kein tmpfs ist - dann gilt diese Begruendung
+# nicht. Unter /run liegen ausserdem FUSE-Einhaengungen, an denen ein
+# Lesezugriff BLOCKIEREN kann (aide --init hing 30 Minuten an
+# /run/vmblock-fuse/dev), gvfs und die Credential-Kopien von systemd.
+!/tmp
+!/run
+!/dev
+# SentinelOne haengt tracefs und bpf unter /opt/sentinelone ein, und Agent
+# selbst verwaltet Konfiguration, Inhaltsdaten und Absturzabbilder (eigener
+# Manipulationsschutz) - die Programmdateien unter bin/ und lib/ bleiben erfasst.
 !/opt/sentinelone/mount
 !/opt/sentinelone/ebpfs
+!/opt/sentinelone/configuration
+!/opt/sentinelone/assets
+!/opt/sentinelone/crash_dumps
+
+# Broker-Quelle: ihr .git ist ein Zwischenspeicher mit inhaltsadressierten
+# Objekten. Der ausgecheckte Stand bleibt erfasst; der AIDE-Abgleich
+# vergleicht ihn mit der signiert geprueften Spitze (backend/aide_abgleich.py).
+!/var/lib/jarvis-broker/quelle/\.git
+!/usr/local/lib/jarvis-broker/.*/__pycache__
+
+# Laufzeitzustand von Desktop, Netz und Paketlisten (gemessen auf ECHT
+# 24.11.2026: nach jedem Start neu geschrieben, ohne Sicherheitswert)
+!/var/lib/lightdm
+!/var/lib/lightdm-data
+!/var/lib/upower
+!/var/lib/NetworkManager
+!/var/lib/plymouth
+!/var/lib/systemd/timers
+!/var/lib/apt/lists
+!/var/cache/apt
+
+# Zustand des AIDE-Abgleichs selbst
+!/var/lib/jarvis-aide
 
 # Caches (Pip, Modelle) - aendern sich laufend
 !/root/\.cache
@@ -350,15 +388,10 @@ AIDE='# Haertung B7 (Checkliste 76) - deploy/security/system_haertung.sh
 # old_logs.tar.gz) - auch die aktuelle Datei schrumpft dabei. Der Agent liefert
 # an seine eigene Konsole; hier zaehlen nur Eigentuemer und Rechte.
 /opt/sentinelone/log/[^/]+$ f LowLog+ANF+ARF
-
-# Laufzeit: Arbeitsverzeichnisse und Anhaenge der Sandbox-Laeufe (je Benutzer,
-# fluechtig), Credential-Kopien und Mount-Propagation von systemd (bei jedem
-# Dienststart neu). Die Quelle des Hauptschluessels unter /etc/jarvis bleibt
-# voll geprueft.
-!/tmp/jarvis-arbeit
-!/tmp/jarvis-anhaenge
-!/run/credentials
-!/run/systemd/propagate
+# Desktop- und Druckprotokolle rotieren ebenfalls selbst (lightdm bei jedem
+# Start, cups nach Groesse).
+/var/log/lightdm/[^/]+$ f LowLog+ANF+ARF
+/var/log/cups/[^/]+$ f LowLog+ANF+ARF
 
 # Nutzungszaehler des Root-Brokers (seit Commit 4b4796ab getrennt von der
 # Freigabeliste): aendern sich im Betrieb laufend und werden deshalb als
@@ -407,6 +440,17 @@ AccuracySec=30s
 
 [Install]
 WantedBy=timers.target'
+
+# B7 Nachlauf: AIDE-Abgleich. Debian laesst die taegliche Pruefung schon als
+# "aide --update" laufen (Bericht + aide.db.new), uebernimmt den neuen Stand
+# aber nie. Der Abgleich teilt den Bericht ein und uebernimmt nur, wenn jede
+# Aenderung erklaert ist (Paket, signierter Jarvis-Stand, Paketverwaltung).
+# "+" laesst NUR diesen Schritt als root laufen - die Pruefung selbst laeuft
+# als _aide. Aus der root-eigenen Broker-Kopie (Befund K1), wie B13.
+AIDE_PROG="/usr/local/lib/jarvis-broker/backend/aide_abgleich.py"
+AIDE_DROPIN="# Haertung B7 (AIDE-Abgleich) - deploy/security/system_haertung.sh
+[Service]
+ExecStartPost=+/usr/bin/python3 -I $AIDE_PROG --nach-pruefung"
 
 # B14 (Checkliste 44). Gemessen auf DEV am 21.11.2026 mit einem Wegwerfkonto:
 #  * pwquality.conf.d wird gelesen: passwd lehnt 9 Zeichen ab ("shorter than
@@ -506,6 +550,7 @@ etc/aide/aide.conf.d/95_jarvis_ausnahmen|0644|AIDE
 etc/logrotate.d/sudo-haertung|0644|LOGROTATE
 etc/systemd/system/jarvis-ueberwachung.service|0644|UEBERW_SERVICE
 etc/systemd/system/jarvis-ueberwachung.timer|0644|UEBERW_TIMER
+etc/systemd/system/dailyaidecheck.service.d/80-jarvis-abgleich.conf|0644|AIDE_DROPIN
 etc/security/pwquality.conf.d/90-haertung.conf|0644|PWQUALITY
 etc/pam.d/jarvis-web|0644|PAM_WEB
 usr/share/pam-configs/jarvis-faillock|0644|FAILLOCK
@@ -597,6 +642,22 @@ dateien() {
         modus="${zeile%%|*}"; var="${zeile#*|}"
         if [ "$var" = "SYSCTL_IPV6" ] && [ -n "$IPV6_GRUND" ]; then
             ipv6_bleibt_an "$aktion" "$W/$pfad"
+            continue
+        fi
+        # Ohne Programm in der Broker-Kopie liefe der Nachlauf jede Nacht in
+        # einen Fehler und markierte die AIDE-Pruefung als gescheitert - dann
+        # gar nicht einrichten und laut sagen, warum (wie B13).
+        # Im Testmodus nur auf Anforderung des Waechters (eigener Abschnitt),
+        # sonst saehe jeder Sandkasten den Nachlauf als fehlend.
+        if [ "$var" = "AIDE_DROPIN" ] && { [ -z "$TEST" ] || [ -n "${JARVIS_AIDE_PROG_PRUEFEN:-}" ]; } \
+                && [ ! -f "$W$AIDE_PROG" ]; then
+            if [ "$aktion" = "pruefen" ]; then
+                echo "  FEHLT       $AIDE_PROG (Broker-Kopie aelter als der AIDE-Abgleich - jarvis-broker neu starten)"
+                abweichungen=$((abweichungen + 1))
+            else
+                echo "WARNUNG: $AIDE_PROG fehlt - AIDE-Abgleich nicht eingerichtet. Erst" >&2
+                echo "         'systemctl restart jarvis-broker.service', dann erneut --anwenden." >&2
+            fi
             continue
         fi
         if [ "$aktion" = "pruefen" ]; then
@@ -916,6 +977,9 @@ system_pruefen() {
         || { echo "  AUS         dailyaidecheck.timer"; abweichungen=$((abweichungen + 1)); }
     [ -s /var/lib/aide/aide.db ] \
         || { echo "  FEHLT       AIDE-Vergleichsstand (--aide-init)"; abweichungen=$((abweichungen + 1)); }
+    # Die AIDE-Ausnahme fuer /tmp ist nur begruendet, solange /tmp fluechtig ist
+    [ "$(findmnt -no FSTYPE /tmp 2>/dev/null)" = "tmpfs" ] \
+        || { echo "  WEICHT AB   /tmp ist kein tmpfs - die AIDE-Ausnahme fuer /tmp setzt das voraus"; abweichungen=$((abweichungen + 1)); }
     systemctl is-enabled --quiet jarvis-ueberwachung.timer 2>/dev/null \
         && systemctl is-active --quiet jarvis-ueberwachung.timer 2>/dev/null \
         || { echo "  AUS         jarvis-ueberwachung.timer"; abweichungen=$((abweichungen + 1)); }
@@ -977,7 +1041,7 @@ anwenden_system() {
     esac
     systemctl enable --now auditd >/dev/null 2>&1 || echo "WARNUNG: auditd liess sich nicht starten" >&2
     systemctl enable --now dailyaidecheck.timer >/dev/null 2>&1 || true
-    case " $geaendert " in *" UEBERW_"*) systemctl daemon-reload ;; esac
+    case " $geaendert " in *" UEBERW_"*|*" AIDE_DROPIN "*) systemctl daemon-reload ;; esac
     if [ -f "$UEBERW_PROG" ]; then
         systemctl enable --now jarvis-ueberwachung.timer >/dev/null 2>&1 \
             || echo "WARNUNG: jarvis-ueberwachung.timer liess sich nicht starten" >&2

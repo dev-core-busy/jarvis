@@ -102,6 +102,10 @@ ABSENDER_LOKAL = "jarvis"
 ALIAS_ABSENDER = "%s: /dev/null" % ABSENDER_LOKAL
 
 _ADRESSE = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
+# Absender: auch ohne Punkt im Domaenenteil (``name@server``) – der interne
+# Exchange nahm ``jarvis@jarvis`` als Absender an (DEV/ECHT 24.11.2026);
+# gemeldet wurde ``meldung@server`` als abgewiesen. Empfaenger bleiben streng.
+_ABSENDER = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})*$")
 _HOST = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
                    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
 _MARKE_AN = "# >>> jarvis-mailversand (backend/mail_meldung.py) – nicht von Hand aendern"
@@ -145,11 +149,11 @@ def empfaenger_pruefen(text) -> tuple[list[str], str]:
     aus: list[str] = []
     for t in teile:
         if not _ADRESSE.match(t):
-            return [], "Keine gueltige E-Mail-Adresse: %s" % t[:80]
+            return [], "Keine gültige E-Mail-Adresse: %s" % t[:80]
         if t.lower() not in (a.lower() for a in aus):
             aus.append(t)
     if len(aus) > EMPFAENGER_MAX:
-        return [], "Hoechstens %d Empfaenger" % EMPFAENGER_MAX
+        return [], "Höchstens %d Empfänger" % EMPFAENGER_MAX
     return aus, ""
 
 
@@ -161,10 +165,10 @@ def relay_pruefen(text) -> tuple[str, str]:
         return "", ""
     m = re.match(r"^\[?([^\]\[:\s]+)\]?(?::(\d{1,5}))?$", t)
     if not m or not _HOST.match(m.group(1)):
-        return "", "Kein gueltiger Servername: %s" % t[:80]
+        return "", "Kein gültiger Servername: %s" % t[:80]
     port = int(m.group(2) or 25)
     if not 1 <= port <= 65535:
-        return "", "Ungueltiger Port: %s" % m.group(2)
+        return "", "Ungültiger Port: %s" % m.group(2)
     return "%s:%d" % (m.group(1), port), ""
 
 
@@ -181,6 +185,31 @@ def quellen_pruefen(werte) -> tuple[list[str], str]:
     return [q for q in QUELLEN if q in aus], ""
 
 
+# Absender und Betreff (Oberflaeche). Leer = Vorgabe. ``{server}`` wird durch den
+# kurzen Rechnernamen ersetzt – so passt dieselbe Einstellung auf jeden Server.
+VORGABE_NAME = "Jarvis {server}"
+VORGABE_BETREFF = "[Jarvis {server}]"
+TEXT_MAX = 80
+
+
+def absender_pruefen(text) -> tuple[str, str]:
+    """Absenderadresse: leer (= jarvis@<rechner>) oder eine gueltige Adresse."""
+    t = str(text or "").strip()
+    if t and not _ABSENDER.match(t):
+        return "", "Keine gültige Absenderadresse: %s" % t[:80]
+    return t, ""
+
+
+def text_pruefen(text, was: str) -> tuple[str, str]:
+    """Einzeiliger Text fuer Anzeigename/Betreff (kein Kopf-Einschleusen)."""
+    t = str(text or "").strip()
+    if re.search(r"[\x00-\x1f\x7f]", t):
+        return "", "%s darf keine Steuerzeichen enthalten" % was
+    if len(t) > TEXT_MAX:
+        return "", "%s: höchstens %d Zeichen" % (was, TEXT_MAX)
+    return t, ""
+
+
 def konf() -> dict:
     roh = _konf_roh()
     empf, _ = empfaenger_pruefen(roh.get("MAIL_EMPFAENGER", ""))
@@ -189,7 +218,15 @@ def konf() -> dict:
         quellen, _ = quellen_pruefen(roh.get("MAIL_QUELLEN", ""))
     else:
         quellen = list(QUELLEN)
-    return {"empfaenger": empf, "relay": relay, "quellen": quellen}
+    absender, _ = absender_pruefen(roh.get("MAIL_ABSENDER", ""))
+    name, _ = text_pruefen(roh.get("MAIL_ABSENDER_NAME", ""), "Name")
+    betreff, _ = text_pruefen(roh.get("MAIL_BETREFF", ""), "Betreff")
+    return {"empfaenger": empf, "relay": relay, "quellen": quellen,
+            "absender": absender, "absender_name": name, "betreff": betreff}
+
+
+def _absender_adresse(k: dict, fqdn: str) -> str:
+    return k.get("absender") or "%s@%s" % (ABSENDER_LOKAL, fqdn)
 
 
 def _konf_schreiben(werte: dict[str, str]) -> None:
@@ -216,17 +253,6 @@ def _konf_schreiben(werte: dict[str, str]) -> None:
     except OSError:
         modus = 0o600
     _atomar(pfad, "\n".join(zeilen) + "\n", modus, merken=False)
-
-
-def ist_lockerung(alt: dict, empfaenger: list[str], relay: str, quellen: list[str]) -> bool:
-    """Braucht die Aenderung den Freigabe-Code? Ja, sobald Meldungen woanders
-    hingehen (Empfaenger, Relay) oder wegfallen (Quelle aus). Nur eine Quelle
-    EINschalten schraenkt nichts ein (dieselbe Regel wie K2 in meta.py)."""
-    if [e.lower() for e in empfaenger] != [e.lower() for e in alt.get("empfaenger", [])]:
-        return True
-    if relay != alt.get("relay", ""):
-        return True
-    return not set(alt.get("quellen", [])) <= set(quellen)
 
 
 # ── Dateien schreiben (mit Merkzettel fuer AIDE) ─────────────────────────────
@@ -402,7 +428,7 @@ def anwenden() -> dict:
 
 def _anwenden() -> dict:
     if not installiert():
-        return {"ok": False, "meldung": "Postfix ist nicht installiert – erst einrichten."}
+        return {"ok": False, "meldung": "Der Mailserver ist nicht installiert – bitte zuerst einrichten."}
     k = konf()
     schritte = []
     try:
@@ -451,7 +477,7 @@ def _anwenden() -> dict:
             return {"ok": False, "meldung": schritte[-1], "schritte": schritte}
     else:
         _lauf(["systemctl", "enable", "--now", "postfix"], timeout=60)
-    return {"ok": True, "meldung": "Konfiguration uebernommen", "schritte": schritte}
+    return {"ok": True, "meldung": "Konfiguration übernommen", "schritte": schritte}
 
 
 def _alias_dbs() -> list[str]:
@@ -474,7 +500,7 @@ def einrichten() -> dict:
                     % ((r.stderr or r.stdout).strip().splitlines() or ["?"])[-1][:300]}
     erg = anwenden()
     if erg.get("ok"):
-        erg["meldung"] = "Postfix eingerichtet"
+        erg["meldung"] = "Mailserver eingerichtet"
     return erg
 
 
@@ -549,6 +575,9 @@ def status() -> dict:
             "konfig_aktuell": aktuell, "lauscht": _lauscht() if aktiv else [],
             "warteschlange": _warteschlange() if aktiv else {"anzahl": None},
             "empfaenger": k["empfaenger"], "relay": k["relay"], "quellen": k["quellen"],
+            "absender": k["absender"], "absender_name": k["absender_name"], "betreff": k["betreff"],
+            "vorgabe": {"absender": "%s@%s" % (ABSENDER_LOKAL, _fqdn()),
+                        "absender_name": VORGABE_NAME, "betreff": VORGABE_BETREFF},
             "alle_quellen": list(QUELLEN), "letzte": (z.get("letzte") or [])[-10:],
             "server": _fqdn()}
 
@@ -577,9 +606,11 @@ def nachricht(quelle: str, betreff: str, text: str, k: dict, fqdn: str,
               unterdrueckt: int = 0) -> EmailMessage:
     kurz = fqdn.split(".", 1)[0]
     m = EmailMessage()
-    m["From"] = formataddr(("Jarvis %s" % kurz, "%s@%s" % (ABSENDER_LOKAL, fqdn)))
+    name = (k.get("absender_name") or VORGABE_NAME).replace("{server}", kurz)
+    m["From"] = formataddr((name, _absender_adresse(k, fqdn)))
     m["To"] = ", ".join(k["empfaenger"])
-    m["Subject"] = "[Jarvis %s] %s" % (kurz, _einzeilig(betreff, 160))
+    praefix = (k.get("betreff") or VORGABE_BETREFF).replace("{server}", kurz)
+    m["Subject"] = ("%s %s" % (praefix, _einzeilig(betreff, 160))).strip()
     m["Date"] = formatdate(localtime=True)
     m["Message-ID"] = make_msgid(domain=fqdn)
     m["Auto-Submitted"] = "auto-generated"
@@ -610,11 +641,11 @@ def _senden(quelle: str, betreff: str, text: str) -> dict:
         return {"ok": False, "gesendet": False, "meldung": "Unbekannte Quelle"}
     k = konf()
     if not k["empfaenger"]:
-        return {"ok": True, "gesendet": False, "meldung": "Kein Empfaenger eingetragen"}
+        return {"ok": True, "gesendet": False, "meldung": "Kein Empfänger eingetragen"}
     if quelle != "test" and quelle not in k["quellen"]:
         return {"ok": True, "gesendet": False, "meldung": "Meldungsart ausgeschaltet"}
     if not installiert():
-        return {"ok": False, "gesendet": False, "meldung": "Postfix ist nicht installiert"}
+        return {"ok": False, "gesendet": False, "meldung": "Der Mailserver ist nicht installiert"}
     jetzt = time.time()
     z = _zustand_lesen()
     erlaubt, unterdrueckt = _drossel(z, quelle, jetzt)
@@ -624,7 +655,7 @@ def _senden(quelle: str, betreff: str, text: str) -> dict:
                 "meldung": "Gedrosselt (%d je Stunde)" % GRENZE_JE_STUNDE.get(quelle, 10)}
     fqdn = _fqdn()
     m = nachricht(quelle, betreff, text, k, fqdn, unterdrueckt)
-    r = _lauf([SENDMAIL, "-oi", "-f", "%s@%s" % (ABSENDER_LOKAL, fqdn), "--"] + k["empfaenger"],
+    r = _lauf([SENDMAIL, "-oi", "-f", _absender_adresse(k, fqdn), "--"] + k["empfaenger"],
               timeout=60, eingabe=m.as_string())
     ok = r.returncode == 0
     eintrag = {"zeit": jetzt, "quelle": quelle, "betreff": _einzeilig(betreff, 160), "ok": ok,
@@ -632,7 +663,7 @@ def _senden(quelle: str, betreff: str, text: str) -> dict:
     z["letzte"] = ((z.get("letzte") or []) + [eintrag])[-20:]
     _zustand_schreiben(z)
     return {"ok": ok, "gesendet": ok,
-            "meldung": "An die Warteschlange uebergeben" if ok else "sendmail: %s" % eintrag["fehler"]}
+            "meldung": "An die Warteschlange übergeben" if ok else "sendmail: %s" % eintrag["fehler"]}
 
 
 def test() -> dict:

@@ -2264,6 +2264,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <label for="mv-relay" class="systab-label" data-i18n="mv.relay_label">Weiterleitender Mailserver</label>
                                     <input data-tabfill-nein="Beispiel fuer das Format, kein Wert" type="text" id="mv-relay" class="systab-feld" autocomplete="off" spellcheck="false" style="width:100%;" data-i18n-placeholder="mv.relay_ph" placeholder="z. B. mail.firma.local oder mail.firma.local:25">
                                     <small class="tab-note" style="opacity:0.7;display:block;margin:2px 0 10px;" data-i18n="mv.relay_hint">Leer bedeutet direkte Zustellung an den Empfänger – Firmen-Mailfilter weisen solche Nachrichten meist ab.</small>
+                                    <label for="mv-absender" class="systab-label" data-i18n="mv.absender_label">Absenderadresse</label>
+                                    <input data-tabfill type="text" id="mv-absender" class="systab-feld" autocomplete="off" spellcheck="false" style="width:100%;margin-bottom:8px;">
+                                    <label for="mv-absender-name" class="systab-label" data-i18n="mv.name_label">Absendername</label>
+                                    <input data-tabfill type="text" id="mv-absender-name" class="systab-feld" autocomplete="off" spellcheck="false" maxlength="80" style="width:100%;margin-bottom:8px;">
+                                    <label for="mv-betreff" class="systab-label" data-i18n="mv.betreff_label">Betreff beginnt mit</label>
+                                    <input data-tabfill type="text" id="mv-betreff" class="systab-feld" autocomplete="off" spellcheck="false" maxlength="80" style="width:100%;">
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin:2px 0 10px;" data-i18n="mv.absender_hint">Leere Felder nehmen die angezeigte Vorgabe – Tab übernimmt sie ins Feld. {server} wird durch den Namen dieses Servers ersetzt.</small>
                                     <div class="systab-label" data-i18n="mv.quellen_titel">Diese Meldungen verschicken</div>
                                     <div id="mv-quellen">
                                         <label class="kb-form-checkbox-label" style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;"><input type="checkbox" data-quelle="ueberwachung" style="width:auto;margin-top:3px;"><span data-i18n="mv.q_ueberwachung">Serverüberwachung – Alarme und Warnungen zu Diensten, Speicherplatz, Zertifikat, Anmeldeversuchen und Firewall</span></label>
@@ -2277,7 +2284,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     </div>
                                     <div id="mv-result" class="sec-ssh-result" style="display:none;margin-top:8px;"></div>
                                     <div id="mv-letzte" style="margin-top:10px;"></div>
-                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="mv.hinweis">Der Server verschickt seine Meldungen über einen eigenen, lokalen Mailserver. Er nimmt nur Nachrichten dieses Servers an und ist von außen nicht erreichbar. Gemeldet werden nur Änderungen, nie Inhalte von Chats oder Dokumenten; viele gleichartige Meldungen werden je Stunde begrenzt. Empfänger oder Mailserver ändern und eine Meldungsart abschalten verlangt den Freigabe-Code der Root-Freigaben.</small>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="mv.hinweis">Der Server verschickt seine Meldungen über einen eigenen, lokalen Mailserver. Er nimmt nur Nachrichten dieses Servers an und ist von außen nicht erreichbar. Gemeldet werden nur Änderungen, nie Inhalte von Chats oder Dokumenten; viele gleichartige Meldungen werden je Stunde begrenzt.</small>
                                 </div>
                             </div>
                         </div>
@@ -6979,8 +6986,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=3"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=532"></script>
-    <script src="/static/js/i18n_fr.js?v=8"></script>
+    <script src="/static/js/i18n.js?v=534"></script>
+    <script src="/static/js/i18n_fr.js?v=10"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=41"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -7023,7 +7030,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/theme.js?v=3"></script>
     <script src="/static/js/security_incidents.js?v=49"></script>
     <script src="/static/js/fernzugang.js?v=5"></script>
-    <script src="/static/js/mailversand.js?v=1"></script>
+    <script src="/static/js/mailversand.js?v=4"></script>
     <script src="/static/js/totp_admin.js?v=6"></script>
     <script src="/static/js/ldap_picker.js?v=18"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>

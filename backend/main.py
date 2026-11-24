@@ -11318,9 +11318,9 @@ async def broker_mailversand_status(request: Request, user: str = Depends(requir
 
 @app.post("/api/broker/mailversand")
 async def broker_mailversand(request: Request, user: str = Depends(require_local_auth)):
-    """E-Mail-Versand einrichten/speichern/testen (Admin). Body: {aktion:
-    einrichten|speichern|test, empfaenger, relay, quellen, nachweis}. Ob der
-    Freigabe-Code noetig ist, entscheidet der BROKER (meta.py)."""
+    """E-Mail-Versand einrichten/speichern/testen (Admin, ohne Freigabe-Code).
+    Body: {aktion: einrichten|speichern|test, empfaenger, relay, quellen,
+    absender, absender_name, betreff}. Geprueft wird im BROKER (meta.py)."""
     try:
         body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
@@ -11330,8 +11330,10 @@ async def broker_mailversand(request: Request, user: str = Depends(require_local
         return JSONResponse({"ok": False, "error": "aktion: einrichten|speichern|test"}, status_code=400)
     quellen = body.get("quellen")
     args = {"aktion": aktion, "by": user,
-            "nachweis": str(body.get("nachweis") or "").strip()[:12],
             "empfaenger": str(body.get("empfaenger") or "")[:2000],
+            "absender": str(body.get("absender") or "")[:300],
+            "absender_name": str(body.get("absender_name") or "")[:300],
+            "betreff": str(body.get("betreff") or "")[:300],
             "relay": str(body.get("relay") or "")[:300],
             "quellen": [str(q)[:40] for q in quellen][:10] if isinstance(quellen, list) else []}
     from backend import broker_client

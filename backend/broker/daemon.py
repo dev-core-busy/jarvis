@@ -26,7 +26,7 @@ Meta-Operationen (Admin-UI), Regeln in backend/broker/meta.py:
 - broker.rdp_status     – RDP (xrdp/3389): erlaubt, installiert, laeuft, im Filter frei
 - broker.rdp            – {aktion: an|aus[, nachweis]}; "an" nur mit Freigabe-Code
 - broker.mailversand_status – E-Mail-Versand: Postfix, Empfaenger, Relay, Quellen
-- broker.mailversand     – {aktion: einrichten|speichern|test, …}; Code siehe meta.py
+- broker.mailversand     – {aktion: einrichten|speichern|test, …}; ohne Freigabe-Code
 - broker.mail_melden     – {art, benutzer, kanal, muster, ip, anzahl}: Sicherheitsmeldung
 
 Start (seit 2026-09-29, Befund K1): aus der root-eigenen Kopie mit dem

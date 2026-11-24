@@ -328,7 +328,10 @@ abschnitt('5. REGEL: jede placeholder-Zuweisung ist eine Entscheidung');
         return out;
     }
 
-    /** Alle `X.placeholder = …` einer Datei, mit Zeilennummer. */
+    /** Alle `X.placeholder = …` UND `X.setAttribute('placeholder', …)` einer
+     *  Datei, mit Zeilennummer. Die zweite Schreibweise kam 2026-11-24 dazu:
+     *  der E-Mail-Versand setzte seine Vorgaben so, die Regel sah es nicht, und
+     *  TAB uebernahm die Vorgabe nicht (gemeldet, nicht gemessen). */
     function zuweisungen(src) {
         const fund = [];
         let ast;
@@ -340,6 +343,12 @@ abschnitt('5. REGEL: jede placeholder-Zuweisung ist eine Entscheidung');
                 n.left.type === 'MemberExpression' && !n.left.computed &&
                 n.left.property && n.left.property.name === 'placeholder' &&
                 n.left.object && n.left.object.type !== 'ThisExpression') {
+                fund.push(n.loc.start.line);
+            }
+            if (n.type === 'CallExpression' && n.callee && n.callee.type === 'MemberExpression' &&
+                !n.callee.computed && n.callee.property && n.callee.property.name === 'setAttribute' &&
+                n.arguments && n.arguments[0] && n.arguments[0].type === 'Literal' &&
+                n.arguments[0].value === 'placeholder') {
                 fund.push(n.loc.start.line);
             }
             for (const k in n) {
@@ -374,13 +383,15 @@ abschnitt('5. REGEL: jede placeholder-Zuweisung ist eine Entscheidung');
         'el.placeholder = "b";',            // 3  markiert
         'this.placeholder = x;',            // 4  Objekt-Eigenschaft
         'var s = "el.placeholder = c";',    // 5  Zeichenkette
-        'JarvisTabfill.vorschlag(el, "d");' // 6  zentraler Weg
+        'JarvisTabfill.vorschlag(el, "d");', // 6  zentraler Weg
+        'el.setAttribute("placeholder", e);', // 7  roh ueber setAttribute
+        'el.setAttribute("title", e);'        // 8  anderes Attribut
     ].join('\n');
     const pz = zuweisungen(probe);
     const pzeilen = probe.split('\n');
     const pOhne = pz && pz.filter(z => !markiert(pzeilen, z));
-    const kontrolleOk = pz && pz.length === 2 && pz[0] === 1 && pz[1] === 3 &&
-                        pOhne.length === 1 && pOhne[0] === 1;
+    const kontrolleOk = pz && pz.length === 3 && pz[0] === 1 && pz[1] === 3 && pz[2] === 7 &&
+                        pOhne.length === 2 && pOhne[0] === 1 && pOhne[1] === 7;
     pruefe(kontrolleOk,
         'Positivkontrolle: die Sonde findet genau die rohen Zuweisungen',
         pz ? ('gefunden ' + JSON.stringify(pz) + ', ohne Marke ' + JSON.stringify(pOhne)) : 'Parse-Fehler');

@@ -7,8 +7,8 @@ der ECHTEN Signatur, die jeden Aufruf festhaelt.
 
 Die Zusagen:
   1. Eingaben: Adressen, Relay und Quellen werden geprueft, Unbekanntes abgewiesen.
-  2. Freigabe-Code: noetig, sobald Meldungen woanders hingehen oder wegfallen
-     (Empfaenger, Relay, Quelle aus) – nicht beim blossen Einschalten einer Quelle.
+  2. Speichern und Einrichten OHNE Freigabe-Code (Betreiberentscheid
+     2026-11-24), Absender/Name/Betreff einzeilig geprueft, Audit mit Werten.
      Gemessen ueber den ECHTEN Broker-Weg (meta.behandeln).
   3. Postfix: lauscht nicht nach aussen (loopback-only, SMTP-Eingang aus),
      nur root darf abgeben, Relay wie eingestellt.
@@ -124,6 +124,11 @@ try:
     pruefe(mm.empfaenger_pruefen("x@localhost")[1] != "", "Adresse ohne Domaene abgewiesen")
     pruefe(mm.empfaenger_pruefen(",".join("a%d@b.de" % i for i in range(11)))[1] != "",
            "mehr als %d Empfaenger abgewiesen" % mm.EMPFAENGER_MAX)
+    pruefe(mm.absender_pruefen("meldung@server") == ("meldung@server", ""),
+           "Absender ohne Punkt im Domaenenteil erlaubt (Exchange nimmt name@server an)")
+    pruefe(mm.absender_pruefen("a@b@c")[1] != "" and mm.absender_pruefen("a b@c")[1] != "",
+           "Absender mit zweitem @ oder Leerzeichen abgewiesen")
+    pruefe("gültige" in mm.absender_pruefen("kein-at")[1], "Meldung mit echten Umlauten (Oberflaechentext)")
     pruefe(mm.relay_pruefen("mail.firma.local")[0] == "mail.firma.local:25", "Relay ohne Port -> :25")
     pruefe(mm.relay_pruefen("[mail.firma.local]:587")[0] == "mail.firma.local:587", "Relay [host]:port")
     # ohne Leerzeichen: sonst scheitert es schon am ersten Muster, und die
@@ -134,42 +139,45 @@ try:
     pruefe(mm.quellen_pruefen(["aide", "unbekannt"])[1] != "", "unbekannte Quelle abgewiesen")
     pruefe(mm.quellen_pruefen(["system", "aide"])[0] == ["aide", "system"], "Quellen in fester Reihenfolge")
 
-    # ── 2. Freigabe-Code ueber den echten Broker-Weg ─────────────────────────
-    print("[2] Freigabe-Code (meta.behandeln)")
+    # ── 2. Speichern ueber den echten Broker-Weg – OHNE Freigabe-Code ────────
+    # Betreiberentscheid 2026-11-24: Administratoren sind mit 2FA angemeldet.
+    print("[2] Speichern (meta.behandeln), ohne Freigabe-Code")
     from backend.broker import freigabe, meta, policy
     CODES = []
-    freigabe.pruefen = lambda code, *a, **k: (CODES.append(code) or code == "123456",
-                                              "" if code == "123456" else "nachweis_falsch")
-    policy.audit = lambda *a, **k: None
-    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_RELAY=relay.beispiel.de:25\nMAIL_QUELLEN=aide\n")
-    alt = mm.konf()
-    pruefe(mm.ist_lockerung(alt, ["a@beispiel.de"], "relay.beispiel.de:25", ["aide", "system"]) is False,
-           "nur Quelle einschalten ist keine Lockerung")
-    pruefe(mm.ist_lockerung(alt, ["b@beispiel.de"], "relay.beispiel.de:25", ["aide"]), "anderer Empfaenger = Lockerung")
-    pruefe(mm.ist_lockerung(alt, ["a@beispiel.de"], "anders.beispiel.de:25", ["aide"]), "anderer Relay = Lockerung")
-    pruefe(mm.ist_lockerung(alt, ["a@beispiel.de"], "relay.beispiel.de:25", []), "Quelle aus = Lockerung")
-    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "boese@beispiel.de",
-                                              "relay": "relay.beispiel.de", "quellen": ["aide"]})
-    pruefe(not r.get("ok") and r.get("grund") == "nachweis_falsch", "Empfaenger aendern ohne Code abgewiesen")
-    pruefe(mm.konf()["empfaenger"] == ["a@beispiel.de"], "… und broker.conf unveraendert")
-    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "a@beispiel.de",
-                                              "relay": "relay.beispiel.de", "quellen": ["aide", "sicherheit"]})
-    pruefe(r.get("ok") and mm.konf()["quellen"] == ["aide", "sicherheit"],
-           "Quelle einschalten ohne Code gespeichert")
+    freigabe.pruefen = lambda code, *a, **k: (CODES.append(code) or False, "nachweis_fehlt")
+    AUDIT = []
+    policy.audit = lambda *a, **k: AUDIT.append((a, k))
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_RELAY=relay.beispiel.de:25\nMAIL_QUELLEN=aide,system\n")
     r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "b@beispiel.de",
-                                              "relay": "relay.beispiel.de", "quellen": ["aide"],
-                                              "nachweis": "123456"})
-    pruefe(r.get("ok") and mm.konf()["empfaenger"] == ["b@beispiel.de"] and mm.konf()["quellen"] == ["aide"],
-           "mit Code: Empfaenger geaendert, Quelle aus")
+                                              "relay": "anders.beispiel.de", "quellen": ["aide"],
+                                              "absender": "meldung@beispiel.de", "absender_name": "Alarm {server}",
+                                              "betreff": "[DP {server}]", "by": "admin"})
+    k = mm.konf()
+    pruefe(r.get("ok") and k["empfaenger"] == ["b@beispiel.de"] and k["relay"] == "anders.beispiel.de:25"
+           and k["quellen"] == ["aide"], "Empfaenger, Relay, Quelle aus: ohne Code gespeichert")
+    pruefe(not CODES, "der Freigabe-Code wird nicht einmal geprueft")
+    pruefe(k["absender"] == "meldung@beispiel.de" and k["absender_name"] == "Alarm {server}"
+           and k["betreff"] == "[DP {server}]", "Absender, Name und Betreff gespeichert")
+    pruefe(any("b@beispiel.de" in str(kw.get("info", "")) for _, kw in AUDIT), "Aenderung steht mit Werten im Audit")
+    r = meta.behandeln("broker.mailversand", {"aktion": "einrichten"})
+    pruefe(r.get("ok") and not CODES, "Einrichten ohne Code")
     os.chmod(mm._p(mm.BROKER_CONF), 0o644)
     meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "b@beispiel.de",
                                           "relay": "relay.beispiel.de", "quellen": ["aide", "system"]})
     pruefe(mm._p(mm.BROKER_CONF).stat().st_mode & 0o777 == 0o644, "broker.conf behaelt ihre Rechte")
-    r = meta.behandeln("broker.mailversand", {"aktion": "einrichten"})
-    pruefe(not r.get("ok") and r.get("grund"), "Einrichten ohne Code abgewiesen")
-    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "x y",
-                                              "relay": "", "quellen": [], "nachweis": "123456"})
-    pruefe(not r.get("ok") and "gueltige" in r.get("meldung", ""), "ungueltige Adresse abgewiesen")
+    pruefe(mm.konf()["absender"] == "" and mm.konf()["betreff"] == "", "leere Felder = zurueck auf die Vorgabe")
+    for feld, wert, text in (("empfaenger", "x y", "ungueltige Adresse"),
+                             ("absender", "kein-at", "ungueltiger Absender"),
+                             ("absender", "a@b.de -oQ/tmp", "Absender mit Option"),
+                             ("absender_name", "Name\nBcc: x@y.de", "Name mit Zeilenumbruch"),
+                             ("betreff", "B\rX-Kopf: 1", "Betreff mit Steuerzeichen"),
+                             ("betreff", "x" * 81, "Betreff zu lang")):
+        args = {"aktion": "speichern", "empfaenger": "b@beispiel.de", "relay": "", "quellen": []}
+        args[feld] = wert
+        vorher = mm._p(mm.BROKER_CONF).read_text()
+        r = meta.behandeln("broker.mailversand", args)
+        pruefe(not r.get("ok") and mm._p(mm.BROKER_CONF).read_text() == vorher,
+               "%s abgewiesen, broker.conf unveraendert" % text)
 
     # ── 3. Postfix-Konfiguration ─────────────────────────────────────────────
     print("[3] Postfix")
@@ -209,6 +217,15 @@ try:
 
     # ── 5. Senden und Drosselung ─────────────────────────────────────────────
     print("[5] Senden")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_ABSENDER=meldung@beispiel.de\n"
+                "MAIL_ABSENDER_NAME=Alarm {server}\nMAIL_BETREFF=[DP {server}]\n")
+    AUFRUFE.clear()
+    mm.senden("aide", "Probe", "t")
+    g = gesendet()[0] if gesendet() else {"befehl": [], "eingabe": ""}
+    paare = list(zip(g["befehl"], g["befehl"][1:]))
+    pruefe(("-f", "meldung@beispiel.de") in paare, "Umschlag-Absender (-f) aus der Einstellung")
+    pruefe("From: Alarm probe <meldung@beispiel.de>" in g["eingabe"], "From mit Name, {server} ersetzt")
+    pruefe("Subject: [DP probe] Probe" in g["eingabe"], "Betreff-Anfang aus der Einstellung, {server} ersetzt")
     konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_QUELLEN=aide\n")
     AUFRUFE.clear()
     e = mm.senden("ueberwachung", "x", "y")

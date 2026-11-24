@@ -1,9 +1,8 @@
 // E-Mail-Versand (Einstellungen -> KI & System -> E-Mail-Versand, 2026-11-24).
-// Empfaenger, weiterleitender Mailserver und die vier Meldungsarten; Speichern
-// und Einrichten laufen ueber den Broker (backend/broker/meta.py), der auch
-// entscheidet, ob der Freigabe-Code noetig ist (Empfaenger/Mailserver aendern,
-// Meldungsart abschalten). Die Code-Abfrage kommt aus fernzugang.js
-// (window.Fernzugang._code/_codeText) – EINE Fassung.
+// Empfaenger, weiterleitender Mailserver, Absender, Betreff und die vier
+// Meldungsarten; Speichern und Einrichten laufen ueber den Broker
+// (backend/broker/meta.py). KEIN Freigabe-Code (Betreiberentscheid 2026-11-24:
+// Administratoren sind mit Zwei-Faktor angemeldet).
 (function () {
     'use strict';
 
@@ -37,11 +36,14 @@
             an('mv-einrichten', function () { self.einrichten(); });
         },
 
-        laden: function () {
+        // felderBehalten: nach einem GESCHEITERTEN Speichern bleiben die
+        // Eingaben stehen – sonst ueberschrieb der Server-Stand sie, und der
+        // Benutzer musste alles neu tippen (gemeldet 2026-11-24).
+        laden: function (felderBehalten) {
             var self = this;
             return fetch('/api/broker/mailversand/status', { headers: authHeaders() })
                 .then(function (r) { return r.json().catch(function () { return null; }); })
-                .then(function (d) { self.zeigen(d && d.ok ? d : null); })
+                .then(function (d) { self.zeigen(d && d.ok ? d : null, felderBehalten); })
                 .catch(function () { self.zeigen(null); });
         },
 
@@ -60,16 +62,26 @@
             return z;
         },
 
-        zeigen: function (d) {
+        zeigen: function (d, felderBehalten) {
             this._stand = d;
             var box = $('mv-status');
             if (box) box.textContent = this.statusZeilen(d).join(' ');
             var ein = $('mv-einrichten');
             if (ein) ein.style.display = (d && !d.installiert) ? '' : 'none';
             var e = $('mv-empfaenger'), r = $('mv-relay');
-            if (d) {
+            if (d && !felderBehalten) {
                 if (e) e.value = (d.empfaenger || []).join(', ');
                 if (r) r.value = d.relay || '';
+                var vg = d.vorgabe || {};
+                [['mv-absender', 'absender'], ['mv-absender-name', 'absender_name'], ['mv-betreff', 'betreff']].forEach(function (f) {
+                    var el = $(f[0]);
+                    if (!el) return;
+                    el.value = d[f[1]] || '';
+                    // Die Vorgabe ist der ECHTE Wert, der ohne Eingabe gilt – also
+                    // ein Vorschlag, den TAB uebernimmt (tabfill.js, Platzhalter UND
+                    // Markierung in einem Zug; gemeldet 2026-11-24).
+                    if (window.JarvisTabfill) window.JarvisTabfill.vorschlag(el, vg[f[1]] || '');
+                });
                 document.querySelectorAll('#mv-quellen input[data-quelle]').forEach(function (cb) {
                     cb.checked = (d.quellen || []).indexOf(cb.getAttribute('data-quelle')) >= 0;
                 });
@@ -116,24 +128,10 @@
             return q;
         },
 
-        // Braucht die Aenderung den Freigabe-Code? Dieselbe Regel wie
-        // mail_meldung.ist_lockerung – der BROKER entscheidet; hier nur, um
-        // nicht unnoetig zu fragen.
-        brauchtCode: function (alt, empf, relay, quellen) {
-            if (!alt) return true;
-            var norm = function (l) { return (l || []).map(function (x) { return String(x).toLowerCase(); }).join(','); };
-            var teile = empf.split(/[\s,;]+/).filter(Boolean);
-            if (norm(teile) !== norm(alt.empfaenger)) return true;
-            var rAlt = alt.relay || '';
-            var rNeu = relay.trim();
-            if (rNeu && rNeu.indexOf(':') < 0) rNeu += ':25';
-            if (rNeu !== rAlt) return true;
-            return (alt.quellen || []).some(function (q) { return quellen.indexOf(q) < 0; });
-        },
-
         _senden: function (body, okText) {
             var self = this;
             var knoepfe = ['mv-speichern', 'mv-test', 'mv-einrichten'].map($).filter(Boolean);
+            var gelungen = false;
             knoepfe.forEach(function (b) { b.disabled = true; });
             self._ergebnis(true, T('mv.laeuft', 'Wird ausgeführt …'));
             return fetch('/api/broker/mailversand', {
@@ -142,43 +140,34 @@
             }).then(function (r) { return r.json().catch(function () { return {}; }); })
               .then(function (d) {
                   if (d && d.ok && d.gedrosselt) self._ergebnis(false, T('mv.gedrosselt', 'Zu viele Testnachrichten in der letzten Stunde – bitte später erneut versuchen.'));
-                  else if (d && d.ok) self._ergebnis(true, okText);
+                  else if (d && d.ok) { gelungen = true; self._ergebnis(true, okText); }
                   else {
-                      var fz = window.Fernzugang;
-                      var text = (d && d.grund && fz && fz._codeText(d.grund)) || (d && (d.meldung || d.error)) || '';
+                      var text = (d && (d.meldung || d.error)) || '';
                       self._ergebnis(false, T('mv.fehler', 'Fehlgeschlagen') + (text ? ': ' + text : ''));
                   }
               })
               .catch(function (e) { self._ergebnis(false, T('mv.fehler', 'Fehlgeschlagen') + ': ' + (e && e.message || e)); })
               .then(function () {
                   knoepfe.forEach(function (b) { b.disabled = false; });
-                  return self.laden();
+                  // Nur nach Erfolg zeigt das Formular wieder den Server-Stand;
+                  // nach einem Fehler bleiben die Eingaben zum Korrigieren stehen.
+                  return self.laden(!gelungen);
               });
-        },
-
-        _code: function () {
-            var fz = window.Fernzugang;
-            return fz && fz._code ? fz._code() : window.prompt('Freigabe-Code:', '');
         },
 
         speichern: function () {
             var empf = ($('mv-empfaenger') || {}).value || '';
             var relay = ($('mv-relay') || {}).value || '';
-            var quellen = this._quellen();
-            var body = { aktion: 'speichern', empfaenger: empf, relay: relay, quellen: quellen };
-            if (this.brauchtCode(this._stand, empf, relay, quellen)) {
-                var c = this._code();
-                if (c === null) return;
-                body.nachweis = c;
-            }
+            var wert = function (id) { return ($(id) || {}).value || ''; };
+            var body = { aktion: 'speichern', empfaenger: empf, relay: relay, quellen: this._quellen(),
+                         absender: wert('mv-absender'), absender_name: wert('mv-absender-name'),
+                         betreff: wert('mv-betreff') };
             return this._senden(body, T('mv.ok_gespeichert', 'Gespeichert.'));
         },
 
         einrichten: function () {
             if (!window.confirm(T('mv.einrichten_frage', 'Den Mailserver installieren und einrichten? Er verschickt nur Meldungen dieses Servers und nimmt keine Verbindungen von außen an.'))) return;
-            var c = this._code();
-            if (c === null) return;
-            return this._senden({ aktion: 'einrichten', nachweis: c }, T('mv.ok_eingerichtet', 'Mailserver eingerichtet.'));
+            return this._senden({ aktion: 'einrichten' }, T('mv.ok_eingerichtet', 'Mailserver eingerichtet.'));
         },
 
         test: function () {

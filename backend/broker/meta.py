@@ -168,10 +168,9 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
     if op == "broker.mailversand_status":
         from backend import mail_meldung
         return mail_meldung.status()
-    # Freigabe-Code (K2): Einrichten installiert ein Paket; Speichern braucht ihn,
-    # sobald Meldungen woanders hingehen oder wegfallen (Empfaenger, Relay, Quelle
-    # aus) – sonst koennte ein eingeschleuster Dienstprozess Alarme umleiten oder
-    # stilllegen. Nur eine Quelle EINschalten und die Testmail brauchen ihn nicht.
+    # KEIN Freigabe-Code (Betreiberentscheid 2026-11-24): Administratoren sind
+    # mit Zwei-Faktor angemeldet, ein zweiter Code fuer Absender/Empfaenger war
+    # "bullshit fuer Admins". Jede Aenderung steht im Audit (Wer, Werte).
     if op == "broker.mailversand":
         from backend import mail_meldung
         aktion = str(args.get("aktion", ""))
@@ -182,25 +181,24 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
                          detail=str(erg.get("meldung", ""))[:200], peer=peer)
             return erg
         if aktion == "einrichten":
-            fehler = _nachweis(args, by, op, audit_key, peer)
-            if fehler:
-                return fehler
             erg = mail_meldung.einrichten()
         elif aktion == "speichern":
             empf, f1 = mail_meldung.empfaenger_pruefen(args.get("empfaenger", ""))
             relay, f2 = mail_meldung.relay_pruefen(args.get("relay", ""))
             quellen, f3 = mail_meldung.quellen_pruefen(args.get("quellen", []))
-            if f1 or f2 or f3:
-                return {"ok": False, "meldung": f1 or f2 or f3}
-            if mail_meldung.ist_lockerung(mail_meldung.konf(), empf, relay, quellen):
-                fehler = _nachweis(args, by, op, audit_key, peer)
-                if fehler:
-                    return fehler
+            absender, f4 = mail_meldung.absender_pruefen(args.get("absender", ""))
+            name, f5 = mail_meldung.text_pruefen(args.get("absender_name", ""), "Name")
+            betreff, f6 = mail_meldung.text_pruefen(args.get("betreff", ""), "Betreff")
+            fehler = f1 or f2 or f3 or f4 or f5 or f6
+            if fehler:
+                return {"ok": False, "meldung": fehler}
             mail_meldung._konf_schreiben({"MAIL_EMPFAENGER": ",".join(empf), "MAIL_RELAY": relay,
-                                          "MAIL_QUELLEN": ",".join(quellen)})
+                                          "MAIL_QUELLEN": ",".join(quellen), "MAIL_ABSENDER": absender,
+                                          "MAIL_ABSENDER_NAME": name, "MAIL_BETREFF": betreff})
             erg = mail_meldung.anwenden() if mail_meldung.installiert() else \
-                {"ok": True, "meldung": "Gespeichert – wirksam nach dem Einrichten"}
-            erg["gespeichert"] = {"empfaenger": empf, "relay": relay, "quellen": quellen}
+                {"ok": True, "meldung": "Gespeichert – wirksam, sobald der Mailserver eingerichtet ist"}
+            erg["gespeichert"] = {"empfaenger": empf, "relay": relay, "quellen": quellen,
+                                  "absender": absender, "absender_name": name, "betreff": betreff}
         else:
             return {"ok": False, "meldung": f"Unbekannte Aktion: {aktion}"}
         policy.audit(by, op, audit_key, "executed" if erg.get("ok") else "fehler",

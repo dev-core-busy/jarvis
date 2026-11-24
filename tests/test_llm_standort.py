@@ -472,5 +472,95 @@ TR = (ROOT / "frontend" / "js" / "tracks.js").read_text(encoding="utf-8")
 check("sensibel: !!(sensEl && sensEl.checked)" in PC and "'st-f-sensibel')" in TR,
       "Prompt-Pruefung in /tracks schickt den Schalter der Ablage mit")
 
+# ── I ─────────────────────────────────────────────────────────────────────
+section("I  Interne Netze: Vorschau und Vorschlaege")
+CFG.INTERNE_NETZE = ""
+pub = _prof("haus", url="https://9.9.9.9/v1")
+check(S.einstufen(pub)["standort"] == "extern",
+      "Positivkontrolle: oeffentliche Adresse ohne Liste ist extern")
+vs, falsch = S.einstufen_mit_netzen([pub], "9.9.9.0/24")
+check(vs.get("haus", {}).get("standort") == "intern" and "9.9.9.0/24" in vs["haus"].get("grund", ""),
+      "Vorschau: mit dem Bereich wird das Profil intern (Grund nennt das Netz)", str(vs))
+check(falsch == [], "Vorschau: gueltige Liste ohne Fehler", str(falsch))
+check(S.einstufen(pub)["standort"] == "extern" and S._eigene_netze() == [],
+      "Vorschau veraendert die gespeicherte Einstufung nicht")
+vs, falsch = S.einstufen_mit_netzen([pub], "9.9.9.0/24, quatsch")
+check(falsch == ["quatsch"] and vs["haus"]["standort"] == "intern",
+      "Vorschau meldet Ungueltiges und stuft mit dem Rest ein", f"{falsch} {vs}")
+CFG.INTERNE_NETZE = "9.9.9.0/24"
+vs, _f = S.einstufen_mit_netzen([pub], "")
+check(vs["haus"]["standort"] == "extern",
+      "Vorschau mit LEERER Liste ersetzt die gespeicherte (kein Zusammenfuehren)", str(vs))
+CFG.INTERNE_NETZE = ""
+
+# Vorschlaege: je Weg ein eigener Fall (eine Probe, ein Weg)
+_DNS["llm.beispiel.de"] = ["9.9.8.7"]
+# Loest der Cloud-Name auf eine oeffentliche Adresse auf, darf er trotzdem
+# nicht vorgeschlagen werden – nur der Namensfilter haelt ihn draussen.
+_DNS["api.openai.com"] = ["9.9.6.1"]
+PROF_V = [
+    _prof("p_ip", url="https://9.9.9.9/v1"),                       # -> 9.9.9.9/32
+    _prof("p_ip2", url="https://9.9.9.9:8443/v1"),                 # dieselbe Adresse
+    _prof("p_dns", url="https://llm.beispiel.de/v1"),              # -> 9.9.8.7/32
+    _prof("p_hand_ext", url="https://9.9.7.1/v1", standort="extern"),
+    _prof("p_hand_int", url="https://9.9.7.2/v1", standort="intern"),
+    _prof("p_google", provider="google", url="https://9.9.7.3"),
+    _prof("p_cloud", url="https://api.openai.com/v1"),
+    _prof("p_privat", url="https://10.1.1.1/v1"),
+]
+vor = S.netz_vorschlaege(PROF_V, angeschlossene=["9.8.0.0/16", "10.0.0.0/8", "9.7.7.7/32"])
+netze = {v["netz"]: v for v in vor}
+check(netze.get("9.8.0.0/16", {}).get("art") == "schnittstelle",
+      "eigene oeffentliche Schnittstelle wird vorgeschlagen", str(vor))
+check("10.0.0.0/8" not in netze, "privates Schnittstellennetz nicht (gilt ohnehin als intern)")
+check("9.7.7.7/32" not in netze, "Einzeladresse (Gateway) nicht als Schnittstellennetz")
+check(netze.get("9.9.9.9/32", {}).get("art") == "profil" and netze["9.9.9.9/32"].get("name") == "p_ip",
+      "oeffentliche IP eines Profils als Einzeladresse, mit Profilnamen", str(vor))
+check(netze.get("9.9.8.7/32", {}).get("name") == "p_dns",
+      "Servername: aufgeloeste Adresse wird vorgeschlagen", str(vor))
+check(not any(n.startswith("9.9.7.") for n in netze),
+      "Handeinstellung und Anbieter mit festem Endpunkt werden nicht vorgeschlagen", str(vor))
+check(not any(n.startswith("9.9.6.") for n in netze),
+      "bekannter Cloud-Dienst nicht (auch wenn er oeffentlich aufloest)", str(vor))
+check(not any(n.startswith("10.") for n in netze if netze[n]["art"] == "profil"),
+      "private Profiladresse nicht", str(vor))
+check(len(netze) == len(vor), "jedes Netz nur einmal")
+CFG.INTERNE_NETZE = "9.9.9.0/24, 9.8.0.0/16"
+vor2 = {v["netz"] for v in S.netz_vorschlaege(PROF_V, angeschlossene=["9.8.0.0/16"])}
+check("9.9.9.9/32" not in vor2 and "9.8.0.0/16" not in vor2 and "9.9.8.7/32" in vor2,
+      "schon abgedeckte Bereiche fallen weg, der Rest bleibt", str(vor2))
+# Teilweise abgedeckt: nur die ANFANGSADRESSE liegt in der Liste – das Netz
+# fehlt trotzdem zum groessten Teil und bleibt ein Vorschlag. Ebenso ein
+# Servername mit zwei Adressen, von denen nur eine abgedeckt ist.
+CFG.INTERNE_NETZE = "9.6.0.0/24, 9.5.5.1/32"
+_DNS["zwei.beispiel.de"] = ["9.5.5.1", "9.5.5.2"]
+vor3 = {v["netz"] for v in S.netz_vorschlaege([_prof("p_zwei", url="https://zwei.beispiel.de/v1")],
+                                             angeschlossene=["9.6.0.0/16", "9.6.0.0/25"])}
+check("9.6.0.0/16" in vor3 and "9.6.0.0/25" not in vor3,
+      "Schnittstellennetz: nur ganz abgedeckte fallen weg", str(vor3))
+check("9.5.5.2/32" in vor3 and "9.5.5.1/32" not in vor3,
+      "Servername: die abgedeckte Adresse faellt weg, die andere bleibt", str(vor3))
+CFG.INTERNE_NETZE = ""
+
+# Endpunkte: Pfad exakt und Administratorrecht
+def _route(pfad):
+    for n in ast.walk(MAIN):
+        if isinstance(n, ast.AsyncFunctionDef):
+            for d in n.decorator_list:
+                if (isinstance(d, ast.Call) and d.args and isinstance(d.args[0], ast.Constant)
+                        and d.args[0].value == pfad):
+                    return n
+    return None
+
+
+for pfad, ruf in (("/api/settings/interne-netze/vorschlaege", "netz_vorschlaege"),
+                  ("/api/settings/interne-netze/vorschau", "einstufen_mit_netzen")):
+    f = _route(pfad)
+    deps = [ast.unparse(x) for x in (f.args.defaults if f else [])]
+    check(f is not None and "Depends(require_local_auth)" in deps,
+          f"{pfad}: vorhanden, nur fuer Administratoren", str(deps))
+    check(f is not None and any(isinstance(k, ast.Attribute) and k.attr == ruf for k in ast.walk(f)),
+          f"{pfad}: ruft llm_standort.{ruf}")
+
 print(f"\nErgebnis: {_ok} OK, {_fail} FAIL")
 sys.exit(1 if _fail else 0)

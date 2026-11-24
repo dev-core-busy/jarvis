@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/static/css/update_widget.css?v=10">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
-    <link rel="stylesheet" href="/static/css/style.css?v=241">
+    <link rel="stylesheet" href="/static/css/style.css?v=242">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1874,6 +1874,15 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             </tr>
                                             <tr class="systab-hint" hidden>
                                                 <td colspan="4"><small class="tab-note" data-i18n="profile.netze_hint">Nicht jedes Firmennetz benutzt private Adressbereiche. Steht ein eigener LLM-Server unter einer öffentlich registrierten Adresse, hält die automatische Erkennung ihn für einen Cloud-Dienst, und sensible Läufe dürfen ihn nicht benutzen. Hier eingetragene Bereiche (Schreibweise mit Präfixlänge, durch Komma getrennt) gelten als intern, auch für Servernamen, die dorthin auflösen. Einzelne Profile lassen sich alternativ im Profil selbst auf „Intern“ stellen.</small></td>
+                                            </tr>
+                                            <!-- Vorschlaege (eigene Schnittstellen, Profiladressen) und Vorschau
+                                                 der Einstufung vor dem Speichern – app.js _netzeHilfe* -->
+                                            <tr class="netze-hilfe">
+                                                <td colspan="4">
+                                                    <div class="sec-ssh-vorschlag-kopf" data-i18n="profile.netze_vs_kopf">Vorschläge – ein Klick fügt den Bereich ins Feld ein:</div>
+                                                    <div id="interne-netze-vorschlaege" class="sec-ssh-vorschlaege"></div>
+                                                    <div id="interne-netze-vorschau" class="netze-vorschau" aria-live="polite"></div>
+                                                </td>
                                             </tr>
 
                                             <!-- Vorhaltezeit erzeugter Dokumente (global) -->
@@ -6946,8 +6955,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=3"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=530"></script>
-    <script src="/static/js/i18n_fr.js?v=6"></script>
+    <script src="/static/js/i18n.js?v=531"></script>
+    <script src="/static/js/i18n_fr.js?v=7"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=41"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -7014,7 +7023,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=3"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=272"></script>
+    <script src="/static/js/app.js?v=273"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

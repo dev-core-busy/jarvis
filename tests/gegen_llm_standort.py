@@ -32,25 +32,33 @@ from pathlib import Path  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PY = "tests/test_llm_standort.py"
-FRONT = ["frontend/js/prompt_check.js", "frontend/js/tracks.js"]
+# Oberflaeche "Interne Netze" (Vorschlaege/Vorschau): eigener jsdom-Waechter
+UI = "tests/test_interne_netze_ui.js"
+TESTS = [PY, UI]
+FRONT = ["frontend/js/prompt_check.js", "frontend/js/tracks.js", "frontend/js/app.js",
+         "frontend/js/i18n.js", "frontend/settings.html"]
 
 
 def baum() -> Path:
     wurzel = Path(tempfile.mkdtemp(prefix="gegen_llm_standort_"))
     ign = shutil.ignore_patterns("__pycache__", "*.pyc")
     shutil.copytree(ROOT / "backend", wurzel / "backend", ignore=ign)
-    for rel in FRONT + [PY]:
+    for rel in FRONT + TESTS:
         ziel = wurzel / rel
         ziel.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, ziel)
+    shutil.copytree(ROOT / "tests" / "lib", wurzel / "tests" / "lib", ignore=ign)
+    # jsdom/acorn liest der UI-Waechter aus dem Repo; nur verlinkt, nie sabotiert
+    (wurzel / "node_modules").symlink_to(ROOT / "node_modules")
     (wurzel / "data").mkdir()
     return wurzel
 
 
-def lauf(wurzel: Path) -> tuple[int, int, bool]:
+def _ein_lauf(wurzel: Path, test: str) -> tuple[int, int, bool]:
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    befehl = ["node", test] if test.endswith(".js") else [sys.executable, test]
     try:
-        p = subprocess.run([sys.executable, PY], cwd=wurzel, capture_output=True,
+        p = subprocess.run(befehl, cwd=wurzel, capture_output=True,
                            text=True, timeout=300, env=env)
     except subprocess.TimeoutExpired:
         return (124, -1, False)
@@ -58,6 +66,19 @@ def lauf(wurzel: Path) -> tuple[int, int, bool]:
     if not treffer:
         return (p.returncode, -1, False)
     return (p.returncode, int(treffer[-1][1]), True)
+
+
+def lauf(wurzel: Path) -> tuple[int, int, bool]:
+    """Beide Waechter; Exit = der schlechteste, FAIL = Summe. Ohne Bilanz in
+    EINEM der beiden gilt der Lauf als nicht gebissen."""
+    codes, fails, bilanz = [], 0, True
+    for t in TESTS:
+        c, f, b = _ein_lauf(wurzel, t)
+        codes.append(c)
+        bilanz = bilanz and b
+        fails += max(f, 0)
+    code = 2 if any(c not in (0, 1) for c in codes) else max(codes)
+    return (code, fails, bilanz)
 
 
 def patch(wurzel: Path, rel: str, alt: str, neu: str) -> None:
@@ -150,6 +171,58 @@ probe("Einstellung nimmt auch externe Profile",
            "                if True:\n                    self.SENSIBEL_PROFILE_ID = _neu"))
 probe("prompt_check.js schickt den Schalter nicht",
       (PC, "                    sensibel: !!(sensEl && sensEl.checked),\n", "                    sensibel: false,\n"))
+
+# ── Interne Netze: Vorschau ──
+probe("Vorschau wirkt nicht",
+      (S, "    marke = _netze_vorschau.set(netze)", "    marke = _netze_vorschau.set(None)"))
+probe("Vorschau bleibt nach dem Lauf stehen",
+      (S, "        _netze_vorschau.reset(marke)", "        pass"))
+probe("leere Vorschau faellt auf die gespeicherte Liste zurueck",
+      (S, "    if vorschau is not None:\n        return vorschau", "    if vorschau:\n        return vorschau"))
+# ── Interne Netze: Vorschlaege ──
+probe("Vorschlag: private Schnittstelle wird vorgeschlagen",
+      (S, "        if n.prefixlen == n.max_prefixlen or _ip_privat(n.network_address):",
+          "        if n.prefixlen == n.max_prefixlen:"))
+probe("Vorschlag: Gateway-Einzeladresse wird vorgeschlagen",
+      (S, "        if n.prefixlen == n.max_prefixlen or _ip_privat(n.network_address):",
+          "        if _ip_privat(n.network_address):"))
+probe("Vorschlag: Handeinstellung wird uebergangen",
+      (S, '        if not isinstance(p, dict) or handwert(p) != "auto":', "        if not isinstance(p, dict):"))
+probe("Vorschlag: Anbieter mit festem Endpunkt wird vorgeschlagen",
+      (S, '        if _norm(p.get("provider")) in _IMMER_EXTERN:\n            continue\n        host = _host(',
+          '        host = _host('))
+probe("Vorschlag: Cloud-Dienst wird vorgeschlagen",
+      (S, '        if not host or any(host == d or host.endswith("." + d) for d in _CLOUD_DOMAINS):',
+          "        if not host:"))
+probe("Vorschlag: abgedeckte Bereiche bleiben stehen",
+      (S, "        if str(n) in gesehen or _abgedeckt(n):", "        if str(n) in gesehen:"))
+probe("Vorschlag: Abdeckung nur ueber die Anfangsadresse",
+      (S, "        if n.prefixlen == n.max_prefixlen or _ip_privat(n.network_address):",
+          "        if n.prefixlen == n.max_prefixlen or _ip_intern(n.network_address):"))
+probe("Vorschlag: doppelt",
+      (S, "        if str(n) in gesehen or _abgedeckt(n):", "        if _abgedeckt(n):"))
+probe("Vorschau-Endpunkt ohne Administratorrecht",
+      (MA, "async def interne_netze_vorschau(request: Request, user: str = Depends(require_local_auth)):",
+           "async def interne_netze_vorschau(request: Request, user: str = Depends(require_auth)):"))
+# ── Interne Netze: Oberflaeche ──
+AP = "frontend/js/app.js"
+probe("UI: Klick traegt nichts ein",
+      (AP, "                feld.value = liste.join(', ');\n", ""))
+probe("UI: eingetragener Vorschlag bleibt klickbar",
+      (AP, "data-netz=\"${escapeHtml(v.netz)}\"${da ? ' disabled' : ''}>", "data-netz=\"${escapeHtml(v.netz)}\">"))
+probe("UI: Vorschau fragt mit dem gespeicherten Stand",
+      (AP, "                    body: JSON.stringify({ interne_netze: text })\n                });\n                if (!r.ok) throw new Error('HTTP ' + r.status);\n                d = await r.json();",
+           "                    body: JSON.stringify({ interne_netze: _netzeGespeichert })\n                });\n                if (!r.ok) throw new Error('HTTP ' + r.status);\n                d = await r.json();"))
+probe("UI: Vorschau nennt keinen Wechsel",
+      (AP, "                if (!alt || !neu || art(alt.standort) === art(neu.standort)) return;",
+           "                return;"))
+probe("UI: Vorschau ungebuendelt (je Tastendruck ein Abruf)",
+      (AP, "                _netzeVorschauTimer = setTimeout(_netzeVorschau, 400);", "                _netzeVorschau();"))
+probe("UI: Vorschau bleibt bei gespeichertem Stand stehen",
+      (AP, "            if (_netzeEintraege(text).join(' ') === _netzeEintraege(_netzeGespeichert).join(' ')) {",
+           "            if (false) {"))
+probe("UI: Vorschlaege hinter Details versteckt",
+      ("frontend/settings.html", '<tr class="netze-hilfe">', '<tr class="systab-hint netze-hilfe" hidden>'))
 
 # ── Ablauf ──────────────────────────────────────────────────────────────────
 for name, aend in PROBEN:

@@ -609,6 +609,10 @@
         let profiles = [];
         // Einstufung je Profil-ID vom Server: {standort, quelle, grund, auto}
         let standorte = {};
+        // Interne Netze: gespeicherter Stand, Vorschlaege, Zeitgeber der Vorschau
+        let _netzeGespeichert = '';
+        let _netzeVorschlaege = [];
+        let _netzeVorschauTimer = null;
         let activeProfileId = '';
         let defaults = {};
         let editingProfileId = null; // null = neues Profil
@@ -1907,6 +1911,7 @@
                     }
                 });
             }
+            _netzeHilfeVerdrahten();
             // Kontext-Komprimierungs-Schwelle speichern (einmalig verdrahten).
             // Grenzen wie im Backend (main.py::api_context_threshold): 4..200.
             // ANDERER Endpunkt als die Nachbarfelder: /api/context/threshold setzt
@@ -2240,6 +2245,8 @@
                 standorte = data.standorte || {};
                 const _inEl = document.getElementById('setting-interne-netze');
                 if (_inEl) _inEl.value = data.interne_netze || '';
+                _netzeGespeichert = data.interne_netze || '';
+                _netzeHilfeLaden();
                 _sensProfilAuswahl(data.sensibel_profile_id || '');
                 // LLM-Timeout (global) ins Eingabefeld
                 const _tmEl = document.getElementById('setting-llm-timeout');
@@ -2338,6 +2345,111 @@
             el.value = da ? gewaehlt : '';
             const st = document.getElementById('sensibel-profile-status');
             if (st) st.textContent = (gewaehlt && !da) ? window.t('profile.sensprof_gone') : '';
+        }
+
+        // ── Interne Netze: Vorschlaege und Vorschau ──
+        // Vorschlaege rechnet der Server (eigene Schnittstellen, oeffentliche
+        // Adressen von Profilen, die nur deshalb extern sind); die Vorschau
+        // stuft alle Profile mit dem UNGESPEICHERTEN Feldinhalt ein und nennt,
+        // was sich gegenueber dem gespeicherten Stand aendert.
+        function _netzeEintraege(text) {
+            return String(text || '').split(/[\s,]+/).filter(Boolean);
+        }
+
+        // Vorschlag einfuegen, Vorschau nachfuehren (einmalig verdrahten)
+        function _netzeHilfeVerdrahten() {
+            const feld = document.getElementById('setting-interne-netze');
+            if (!feld || feld._netzeWired) return;
+            feld._netzeWired = true;
+            feld.addEventListener('input', () => {
+                _netzeVorschlaegeZeigen();
+                clearTimeout(_netzeVorschauTimer);
+                _netzeVorschauTimer = setTimeout(_netzeVorschau, 400);
+            });
+            const box = document.getElementById('interne-netze-vorschlaege');
+            if (box) box.addEventListener('click', (ev) => {
+                const b = ev.target.closest('button[data-netz]');
+                if (!b || b.disabled) return;
+                const liste = _netzeEintraege(feld.value);
+                liste.push(b.getAttribute('data-netz'));
+                feld.value = liste.join(', ');
+                feld.dispatchEvent(new Event('input'));
+            });
+        }
+
+        async function _netzeHilfeLaden() {
+            const box = document.getElementById('interne-netze-vorschlaege');
+            if (!box) return;
+            try {
+                const r = await fetch('/api/settings/interne-netze/vorschlaege', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                _netzeVorschlaege = (await r.json()).vorschlaege || [];
+            } catch (e) {
+                _netzeVorschlaege = [];
+            }
+            _netzeVorschlaegeZeigen();
+            _netzeVorschau();
+        }
+
+        function _netzeVorschlaegeZeigen() {
+            const box = document.getElementById('interne-netze-vorschlaege');
+            const feld = document.getElementById('setting-interne-netze');
+            if (!box) return;
+            const drin = new Set(_netzeEintraege(feld && feld.value));
+            box.innerHTML = _netzeVorschlaege.length ? _netzeVorschlaege.map(v => {
+                const da = drin.has(v.netz);
+                const hinweis = v.art === 'schnittstelle'
+                    ? window.t('profile.netze_vs_schnitt')
+                    : window.t('profile.netze_vs_profil').replace('{name}', v.name || '');
+                return `<button type="button" class="sec-ssh-vorschlag" data-netz="${escapeHtml(v.netz)}"${da ? ' disabled' : ''}>`
+                    + `<span class="sec-ssh-vs-netz">${da ? '' : '+ '}${escapeHtml(v.netz)}</span>`
+                    + `<span class="sec-ssh-vs-hinweis">${escapeHtml(hinweis)}${da ? ' · ' + escapeHtml(window.t('profile.netze_vs_drin')) : ''}</span>`
+                    + '</button>';
+            }).join('') : `<span class="sec-ssh-leer">${escapeHtml(window.t('profile.netze_vs_keine'))}</span>`;
+        }
+
+        async function _netzeVorschau() {
+            const box = document.getElementById('interne-netze-vorschau');
+            const feld = document.getElementById('setting-interne-netze');
+            if (!box || !feld) return;
+            const text = feld.value || '';
+            if (_netzeEintraege(text).join(' ') === _netzeEintraege(_netzeGespeichert).join(' ')) {
+                box.innerHTML = '';
+                return;
+            }
+            let d;
+            try {
+                const r = await fetch('/api/settings/interne-netze/vorschau', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ interne_netze: text })
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                d = await r.json();
+            } catch (e) {
+                box.innerHTML = '';
+                return;
+            }
+            // Antwort auf einen aelteren Feldinhalt verwerfen
+            if ((feld.value || '') !== text) return;
+            const zeilen = [];
+            if ((d.ungueltig || []).length) {
+                zeilen.push(`<div class="netze-vorschau-fehler">${escapeHtml(window.t('profile.netze_vs_ungueltig').replace('{liste}', d.ungueltig.join(', ')))}</div>`);
+            }
+            const art = (x) => (x === 'intern' || x === 'extern') ? x : 'unbekannt';
+            (profiles || []).forEach(p => {
+                const alt = standorte[p.id], neu = (d.standorte || {})[p.id];
+                if (!alt || !neu || art(alt.standort) === art(neu.standort)) return;
+                zeilen.push('<div>' + escapeHtml(window.t('profile.netze_vs_wechsel')
+                    .replace('{name}', p.name || p.id)
+                    .replace('{alt}', window.t('profile.standort_badge_' + art(alt.standort)))
+                    .replace('{neu}', window.t('profile.standort_badge_' + art(neu.standort)))) + '</div>');
+            });
+            if (!zeilen.length) zeilen.push(`<div>${escapeHtml(window.t('profile.netze_vs_gleich'))}</div>`);
+            zeilen.push(`<div class="netze-vorschau-fuss">${escapeHtml(window.t('profile.netze_vs_ungespeichert'))}</div>`);
+            box.innerHTML = zeilen.join('');
         }
 
         // Plakette intern/extern an der Profilkarte. Farbe allein traegt die

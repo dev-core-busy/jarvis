@@ -156,6 +156,26 @@ def main(benutzer: str, netz: str) -> int:
         check("42" not in t, "keine Antwort eines Modells")
         check("kein internes KI-Modell" in t or "internes LLM-Profil" in t,
               "der Text nennt den Weg (internes Profil einrichten)")
+        # Vorschlaege und Vorschau (ohne Liste: der Haus-Server muss als
+        # Profiladresse vorgeschlagen werden, die Vorschau macht ihn intern,
+        # und gespeichert wird dabei NICHTS)
+        ihost = urlparse(intern.get("api_url") or "").hostname or ""
+        st, v = api(adm, "GET", "/api/settings/interne-netze/vorschlaege")
+        vs = v.get("vorschlaege") or []
+        print(f"  (Vorschlaege: {[(x['netz'], x['art'], x['name']) for x in vs]})")
+        check(st == 200 and any(x["art"] == "profil" and x["netz"].split("/")[0] == ihost for x in vs),
+              "Vorschlag enthaelt die Adresse des Haus-Servers als Einzeladresse", f"{st} {vs}")
+        check(any(x["art"] == "schnittstelle" for x in vs),
+              "Vorschlag enthaelt das oeffentlich registrierte Netz, an dem DEV haengt", str(vs))
+        st, pv = api(adm, "POST", "/api/settings/interne-netze/vorschau", {"interne_netze": netz})
+        check(st == 200 and pv.get("standorte", {}).get(intern["id"], {}).get("standort") == "intern"
+              and not pv.get("ungueltig"),
+              "Vorschau mit dem Netz: Haus-Server intern", f"{st} {str(pv)[:300]}")
+        st, pv = api(adm, "POST", "/api/settings/interne-netze/vorschau", {"interne_netze": netz + ", quatsch"})
+        check(pv.get("ungueltig") == ["quatsch"], "Vorschau nennt Ungueltiges", str(pv.get("ungueltig")))
+        st, s = api(adm, "GET", "/api/settings")
+        check(s.get("interne_netze", "") == "" and s["standorte"][intern["id"]]["standort"] != "intern",
+              "Vorschau hat nichts gespeichert", str(s.get("interne_netze")))
         # ── B ──
         print("\n── B  mit interner Liste")
         st, r = api(adm, "POST", "/api/settings", {"interne_netze": "quatsch/99"})
@@ -164,6 +184,9 @@ def main(benutzer: str, netz: str) -> int:
         st, s = api(adm, "GET", "/api/settings")
         e = s["standorte"][intern["id"]]
         check(e["standort"] == "intern" and "Netz" in e["grund"], "Haus-Server jetzt intern", str(e))
+        st, v = api(adm, "GET", "/api/settings/interne-netze/vorschlaege")
+        check(not any(x["netz"].split("/")[0] == ihost for x in (v.get("vorschlaege") or [])),
+              "abgedeckter Haus-Server wird nicht mehr vorgeschlagen", str(v))
         api(tok, "POST", f"/api/llm/profiles/{intern['id']}/activate")
         t = asyncio.run(lauf(tok, True))
         check("es arbeitet das interne Modell" in t and intern["name"] in t,

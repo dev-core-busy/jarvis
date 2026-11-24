@@ -46,6 +46,7 @@ import ipaddress
 import socket
 import threading
 import time
+from contextvars import ContextVar
 from urllib.parse import urlparse
 
 FELD = "standort"
@@ -121,7 +122,16 @@ def netze_lesen(text) -> tuple[list, list]:
     return netze, falsch
 
 
+# Vorschau (``einstufen_mit_netzen``): eine noch nicht gespeicherte Liste gilt
+# nur fuer den eigenen Kontext – ein paralleler Lauf sieht weiter die
+# gespeicherte. ``None`` = keine Vorschau.
+_netze_vorschau: ContextVar = ContextVar("interne_netze_vorschau", default=None)
+
+
 def _eigene_netze() -> list:
+    vorschau = _netze_vorschau.get()
+    if vorschau is not None:
+        return vorschau
     try:
         from backend.config import config
         return netze_lesen(getattr(config, "INTERNE_NETZE", "") or "")[0]
@@ -136,14 +146,23 @@ def _im_eigenen_netz(ip) -> str:
     return ""
 
 
+def _ip_privat(ip: ipaddress._BaseAddress) -> bool:
+    """Privat bzw. lokal OHNE die eingestellten internen Netze."""
+    if getattr(ip, "ipv4_mapped", None):
+        ip = ip.ipv4_mapped
+    if ip.is_loopback or ip.is_link_local:
+        return True
+    # 100.64.0.0/10 (CGNAT) gilt NICHT als intern: geteilter Adressraum eines
+    # Providers, nicht das eigene Netz.
+    return bool(ip.is_private) and not ip.is_global
+
+
 def _ip_intern(ip: ipaddress._BaseAddress) -> bool:
     if getattr(ip, "ipv4_mapped", None):
         ip = ip.ipv4_mapped
     if ip.is_loopback or ip.is_link_local or _im_eigenen_netz(ip):
         return True
-    # 100.64.0.0/10 (CGNAT) gilt NICHT als intern: geteilter Adressraum eines
-    # Providers, nicht das eigene Netz.
-    return bool(ip.is_private) and not ip.is_global
+    return _ip_privat(ip)
 
 
 def _dns_aufloesen(host: str) -> list[str] | None:
@@ -363,3 +382,97 @@ def riegel(provider_kennung: str, api_url: str) -> None:
     except Exception:  # noqa: BLE001
         pass
     raise ExternGesperrt(text)
+
+
+def einstufen_mit_netzen(profile: list, text) -> tuple[dict, list]:
+    """Vorschau: ``({profil_id: einstufung}, ungueltige)`` fuer eine Liste
+    interner Netze, die noch NICHT gespeichert ist. Ungueltige Eintraege
+    werden gemeldet; eingestuft wird mit den gueltigen."""
+    netze, falsch = netze_lesen(text)
+    marke = _netze_vorschau.set(netze)
+    try:
+        return ({p.get("id"): einstufen(p) for p in profile if isinstance(p, dict)}, falsch)
+    finally:
+        _netze_vorschau.reset(marke)
+
+
+def _adressen_von(host: str) -> list:
+    """IP-Adressen eines Hosts (Literal oder DNS ueber den Cache) – leer, wenn
+    nicht aufloesbar."""
+    try:
+        return [ipaddress.ip_address(host.strip("[]"))]
+    except ValueError:
+        pass
+    _per_dns(host)  # fuellt den Cache mit Deckel
+    with _dns_sperre:
+        c = _dns_cache.get(host)
+    aus = []
+    for a in (c[1] if c and c[1] else []):
+        try:
+            aus.append(ipaddress.ip_address(a.split("%")[0]))
+        except ValueError:
+            pass
+    return aus
+
+
+def netz_vorschlaege(profile: list, angeschlossene=None) -> list:
+    """Vorschlaege fuer die Liste "Interne Netze" – ``[{netz, art, name}]``.
+
+    * ``art = "schnittstelle"``: ein Netz, an dem DIESER Server selbst haengt
+      (``sandbox_grenzen.angeschlossene_netze``) und das nicht ohnehin privat
+      ist – wer dort steht, gehoert zum eigenen Netz.
+    * ``art = "profil"``: die oeffentliche Adresse eines Profils, das NUR
+      wegen dieser Adresse als extern gilt (Anbieter mit eigener Adresse, kein
+      bekannter Cloud-Dienst, keine Handeinstellung) – als Einzeladresse,
+      damit kein Nachbar mitwandert. Ob der Server zum eigenen Netz gehoert,
+      entscheidet der Administrator; die Oberflaeche sagt das dazu.
+
+    Was die aktuelle Liste schon abdeckt, faellt weg; jedes Netz kommt einmal.
+    """
+    eigene = _eigene_netze()
+
+    def _abgedeckt(n) -> bool:
+        return any(n.version == e.version and n.subnet_of(e) for e in eigene)
+
+    aus, gesehen = [], set()
+
+    def _dazu(n, art, name=""):
+        if str(n) in gesehen or _abgedeckt(n):
+            return
+        gesehen.add(str(n))
+        aus.append({"netz": str(n), "art": art, "name": name})
+
+    if angeschlossene is None:
+        try:
+            from backend import sandbox_grenzen
+            angeschlossene = sandbox_grenzen.angeschlossene_netze()
+        except Exception:  # noqa: BLE001
+            angeschlossene = []
+    for t in angeschlossene or []:
+        try:
+            n = ipaddress.ip_network(str(t), strict=False)
+        except ValueError:
+            continue
+        # Einzeladressen sind dort Gateways ausserhalb jedes Netzes, private
+        # Bereiche gelten ohnehin als intern. Bewusst _ip_privat, nicht
+        # _ip_intern: ob die Liste das Netz schon abdeckt, entscheidet allein
+        # _abgedeckt – ueber das GANZE Netz, nicht ueber seine Anfangsadresse.
+        if n.prefixlen == n.max_prefixlen or _ip_privat(n.network_address):
+            continue
+        _dazu(n, "schnittstelle")
+    for p in profile or []:
+        if not isinstance(p, dict) or handwert(p) != "auto":
+            continue
+        if _norm(p.get("provider")) in _IMMER_EXTERN:
+            continue
+        host = _host(p.get("api_url") or "")
+        if not host or any(host == d or host.endswith("." + d) for d in _CLOUD_DOMAINS):
+            continue
+        if auto_einstufen(p.get("provider") or "", p.get("api_url") or "")[0] != "extern":
+            continue
+        for ip in _adressen_von(host):
+            if getattr(ip, "ipv4_mapped", None):
+                ip = ip.ipv4_mapped
+            if not _ip_privat(ip):
+                _dazu(ipaddress.ip_network(ip), "profil", str(p.get("name") or p.get("id") or ""))
+    return aus

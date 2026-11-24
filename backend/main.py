@@ -13081,6 +13081,29 @@ def _standorte_je_profil() -> dict:
     return {p.get("id"): llm_standort.einstufen(p) for p in config.profiles}
 
 
+@app.get("/api/settings/interne-netze/vorschlaege")
+async def interne_netze_vorschlaege(user: str = Depends(require_local_auth)):
+    """Vorschlaege fuer "Interne Netze": eigene Schnittstellen des Servers und
+    oeffentliche Adressen von Profilen, die nur deshalb als extern gelten
+    (``llm_standort.netz_vorschlaege``). Im Thread – DNS und ``ip`` koennen
+    dauern."""
+    from backend import llm_standort
+    vor = await asyncio.to_thread(llm_standort.netz_vorschlaege, list(config.profiles))
+    return JSONResponse({"vorschlaege": vor})
+
+
+@app.post("/api/settings/interne-netze/vorschau")
+async def interne_netze_vorschau(request: Request, user: str = Depends(require_local_auth)):
+    """Einstufung aller Profile mit einer NOCH NICHT gespeicherten Liste –
+    die Oberflaeche zeigt damit vor dem Speichern, was sich aendert."""
+    body = await _json_objekt(request)
+    text = str((body or {}).get("interne_netze") or "")[:4000]
+    from backend import llm_standort
+    standorte, falsch = await asyncio.to_thread(
+        llm_standort.einstufen_mit_netzen, list(config.profiles), text)
+    return JSONResponse({"standorte": standorte, "ungueltig": falsch[:20]})
+
+
 def _standort_fehler(body: dict, provider: str) -> str:
     """Grund, warum der Standort im Rumpf ungueltig ist – "" = in Ordnung."""
     if "standort" not in body:

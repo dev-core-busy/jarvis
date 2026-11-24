@@ -3101,6 +3101,12 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
 }
 .prof-standort.is-intern { border-color: var(--success); background: rgba(var(--success-rgb), 0.12); }
 .prof-standort.is-extern { border-color: var(--warning); background: rgba(var(--warning-rgb), 0.12); }
+/* Interne Netze: Vorschau der Einstufung vor dem Speichern */
+.netze-vorschau { margin-top: 8px; font-size: 0.8rem; color: var(--text-primary); }
+.netze-vorschau:empty { display: none; }
+.netze-vorschau > div + div { margin-top: 2px; }
+.netze-vorschau-fehler { color: var(--danger-text); }
+.netze-vorschau-fuss { color: var(--text-secondary); font-size: 0.75rem; margin-top: 4px; }
 .prof-standort.is-unbekannt { border-color: var(--border-hover); }
 .prof-standort-erkannt { display: block; margin-top: 4px; }
 .prof-standort-erkannt[hidden] { display: none; }

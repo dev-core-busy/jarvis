@@ -222,8 +222,10 @@
                         if (data.is_admin === false) window.location.replace('/portal');
                         else _enterSettingsPage();
                     } else {
-                        // Konsolidierung: alle Rollen landen auf dem Portal (kein Haupt-Chat mehr).
-                        window.location.replace('/portal');
+                        // Konsolidierung: alle Rollen landen auf dem Portal (kein Haupt-Chat mehr)
+                        // – ausser die Anmeldung kam von einer abgelaufenen Sitzung
+                        // (sitzung_ablauf.js): dann zurueck auf die Seite von vorher.
+                        window.location.replace(window.JarvisSitzung.rueckkehrZiel('/portal'));
                     }
                 }
             } else if (data.requires_totp) {
@@ -407,7 +409,8 @@
                     hideChangePwModal();
                     if (_cpwMandatory) {
                         // Erst-Login abgeschlossen -> Portal (Konsolidierung, kein Haupt-Chat)
-                        window.location.replace('/portal');
+                        // bzw. die gemerkte Seite nach abgelaufener Sitzung.
+                        window.location.replace(window.JarvisSitzung.rueckkehrZiel('/portal'));
                     }
                 } else {
                     if (cpwError) { cpwError.textContent = data.error || window.t('security.change_error'); cpwError.style.display = ''; }
@@ -3775,7 +3778,9 @@
                 } else {
                     // Konsolidierung: Wurzel-Seite leitet alle Rollen aufs Portal
                     // (kein Haupt-Chat mehr). Chat/Userchat/Support/Settings dort verlinkt.
-                    window.location.replace('/portal');
+                    // Gilt das Token noch (in einem anderen Tab neu angemeldet), geht
+                    // es nach "Neu anmelden" direkt auf die gemerkte Seite zurueck.
+                    window.location.replace(window.JarvisSitzung.rueckkehrZiel('/portal'));
                 }
             } else {
                 _maskeNachTokenpruefung();

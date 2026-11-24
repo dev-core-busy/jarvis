@@ -241,6 +241,12 @@ const kontrollen3 = [
      "ein Fenster-Export (`JarvisIcons`, icons.js) gilt als fehlendes Nachbarmodul"],
     [pruefer.einteilen("fetch", index) === "umgebung",
      "ein Browser-Name (`fetch`) gilt als Umgebung, nicht als Befund"],
+    // Seit 2026-11-24 umhuellt sitzung_ablauf.js `window.fetch` – das ist kein
+    // Export (Zeile darueber). Die Ausnahme darf aber nicht weiter greifen:
+    // `agentKeysOnShow` (app.js) wird nur in einem FUNKTIONSRUMPF gelesen und
+    // bleibt ein echter Export (eine zu breite Fassung verlor ihn, gemessen).
+    [pruefer.einteilen("agentKeysOnShow", index) === "nachbarmodul",
+     "ein Export mit Lesezugriff im Funktionsrumpf (`agentKeysOnShow`, app.js) bleibt Nachbarmodul"],
 ];
 for (const [bed, text, extra] of kontrollen3) check(bed, text, extra);
 

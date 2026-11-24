@@ -229,16 +229,55 @@ function deklarierteNamen(wurzel) {
     return namen;
 }
 
-/** Namen, die eine Datei ans Fenster EXPORTIERT (`window.X = …`). */
+/** `window.X` / `globalThis.X` ohne Berechnung -> "X", sonst null. */
+function fensterName(m) {
+    if (!m || m.type !== "MemberExpression" || m.computed) return null;
+    if (m.object.type !== "Identifier") return null;
+    if (m.object.name !== "window" && m.object.name !== "globalThis") return null;
+    return m.property.type === "Identifier" ? m.property.name : null;
+}
+
+/** Namen, die eine Datei ans Fenster EXPORTIERT (`window.X = …`).
+ *
+ *  ⚠ EINE UMHUELLUNG IST KEIN EXPORT (2026-11-24): `sitzung_ablauf.js` faengt
+ *  das Original (`var _orig = … window.fetch …`) und ersetzt `window.fetch`
+ *  durch eine Funktion, die es weiterreicht. Als Export gezaehlt galt `fetch`
+ *  danach als NACHBARMODUL – ein Pruefstand ohne fetch haette "Modul
+ *  sitzung_ablauf.js fehlt" gelesen statt "Umgebung", also die falsche
+ *  Ursache (gemeldet von der Kontrolle in test_prolog_vollstaendig.js).
+ *  Ausgenommen wird deshalb genau diese Form: das Original wird in einer
+ *  Variablendeklaration GELESEN und der Name durch eine FUNKTION ersetzt.
+ *  `window.Foo = window.Foo || {}` (Namensraum) und `if (window.Foo) return;`
+ *  bleiben Exporte – dort faengt keine Deklaration das Original. */
 function fensterExporte(wurzel) {
-    const namen = new Set();
+    const namen = new Set(), gefangen = new Set();
+    /* Nur das UNMITTELBARE Lesen im Initialisierer zaehlt, nicht ein Lesen
+     * in einem Funktionsrumpf darin: `const x = () => { if (window.Y) … }`
+     * faengt kein Original (beim Bau gemessen – sonst verlor `app.js` seinen
+     * echten Export `agentKeysOnShow`). */
+    const ohneFunktionen = (k, fn) => {
+        if (!k || typeof k !== "object") return;
+        if (Array.isArray(k)) { k.forEach(x => ohneFunktionen(x, fn)); return; }
+        if (typeof k.type === "string") {
+            if (/Function/.test(k.type)) return;
+            fn(k);
+        }
+        for (const feld in k) {
+            if (feld === "type" || feld === "loc" || feld === "start" || feld === "end") continue;
+            ohneFunktionen(k[feld], fn);
+        }
+    };
+    gehe(wurzel, (k) => {
+        if (k.type !== "VariableDeclarator" || !k.init) return;
+        ohneFunktionen(k.init, (m) => { const n = fensterName(m); if (n) gefangen.add(n); });
+    });
     gehe(wurzel, (k) => {
         if (k.type !== "AssignmentExpression") return;
-        const l = k.left;
-        if (l.type !== "MemberExpression" || l.computed) return;
-        if (l.object.type !== "Identifier") return;
-        if (l.object.name !== "window" && l.object.name !== "globalThis") return;
-        if (l.property.type === "Identifier") namen.add(l.property.name);
+        const n = fensterName(k.left);
+        if (!n) return;
+        const funktion = k.right.type === "FunctionExpression" || k.right.type === "ArrowFunctionExpression";
+        if (funktion && gefangen.has(n)) return;     // Umhuellung eines vorhandenen Namens
+        namen.add(n);
     });
     return namen;
 }

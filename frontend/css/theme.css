@@ -2242,3 +2242,80 @@ body .wi-section { margin-bottom: var(--jv-abstand); }
     box-shadow: 0 4px 16px var(--accent-glow);
     transform: translateY(-1px);
 }
+
+/* Hinweis "Sitzung abgelaufen" (sitzung_ablauf.js) – auf JEDER angemeldeten
+   Seite, deshalb hier und nicht in style.css/chat.css. Eigene Klassen statt
+   `.modal`: die Modal-Klassen stehen nur in einzelnen Stylesheets und
+   brauchen dort zusaetzlich `.open` (Register: "display:flex allein oeffnet
+   ein .modal NICHT"). Liegt ueber allem, auch ueber dem Paket-Kasten. */
+.jv-sitzung-ablauf {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: rgba(var(--shadow-rgb), .55);
+}
+.jv-sitzung-ablauf-karte {
+    position: relative;
+    width: min(440px, 100%);
+    /* DECKEND: darunter liegt die Seite mit Text (Register). */
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(var(--shadow-rgb), .45);
+    padding: 20px 20px 18px;
+    font-family: inherit;
+}
+.jv-sitzung-ablauf-titel {
+    margin: 0 28px 10px 0;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.jv-sitzung-ablauf-text {
+    margin: 0 0 8px;
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+.jv-sitzung-ablauf-tipp {
+    margin: 0 0 16px;
+    font-size: .9em;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+.jv-sitzung-ablauf-los {
+    display: block;
+    width: 100%;
+    padding: 10px 16px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--text-on-accent);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+.jv-sitzung-ablauf-los:hover { box-shadow: 0 4px 16px var(--accent-glow); }
+.jv-sitzung-ablauf-los:focus-visible,
+.jv-sitzung-ablauf-zu:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
+.jv-sitzung-ablauf-zu {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.jv-sitzung-ablauf-zu:hover { background: var(--bg-input); color: var(--text-primary); }

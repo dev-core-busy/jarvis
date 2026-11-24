@@ -290,7 +290,8 @@
         if (window.ZugangAnmeldung) {
             try { await window.ZugangAnmeldung.schritt(token); } catch (e) { /* weiter */ }
         }
-        window.location.replace('/portal');
+        // Wie app.js: nach abgelaufener Sitzung zurueck auf die gemerkte Seite.
+        window.location.replace(window.JarvisSitzung.rueckkehrZiel('/portal'));
     }
 
     var laeuft = false;

@@ -223,6 +223,54 @@
         try { document.documentElement.classList.remove(PRUEF_KLASSE); } catch (e) { /* kein DOM */ }
     }
     window.JarvisSitzung.maskeFreigeben = maskeFreigeben;
+
+    /* RUECKKEHR NACH DER NEUANMELDUNG (2026-11-24). Laeuft eine Sitzung ab,
+     * schickt `sitzung_ablauf.js` den Benutzer zur Anmeldung auf `/` – und
+     * danach landete er bisher immer im Portal statt auf der Seite, auf der er
+     * war. `merkeRueckkehr()` legt die aktuelle Adresse im sessionStorage ab
+     * (NUR dieser Tab, ueberlebt den Weg ueber den Firmen-IdP),
+     * `rueckkehrZiel(vorgabe)` liefert sie nach der Anmeldung EINMAL zurueck.
+     *
+     * Bewusst KEIN Adressparameter (`/?zurueck=…`): den koennte jeder in einen
+     * Link schreiben, und die Anmeldeseite wuerde dorthin weiterleiten. Der
+     * sessionStorage ist nur von dieser Seite selbst beschreibbar. Trotzdem
+     * wird beim LESEN geprueft (`sicheresZiel`) – der Wert verlaesst sonst
+     * ungeprueft den Speicher Richtung `location.replace`. */
+    var RUECKKEHR_SCHLUESSEL = 'jarvis_rueckkehr';
+
+    /* Nur ein eigener Pfad ist ein Ziel: beginnt mit genau EINEM `/`
+     * (`//host` waere eine fremde Adresse), ohne Steuerzeichen und Rueckstrich
+     * (manche Browser lesen `/\host` wie `//host`), und nicht die Wurzel
+     * selbst – die IST die Anmeldeseite, ein Ziel `/` waere eine Schleife. */
+    function sicheresZiel(z) {
+        if (typeof z !== 'string' || z.length > 2000) return '';
+        if (z.charAt(0) !== '/' || z.charAt(1) === '/') return '';
+        if (/[\u0000-\u001f\u007f\\]/.test(z)) return '';
+        var pfad = z.split(/[?#]/)[0].replace(/\/+$/, '');
+        if (pfad === '') return '';
+        return z;
+    }
+
+    window.JarvisSitzung.merkeRueckkehr = function (ziel) {
+        var z = sicheresZiel(ziel != null ? ziel
+            : (location.pathname || '') + (location.search || '') + (location.hash || ''));
+        if (!z) return false;
+        try { sessionStorage.setItem(RUECKKEHR_SCHLUESSEL, z); return true; }
+        catch (e) { return false; }   /* Speicher gesperrt: dann eben Portal */
+    };
+
+    /* Einmalig: der Wert wird beim Lesen verbraucht, sonst fuehrte jede
+     * spaetere Anmeldung in diesem Tab wieder dorthin. */
+    window.JarvisSitzung.rueckkehrZiel = function (vorgabe) {
+        var z = '';
+        try {
+            z = sessionStorage.getItem(RUECKKEHR_SCHLUESSEL) || '';
+            sessionStorage.removeItem(RUECKKEHR_SCHLUESSEL);
+        } catch (e) { /* Speicher gesperrt */ }
+        return sicheresZiel(z) || vorgabe;
+    };
+    window.JarvisSitzung._sicheresZiel = sicheresZiel;
+
     if (window.JarvisSitzung.token()) {
         try {
             document.documentElement.classList.add(PRUEF_KLASSE);

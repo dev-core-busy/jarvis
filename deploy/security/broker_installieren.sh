@@ -55,6 +55,13 @@ JARVIS_DIR="/opt/jarvis"
 SCHLUESSEL=""
 SSH_443="0"
 
+# Welcher Installer baut diese Kopie? Steht im STAND (Feld "installer"). Der
+# Broker-Start (start_jarvis_root.sh, 0c) vergleicht es mit dem Installer IN der
+# Kopie: beim Neustart laeuft immer der Installer der ALTEN Kopie, eine
+# Aenderung an dieser Datei (z. B. neue mitkopierte Dateien) wirkte sonst erst
+# beim UEBERNAECHSTEN Neustart (gefunden 2026-11-24, i18n fuer den Mailversand).
+INSTALLER_SHA="$(sha256sum "${BASH_SOURCE[0]}" 2>/dev/null | cut -c1-16)"
+
 meldung() { echo "[Broker-Installation] $*"; }
 fehler()  { echo "[Broker-Installation] FEHLER: $*" >&2; exit 1; }
 
@@ -168,14 +175,19 @@ mkdir -m 0755 "$NEU" || fehler "kann $NEU nicht anlegen"
 # unten per chmod -R go=rX fuer alle lesbar gemacht worden. Ohne -h wuerde der
 # Link selbst kopiert und zeigte in die beschreibbare Welt. Beides darf nicht
 # sein; das Repo enthaelt keine Links.
+# Die Uebersetzungen (i18n.js, i18n_fr.js) kommen mit: der E-Mail-Versand
+# (backend/mail_meldung.py) schreibt seine Meldungen in der Oberflaechensprache
+# und liest die Texte als root – aus dieser Kopie, nicht aus der Datei des
+# Dienstbenutzers (2026-11-24).
+I18N_DATEIEN="frontend/js/i18n.js frontend/js/i18n_fr.js"
 LINKS=$(find "$SRC/backend" "$SRC/deploy" "$SRC/start_jarvis_root.sh" "$SRC/jarvis.service" \
-        -type l 2>/dev/null | head -5)
+        $(for f in $I18N_DATEIEN; do echo "$SRC/$f"; done) -type l 2>/dev/null | head -5)
 if [ -n "$LINKS" ]; then
     rm -rf "$NEU"; fehler "Symbolische Links in der Quelle – Abbruch: $(echo $LINKS)"
 fi
 # Beide tar einzeln pruefen: ohne pipefail zaehlte nur der Exit des zweiten.
 tar -C "$SRC" -cf - --exclude='__pycache__' --exclude='*.pyc' \
-        backend deploy start_jarvis_root.sh jarvis.service 2>/dev/null \
+        backend deploy start_jarvis_root.sh jarvis.service $I18N_DATEIEN 2>/dev/null \
      | tar -C "$NEU" -xf - --no-same-owner --no-same-permissions
 TAR_RC=("${PIPESTATUS[@]}")
 if [ "${TAR_RC[0]}" != "0" ] || [ "${TAR_RC[1]}" != "0" ]; then
@@ -199,15 +211,25 @@ HASH="$(cd "$NEU" && find . -type f ! -path '*/__pycache__/*' -print0 | sort -z 
 ALT_HASH=""
 [ -f "$ZIEL/STAND" ] && ALT_HASH="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("hash",""))' "$ZIEL/STAND" 2>/dev/null)"
 if [ -n "$ALT_HASH" ] && [ "$ALT_HASH" = "$HASH" ]; then
+    # Inhalt gleich: nur den Installer-Vermerk nachtragen, sonst liefe der
+    # Abgleich in 0c bei jedem Start erneut an.
+    "$PY" - "$ZIEL/STAND" "$INSTALLER_SHA" <<'PYEOF' 2>/dev/null || true
+import json, sys
+pfad, sha = sys.argv[1:3]
+d = json.load(open(pfad))
+if d.get("installer") != sha:
+    d["installer"] = sha
+    json.dump(d, open(pfad, "w"), ensure_ascii=False, indent=1)
+PYEOF
     rm -rf "$NEU"
     meldung "aktuell ($QUELLE${COMMIT:+ ${COMMIT:0:10}}, $HASH)"
     exit 3
 fi
 
-"$PY" - "$NEU/STAND" "$QUELLE" "$COMMIT" "$HASH" "$REPO" "$BRANCH" "$SRC" <<'PYEOF'
+"$PY" - "$NEU/STAND" "$QUELLE" "$COMMIT" "$HASH" "$REPO" "$BRANCH" "$SRC" "$INSTALLER_SHA" <<'PYEOF'
 import json, sys, time
-ziel, quelle, commit, h, repo, branch, src = sys.argv[1:8]
-json.dump({"quelle": quelle, "commit": commit, "hash": h,
+ziel, quelle, commit, h, repo, branch, src, installer = sys.argv[1:9]
+json.dump({"quelle": quelle, "commit": commit, "hash": h, "installer": installer,
            "repo": repo if quelle == "github" else "", "branch": branch if quelle == "github" else "",
            "aus": src, "installiert": time.strftime("%Y-%m-%d %H:%M:%S")},
           open(ziel, "w"), ensure_ascii=False, indent=1)

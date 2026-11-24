@@ -88,13 +88,6 @@ AIDE_DROPIN = "/etc/systemd/system/dailyaidecheck.service.d/81-jarvis-mail.conf"
 AIDE_AUSNAHME = "/etc/aide/aide.conf.d/96_jarvis_mailversand"
 
 QUELLEN = ("ueberwachung", "aide", "sicherheit", "system")
-QUELLEN_NAME = {
-    "ueberwachung": "Serverueberwachung",
-    "aide": "Integritaetspruefung (AIDE)",
-    "sicherheit": "Sicherheitsverletzung",
-    "system": "System",
-    "test": "Testnachricht",
-}
 GRENZE_JE_STUNDE = {"ueberwachung": 20, "aide": 6, "sicherheit": 12, "test": 5}
 EMPFAENGER_MAX = 10
 ABSENDER_LOKAL = "jarvis"
@@ -218,11 +211,15 @@ def konf() -> dict:
         quellen, _ = quellen_pruefen(roh.get("MAIL_QUELLEN", ""))
     else:
         quellen = list(QUELLEN)
+    sprache = roh.get("MAIL_SPRACHE", "de")
+    sprache = sprache if sprache in SPRACHEN else "de"
+    marke = text_pruefen(roh.get("MAIL_MARKE", ""), "Marke")[0] or "Jarvis"
     absender, _ = absender_pruefen(roh.get("MAIL_ABSENDER", ""))
     name, _ = text_pruefen(roh.get("MAIL_ABSENDER_NAME", ""), "Name")
     betreff, _ = text_pruefen(roh.get("MAIL_BETREFF", ""), "Betreff")
     return {"empfaenger": empf, "relay": relay, "quellen": quellen,
-            "absender": absender, "absender_name": name, "betreff": betreff}
+            "absender": absender, "absender_name": name, "betreff": betreff,
+            "sprache": sprache, "marke": marke}
 
 
 def _absender_adresse(k: dict, fqdn: str) -> str:
@@ -576,6 +573,7 @@ def status() -> dict:
             "warteschlange": _warteschlange() if aktiv else {"anzahl": None},
             "empfaenger": k["empfaenger"], "relay": k["relay"], "quellen": k["quellen"],
             "absender": k["absender"], "absender_name": k["absender_name"], "betreff": k["betreff"],
+            "sprache": k["sprache"],
             "vorgabe": {"absender": "%s@%s" % (ABSENDER_LOKAL, _fqdn()),
                         "absender_name": VORGABE_NAME, "betreff": VORGABE_BETREFF},
             "alle_quellen": list(QUELLEN), "letzte": (z.get("letzte") or [])[-10:],
@@ -602,7 +600,135 @@ def _einzeilig(s, n: int = 200) -> str:
     return re.sub(r"[\r\n\t]+", " ", str(s or "")).strip()[:n]
 
 
-def nachricht(quelle: str, betreff: str, text: str, k: dict, fqdn: str,
+# ── Sprache der Mails (i18n.js / i18n_fr.js) ─────────────────────────────────
+# Die Meldungen sind in der Sprache verfasst, die in der Oberflaeche gewaehlt
+# ist (MAIL_SPRACHE, gesetzt beim Speichern und beim Umschalten der Sprache in
+# den Einstellungen). Die Texte kommen aus DERSELBEN Quelle wie die Oberflaeche
+# – eine zweite Kopie hier liefe auseinander. Gelesen wird die root-eigene
+# Kopie neben diesem Modul (broker_installieren.sh kopiert die beiden Dateien
+# mit), nie die des Dienstbenutzers. Fehlt ein Text: Rueckfall fr -> en -> de,
+# zuletzt der hier mitgegebene deutsche Text.
+SPRACHEN = ("de", "en", "fr")
+_RUECKFALL = {"de": ("de",), "en": ("en", "de"), "fr": ("fr", "en", "de")}
+I18N_JS = Path(__file__).resolve().parent.parent / "frontend" / "js" / "i18n.js"
+I18N_FR = Path(__file__).resolve().parent.parent / "frontend" / "js" / "i18n_fr.js"
+_TEXTE_CACHE: dict = {}
+
+
+def _js_text(roh: str) -> str:
+    """Inhalt eines JS-Zeichenkettenliterals (ohne Anfuehrungszeichen) entschluesseln."""
+    aus, i = [], 0
+    while i < len(roh):
+        c = roh[i]
+        if c == "\\" and i + 1 < len(roh):
+            n = roh[i + 1]
+            if n == "u" and re.match(r"[0-9a-fA-F]{4}", roh[i + 2:i + 6]):
+                aus.append(chr(int(roh[i + 2:i + 6], 16)))
+                i += 6
+                continue
+            aus.append({"n": "\n", "t": "\t", "r": ""}.get(n, n))
+            i += 2
+            continue
+        aus.append(c)
+        i += 1
+    return "".join(aus)
+
+
+def _texte_laden() -> dict:
+    """{sprache: {schluessel: text}} fuer die Schluessel, die Mails brauchen."""
+    try:
+        stempel = (I18N_JS.stat().st_mtime, I18N_FR.stat().st_mtime if I18N_FR.exists() else 0)
+    except OSError:
+        return {}
+    if _TEXTE_CACHE.get("stempel") == stempel:
+        return _TEXTE_CACHE["texte"]
+    texte: dict = {"de": {}, "en": {}, "fr": {}}
+    wichtig = re.compile(r"^(?:mvm\.|ue\.art_)")
+    try:
+        js = I18N_JS.read_text(encoding="utf-8")
+        de_an, en_an = js.find("\n    de: {"), js.find("\n    en: {")
+        if de_an >= 0 and en_an > de_an:
+            for sprache, teil in (("de", js[de_an:en_an]), ("en", js[en_an:])):
+                for m in re.finditer(r"^\s*'([A-Za-z0-9_.\-]+)'\s*:\s*'((?:[^'\\\n]|\\.)*)'", teil, re.M):
+                    if wichtig.match(m.group(1)) and m.group(1) not in texte[sprache]:
+                        texte[sprache][m.group(1)] = _js_text(m.group(2))
+        if I18N_FR.exists():
+            for m in re.finditer(r'^\s*"([A-Za-z0-9_.\-]+)"\s*:\s*"((?:[^"\\\n]|\\.)*)"',
+                                 I18N_FR.read_text(encoding="utf-8"), re.M):
+                if wichtig.match(m.group(1)):
+                    texte["fr"][m.group(1)] = json.loads('"%s"' % m.group(2))
+    except (OSError, ValueError):
+        return {}
+    _TEXTE_CACHE.update(stempel=stempel, texte=texte)
+    return texte
+
+
+def text(schluessel: str, vorgabe: str, sprache: str = "de", **werte) -> str:
+    """Text in ``sprache`` mit ``{name}``-Platzhaltern; Rueckfall wie die Oberflaeche."""
+    alle = _texte_laden()
+    roh = vorgabe
+    for s in _RUECKFALL.get(sprache, ("de",)):
+        if (alle.get(s) or {}).get(schluessel):
+            roh = alle[s][schluessel]
+            break
+    return re.sub(r"\{(\w+)\}", lambda m: str(werte[m.group(1)]) if m.group(1) in werte else m.group(0), roh)
+
+
+def zeitpunkt(sek, sprache: str, mit_uhr: bool = True) -> str:
+    """Datum (und Uhrzeit) in der Schreibweise der Sprache; leer bei 0."""
+    try:
+        t = time.localtime(float(sek))
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if not sek:
+        return ""
+    datum = time.strftime("%d/%m/%Y" if sprache in ("en", "fr") else "%d.%m.%Y", t)
+    return datum + (time.strftime(" %H:%M", t) if mit_uhr else "")
+
+
+def befund_text(b: dict, sprache: str, marke: str = "Jarvis") -> str:
+    """Text eines Ueberwachungs-Befunds in ``sprache`` – dieselben Vorlagen und
+    Werte wie die Anzeige am Zahnrad (sysload.js ueText). Ohne Vorlage: der
+    deutsche Text des Befunds (der auch im Journal steht)."""
+    art = str(b.get("art", ""))
+    w = b.get("werte") or {}
+    try:
+        if art == "zert_ablauf" and float(w.get("tage", 0)) < 0:
+            art = "zert_abgelaufen"
+    except (TypeError, ValueError):
+        pass
+    if art == "in_drop" and b.get("stufe") == "warnung":
+        art = "in_drop_voll"
+    werte = {}
+    for k_, v in w.items():
+        if k_ == "zuletzt":
+            v = zeitpunkt(v, sprache)
+        elif k_ == "ablauf":
+            v = zeitpunkt(v, sprache, mit_uhr=False)
+        elif isinstance(v, (list, tuple)):
+            v = ", ".join(str(x) for x in v)
+        elif isinstance(v, float) and k_ == "prozent":
+            v = ("%.1f" % v) if sprache == "en" else ("%.1f" % v).replace(".", ",")
+        werte[k_] = "" if v is None else v
+    werte["marke"] = marke
+    return text("ue.art_" + art, str(b.get("text", "")), sprache, **werte)
+
+
+QUELLEN_TEXT = {
+    "ueberwachung": ("mvm.q_ueberwachung", "Serverüberwachung"),
+    "aide": ("mvm.q_aide", "Integritätsprüfung (AIDE)"),
+    "sicherheit": ("mvm.q_sicherheit", "Sicherheitsverletzung"),
+    "system": ("mvm.q_system", "System"),
+    "test": ("mvm.q_test", "Testnachricht"),
+}
+
+
+def quelle_name(quelle: str, sprache: str) -> str:
+    k_, d = QUELLEN_TEXT.get(quelle, ("", quelle))
+    return text(k_, d, sprache) if k_ else d
+
+
+def nachricht(quelle: str, betreff: str, inhalt: str, k: dict, fqdn: str,
               unterdrueckt: int = 0) -> EmailMessage:
     kurz = fqdn.split(".", 1)[0]
     m = EmailMessage()
@@ -615,15 +741,17 @@ def nachricht(quelle: str, betreff: str, text: str, k: dict, fqdn: str,
     m["Message-ID"] = make_msgid(domain=fqdn)
     m["Auto-Submitted"] = "auto-generated"
     m["X-Jarvis-Quelle"] = quelle
-    kopf = ["Server: %s" % fqdn,
-            "Zeit:   %s" % time.strftime("%d.%m.%Y %H:%M:%S %Z"),
-            "Art:    %s" % QUELLEN_NAME.get(quelle, quelle), ""]
+    sp = k.get("sprache", "de")
+    kopf = ["%s: %s" % (text("mvm.kopf_server", "Server", sp), fqdn),
+            "%s: %s" % (text("mvm.kopf_zeit", "Zeit", sp), zeitpunkt(time.time(), sp)),
+            "%s: %s" % (text("mvm.kopf_art", "Art", sp), quelle_name(quelle, sp)), ""]
     if unterdrueckt:
-        kopf += ["Hinweis: %d weitere Meldung(en) dieser Art wurden in der letzten Stunde "
-                 "zurueckgehalten (Drosselung) – sie stehen im Journal und in der Oberflaeche." % unterdrueckt, ""]
-    fuss = ["", "-- ", "Diese Nachricht verschickt %s automatisch. Empfaenger und Meldungsarten:" % fqdn,
-            "Einstellungen -> KI & System -> E-Mail-Versand."]
-    m.set_content("\n".join(kopf) + str(text or "").rstrip() + "\n" + "\n".join(fuss) + "\n")
+        kopf += [text("mvm.gedrosselt", "Hinweis: {n} weitere Meldung(en) dieser Art wurden in der letzten "
+                      "Stunde zurückgehalten (Drosselung) – sie stehen im Journal und in der Oberfläche.",
+                      sp, n=unterdrueckt), ""]
+    fuss = ["", "-- ", text("mvm.fuss", "Diese Nachricht verschickt {server} automatisch. Empfänger und "
+                            "Meldungsarten: Einstellungen → KI & System → E-Mail-Versand.", sp, server=fqdn)]
+    m.set_content("\n".join(kopf) + str(inhalt or "").rstrip() + "\n" + "\n".join(fuss) + "\n")
     return m
 
 
@@ -668,20 +796,23 @@ def _senden(quelle: str, betreff: str, text: str) -> dict:
 
 def test() -> dict:
     k = konf()
-    return senden("test", "Testnachricht",
-                  "Diese Testnachricht bestaetigt, dass der Server Meldungen per E-Mail verschicken kann.\n\n"
-                  "Eingeschaltete Meldungsarten: %s\nRelay: %s\n"
-                  % (", ".join(QUELLEN_NAME[q] for q in k["quellen"]) or "keine",
-                     k["relay"] or "keiner (direkte Zustellung)"))
+    sp = k["sprache"]
+    liste = ", ".join(quelle_name(q, sp) for q in k["quellen"]) or text("mvm.keine", "keine", sp)
+    relay = k["relay"] or text("mvm.relay_keiner", "keiner (direkte Zustellung)", sp)
+    return senden("test", text("mvm.test_betreff", "Testnachricht", sp),
+                  "\n".join([text("mvm.test_text", "Diese Testnachricht bestätigt, dass der Server Meldungen "
+                                   "per E-Mail verschicken kann.", sp), "",
+                             text("mvm.test_quellen", "Eingeschaltete Meldungsarten: {liste}", sp, liste=liste),
+                             text("mvm.test_relay", "Weiterleitender Mailserver: {relay}", sp, relay=relay)]))
 
 
 # ── Sicherheitsmeldungen vom Dienst (Broker-Op broker.mail_melden) ──────────
 
 SICHERHEIT_ARTEN = {
     "konto_gesperrt_angriff": "Konto gesperrt: Angriffsversuch erkannt",
-    "konto_gesperrt_verstoss": "Konto gesperrt: wiederholte Richtlinien-Verstoesse",
+    "konto_gesperrt_verstoss": "Konto gesperrt: wiederholte Richtlinien-Verstöße",
     "konto_gesperrt_anmeldung": "Konto gesperrt: zu viele Fehlanmeldungen",
-    "spruehangriff": "Spruehangriff auf Anmeldungen erkannt",
+    "spruehangriff": "Sprühangriff auf Anmeldungen erkannt",
     "angriff_protokolliert": "Angriffsversuch erkannt (nur protokolliert)",
 }
 
@@ -692,15 +823,18 @@ def sicherheit(args: dict) -> dict:
     art = str(args.get("art", ""))
     if art not in SICHERHEIT_ARTEN:
         return {"ok": False, "gesendet": False, "meldung": "Unbekannte Art"}
+    sp = konf()["sprache"]
     felder = [("Benutzer", "benutzer"), ("Kanal", "kanal"), ("Erkennung", "muster"),
               ("Quelladresse", "ip"), ("Anzahl", "anzahl")]
-    zeilen = [SICHERHEIT_ARTEN[art], ""]
+    titel = text("mvm.s_" + art, SICHERHEIT_ARTEN[art], sp)
+    zeilen = [titel, ""]
     for name, f in felder:
         w = _einzeilig(args.get(f, ""), 120)
         if w:
-            zeilen.append("%-13s %s" % (name + ":", w))
-    zeilen += ["", "Einzelheiten: Einstellungen -> Sicherheit (Vorfaelle, Sicherheitsprotokoll)."]
-    betreff = SICHERHEIT_ARTEN[art]
+            zeilen.append("%s: %s" % (text("mvm.f_" + f, name, sp), w))
+    zeilen += ["", text("mvm.s_einzelheiten", "Einzelheiten: Einstellungen → Sicherheit (Vorfälle, "
+                        "Sicherheitsprotokoll).", sp)]
+    betreff = titel
     if _einzeilig(args.get("benutzer", ""), 60):
         betreff += " (%s)" % _einzeilig(args.get("benutzer"), 60)
     return senden("sicherheit", betreff, "\n".join(zeilen))

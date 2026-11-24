@@ -496,10 +496,12 @@ def auswerten(eing: dict, vorher: dict, konf: dict, jetzt: float) -> tuple[dict,
                                    "AIDE: %d Aenderung(en) seit dem letzten Stand nicht erklaert (Pruefung %s) – "
                                    "Durchsicht unter Einstellungen > KI & System > Paket-Updates und Integritaet"
                                    % (a.get("offen_anzahl", 0), _uhr(zeit)),
-                                   anzahl=a.get("offen_anzahl", 0), kennung=a.get("kennung", "")))
+                                   anzahl=a.get("offen_anzahl", 0), kennung=a.get("kennung", ""),
+                                   zuletzt=zeit))
         elif a.get("zustand") == "fehler":
             befunde.append(_befund("aide", "aide_fehler", "warnung",
-                                   "AIDE-Abgleich gescheitert: %s" % (a.get("grund") or "?")))
+                                   "AIDE-Abgleich gescheitert: %s" % (a.get("grund") or "?"),
+                                   grund=a.get("grund") or "?"))
         juengst = zeit or eing["aide_eingerichtet"]
         if jetzt - juengst > AIDE_VERALTET_S:
             befunde.append(_befund("aide_alt", "aide_veraltet", "warnung",
@@ -579,18 +581,42 @@ def _mail_modul():
     return mail_meldung
 
 
-def mail_melden(meldungen: list[tuple[str, str]]) -> dict | None:
-    """Dieselben Zeilen wie im Journal als EINE Mail (Quelle "ueberwachung"),
-    also auch nur bei einer Aenderung. Ob die Quelle an ist, entscheidet
-    mail_meldung; ein Fehler dort haelt die Ueberwachung nie an."""
+_MELDUNG = re.compile(r"^B13 (ALARM|WARNUNG|BEHOBEN) (\S+): ")
+
+
+def mail_melden(meldungen: list[tuple[str, str]], zustand: dict | None = None,
+                vorher: dict | None = None) -> dict | None:
+    """Dieselben Meldungen wie im Journal als EINE Mail (Quelle "ueberwachung"),
+    also auch nur bei einer Aenderung – aber in der Sprache der Oberflaeche:
+    der Text jedes Befunds kommt aus seiner Art und seinen Werten
+    (mail_meldung.befund_text, dieselben Vorlagen wie am Zahnrad). Der
+    Journaltext bleibt deutsch. Ob die Quelle an ist, entscheidet mail_meldung;
+    ein Fehler dort haelt die Ueberwachung nie an."""
     if not meldungen:
         return None
     try:
         mm = _mail_modul()
-        oberste = max((s for s, _ in meldungen), key=lambda s: {"alarm": 3, "warnung": 2}.get(s, 1))
-        erste = next(t for s, t in meldungen if s == oberste)
-        betreff = erste if len(meldungen) == 1 else "%s (+%d weitere)" % (erste, len(meldungen) - 1)
-        return mm.senden("ueberwachung", betreff, "\n".join(t for _, t in meldungen))
+        k = mm.konf()
+        sp, marke = k.get("sprache", "de"), k.get("marke", "Jarvis")
+        jetzt_b = {b["id"]: b for b in (zustand or {}).get("befunde") or []}
+        alt_b = {b["id"]: b for b in (vorher or {}).get("befunde") or []}
+        zeilen = []
+        for stufe, roh in meldungen:
+            m = _MELDUNG.match(roh)
+            b = None
+            if m:
+                b = (alt_b if m.group(1) == "BEHOBEN" else jetzt_b).get(m.group(2))
+            if b is None:
+                # Kein Befund zur Zeile (unbekannte Form): die Journalzeile unveraendert
+                zeilen.append((stufe, roh))
+                continue
+            etikett = mm.text("mvm.ue_" + stufe, stufe.upper(), sp)
+            zeilen.append((stufe, "%s: %s" % (etikett, mm.befund_text(b, sp, marke))))
+        oberste = max((s for s, _ in zeilen), key=lambda s: {"alarm": 3, "warnung": 2}.get(s, 1))
+        erste = next(t for s, t in zeilen if s == oberste)
+        betreff = erste if len(zeilen) == 1 else \
+            "%s %s" % (erste, mm.text("mvm.ue_weitere", "(+{n} weitere)", sp, n=len(zeilen) - 1))
+        return mm.senden("ueberwachung", betreff, "\n".join(t for _, t in zeilen))
     except Exception as e:  # noqa: BLE001
         print("Mail nicht verschickt: %s" % e, file=sys.stderr)
         return None
@@ -603,7 +629,7 @@ def lauf(pfad: Path = ZUSTAND_DATEI) -> int:
     zustand, meldungen = auswerten(sammeln(konf, vorher), vorher, konf, jetzt)
     schreiben(zustand, pfad)
     melden(meldungen)
-    mail_melden(meldungen)
+    mail_melden(meldungen, zustand, vorher)
     for stufe, text in meldungen:
         print(text)
     print("Stufe: %s, %d Befund(e)" % (zustand["stufe"], len(zustand["befunde"])))

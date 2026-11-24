@@ -75,7 +75,7 @@ const STATUS = {
     ok: true, installiert: true, aktiv: true, konfig_aktuell: true, lauscht: [], warteschlange: { anzahl: 0, grund: '' },
     empfaenger: ['a@beispiel.de'], relay: 'mail.beispiel.de:25', quellen: ['ueberwachung', 'aide'],
     alle_quellen: ['ueberwachung', 'aide', 'sicherheit', 'system'],
-    absender: 'meldung@beispiel.de', absender_name: '', betreff: '',
+    absender: 'meldung@beispiel.de', absender_name: '', betreff: '', sprache: 'de',
     vorgabe: { absender: 'jarvis@probe.beispiel.de', absender_name: 'Jarvis {server}', betreff: '[Jarvis {server}]' },
     letzte: [{ zeit: 1795480000, quelle: 'aide', betreff: '<img src=x onerror="window.__xss=1">', ok: true, fehler: '' }],
     server: 'probe.beispiel.de',
@@ -174,6 +174,28 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 60));
     pruefe(post && post.rumpf.aktion === 'einrichten' && !('nachweis' in post.rumpf) && prompts === 0 && codes() === 0,
            'Einrichten: keine Code-Abfrage');
     pruefe(!/Freigabe-Code/.test(d.getElementById('mv-block').textContent), 'im Bereich ist von keinem Freigabe-Code die Rede');
+    abschnitt('3b. Sprache der Mails = Oberflaechensprache');
+    ({ w, d, rufe } = baue(STATUS));
+    w.MailVersand.onShow(); await warte();
+    pruefe(/auf Deutsch verschickt/.test(d.getElementById('mv-status').textContent), 'Statuszeile nennt die Mailsprache');
+    w._lang = 'en';
+    d.getElementById('mv-speichern').click(); await warte();
+    let p2 = rufe.filter((r) => r.methode === 'POST').pop();
+    pruefe(p2 && p2.rumpf.aktion === 'speichern' && p2.rumpf.sprache === 'en', 'Speichern schickt die Oberflaechensprache mit',
+           p2 && JSON.stringify(p2.rumpf.sprache));
+    ({ w, d, rufe } = baue(STATUS));
+    w.MailVersand.onShow(); await warte();
+    w._lang = 'fr';
+    d.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'fr' } })); await warte();
+    p2 = rufe.filter((r) => r.methode === 'POST').pop();
+    pruefe(p2 && p2.rumpf.aktion === 'sprache' && p2.rumpf.sprache === 'fr' && !('empfaenger' in p2.rumpf),
+           'Sprachwechsel speichert NUR die Sprache (fr)', p2 && JSON.stringify(p2.rumpf));
+    ({ w, d, rufe } = baue(STATUS));
+    w.MailVersand.onShow(); await warte();
+    w._lang = 'de';
+    d.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'de' } })); await warte();
+    pruefe(!rufe.some((r) => r.methode === 'POST'), 'gleiche Sprache: nichts geschrieben');
+
     abschnitt('4. Fehler bleibt stehen');
     ({ w, d } = baue(STATUS, { ok: false, meldung: 'Keine gueltige Absenderadresse: x' }));
     w.MailVersand.onShow(); await warte();

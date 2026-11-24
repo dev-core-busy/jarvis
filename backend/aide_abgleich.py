@@ -699,30 +699,50 @@ def nach_pruefung() -> int:
 MAIL_EINTRAEGE = 40
 
 
-def mail_text(z: dict) -> tuple[str, str] | None:
-    """(Betreff, Text) fuer "offen" und "fehler" – sonst None (nichts zu melden)."""
+def _mm():
+    try:
+        from backend import mail_meldung  # type: ignore
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import mail_meldung  # type: ignore
+    return mail_meldung
+
+
+def mail_text(z: dict, sprache: str | None = None) -> tuple[str, str] | None:
+    """(Betreff, Text) fuer "offen" und "fehler" in der Sprache der Oberflaeche
+    (mail_meldung.text) – sonst None (nichts zu melden). Die Begruendung je
+    Eintrag ("warum") bleibt wie in der Anzeige."""
+    mm = _mm()
+    k = mm.konf()
+    sp = sprache or k.get("sprache", "de")
+    t = lambda key, d, **w: mm.text(key, d, sp, **w)  # noqa: E731
     summe = z.get("bericht", {}).get("summe", {})
     if z.get("zustand") == "fehler":
-        return ("AIDE-Abgleich fehlgeschlagen",
-                "Der Abgleich der taeglichen Integritaetspruefung ist gescheitert:\n  %s\n\n"
-                "Der bisherige Vergleichsstand bleibt bestehen." % (z.get("grund") or "unbekannt"))
+        return (t("mvm.aide_fehler_betreff", "AIDE-Abgleich fehlgeschlagen"),
+                "\n".join([t("mvm.aide_fehler_text", "Der Abgleich der täglichen Integritätsprüfung ist "
+                              "gescheitert: {grund}", grund=z.get("grund") or "?"), "",
+                            t("mvm.aide_fehler_stand", "Der bisherige Vergleichsstand bleibt bestehen.")]))
     if z.get("zustand") != "offen":
         return None
     n = int(z.get("offen_anzahl") or 0)
-    zeilen = ["Die Integritaetspruefung hat Aenderungen gefunden, die weder ein Paket noch der",
-              "signierte Stand von Jarvis erklaert. Der Vergleichsstand wurde NICHT uebernommen.", "",
-              "Gesamt: %d neu, %d entfernt, %d geaendert – davon %d nicht erklaert."
-              % (summe.get("neu", 0), summe.get("entfernt", 0), summe.get("geaendert", 0), n)]
+    zeilen = [t("mvm.aide_einleitung", "Die Integritätsprüfung hat Änderungen gefunden, die weder ein Paket "
+                "noch der signierte Stand von {marke} erklärt. Der Vergleichsstand wurde NICHT übernommen.",
+                marke=k.get("marke", "Jarvis")), "",
+              t("mvm.aide_summe", "Gesamt: {neu} neu, {entfernt} entfernt, {geaendert} geändert – davon {n} "
+                "nicht erklärt.", neu=summe.get("neu", 0), entfernt=summe.get("entfernt", 0),
+                geaendert=summe.get("geaendert", 0), n=n)]
     if z.get("grund"):
-        zeilen.append("Hinweis: %s" % z["grund"])
+        zeilen.append(t("mvm.aide_hinweis", "Hinweis: {grund}", grund=z["grund"]))
     zeilen.append("")
     for o in (z.get("offen") or [])[:MAIL_EINTRAEGE]:
-        zeilen.append("  [%s] %s – %s" % (o.get("art", "?"), o.get("pfad", "?"), o.get("warum", "")))
+        art = t("mvm.aide_art_" + str(o.get("art", "")), str(o.get("art", "?")))
+        zeilen.append("  [%s] %s – %s" % (art, o.get("pfad", "?"), o.get("warum", "")))
     if n > MAIL_EINTRAEGE:
-        zeilen.append("  … und %d weitere (vollstaendige Liste in der Oberflaeche)" % (n - MAIL_EINTRAEGE))
-    zeilen += ["", "Durchsicht und Uebernahme: Einstellungen -> KI & System -> Paket-Updates und",
-               "Integritaet -> Integritaetspruefung (AIDE)."]
-    return ("AIDE: %d nicht erklaerte Aenderung(en)" % n, "\n".join(zeilen))
+        zeilen.append("  " + t("mvm.aide_weitere", "… und {n} weitere (vollständige Liste in der Oberfläche)",
+                               n=n - MAIL_EINTRAEGE))
+    zeilen += ["", t("mvm.aide_weg", "Durchsicht und Übernahme: Einstellungen → KI & System → "
+                     "Paket-Updates und Integrität → Integritätsprüfung (AIDE).")]
+    return (t("mvm.aide_betreff", "AIDE: {n} nicht erklärte Änderung(en)", n=n), "\n".join(zeilen))
 
 
 def mail_melden(z: dict) -> dict | None:
@@ -733,12 +753,7 @@ def mail_melden(z: dict) -> dict | None:
         inhalt = mail_text(z)
         if not inhalt:
             return None
-        try:
-            from backend import mail_meldung  # type: ignore
-        except ImportError:
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            import mail_meldung  # type: ignore
-        return mail_meldung.senden("aide", inhalt[0], inhalt[1])
+        return _mm().senden("aide", inhalt[0], inhalt[1])
     except Exception as e:  # noqa: BLE001
         print("Mail nicht verschickt: %s" % e, flush=True)
         return None

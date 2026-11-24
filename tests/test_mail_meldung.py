@@ -298,7 +298,7 @@ try:
     from backend import aide_abgleich as aa
     t = aa.mail_text({"zustand": "offen", "offen_anzahl": 2, "bericht": {"summe": {"geaendert": 5}},
                       "offen": [{"art": "geaendert", "pfad": "/etc/x", "warum": "Inhalt weicht ab"}]})
-    pruefe(t and "2 nicht erklaerte" in t[0] and "/etc/x" in t[1], "AIDE offen: Betreff und Pfadliste")
+    pruefe(t and "2 nicht erklärte" in t[0] and "/etc/x" in t[1], "AIDE offen: Betreff und Pfadliste")
     pruefe(aa.mail_text({"zustand": "uebernommen"}) is None and aa.mail_text({"zustand": "unveraendert"}) is None,
            "AIDE sauber: keine Mail")
     pruefe(aa.mail_text({"zustand": "fehler", "grund": "kaputt"})[0].startswith("AIDE-Abgleich fehlgeschlagen"),
@@ -353,6 +353,82 @@ try:
     hm = (REPO / "backend/main.py").read_text()
     pruefe('_mail_sicherheit("konto_gesperrt_anmeldung"' in hm and '_mail_sicherheit("spruehangriff"' in hm,
            "main.py meldet Kontosperre und Spruehangriff")
+    # ── 10. Sprache der Mails = Oberflaechensprache (gemeldet 2026-11-24) ───
+    print("[10] Sprache")
+    alle = mm._texte_laden()
+    pruefe(all(len(alle.get(sp_, {})) >= 40 for sp_ in ("de", "en", "fr")),
+           "Positivkontrolle: Texte aus i18n.js/i18n_fr.js gelesen (%s)" % {k_: len(v) for k_, v in alle.items()})
+    # REGEL am Syntaxbaum: jeder Schluessel, den Mailmodul, Ueberwachung und
+    # AIDE-Abgleich benutzen, steht in ALLEN drei Sprachen (fehlt einer, faellt
+    # die Mail still auf Deutsch zurueck – genau der gemeldete Zustand).
+    benutzt = set()
+    for datei in ("backend/mail_meldung.py", "backend/ueberwachung.py", "backend/aide_abgleich.py"):
+        for c in ast.walk(ast.parse((REPO / datei).read_text())):
+            if isinstance(c, ast.Call) and c.args and isinstance(c.args[0], ast.Constant) \
+                    and isinstance(c.args[0].value, str) and c.args[0].value.startswith("mvm."):
+                benutzt.add(c.args[0].value)
+            if isinstance(c, ast.Constant) and isinstance(c.value, str) and c.value.startswith("mvm.") \
+                    and not c.value.endswith(("_", ".s_", ".f_")):
+                benutzt.add(c.value)
+    # zusammengesetzte Schluessel: Praefix + bekannte Endungen
+    benutzt |= {"mvm.s_" + a_ for a_ in mm.SICHERHEIT_ARTEN} | {"mvm.f_" + f_ for f_ in
+                ("benutzer", "kanal", "muster", "ip", "anzahl")} | {"mvm.ue_" + s_ for s_ in
+                ("alarm", "warnung", "behoben")} | {"mvm.aide_art_" + a_ for a_ in ("neu", "entfernt", "geaendert")}
+    benutzt = {b_ for b_ in benutzt if not b_.endswith("_")}
+    fehlt = sorted("%s:%s" % (sp_, k_) for k_ in benutzt for sp_ in ("de", "en", "fr") if k_ not in alle.get(sp_, {}))
+    pruefe(len(benutzt) >= 30 and not fehlt, "jeder benutzte Mailtext steht in DE, EN und FR (%d)%s"
+           % (len(benutzt), (" – fehlt: " + ", ".join(fehlt[:8])) if fehlt else ""))
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_SPRACHE=en\nMAIL_MARKE=Fabrikam\n")
+    mm._p(mm.ZUSTAND).unlink(missing_ok=True)
+    AUFRUFE.clear()
+    mm.test()
+    t_en = gesendet()[0]["eingabe"] if gesendet() else ""
+    pruefe("Subject: [Jarvis probe] Test message" in t_en and "This test message confirms" in t_en
+           and "This message is sent automatically" in t_en,
+           "Testmail englisch (Betreff, Text, Fusszeile)")
+    kopf_en = t_en.split("\n\n", 1)[1] if "\n\n" in t_en else ""
+    pruefe(all(z in kopf_en for z in ("Server: ", "Time: ", "Type: Test message")) and "Zeit:" not in kopf_en
+           and "Art:" not in kopf_en, "Kopfzeilen der Mail englisch (Server, Time, Type)")
+    AUFRUFE.clear()
+    mm.sicherheit({"art": "spruehangriff", "ip": "192.0.2.1"})
+    t_en = gesendet()[0]["eingabe"] if gesendet() else ""
+    pruefe("Password spraying" in t_en and "Source address: 192.0.2.1" in t_en, "Sicherheitsmail englisch")
+    zu = {"befunde": [{"id": "zert", "art": "zert_ablauf", "stufe": "warnung", "text": "DEUTSCH",
+                       "werte": {"tage": 5, "ablauf": 1796000000}}]}
+    AUFRUFE.clear()
+    ueberwachung.mail_melden([("warnung", "B13 WARNUNG zert: DEUTSCH")], zu, {})
+    t_en = gesendet()[0]["eingabe"] if gesendet() else ""
+    pruefe("WARNING: The server certificate expires" in t_en and "DEUTSCH" not in t_en,
+           "Ueberwachung englisch aus Art und Werten, nicht der Journaltext")
+    AUFRUFE.clear()
+    ueberwachung.mail_melden([("behoben", "B13 BEHOBEN zert: DEUTSCH")], {"befunde": []}, zu)
+    t_en = gesendet()[0]["eingabe"] if gesendet() else ""
+    pruefe("RESOLVED: The server certificate" in t_en, "behobener Befund aus dem Vorzustand uebersetzt")
+    t_aide = aa.mail_text({"zustand": "offen", "offen_anzahl": 1, "bericht": {"summe": {"neu": 1}},
+                           "offen": [{"art": "neu", "pfad": "/etc/x", "warum": "w"}]})
+    pruefe(t_aide and t_aide[0] == "AIDE: 1 unexplained change(s)" and "[added] /etc/x" in t_aide[1]
+           and "signed Fabrikam release" in t_aide[1], "AIDE-Mail englisch, {marke} aus der Einstellung")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_SPRACHE=fr\n")
+    AUFRUFE.clear()
+    mm.test()
+    pruefe(gesendet() and "Message de test" in gesendet()[0]["eingabe"], "Testmail franzoesisch")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_SPRACHE=xx\n")
+    pruefe(mm.konf()["sprache"] == "de", "unbekannte Sprache -> Deutsch")
+    r = meta.behandeln("broker.mailversand", {"aktion": "sprache", "sprache": "en", "marke": "Fabrikam"})
+    pruefe(r.get("ok") and mm.konf()["sprache"] == "en" and mm.konf()["empfaenger"] == ["a@beispiel.de"],
+           "Aktion 'sprache' setzt nur die Sprache, Empfaenger bleibt")
+    r = meta.behandeln("broker.mailversand", {"aktion": "sprache", "sprache": "xx"})
+    pruefe(not r.get("ok") and mm.konf()["sprache"] == "en", "unbekannte Sprache abgewiesen")
+    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "a@beispiel.de",
+                                              "relay": "", "quellen": ["aide"], "sprache": "fr"})
+    pruefe(r.get("ok") and mm.konf()["sprache"] == "fr", "Speichern uebernimmt die Sprache")
+    bi = (REPO / "deploy/security/broker_installieren.sh").read_text()
+    pruefe('I18N_DATEIEN="frontend/js/i18n.js frontend/js/i18n_fr.js"' in bi and "$I18N_DATEIEN 2>/dev/null" in bi,
+           "Broker-Kopie enthaelt die Uebersetzungen (root liest nicht die Datei des Dienstes)")
+    pruefe(mm.I18N_JS.parent.parent.parent == REPO / "backend" / ".." or
+           mm.I18N_JS == (REPO / "frontend/js/i18n.js").resolve(),
+           "das Modul liest i18n.js NEBEN sich (Broker-Kopie), keinen festen /opt-Pfad")
+
     # ── 9. Ausrollen auf andere Server ohne Handarbeit ───────────────────────
     print("[9] Automatik")
     start = (REPO / "start_jarvis_root.sh").read_text()
@@ -370,8 +446,19 @@ try:
                and any(getattr(t, "id", "") == "_BROKER_PFADE" for t in n.targets)), None)
     werte = {e.value for e in getattr(pf, "elts", []) if isinstance(e, ast.Constant)}
     fehlt = {"backend/mail_meldung.py", "backend/ueberwachung.py", "backend/aide_abgleich.py",
-             "start_jarvis_root.sh", "backend/broker/"} - werte
+             "start_jarvis_root.sh", "backend/broker/", "frontend/js/i18n.js", "frontend/js/i18n_fr.js"} - werte
     pruefe(not fehlt, "Update startet den Broker bei Aenderung der root-Module neu (%s)" % (", ".join(sorted(fehlt)) or "alle da"))
+    # Installer-Wechsel (0c): sonst kaemen neue mitkopierte Dateien (i18n)
+    # erst beim UEBERNAECHSTEN Broker-Neustart an – auf DEV nachgestellt.
+    m0c = start.split("# 0c. Installer-Wechsel nachholen", 1)
+    b0c = m0c[1].split("\n# 0b.", 1)[0] if len(m0c) == 2 else ""
+    pruefe(bool(b0c) and start.index("# 0c.") < start.index("# 0b."), "Startschritt 0c steht vor dem Rest des Starts")
+    pruefe('[ "${JARVIS_BROKER_NACHINSTALL:-0}" != "1" ]' in b0c and "export JARVIS_BROKER_NACHINSTALL=1" in b0c,
+           "0c laeuft hoechstens einmal (Schleifensperre)")
+    pruefe('bash "$BROKER_INSTALL_DIR/$INSTALLER_REL"' in b0c and '.get("installer","")' in b0c,
+           "0c vergleicht den Vermerk im STAND mit dem Installer DER KOPIE und ruft diesen")
+    pruefe('"installer": installer' in bi and 'd["installer"] = sha' in bi,
+           "Installer vermerkt sich im STAND – auch wenn der Inhalt gleich bleibt")
     mm.main.__doc__  # noqa: B018
     pruefe("--einrichten" in mm.__doc__ and "--anwenden" in mm.__doc__, "Kommandozeile kennt --einrichten/--anwenden")
 finally:

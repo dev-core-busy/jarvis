@@ -77,6 +77,31 @@ if [ "${JARVIS_BROKER_FRISCH:-0}" != "1" ] && [ -f "$CODE_DIR/$INSTALLER_REL" ];
     fi
 fi
 
+# 0c. Installer-Wechsel nachholen (2026-11-24)
+#
+# Beim Neustart baut der Installer der ALTEN Kopie die neue. Bringt ein Update
+# einen GEAENDERTEN Installer (z. B. weitere mitkopierte Dateien), steht dessen
+# Wirkung sonst erst nach dem uebernaechsten Neustart da – auf jedem Server,
+# unbemerkt. Gefunden am Mailversand: die Uebersetzungen fehlten in der Kopie,
+# die Mails gingen weiter deutsch hinaus. Der Installer vermerkt sich im STAND
+# ("installer"); weicht der Vermerk vom Installer IN der Kopie ab, laeuft dieser
+# EINMAL nach. JARVIS_BROKER_NACHINSTALL=1 verhindert eine Schleife.
+if [ "${JARVIS_BROKER_NACHINSTALL:-0}" != "1" ] && [ "$CODE_DIR" = "$BROKER_INSTALL_DIR" ] \
+        && [ -f "$BROKER_INSTALL_DIR/$INSTALLER_REL" ] && [ -f "$BROKER_INSTALL_DIR/STAND" ]; then
+    INST_SHA="$(sha256sum "$BROKER_INSTALL_DIR/$INSTALLER_REL" 2>/dev/null | cut -c1-16)"
+    INST_VERMERK="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("installer",""))' \
+                    "$BROKER_INSTALL_DIR/STAND" 2>/dev/null)"
+    if [ -n "$INST_SHA" ] && [ "$INST_SHA" != "$INST_VERMERK" ]; then
+        echo "[Broker] Installer hat sich geaendert (${INST_VERMERK:-ohne Vermerk} -> $INST_SHA) – Kopie wird nachgebaut."
+        bash "$BROKER_INSTALL_DIR/$INSTALLER_REL" --jarvis-dir "$JARVIS_DIR"; RC=$?
+        export JARVIS_BROKER_NACHINSTALL=1
+        if [ "$RC" = "0" ]; then
+            export JARVIS_BROKER_FRISCH=1
+            exec "$BROKER_INSTALL_DIR/start_jarvis_root.sh"
+        fi
+    fi
+fi
+
 # 0b. WhatsApp-Bridge nicht als root (K1-a, auf ECHT gemessen: User=root)
 #
 # Die Bridge startet `node index.js` aus dem Projektbaum. Als root waere jede

@@ -38,8 +38,8 @@ PROBEN = [
     ("unbekannte Quelle erlaubt", MM, '        if w not in QUELLEN:\n            return [], "Unbekannte',
      '        if False:\n            return [], "Unbekannte', 1),
     ("Code wieder verlangt (Speichern)", "backend/broker/meta.py",
-     '            fehler = f1 or f2 or f3 or f4 or f5 or f6\n',
-     '            fehler = f1 or f2 or f3 or f4 or f5 or f6 or (_nachweis(args, by, op, audit_key, peer) or {}).get("error")\n', 1),
+     '            fehler = f1 or f2 or f3 or f4 or f5 or f6 or f7 or f8\n',
+     '            fehler = f1 or f2 or f3 or f4 or f5 or f6 or f7 or f8 or (_nachweis(args, by, op, audit_key, peer) or {}).get("error")\n', 1),
     ("Code wieder verlangt (Einrichten)", "backend/broker/meta.py",
      '        if aktion == "einrichten":\n            erg = mail_meldung.einrichten()',
      '        if aktion == "einrichten":\n            if _nachweis(args, by, op, audit_key, peer):\n                return {"ok": False}\n            erg = mail_meldung.einrichten()', 1),
@@ -76,7 +76,7 @@ PROBEN = [
      '    return str(s or "")[:n]', 1),
     ("AIDE erklaert jede gemerkte Datei", MM,
      '        return _sha(_p(pfad).read_bytes()) == soll', "        return True", 1),
-    ("Ueberwachung meldet nicht", "backend/ueberwachung.py", "    mail_melden(meldungen)\n", "", 1),
+    ("Ueberwachung meldet nicht", "backend/ueberwachung.py", "    mail_melden(meldungen, zustand, vorher)\n", "", 1),
     ("AIDE-Abgleich meldet nicht", "backend/aide_abgleich.py", "    mail_melden(z)\n", "", 1),
     ("Dienst reicht beliebige Felder weiter", "backend/sicherheit_mail.py",
      "    for f in FELDER:\n        w = felder.get(f)", "    for f in felder:\n        w = felder.get(f)", 1),
@@ -88,6 +88,22 @@ PROBEN = [
      'MAIL_PROG="$CODE_DIR/backend/mail_meldung.py"', 'MAIL_PROG="/opt/jarvis/backend/mail_meldung.py"', 1),
     ("6j installiert nie", "start_jarvis_root.sh",
      "MAIL_AKTION=--anwenden; else MAIL_AKTION=--einrichten", "MAIL_AKTION=--anwenden; else MAIL_AKTION=--anwenden", 1),
+    ("Mails immer deutsch", MM, '    for s in _RUECKFALL.get(sprache, ("de",)):', '    for s in ("de",):', 1),
+    ("Sprache nie gelesen", MM, '    sprache = roh.get("MAIL_SPRACHE", "de")', '    sprache = "de"', 1),
+    ("Ueberwachung nimmt Journaltext", "backend/ueberwachung.py",
+     '            zeilen.append((stufe, "%s: %s" % (etikett, mm.befund_text(b, sp, marke))))',
+     '            zeilen.append((stufe, roh))', 1),
+    ("Kopf der Mail fest deutsch", MM, '"%s: %s" % (text("mvm.kopf_art", "Art", sp), quelle_name(quelle, sp)), ""]',
+     '"Art: %s" % quelle_name(quelle, sp), ""]', 1),
+    ("Speichern verwirft die Sprache", "backend/broker/meta.py", '"MAIL_SPRACHE": sprache,\n', '', 1),
+    ("i18n nicht in der Broker-Kopie", "deploy/security/broker_installieren.sh",
+     "        backend deploy start_jarvis_root.sh jarvis.service $I18N_DATEIEN 2>/dev/null \\",
+     "        backend deploy start_jarvis_root.sh jarvis.service 2>/dev/null \\", 1),
+    ("Update startet Broker nicht fuer i18n", "backend/update_manager.py", '"frontend/js/i18n.js", "frontend/js/i18n_fr.js"', '', 1),
+    ("0c ohne Schleifensperre", "start_jarvis_root.sh", "        export JARVIS_BROKER_NACHINSTALL=1\n", "", 1),
+    ("Installer ohne Vermerk", "deploy/security/broker_installieren.sh",
+     'json.dump({"quelle": quelle, "commit": commit, "hash": h, "installer": installer,',
+     'json.dump({"quelle": quelle, "commit": commit, "hash": h,', 1),
     ("Auto-Sperre mit Befehlstext", "backend/security_guard.py",
      '_mail("konto_gesperrt_verstoss", benutzer=user, kanal=channel, muster=kind, ip=ip)',
      '_mail("konto_gesperrt_verstoss", benutzer=user, kanal=channel, muster=kind, ip=ip, detail=detail)', 1),
@@ -112,6 +128,11 @@ def main() -> int:
         shutil.copytree(REPO / "backend", tmp / "backend",
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         shutil.copy2(REPO / "start_jarvis_root.sh", tmp / "start_jarvis_root.sh")
+        (tmp / "deploy" / "security").mkdir(parents=True)
+        shutil.copy2(REPO / "deploy/security/broker_installieren.sh", tmp / "deploy/security/broker_installieren.sh")
+        (tmp / "frontend" / "js").mkdir(parents=True)
+        for f in ("i18n.js", "i18n_fr.js"):
+            shutil.copy2(REPO / "frontend/js" / f, tmp / "frontend/js" / f)
         original = {}
         for _, datei, alt, _, soll in PROBEN:
             text = original.setdefault(datei, (REPO / datei).read_text(encoding="utf-8"))

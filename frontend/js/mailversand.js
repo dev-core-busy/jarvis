@@ -34,6 +34,9 @@
             an('mv-speichern', function () { self.speichern(); });
             an('mv-test', function () { self.test(); });
             an('mv-einrichten', function () { self.einrichten(); });
+            // Mails in der Oberflaechensprache (gemeldet 2026-11-24): wer die
+            // Sprache umschaltet, stellt die Mails mit um.
+            document.addEventListener('jarvis-lang-changed', function () { self.spracheNachziehen(); });
         },
 
         // felderBehalten: nach einem GESCHEITERTEN Speichern bleiben die
@@ -59,7 +62,37 @@
             if ((d.lauscht || []).length) z.push(T('mv.st_lauscht', 'Achtung: der Mailserver nimmt Verbindungen an ({adr}).', { adr: d.lauscht.join(', ') }));
             var w = d.warteschlange || {};
             if (w.anzahl) z.push(T('mv.st_warteschlange', '{n} Nachricht(en) warten auf Zustellung.', { n: w.anzahl }) + (w.grund ? ' (' + w.grund + ')' : ''));
+            z.push(T('mv.st_sprache', 'Meldungen werden auf {sprache} verschickt.', { sprache: this.sprachName(d.sprache) }));
             return z;
+        },
+
+        sprachName: function (code) {
+            return T('mv.sprache_' + (code || 'de'), { de: 'Deutsch', en: 'Englisch', fr: 'Französisch' }[code] || 'Deutsch');
+        },
+
+        aktuelleSprache: function () {
+            var l = window._lang || 'de';
+            return ['de', 'en', 'fr'].indexOf(l) >= 0 ? l : 'de';
+        },
+
+        marke: function () {
+            try { if (window.jarvisMarke) return window.jarvisMarke() || ''; } catch (e) { /* Rueckfall leer */ }
+            return '';
+        },
+
+        // Nach einem Sprachwechsel: nur Sprache und Marke speichern, und nur
+        // wenn der Stand geladen ist und wirklich abweicht – kein Schreiben bei
+        // jedem Aufruf. Scheitert es, bleibt die Statuszeile ehrlich (sie nennt
+        // die Sprache des SERVERS).
+        spracheNachziehen: function () {
+            var self = this, d = this._stand;
+            if (!d || !d.installiert || d.sprache === this.aktuelleSprache()) { if (d) this.zeigen(d, true); return null; }
+            return fetch('/api/broker/mailversand', {
+                method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ aktion: 'sprache', sprache: this.aktuelleSprache(), marke: this.marke() })
+            }).then(function (r) { return r.json().catch(function () { return {}; }); })
+              .catch(function () { return {}; })
+              .then(function () { return self.laden(true); });
         },
 
         zeigen: function (d, felderBehalten) {
@@ -160,6 +193,7 @@
             var relay = ($('mv-relay') || {}).value || '';
             var wert = function (id) { return ($(id) || {}).value || ''; };
             var body = { aktion: 'speichern', empfaenger: empf, relay: relay, quellen: this._quellen(),
+                         sprache: this.aktuelleSprache(), marke: this.marke(),
                          absender: wert('mv-absender'), absender_name: wert('mv-absender-name'),
                          betreff: wert('mv-betreff') };
             return this._senden(body, T('mv.ok_gespeichert', 'Gespeichert.'));

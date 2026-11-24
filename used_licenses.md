@@ -905,7 +905,7 @@ MIT, © 2020 Shiqi Yu) liegt als Datei im Repository; der Lizenztext steht daneb
 
 ### BSD-2-Clause (1)
 
-- `github.com/gorilla/websocket` v1.5.3
+- `github.com/gorilla/websocket` v1.5.4-0.20250319132907-e064f32e3674
 
 ### ISC (1)
 

@@ -8,7 +8,7 @@ require (
 	fyne.io/fyne/v2 v2.5.4
 	github.com/fogleman/gg v1.3.0
 	github.com/gen2brain/malgo v0.11.24
-	github.com/gorilla/websocket v1.5.3
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 )
 
 require (

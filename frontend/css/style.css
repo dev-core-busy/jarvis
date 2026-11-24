@@ -3101,6 +3101,14 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
 }
 .prof-standort.is-intern { border-color: var(--success); background: rgba(var(--success-rgb), 0.12); }
 .prof-standort.is-extern { border-color: var(--warning); background: rgba(var(--warning-rgb), 0.12); }
+/* Interne Netze: eigener Block im Container LLM-Profile, vor "+ Neues Profil" */
+.netze-block { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-secondary); }
+.netze-zeile { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.netze-zeile .netze-feld { flex: 1 1 260px; min-width: 0; max-width: 520px; }
+.netze-zeile .btn-small { flex: 0 0 auto; width: auto; }
+.netze-wirkung { font-size: 0.78rem; color: var(--text-secondary); }
+.netze-hinweis { margin-top: 4px; }
 /* Interne Netze: Vorschau der Einstufung vor dem Speichern */
 .netze-vorschau { margin-top: 8px; font-size: 0.8rem; color: var(--text-primary); }
 .netze-vorschau:empty { display: none; }

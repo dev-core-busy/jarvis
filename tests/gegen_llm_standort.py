@@ -36,7 +36,7 @@ PY = "tests/test_llm_standort.py"
 UI = "tests/test_interne_netze_ui.js"
 TESTS = [PY, UI]
 FRONT = ["frontend/js/prompt_check.js", "frontend/js/tracks.js", "frontend/js/app.js",
-         "frontend/js/i18n.js", "frontend/settings.html"]
+         "frontend/js/i18n.js", "frontend/js/settings_bedienung.js", "frontend/settings.html"]
 
 
 def baum() -> Path:
@@ -222,7 +222,18 @@ probe("UI: Vorschau bleibt bei gespeichertem Stand stehen",
       (AP, "            if (_netzeEintraege(text).join(' ') === _netzeEintraege(_netzeGespeichert).join(' ')) {",
            "            if (false) {"))
 probe("UI: Vorschlaege hinter Details versteckt",
-      ("frontend/settings.html", '<tr class="netze-hilfe">', '<tr class="systab-hint netze-hilfe" hidden>'))
+      ("frontend/settings.html", '<div id="interne-netze-vorschlaege" class="sec-ssh-vorschlaege"></div>',
+       '<div hidden><div id="interne-netze-vorschlaege" class="sec-ssh-vorschlaege"></div></div>'))
+probe("UI: Details-Knopf klappt nichts auf",
+      ("frontend/settings.html", 'data-klick="netze-details"', 'data-klick="systab-details"'))
+_KNOPF = ('                                <div style="margin-bottom:10px;">\n'
+          '                                    <button class="btn-add-profile" id="btn-add-profile" '
+          'data-i18n="profile.add_btn" style="margin:0;">+ Neues Profil</button>\n'
+          '                                </div>\n')
+_BLOCK = "                                <!-- Interne Netze fuer die Standort-Erkennung (global; bis"
+probe("UI: Block steht hinter + Neues Profil",
+      ("frontend/settings.html", _KNOPF, ""),
+      ("frontend/settings.html", _BLOCK, _KNOPF + _BLOCK))
 
 # ── Ablauf ──────────────────────────────────────────────────────────────────
 for name, aend in PROBEN:

@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/static/css/update_widget.css?v=10">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
-    <link rel="stylesheet" href="/static/css/style.css?v=242">
+    <link rel="stylesheet" href="/static/css/style.css?v=243">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1739,6 +1739,25 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <span class="sk-sektion-toggle" id="prof-sect-list-tog">▶</span>
                             </div>
                             <div id="prof-sect-list-body" class="kb-collapse-body" style="display:none;">
+                                <!-- Interne Netze fuer die Standort-Erkennung (global; bis 2026-11-24
+                                     als Zeile unter "System-Einstellungen") – steht bei den Profilen,
+                                     weil sie deren Plakette intern/extern bestimmt. Vorschlaege und
+                                     Vorschau: app.js _netzeHilfe*. -->
+                                <div class="netze-block" id="interne-netze-block">
+                                    <h4 class="tuning-group-title" data-i18n="profile.section_netze">Interne Netze</h4>
+                                    <label for="setting-interne-netze" class="systab-label" data-i18n="profile.netze_label">Diese Adressbereiche gehören zum eigenen Netz</label>
+                                    <div class="netze-zeile">
+                                        <input data-tabfill-nein="Beispiel fuer das Format, kein Wert" type="text" id="setting-interne-netze" class="systab-feld netze-feld" autocomplete="off" spellcheck="false" data-i18n-placeholder="profile.netze_ph" placeholder="z. B. 198.51.100.0/24, 2001:db8::/32">
+                                        <button class="btn-secondary btn-small" id="btn-save-interne-netze" type="button" data-i18n="profile.save_btn">Speichern</button>
+                                        <span id="interne-netze-status" class="systab-status"></span>
+                                    </div>
+                                    <div class="netze-wirkung"><span data-i18n="profile.systab_netze_wirkung">LLM-Server unter diesen Adressen gelten als intern – zusätzlich zu den privaten Bereichen (10.x, 172.16–31.x, 192.168.x).</span>
+                                        <button type="button" class="systab-mehr" data-klick="netze-details" aria-expanded="false" aria-controls="interne-netze-hinweis" data-i18n="profile.systab_details">Details</button></div>
+                                    <div id="interne-netze-hinweis" class="netze-hinweis" hidden><small class="tab-note" data-i18n="profile.netze_hint">Nicht jedes Firmennetz benutzt private Adressbereiche. Steht ein eigener LLM-Server unter einer öffentlich registrierten Adresse, hält die automatische Erkennung ihn für einen Cloud-Dienst, und sensible Läufe dürfen ihn nicht benutzen. Hier eingetragene Bereiche (Schreibweise mit Präfixlänge, durch Komma getrennt) gelten als intern, auch für Servernamen, die dorthin auflösen. Einzelne Profile lassen sich alternativ im Profil selbst auf „Intern“ stellen.</small></div>
+                                    <div class="sec-ssh-vorschlag-kopf" data-i18n="profile.netze_vs_kopf">Vorschläge – ein Klick fügt den Bereich ins Feld ein:</div>
+                                    <div id="interne-netze-vorschlaege" class="sec-ssh-vorschlaege"></div>
+                                    <div id="interne-netze-vorschau" class="netze-vorschau" aria-live="polite"></div>
+                                </div>
                                 <div style="margin-bottom:10px;">
                                     <button class="btn-add-profile" id="btn-add-profile" data-i18n="profile.add_btn" style="margin:0;">+ Neues Profil</button>
                                 </div>
@@ -1852,37 +1871,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                             </tr>
                                             <tr class="systab-hint" hidden>
                                                 <td colspan="4"><small class="tab-note" data-i18n="profile.sensprof_hint">Ist das Modell des Benutzers, seiner Rolle oder der Ablage extern, arbeitet ein sensibler Lauf mit diesem Profil – unabhängig davon, wer es sonst benutzen darf. Ohne Eintrag nimmt er das erste interne Profil, das der Benutzer benutzen darf. Gibt es keines, wird der Lauf mit einer Meldung abgebrochen, statt Inhalte an einen Cloud-Anbieter zu schicken.</small></td>
-                                            </tr>
-
-                                            <!-- Interne Netze fuer die Standort-Erkennung (global) -->
-                                            <tr>
-                                                <td>
-                                                    <h4 class="tuning-group-title" data-i18n="profile.section_netze">Interne Netze</h4>
-                                                    <label for="setting-interne-netze" class="systab-label" data-i18n="profile.netze_label">Diese Adressbereiche gehören zum eigenen Netz</label>
-                                                </td>
-                                                <td>
-                                                    <input data-tabfill-nein="Beispiel fuer das Format, kein Wert" type="text" id="setting-interne-netze" class="systab-feld" autocomplete="off" spellcheck="false" data-i18n-placeholder="profile.netze_ph" placeholder="z. B. 198.51.100.0/24, 2001:db8::/32">
-                                                </td>
-                                                <td>
-                                                    <span data-i18n="profile.systab_netze_wirkung">LLM-Server unter diesen Adressen gelten als intern – zusätzlich zu den privaten Bereichen (10.x, 172.16–31.x, 192.168.x).</span>
-                                                    <button type="button" class="systab-mehr" data-klick="systab-details" aria-expanded="false" data-i18n="profile.systab_details">Details</button>
-                                                </td>
-                                                <td class="systab-save">
-                                                    <button class="btn-secondary btn-small" id="btn-save-interne-netze" type="button" data-i18n="profile.save_btn">Speichern</button>
-                                                    <span id="interne-netze-status" class="systab-status"></span>
-                                                </td>
-                                            </tr>
-                                            <tr class="systab-hint" hidden>
-                                                <td colspan="4"><small class="tab-note" data-i18n="profile.netze_hint">Nicht jedes Firmennetz benutzt private Adressbereiche. Steht ein eigener LLM-Server unter einer öffentlich registrierten Adresse, hält die automatische Erkennung ihn für einen Cloud-Dienst, und sensible Läufe dürfen ihn nicht benutzen. Hier eingetragene Bereiche (Schreibweise mit Präfixlänge, durch Komma getrennt) gelten als intern, auch für Servernamen, die dorthin auflösen. Einzelne Profile lassen sich alternativ im Profil selbst auf „Intern“ stellen.</small></td>
-                                            </tr>
-                                            <!-- Vorschlaege (eigene Schnittstellen, Profiladressen) und Vorschau
-                                                 der Einstufung vor dem Speichern – app.js _netzeHilfe* -->
-                                            <tr class="netze-hilfe">
-                                                <td colspan="4">
-                                                    <div class="sec-ssh-vorschlag-kopf" data-i18n="profile.netze_vs_kopf">Vorschläge – ein Klick fügt den Bereich ins Feld ein:</div>
-                                                    <div id="interne-netze-vorschlaege" class="sec-ssh-vorschlaege"></div>
-                                                    <div id="interne-netze-vorschau" class="netze-vorschau" aria-live="polite"></div>
-                                                </td>
                                             </tr>
 
                                             <!-- Vorhaltezeit erzeugter Dokumente (global) -->
@@ -6951,7 +6939,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): Klick-Zuhoerer der frueheren
          onclick-Attribute (data-klick). VOR allen anderen Skripten, damit vision.js
          den Platz el.onclick wie bisher danach ueberschreiben kann. -->
-    <script src="/static/js/settings_bedienung.js?v=8"></script>
+    <script src="/static/js/settings_bedienung.js?v=9"></script>
     <script src="/static/js/konto_hinweise.js?v=3"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>

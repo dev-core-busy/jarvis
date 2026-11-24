@@ -110,6 +110,13 @@
 
         // System-Einstellungen als Tabelle: "Details" klappt die Erlaeuterungs-
         // zeile direkt unter der eigenen Zeile auf und zu.
+        // Interne Netze (Container LLM-Profile): Erlaeuterung unter dem Block
+        'netze-details': function () {
+            var h = document.getElementById('interne-netze-hinweis');
+            if (!h) return;
+            h.hidden = !h.hidden;
+            this.setAttribute('aria-expanded', h.hidden ? 'false' : 'true');
+        },
         'systab-details': function () {
             var tr = this.closest('tr');
             var hint = tr && tr.nextElementSibling;

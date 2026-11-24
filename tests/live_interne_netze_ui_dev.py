@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Optische Abnahme (DEV, echtes Chrome): Vorschlaege und Vorschau "Interne Netze".
 
-KI & System -> System-Einstellungen, Zeile "Interne Netze" (seit 2026-11-24):
+KI & System -> Container "LLM-Profile", Block "Interne Netze" vor "+ Neues Profil"
+(seit 2026-11-24):
 unter dem Feld stehen Vorschlaege des Servers (eigene Schnittstellen,
 oeffentliche Profiladressen), ein Klick traegt sie ein, und eine Vorschau
 nennt VOR dem Speichern, welches Profil seine Einstufung wechselt. jsdom
 rechnet kein Layout (tests/test_interne_netze_ui.js misst das Verhalten) –
-ob die Knoepfe in der Tabelle bleiben und die Vorschau zu sehen ist, sieht
+ob die Knoepfe im Block bleiben und die Vorschau zu sehen ist, sieht
 nur ein Browser.
 
 Gemessen je Thema (dunkel/hell):
   - Positivkontrolle: Feld und Vorschlagszeile sind sichtbar, mindestens ein
     Vorschlag ist da (sonst Exit 2 – dann misst der Rest nichts);
-  - kein Vorschlagsknopf ragt rechts aus der Tabelle;
+  - der Block steht im Container LLM-Profile UEBER "+ Neues Profil";
+  - kein Vorschlags- und kein Speichern-Knopf ragt rechts aus dem Block;
   - Feld LEEREN (wie ein Benutzer, per Eingabe-Ereignis): die Vorschau
     erscheint, ist sichtbar und nennt mindestens einen Wechsel;
   - es wird NICHTS gespeichert: die Liste auf dem Server ist am Ende dieselbe.
@@ -151,24 +153,32 @@ def main(benutzer: str) -> int:
                      "body:JSON.stringify({code:%s})}).then(r=>r.status)" % json.dumps(neuer_code()))
             cmd("Page.navigate", {"url": "https://127.0.0.1/settings"})
             time.sleep(6)
-            js("(function(){var b=document.getElementById('prof-sect-tuning-body');"
-               "if(b&&b.style.display==='none')document.getElementById('prof-sect-tuning-hdr').click();})()")
+            js("(function(){var b=document.getElementById('prof-sect-list-body');"
+               "if(b&&b.style.display==='none')document.getElementById('prof-sect-list-hdr').click();})()")
             time.sleep(3)
             m = js("""(function(){
               var f=document.getElementById('setting-interne-netze'), v=document.getElementById('interne-netze-vorschlaege');
-              if(!f||!v) return null;
-              var t=v.closest('table'), tb=t?t.getBoundingClientRect():null, vb=v.getBoundingClientRect();
+              var t=document.getElementById('interne-netze-block'), neu=document.getElementById('btn-add-profile');
+              if(!f||!v||!t||!neu) return null;
+              var tb=t.getBoundingClientRect(), vb=v.getBoundingClientRect(), nb=neu.getBoundingClientRect();
+              var sp=document.getElementById('btn-save-interne-netze').getBoundingClientRect();
               var k=[...v.querySelectorAll('button[data-netz]')].map(function(b){var r=b.getBoundingClientRect();
                 return {netz:b.dataset.netz,r:Math.round(r.right),w:Math.round(r.width),h:Math.round(r.height)};});
               return {feldSichtbar:f.offsetParent!==null, zeileSichtbar:v.offsetParent!==null && vb.height>0,
-                      tabR:tb?Math.round(tb.right):null, knoepfe:k, text:v.textContent.slice(0,200)};})()""")
+                      tabR:Math.round(tb.right), knoepfe:k, text:v.textContent.slice(0,200),
+                      blockUnten:Math.round(tb.bottom), neuOben:Math.round(nb.top),
+                      neuSichtbar:neu.offsetParent!==null, speichernR:Math.round(sp.right),
+                      imContainer:document.getElementById('prof-sect-list-body').contains(t)};})()""")
             if not m or not m["feldSichtbar"] or not m["zeileSichtbar"] or not m["knoepfe"]:
                 print(f"ABBRUCH: Feld/Vorschlaege nicht sichtbar oder leer (Erhoehung {erh}): {m}")
                 return 2
             check("Positivkontrolle: Feld und Vorschlaege sichtbar, %d Vorschlag/Vorschlaege" % len(m["knoepfe"]), True)
             print("  (Vorschlaege: %s)" % [k["netz"] for k in m["knoepfe"]])
-            check("kein Vorschlag ragt rechts aus der Tabelle",
-                  all(k["r"] <= m["tabR"] + 1 for k in m["knoepfe"]), str(m))
+            check('Block steht im Container LLM-Profile, ueber "+ Neues Profil"',
+                  m["imContainer"] and m["neuSichtbar"] and m["blockUnten"] <= m["neuOben"], str(m))
+            check("kein Vorschlag und kein Speichern ragt rechts aus dem Block",
+                  all(k["r"] <= m["tabR"] + 1 for k in m["knoepfe"]) and m["speichernR"] <= m["tabR"] + 1,
+                  str(m))
             check("Vorschlagsknoepfe haben Groesse (gezeichnet)",
                   all(k["w"] > 40 and k["h"] > 15 for k in m["knoepfe"]), str(m["knoepfe"]))
             # Wie ein Benutzer: Feld leeren -> Vorschau (nichts speichern!)
@@ -182,7 +192,7 @@ def main(benutzer: str) -> int:
             check("Vorschau nennt einen Wechsel (intern -> extern) und dass erst Speichern wirkt",
                   bool(pv) and "→" in pv["text"] and "Speichern" in pv["text"], str(pv and pv["text"]))
             print("  (Vorschau: %s)" % (pv and pv["text"]))
-            bild(f"interne-netze-{thema}.png", "tr.netze-hilfe")
+            bild(f"interne-netze-{thema}.png", "#interne-netze-block")
             st, s = api(tok, "GET", "/api/settings")
             check("nichts gespeichert: Liste auf dem Server unveraendert",
                   st == 200 and s.get("interne_netze", "") == vor_netze, f"{st} {s.get('interne_netze')!r}")

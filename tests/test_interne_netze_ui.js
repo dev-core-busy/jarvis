@@ -56,7 +56,7 @@ if (fehltFn.length) {
 
 // ── Markup ──
 const HTML = lies('frontend/settings.html');
-const A = ausschnitt(HTML, ['setting-interne-netze', 'interne-netze-vorschlaege', 'interne-netze-vorschau']);
+const A = ausschnitt(HTML, ['prof-sect-list-body', 'prof-sect-tuning-body']);
 if (A.fehlend.length) {
     console.log('ABBRUCH: Markup fehlt: ' + A.fehlend.join(', '));
     process.exit(2);
@@ -94,6 +94,7 @@ function attrappe(url, opt) {
     const dom = new JSDOM(A.html, { runScripts: 'outside-only', url: 'https://jarvis.test/settings' });
     const w = dom.window;
     w.eval(lies('frontend/js/i18n.js'));
+    w.eval(lies('frontend/js/settings_bedienung.js'));
     w.fetch = attrappe;
     // Die geschnittenen Funktionen teilen ihre Variablen als Closure (wie in
     // app.js); gelesen und gesetzt wird ueber den Zugriff __netze.
@@ -118,8 +119,28 @@ function attrappe(url, opt) {
     const pbox = w.document.getElementById('interne-netze-vorschau');
 
     console.log('\n── Markup');
-    check(vbox.closest('tr') && !vbox.closest('tr').hidden && !vbox.closest('.systab-hint'),
-        'Vorschlaege stehen in einer sichtbaren Zeile, nicht hinter "Details"');
+    const block = w.document.getElementById('interne-netze-block');
+    const neu = w.document.getElementById('btn-add-profile');
+    const liste = w.document.getElementById('prof-sect-list-body');
+    check(block && neu && liste && liste.contains(block),
+        'Block "Interne Netze" steht im Container LLM-Profile');
+    check(block && neu && (block.compareDocumentPosition(neu) & w.Node.DOCUMENT_POSITION_FOLLOWING),
+        'Block steht VOR "+ Neues Profil"');
+    check(!w.document.getElementById('prof-sect-tuning-body').querySelector('#setting-interne-netze'),
+        'nicht mehr unter System-Einstellungen');
+    check(block && block.contains(feld) && block.contains(vbox) && block.contains(pbox)
+        && block.contains(w.document.getElementById('btn-save-interne-netze')),
+        'Feld, Speichern, Vorschlaege und Vorschau gehoeren zum Block');
+    check(!vbox.closest('[hidden]') && !pbox.closest('[hidden]'),
+        'Vorschlaege und Vorschau stehen nicht hinter "Details"');
+    const hinweis = w.document.getElementById('interne-netze-hinweis');
+    const details = block && block.querySelector('[aria-controls="interne-netze-hinweis"]');
+    check(hinweis && hinweis.hidden, 'Erlaeuterung ist zunaechst zu');
+    if (details) details.click();
+    check(hinweis && !hinweis.hidden && details.getAttribute('aria-expanded') === 'true',
+        '"Details" klappt die Erlaeuterung auf');
+    if (details) details.click();
+    check(hinweis && hinweis.hidden, '"Details" klappt sie wieder zu');
     check(pbox.getAttribute('aria-live') === 'polite', 'Vorschau wird Bildschirmlesern angesagt');
 
     console.log('\n── Vorschlaege');

@@ -187,12 +187,14 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
             sprache = str(args.get("sprache", ""))
             marke, f = mail_meldung.text_pruefen(args.get("marke", ""), "Marke")
             if sprache not in mail_meldung.SPRACHEN or f:
-                return {"ok": False, "meldung": f or "Unbekannte Sprache"}
+                return mail_meldung.antwort(False, f or mail_meldung.Meldung(
+                    "sprache_unbekannt", "Unbekannte Sprache", wert=sprache[:5]))
             werte = {"MAIL_SPRACHE": sprache}
             if marke:
                 werte["MAIL_MARKE"] = marke
             mail_meldung._konf_schreiben(werte)
-            erg = {"ok": True, "meldung": "Sprache übernommen", "gespeichert": werte}
+            erg = mail_meldung.antwort(True, mail_meldung.Meldung("sprache_uebernommen", "Sprache übernommen"),
+                                       gespeichert=werte)
         elif aktion == "speichern":
             empf, f1 = mail_meldung.empfaenger_pruefen(args.get("empfaenger", ""))
             relay, f2 = mail_meldung.relay_pruefen(args.get("relay", ""))
@@ -202,22 +204,25 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
             betreff, f6 = mail_meldung.text_pruefen(args.get("betreff", ""), "Betreff")
             marke, f7 = mail_meldung.text_pruefen(args.get("marke", ""), "Marke")
             sprache = str(args.get("sprache", "") or mail_meldung.konf()["sprache"])
-            f8 = "" if sprache in mail_meldung.SPRACHEN else "Unbekannte Sprache"
+            f8 = "" if sprache in mail_meldung.SPRACHEN else mail_meldung.Meldung(
+                "sprache_unbekannt", "Unbekannte Sprache", wert=sprache[:5])
             fehler = f1 or f2 or f3 or f4 or f5 or f6 or f7 or f8
             if fehler:
-                return {"ok": False, "meldung": fehler}
+                return mail_meldung.antwort(False, fehler)
             mail_meldung._konf_schreiben({"MAIL_EMPFAENGER": ",".join(empf), "MAIL_RELAY": relay,
                                           "MAIL_QUELLEN": ",".join(quellen), "MAIL_ABSENDER": absender,
                                           "MAIL_ABSENDER_NAME": name, "MAIL_BETREFF": betreff,
                                           "MAIL_SPRACHE": sprache,
                                           "MAIL_MARKE": marke or mail_meldung.konf()["marke"]})
             erg = mail_meldung.anwenden() if mail_meldung.installiert() else \
-                {"ok": True, "meldung": "Gespeichert – wirksam, sobald der Mailserver eingerichtet ist"}
+                mail_meldung.antwort(True, mail_meldung.Meldung(
+                    "gespeichert_ohne_mailserver", "Gespeichert – wirksam, sobald der Mailserver eingerichtet ist"))
             erg["gespeichert"] = {"empfaenger": empf, "relay": relay, "quellen": quellen,
                                   "absender": absender, "absender_name": name, "betreff": betreff,
                                   "sprache": sprache}
         else:
-            return {"ok": False, "meldung": f"Unbekannte Aktion: {aktion}"}
+            return mail_meldung.antwort(False, mail_meldung.Meldung(
+                "aktion_unbekannt", f"Unbekannte Aktion: {aktion}", wert=aktion[:40]))
         policy.audit(by, op, audit_key, "executed" if erg.get("ok") else "fehler",
                      detail=str(erg.get("meldung", ""))[:200],
                      info=str(erg.get("gespeichert", ""))[:300], peer=peer)

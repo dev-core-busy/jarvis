@@ -1275,15 +1275,14 @@ def _record_login_attempt(ip: str, username: str = ""):
                                   ergebnis="gesperrt",
                                   dauer_s=_anmelde_schutz.KONTO_SPERRE_S)
         _mail_sicherheit("konto_gesperrt_anmeldung", benutzer=_norm_login(username), ip=ip,
-                         kanal="Anmeldung")
+                         kanal="anmeldung")
     # Password Spraying: EINMAL je Angriff melden (Sicherheitsprotokoll mit
     # Hash-Kette + Journal); die Admin-Ansicht zeigt die Lage, solange sie gilt.
     lage = _anmelde_schutz.sprueh_neu_melden()
     if lage:
         _sicherheits_log.ereignis("spruehangriff", ip=ip, ergebnis="erkannt",
                                   konten=lage["konten"], bis=lage["bis"])
-        _mail_sicherheit("spruehangriff", ip=ip, kanal="Anmeldung",
-                         anzahl="%s Konten" % lage["konten"])
+        _mail_sicherheit("spruehangriff", ip=ip, kanal="anmeldung", konten=lage["konten"])
         print(f"[Anmeldeschutz] SPRUEHANGRIFF erkannt: Fehlversuche fuer "
               f"{lage['konten']} verschiedene Konten in "
               f"{_anmelde_schutz.SPRUEH_FENSTER_S // 60} min – Anmeldungen gebremst "
@@ -11348,6 +11347,9 @@ async def broker_mailversand(request: Request, user: str = Depends(require_local
     return JSONResponse({"ok": bool(res.get("ok")), "gesendet": res.get("gesendet"),
                          "gedrosselt": res.get("gedrosselt"),
                          "meldung": res.get("meldung") or res.get("error", ""),
+                         # Kennung + Werte: die Oberflaeche uebersetzt (mv.m_<code>)
+                         "code": str(res.get("code") or "")[:60],
+                         "werte": res.get("werte") if isinstance(res.get("werte"), dict) else {},
                          "schritte": res.get("schritte") or [],
                          "gespeichert": res.get("gespeichert")},
                         status_code=200 if res.get("ok") else 409)

@@ -16,6 +16,20 @@
         Object.keys(vars || {}).forEach(function (k) { s = s.split('{' + k + '}').join(vars[k]); });
         return s;
     }
+    // Rueckmeldung des Servers in der gewaehlten Sprache: der Server schickt
+    // eine Kennung (code) und Werte, der deutsche Satz (meldung) ist nur der
+    // Rueckfall fuer eine unbekannte Kennung (gemeldet 2026-11-24: bei FR kam
+    // "Échec : Keine gültige Absenderadresse").
+    function meldungText(d) {
+        if (!d) return '';
+        var w = d.werte || {};
+        var vorlage = d.code ? T('mv.m_' + d.code, '') : '';
+        if (!vorlage) return String(d.meldung || d.error || '');
+        return vorlage.replace(/\{(\w+)\}/g, function (_, k) {
+            if (k === 'feld' && w.feld) return T('mv.feld_' + w.feld, String(w.feld));
+            return w[k] == null ? '' : String(w[k]);
+        });
+    }
     function zeit(ts) {
         try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
     }
@@ -35,8 +49,10 @@
             an('mv-test', function () { self.test(); });
             an('mv-einrichten', function () { self.einrichten(); });
             // Mails in der Oberflaechensprache (gemeldet 2026-11-24): wer die
-            // Sprache umschaltet, stellt die Mails mit um.
-            document.addEventListener('jarvis-lang-changed', function () { self.spracheNachziehen(); });
+            // Sprache umschaltet, stellt die Mails mit um. i18n.js loest das
+            // Ereignis am WINDOW aus – die erste Fassung hoerte am document und
+            // bekam es nie (auf ECHT gemeldet: FR gewaehlt, Mail deutsch).
+            window.addEventListener('jarvis-lang-changed', function () { self.spracheNachziehen(); });
         },
 
         // felderBehalten: nach einem GESCHEITERTEN Speichern bleiben die
@@ -46,7 +62,16 @@
             var self = this;
             return fetch('/api/broker/mailversand/status', { headers: authHeaders() })
                 .then(function (r) { return r.json().catch(function () { return null; }); })
-                .then(function (d) { self.zeigen(d && d.ok ? d : null, felderBehalten); })
+                .then(function (d) {
+                    self.zeigen(d && d.ok ? d : null, felderBehalten);
+                    // Beim Oeffnen: weicht die gespeicherte Mailsprache von der
+                    // gewaehlten ab (Sprache vorher woanders umgestellt), gleich
+                    // nachziehen. Nach einem Nachziehen kommt felderBehalten=true
+                    // – keine Schleife.
+                    if (!felderBehalten && d && d.ok && d.installiert && d.sprache !== self.aktuelleSprache()) {
+                        return self.spracheNachziehen();
+                    }
+                })
                 .catch(function () { self.zeigen(null); });
         },
 
@@ -173,9 +198,11 @@
             }).then(function (r) { return r.json().catch(function () { return {}; }); })
               .then(function (d) {
                   if (d && d.ok && d.gedrosselt) self._ergebnis(false, T('mv.gedrosselt', 'Zu viele Testnachrichten in der letzten Stunde – bitte später erneut versuchen.'));
+                  // ok, aber nichts verschickt (kein Empfaenger, Art aus): sagen, warum
+                  else if (d && d.ok && d.gesendet === false) self._ergebnis(false, meldungText(d));
                   else if (d && d.ok) { gelungen = true; self._ergebnis(true, okText); }
                   else {
-                      var text = (d && (d.meldung || d.error)) || '';
+                      var text = meldungText(d);
                       self._ergebnis(false, T('mv.fehler', 'Fehlgeschlagen') + (text ? ': ' + text : ''));
                   }
               })
@@ -205,9 +232,17 @@
         },
 
         test: function () {
+            var self = this;
+            // Erst die Sprache angleichen, dann senden – sonst kaeme die Testmail
+            // in der alten Sprache (auf ECHT gemeldet, 2026-11-24).
+            return Promise.resolve(this.spracheNachziehen()).then(function () { return self._testSenden(); });
+        },
+
+        _testSenden: function () {
             return this._senden({ aktion: 'test' }, T('mv.ok_test', 'Testnachricht übergeben – sie sollte in wenigen Minuten ankommen.'));
         }
     };
 
+    Mv._meldungText = meldungText;
     window.MailVersand = Mv;
 })();

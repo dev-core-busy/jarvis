@@ -110,6 +110,29 @@ def _p(pfad: str) -> Path:
     return Path(W + pfad) if W else Path(pfad)
 
 
+# ── Rueckmeldungen an die Oberflaeche: Kennung + Werte ──────────────────────
+# Die Oberflaeche uebersetzt ``code`` in der gewaehlten Sprache (i18n
+# ``mv.m_<code>`` mit ``werte``); ``meldung`` bleibt der deutsche Satz fuer
+# Audit und Konsole. Vorher kam jeder Satz fertig deutsch an – bei FR stand
+# dann "Échec : Keine gültige Absenderadresse" (gemeldet 2026-11-24).
+# Waechter: tests/test_mail_meldung.py (jede Rueckmeldung traegt eine Kennung,
+# jede Kennung steht in DE/EN/FR).
+class Meldung(str):
+    """Ein Satz MIT Kennung und Werten – bleibt ein str fuer alle Aufrufer."""
+
+    def __new__(cls, code: str, satz: str, **werte):
+        o = str.__new__(cls, satz)
+        o.code = code
+        o.werte = {k: (v if isinstance(v, (int, float)) else str(v)) for k, v in werte.items()}
+        return o
+
+
+def antwort(ok: bool, m, **felder) -> dict:
+    """Antwort-Objekt mit meldung (deutsch), code und werte."""
+    return {"ok": ok, "meldung": str(m), "code": getattr(m, "code", ""),
+            "werte": dict(getattr(m, "werte", {}) or {}), **felder}
+
+
 def _lauf(befehl: list[str], timeout: int = 60, eingabe: str | None = None,
           umgebung: dict | None = None) -> subprocess.CompletedProcess:
     umg = dict(os.environ, LC_ALL="C", LANG="C")
@@ -142,11 +165,11 @@ def empfaenger_pruefen(text) -> tuple[list[str], str]:
     aus: list[str] = []
     for t in teile:
         if not _ADRESSE.match(t):
-            return [], "Keine gültige E-Mail-Adresse: %s" % t[:80]
+            return [], Meldung("empfaenger_ungueltig", "Keine gültige E-Mail-Adresse: %s" % t[:80], wert=t[:80])
         if t.lower() not in (a.lower() for a in aus):
             aus.append(t)
     if len(aus) > EMPFAENGER_MAX:
-        return [], "Höchstens %d Empfänger" % EMPFAENGER_MAX
+        return [], Meldung("empfaenger_zuviele", "Höchstens %d Empfänger" % EMPFAENGER_MAX, max=EMPFAENGER_MAX)
     return aus, ""
 
 
@@ -158,10 +181,10 @@ def relay_pruefen(text) -> tuple[str, str]:
         return "", ""
     m = re.match(r"^\[?([^\]\[:\s]+)\]?(?::(\d{1,5}))?$", t)
     if not m or not _HOST.match(m.group(1)):
-        return "", "Kein gültiger Servername: %s" % t[:80]
+        return "", Meldung("relay_ungueltig", "Kein gültiger Servername: %s" % t[:80], wert=t[:80])
     port = int(m.group(2) or 25)
     if not 1 <= port <= 65535:
-        return "", "Ungültiger Port: %s" % m.group(2)
+        return "", Meldung("port_ungueltig", "Ungültiger Port: %s" % m.group(2), wert=m.group(2))
     return "%s:%d" % (m.group(1), port), ""
 
 
@@ -172,7 +195,7 @@ def quellen_pruefen(werte) -> tuple[list[str], str]:
     for w in werte or []:
         w = str(w).strip().lower()
         if w not in QUELLEN:
-            return [], "Unbekannte Meldungsart: %s" % w[:40]
+            return [], Meldung("quelle_unbekannt", "Unbekannte Meldungsart: %s" % w[:40], wert=w[:40])
         if w not in aus:
             aus.append(w)
     return [q for q in QUELLEN if q in aus], ""
@@ -189,7 +212,7 @@ def absender_pruefen(text) -> tuple[str, str]:
     """Absenderadresse: leer (= jarvis@<rechner>) oder eine gueltige Adresse."""
     t = str(text or "").strip()
     if t and not _ABSENDER.match(t):
-        return "", "Keine gültige Absenderadresse: %s" % t[:80]
+        return "", Meldung("absender_ungueltig", "Keine gültige Absenderadresse: %s" % t[:80], wert=t[:80])
     return t, ""
 
 
@@ -197,9 +220,9 @@ def text_pruefen(text, was: str) -> tuple[str, str]:
     """Einzeiliger Text fuer Anzeigename/Betreff (kein Kopf-Einschleusen)."""
     t = str(text or "").strip()
     if re.search(r"[\x00-\x1f\x7f]", t):
-        return "", "%s darf keine Steuerzeichen enthalten" % was
+        return "", Meldung("steuerzeichen", "%s darf keine Steuerzeichen enthalten" % was, feld=was.lower())
     if len(t) > TEXT_MAX:
-        return "", "%s: höchstens %d Zeichen" % (was, TEXT_MAX)
+        return "", Meldung("zu_lang", "%s: höchstens %d Zeichen" % (was, TEXT_MAX), feld=was.lower(), max=TEXT_MAX)
     return t, ""
 
 
@@ -420,12 +443,12 @@ def anwenden() -> dict:
     try:
         return _anwenden()
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "meldung": "Fehler beim Anwenden: %s" % e}
+        return antwort(False, Meldung("anwenden_fehler", "Fehler beim Anwenden: %s" % e, fehler=e))
 
 
 def _anwenden() -> dict:
     if not installiert():
-        return {"ok": False, "meldung": "Der Mailserver ist nicht installiert – bitte zuerst einrichten."}
+        return antwort(False, Meldung("nicht_installiert", "Der Mailserver ist nicht installiert – bitte zuerst einrichten."))
     k = konf()
     schritte = []
     try:
@@ -446,7 +469,8 @@ def _anwenden() -> dict:
         schritte.append("SMTP-Eingang abgeschaltet" if r2.returncode == 0 else
                         "SMTP-Eingang abschalten gescheitert: %s" % (r2.stderr or "").strip()[:200])
         if r2.returncode != 0:
-            return {"ok": False, "meldung": schritte[-1], "schritte": schritte}
+            return antwort(False, Meldung("smtp_aus_fehler", schritte[-1], fehler=(r2.stderr or "").strip()[:200]),
+                           schritte=schritte)
         try:
             _merken(MASTER_CF, _sha(_p(MASTER_CF).read_bytes()))
         except OSError:
@@ -454,8 +478,8 @@ def _anwenden() -> dict:
     if g_alias or not _alias_db_da():
         r = _lauf(["newaliases"], timeout=30)
         if r.returncode != 0:
-            return {"ok": False, "meldung": "newaliases: %s" % (r.stderr or r.stdout).strip()[:300],
-                    "schritte": schritte}
+            return antwort(False, Meldung("newaliases", "newaliases: %s" % (r.stderr or r.stdout).strip()[:300],
+                                          fehler=(r.stderr or r.stdout).strip()[:300]), schritte=schritte)
         for db in _alias_dbs():
             _merken(db, _sha(_p(db).read_bytes()))
         schritte.append("Weiterleitung fuer root aktualisiert")
@@ -464,17 +488,18 @@ def _anwenden() -> dict:
         schritte.append("Debians AIDE-Tagesbericht stillgelegt")
     r = _lauf(["postfix", "check"], timeout=30)
     if r.returncode != 0:
-        return {"ok": False, "meldung": "postfix check: %s" % (r.stderr or r.stdout).strip()[:300],
-                "schritte": schritte}
+        return antwort(False, Meldung("postfix_check", "postfix check: %s" % (r.stderr or r.stdout).strip()[:300],
+                                      fehler=(r.stderr or r.stdout).strip()[:300]), schritte=schritte)
     if g_main or g_name or g_alias or any("SMTP" in s for s in schritte):
         r = _lauf(["systemctl", "restart", "postfix"], timeout=60)
         schritte.append("Postfix neu gestartet" if r.returncode == 0 else
                         "Neustart gescheitert: %s" % (r.stderr or "").strip()[:200])
         if r.returncode != 0:
-            return {"ok": False, "meldung": schritte[-1], "schritte": schritte}
+            return antwort(False, Meldung("neustart_fehler", schritte[-1], fehler=(r.stderr or "").strip()[:200]),
+                           schritte=schritte)
     else:
         _lauf(["systemctl", "enable", "--now", "postfix"], timeout=60)
-    return {"ok": True, "meldung": "Konfiguration übernommen", "schritte": schritte}
+    return antwort(True, Meldung("konfig_uebernommen", "Konfiguration übernommen"), schritte=schritte)
 
 
 def _alias_dbs() -> list[str]:
@@ -493,11 +518,11 @@ def einrichten() -> dict:
         r = _lauf(["apt-get", "install", "-y", "--no-install-recommends", "postfix"], timeout=900,
                   umgebung={"DEBIAN_FRONTEND": "noninteractive"})
         if r.returncode != 0:
-            return {"ok": False, "meldung": "Installation gescheitert: %s"
-                    % ((r.stderr or r.stdout).strip().splitlines() or ["?"])[-1][:300]}
+            letzte = ((r.stderr or r.stdout).strip().splitlines() or ["?"])[-1][:300]
+            return antwort(False, Meldung("installation_fehler", "Installation gescheitert: %s" % letzte, fehler=letzte))
     erg = anwenden()
     if erg.get("ok"):
-        erg["meldung"] = "Mailserver eingerichtet"
+        erg.update(antwort(True, Meldung("eingerichtet", "Mailserver eingerichtet")), schritte=erg.get("schritte", []))
     return erg
 
 
@@ -761,26 +786,27 @@ def senden(quelle: str, betreff: str, text: str) -> dict:
     try:
         return _senden(quelle, betreff, text)
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "gesendet": False, "meldung": "Fehler: %s" % e}
+        return antwort(False, Meldung("fehler", "Fehler: %s" % e, fehler=e), gesendet=False)
 
 
 def _senden(quelle: str, betreff: str, text: str) -> dict:
     if quelle not in QUELLEN and quelle != "test":
-        return {"ok": False, "gesendet": False, "meldung": "Unbekannte Quelle"}
+        return antwort(False, Meldung("quelle_unbekannt", "Unbekannte Quelle", wert=quelle), gesendet=False)
     k = konf()
     if not k["empfaenger"]:
-        return {"ok": True, "gesendet": False, "meldung": "Kein Empfänger eingetragen"}
+        return antwort(True, Meldung("kein_empfaenger", "Kein Empfänger eingetragen"), gesendet=False)
     if quelle != "test" and quelle not in k["quellen"]:
-        return {"ok": True, "gesendet": False, "meldung": "Meldungsart ausgeschaltet"}
+        return antwort(True, Meldung("quelle_aus", "Meldungsart ausgeschaltet"), gesendet=False)
     if not installiert():
-        return {"ok": False, "gesendet": False, "meldung": "Der Mailserver ist nicht installiert"}
+        return antwort(False, Meldung("nicht_installiert", "Der Mailserver ist nicht installiert"), gesendet=False)
     jetzt = time.time()
     z = _zustand_lesen()
     erlaubt, unterdrueckt = _drossel(z, quelle, jetzt)
     if not erlaubt:
         _zustand_schreiben(z)
-        return {"ok": True, "gesendet": False, "gedrosselt": True,
-                "meldung": "Gedrosselt (%d je Stunde)" % GRENZE_JE_STUNDE.get(quelle, 10)}
+        n = GRENZE_JE_STUNDE.get(quelle, 10)
+        return antwort(True, Meldung("gedrosselt", "Gedrosselt (%d je Stunde)" % n, n=n),
+                       gesendet=False, gedrosselt=True)
     fqdn = _fqdn()
     m = nachricht(quelle, betreff, text, k, fqdn, unterdrueckt)
     r = _lauf([SENDMAIL, "-oi", "-f", _absender_adresse(k, fqdn), "--"] + k["empfaenger"],
@@ -790,8 +816,9 @@ def _senden(quelle: str, betreff: str, text: str) -> dict:
                "fehler": "" if ok else _einzeilig(r.stderr or r.stdout, 300)}
     z["letzte"] = ((z.get("letzte") or []) + [eintrag])[-20:]
     _zustand_schreiben(z)
-    return {"ok": ok, "gesendet": ok,
-            "meldung": "An die Warteschlange übergeben" if ok else "sendmail: %s" % eintrag["fehler"]}
+    m = Meldung("uebergeben", "An die Warteschlange übergeben") if ok else \
+        Meldung("sendmail", "sendmail: %s" % eintrag["fehler"], fehler=eintrag["fehler"])
+    return antwort(ok, m, gesendet=ok)
 
 
 def test() -> dict:
@@ -822,16 +849,21 @@ def sicherheit(args: dict) -> dict:
     kein Befehl): die Meldung verlaesst den Server."""
     art = str(args.get("art", ""))
     if art not in SICHERHEIT_ARTEN:
-        return {"ok": False, "gesendet": False, "meldung": "Unbekannte Art"}
+        return antwort(False, Meldung("art_unbekannt", "Unbekannte Art", wert=art), gesendet=False)
     sp = konf()["sprache"]
     felder = [("Benutzer", "benutzer"), ("Kanal", "kanal"), ("Erkennung", "muster"),
-              ("Quelladresse", "ip"), ("Anzahl", "anzahl")]
+              ("Quelladresse", "ip"), ("Anzahl", "anzahl"), ("Betroffene Konten", "konten")]
     titel = text("mvm.s_" + art, SICHERHEIT_ARTEN[art], sp)
     zeilen = [titel, ""]
     for name, f in felder:
         w = _einzeilig(args.get(f, ""), 120)
-        if w:
-            zeilen.append("%s: %s" % (text("mvm.f_" + f, name, sp), w))
+        if not w:
+            continue
+        # Bekannte Kanaele sind Kennungen (z. B. "anmeldung") und werden
+        # uebersetzt; unbekannte (Namen aus dem Dienst) bleiben wie sie sind.
+        if f == "kanal" and re.match(r"^[a-z_]{2,30}$", w):
+            w = text("mvm.kanal_" + w, w, sp)
+        zeilen.append("%s: %s" % (text("mvm.f_" + f, name, sp), w))
     zeilen += ["", text("mvm.s_einzelheiten", "Einzelheiten: Einstellungen → Sicherheit (Vorfälle, "
                         "Sicherheitsprotokoll).", sp)]
     betreff = titel

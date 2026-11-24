@@ -20,7 +20,7 @@ import threading
 
 ARTEN = ("konto_gesperrt_angriff", "konto_gesperrt_verstoss", "konto_gesperrt_anmeldung",
          "spruehangriff", "angriff_protokolliert")
-FELDER = ("benutzer", "kanal", "muster", "ip", "anzahl")
+FELDER = ("benutzer", "kanal", "muster", "ip", "anzahl", "konten")
 
 
 def _aufruf(args: dict) -> None:

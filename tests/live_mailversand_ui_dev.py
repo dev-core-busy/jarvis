@@ -37,7 +37,7 @@ _KTX = ssl._create_unverified_context()
 HOME = os.path.expanduser("~")
 _ok = _fail = 0
 FELDER = (("mv-absender", "absender"), ("mv-absender-name", "absender_name"), ("mv-betreff", "betreff"))
-STAND_FELDER = ("empfaenger", "relay", "quellen", "absender", "absender_name", "betreff")
+STAND_FELDER = ("empfaenger", "relay", "quellen", "absender", "absender_name", "betreff", "sprache")
 
 
 def check(text, bed, info=""):
@@ -198,8 +198,29 @@ def main(benutzer: str) -> int:
                   bool(f) and f["abs"] == "kein absender" and f["betr"] == "[Probe]"
                   and f["empf"] == "probe@beispiel.de", str(f))
             bild(f"mailversand-{thema}.png", "#mv-block")
+            # Gemeldet von ECHT (2026-11-24): Sprache auf FR gestellt, Testmail
+            # kam deutsch. Gemessen mit einem ECHTEN Klick auf den Umschalter der
+            # Seite und am SERVER-Stand (nicht an der Anzeige).
+            if thema == "dark":
+                for ziel in ("fr", "de"):
+                    geklickt = js("""(function(){var b=[...document.querySelectorAll('[data-setlang="%s"]')]
+                        .find(function(x){return x.offsetParent!==null;})||document.querySelector('[data-setlang="%s"]');
+                        if(!b)return false;b.click();return true;})()""" % (ziel, ziel))
+                    time.sleep(4)
+                    st, z = api(tok, "GET", "/api/broker/mailversand/status")
+                    check(f"Klick auf den Sprachumschalter {ziel.upper()}: Mailsprache auf dem Server = {ziel}",
+                          geklickt and st == 200 and z.get("sprache") == ziel, f"geklickt={geklickt} {st} {z.get('sprache')}")
+                    if ziel == "fr":
+                        # Gemeldet: "Échec : Keine gültige Absenderadresse" – die
+                        # Rueckmeldung des Servers muss in FR erscheinen.
+                        js("""(function(){document.getElementById('mv-absender').value='kein absender';
+                             document.getElementById('mv-speichern').click();})()""")
+                        time.sleep(5)
+                        t_fr = js("document.getElementById('mv-result').textContent") or ""
+                        check("FR: Fehlermeldung des Servers französisch, kein deutscher Satz",
+                              "non valide" in t_fr and "Keine" not in t_fr and "gültige" not in t_fr, t_fr)
             st, jetzt = stand(tok)
-            check("nichts gespeichert: Server-Stand unveraendert", st == 200 and jetzt == vorher,
+            check("nichts gespeichert: Server-Stand wie vorgefunden", st == 200 and jetzt == vorher,
                   f"{st} {jetzt}")
     finally:
         try:

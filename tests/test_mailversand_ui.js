@@ -86,16 +86,29 @@ function baue(status, postAntwort) {
     const w = dom.window;
     const rufe = [];
     let codes = 0;
+    // Der Server-Stand wie beim echten Broker: eine ANGENOMMENE Aenderung der
+    // Sprache steht danach im Status (sonst zoege die Oberflaeche zu Recht
+    // erneut nach, und die Pruefung mass die Attrappe statt das Verhalten).
+    const stand = Object.assign({}, status);
     w.fetch = (url, o) => {
         const pfad = String(url).split('?')[0];
-        rufe.push({ pfad: pfad, methode: (o && o.method) || 'GET', rumpf: o && o.body ? JSON.parse(o.body) : null });
-        const daten = pfad === '/api/broker/mailversand/status' ? status : (postAntwort || { ok: true, meldung: '' });
-        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(daten) });
+        const rumpf = o && o.body ? JSON.parse(o.body) : null;
+        rufe.push({ pfad: pfad, methode: (o && o.method) || 'GET', rumpf: rumpf });
+        const antwort = postAntwort || { ok: true, meldung: '' };
+        if (rumpf && rumpf.sprache && antwort.ok && ['sprache', 'speichern'].indexOf(rumpf.aktion) >= 0) stand.sprache = rumpf.sprache;
+        const daten = pfad === '/api/broker/mailversand/status' ? Object.assign({}, stand) : antwort;
+        // Antwort erst im naechsten Zeitgeber-Takt, wie ein echtes Netz: eine
+        // Schleife aus Nachziehen und Neuladen haelt sonst als Mikrotask-Kette
+        // jeden Zeitgeber an – der Waechter hinge, statt sie als FAIL zu melden.
+        return new Promise((res) => setTimeout(() => res({ ok: true, status: 200, json: () => Promise.resolve(daten) }), 0));
     };
     w.confirm = () => true;
     w.authToken = 'T';
     w.eval(lies('frontend/js/sitzung.js'));
-    w.eval(lies('frontend/js/i18n.js'));
+    // i18n.js und i18n_fr.js in EINEM Aufruf (wie tests/test_i18n_fr.js): die
+    // FR-Datei haengt sich an die const _I18N, die ein zweiter eval nicht sieht.
+    // Ohne FR ignoriert setLang('fr') den Wechsel.
+    w.eval(lies('frontend/js/i18n.js') + '\n' + lies('frontend/js/i18n_fr.js'));
     // ECHTES tabfill.js: die Vorgaben muessen per TAB uebernehmbar sein
     w.eval(lies('frontend/js/tabfill.js'));
     w.Fernzugang = { _code: () => { codes++; return '123456'; }, _codeText: (g) => 'CODE:' + g };
@@ -185,16 +198,68 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 60));
            p2 && JSON.stringify(p2.rumpf.sprache));
     ({ w, d, rufe } = baue(STATUS));
     w.MailVersand.onShow(); await warte();
-    w._lang = 'fr';
-    d.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'fr' } })); await warte();
+    // ECHTER Umschalter aus i18n.js – kein selbst ausgeloestes Ereignis: die
+    // erste Fassung loeste es am document aus und bestaetigte damit nur die
+    // eigene (falsche) Annahme; i18n.js feuert am window (ECHT 2026-11-24).
+    pruefe(typeof w.setLang === 'function', 'Positivkontrolle: window.setLang aus i18n.js geladen');
+    w.setLang('fr'); await warte();
     p2 = rufe.filter((r) => r.methode === 'POST').pop();
     pruefe(p2 && p2.rumpf.aktion === 'sprache' && p2.rumpf.sprache === 'fr' && !('empfaenger' in p2.rumpf),
            'Sprachwechsel speichert NUR die Sprache (fr)', p2 && JSON.stringify(p2.rumpf));
+    // Sprache vorher woanders umgestellt: beim Oeffnen gleich nachziehen
+    ({ w, d, rufe } = baue(STATUS));
+    w.setLang('fr');
+    w.MailVersand.onShow(); await warte(150);
+    p2 = rufe.filter((r) => r.methode === 'POST');
+    pruefe(p2.length === 1 && p2[0].rumpf.aktion === 'sprache' && p2[0].rumpf.sprache === 'fr',
+           'beim Oeffnen mit anderer Sprache: einmal nachgezogen (keine Schleife)', JSON.stringify(p2.map((r) => r.rumpf)));
+    // Lehnt der Server ab (z. B. alter Broker ohne Aktion 'sprache'), darf
+    // das Oeffnen NICHT in eine Schleife aus Nachziehen und Neuladen laufen.
+    ({ w, d, rufe } = baue(STATUS, { ok: false, meldung: 'Unbekannte Aktion: sprache' }));
+    w.setLang('fr');
+    w.MailVersand.onShow(); await warte(400);
+    pruefe(rufe.filter((r) => r.methode === 'POST').length === 1,
+           'abgelehnte Sprache: genau EIN Versuch, keine Schleife', String(rufe.filter((r) => r.methode === 'POST').length));
+    // Testnachricht: erst Sprache, dann Test
     ({ w, d, rufe } = baue(STATUS));
     w.MailVersand.onShow(); await warte();
-    w._lang = 'de';
-    d.dispatchEvent(new w.CustomEvent('jarvis-lang-changed', { detail: { lang: 'de' } })); await warte();
+    w._lang = 'en';
+    d.getElementById('mv-test').click(); await warte(150);
+    p2 = rufe.filter((r) => r.methode === 'POST').map((r) => r.rumpf.aktion);
+    pruefe(p2.join(',') === 'sprache,test', 'Testnachricht: erst die Sprache angleichen, dann senden', p2.join(','));
+    ({ w, d, rufe } = baue(STATUS));
+    w.MailVersand.onShow(); await warte();
+    w.setLang('de'); await warte();
     pruefe(!rufe.some((r) => r.methode === 'POST'), 'gleiche Sprache: nichts geschrieben');
+
+    abschnitt('3c. Rueckmeldungen des Servers in der gewaehlten Sprache');
+    // Gemeldet 2026-11-24: bei FR stand "Échec : Keine gültige Absenderadresse".
+    // Der Server schickt Kennung + Werte, der deutsche Satz ist nur Rueckfall.
+    ({ w, d } = baue(STATUS, { ok: false, code: 'absender_ungueltig', werte: { wert: 'kein absender' },
+                               meldung: 'Keine gültige Absenderadresse: kein absender' }));
+    w.setLang('fr');
+    w.MailVersand.onShow(); await warte(150);
+    d.getElementById('mv-absender').value = 'kein absender';
+    d.getElementById('mv-speichern').click(); await warte(150);
+    let res3 = d.getElementById('mv-result').textContent;
+    pruefe(/Adresse d'expéditeur non valide : kein absender/.test(res3) && !/Keine gültige/.test(res3),
+           'FR: Fehler aus der Kennung französisch, kein deutscher Satz', res3);
+    ({ w, d } = baue(STATUS, { ok: false, code: 'steuerzeichen', werte: { feld: 'betreff' }, meldung: 'Betreff darf keine Steuerzeichen enthalten' }));
+    w.setLang('en');
+    w.MailVersand.onShow(); await warte(150);
+    d.getElementById('mv-speichern').click(); await warte(150);
+    res3 = d.getElementById('mv-result').textContent;
+    pruefe(/Subject must not contain line breaks/.test(res3), 'EN: Feldname in der Meldung mit übersetzt', res3);
+    ({ w, d } = baue(Object.assign({}, STATUS), { ok: true, gesendet: false, code: 'kein_empfaenger', werte: {}, meldung: 'Kein Empfänger eingetragen' }));
+    w.MailVersand.onShow(); await warte(150);
+    d.getElementById('mv-test').click(); await warte(200);
+    res3 = d.getElementById('mv-result').textContent;
+    pruefe(/kein Empfänger eingetragen – es wurde nichts verschickt/.test(res3) && !/übergeben/.test(res3),
+           'Test ohne Versand meldet den Grund, nicht "übergeben"', res3);
+    ({ w, d } = baue(STATUS, { ok: false, code: 'gibt_es_nicht', werte: {}, meldung: 'Rückfall-Satz' }));
+    w.MailVersand.onShow(); await warte(150);
+    d.getElementById('mv-speichern').click(); await warte(150);
+    pruefe(/Rückfall-Satz/.test(d.getElementById('mv-result').textContent), 'unbekannte Kennung: Satz des Servers als Rückfall');
 
     abschnitt('4. Fehler bleibt stehen');
     ({ w, d } = baue(STATUS, { ok: false, meldung: 'Keine gueltige Absenderadresse: x' }));

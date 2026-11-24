@@ -429,6 +429,76 @@ try:
            mm.I18N_JS == (REPO / "frontend/js/i18n.js").resolve(),
            "das Modul liest i18n.js NEBEN sich (Broker-Kopie), keinen festen /opt-Pfad")
 
+    # ── 11. Rueckmeldungen: Kennung statt fester deutscher Satz ─────────────
+    # Gemeldet 2026-11-24: bei FR stand "Échec : Keine gültige Absenderadresse".
+    print("[11] Rueckmeldungen mit Kennung")
+    import re as _re
+    mm_baum = ast.parse((REPO / "backend/mail_meldung.py").read_text())
+    meta_src = (REPO / "backend/broker/meta.py").read_text()
+    blk = meta_src[meta_src.find('if op == "broker.mailversand":'):meta_src.find('if op == "broker.mail_melden":')]
+    pruefe(len(blk) > 500, "Positivkontrolle: Block broker.mailversand in meta.py gefunden")
+    def roh_meldungen(baum, ausser=()):
+        """dict-Literale mit Schluessel "meldung" ausserhalb der erlaubten Funktionen."""
+        fund = []
+        for f in ast.walk(baum):
+            if isinstance(f, ast.FunctionDef) and f.name in ausser:
+                continue
+            if isinstance(f, ast.FunctionDef):
+                for n in ast.walk(f):
+                    if isinstance(n, ast.Dict) and any(isinstance(k_, ast.Constant) and k_.value == "meldung"
+                                                       for k_ in n.keys):
+                        fund.append("%s:%d" % (f.name, n.lineno))
+        return sorted(set(fund))
+    roh = roh_meldungen(mm_baum, ausser=("antwort",))
+    pruefe(not roh, "mail_meldung.py: jede Rueckmeldung ueber antwort()/Meldung (mit Kennung)%s"
+           % (" – roh: " + ", ".join(roh) if roh else ""))
+    roh_meta = [z for z in blk.splitlines() if _re.search(r'\{\s*"ok"[^}]*"meldung"', z)]
+    pruefe(not roh_meta, "meta.py broker.mailversand: keine Rueckmeldung als fester Satz%s"
+           % (" – " + roh_meta[0].strip() if roh_meta else ""))
+    meta_if = [n for n in ast.walk(ast.parse(meta_src)) if isinstance(n, ast.If)
+               and ast.unparse(n.test) == "op == 'broker.mailversand'"]
+    pruefe(len(meta_if) == 1, "Positivkontrolle: Zweig broker.mailversand im Syntaxbaum von meta.py")
+    codes = set()
+    for baum in [mm_baum] + meta_if:
+        for c in ast.walk(baum):
+            if isinstance(c, ast.Call) and getattr(c.func, "id", getattr(c.func, "attr", "")) == "Meldung" \
+                    and c.args and isinstance(c.args[0], ast.Constant):
+                codes.add(c.args[0].value)
+    i18n = (REPO / "frontend/js/i18n.js").read_text()
+    fr = (REPO / "frontend/js/i18n_fr.js").read_text()
+    fehlt = sorted(c_ for c_ in codes if i18n.count("'mv.m_%s':" % c_) != 2 or ('"mv.m_%s":' % c_) not in fr)
+    pruefe(len(codes) >= 25 and not fehlt, "jede Kennung (%d) steht als mv.m_<code> in DE, EN und FR%s"
+           % (len(codes), (" – fehlt: " + ", ".join(fehlt)) if fehlt else ""))
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\n")
+    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "a@beispiel.de",
+                                              "relay": "", "quellen": [], "absender": "kein absender"})
+    pruefe(not r.get("ok") and r.get("code") == "absender_ungueltig" and r.get("werte", {}).get("wert") == "kein absender",
+           "ungueltiger Absender: Kennung absender_ungueltig mit Wert – %s" % r.get("code"))
+    r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "a@beispiel.de",
+                                              "relay": "", "quellen": [], "betreff": "x\ny"})
+    pruefe(r.get("code") == "steuerzeichen" and r.get("werte", {}).get("feld") == "betreff",
+           "Steuerzeichen: Kennung mit Feldkennung (uebersetzbar) – %s" % r.get("code"))
+    r = meta.behandeln("broker.mailversand", {"aktion": "gibtsnicht"})
+    pruefe(r.get("code") == "aktion_unbekannt", "unbekannte Aktion mit Kennung – %s" % r.get("code"))
+    konf_setzen("MAIL_QUELLEN=aide\n")
+    pruefe(mm.test().get("code") == "kein_empfaenger", "Test ohne Empfaenger: Kennung kein_empfaenger")
+    # main.py: Werte der Sicherheitsmeldungen sind Kennungen, keine deutschen Saetze
+    hm_baum = ast.parse((REPO / "backend/main.py").read_text())
+    werte_main = [(k_.arg, k_.value) for c in ast.walk(hm_baum) if isinstance(c, ast.Call)
+                  and getattr(c.func, "id", "") == "_mail_sicherheit" for k_ in c.keywords]
+    kanaele = [v.value for a_, v in werte_main if a_ == "kanal" and isinstance(v, ast.Constant)]
+    pruefe(werte_main and kanaele and all(_re.match(r"^[a-z_]+$", k_) for k_ in kanaele),
+           "main.py: kanal ist eine Kennung (%s)" % kanaele)
+    pruefe(not any(isinstance(v, (ast.BinOp, ast.JoinedStr)) for _, v in werte_main),
+           "main.py: kein zusammengesetzter Text in den Feldern (frueher '%s Konten')")
+    konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_SPRACHE=fr\n")
+    mm._p(mm.ZUSTAND).unlink(missing_ok=True)
+    AUFRUFE.clear()
+    mm.sicherheit({"art": "spruehangriff", "kanal": "anmeldung", "konten": "7"})
+    t_fr = gesendet()[0]["eingabe"] if gesendet() else ""
+    pruefe("Canal: Connexion" in t_fr and "Comptes concern" in t_fr and "Anmeldung" not in t_fr,
+           "Sicherheitsmail FR: Kanal und Konten uebersetzt")
+
     # ── 9. Ausrollen auf andere Server ohne Handarbeit ───────────────────────
     print("[9] Automatik")
     start = (REPO / "start_jarvis_root.sh").read_text()

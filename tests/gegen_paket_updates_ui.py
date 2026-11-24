@@ -35,10 +35,21 @@ PROBEN = [
     ("Updates beim Oeffnen nicht geladen", " this.loadCve(); this.loadUpdates(); },", " this.loadCve(); },", 1),
     ("Ladefehler laesst Einspielen aktiv", "                if (ein) ein.disabled = true;\n", "", 1),
 ]
+SETTINGS = REPO / "frontend" / "settings.html"
+# Proben an der Lage im Markup (Container seit 2026-11-24)
+PROBEN_HTML = [
+    ("Container ohne eigenen Kopf (wieder in den System-Einstellungen)",
+     'id="prof-sect-pakete-hdr"', 'id="prof-sect-pakete-hdr-alt"', 1),
+    ("Titel ohne i18n-Schluessel", '<h3 data-i18n="profile.section_pakete">', "<h3>", 1),
+    ("AIDE-Gruppe ohne eigene Ueberschrift", '<h4 class="tuning-group-title" data-i18n="security.section_aide">',
+     '<h4 class="tuning-group-title">', 1),
+]
 
 
-def waechter(modul):
+def waechter(modul, settings=None):
     env = dict(os.environ, JARVIS_SECINC_PRUEFLING=str(modul))
+    if settings:
+        env["JARVIS_SETTINGS_PRUEFLING"] = str(settings)
     p = subprocess.run(["timeout", "90", "node", str(WAECHTER)], env=env, capture_output=True, text=True)
     return p.returncode, sum(1 for z in p.stdout.splitlines() if z.startswith("  ✗"))
 
@@ -68,7 +79,22 @@ def main():
             else:
                 print("  STUMM         %-42s Exit %d, %d FAIL" % (name, rc, f))
                 stumm += 1
-        print("ERGEBNIS: %d von %d Proben beissen" % (len(PROBEN) - stumm, len(PROBEN)))
+        html = SETTINGS.read_text(encoding="utf-8")
+        for name, alt, neu, n in PROBEN_HTML:
+            if html.count(alt) != n:
+                print("  PROBE KAPUTT  %-42s Anker %d statt %d Treffer" % (name, html.count(alt), n))
+                stumm += 1
+                continue
+            kopie = tmp / "settings.html"
+            kopie.write_text(html.replace(alt, neu), encoding="utf-8")
+            rc, f = waechter(basis, kopie)
+            if rc == 1 and f > 0:
+                print("  beisst        %-42s %d FAIL" % (name, f))
+            else:
+                print("  STUMM         %-42s Exit %d, %d FAIL" % (name, rc, f))
+                stumm += 1
+        alle = len(PROBEN) + len(PROBEN_HTML)
+        print("ERGEBNIS: %d von %d Proben beissen" % (alle - stumm, alle))
         return 0 if stumm == 0 else 1
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -42,12 +42,42 @@ function bilanz(code) {
 const wachhund = require('./lib/wachhund')(() => { console.log('  ✗ ABBRUCH: Wachhund nach 40 s'); bilanz(2); }, 40000);
 wachhund.unref && wachhund.unref();
 
-const HTML = lies('frontend/settings.html');
+// Gegenprobe (tests/gegen_paket_updates_ui.py) kann eine sabotierte KOPIE unterschieben
+const HTML = process.env.JARVIS_SETTINGS_PRUEFLING ? fs.readFileSync(process.env.JARVIS_SETTINGS_PRUEFLING, 'utf8')
+                                                   : lies('frontend/settings.html');
 const { ausschnitt } = require('./lib/seite_ausschnitt');
-const AUSSCHNITT = ausschnitt(HTML, ['sec-upd'], {});
-pruefe(AUSSCHNITT.fehlend.length === 0, 'Ausschnitt: Abschnitt #sec-upd in der echten settings.html (Positivkontrolle)',
+const AUSSCHNITT = ausschnitt(HTML, ['prof-sect-pakete-body'], {});
+pruefe(AUSSCHNITT.fehlend.length === 0, 'Ausschnitt: Container #prof-sect-pakete-body in der echten settings.html (Positivkontrolle)',
        AUSSCHNITT.fehlend.join(', '));
 if (AUSSCHNITT.fehlend.length) bilanz(2);
+
+// Lage (2026-11-24, Wunsch des Betreibers): eigener Container "Paket-Updates und
+// Integritaet" in KI & System, zwischen System-Einstellungen und Agent API Key,
+// mit den drei Gruppen darin - gemessen an der ECHTEN Seite, nicht am Ausschnitt.
+{
+    const echt = new JSDOM(HTML).window.document;
+    const reiter = echt.getElementById('settings-tab-profiles');
+    const kopf = (id) => { const h = echt.getElementById(id); return h ? h.closest('.kb-section') : null; };
+    const tuning = kopf('prof-sect-tuning-hdr'), pakete = kopf('prof-sect-pakete-hdr'), api = kopf('prof-sect-api-hdr');
+    pruefe(!!pakete && !!reiter && reiter.contains(pakete), 'Container steht im Reiter KI & System');
+    const sektionen = reiter ? Array.from(reiter.querySelectorAll('.kb-section')) : [];
+    const i = (x) => sektionen.indexOf(x);
+    pruefe(!!tuning && !!api && i(pakete) === i(tuning) + 1 && i(api) === i(pakete) + 1,
+           'Container liegt direkt zwischen System-Einstellungen und Agent API Key', [i(tuning), i(pakete), i(api)].join(','));
+    const titel = pakete ? pakete.querySelector('.kb-section-header h3') : null;
+    pruefe(!!titel && titel.getAttribute('data-i18n') === 'profile.section_pakete'
+           && titel.textContent.trim() === 'Paket-Updates und Integrität', 'Titel "Paket-Updates und Integrität" mit i18n-Schluessel');
+    const body = echt.getElementById('prof-sect-pakete-body');
+    const gruppen = body ? Array.from(body.querySelectorAll(':scope > .tuning-group h4')).map((h) => h.getAttribute('data-i18n')) : [];
+    pruefe(gruppen.join(',') === 'security.section_unattended,security.section_updates,security.section_aide',
+           'drei Gruppen in dieser Reihenfolge: Sicherheitsupdates, Paket-Updates, Integritaetspruefung', gruppen.join(','));
+    const sys = echt.getElementById('prof-sect-tuning-body');
+    pruefe(!!sys && !['sec-unatt-status', 'sec-upd-einspielen', 'sec-aide-status'].some((id) => sys.contains(echt.getElementById(id))),
+           'nichts davon steht mehr in den System-Einstellungen');
+    const appJs = lies('frontend/js/app.js');
+    pruefe(/hdr:\s*'prof-sect-pakete-hdr',\s*body:\s*'prof-sect-pakete-body'/.test(appJs),
+           'app.js klappt den Container ueber _collapseInit (gemerkter Zustand wie die anderen)');
+}
 pruefe(/\/static\/js\/security_incidents\.js\?v=\d+/.test(HTML), 'security_incidents.js ist in settings.html eingebunden');
 
 const KENNUNG = 'a1b2c3d4e5f60718';

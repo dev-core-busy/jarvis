@@ -1026,7 +1026,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                     <li>Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
                     <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Internet-Sperre (Firewall)</i>.</li>
                     <li>OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Einrichten/Reparieren via <code>POST /api/security/sandbox/setup</code>, Grenzen und Admin-Schalter via <code>POST /api/security/sandbox/config</code> (<code>auch_admins</code>, <code>speicher_mb</code>, <code>prozesse</code>, <code>cpu_prozent</code>). Ein Abschalten gibt es nicht. Bedienung unter <i>Sicherheit → Angriffsprävention und Sicherheitsvorfälle → Systemschutz / Sandbox</i>.</li>
-                    <li>Automatische Sicherheitsupdates (System): Status via <code>GET /api/security/unattended</code> (mit <code>?live=1</code> Trockenlauf), Ein-/Ausschalten via <code>POST /api/security/unattended/setup</code> bzw. <code>/teardown</code>. Richtet <code>unattended-upgrades</code> bewusst eng ein: nur die Debian-Sicherheits-Quelle, kein automatischer Neustart, kein automatisches Aufräumen von Paketen. Beim Ausschalten bleibt die tägliche Aktualisierung des Paketindex aktiv. Bedienung unter <i>KI &amp; System → System-Einstellungen → Automatische Sicherheitsupdates</i>.</li>
+                    <li>Automatische Sicherheitsupdates (System): Status via <code>GET /api/security/unattended</code> (mit <code>?live=1</code> Trockenlauf), Ein-/Ausschalten via <code>POST /api/security/unattended/setup</code> bzw. <code>/teardown</code>. Richtet <code>unattended-upgrades</code> bewusst eng ein: nur die Debian-Sicherheits-Quelle, kein automatischer Neustart, kein automatisches Aufräumen von Paketen. Beim Ausschalten bleibt die tägliche Aktualisierung des Paketindex aktiv. Bedienung unter <i>KI &amp; System → Paket-Updates und Integrität → Automatische Sicherheitsupdates</i>.</li>
                     <li>Root-Broker (Trennung UI-/Ausführungsebene): Betriebsmodus via <code>GET /api/broker/status</code>, Ein-Klick-Umschaltung via <code>POST /api/broker/setup</code> (getrennter Betrieb) bzw. <code>POST /api/broker/teardown</code> (Alt-Betrieb), Freigabeliste via <code>GET /api/broker/ops</code>, Admin-Entscheidung via <code>POST /api/broker/ops/decide</code> (Body <code>{key, decision: allow|deny|pending}</code>), Eintrag löschen via <code>POST /api/broker/ops/remove</code>, Audit-Log via <code>GET /api/broker/audit?n=100</code>. Bedienung unter <i>Sicherheit → Root-Freigaben (Root-Broker)</i>.</li>
                     <li>Zeitversetzte Auslöser (seit 2026-07-29): Zeitgesteuerte Aufträge (<code>POST/PUT /api/cron</code>, <code>POST /api/cron/{id}/run</code>) und Trigger-Watcher (<code>POST/PUT /api/watchers</code>) darf <b>nur ein Administrator</b> anlegen bzw. ändern; das Werkzeug <code>cron_create</code> ist für Netzwerk-Benutzer gesperrt. Grund: ein solcher Eintrag startet später selbständig einen Agenten mit vollem Werkzeugkasten – außerhalb jeder Sitzung, ohne Freigabe. Sehen und Löschen <em>eigener</em> Einträge bleibt erlaubt (Altbestand aufräumbar). Ausnahme: unter <i>Sicherheit → Erinnerungen per Messenger</i> freigegebene Absender (<code>GET/POST /api/reminders/senders</code>) dürfen sich <b>einmalige Erinnerungen</b> an sich selbst setzen – reiner Nachrichtenversand ohne Agent, gedeckelt auf 20 offene je Absender.</li>
                 </ul>
@@ -1755,7 +1755,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                         <!-- System-Einstellungen (hiess bis 2026-07-28 „Tuning"): Sprachausgabe,
                              Antwort-Timeout, Maximale Antwortlänge, Vorhaltezeit erzeugter
-                             Dokumente, Automatische Sicherheitsupdates.
+                             Dokumente. Die automatischen Sicherheitsupdates stehen seit
+                             2026-11-24 im eigenen Container "Paket-Updates und Integrität".
                              Zusammengefasst 2026-07-27; alle Element-IDs bleiben unverändert
                              (auch die Container-IDs prof-sect-tuning-*, app.js verdrahtet sie
                              darüber) – umbenannt wurde nur die Beschriftung. -->
@@ -2032,50 +2033,6 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="lk.dauerhaft_hinweis">Gedächtnis und Lernnotizen laufen nicht ab. Jede Lernnotiz nennt, aus wessen Unterhaltung sie stammt, und lässt sich unter Wissen → Gelerntes Wissen einzeln löschen; das eigene Gedächtnis steht darunter.</small>
                                 </div>
 
-                                <!-- Automatische Sicherheitsupdates (System).
-                                     Verschoben 2026-07-28 aus Sicherheit -> Systemschutz hierher.
-                                     Die IDs sec-unatt-* bleiben, security_incidents.js verdrahtet
-                                     sie darueber – ein Umbenennen haette die Knoepfe still
-                                     gebrochen. -->
-                                <div class="tuning-group">
-                                    <h4 class="tuning-group-title" data-i18n="security.section_unattended">Automatische Sicherheitsupdates (System)</h4>
-                                    <div id="sec-unatt-status" class="kb-hint" style="margin:0 0 4px;">Status wird geladen…</div>
-                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                                        <button type="button" id="sec-unatt-setup" data-i18n="security.unattended_setup" class="sec-btn primary">Einschalten / Reparieren</button>
-                                        <button type="button" id="sec-unatt-verify" data-i18n="security.unattended_verify" class="sec-btn">Status prüfen (Trockenlauf)</button>
-                                        <button type="button" id="sec-unatt-teardown" data-i18n="security.unattended_teardown" class="sec-btn danger">Ausschalten</button>
-                                        <!-- Manueller Lauf: Symbol (Dreieck) setzt security_incidents.js
-                                             aus icons.js ein; der Text steht nur im Tooltip. -->
-                                        <button type="button" id="sec-unatt-jetzt" class="sec-btn" data-i18n-title="security.unattended_jetzt" data-i18n-aria="security.unattended_jetzt" title="Sicherheitsupdates jetzt einspielen" aria-label="Sicherheitsupdates jetzt einspielen"></button>
-                                    </div>
-                                    <div id="sec-unatt-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
-                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.unattended_desc">Spielt Debian-Sicherheitspatches automatisch ein (unattended-upgrades). Bewusst eng gefasst: nur die Sicherheits-Quelle – keine allgemeinen Versionssprünge unter dem laufenden Dienst, kein automatischer Neustart und kein automatisches Aufräumen von Paketen (Letzteres würde Abhängigkeiten des Agenten entfernen, etwa cmake/boost für die Gesichtserkennung, ffmpeg für die Sprachausgabe oder LibreOffice-Teile). Die tägliche Aktualisierung des Paketindex bleibt beim Ausschalten aktiv – ein veralteter Index lässt Paketinstallationen mit „404 Not Found“ scheitern.</small>
-                                </div>
-
-                                <!-- Offene Paket-Updates und AIDE-Abgleich (2026-11-24).
-                                     Logik: security_incidents.js (loadUpdates/renderUpdates/...),
-                                     Backend: backend/paket_updates.py, backend/aide_abgleich.py.
-                                     Ergebnisse stehen direkt unter den Knoepfen (sec-upd-result). -->
-                                <div class="tuning-group" id="sec-upd">
-                                    <h4 class="tuning-group-title" data-i18n="security.section_updates">Paket-Updates und Integritätsprüfung</h4>
-                                    <div id="sec-upd-status" class="kb-hint" style="margin:0 0 4px;" data-i18n="security.upd_laedt">Wird geladen…</div>
-                                    <div id="sec-upd-liste"></div>
-                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                                        <button type="button" id="sec-upd-einspielen" class="sec-btn primary" data-i18n="security.upd_einspielen">Alle einspielen</button>
-                                        <button type="button" id="sec-upd-neu" class="sec-btn" data-i18n="security.upd_neu_laden">Liste aktualisieren</button>
-                                    </div>
-                                    <div id="sec-upd-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
-                                    <div id="sec-upd-neustart" style="margin-top:10px;"></div>
-                                    <div id="sec-aide-status" class="kb-hint" style="margin:12px 0 4px;"></div>
-                                    <div id="sec-aide-liste"></div>
-                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                                        <button type="button" id="sec-aide-pruefen" class="sec-btn" data-i18n="security.aide_pruefen">Prüfung jetzt starten</button>
-                                        <button type="button" id="sec-aide-uebernehmen" class="sec-btn danger" style="display:none;" data-i18n="security.aide_uebernehmen">Nach Durchsicht übernehmen</button>
-                                    </div>
-                                    <div id="sec-aide-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
-                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.upd_desc">Zeigt alle Updates, die auf dem Server bereitliegen – auch die, die die Automatik bewusst nicht einspielt. „Alle einspielen“ hebt nur vorhandene Pakete, entfernt nichts und startet nichts neu. Danach prüft die Integritätsprüfung (AIDE) das System: Änderungen, die ein Paket oder der signierte Stand dieser Anwendung erklärt, werden automatisch zum neuen Vergleichsstand. Alles andere wird hier zur Durchsicht vorgelegt und erst nach Ihrer Bestätigung übernommen.</small>
-                                </div>
-
                                 <!-- RDP erlauben (xrdp, Port 3389), Vorgabe AUS (2026-11-17).
                                      Logik: fernzugang.js (window.RdpSchalter), Broker:
                                      backend/broker/fernzugang.py (rdp/rdp_status), Regel:
@@ -2173,6 +2130,73 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <span id="service-restart-status" style="font-size:0.8rem;min-width:0;"></span>
                                     </div>
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="profile.restart_hint">Startet den {marke}-Dienst auf dem Server neu – nicht den Rechner. Nötig für Einstellungen, die erst beim Start gelesen werden, und nach dem Aufräumen der Gedächtnis-Dateien: die hält der Dienst je Benutzer im Speicher, ohne Neustart arbeitet der Agent mit dem alten Stand weiter und überschreibt die Korrektur beim nächsten Merken. Der Neustart dauert einige Sekunden und trennt in dieser Zeit ALLE angemeldeten Benutzer; laufende Agenten-Aufträge brechen ab. Dass er stattgefunden hat, wird an der Startzeit des Prozesses gemessen und hier gemeldet.</small>
+                                </div>
+
+                            </div>
+                        </div>
+
+                        <!-- Paket-Updates und Integritaet (2026-11-24, auf Wunsch des Betreibers
+                             aus den System-Einstellungen ausgelagert): Automatische
+                             Sicherheitsupdates, offene Paket-Updates, Integritaetspruefung (AIDE).
+                             Alle Element-IDs (sec-unatt-*, sec-upd-*, sec-aide-*) blieben
+                             unveraendert – security_incidents.js und cron.js verdrahten sie darueber. -->
+                        <div class="kb-section">
+                            <div class="kb-section-header kb-collapse-header is-collapsed" id="prof-sect-pakete-hdr">
+                                <h3 data-i18n="profile.section_pakete">Paket-Updates und Integrität</h3>
+                                <span class="sk-sektion-toggle" id="prof-sect-pakete-tog">▶</span>
+                            </div>
+                            <div id="prof-sect-pakete-body" class="kb-collapse-body" style="display:none;">
+
+                                <!-- Automatische Sicherheitsupdates (System).
+                                     Verschoben 2026-07-28 aus Sicherheit -> Systemschutz in die
+                                     System-Einstellungen, 2026-11-24 in "Paket-Updates und Integritaet".
+                                     Die IDs sec-unatt-* bleiben, security_incidents.js verdrahtet
+                                     sie darueber – ein Umbenennen haette die Knoepfe still
+                                     gebrochen. -->
+                                <div class="tuning-group">
+                                    <h4 class="tuning-group-title" data-i18n="security.section_unattended">Automatische Sicherheitsupdates (System)</h4>
+                                    <div id="sec-unatt-status" class="kb-hint" style="margin:0 0 4px;">Status wird geladen…</div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                        <button type="button" id="sec-unatt-setup" data-i18n="security.unattended_setup" class="sec-btn primary">Einschalten / Reparieren</button>
+                                        <button type="button" id="sec-unatt-verify" data-i18n="security.unattended_verify" class="sec-btn">Status prüfen (Trockenlauf)</button>
+                                        <button type="button" id="sec-unatt-teardown" data-i18n="security.unattended_teardown" class="sec-btn danger">Ausschalten</button>
+                                        <!-- Manueller Lauf: Symbol (Dreieck) setzt security_incidents.js
+                                             aus icons.js ein; der Text steht nur im Tooltip. -->
+                                        <button type="button" id="sec-unatt-jetzt" class="sec-btn" data-i18n-title="security.unattended_jetzt" data-i18n-aria="security.unattended_jetzt" title="Sicherheitsupdates jetzt einspielen" aria-label="Sicherheitsupdates jetzt einspielen"></button>
+                                    </div>
+                                    <div id="sec-unatt-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.unattended_desc">Spielt Debian-Sicherheitspatches automatisch ein (unattended-upgrades). Bewusst eng gefasst: nur die Sicherheits-Quelle – keine allgemeinen Versionssprünge unter dem laufenden Dienst, kein automatischer Neustart und kein automatisches Aufräumen von Paketen (Letzteres würde Abhängigkeiten des Agenten entfernen, etwa cmake/boost für die Gesichtserkennung, ffmpeg für die Sprachausgabe oder LibreOffice-Teile). Die tägliche Aktualisierung des Paketindex bleibt beim Ausschalten aktiv – ein veralteter Index lässt Paketinstallationen mit „404 Not Found“ scheitern.</small>
+                                </div>
+
+                                <!-- Offene Paket-Updates (2026-11-24). Logik: security_incidents.js
+                                     (loadUpdates/renderUpdates), Backend: backend/paket_updates.py.
+                                     Ergebnisse stehen direkt unter den Knoepfen (sec-upd-result). -->
+                                <div class="tuning-group" id="sec-upd">
+                                    <h4 class="tuning-group-title" data-i18n="security.section_updates">Offene Paket-Updates</h4>
+                                    <div id="sec-upd-status" class="kb-hint" style="margin:0 0 4px;" data-i18n="security.upd_laedt">Wird geladen…</div>
+                                    <div id="sec-upd-liste"></div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                        <button type="button" id="sec-upd-einspielen" class="sec-btn primary" data-i18n="security.upd_einspielen">Alle einspielen</button>
+                                        <button type="button" id="sec-upd-neu" class="sec-btn" data-i18n="security.upd_neu_laden">Liste aktualisieren</button>
+                                    </div>
+                                    <div id="sec-upd-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
+                                    <div id="sec-upd-neustart" style="margin-top:10px;"></div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.upd_desc">Zeigt alle Updates, die auf dem Server bereitliegen – auch die, die die Automatik bewusst nicht einspielt. „Alle einspielen“ hebt nur vorhandene Pakete, entfernt nichts und startet nichts neu; danach startet die Integritätsprüfung.</small>
+                                </div>
+
+                                <!-- Integritaetspruefung (AIDE-Abgleich, 2026-11-24). Logik:
+                                     security_incidents.js (renderAide, aidePruefen, aideUebernehmen),
+                                     Backend: backend/aide_abgleich.py. -->
+                                <div class="tuning-group" id="sec-aide">
+                                    <h4 class="tuning-group-title" data-i18n="security.section_aide">Integritätsprüfung (AIDE)</h4>
+                                    <div id="sec-aide-status" class="kb-hint" style="margin:0 0 4px;"></div>
+                                    <div id="sec-aide-liste"></div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                                        <button type="button" id="sec-aide-pruefen" class="sec-btn" data-i18n="security.aide_pruefen">Prüfung jetzt starten</button>
+                                        <button type="button" id="sec-aide-uebernehmen" class="sec-btn danger" style="display:none;" data-i18n="security.aide_uebernehmen">Nach Durchsicht übernehmen</button>
+                                    </div>
+                                    <div id="sec-aide-result" style="display:none;font-size:0.78rem;margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid;"></div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="security.aide_desc">Prüft jede Nacht, ob sich Dateien des Systems verändert haben. Änderungen, die ein Paket oder der signierte Stand dieser Anwendung erklärt, werden automatisch zum neuen Vergleichsstand. Alles andere wird hier zur Durchsicht vorgelegt und erst nach Ihrer Bestätigung übernommen.</small>
                                 </div>
 
                             </div>
@@ -6863,9 +6887,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=2"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=523"></script>
+    <script src="/static/js/i18n.js?v=524"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
-    <script src="/static/js/cron.js?v=39"></script>
+    <script src="/static/js/cron.js?v=40"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
     <script src="/static/js/audit.js?v=5"></script>
     <script src="/static/js/sicherheitsprotokoll.js?v=5"></script>
@@ -6904,7 +6928,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=17"></script>
     <script src="/static/js/branding.js?v=31"></script>
     <script src="/static/js/theme.js?v=3"></script>
-    <script src="/static/js/security_incidents.js?v=47"></script>
+    <script src="/static/js/security_incidents.js?v=48"></script>
     <script src="/static/js/fernzugang.js?v=4"></script>
     <script src="/static/js/totp_admin.js?v=6"></script>
     <script src="/static/js/ldap_picker.js?v=18"></script>
@@ -6930,7 +6954,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=3"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=269"></script>
+    <script src="/static/js/app.js?v=270"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

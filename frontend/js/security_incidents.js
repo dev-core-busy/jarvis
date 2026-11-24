@@ -1275,12 +1275,13 @@
             if (!box) return;
             if (ue) ue.style.display = 'none';
             if (liste) liste.innerHTML = '';
+            // Die Ueberschrift steht seit 2026-11-24 als eigene Gruppe im Markup
+            // (security.section_aide) – hier nur noch der Zustand.
             if (!a || a.fehler) {
-                box.innerHTML = '<b>' + esc(T('security.aide_titel', 'Integritätsprüfung (AIDE)')) + '</b><br>'
-                    + esc(T('security.aide_unbekannt', 'Zustand nicht ermittelbar')) + (a && a.fehler ? ': ' + esc(a.fehler) : '');
+                box.innerHTML = esc(T('security.aide_unbekannt', 'Zustand nicht ermittelbar')) + (a && a.fehler ? ': ' + esc(a.fehler) : '');
                 return;
             }
-            var z = a.zustand || {}, h = '<b>' + esc(T('security.aide_titel', 'Integritätsprüfung (AIDE)')) + '</b><br>';
+            var z = a.zustand || {}, h = '';
             if (!a.eingerichtet) {
                 h += _P('aus') + esc(T('security.aide_nicht_eingerichtet',
                     'Der automatische Abgleich ist auf diesem Server nicht eingerichtet (Härtung B7).'));

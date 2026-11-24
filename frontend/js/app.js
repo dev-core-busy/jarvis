@@ -697,6 +697,9 @@
                 // Tuning fasst Sprachausgabe, Antwort-Timeout und maximale
                 // Antwortlaenge zusammen (vorher drei eigene Klappabschnitte).
                 { hdr: 'prof-sect-tuning-hdr', body: 'prof-sect-tuning-body', tog: 'prof-sect-tuning-tog' },
+                // Automatische Sicherheitsupdates, offene Paket-Updates und
+                // Integritaetspruefung (seit 2026-11-24 eigener Container)
+                { hdr: 'prof-sect-pakete-hdr', body: 'prof-sect-pakete-body', tog: 'prof-sect-pakete-tog' },
                 { hdr: 'prof-sect-api-hdr',  body: 'prof-sect-api-body',  tog: 'prof-sect-api-tog'  },
                 { hdr: 'prof-sect-ssl-hdr',  body: 'prof-sect-ssl-body',  tog: 'prof-sect-ssl-tog'  },
             ]);
@@ -969,7 +972,8 @@
                     tabProfiles.classList.add('active');
                     _initProfilesCollapse();
                     // Der Schalter "Automatische Sicherheitsupdates" liegt seit
-                    // 2026-07-28 in den System-Einstellungen dieses Reiters, seine
+                    // 2026-07-28 in diesem Reiter (seit 2026-11-24 im Container
+                    // "Paket-Updates und Integritaet"), seine
                     // Logik aber weiter in security_incidents.js. Ohne diesen Aufruf
                     // waeren die Knoepfe unverdrahtet und der Status leer, solange
                     // der Sicherheits-Reiter nicht geoeffnet wurde.

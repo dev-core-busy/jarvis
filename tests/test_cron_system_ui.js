@@ -69,7 +69,7 @@ function baue(opt) {
     const dom = new JSDOM('<!doctype html><html><body>'
         + '<button class="settings-tab-btn" data-settings-tab="security">S</button>'
         + (o.reiter ? '<button class="settings-tab-btn" data-settings-tab="profiles">P</button>'
-            + '<div id="prof-sect-tuning-hdr"></div><div id="prof-sect-tuning-body" style="display:none;">'
+            + '<div id="prof-sect-pakete-hdr"></div><div id="prof-sect-pakete-body" style="display:none;">'
             + '<div class="tuning-group" id="gruppe-unatt"><div id="sec-unatt-status"></div></div></div>' : '')
         + '<div id="cron-tab-content"></div></body></html>',
         { url: 'https://localhost/settings', runScripts: 'outside-only' });
@@ -164,15 +164,16 @@ async function aufbau(opt) {
         // Erst an der ECHTEN settings.html: steht der Schalter dort, wo der Knopf hinfuehrt?
         const echt = new JSDOM(fs.readFileSync(path.join(ROOT, 'frontend', 'settings.html'), 'utf8')).window.document;
         const schalter = echt.getElementById('sec-unatt-status');
-        const tuning = echt.getElementById('prof-sect-tuning-body');
-        check('settings.html: Schalter steht in KI & System -> System-Einstellungen',
-            !!schalter && !!tuning && tuning.contains(schalter) && !!echt.getElementById('prof-sect-tuning-hdr')
+        // Seit 2026-11-24 im eigenen Container "Paket-Updates und Integritaet"
+        const tuning = echt.getElementById('prof-sect-pakete-body');
+        check('settings.html: Schalter steht in KI & System -> Paket-Updates und Integritaet',
+            !!schalter && !!tuning && tuning.contains(schalter) && !!echt.getElementById('prof-sect-pakete-hdr')
             && !!echt.getElementById('settings-tab-profiles') && echt.getElementById('settings-tab-profiles').contains(tuning)
             && !!echt.querySelector('.settings-tab-btn[data-settings-tab="profiles"]'));
         check('settings.html: Schalter steht NICHT im Reiter Sicherheit',
             !!schalter && !!echt.getElementById('settings-tab-security') && !echt.getElementById('settings-tab-security').contains(schalter));
         let sicherheit = 0, profile = 0, kopf = 0, gesprungen = null;
-        const hdr = doc.getElementById('prof-sect-tuning-hdr'), body = doc.getElementById('prof-sect-tuning-body');
+        const hdr = doc.getElementById('prof-sect-pakete-hdr'), body = doc.getElementById('prof-sect-pakete-body');
         doc.querySelector('.settings-tab-btn[data-settings-tab="security"]').addEventListener('click', () => sicherheit++);
         doc.querySelector('.settings-tab-btn[data-settings-tab="profiles"]').addEventListener('click', () => profile++);
         // Kopfzeilen-Handler wie _collapseInit (app.js): schaltet um.
@@ -184,7 +185,7 @@ async function aufbau(opt) {
         await sleep(40);
         check('oeffnet den Reiter KI & System', profile === 1, profile);
         check('⚠ oeffnet NICHT den Reiter Sicherheit', sicherheit === 0, sicherheit);
-        check('klappt System-Einstellungen auf', body.style.display !== 'none' && kopf === 1, kopf);
+        check('klappt Paket-Updates und Integritaet auf', body.style.display !== 'none' && kopf === 1, kopf);
         check('springt zum Schalter (seine Gruppe)', !!gesprungen && gesprungen.id === 'gruppe-unatt', gesprungen && gesprungen.id);
         if (eb()) eb().click();
         await sleep(40);

@@ -494,7 +494,7 @@ def auswerten(eing: dict, vorher: dict, konf: dict, jetzt: float) -> tuple[dict,
         if a.get("zustand") == "offen":
             befunde.append(_befund("aide", "aide_offen", "warnung",
                                    "AIDE: %d Aenderung(en) seit dem letzten Stand nicht erklaert (Pruefung %s) – "
-                                   "Durchsicht unter Einstellungen > System > Paket-Updates"
+                                   "Durchsicht unter Einstellungen > KI & System > Paket-Updates und Integritaet"
                                    % (a.get("offen_anzahl", 0), _uhr(zeit)),
                                    anzahl=a.get("offen_anzahl", 0), kennung=a.get("kennung", "")))
         elif a.get("zustand") == "fehler":

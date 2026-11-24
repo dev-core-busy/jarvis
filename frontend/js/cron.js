@@ -705,7 +705,8 @@ window.cronManager = new (class JarvisCronManager {
         if (this._sysLogOffen) this._renderSystemLog();
     }
 
-    /* Oeffnet KI & System, klappt "System-Einstellungen" auf und springt zum
+    /* Oeffnet KI & System, klappt "Paket-Updates und Integritaet" auf (seit
+     * 2026-11-24 dort, vorher in den System-Einstellungen) und springt zum
      * Schalter. Der Reiter-Klick laeuft ueber den vorhandenen Handler (er
      * verdrahtet dabei die Knoepfe des Schalters, app.js). */
     _sysZumSchalter() {
@@ -716,8 +717,8 @@ window.cronManager = new (class JarvisCronManager {
         // Aufklappen NUR, wenn er zu ist: ein blindes click() wuerde einen
         // offenen Abschnitt ZUklappen. Geklickt wird der Kopfzeilen-Handler,
         // damit der gemerkte Auf-/Zu-Zustand mitgeschrieben wird.
-        const hdr = document.getElementById('prof-sect-tuning-hdr');
-        const body = document.getElementById('prof-sect-tuning-body');
+        const hdr = document.getElementById('prof-sect-pakete-hdr');
+        const body = document.getElementById('prof-sect-pakete-body');
         if (hdr && body && body.style.display === 'none') hdr.click();
         // Erst im naechsten Frame springen: das Aufklappen aendert die Hoehen.
         const spaeter = window.requestAnimationFrame || (cb => setTimeout(cb, 0));

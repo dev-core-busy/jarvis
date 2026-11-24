@@ -368,6 +368,19 @@ def unblock(user: str) -> bool:
     return False
 
 
+def _inhalt(text: str) -> str:
+    """Sensibler Lauf (backend/sensibel.py): Auszug und Auftrag sind Inhalt –
+    es bleiben Kanal, Methode, Muster, Werkzeug und Schranke. Wer wann woran
+    angeschlagen hat, ist damit weiter nachweisbar, nur nicht mehr womit."""
+    try:
+        from backend import sensibel as _s
+        if _s.aktiv() and text:
+            return _s.MARKE
+    except Exception:  # noqa: BLE001
+        pass
+    return text
+
+
 def _record(user: str, channel: str, method: str, pattern: str, text: str) -> dict:
     """Protokolliert einen Vorfall und sperrt den Account (falls nicht schon)."""
     incident = {
@@ -375,7 +388,7 @@ def _record(user: str, channel: str, method: str, pattern: str, text: str) -> di
         "channel": channel,
         "method": method,
         "pattern": pattern,
-        "snippet": (text or "")[:500],
+        "snippet": _inhalt((text or "")[:500]),
     }
     with _lock:
         state = _load()
@@ -521,7 +534,7 @@ async def inspect(text: str, user: str, channel: str,
         # Eintrag festhalten.
         incident = {
             "ts": int(time.time()), "channel": channel, "method": method,
-            "pattern": pattern, "snippet": (text or "")[:500],
+            "pattern": pattern, "snippet": _inhalt((text or "")[:500]),
         }
         if eingefuegt:
             incident["eingefuegt"] = eingefuegt
@@ -610,8 +623,9 @@ def record_violation(user: str, channel: str, kind: str, detail: str = "",
     Rueckgabe: {'blocked': bool, 'count': int}."""
     ts = int(time.time())
     entry = {"ts": ts, "channel": channel, "method": "policy", "pattern": kind,
-             "detail": (detail or "")[:_DETAIL_MAX], "snippet": (snippet or "")[:_DETAIL_MAX],
-             "tool": tool or "", "task": (task or "")[:_TASK_MAX],
+             "detail": _inhalt((detail or "")[:_DETAIL_MAX]),
+             "snippet": _inhalt((snippet or "")[:_DETAIL_MAX]),
+             "tool": tool or "", "task": _inhalt((task or "")[:_TASK_MAX]),
              "ip": ip or "", "client_type": client_type or ""}
     if marke:
         entry["marke"] = str(marke)[:120]

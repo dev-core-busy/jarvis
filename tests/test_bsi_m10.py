@@ -154,10 +154,14 @@ for k, (art, _g) in zr.AUSNAHMEN.items():
     if fn is None:
         continue
     namen = _gerufen(fn)
-    # eine Ebene tiefer: /ws prueft in handle_ws_message, nicht im Handler selbst
-    for n in list(namen):
-        if n in MODUL_FN and n != fn.name:
-            namen |= _gerufen(MODUL_FN[n])
+    # Tiefer: /ws prueft in handle_ws_message, nicht im Handler selbst – und
+    # seit dem Schalter "sensible Daten" (2026-11-24) liegt dazwischen
+    # _ws_nachricht_behandeln (die sensible Klammer). Deshalb ZWEI Ebenen;
+    # gedeckelt, damit die Regel nicht ueber den halben Modulbaum wandert.
+    for _ebene in range(2):
+        for n in list(namen):
+            if n in MODUL_FN and n != fn.name:
+                namen |= _gerufen(MODUL_FN[n])
     lokal = any(isinstance(c, ast.Constant) and c.value == "127.0.0.1" for c in ast.walk(fn))
     if not (namen & PRUEF_AUFRUFE or lokal):
         selbst_ohne.append("%s %s (%s)" % (k[0], k[1], fn.name))

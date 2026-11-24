@@ -577,6 +577,18 @@ def lauf_scope(benutzer: str, privilegiert: bool):
             or not bwrap_verfuegbar()):
         yield None
         return
+    # Sensibler Lauf (backend/sensibel.py): ein EIGENES Verzeichnis statt des
+    # gemeinsamen des Benutzers – die Ausnahme von "je Benutzer, nicht je Lauf"
+    # oben. Nur so laesst es sich am Laufende restlos loeschen, ohne die
+    # Zwischenprodukte anderer Laeufe derselben Person mitzunehmen. Der Preis
+    # (die Folgefrage findet das Zwischenprodukt nicht mehr) ist hier gewollt.
+    try:
+        from backend import sensibel as _sens
+        _sk = _sens.arbeit_kennung()
+        if _sk:
+            kennung = _sk
+    except Exception:  # noqa: BLE001
+        pass
     neu = Lauf(ARBEIT_ROOT / kennung, benutzer, kennung)
     token = _lauf_cv.set(neu)
     try:
@@ -682,6 +694,15 @@ def anhang_verzeichnis(benutzer: str, anlegen: bool = False) -> Path | None:
     kennung = benutzer_kennung(benutzer)
     if not kennung or not bwrap_verfuegbar():
         return None
+    # Sensibler Lauf: dieselbe eigene Kennung wie das Arbeitsverzeichnis
+    # (``lauf_scope``) – der Broker bindet Anhaenge nur aus dem Verzeichnis
+    # der Lauf-Kennung ein (``binds_pruefen``), mit der Benutzer-Kennung
+    # waeren sie in der Shell nicht vorhanden.
+    try:
+        from backend import sensibel as _sens
+        kennung = _sens.arbeit_kennung() or kennung
+    except Exception:  # noqa: BLE001
+        pass
     ziel = ANH_ROOT / kennung
     if anlegen:
         try:
@@ -713,7 +734,16 @@ def anhang_ziel(benutzer: str, sicherer_name: str) -> Path:
     """
     name = "anhang_%s_%s" % (uuid.uuid4().hex[:12], sicherer_name)
     verz = anhang_verzeichnis(benutzer, anlegen=True)
-    return (verz / name) if verz else (TMP_ECHT / name)
+    ziel = (verz / name) if verz else (TMP_ECHT / name)
+    # Sensibler Lauf (backend/sensibel.py): die Kopie faellt am Laufende, nicht
+    # erst nach JARVIS_ATTACH_TTL_MIN. Hier statt bei jedem Aufrufer – es gibt
+    # drei (Chat-Anhang, Track-Ablage, Track-Referenz).
+    try:
+        from backend import sensibel as _sens
+        _sens.datei_merken(ziel)
+    except Exception:  # noqa: BLE001
+        pass
+    return ziel
 
 
 def anhang_binds(benutzer: str) -> list:
@@ -789,7 +819,16 @@ def gehoert_anhang(pfad, benutzer: str) -> bool | None:
         eigen = rp.relative_to(root).parts[0]
     except Exception:  # noqa: BLE001
         return None
-    return eigen == benutzer_kennung(benutzer)
+    if eigen == benutzer_kennung(benutzer):
+        return True
+    # Anhang-Verzeichnis eines sensiblen Laufs (``anhang_verzeichnis``): nur
+    # innerhalb DIESES Laufs – die Kennung ist zufaellig und lebt nur dort.
+    try:
+        from backend import sensibel as _sens
+        _sk = _sens.vorhandene_kennung()
+        return bool(_sk) and eigen == _sk and bool(benutzer_kennung(benutzer))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 # ── Pfad-Aufloesung fuer Werkzeuge im Dienstprozess ─────────────────────────
@@ -1062,9 +1101,16 @@ def gehoert_arbeitsbereich(pfad, benutzer: str) -> bool | None:
     if not eigen:
         return False
     try:
-        return rp.relative_to(root).parts[0] == eigen
+        teil = rp.relative_to(root).parts[0]
     except Exception:  # noqa: BLE001
         return False
+    if teil == eigen:
+        return True
+    # Eigenes Verzeichnis eines sensiblen Laufs (``lauf_scope``): gehoert dem
+    # Benutzer nur INNERHALB dieses Laufs – danach ist es ohnehin geloescht.
+    lauf = _lauf_cv.get()
+    return bool(lauf is not None and lauf.kennung == teil
+                and _norm_user(lauf.benutzer) == _norm_user(benutzer))
 
 
 def einhaengepunkte(lauf_dir, ziele, sandbox_user: str) -> None:

@@ -270,21 +270,64 @@ def llm_aufruf_vermerken(exc: BaseException, provider, modell: str, dauer_s: flo
 
 # ─── Ausgabe: stdout-Huelle und Logging-Filter ───────────────────────────────
 
+# Ersatz fuer jede Zeile, die in einem sensiblen Lauf entsteht
+# (``backend/sensibel.py``, Festlegung 2026-11-24): die Kennzeichnung davor
+# (wer/Kanal/Chat) ist Metadatum und bleibt, der Text ist Inhalt und faellt weg.
+UNTERDRUECKT = "[sensibel] Inhalt nicht protokolliert"
+
+
+def _sensibel() -> bool:
+    """Liest das Lauf-Merkmal, ohne ``backend.sensibel`` zu importieren
+    (dieses Modul wird sehr frueh installiert). Fehler = nicht sensibel: eine
+    Protokoll-Huelle darf keinen Lauf abbrechen – das Merkmal ist eine
+    ContextVar, ein Lesefehler ist praktisch ausgeschlossen."""
+    try:
+        m = sys.modules.get("backend.sensibel")
+        return bool(m is not None and m.aktiv())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class _KontextStrom:
     """Huelle um ``sys.stdout``: setzt die Kennzeichnung vor jede Zeile, die
     innerhalb eines Kontexts BEGINNT. Folgezeilen einer mehrzeiligen Ausgabe
     (Traceback) bleiben unveraendert – die erste Zeile traegt die Herkunft,
-    hundert Wiederholungen davon waeren Laerm."""
+    hundert Wiederholungen davon waeren Laerm.
+
+    In einem SENSIBLEN Lauf wird jede Ausgabe verschluckt; je begonnener
+    Zeile erscheint einmal ``UNTERDRUECKT`` samt Kennzeichnung. Das gilt auch
+    fuer Folgezeilen und mehrteilige ``print``-Aufrufe (``print(a, b)``
+    schreibt viermal) – die Entscheidung faellt je ``write``, nicht je Zeile.
+
+    ``kennzeichnen=False`` (stderr): nur die Unterdrueckung, keine
+    Kennzeichnung – stderr trug sie nie, und Fremdbibliotheken schreiben
+    dort Formate, die niemand umgebaut haben will."""
 
     _jarvis_kontext_strom = True
 
-    def __init__(self, ziel):
+    def __init__(self, ziel, kennzeichnen: bool = True):
         self._ziel = ziel
+        self._kennzeichnen = kennzeichnen
         self._zeilenanfang = True
         self._lock = threading.Lock()
 
     def write(self, s):
         if not isinstance(s, str) or not s:
+            return self._ziel.write(s)
+        if _sensibel():
+            with self._lock:
+                if self._zeilenanfang and s != "\n":
+                    try:
+                        kz = kennzeichen() if self._kennzeichnen else ""
+                    except Exception:  # noqa: BLE001
+                        kz = ""
+                    self._ziel.write((kz + " " if kz else "") + UNTERDRUECKT + "\n")
+                    # Die Zeile ist "erledigt": der Rest dieses print (und die
+                    # Folgezeilen) beginnen keine neue Marke, bis ein Text mit
+                    # Zeilenende vorbeikam.
+                self._zeilenanfang = s.endswith("\n")
+                return len(s)
+        if not self._kennzeichnen:
             return self._ziel.write(s)
         with self._lock:
             if self._zeilenanfang and s != "\n":
@@ -316,6 +359,14 @@ class KontextFilter(logging.Filter):
         except Exception:  # noqa: BLE001
             kz = ""
         record.kontext = (" " + kz) if kz else ""
+        if _sensibel():
+            # Stufe und Logger-Name bleiben (Metadaten), Text, Argumente und
+            # Traceback fallen weg – ein Traceback zitiert Werte und Zeilen.
+            record.msg = UNTERDRUECKT
+            record.args = ()
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
         return True
 
 
@@ -327,6 +378,10 @@ def installieren() -> None:
     haengen. Mehrfach aufrufbar (Neuimport in Tests)."""
     if not getattr(sys.stdout, "_jarvis_kontext_strom", False):
         sys.stdout = _KontextStrom(sys.stdout)
+    # stderr: nur die Unterdrueckung sensibler Laeufe (``traceback.print_exc``
+    # und Warnungen schreiben dorthin).
+    if not getattr(sys.stderr, "_jarvis_kontext_strom", False):
+        sys.stderr = _KontextStrom(sys.stderr, kennzeichnen=False)
     filt = None
     for h in logging.getLogger().handlers:
         if not any(isinstance(f, KontextFilter) for f in h.filters):

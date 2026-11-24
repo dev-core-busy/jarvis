@@ -359,6 +359,14 @@
         _initSessions();
         const _csNewBtn = $('cs-new');
         if (_csNewBtn && !_csNewBtn._wired) { _csNewBtn._wired = true; _csNewBtn.addEventListener('click', _newSession); }
+        const _csSensBtn = $('cs-new-sens');
+        if (_csSensBtn && !_csSensBtn._wired) {
+            _csSensBtn._wired = true;
+            _csSensBtn.innerHTML = JarvisIcons.lock();
+            _csSensBtn.addEventListener('click', _newSensibelSession);
+        }
+        const _sensIco = document.querySelector('#sens-banner .sens-banner-ico');
+        if (_sensIco && !_sensIco.firstChild) _sensIco.innerHTML = JarvisIcons.lock();
         // Auswahlmodus der Verlaufsleiste (mehrere Chats zusammen loeschen)
         // Eigenes Kontextmenue in der ganzen Verlaufsleiste (Zeilen + Flaeche)
         const _csSide = $('chat-sidebar');
@@ -1137,6 +1145,8 @@
     // agent_id gehoert bewusst NICHT hierher: das Backend kuerzt den Verlauf
     // beim Bearbeiten nur fuer den Hauptagenten.
     function _auswahlMitgeben(msg) {
+        // Nur ein ausdrueckliches true zaehlt im Backend (main._ist_sensibler_auftrag).
+        if (_istSensibel(_activeSid)) msg.sensibel = true;
         if (_kbFilter) msg.kb_groups = _kbFilter.getSelection();
         if (_sqlFilter) {
             const _sq = _sqlFilter.getSelection();
@@ -2442,6 +2452,8 @@
 
     function _saveHistory() {
         if (_chatHistory.length > _HISTORY_MAX) _chatHistory = _chatHistory.slice(-_HISTORY_MAX);
+        // Sensibler Chat: kein localStorage – nur der Speicher dieses Tabs.
+        if (_istSensibel(_activeSid)) { _sensChats.get(_activeSid).history = _chatHistory; return; }
         if (window.JarvisChatLib && window.JarvisChatLib.saveHistory) {
             window.JarvisChatLib.saveHistory(_HISTORY_KEY, _chatHistory, _HISTORY_MAX);
         } else {
@@ -2655,12 +2667,72 @@
         if (!agentRunning) msgInput.focus();
     }
 
+    // ── Sensibler Chat (Schalter "sensible Daten", backend/sensibel.py) ──────
+    // Festlegung 2026-11-24: ein sensibler Chat lebt NUR in diesem offenen Tab.
+    // Er wird nie auf dem Server angelegt (keine Sitzung, kein Transkript,
+    // kein Titel aus dem Inhalt) und nie in localStorage geschrieben – auch
+    // seine Kennung nicht. Nach Neuladen oder Schliessen ist er weg; der
+    // Server verwirft den Gespraechszusammenhang beim Trennen der Verbindung.
+    // Jeder Auftrag traegt `sensibel: true`, damit das Backend Protokolle,
+    // Lernen, Gedaechtnis und Dateien entsprechend behandelt.
+    const _sensChats = new Map();   // sid -> { title, history }
+    function _istSensibel(sid) { return !!sid && _sensChats.has(sid); }
+    function _sensEintraege() {
+        return Array.from(_sensChats.entries()).map(([id, c]) => ({ id, title: c.title, sensibel: true }));
+    }
+    // Server-Liste plus die sensiblen Chats dieses Tabs (oben) – JEDE Zuweisung
+    // an `_sessions` aus einer Server-Antwort laeuft hierueber, sonst
+    // verschwaende ein sensibler Chat beim naechsten Auffrischen aus der Leiste.
+    function _mitSensiblen(list) {
+        return _sensEintraege().concat((list || []).filter(x => !_istSensibel(x.id)));
+    }
+    // Aktive Sitzung fuer den naechsten Seitenaufruf merken – nie eine sensible.
+    function _sidMerken(sid) {
+        if (_istSensibel(sid)) return;
+        try { localStorage.setItem(_sidKey(), sid || ''); } catch (e) {}
+    }
+    function _sensNeueKennung() {
+        const a = new Uint8Array(6);
+        (window.crypto || window.msCrypto).getRandomValues(a);
+        return 'sens-' + Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+    }
+    async function _newSensibelSession() {
+        _persistSession();
+        const sid = _sensNeueKennung();
+        _sensChats.set(sid, { title: window.t('chat.sens_title'), history: [] });
+        _sessions = _mitSensiblen(_sessions);
+        _activeSid = sid;
+        _renderSidebar();
+        await _restoreHistory();
+        _updateContextIndicator();
+        if (typeof msgInput !== 'undefined' && msgInput) msgInput.focus();
+    }
+    // Sensiblen Chat verwerfen: aus dem Tab UND aus dem Arbeitsspeicher des
+    // Servers (die Verbindung bleibt offen, also ausdruecklich sagen).
+    function _sensVerwerfen(sid) {
+        _sensChats.delete(sid);
+        try {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'sensibel_vergessen', session_id: sid }));
+            }
+        } catch (e) { /* beim Trennen verwirft der Server ohnehin */ }
+    }
+    // Hinweisband ueber der Eingabe: nur im sensiblen Chat sichtbar.
+    function _sensBandZeigen() {
+        const band = document.getElementById('sens-banner');
+        if (band) band.hidden = !_istSensibel(_activeSid);
+        const knopf = document.getElementById('cs-new-sens');
+        if (knopf) knopf.setAttribute('aria-pressed', _istSensibel(_activeSid) ? 'true' : 'false');
+    }
+
     // ── Chat-Sitzungen: Persistenz je aktiver Sitzung (statt geteilter History) ──
     function _csHeaders(extra) { return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {}); }
     function _sidKey() { return 'jarvis_chat_sid_' + (_currentUser || 'anon'); }
     // Transkript der aktiven Sitzung serverseitig speichern (nach jedem Turn/Edit)
     function _persistSession() {
         if (!_activeSid || !token) return;
+        // Sensibel: nur der Speicher dieses Tabs, nie der Server.
+        if (_istSensibel(_activeSid)) { _sensChats.get(_activeSid).history = _chatHistory; return; }
         const body = { messages: _chatHistory };
         // Wissensgruppen-Auswahl der Sitzung mitspeichern (null=alle, []=keine, [ids])
         if (_kbFilter) body.kb_groups = _kbFilter.getSelection();
@@ -2682,6 +2754,7 @@
     // den Verlauf gewechselt). Nur `messages` senden – kb_groups/profile_id der
     // Ziel-Sitzung bleiben unangetastet.
     async function _appendToSessionTranscript(sid, entry) {
+        if (_istSensibel(sid)) { _sensChats.get(sid).history.push(entry); return; }
         try {
             const d = await _csGet(sid);
             if (!d) return;   // Sitzung inzwischen geloescht
@@ -2693,7 +2766,7 @@
             });
             // Sidebar aktualisieren (Auto-Benennung/updated der Ursprungs-Sitzung)
             const list = await _csList();
-            if (list.length) { _sessions = list; _renderSidebar(); }
+            if (list.length) { _sessions = _mitSensiblen(list); _renderSidebar(); }
         } catch (e) { /* best effort */ }
     }
 
@@ -2756,6 +2829,15 @@
             }
             const title = document.createElement('span');
             title.className = 'cs-title'; title.textContent = s.title || window.t('chat.untitled');
+            if (_istSensibel(s.id)) {
+                // Schloss VOR dem Titel + Text im title (Symbol allein ist keine
+                // Information); kein Prompt-Knopf: der liegt auf dem Server.
+                item.classList.add('cs-sensibel');
+                const lk = document.createElement('span');
+                lk.className = 'cs-sens-ico'; lk.innerHTML = JarvisIcons.lock();
+                item.title = window.t('chat.sens_item_title');
+                item.appendChild(lk);
+            }
             const ren = document.createElement('button'); ren.type = 'button'; ren.className = 'cs-act cs-ren'; JarvisIcons.setPencil(ren); ren.title = window.t('chat.rename');
             // Sprechblase = Prompt fuer DIESEN Chat. Gefuellt, wenn einer
             // hinterlegt ist – die Form ist die sichtbare Aussage, der Wortlaut
@@ -2766,7 +2848,9 @@
             pr.title = window.t(s.has_prompt ? 'chat.sprompt_btn_set' : 'chat.sprompt_btn');
             pr.setAttribute('aria-label', pr.title);
             const del = document.createElement('button'); del.type = 'button'; del.className = 'cs-act cs-del'; JarvisIcons.setTrash(del); del.title = window.t('chat.delete');
-            item.appendChild(title); item.appendChild(pr); item.appendChild(ren); item.appendChild(del);
+            item.appendChild(title);
+            if (!_istSensibel(s.id)) item.appendChild(pr);
+            item.appendChild(ren); item.appendChild(del);
             // `contains` statt `e.target === …`: die Knoepfe tragen ein
             // Inline-SVG, ein Klick trifft dort das <path> und nicht den Knopf.
             // Getragen hat das bisher allein das `stopPropagation` in den
@@ -2939,13 +3023,19 @@
         if (!ids.length) return;
         if (!window.confirm(window.t('chat.delete_many_confirm').replace('{n}', String(ids.length)))) return;
         let d = null;
-        try {
+        // Sensible Chats gibt es auf dem Server nicht – lokal verwerfen.
+        const sensWeg = ids.filter(_istSensibel);
+        sensWeg.forEach(_sensVerwerfen);
+        const serverIds = ids.filter(id => !_istSensibel(id) && !sensWeg.includes(id));
+        if (!serverIds.length) d = { deleted: [], failed: [] };
+        else try {
             const r = await fetch('/api/chat/sessions/delete', {
                 method: 'POST', headers: _csHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({ ids })
+                body: JSON.stringify({ ids: serverIds })
             });
             d = await r.json();
         } catch (e) { d = null; }
+        if (d && Array.isArray(d.deleted)) d.deleted = d.deleted.concat(sensWeg);
         if (!d || !Array.isArray(d.deleted)) { showToast(window.t('chat.delete_many_failed')); return; }
         const weg = new Set(d.deleted);
         _sessions = _sessions.filter(x => !weg.has(x.id));
@@ -2968,7 +3058,7 @@
             const ns = await _csCreate('');
             if (ns) { _sessions.unshift(ns); _activeSid = ns.id; }
         }
-        try { localStorage.setItem(_sidKey(), _activeSid || ''); } catch (e) {}
+        _sidMerken(_activeSid);
         _renderSidebar();
         await _restoreHistory();
         _updateContextIndicator();
@@ -3001,7 +3091,7 @@
     }
 
     async function _initSessions() {
-        _sessions = await _csList();
+        _sessions = _mitSensiblen(await _csList());
         let want = null; try { want = localStorage.getItem(_sidKey()); } catch (e) {}
         let active = null;
         // Uebergabe einer anderen Seite (Wissensgraph → "Recherche starten"):
@@ -3015,7 +3105,7 @@
         if (!active) active = _sessions.find(s => s.id === want) || _sessions[0] || null;
         if (!active) { active = await _csCreate(''); if (active) _sessions.unshift(active); }
         _activeSid = active ? active.id : null;
-        if (_activeSid) { try { localStorage.setItem(_sidKey(), _activeSid); } catch (e) {} }
+        if (_activeSid) _sidMerken(_activeSid);
         _renderSidebar();
         await _restoreHistory();        _updateContextIndicator();
     }
@@ -3024,7 +3114,7 @@
         if (sid === _activeSid) return;
         _persistSession();
         _activeSid = sid;
-        try { localStorage.setItem(_sidKey(), sid); } catch (e) {}
+        _sidMerken(sid);
         _renderSidebar();
         await _restoreHistory();        _updateContextIndicator();
         // Laeuft gerade eine Anfrage DIESER Sitzung (Rueckwechsel waehrend Streaming):
@@ -3044,7 +3134,7 @@
         if (!s) return;
         _sessions.unshift(s);
         _activeSid = s.id;
-        try { localStorage.setItem(_sidKey(), s.id); } catch (e) {}
+        _sidMerken(s.id);
         _renderSidebar();
         await _restoreHistory();        _updateContextIndicator();
         if (typeof msgInput !== 'undefined' && msgInput) msgInput.focus();
@@ -3066,10 +3156,10 @@
             // Liste frisch holen statt den einen Eintrag einzuschieben: sonst
             // stuende die neue Sitzung an falscher Stelle (sortiert nach updated).
             const list = await _csList();
-            if (list && list.length) _sessions = list;
+            if (list && list.length) _sessions = _mitSensiblen(list);
             if (!_sessions.some(x => x.id === d.session.id)) _sessions.unshift(d.session);
             _activeSid = d.session.id;
-            try { localStorage.setItem(_sidKey(), _activeSid); } catch (e) {}
+            _sidMerken(_activeSid);
             _renderSidebar();
             await _restoreHistory();
             _updateContextIndicator();
@@ -3392,6 +3482,10 @@
         const nn = window.prompt(window.t('chat.rename_prompt'), s.title || '');
         if (nn == null) return;
         const title = nn.trim(); if (!title) return;
+        if (_istSensibel(s.id)) {
+            // Nur im Tab – ein Titel ist Inhalt und geht nicht an den Server.
+            _sensChats.get(s.id).title = title; s.title = title; _renderSidebar(); return;
+        }
         try {
             const r = await fetch('/api/chat/sessions/' + encodeURIComponent(s.id), { method: 'PATCH', headers: _csHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ title }) });
             const d = await r.json();
@@ -3401,7 +3495,8 @@
 
     async function _deleteSession(s) {
         if (!window.confirm(window.t('chat.delete_confirm').replace('{name}', s.title || ''))) return;
-        try { await fetch('/api/chat/sessions/' + encodeURIComponent(s.id), { method: 'DELETE', headers: _csHeaders() }); } catch (e) {}
+        if (_istSensibel(s.id)) _sensVerwerfen(s.id);
+        else { try { await fetch('/api/chat/sessions/' + encodeURIComponent(s.id), { method: 'DELETE', headers: _csHeaders() }); } catch (e) {} }
         const warAktiv = (_activeSid === s.id);
         _sessions = _sessions.filter(x => x.id !== s.id);
         await _nachLoeschen(warAktiv);
@@ -3409,6 +3504,7 @@
     // Nach der ersten Antwort den vom Backend automatisch gesetzten Titel
     // (erster Nachrichtentext) in die Sidebar uebernehmen.
     async function _maybeRefreshTitle() {
+        if (_istSensibel(_activeSid)) return;
         const s = _sessions.find(x => x.id === _activeSid);
         if (!s || (s.title && s.title !== _CS_DEFAULT_TITLE)) return;
         const list = await _csList();
@@ -3571,8 +3667,14 @@
         messagesEl.innerHTML = '';
         currentBotBubble = null;
         let _sdata = null;
-        if (_activeSid) _sdata = await _csGet(_activeSid);
-        _chatHistory = (_sdata && _sdata.transcript) || [];
+        _sensBandZeigen();
+        if (_istSensibel(_activeSid)) {
+            // Kein Serverabruf: die Sitzung gibt es dort nicht.
+            _chatHistory = _sensChats.get(_activeSid).history || [];
+        } else {
+            if (_activeSid) _sdata = await _csGet(_activeSid);
+            _chatHistory = (_sdata && _sdata.transcript) || [];
+        }
         // Wissensgruppen-Auswahl dieser Sitzung wiederherstellen.
         //  - Sitzung hat eine gespeicherte Auswahl -> die gilt.
         //  - FRISCHE Sitzung (kein Transkript, keine Auswahl) -> die persoenliche

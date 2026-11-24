@@ -43,6 +43,10 @@ def _headless_herkunft(agent, actor) -> dict:
 
 def _friendly_api_error(exc: Exception) -> str:
     """Wandelt rohe API-Fehler in verständliche Meldungen um."""
+    # Riegel "sensible Daten": der Text ist schon fuer den Benutzer geschrieben,
+    # und die Anbieter-Muster unten duerften ihn nicht umdeuten.
+    if type(exc).__name__ == "ExternGesperrt":
+        return "🔒 " + str(exc)
     raw = str(exc)
     _type = type(exc).__name__
     _mod = type(exc).__module__ or ""
@@ -168,6 +172,7 @@ import backend.conv_log as conv_log
 import backend.log_kontext as _log_kontext
 import backend.documents as _documents
 import backend.lauf_tmp as _lauf_tmp
+import backend.sensibel as _sensibel
 import backend.prompt_schutz as _prompt_schutz
 import backend.werkzeug_rahmen as _rahmen
 import backend.wirkung as _wirkung
@@ -2172,6 +2177,7 @@ KRITISCH – Ausfuehrungs-Regeln:
             for p in config.profiles:
                 if p.get("id") == self._role_profile_id:
                     self._active_profile = p
+                    self._sensibel_profil_anwenden()
                     return
             # Profil wurde geloescht: NICHT scheitern, sondern mit dem Profil des
             # Aufrufers weiterlaufen und es sagen. Eine Rolle, die wegen einer
@@ -2181,6 +2187,44 @@ KRITISCH – Ausfuehrungs-Regeln:
                   f"{self._role_profile_id} existiert nicht (mehr) – Profil des "
                   f"Aufrufers wird verwendet", flush=True)
         self._active_profile = config.profile_for_user(getattr(self, "_current_username", ""))
+        self._sensibel_profil_anwenden()
+
+    def _sensibel_profil_anwenden(self) -> None:
+        """Sensibler Lauf: ein EXTERNES Profil wird durch ein internes ersetzt.
+
+        Steht hinter jeder Profilwahl (Rolle, Benutzer, global), weil keine
+        davon fuer sensible Daten gedacht ist. Ohne internes Profil bleibt das
+        bisherige stehen – der Riegel in ``llm.py`` sperrt dann den ersten
+        Aufruf mit Grund (fail-closed). ``_sensibel_wechsel`` haelt fuer die
+        Statuszeile fest, was passiert ist: ``(vorher, nachher)``, ``nachher``
+        leer = kein internes gefunden; ``None`` = kein sensibler Lauf."""
+        self._sensibel_wechsel = None
+        if not _sensibel.aktiv():
+            return
+        from backend import llm_standort
+        basis = self._eff_profile
+        name = lambda p: str((p or {}).get("name") or (p or {}).get("id") or "?")  # noqa: E731
+        if llm_standort.ist_intern(basis):
+            self._sensibel_wechsel = (name(basis), name(basis))
+            return
+        ersatz = llm_standort.sensibles_profil(getattr(self, "_current_username", ""), basis)
+        if ersatz:
+            self._active_profile = ersatz
+        self._sensibel_wechsel = (name(basis), name(ersatz) if ersatz else "")
+
+    def _sensibel_statuszeile(self) -> str:
+        """Text fuer den Chat: welches Modell arbeitet im sensiblen Lauf."""
+        w = getattr(self, "_sensibel_wechsel", None)
+        if not w:
+            return ""
+        vorher, nachher = w
+        if not nachher:
+            from backend import llm_standort
+            return "🔒 " + llm_standort.KEIN_INTERNES
+        if vorher == nachher:
+            return f"🔒 Sensible Daten: es arbeitet das interne Modell „{nachher}“."
+        return (f"🔒 Sensible Daten: „{vorher}“ ist extern – es arbeitet stattdessen das "
+                f"interne Modell „{nachher}“.")
 
     def _werkzeug_nutzbar(self, name: str) -> bool:
         """Ist das Werkzeug in DIESEM Lauf wirklich aufrufbar?
@@ -3342,6 +3386,9 @@ KRITISCH – Ausfuehrungs-Regeln:
         )
 
         await self._send_status(ws, f"🚀 Starte Aufgabe: {task_text}")
+        _sens_zeile = self._sensibel_statuszeile()
+        if _sens_zeile:
+            await self._send_status(ws, _sens_zeile, highlight=True, persist=True)
 
         # System-Prompt zusammenbauen
         system_prompt = self._base_system_prompt()
@@ -4276,7 +4323,13 @@ KRITISCH – Ausfuehrungs-Regeln:
             # Ohne das Werkzeug ist der ganze Zweig sinnlos: er kostet einen
             # weiteren LLM-Aufruf und endet mit "Tool nicht gefunden".
             _st = _lauf_stats()
-            if steps >= 2 and _st and self._werkzeug_nutzbar("memory_manage"):
+            # Sensibler Lauf (backend/sensibel.py): der Zweig waere ein
+            # LLM-Aufruf mit dem Inhalt, dessen Ergebnis das Werkzeug abweist.
+            # Bewusst NUR das Merkmal und nicht `_memory_schreiben_gesperrt()`:
+            # das sperrt auch Laeufe ohne Kanal und haette den Normalfall
+            # veraendert (test_agent_kern, Positivkontrolle 4 -> 3 Aufrufe).
+            if (steps >= 2 and _st and self._werkzeug_nutzbar("memory_manage")
+                    and not _sensibel.aktiv()):
                 failed = [s for s in _st if not s["success"]]
                 succeeded = [s for s in _st if s["success"]]
                 if failed and succeeded:
@@ -7450,6 +7503,10 @@ KRITISCH – Ausfuehrungs-Regeln:
                 _documents.register(url.rsplit("/", 1)[-1], _owner)
             except Exception as e:
                 _log(f"Eigentuemer-Eintrag fehlgeschlagen fuer {url}: {e}")
+            # Sensibler Lauf (backend/sensibel.py): diese Ablage ist ein
+            # ERGEBNIS – sie bleibt bis zum ersten Download (hoechstens 15 min)
+            # statt mit den Zwischenablagen am Laufende zu fallen.
+            _sensibel.ergebnis_merken(url.rsplit("/", 1)[-1])
             # Der NAME dieser Auslieferung – nicht nur der Pfad. Ein Pfad-Schluessel
             # allein traegt nicht: das Werkzeug liefert aus data/documents, das
             # Modell nennt im Text einen /tmp-Pfad, der nie existiert hat.

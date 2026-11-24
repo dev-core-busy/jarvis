@@ -266,6 +266,9 @@ class LaufTmpStub:
         return False if self.anhang_blind else _LT_ECHT.ist_anhang_kopie(pfad)
 
 
+from backend import sensibel as _SENS_ECHT  # noqa: E402
+
+
 def baue(tmpdir: Path, dok: DokStub, lauf=None):
     """Liefert (deliver, clean) – beide gegen ein gefaelschtes Projektverzeichnis."""
     umg = {
@@ -273,6 +276,10 @@ def baue(tmpdir: Path, dok: DokStub, lauf=None):
         "_documents": dok,
         "_log": lambda *a, **k: None,
         "_lauf_tmp": lauf or LaufTmpStub(),
+        # Schalter "sensible Daten" (backend/sensibel.py): _emit vermerkt
+        # Ergebnisse dort. Das ECHTE Modul – ausserhalb eines Laufs ist jeder
+        # Aufruf wirkungslos, eine Attrappe saehe nur die eigene Annahme.
+        "_sensibel": _SENS_ECHT,
         **modul_konstanten(),
         "__file__": str(tmpdir / "backend" / "agent.py"),
     }

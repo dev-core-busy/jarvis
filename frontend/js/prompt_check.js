@@ -44,9 +44,12 @@
     /* Knopf-Markup fuer ein Formular. `klasse` uebernimmt den Stil der
      * Nachbarknoepfe (st-btn, em-btn, btn-secondary) – der Knopf soll sich
      * einreihen, nicht auffallen. */
-    function knopfHtml(feldId, kontext, klasse) {
+    // sensId: optional die Kennung einer Checkbox "sensible Daten" – ist sie
+    // gesetzt, geht die Pruefung nur an ein internes Modell (llm_standort).
+    function knopfHtml(feldId, kontext, klasse, sensId) {
         return '<button type="button" class="jv-pc-btn ' + esc(klasse || '') + '"'
             + ' data-pc-feld="' + esc(feldId) + '"'
+            + (sensId ? ' data-pc-sensibel="' + esc(sensId) + '"' : '')
             + ' data-pc-kontext="' + esc(kontext) + '"'
             + ' data-i18n="promptcheck.btn"'
             + ' data-i18n-title="promptcheck.title"'
@@ -181,6 +184,8 @@
                 'Es steht noch kein Text im Prompt-Feld.')) + '</p>', '');
             return;
         }
+        var sensId = btn.getAttribute('data-pc-sensibel') || '';
+        var sensEl = sensId ? document.getElementById(sensId) : null;
         var alt = btn.textContent;
         btn.disabled = true;
         btn.textContent = T('promptcheck.running', 'prüft …');
@@ -193,6 +198,7 @@
                 },
                 body: JSON.stringify({
                     prompt: text, kontext: kontext,
+                    sensibel: !!(sensEl && sensEl.checked),
                     lang: (window._lang === 'en' || window._lang === 'fr') ? 'en' : 'de'
                 })
             });

@@ -206,8 +206,9 @@ win.fetch = async function (url, opt) {
 };
 global.fetch = win.fetch;
 
+// + die ECHTEN Helfer des sensiblen Chats (seit 2026-11-24 ruft die Leiste sie)
 const teile = ['_renderSidebar', '_renderTools', '_selSetze', '_selModus', '_selAlle',
-               '_deleteSelected', '_nachLoeschen'];
+               '_deleteSelected', '_nachLoeschen', '_istSensibel', '_sidMerken', '_sensVerwerfen'];
 const stuecke = teile.map(n => {
     const s = schneide(CHATJS, n);
     if (!s) check('Schnitt: ' + n + ' gefunden', false, 'nicht im Quelltext');
@@ -215,16 +216,19 @@ const stuecke = teile.map(n => {
 });
 // Positivkontrolle VOR den inhaltlichen Pruefungen: ohne sie sind sie trivial.
 if (!stuecke.every(s => s.length > 20)) {
-    check('alle sieben Funktionen liessen sich schneiden', false,
+    check('alle ' + teile.length + ' Funktionen liessen sich schneiden', false,
           teile.map((n, i) => n + ':' + stuecke[i].length).join(' '));
     bilanz(); clearTimeout(wachhund); process.exit(2);
 }
-check('alle sieben Funktionen liessen sich schneiden', true);
+check('alle ' + teile.length + ' Funktionen liessen sich schneiden', true);
 
 /* ⚠ Modulvariablen fallen aus jedem Funktions-Schnitt heraus – ohne diese
  * Deklarationen bricht der Lauf mit einem nackten ReferenceError ab. */
 const prolog = `
 var _sessions = [], _activeSid = null, _selMode = false, _selIds = new Set();
+// Sensibler Chat (Schalter "sensible Daten", 2026-11-24): die Leiste fragt
+// _istSensibel; die Map ist Modulvariable und faellt aus jedem Schnitt.
+var _sensChats = new Map(), ws = null;
 var gewechselt = [], toasts = [], wiederhergestellt = 0;
 var $ = function (id) { return document.getElementById(id); };
 function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }

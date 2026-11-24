@@ -49,7 +49,19 @@ def _local_dispatch(op: str, args: dict, user: str, stream_cb) -> dict:
 def call_sync(op: str, args: dict | None = None, *, user: str = "",
               timeout: int = DEFAULT_TIMEOUT, stream_cb=None) -> dict:
     """Synchroner Broker-Aufruf (fuer Threads/Sync-Code). stream_cb(line) wird
-    fuer Live-Ausgabezeilen aufgerufen (sofern die Op streamt)."""
+    fuer Live-Ausgabezeilen aufgerufen (sofern die Op streamt).
+
+    Sensibler Lauf (backend/sensibel.py): das Merkmal reist als Argument
+    ``sensibel`` mit – der Broker ist ein eigener Prozess und sieht die
+    ContextVar nicht. Er schwaerzt dann Journalzeile und Audit bis auf die
+    Metadaten (``ops.redact_args``). ``to_thread`` kopiert den Kontext, der
+    asynchrone Weg landet also ebenfalls hier."""
+    try:
+        from backend import sensibel as _sens
+        if _sens.aktiv():
+            args = {**(args or {}), "sensibel": True}
+    except Exception:  # noqa: BLE001
+        pass
     if not os.path.exists(SOCKET_PATH):
         if os.geteuid() == 0:
             return _local_dispatch(op, args or {}, user, stream_cb)

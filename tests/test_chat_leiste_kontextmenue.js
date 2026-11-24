@@ -71,7 +71,8 @@ function schneide(quelle, name) {
     return null;
 }
 
-const NAMEN = ['_csCtxItems', '_renderSidebar', '_renderTools', '_ctxPdfItem', '_selSetze', '_selModus'];
+const NAMEN = ['_csCtxItems', '_renderSidebar', '_renderTools', '_ctxPdfItem', '_selSetze', '_selModus',
+               '_istSensibel'];   // Helfer des sensiblen Chats (2026-11-24), ECHT geschnitten
 const TEILE = NAMEN.map(n => schneide(CHATJS, n));
 if (TEILE.some(t => !t)) abbruch('Funktionen in chat.js nicht gefunden: '
     + NAMEN.filter((n, i) => !TEILE[i]).join(', '));
@@ -100,6 +101,9 @@ var _sessions = [
   { id: 's3', title: 'Dritter Chat', has_prompt: false },
 ];
 var _activeSid = 's1', _selMode = false, _selIds = new Set();
+// Sensibler Chat (Schalter "sensible Daten", 2026-11-24): die Leiste fragt
+// _istSensibel; die Map ist Modulvariable und faellt aus jedem Schnitt.
+var _sensChats = new Map(), ws = null;
 var messagesEl = document.getElementById('messages') || document.body;
 var $ = function (id) { return document.getElementById(id); };
 function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }

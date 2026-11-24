@@ -1746,8 +1746,25 @@ _REGISTRY = {
 OHNE_AUTOMATIK = {name for name, e in _REGISTRY.items() if not e[3]}
 
 
+# Argumente, die auch aus einem SENSIBLEN Lauf (backend/sensibel.py) im
+# Journal und Audit stehen bleiben: wer, welches Verzeichnis, welche Frist.
+# Alles andere (Befehl, Pfade, Binds, Inhalt) ist Inhalt. Positivliste – ein
+# neues Argument ist erst einmal Inhalt.
+_SENSIBEL_META = frozenset({"user", "arbeit", "timeout", "alter_min", "sensibel"})
+
+
+def ist_sensibel(args: dict) -> bool:
+    return bool((args or {}).get("sensibel") is True)
+
+
 def redact_args(op: str, args: dict) -> dict:
-    """Sensible Felder (Passwoerter) fuer Audit/Anzeige maskieren."""
+    """Sensible Felder (Passwoerter) fuer Audit/Anzeige maskieren.
+
+    Aus einem sensiblen Lauf (Argument ``sensibel``) bleibt nur ``_SENSIBEL_META``
+    lesbar – der Shell-Befehl eines Laufs ist dessen Inhalt."""
+    if ist_sensibel(args):
+        return {k: (v if k in _SENSIBEL_META else "[sensibel]")
+                for k, v in (args or {}).items()}
     entry = _REGISTRY.get(op)
     if not entry:
         return dict(args or {})
@@ -1808,6 +1825,8 @@ def dispatch(op: str, args: dict, user: str = "", stream=None, peer: str = "") -
     # Rein informativer Ausloeser-Kontext (z.B. Agent-Task-Auszug). Wird NUR
     # ins Audit geschrieben und fliesst nie in key/desc/Policy/Befehl ein.
     context = str(args.get("_context") or "")[:300]
+    if ist_sensibel(args) and context:
+        context = "[sensibel]"
     # Konkrete (maskierte) Argumente dieser Ausfuehrung fuers Audit-Log
     info = _args_info(op, args)
 
@@ -1830,6 +1849,13 @@ def dispatch(op: str, args: dict, user: str = "", stream=None, peer: str = "") -
     # Detail: stderr hat Vorrang (Fehlerursache); bei Erfolg ein stdout-Auszug,
     # damit auch rc=0-Eintraege aussagen, WAS passiert ist.
     detail = (result.get("stderr") or result.get("stdout") or "")[:200]
+    if ist_sensibel(args):
+        # Ausgabe des Befehls ist Inhalt; der Rueckgabewert (rc) bleibt.
+        detail = "[sensibel]" if detail else ""
+        # Bestaetigung an den Aufrufer: dieser Broker kennt das Merkmal. Eine
+        # Op nimmt ein unbekanntes Argument klaglos an (Register) – ohne das
+        # Feld liesse sich ein alter Broker nicht von einem neuen unterscheiden.
+        result["sensibel"] = True
     policy.audit(user, op, key, "executed", rc=result.get("rc"),
                  duration_ms=dur, detail=detail, context=context, info=info, peer=peer)
     result.setdefault("ok", False)

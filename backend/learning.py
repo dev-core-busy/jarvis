@@ -354,7 +354,17 @@ async def learn_from_conversation(
 
     Wird als asyncio.Task (fire-and-forget) nach Konversationsende aufgerufen.
     Laeuft im Hintergrund, blockiert NICHT die User-Antwort.
+
+    Sensibler Lauf (backend/sensibel.py): kein Lernen – weder Notiz noch
+    Index noch der zusaetzliche LLM-Aufruf mit dem Inhalt. Lernnotizen laufen
+    nie ab; ein Inhalt darin waere das Gegenteil der Zusage.
     """
+    try:
+        from backend import sensibel as _sens
+        if _sens.aktiv():
+            return
+    except Exception:  # noqa: BLE001
+        return
     try:
         tool_results = _collect_tool_results(conv_messages)
         if len(tool_results) < MIN_TOOL_OK_RESULTS:

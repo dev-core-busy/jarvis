@@ -55,6 +55,7 @@ from pathlib import Path
 from backend import documents as _documents
 from backend import fremdtext
 from backend import netz_ziel as _netz_ziel
+from backend import sensibel as _sens
 from backend import short_tracks as st
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -811,6 +812,11 @@ def _job_neu(dump: dict, owner: str, titel: str) -> dict:
         "beendet": 0.0,
         "gesehen": False,           # fuer den Zaehler auf der Portal-Kachel
         "art": "datei",             # datei | frage
+        # Ablage mit "sensible Daten" (backend/sensibel.py): beim EINREIHEN
+        # festgehalten – gilt fuer diesen Auftrag, auch wenn die Ablage danach
+        # umgestellt wird. ``_sensibel`` ist sein eigener Lauf (Dateien).
+        "sensibel": bool(dump.get("sensibel")),
+        "_sensibel": None,
         "verlauf": 0,               # Zahl der frueheren Fragen im Auftrag (Nachfrage)
         "verlauf_weggelassen": 0,   # wegen Budget/Alter nicht mehr mitgegeben
         "_nr": next(_folge),
@@ -933,6 +939,7 @@ async def einreihen(dump: dict, user: str, teile: list[dict], hinweis: str = "")
             j = _job_neu(dump, user, titel)
             j["_teile"] = teile
             j["_hinweis"] = hinweis
+            _sensibel_abzweigen(j)
             _jobs[j["id"]] = j
             _reihe.append(j["id"])
             neu.append(j)
@@ -941,12 +948,22 @@ async def einreihen(dump: dict, user: str, teile: list[dict], hinweis: str = "")
                 j = _job_neu(dump, user, t.get("name") or "Datei")
                 j["_teile"] = [t]
                 j["_hinweis"] = hinweis
+                _sensibel_abzweigen(j)
                 _jobs[j["id"]] = j
                 _reihe.append(j["id"])
                 neu.append(j)
         _aufraeumen()
     await _pumpe()
     return [_oeffentlich(j) for j in neu]
+
+
+def _sensibel_abzweigen(j: dict) -> None:
+    """Auftrag einer sensiblen Ablage: eigener Lauf mit genau SEINEN Ablagen
+    (``sensibel.abzweigen``) – er startet spaeter aus der Warteschlange und
+    raeumt am Ende selbst auf (``_fuehre_aus``)."""
+    if j.get("sensibel"):
+        j["_sensibel"] = _sens.abzweigen(
+            [t.get("ablage") for t in (j.get("_teile") or []) if t.get("ablage")])
 
 
 def _titel_der_frage(frage: str) -> str:
@@ -966,6 +983,7 @@ async def einreihen_frage(dump: dict, user: str, frage: str) -> dict:
         j = _job_neu(dump, user, _titel_der_frage(frage))
         j["art"] = "frage"
         j["_frage"] = (frage or "").strip()
+        _sensibel_abzweigen(j)
         _jobs[j["id"]] = j
         _reihe.append(j["id"])
         _aufraeumen()
@@ -1007,9 +1025,13 @@ def verlauf_fuer(j: dict, jetzt: float | None = None) -> tuple[list[dict], int]:
     verschwiegen. Rueckgabe chronologisch (aelteste zuerst).
     """
     jetzt = time.time() if jetzt is None else jetzt
+    # Frage und Antwort eines SENSIBLEN Auftrags gehen nur in einen sensiblen
+    # Lauf mit – sonst stuenden sie im LLM-Verlauf einer inzwischen wieder
+    # normalen Ablage (backend/sensibel.py).
     kandidaten = sorted((v for v in _jobs.values()
                          if _ist_vorgaenger(v, j) and v.get("status") == "fertig"
-                         and (v.get("ergebnis") or "").strip()),
+                         and (v.get("ergebnis") or "").strip()
+                         and (j.get("sensibel") or not v.get("sensibel"))),
                         key=lambda v: v.get("_nr") or 0, reverse=True)
     paare: list[dict] = []
     summe = 0
@@ -1289,6 +1311,24 @@ async def _injektion_pruefen(job: dict, teile: list[dict]) -> None:
 
 
 async def _fuehre_aus(job_id: str) -> None:
+    """Ein Auftrag in SEINEM Lauf-Merkmal (``sensibel.fortsetzen``), danach die
+    Warteschlange nachziehen – AUSSERHALB davon: der naechste Task erbt den
+    Kontext dessen, der ihn startet."""
+    j = _jobs.get(job_id)
+    try:
+        async with _sens.fortsetzen((j or {}).get("_sensibel")):
+            await _fuehre_aus_im_lauf(job_id)
+    finally:
+        if j is not None:
+            j["_sensibel"] = None
+        # Naechsten wartenden Auftrag nachziehen
+        try:
+            await _pumpe()
+        except Exception as e:  # noqa: BLE001
+            print("[Tracks] Warteschlange: %s" % e, flush=True)
+
+
+async def _fuehre_aus_im_lauf(job_id: str) -> None:
     """Ein Auftrag: Arbeitskopien, Auftragsbau, Agentenlauf, Ergebnis, Protokoll."""
     j = _jobs.get(job_id)
     if not j:
@@ -1359,11 +1399,6 @@ async def _fuehre_aus(job_id: str) -> None:
             })
         except Exception as e:  # noqa: BLE001
             print("[Tracks] Protokoll nicht geschrieben: %s" % e, flush=True)
-        # Naechsten wartenden Auftrag nachziehen
-        try:
-            await _pumpe()
-        except Exception as e:  # noqa: BLE001
-            print("[Tracks] Warteschlange: %s" % e, flush=True)
 
 
 async def _lauf(job: dict, dump: dict, auftrag: str,
@@ -1581,9 +1616,15 @@ async def reset_dump(dump_id: str, user: str) -> dict:
     ids = [jid for jid, j in _jobs.items()
            if j.get("dump_id") == dump_id and j.get("owner") == un]
     abgebrochen = 0
+    # Sensible Auftraege, die nie starten werden: ihre Ablagen raeumt sonst
+    # niemand (ein laufender raeumt im ``finally`` von ``_fuehre_aus`` selbst).
+    verwaist: list = []
     async with _lock:
         for jid in ids:
             j = _jobs.get(jid) or {}
+            if j.get("status") == "wartet" and j.get("_sensibel") is not None:
+                verwaist.append(j["_sensibel"])
+                j["_sensibel"] = None
             if j.get("status") in ("wartet", "laeuft"):
                 abgebrochen += 1
                 # Status VOR dem Abbruch setzen: das `finally` in `_fuehre_aus`
@@ -1601,6 +1642,12 @@ async def reset_dump(dump_id: str, user: str) -> dict:
                 except ValueError:  # noqa: PERF203
                     pass
             _jobs.pop(jid, None)
+    for d in verwaist:
+        try:
+            await _sens.aufraeumen(d)
+        except Exception as e:  # noqa: BLE001
+            print("[Tracks] Reset: sensible Ablagen nicht geloescht (%s)"
+                  % type(e).__name__, flush=True)
     # Freigewordene Plaetze sofort nachbesetzen – ein Reset darf die
     # Warteschlange anderer Ablagen nicht anhalten.
     try:

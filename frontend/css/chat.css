@@ -423,6 +423,26 @@ body.light .cs-tool-del:hover { color: #fff; }
     cursor: pointer; font-size: 1rem; line-height: 1;
 }
 .cs-collapse:hover { color: var(--text-primary); border-color: var(--border-hover); }
+
+/* ─── Sensibler Chat (backend/sensibel.py) ───────────────────────────────────
+   Schloss-Knopf im Kopf der Leiste, Schloss an der Zeile, Hinweisband ueber der
+   Eingabe. Nur Variablen aus theme.css; die Aussage steht immer auch als Text
+   daneben bzw. im title (Farbe/Symbol allein ist keine Information). */
+.cs-new-sens { display: inline-flex; align-items: center; justify-content: center; }
+.cs-new-sens .jv-ico { width: 15px; height: 15px; }
+.cs-new-sens[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.cs-item .cs-sens-ico { display: inline-flex; flex: 0 0 auto; color: var(--accent); }
+.cs-item .cs-sens-ico .jv-ico { width: 13px; height: 13px; }
+.sens-banner {
+    display: flex; align-items: flex-start; gap: 8px;
+    margin: 0 10px 4px; padding: 6px 10px;
+    border: 1px solid var(--accent); border-radius: 10px;
+    background: var(--bg-secondary); color: var(--text-primary);
+    font-size: 0.78rem; line-height: 1.35;
+}
+.sens-banner[hidden] { display: none; }
+.sens-banner-ico { display: inline-flex; flex: 0 0 auto; color: var(--accent); padding-top: 1px; }
+.sens-banner-ico .jv-ico { width: 14px; height: 14px; }
 .cs-expand { display: none; }
 .chat-screen.sidebar-collapsed .chat-sidebar {
     flex-basis: 0; width: 0; padding-left: 0; padding-right: 0;

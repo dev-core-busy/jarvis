@@ -436,10 +436,24 @@ class LLMProvider(ABC):
         if cls.__module__ != __name__:
             return
         eigen = cls.__dict__.get("generate_response")
-        if eigen is None or getattr(eigen, "__token_erfassung__", False):
-            return
-        from backend import token_verbrauch
-        cls.generate_response = token_verbrauch.umhuellen(eigen)
+        if eigen is not None and not getattr(eigen, "__token_erfassung__", False):
+            from backend import token_verbrauch
+            cls.generate_response = token_verbrauch.umhuellen(eigen)
+        # Riegel "sensible Daten" (backend/llm_standort.py) AUSSEN um beide
+        # Netzwege: ein gesperrter Aufruf erreicht weder den Anbieter noch die
+        # Token-Statistik. Nur Methoden, die die Klasse SELBST definiert –
+        # geerbte sind in der Elternklasse schon umhuellt.
+        for _name in ("generate_response", "generate_image"):
+            _f = cls.__dict__.get(_name)
+            if _f is not None and not getattr(_f, "__sensibel_riegel__", False):
+                setattr(cls, _name, _riegel_umhuellen(_f))
+
+    def _standort_ziel(self) -> tuple[str, str]:
+        """``(anbieter_kennung, adresse)`` des Ziels – fuer den Riegel.
+
+        Anbieter mit festem Cloud-Endpunkt haben keine Adresse; wer eine hat
+        (``OpenAICompatibleProvider``), ueberschreibt das."""
+        return (str(self.anbieter_kennung or type(self).__name__), "")
 
     @abstractmethod
     async def generate_response(self, model: str, system_prompt: str, contents: list,
@@ -467,6 +481,23 @@ class LLMProvider(ABC):
         wenn er Bildgenerierung kann. Es wird NIEMALS auf ein anderes Profil gewechselt.
         """
         raise ImageGenNotSupported(self.image_label)
+
+
+def _riegel_umhuellen(original):
+    """Huelle "sensible Daten": prueft vor dem Aufruf das Ziel
+    (``llm_standort.riegel``). Ausserhalb eines sensiblen Laufs kostet sie
+    einen ContextVar-Zugriff."""
+    import functools
+
+    @functools.wraps(original)
+    async def _mit_riegel(self, *args, **kwargs):
+        from backend import llm_standort
+        kennung, adresse = self._standort_ziel()
+        llm_standort.riegel(kennung, adresse)
+        return await original(self, *args, **kwargs)
+
+    _mit_riegel.__sensibel_riegel__ = True
+    return _mit_riegel
 
 
 def _parse_sse_to_completion(sse_text: str) -> dict:
@@ -1114,6 +1145,9 @@ class OpenAICompatibleProvider(LLMProvider):
         if not url.endswith("/chat/completions"):
             url = url + "/chat/completions"
         self.base_url = url
+
+    def _standort_ziel(self) -> tuple[str, str]:
+        return (str(self.anbieter_kennung), self.base_url)
 
     def _build_headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -2234,6 +2268,29 @@ current_agent_profile: contextvars.ContextVar = contextvars.ContextVar(
     "jarvis_agent_profile", default=None)
 
 
+def _sensibel_profil_waehlen(p: dict | None) -> dict | None:
+    """Im SENSIBLEN Lauf: ein internes Profil statt ``p`` (bzw. statt des
+    global aktiven, wenn ``p`` None ist). Ausserhalb: ``p`` unveraendert.
+
+    Findet sich kein internes, bleibt es beim bisherigen Profil – dann sperrt
+    der Riegel den Aufruf mit Grund (fail-closed); hier zu werfen, braechte
+    Werkzeuge um ihre eigene Fehlermeldung."""
+    try:
+        from backend import sensibel
+        if not sensibel.aktiv():
+            return p
+        from backend import llm_standort
+        from backend.config import config
+        basis = p if p else config.active_profile
+        if llm_standort.ist_intern(basis):
+            return p
+        from backend import token_verbrauch
+        ersatz = llm_standort.sensibles_profil(token_verbrauch._benutzer(), basis)
+        return ersatz if ersatz else p
+    except Exception:  # noqa: BLE001
+        return p
+
+
 def provider_fuer_lauf(prompt_tool_calling: bool | None = None):
     """``(provider, model)`` aus dem Profil des laufenden Agenten – sonst global.
 
@@ -2242,6 +2299,7 @@ def provider_fuer_lauf(prompt_tool_calling: bool | None = None):
     """
     from backend.config import config
     p = current_agent_profile.get()
+    p = _sensibel_profil_waehlen(p if isinstance(p, dict) and p else None)
     if not isinstance(p, dict) or not p:
         ptc = (config.current_prompt_tool_calling if prompt_tool_calling is None
                else bool(prompt_tool_calling))
@@ -2294,6 +2352,16 @@ def provider_fuer_bild():
     pid = str(getattr(config, "IMAGE_PROFILE_ID", "") or "").strip()
     if not pid:
         return provider_fuer_lauf(prompt_tool_calling=False)
+    # Sensibler Lauf mit EXTERNEM Bildprofil: das (interne) Laufprofil malt –
+    # oder sagt ab. Ein externes Bildmodell bekaeme den Bildauftrag samt Inhalt.
+    try:
+        from backend import sensibel, llm_standort
+        if sensibel.aktiv():
+            _bp = next((p for p in (config.profiles or []) if p.get("id") == pid), None)
+            if not llm_standort.ist_intern(_bp):
+                return provider_fuer_lauf(prompt_tool_calling=False)
+    except Exception:  # noqa: BLE001
+        pass
     try:
         prof = next((p for p in (config.profiles or []) if p.get("id") == pid), None)
     except Exception:  # noqa: BLE001

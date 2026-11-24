@@ -140,7 +140,7 @@ def register(fname: str, username: str) -> bool:
         data = _load()
         if fname in data:
             return True
-        data[fname] = {"user": user, "ts": int(time.time())}
+        data[fname] = _sensibel_vermerken({"user": user, "ts": int(time.time())}, fname)
         return _save(data)
 
 
@@ -167,8 +167,118 @@ def register_upload(fname: str, username: str) -> bool:
         data = _load()
         if fname in data:
             return True
-        data[fname] = {"user": user, "ts": int(time.time()), "kind": "upload"}
+        data[fname] = _sensibel_vermerken(
+            {"user": user, "ts": int(time.time()), "kind": "upload"}, fname)
         return _save(data)
+
+
+# Namen sensibler Ablagen im Speicher – fuer das Schwaerzen in Protokollzeilen
+# (uvicorn-Access-Log nennt ``/api/documents/<kennung>__<Dateiname>``, und der
+# Dateiname ist Inhalt). Abgeglichen mit der Registry bei jedem Fristenlauf,
+# damit ein Neustart die Liste nicht verliert.
+_SENSIBLE_NAMEN: set = set()
+
+
+def sensible_namen_schwaerzen(text):
+    """Ersetzt Namen sensibler Ablagen in ``text`` durch ``[sensibel]``."""
+    if not _SENSIBLE_NAMEN or not isinstance(text, str) or not text:
+        return text
+    for n in list(_SENSIBLE_NAMEN):
+        if n and n in text:
+            text = text.replace(n, "[sensibel]")
+    return text
+
+
+def _sensibel_vermerken(eintrag: dict, fname: str) -> dict:
+    """Neuer Eintrag aus einem sensiblen Lauf (``backend/sensibel.py``):
+    Merkmal in der Registry (ueberlebt einen Neustart, damit der Fristen-
+    Abraeumer die Datei auch dann findet) und Anmeldung beim Lauf, der sie am
+    Ende loescht. Nur NEUE Eintraege – eine schon vorhandene, nicht sensible
+    Datei wird durch blosses Ansprechen nicht zur Loeschung vorgemerkt."""
+    try:
+        from backend import sensibel as _sens
+        if _sens.aktiv():
+            eintrag["sensibel"] = True
+            _sens.ablage_merken(fname)
+            _SENSIBLE_NAMEN.add(fname)
+    except Exception:  # noqa: BLE001
+        pass
+    return eintrag
+
+
+def ist_sensibel(fname: str) -> bool:
+    entry = _load().get(os.path.basename(fname or ""))
+    return isinstance(entry, dict) and bool(entry.get("sensibel"))
+
+
+def entfernen(fname: str) -> bool:
+    """Datei UND Registry-Eintrag loeschen. Nur einfache Namen direkt unter
+    ``DOCS_DIR`` – ein Pfad aus einem Argument darf keine Loeschung an anderer
+    Stelle ausloesen. True = es lag etwas da und ist jetzt weg."""
+    name = os.path.basename(fname or "")
+    if not name or name.startswith(".") or name != (fname or ""):
+        return False
+    p = DOCS_DIR / name
+    weg = False
+    with _lock:
+        try:
+            if p.is_file() and not p.is_symlink():
+                p.unlink()
+                weg = True
+        except FileNotFoundError:
+            pass
+        except Exception as e:  # noqa: BLE001
+            # Ohne Namen: er kann Inhalt sein (sensibler Lauf).
+            _log(f"Loeschen fehlgeschlagen: {type(e).__name__}")
+        data = _load()
+        if data.pop(name, None) is not None:
+            _save(data)
+            weg = True
+    _SENSIBLE_NAMEN.discard(name)
+    return weg
+
+
+def ergebnisfrist_setzen(fname: str, frist_s: int) -> bool:
+    """Ergebnis eines sensiblen Laufs: loeschen nach ``frist_s`` Sekunden
+    (oder beim ersten Download, siehe ``main.get_document``)."""
+    name = os.path.basename(fname or "")
+    with _lock:
+        data = _load()
+        e = data.get(name)
+        if not isinstance(e, dict) or not (DOCS_DIR / name).is_file():
+            return False
+        e["sensibel"] = True
+        e["sensibel_bis"] = int(time.time()) + int(frist_s)
+        _SENSIBLE_NAMEN.add(name)
+        return _save(data)
+
+
+def sensible_abraeumen(jetzt: float, waisen_frist_s: int) -> int:
+    """Loescht sensible Ablagen, deren Frist abgelaufen ist – und Waisen
+    (sensibel ohne Frist, also aus einem Lauf, der nie aufgeraeumt hat)."""
+    with _lock:
+        data = _load()
+        faellig = []
+        for name, e in data.items():
+            if not (isinstance(e, dict) and e.get("sensibel")):
+                continue
+            _SENSIBLE_NAMEN.add(name)
+            bis = e.get("sensibel_bis")
+            try:
+                if bis is not None:
+                    if float(bis) <= jetzt:
+                        faellig.append(name)
+                elif float(e.get("ts") or 0) + waisen_frist_s <= jetzt:
+                    faellig.append(name)
+            except (TypeError, ValueError):
+                faellig.append(name)
+    n = 0
+    for name in faellig:
+        if entfernen(name):
+            n += 1
+    if n:
+        _log(f"sensible Ablagen nach Frist geloescht: {n}")
+    return n
 
 
 def owner_of(fname: str) -> str | None:

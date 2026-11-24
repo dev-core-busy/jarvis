@@ -783,6 +783,9 @@ schneide("_profil_umleitung", ns)
 # Seit dem Aktivitaetsprotokoll (2026-11-04) protokolliert update_profile ueber
 # _aktivitaet mit _profil_details – Helfer und Konstante ECHT aus main.py.
 schneide("_profil_details", ns)
+# Seit dem Standort intern/extern (2026-11-24) prueft update_profile das Feld
+# ueber _standort_fehler – ECHT ausgeschnitten (es fragt backend.llm_standort).
+schneide("_standort_fehler", ns)
 _rf = next((st for st in MB.body if isinstance(st, ast.Assign)
             and any(isinstance(z, ast.Name) and z.id == "_PROFIL_RECHTE_FELDER" for z in st.targets)),
            None)

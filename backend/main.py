@@ -1086,9 +1086,19 @@ def _bild_als_datei(b64daten: str, dateiname: str, benutzer: str,
 
 
 def _anhang_merken(sitzung: str, name: str, ablage: str, arbeitskopie: str) -> None:
-    """Vermerkt einen Anhang fuer Folgefragen derselben Sitzung."""
+    """Vermerkt einen Anhang fuer Folgefragen derselben Sitzung.
+
+    Nicht im sensiblen Lauf: Ablage und Arbeitskopie sind nach dem Lauf
+    geloescht (backend/sensibel.py), ein Hinweis darauf liesse das Modell
+    eine Datei suchen, die es nicht mehr gibt."""
     if not sitzung:
         return
+    try:
+        from backend import sensibel as _sensibel
+        if _sensibel.aktiv():
+            return
+    except Exception:  # noqa: BLE001
+        pass
     try:
         liste = _SESSION_ANHAENGE.setdefault(sitzung, [])
         liste[:] = [e for e in liste if e.get("name") != name]
@@ -1161,6 +1171,37 @@ async def _cpu_poll_task():
 @app.on_event("startup")
 async def startup_cpu_poll():
     asyncio.create_task(_cpu_poll_task())
+
+
+@app.on_event("startup")
+async def startup_sensibel_fristen():
+    """Schalter "sensible Daten" (backend/sensibel.py): Ergebnisdateien fallen
+    spaetestens nach 15 Minuten, Waisen eines abgebrochenen Laufs nach Frist.
+    Eigener Wecker im Minutentakt – der Anhang-Aufraeumer laeuft nur alle
+    5 Minuten, aus 15 wuerden sonst bis zu 20. Der erste Lauf direkt beim
+    Start faengt ab, was waehrend eines Neustarts faellig wurde."""
+    from backend import sensibel as _sensibel
+
+    from backend import llm_standort as _standort
+
+    def _standorte_vorwaermen():
+        # Haelt die DNS-Einstufung der Profile frisch (Cache 10 min), damit der
+        # Riegel in llm.py im sensiblen Lauf nicht selbst auf DNS wartet.
+        for _p in list(config.profiles or []):
+            _standort.einstufen(_p)
+
+    async def _wecker():
+        while True:
+            try:
+                await asyncio.to_thread(_sensibel.fristen_abraeumen)
+            except Exception as e:  # noqa: BLE001
+                print(f"[sensibel] Fristen-Wecker: {type(e).__name__}", flush=True)
+            try:
+                await asyncio.to_thread(_standorte_vorwaermen)
+            except Exception as e:  # noqa: BLE001
+                print(f"[sensibel] Standort-Einstufung: {type(e).__name__}", flush=True)
+            await asyncio.sleep(60)
+    asyncio.create_task(_wecker())
 
 
 @app.on_event("startup")
@@ -11903,6 +11944,20 @@ async def get_document(name: str, user: str = Depends(require_auth_or_query)):
     # 2026-11 inline und lief beim Oeffnen im Tab als Skript (gespeichertes
     # XSS). Ein <img> zeigt das SVG trotz attachment weiter an.
     disp = _datei.disposition(media)
+    # Ergebnis eines sensiblen Laufs (backend/sensibel.py): kein Browser-Cache
+    # (der waere eine weitere Kopie auf Platte), und eine HERUNTERGELADENE
+    # Datei faellt sofort danach. Inline-Typen (Bild, PDF) bleiben bis zur
+    # Frist: dieselbe Adresse dient der Vorschau im Chat, ein Loeschen beim
+    # Anzeigen naehme dem Benutzer den Download-Chip daneben.
+    if _documents.ist_sensibel(name):
+        from starlette.background import BackgroundTask
+        hintergrund = (BackgroundTask(_documents.entfernen, name)
+                       if disp == "attachment" else None)
+        return FileResponse(str(p), media_type=media,
+                            filename=f"{base}.{ext}",
+                            content_disposition_type=disp,
+                            headers={"Cache-Control": "no-store"},
+                            background=hintergrund)
     return FileResponse(str(p), media_type=media,
                         filename=f"{base}.{ext}",
                         content_disposition_type=disp,
@@ -12395,6 +12450,11 @@ async def get_settings(user: str = Depends(require_auth)):
         # Chat-Profil". Aufgefallen NUR in der Live-Probe gegen den echten
         # Endpunkt, nicht im Waechter (der prueste config.py).
         "image_profile_id": config.IMAGE_PROFILE_ID,
+        "sensibel_profile_id": config.SENSIBEL_PROFILE_ID,
+        "interne_netze": config.INTERNE_NETZE,
+        # Intern/extern je Profil (backend/llm_standort.py); im Thread, weil
+        # die Erkennung DNS fragen kann (Deckel 2 s, Cache 10 min).
+        "standorte": await asyncio.to_thread(_standorte_je_profil),
         # Speicherbar war der Werkzeug-Zuschnitt seit jeher, LESBAR nie – ob er
         # an ist, liess sich ueber die API nicht nachsehen (test_bildmasse,
         # Regel "jedes speicherbare Feld ist lesbar", 2026-10-25 behoben).
@@ -12425,6 +12485,14 @@ async def save_settings(request: Request, user: str = Depends(require_local_auth
     body = await _json_objekt(request)
     # Nur die NAMEN der Felder ins Sicherheitsprotokoll – Werte koennen Kennwoerter sein
     _sprot_angaben(felder=sorted(str(k)[:60] for k in body)[:60] if isinstance(body, dict) else None)
+    if isinstance(body, dict) and "interne_netze" in body:
+        # Ungueltige Eintraege mit Grund abweisen statt still zu verwerfen
+        # (config.save_global_settings nimmt dann gar nichts an).
+        from backend import llm_standort
+        _falsch = llm_standort.netze_lesen(body.get("interne_netze"))[1]
+        if _falsch:
+            return JSONResponse({"success": False, "error": "Kein gültiger Adressbereich: "
+                                 + ", ".join(_falsch[:5])}, status_code=400)
     config.save_global_settings(body)
     # AD-Konfiguration separat persistieren
     if any(k in body for k in ("ad_server", "ad_domain", "ad_bind_user", "ad_bind_password")):
@@ -13001,7 +13069,24 @@ async def get_profiles(user: str = Depends(require_auth)):
         "profiles": safe_profiles,
         "active_profile_id": config.active_profile_id,
         "defaults": config.DEFAULT_PROVIDERS,
+        # Intern/extern je Profil (backend/llm_standort.py) – im Thread, weil
+        # die Erkennung DNS fragen kann.
+        "standorte": await asyncio.to_thread(_standorte_je_profil),
+        "sensibel_profile_id": config.SENSIBEL_PROFILE_ID,
     })
+
+
+def _standorte_je_profil() -> dict:
+    from backend import llm_standort
+    return {p.get("id"): llm_standort.einstufen(p) for p in config.profiles}
+
+
+def _standort_fehler(body: dict, provider: str) -> str:
+    """Grund, warum der Standort im Rumpf ungueltig ist – "" = in Ordnung."""
+    if "standort" not in body:
+        return ""
+    from backend import llm_standort
+    return llm_standort.handwert_pruefen(provider, body.get("standort"))[1]
 
 
 @app.post("/api/profiles")
@@ -13014,6 +13099,9 @@ async def create_profile(request: Request, user: str = Depends(require_local_aut
     body = await request.json()
     if not isinstance(body, dict):
         return JSONResponse({"success": False, "error": "Objekt erwartet"}, status_code=400)
+    _sf = _standort_fehler(body, str(body.get("provider") or "google"))
+    if _sf:
+        return JSONResponse({"success": False, "error": _sf}, status_code=400)
     # Anker VOR dem Anlegen bauen: scheitert er, entsteht kein halbes Profil.
     from backend import llm_tls
     url = body.get("api_url") or config.DEFAULT_PROVIDERS.get(
@@ -13042,6 +13130,8 @@ def _profil_details(profile_id: str, body: dict) -> dict:
     im Wortlaut (Konten/Gruppen sind keine Geheimnisse) – nie Schluessel."""
     aus = {"profil": profile_id, "felder": sorted(body),
            "anbieter": body.get("provider"), "modell": body.get("model")}
+    if "standort" in body:
+        aus["standort"] = body.get("standort")
     for f in _PROFIL_RECHTE_FELDER:
         if f in body:
             aus[f] = body.get(f)
@@ -13095,6 +13185,9 @@ async def update_profile(profile_id: str, request: Request, user: str = Depends(
     bisher = next((p for p in config.profiles if p.get("id") == profile_id), None)
     if not bisher:
         return JSONResponse({"success": False, "error": "Profil nicht gefunden"}, status_code=404)
+    _sf = _standort_fehler(body, str(body.get("provider") or bisher.get("provider") or ""))
+    if _sf:
+        return JSONResponse({"success": False, "error": _sf}, status_code=400)
     try:
         aktion, eintrag = await _profil_anker(
             body, body.get("api_url", bisher.get("api_url", "")), bisher.get(llm_tls.FELD))
@@ -20248,52 +20341,57 @@ async def tracks_drop(dump_id: str = Form(...), hinweis: str = Form(""),
         # Auch fuer eine abgeschaltete oder fremde private Ablage: 404.
         return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
                             status_code=404)
-    if len(files or []) > _st.max_dateien_je_drop():
-        return JSONResponse({"ok": False, "error":
-                             "Es sind hoechstens %d Dateien je Vorgang moeglich."
-                             % _st.max_dateien_je_drop()}, status_code=400)
+    # Ablage mit "sensible Daten" (backend/sensibel.py): alles ab hier in der
+    # Klammer – Ablegen, Lesen, Einreihen. Die Auftraege zweigen ihre Dateien
+    # ab (``sensibel.abzweigen``), der Rest faellt am Ende der Anfrage.
+    from backend import sensibel as _sensibel
+    async with _sensibel.anfrage(bool(dump.get("sensibel"))):
+        if len(files or []) > _st.max_dateien_je_drop():
+            return JSONResponse({"ok": False, "error":
+                                 "Es sind hoechstens %d Dateien je Vorgang moeglich."
+                                 % _st.max_dateien_je_drop()}, status_code=400)
 
-    grenze = _st.max_datei_bytes()
-    teile, abgewiesen = [], []
-    for f in (files or []):
-        name = os.path.basename(f.filename or "datei")
-        ok, grund = _st.typ_erlaubt(dump, name)
-        if not ok:
-            abgewiesen.append({"name": name, "grund": grund})
-            continue
-        daten = await _tracks_lesen_mit_grenze(f, grenze)
-        if daten is None:
-            abgewiesen.append({"name": name, "grund":
-                               "Die Datei ist groesser als %d MB."
-                               % (grenze // (1024 * 1024))})
-            continue
-        if not daten:
-            abgewiesen.append({"name": name, "grund": "Die Datei ist leer."})
-            continue
-        # Ein umbenanntes Programm kann jeden MIME-Typ behaupten – deshalb
-        # dieselbe Magie-Byte-Pruefung wie bei Chat-Anhaengen.
-        endung = os.path.splitext(name)[1].lower().lstrip(".")
-        grund = _anhang_ausfuehrbar(endung, f.content_type or "", daten)
-        if grund:
-            abgewiesen.append({"name": name, "grund": grund})
-            continue
-        ziel = await asyncio.to_thread(_str.datei_ablegen, daten, name, user)
-        if ziel is None:
-            abgewiesen.append({"name": name, "grund":
-                               "Die Datei konnte auf dem Server nicht abgelegt werden."})
-            continue
-        text, thinweis = await asyncio.to_thread(_str.inhalt_lesen, ziel)
-        teile.append({"name": name, "art": "datei", "text": text,
-                      "hinweis": thinweis, "pfad": ziel.as_posix(),
-                      "ablage": ziel.name})
+        grenze = _st.max_datei_bytes()
+        teile, abgewiesen = [], []
+        for f in (files or []):
+            name = os.path.basename(f.filename or "datei")
+            ok, grund = _st.typ_erlaubt(dump, name)
+            if not ok:
+                abgewiesen.append({"name": name, "grund": grund})
+                continue
+            daten = await _tracks_lesen_mit_grenze(f, grenze)
+            if daten is None:
+                abgewiesen.append({"name": name, "grund":
+                                   "Die Datei ist groesser als %d MB."
+                                   % (grenze // (1024 * 1024))})
+                continue
+            if not daten:
+                abgewiesen.append({"name": name, "grund": "Die Datei ist leer."})
+                continue
+            # Ein umbenanntes Programm kann jeden MIME-Typ behaupten – deshalb
+            # dieselbe Magie-Byte-Pruefung wie bei Chat-Anhaengen.
+            endung = os.path.splitext(name)[1].lower().lstrip(".")
+            grund = _anhang_ausfuehrbar(endung, f.content_type or "", daten)
+            if grund:
+                abgewiesen.append({"name": name, "grund": grund})
+                continue
+            ziel = await asyncio.to_thread(_str.datei_ablegen, daten, name, user)
+            if ziel is None:
+                abgewiesen.append({"name": name, "grund":
+                                   "Die Datei konnte auf dem Server nicht abgelegt werden."})
+                continue
+            text, thinweis = await asyncio.to_thread(_str.inhalt_lesen, ziel)
+            teile.append({"name": name, "art": "datei", "text": text,
+                          "hinweis": thinweis, "pfad": ziel.as_posix(),
+                          "ablage": ziel.name})
 
-    if not teile:
-        return JSONResponse({"ok": False, "abgewiesen": abgewiesen,
-                             "error": "Keine Datei konnte uebernommen werden."},
-                            status_code=400)
-    jobs = await _str.einreihen(dump, user, teile,
-                               (hinweis or "")[:_st.HINWEIS_MAX])
-    return JSONResponse({"ok": True, "jobs": jobs, "abgewiesen": abgewiesen})
+        if not teile:
+            return JSONResponse({"ok": False, "abgewiesen": abgewiesen,
+                                 "error": "Keine Datei konnte uebernommen werden."},
+                                status_code=400)
+        jobs = await _str.einreihen(dump, user, teile,
+                                   (hinweis or "")[:_st.HINWEIS_MAX])
+        return JSONResponse({"ok": True, "jobs": jobs, "abgewiesen": abgewiesen})
 
 
 @app.post("/api/tracks/drop_url")
@@ -20320,32 +20418,37 @@ async def tracks_drop_url(request: Request, user: str = Depends(require_tracks_a
     if not dump or not _st.darf_benutzen(dump, user):
         return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
                             status_code=404)
-    if not _user_has_internet_access(user):
-        return JSONResponse({"ok": False, "error":
-                             "Adressen aus dem Internet sind fuer deinen Benutzer "
-                             "nicht freigeschaltet (Einstellungen → Sicherheit → "
-                             "Berechtigungen, Spalte „Internet“)."}, status_code=403)
-    url = str(body.get("url") or "").strip()
-    if not url:
-        return JSONResponse({"ok": False, "error": "Keine Adresse angegeben."},
-                            status_code=400)
-    try:
-        titel, text, ziel = await _str.url_holen(url)
-    except _str.UrlFehler as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": "Die Seite konnte nicht geholt "
-                                                   "werden: %s" % e}, status_code=400)
-    if not (text or "").strip():
-        return JSONResponse({"ok": False, "error":
-                             "Von dieser Seite liess sich kein Text gewinnen."},
-                            status_code=400)
-    teile = [{"name": (titel or ziel)[:120], "art": "url",
-              "text": _str._kuerzen(text, _str.TEXT_MAX), "hinweis": "",
-              "url": ziel}]
-    jobs = await _str.einreihen(dump, user, teile,
-                               str(body.get("hinweis") or "")[:_st.HINWEIS_MAX])
-    return JSONResponse({"ok": True, "jobs": jobs, "abgewiesen": []})
+    # Ablage mit "sensible Daten" (backend/sensibel.py): alles ab hier in der
+    # Klammer – Ablegen, Lesen, Einreihen. Die Auftraege zweigen ihre Dateien
+    # ab (``sensibel.abzweigen``), der Rest faellt am Ende der Anfrage.
+    from backend import sensibel as _sensibel
+    async with _sensibel.anfrage(bool(dump.get("sensibel"))):
+        if not _user_has_internet_access(user):
+            return JSONResponse({"ok": False, "error":
+                                 "Adressen aus dem Internet sind fuer deinen Benutzer "
+                                 "nicht freigeschaltet (Einstellungen → Sicherheit → "
+                                 "Berechtigungen, Spalte „Internet“)."}, status_code=403)
+        url = str(body.get("url") or "").strip()
+        if not url:
+            return JSONResponse({"ok": False, "error": "Keine Adresse angegeben."},
+                                status_code=400)
+        try:
+            titel, text, ziel = await _str.url_holen(url)
+        except _str.UrlFehler as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": "Die Seite konnte nicht geholt "
+                                                       "werden: %s" % e}, status_code=400)
+        if not (text or "").strip():
+            return JSONResponse({"ok": False, "error":
+                                 "Von dieser Seite liess sich kein Text gewinnen."},
+                                status_code=400)
+        teile = [{"name": (titel or ziel)[:120], "art": "url",
+                  "text": _str._kuerzen(text, _str.TEXT_MAX), "hinweis": "",
+                  "url": ziel}]
+        jobs = await _str.einreihen(dump, user, teile,
+                                   str(body.get("hinweis") or "")[:_st.HINWEIS_MAX])
+        return JSONResponse({"ok": True, "jobs": jobs, "abgewiesen": []})
 
 
 @app.post("/api/tracks/ask")
@@ -20371,20 +20474,25 @@ async def tracks_ask(request: Request, user: str = Depends(require_tracks_access
     if not dump or not _st.darf_benutzen(dump, user):
         return JSONResponse({"ok": False, "error": "Ablage nicht gefunden."},
                             status_code=404)
-    if not dump.get("fragen"):
-        return JSONResponse({"ok": False, "error":
-                             "Diese Ablage nimmt keine Fragen an – das Fragefeld ist "
-                             "in ihren Einstellungen ausgeschaltet."}, status_code=400)
-    frage = str(body.get("frage") or "").strip()
-    if not frage:
-        return JSONResponse({"ok": False, "error": "Die Frage ist leer."},
-                            status_code=400)
-    if len(frage) > _st.FRAGE_MAX:
-        return JSONResponse({"ok": False, "error":
-                             "Die Frage ist zu lang (hoechstens %d Zeichen)."
-                             % _st.FRAGE_MAX}, status_code=400)
-    job = await _str.einreihen_frage(dump, user, frage)
-    return JSONResponse({"ok": True, "jobs": [job]})
+    # Ablage mit "sensible Daten" (backend/sensibel.py): alles ab hier in der
+    # Klammer – Ablegen, Lesen, Einreihen. Die Auftraege zweigen ihre Dateien
+    # ab (``sensibel.abzweigen``), der Rest faellt am Ende der Anfrage.
+    from backend import sensibel as _sensibel
+    async with _sensibel.anfrage(bool(dump.get("sensibel"))):
+        if not dump.get("fragen"):
+            return JSONResponse({"ok": False, "error":
+                                 "Diese Ablage nimmt keine Fragen an – das Fragefeld ist "
+                                 "in ihren Einstellungen ausgeschaltet."}, status_code=400)
+        frage = str(body.get("frage") or "").strip()
+        if not frage:
+            return JSONResponse({"ok": False, "error": "Die Frage ist leer."},
+                                status_code=400)
+        if len(frage) > _st.FRAGE_MAX:
+            return JSONResponse({"ok": False, "error":
+                                 "Die Frage ist zu lang (hoechstens %d Zeichen)."
+                                 % _st.FRAGE_MAX}, status_code=400)
+        job = await _str.einreihen_frage(dump, user, frage)
+        return JSONResponse({"ok": True, "jobs": [job]})
 
 
 # ── Auftraege ──────────────────────────────────────────────────────────────
@@ -20456,6 +20564,7 @@ async def prompt_pruefen(request: Request, user: str = Depends(require_auth)):
     durchgelassen.
     """
     from backend import prompt_check as _pc
+    from backend import sensibel as _sensibel
     try:
         body = await _json_objekt(request)
     except Exception:  # noqa: BLE001
@@ -20478,7 +20587,12 @@ async def prompt_pruefen(request: Request, user: str = Depends(require_auth)):
             status_code=403)
 
     try:
-        return JSONResponse(await _pc.pruefen(prompt, kontext, user, lang))
+        # Schalter "sensible Daten" der Ablage: die Pruefung schickt den Prompt
+        # an ein Modell – also dieselben Regeln wie der Lauf (nur intern, kein
+        # Inhalt in Protokollen).
+        async with _sensibel.anfrage(body.get("sensibel") is True):
+            erg = await _pc.pruefen(prompt, kontext, user, lang)
+        return JSONResponse(erg)
     except _pc.PruefFehler as e:
         # 400 mit Klartext, nicht 200 mit ok:false – sonst sieht ein Fehlschlag
         # im Netzwerk-Reiter wie ein Erfolg aus (dieselbe Regel wie bei
@@ -31812,7 +31926,7 @@ async def websocket_endpoint(ws: WebSocket):
         while True:
             data = await ws.receive_text()
             msg = json.loads(data)
-            await handle_ws_message(ws, msg)
+            await _ws_nachricht_behandeln(ws, msg)
     except WebSocketDisconnect:
         pass
     except Exception as e:
@@ -31821,6 +31935,10 @@ async def websocket_endpoint(ws: WebSocket):
         cpu_task.cancel()
         active_sessions.pop(session_id, None)
         _active_ws.discard(ws)
+        # Sensible Chats dieser Verbindung: Gespraechszusammenhang aus dem
+        # Arbeitsspeicher nehmen – der Chat lebt nur im offenen Tab.
+        for _u, _sid in _ws_sensible_chats.pop(id(ws), set()):
+            _sensibel_chat_vergessen(_u, _sid)
         # Client-Typ + Username entfernen
         ct = _ws_client_types.pop(id(ws), "browser")
         _ws_usernames.pop(id(ws), None)
@@ -31839,6 +31957,66 @@ async def websocket_endpoint(ws: WebSocket):
                 remove_android_ws(ws)
             except Exception:
                 pass
+
+
+# ── Schalter "sensible Daten" im Chat (backend/sensibel.py) ─────────────────
+# Je Verbindung die sensiblen Chats (Benutzer, Sitzung), deren Verlauf beim
+# Trennen aus dem Arbeitsspeicher faellt. Festlegung 2026-11-24: ein sensibler
+# Chat lebt nur im offenen Tab – nichts auf dem Server, nichts im Browser.
+_ws_sensible_chats: dict = {}
+
+
+def _ist_sensibler_auftrag(msg) -> bool:
+    """Nur ein ausdrueckliches ``true`` an einem Auftrag zaehlt."""
+    return (isinstance(msg, dict) and msg.get("type") == "task"
+            and msg.get("sensibel") is True)
+
+
+def _sensibel_chat_vergessen(benutzer: str, sid: str) -> None:
+    """Verlauf und Anhang-Merkliste eines sensiblen Chats aus dem Speicher."""
+    try:
+        if agent_manager is not None and agent_manager.main_agent is not None:
+            from backend.agent import _hist_key
+            agent_manager.main_agent._user_histories.pop(
+                _hist_key(benutzer or "anonymous", sid), None)
+    except Exception as e:  # noqa: BLE001
+        print(f"[sensibel] Verlauf nicht verworfen: {type(e).__name__}", flush=True)
+    _SESSION_ANHAENGE.pop(sid, None)
+
+
+async def _ws_nachricht_behandeln(ws: WebSocket, msg: dict):
+    """Eine WebSocket-Nachricht – ein sensibler Auftrag in seiner Klammer.
+
+    Die Klammer umfasst die GANZE Behandlung, nicht erst den Lauf: Anhaenge
+    werden schon vorher abgelegt, Sprache transkribiert und die Eingabe
+    geprueft – alles davon kann Inhalt protokollieren."""
+    from backend import sensibel as _sensibel
+    sens = _ist_sensibler_auftrag(msg)
+    if sens:
+        sid = str(msg.get("session_id") or "").strip()
+        if sid:
+            _ws_sensible_chats.setdefault(id(ws), set()).add(
+                (_ws_usernames.get(id(ws), "") or "anonymous", sid))
+    if isinstance(msg, dict) and msg.get("type") == "sensibel_vergessen":
+        sid = str(msg.get("session_id") or "").strip()
+        eintrag = (_ws_usernames.get(id(ws), "") or "anonymous", sid)
+        # Nur einen Chat, den DIESE Verbindung als sensibel gefuehrt hat –
+        # sonst liesse sich ueber die Nachricht ein normaler Verlauf leeren.
+        if sid and eintrag in _ws_sensible_chats.get(id(ws), set()):
+            _ws_sensible_chats[id(ws)].discard(eintrag)
+            _sensibel_chat_vergessen(*eintrag)
+        return
+    try:
+        async with _sensibel.anfrage(sens):
+            await handle_ws_message(ws, msg)
+    except WebSocketDisconnect:
+        raise
+    except Exception as e:
+        if sens:
+            # Die Meldung einer Ausnahme kann Inhalt zitieren; die Zeile
+            # draussen ("[WS Error] …") steht nicht mehr im sensiblen Lauf.
+            raise RuntimeError(f"{type(e).__name__} {_sensibel.MARKE}") from None
+        raise
 
 
 async def cpu_broadcast(ws: WebSocket):
@@ -32399,7 +32577,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 target._current_user_sap = _ws_sap
                 target._current_user_vemas = _ws_vemas
                 from backend.agent import _hintergrund
-                _hintergrund(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, sql_schemata=sql_schemata, reasoning_effort=reasoning_effort, bestaetigung=_kann_bestaetigen, rechte=_ws_rechte), "Folgeauftrag")
+                from backend import sensibel as _sensibel
+                _hintergrund(_sensibel.uebergeben(target.run_task(task_text, ws, client_type=client_type, client_ip=client_ip, username=_ws_user, lang=ui_lang, attachments=image_attachments, kb_groups=kb_groups, sql_schemata=sql_schemata, reasoning_effort=reasoning_effort, bestaetigung=_kann_bestaetigen, rechte=_ws_rechte)), "Folgeauftrag")
                 return
 
         agent = agent_manager.get_or_create_main()
@@ -32493,7 +32672,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 except Exception:
                     pass
         from backend.agent import _hintergrund
-        _hintergrund(_run_main_agent_and_notify(), "Hauptlauf")
+        from backend import sensibel as _sensibel
+        _hintergrund(_sensibel.uebergeben(_run_main_agent_and_notify()), "Hauptlauf")
 
     elif msg_type == "spawn_agent":
         # Sub-Agent starten (vom Frontend oder Hauptagent)

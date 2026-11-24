@@ -123,7 +123,11 @@ NS = {
     "Request": Request, "Depends": Depends, "require_auth_or_query": _auth,
     "__file__": str(SAND / "backend" / "main.py"), "_datei": datei, "_csp": _Csp,
     "_routing_pfad": lambda r: r.scope["path"],
-    "_documents": types.SimpleNamespace(may_access=lambda n, u, a: True),
+    # ist_sensibel: Schalter "sensible Daten" (2026-11-24) – hier immer False,
+    # gemessen wird die Auslieferung normaler Dateien (der sensible Zweig
+    # steht in tests/test_sensibel.py).
+    "_documents": types.SimpleNamespace(may_access=lambda n, u, a: True,
+                                        ist_sensibel=lambda n: False),
     "_is_admin_user": lambda u: False,
     "_editable_groups_for": lambda u: [{"id": "g1"}],
     "_wissen_datei_ziel": lambda rel: ((RAG / rel), None),

@@ -225,13 +225,14 @@ grenzen(max_dumps=10)
 # ═══════════════════════════════════════════════════════════════════════════
 section("2. Aendern: Whitelist und unveraenderliche Felder")
 
-# `fragen` (Fragefeld) seit 2026-11-06. `owner`, `global`, `id` und
+# `fragen` (Fragefeld) seit 2026-11-06, `sensibel` (Schalter "sensible Daten",
+# backend/sensibel.py) seit 2026-11-24. `owner`, `global`, `id` und
 # `referenzen` stehen weiterhin NICHT darin – die Referenzen haben eigene
 # Endpunkte (tests/test_short_tracks_fragen.py).
 check(set(st.AENDERBAR) == {"name", "beschreibung", "prompt", "bereiche",
                             "dateitypen", "mehrfach", "profile_id",
                             "reasoning_effort", "max_steps", "enabled",
-                            "fragen"},
+                            "fragen", "sensibel"},
       "AENDERBAR ist die erwartete Whitelist")
 for feld in ("id", "owner", "global"):
     check(feld not in st.AENDERBAR, "%s steht NICHT in AENDERBAR" % feld)

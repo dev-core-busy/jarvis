@@ -39,8 +39,22 @@ def _ensure_dir():
     AUDIT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _sensibel() -> bool:
+    """Sensibler Lauf (backend/sensibel.py)? Dann nur Metadaten."""
+    try:
+        from backend import sensibel as _s
+        return _s.aktiv()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def log_task(user: str, task: str, client_type: str = "", client_ip: str = ""):
-    """Loggt den Start einer Benutzer-Anfrage (auch ohne Tool-Aufruf)."""
+    """Loggt den Start einer Benutzer-Anfrage (auch ohne Tool-Aufruf).
+
+    Sensibler Lauf: der Auftrag ist Inhalt und wird durch ``[sensibel]``
+    ersetzt – wer, wann, Kanal und Adresse bleiben (Nachweis)."""
+    if _sensibel():
+        task = "[sensibel]"
     entry = {
         "ts": int(time.time()),
         "user": user or "unknown",
@@ -57,7 +71,13 @@ def log_task(user: str, task: str, client_type: str = "", client_ip: str = ""):
 
 
 def log_tool(user: str, tool: str, args: dict, result_len: int, duration_ms: int):
-    """Loggt einen Tool-Aufruf als JSONL-Zeile."""
+    """Loggt einen Tool-Aufruf als JSONL-Zeile.
+
+    Sensibler Lauf: Werkzeugname, Dauer und Ergebnislaenge bleiben, die
+    Argumente (Shell-Befehle, Pfade, Zellwerte) sind Inhalt – es bleiben nur
+    ihre NAMEN, damit erkennbar ist, welche Art Aufruf es war."""
+    if _sensibel():
+        args = {k: "[sensibel]" for k in (args or {})}
     entry = {
         "ts": int(time.time()),
         "user": user or "unknown",

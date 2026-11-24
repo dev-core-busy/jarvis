@@ -512,6 +512,8 @@ def save_profile(user: str, sid: str, profile_id) -> None:
 def touch(user: str, sid: str, auto_title: str = "") -> None:
     """Aktualisiert den updated-Zeitstempel; setzt bei noch unbenanntem Chat
     optional einen Titel aus dem ersten Nutzertext."""
+    if _sensibel():
+        return
     with _LOCK:
         sd = _sess_dir(user, sid)
         meta = _read_meta(sd)
@@ -521,6 +523,16 @@ def touch(user: str, sid: str, auto_title: str = "") -> None:
         if auto_title and meta.get("title", _DEFAULT_TITLE) == _DEFAULT_TITLE:
             meta["title"] = " ".join(auto_title.split())[:60] or _DEFAULT_TITLE
         _write_meta(sd, meta)
+
+
+def _sensibel() -> bool:
+    """Sensibler Lauf (backend/sensibel.py)? Dann wird NICHTS dieser Sitzung
+    gespeichert – kein Kontext, kein Transkript, kein Titel aus dem Inhalt."""
+    try:
+        from backend import sensibel as _s
+        return _s.aktiv()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 # ─── Transkript (Anzeige) ────────────────────────────────────────────────────
@@ -543,6 +555,8 @@ def save_transcript(user: str, sid: str, messages: list) -> list:
     if not isinstance(messages, list):
         messages = []
     messages = messages[-_MAX_TRANSCRIPT:]
+    if _sensibel():
+        return messages
     with _LOCK:
         if not _valid(user, sid):
             return []
@@ -568,7 +582,7 @@ def load_context(user: str, sid: str) -> list:
 
 
 def save_context(user: str, sid: str, content_dicts: list) -> None:
-    if not isinstance(content_dicts, list):
+    if not isinstance(content_dicts, list) or _sensibel():
         return
     with _LOCK:
         if not _valid(user, sid):

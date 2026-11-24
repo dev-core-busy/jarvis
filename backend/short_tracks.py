@@ -468,7 +468,7 @@ def _alle_speichern(dumps: list[dict]) -> None:
 # im Datensatz waere eine zweite Wahrheit neben dem Verzeichnis.
 AENDERBAR = ("name", "beschreibung", "prompt", "bereiche", "dateitypen",
              "mehrfach", "profile_id", "reasoning_effort", "max_steps", "enabled",
-             "fragen")
+             "fragen", "sensibel")
 
 
 def _neue_id() -> str:
@@ -642,6 +642,12 @@ def _pruefe(felder: dict, bestehend: dict | None = None) -> dict:
         # nicht still, und eine Ablage "Rechnung pruefen" hat ohne Rechnung
         # nichts zu tun.
         "fragen": bool(q.get("fragen", False)),
+        # "Sensible Daten" (backend/sensibel.py, 2026-11-24): Laeufe dieser
+        # Ablage hinterlassen keine Inhalte in Protokollen, Eingaben und
+        # Zwischendateien fallen am Laufende, Ergebnisse nach dem ersten
+        # Download (hoechstens 15 min). Vorgabe AUS – wie ``fragen``: eine
+        # bestehende Ablage aendert ihr Verhalten nicht still.
+        "sensibel": q.get("sensibel") is True,
         "angelegt": int(q.get("angelegt") or 0) or int(time.time()),
         "geaendert": int(time.time()),
         "laeufe": int(q.get("laeufe") or 0),
@@ -1058,7 +1064,30 @@ def typ_erlaubt(dump: dict, dateiname: str) -> tuple[bool, str]:
 # Mengengrenze wuerde genau die Eintraege verdraengen, die man nach einem
 # missglueckten Lauf braucht (Lehre vom 2026-08-04).
 
+def _protokoll_sensibel(e: dict) -> dict:
+    """Eintrag aus einem sensiblen Lauf (backend/sensibel.py): nur Metadaten.
+
+    Bleiben: wer, welche Ablage, wann, Erfolg, Art, Dauer, Werkzeugnamen
+    (``schritte``) und die ANZAHL der Dateien. Titel (Dateiname bzw. Frage),
+    Ergebnis und Dateinamen sind Inhalt."""
+    e = dict(e)
+    e["titel"] = "[sensibel]"
+    e["ergebnis"] = "[sensibel]" if e.get("ergebnis") else ""
+    # Die Liste bleibt eine LISTE (die Anzeige ruft ``.map``) – die Anzahl
+    # steht daneben.
+    e["dateien_anzahl"] = len(e.get("dateien") or [])
+    e["dateien"] = []
+    e["sensibel"] = True
+    return e
+
+
 def protokoll_schreiben(eintrag: dict) -> None:
+    try:
+        from backend import sensibel as _sens
+        if _sens.aktiv():
+            eintrag = _protokoll_sensibel(eintrag or {})
+    except Exception:  # noqa: BLE001
+        eintrag = _protokoll_sensibel(eintrag or {})
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         neu = not PROTOKOLL_DATEI.exists()

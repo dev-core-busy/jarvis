@@ -266,6 +266,11 @@
                           esc(T('tracks.badge_global', 'für alle')) + '</span>' : '') +
                       (d.enabled ? '' : '<span class="st-badge">' +
                           esc(T('tracks.badge_off', 'inaktiv')) + '</span>') +
+                      // Sensible Daten (backend/sensibel.py): Schloss UND Text.
+                      (d.sensibel ? '<span class="st-badge is-sens" title="' +
+                          esc(T('tracks.badge_sens_title', 'Läufe dieser Ablage hinterlassen keine Inhalte in Protokollen; Dateien werden sofort gelöscht.')) +
+                          '">' + (window.JarvisIcons ? window.JarvisIcons.lock() : '') +
+                          esc(T('tracks.badge_sens', 'sensibel')) + '</span>' : '') +
                     '</div>' +
                     (d.beschreibung ? '<div class="st-dump-desc">' + esc(d.beschreibung) + '</div>' : '') +
                     // Referenzen NUR mit Namen: wer fragt, soll wissen, worauf
@@ -797,7 +802,7 @@
             id: '', name: '', beschreibung: '', prompt: '', bereiche: ['basis'],
             dateitypen: [], mehrfach: 'einzeln', profile_id: '',
             reasoning_effort: '', max_steps: 0, enabled: true, 'global': false,
-            fragen: false, referenzen: []
+            fragen: false, sensibel: false, referenzen: []
         } : (_dumps.filter(function (x) { return x.id === id; })[0] || null);
         if (!d) return;
         _editId = id;
@@ -861,6 +866,19 @@
               '<div class="st-help" id="st-help-areas" data-i18n="tracks.help_areas">Je weniger, desto besser: der Inhalt einer abgelegten Datei kann von einem Fremden stammen. Nicht freigegebene Bereiche schaltet ein Administrator unter Einstellungen → Short Tracks frei.</div>' +
             '</div>' +
             '<div class="st-sep"></div>' +
+            // ── Sensible Daten (backend/sensibel.py) ──
+            '<div class="st-field">' +
+              '<label class="st-hint" style="display:flex;gap:6px;align-items:center;">' +
+                '<input type="checkbox" id="st-f-sensibel"> <span data-i18n="tracks.f_sensibel">Sensible Daten (nichts protokollieren, Dateien sofort löschen)</span>' +
+                '<button type="button" class="st-info" data-help="st-help-sensibel" aria-expanded="false" ' +
+                  'data-i18n-title="tracks.help" title="Erklärung anzeigen">&#9432;</button>' +
+              '</label>' +
+              '<div class="st-help" id="st-help-sensibel" data-i18n-html="tracks.help_sensibel">' +
+                'Für vertrauliche Unterlagen. Läufe dieser Ablage hinterlassen <b>keine Inhalte</b> in Protokollen: kein Auftrag, kein Ergebnis, keine Dateinamen. Stehen bleibt nur, wer wann welche Ablage benutzt hat. Abgelegte Dateien und Zwischendateien werden am Ende des Laufs gelöscht, Ergebnisdateien nach dem ersten Download (spätestens nach 15 Minuten). Aus diesen Läufen wird nichts gelernt und nichts im Gedächtnis gespeichert.' +
+                '<ul><li><b>Es arbeitet nur ein internes KI-Modell</b> – ist das gewählte extern, wechselt der Lauf auf ein internes; gibt es keines, bricht er ab.</li>' +
+                '<li>Das Ergebnis wird nicht gespeichert: es steht auf der Karte, bis du „Zurücksetzen“ wählst oder der Dienst neu startet.</li></ul>' +
+              '</div>' +
+            '</div>' +
             // ── Fragen und Referenzen ──
             '<div class="st-field">' +
               '<label class="st-hint" style="display:flex;gap:6px;align-items:center;">' +
@@ -932,7 +950,7 @@
               // aus diesem String gebaut, ein direkt gebundener Handler waere
               // danach weg.
               (window.JarvisPromptCheck
-                  ? window.JarvisPromptCheck.knopfHtml('st-f-prompt', 'tracks', 'st-btn')
+                  ? window.JarvisPromptCheck.knopfHtml('st-f-prompt', 'tracks', 'st-btn', 'st-f-sensibel')
                   : '') +
               '<button class="st-btn" id="st-f-cancel" data-i18n="tracks.cancel">Abbrechen</button>' +
               '<span class="st-status" id="st-f-status"></span>' +
@@ -964,6 +982,7 @@
         var gv = $('st-f-global');
         if (gv) gv.checked = !!d['global'];
         $('st-f-fragen').checked = !!d.fragen;
+        $('st-f-sensibel').checked = !!d.sensibel;
         zeichneRefs();
         $('st-f-save').addEventListener('click', function () { speichere(id); });
         $('st-f-cancel').addEventListener('click', formSchliessen);
@@ -1096,7 +1115,8 @@
             reasoning_effort: $('st-f-effort').value,
             max_steps: parseInt($('st-f-steps').value || '0', 10) || 0,
             enabled: $('st-f-enabled').checked,
-            fragen: $('st-f-fragen').checked
+            fragen: $('st-f-fragen').checked,
+            sensibel: $('st-f-sensibel').checked
         };
     }
 

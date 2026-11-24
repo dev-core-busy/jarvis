@@ -181,6 +181,12 @@ def _ergebnis_max(value) -> int:
     return n if n > 0 else 0
 
 
+def _valid_standort(provider, value) -> str:
+    """Standort eines Profils (auto|intern|extern), siehe llm_standort."""
+    from backend import llm_standort
+    return llm_standort.handwert_pruefen(provider or "", value)[0]
+
+
 def _clean_profile_str(value) -> str:
     """Raeumt ein technisches Profil-Textfeld auf (api_key, session_key, api_url, model).
 
@@ -309,6 +315,12 @@ class Config:
     # Bildmodelle je Rolle braucht, braucht ein Rollen-Feld – das gibt es
     # bewusst (noch) nicht.
     IMAGE_PROFILE_ID: str = os.getenv("IMAGE_PROFILE_ID", "")
+    # Profil fuer SENSIBLE Laeufe (backend/llm_standort.py) – leer = das erste
+    # interne Profil, das der Benutzer benutzen darf.
+    SENSIBEL_PROFILE_ID: str = os.getenv("SENSIBEL_PROFILE_ID", "")
+    # Adressbereiche des eigenen Netzes (CIDR, durch Komma/Zeilen getrennt),
+    # die die Standort-Erkennung zusaetzlich zu den privaten als intern wertet.
+    INTERNE_NETZE: str = os.getenv("INTERNE_NETZE", "")
     # Vorhaltezeit erzeugter Dokumente in data/documents/ (Tage). 0 = dauerhaft
     # behalten, sonst 15..90. Wird von backend/documents.py::retention_days()
     # gelesen; das Loeschen der Datei IST der Widerruf der Capability-URL, denn
@@ -460,6 +472,10 @@ class Config:
         # Begruendung wie bei docs_retention_days).
         if "image_profile_id" in data:
             self.IMAGE_PROFILE_ID = str(data.get("image_profile_id") or "").strip()
+        if "sensibel_profile_id" in data:
+            self.SENSIBEL_PROFILE_ID = str(data.get("sensibel_profile_id") or "").strip()
+        if "interne_netze" in data:
+            self.INTERNE_NETZE = str(data.get("interne_netze") or "").strip()
         # Vorhaltezeit: fehlt der Schluessel, bleibt der ENV-/Klassenwert stehen –
         # NICHT auf 30 zurueckfallen, sonst ueberschreibt ein Laden ohne den
         # Schluessel eine bewusst per ENV gesetzte Vorgabe.
@@ -570,6 +586,8 @@ class Config:
             "llm_max_tokens": self.LLM_MAX_TOKENS,
             "werkzeug_buendel": self.WERKZEUG_BUENDEL,
             "image_profile_id": self.IMAGE_PROFILE_ID,
+            "sensibel_profile_id": self.SENSIBEL_PROFILE_ID,
+            "interne_netze": self.INTERNE_NETZE,
             "docs_retention_days": self.DOCS_RETENTION_DAYS,
             "agent_api_key": self.AGENT_API_KEY,
             "profiles": self.profiles,
@@ -611,6 +629,27 @@ class Config:
             _neu = str(settings["image_profile_id"] or "").strip()
             if not _neu or any(p.get("id") == _neu for p in (self.profiles or [])):
                 self.IMAGE_PROFILE_ID = _neu
+        if "sensibel_profile_id" in settings:
+            # Nur ein Profil, das es gibt UND das intern ist: ein externes hier
+            # einzutragen waere ein Widerspruch, den llm_standort ohnehin
+            # uebergeht – abweisen ist die ehrlichere Antwort. "" = Vorgabe.
+            _neu = str(settings["sensibel_profile_id"] or "").strip()
+            _p = next((p for p in (self.profiles or []) if p.get("id") == _neu), None)
+            if not _neu:
+                self.SENSIBEL_PROFILE_ID = ""
+            elif _p is not None:
+                from backend import llm_standort
+                if llm_standort.ist_intern(_p):
+                    self.SENSIBEL_PROFILE_ID = _neu
+        if "interne_netze" in settings:
+            # Nur wenn ALLES lesbar ist – ein Tippfehler darf kein Netz still
+            # wegfallen lassen (dann liefe ein interner Server als extern und
+            # sensible Laeufe brechen ab, ohne dass jemand den Grund sieht).
+            # Die API weist Ungueltiges vorher mit Grund ab.
+            from backend import llm_standort
+            _netze, _falsch = llm_standort.netze_lesen(settings["interne_netze"])
+            if not _falsch:
+                self.INTERNE_NETZE = ", ".join(str(n) for n in _netze)
         if "docs_retention_days" in settings:
             # Bei Muell den ALTEN Wert behalten (Fallback = aktueller Stand), nicht
             # stillschweigend auf 30 zuruecksetzen.
@@ -794,6 +833,9 @@ class Config:
             # Prompt-basiertes Tool-Calling. Stand bis 2026-07-27 in KEINER
             # Persistenz-Liste – der Schalter im Profilformular wirkte deshalb nie.
             "prompt_tool_calling": bool(data.get("prompt_tool_calling", False)),
+            # Standort: auto (Erkennung) | intern | extern – backend/llm_standort.py.
+            # Ungueltiges faellt auf auto; die API weist es vorher mit Grund ab.
+            "standort": _valid_standort(provider, data.get("standort")),
             # Pro-Profil-Berechtigung (leer = alle duerfen nutzen); analog Wissensgruppen.
             "allowed_users": data.get("allowed_users", ""),
             "allowed_group": data.get("allowed_group", ""),
@@ -810,7 +852,8 @@ class Config:
             if p["id"] == profile_id:
                 for key in ["name", "provider", "model", "api_url", "api_key", "auth_method",
                             "session_key", "reasoning_effort", "temperature",
-                            "prompt_tool_calling", "allowed_users", "allowed_group"]:
+                            "prompt_tool_calling", "allowed_users", "allowed_group",
+                            "standort"]:
                     if key in data:
                         val = data[key]
                         # Maskierte Keys (***...) nicht überschreiben – Wert unverändert lassen.
@@ -825,6 +868,8 @@ class Config:
                             val = _valid_temperature(val)
                         elif key == "prompt_tool_calling":
                             val = bool(val)
+                        elif key == "standort":
+                            val = _valid_standort(data.get("provider", p.get("provider")), val)
                         elif key in ("api_key", "session_key", "api_url", "model"):
                             val = _clean_profile_str(val)   # siehe create_profile
                         p[key] = val

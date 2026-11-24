@@ -147,6 +147,20 @@ def _kanal():
     return wirkung.kanal_cv.get()
 
 
+HINWEIS_SENSIBEL = (
+    "⛔ Dieser Auftrag ist als „sensible Daten“ markiert – das Gedächtnis ist "
+    "darin nur lesbar, damit nichts aus ihm gespeichert wird. Nicht erneut "
+    "versuchen; die Aufgabe ohne Gedächtniseintrag zu Ende führen.")
+
+
+def _sensibel() -> bool:
+    try:
+        from backend import sensibel as _s  # noqa: PLC0415
+        return _s.aktiv()
+    except Exception:  # noqa: BLE001
+        return True   # fail-closed wie unten
+
+
 def schreiben_gesperrt() -> bool:
     """Darf dieser Lauf das Gedaechtnis veraendern? (BSI-Abgleich, Skill memory)
 
@@ -160,7 +174,12 @@ def schreiben_gesperrt() -> bool:
     (``wirkung.kanal_cv``): ein Lauf mit Kanal hat einen Menschen am anderen
     Ende, ein Rollen-Agent erbt den Kanal seines Aufrufers. Kann das Merkmal
     nicht gelesen werden, gilt "gesperrt" (fail-closed).
+
+    Ebenso gesperrt in einem SENSIBLEN Lauf (backend/sensibel.py): das
+    Gedaechtnis laeuft nie ab und steht in jedem spaeteren Prompt.
     """
+    if _sensibel():
+        return True
     try:
         return _kanal() is None
     except Exception:  # noqa: BLE001
@@ -314,6 +333,9 @@ class MemoryTool(BaseTool):
         username = str(kwargs.get("_username", "") or "")
 
         if action in _SCHREIBEND and schreiben_gesperrt():
+            if _sensibel():
+                print(f"[Memory] {action} abgewiesen: sensibler Lauf", flush=True)
+                return HINWEIS_SENSIBEL
             print(f"[Memory] {action} abgewiesen: Lauf ohne Oberflaeche "
                   f"(Benutzer {username or 'jarvis'})", flush=True)
             return HINWEIS_NUR_LESEN

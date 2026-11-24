@@ -571,6 +571,9 @@
         const promptToolGroup = document.getElementById('prompt-tool-group');
         const checkPromptTool = document.getElementById('profile-prompt-tool-calling');
         const inputTemperature = document.getElementById('profile-temperature');
+        // Standort intern/extern (backend/llm_standort.py)
+        const selectStandort = document.getElementById('profile-standort');
+        const standortErkannt = document.getElementById('profile-standort-erkannt');
         const inputKey = document.getElementById('profile-api-key');
         const inputSessionKey = document.getElementById('profile-session-key');
         const apikeyHint = document.querySelector('.apikey-hint');
@@ -604,6 +607,8 @@
         const profileTestResult = document.getElementById('profile-test-result');
 
         let profiles = [];
+        // Einstufung je Profil-ID vom Server: {standort, quelle, grund, auto}
+        let standorte = {};
         let activeProfileId = '';
         let defaults = {};
         let editingProfileId = null; // null = neues Profil
@@ -1857,6 +1862,51 @@
                     }
                 });
             }
+            // Profil fuer sensible Daten speichern – nur sein eigenes Feld.
+            const _btnSp = document.getElementById('btn-save-sensibel-profile');
+            if (_btnSp && !_btnSp._wired) {
+                _btnSp._wired = true;
+                _btnSp.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-sensibel-profile');
+                    const st = document.getElementById('sensibel-profile-status');
+                    const v = (el && el.value) || '';
+                    try {
+                        const r = await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ sensibel_profile_id: v })
+                        });
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        if (st) { st.textContent = '✓ ' + window.t('profile.save_btn'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                    } catch (e) {
+                        if (st) st.textContent = '✗';
+                    }
+                });
+            }
+            // Interne Netze speichern; danach die Profile neu laden, damit die
+            // Plaketten intern/extern die neue Einstufung zeigen.
+            const _btnIn = document.getElementById('btn-save-interne-netze');
+            if (_btnIn && !_btnIn._wired) {
+                _btnIn._wired = true;
+                _btnIn.addEventListener('click', async () => {
+                    const el = document.getElementById('setting-interne-netze');
+                    const st = document.getElementById('interne-netze-status');
+                    try {
+                        const r = await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ interne_netze: (el && el.value) || '' })
+                        });
+                        const d = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+                        if (st) { st.textContent = '✓ ' + window.t('profile.save_btn'); setTimeout(() => { st.textContent = ''; }, 2000); }
+                        loadProfiles();
+                    } catch (e) {
+                        // Ein Fehler bleibt stehen (Register: nicht von selbst verschwinden)
+                        if (st) st.textContent = '✗ ' + (e.message || '');
+                    }
+                });
+            }
             // Kontext-Komprimierungs-Schwelle speichern (einmalig verdrahten).
             // Grenzen wie im Backend (main.py::api_context_threshold): 4..200.
             // ANDERER Endpunkt als die Nachbarfelder: /api/context/threshold setzt
@@ -2187,6 +2237,10 @@
                 profiles = data.profiles || [];
                 activeProfileId = data.active_profile_id || '';
                 defaults = data.defaults || {};
+                standorte = data.standorte || {};
+                const _inEl = document.getElementById('setting-interne-netze');
+                if (_inEl) _inEl.value = data.interne_netze || '';
+                _sensProfilAuswahl(data.sensibel_profile_id || '');
                 // LLM-Timeout (global) ins Eingabefeld
                 const _tmEl = document.getElementById('setting-llm-timeout');
                 if (_tmEl) _tmEl.value = data.llm_timeout || 180;
@@ -2263,6 +2317,53 @@
             }
         }
 
+        // Auswahl "Profil fuer sensible Daten": NUR interne Profile – ein
+        // externes nimmt der Server ohnehin nicht an (config.save_global_settings).
+        function _sensProfilAuswahl(gewaehlt) {
+            const el = document.getElementById('setting-sensibel-profile');
+            if (!el) return;
+            const leer = el.querySelector('option[value=""]');
+            el.innerHTML = '';
+            if (leer) el.appendChild(leer);
+            profiles.forEach(p => {
+                const st = standorte[p.id];
+                if (!st || st.standort !== 'intern') return;
+                const o = document.createElement('option');
+                o.value = p.id || '';
+                // textContent: der Profilname ist Freitext eines Admins
+                o.textContent = (p.name || p.id || '') + (p.model ? ` · ${p.model}` : '');
+                el.appendChild(o);
+            });
+            const da = gewaehlt && Array.from(el.options).some(o => o.value === gewaehlt);
+            el.value = da ? gewaehlt : '';
+            const st = document.getElementById('sensibel-profile-status');
+            if (st) st.textContent = (gewaehlt && !da) ? window.t('profile.sensprof_gone') : '';
+        }
+
+        // Plakette intern/extern an der Profilkarte. Farbe allein traegt die
+        // Aussage nicht – der Text nennt sie, der Tooltip den Grund.
+        function _standortPlakette(p) {
+            const st = standorte[p.id];
+            if (!st) return '';
+            const art = st.standort === 'intern' ? 'intern' : (st.standort === 'extern' ? 'extern' : 'unbekannt');
+            const txt = window.t('profile.standort_badge_' + art);
+            const grund = (st.quelle === 'hand' ? window.t('profile.standort_von_hand') : (st.grund || ''));
+            return ` <span class="prof-standort is-${art}" title="${escapeHtml(grund)}">${escapeHtml(txt)}</span>`;
+        }
+
+        // Unter der Auswahl im Formular: was die Erkennung sagt (nur fuer
+        // gespeicherte Profile – die Einstufung rechnet der Server).
+        function _standortErkanntZeigen(id) {
+            if (!standortErkannt) return;
+            const st = id ? standorte[id] : null;
+            if (!st) { standortErkannt.hidden = true; standortErkannt.textContent = ''; return; }
+            const art = st.auto === 'intern' ? 'intern' : (st.auto === 'extern' ? 'extern' : 'unbekannt');
+            standortErkannt.textContent = window.t('profile.standort_erkannt')
+                .replace('{art}', window.t('profile.standort_badge_' + art))
+                .replace('{grund}', st.quelle === 'auto' ? (st.grund || '') : '');
+            standortErkannt.hidden = false;
+        }
+
         // Dezente Zusammenfassung der Profil-Einschraenkung (erlaubte Benutzer/Gruppen)
         // fuer die Listenanzeige – leer, wenn das Profil fuer alle offen ist.
         function _profRestrictionSummary(p) {
@@ -2297,7 +2398,7 @@
                             <span class="llm-status-pill checking" data-id="${p.id}" title="${window.t('profile.status_checking')}"></span>
                             <span class="profile-name">${escapeHtml(p.name)}</span>
                         </span>
-                        <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}${_profRestrictionSummary(p)}</span>
+                        <span class="profile-detail">${PROVIDER_LABELS[p.provider] || p.provider} · ${escapeHtml(p.model)}${_profRestrictionSummary(p)}${_standortPlakette(p)}</span>
                     </div>
                     <div class="profile-actions">
                         <button class="btn-icon btn-small btn-default-profile${istAktiv ? ' is-gesetzt' : ''}" data-id="${p.id}" title="${escapeHtml(window.t(istAktiv ? 'profile.default_is' : 'profile.default_set'))}" aria-label="${escapeHtml(window.t(istAktiv ? 'profile.default_is' : 'profile.default_set'))}" aria-pressed="${istAktiv ? 'true' : 'false'}">${JarvisIcons.star(istAktiv)}</button>
@@ -2592,6 +2693,11 @@
                 if (checkPromptTool) checkPromptTool.checked = false;
                 if (inputTemperature) inputTemperature.value = '';
             }
+            if (selectStandort) {
+                const _sw = profile && profile.standort;
+                selectStandort.value = (_sw === 'intern' || _sw === 'extern') ? _sw : 'auto';
+            }
+            _standortErkanntZeigen(profile ? profile.id : '');
 
             showEditView(!id);
         }
@@ -2801,6 +2907,7 @@
                 // Rohwert senden ("", "auto" oder Zahl als Text) – die Validierung
                 // und Begrenzung auf 0..2 macht das Backend (config._valid_temperature).
                 temperature: inputTemperature ? inputTemperature.value.trim() : '',
+                standort: selectStandort ? selectStandort.value : 'auto',
                 // Leer = kein Anker. Der Server holt das Zertifikat selbst und
                 // verankert nur bei gleichem Fingerabdruck (llm_tls.anker_bauen).
                 cert_fingerprint: _certFeldWert(),

@@ -294,6 +294,10 @@ _KEIN_MODELLTEXT = {
     # Durch `_anzeigetext` geschickt wuerde `_mit_bildern` ihr am Ende noch ein
     # Bild anhaengen ("Verbindung fehlgeschlagen" + Katzenbild).
     "err_msg",
+    # `_sens_zeile` (2026-11-24): vom PROGRAMM formulierte Zeile, welches
+    # Modell im sensiblen Lauf arbeitet (agent._sensibel_statuszeile) – kein
+    # Modelltext, und ein angehaengtes Bild waere dort genauso falsch.
+    "_sens_zeile",
 }
 
 

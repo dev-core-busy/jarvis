@@ -3085,6 +3085,26 @@ body.kbm-resizing { cursor: col-resize; user-select: none; }
     font-style: italic;
 }
 
+/* Plakette intern/extern (backend/llm_standort.py). Schrift in Textfarbe –
+   die Signalfarbe steckt nur in Rand und Toenung, der TEXT traegt die Aussage
+   (Register: --danger/--warning halten als Schriftfarbe den Kontrast nicht). */
+.prof-standort {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-hover);
+    color: var(--text-primary);
+    font-size: 0.78em;
+    font-style: normal;
+    line-height: 1.5;
+}
+.prof-standort.is-intern { border-color: var(--success); background: rgba(var(--success-rgb), 0.12); }
+.prof-standort.is-extern { border-color: var(--warning); background: rgba(var(--warning-rgb), 0.12); }
+.prof-standort.is-unbekannt { border-color: var(--border-hover); }
+.prof-standort-erkannt { display: block; margin-top: 4px; }
+.prof-standort-erkannt[hidden] { display: none; }
+
 .profile-actions {
     display: flex;
     gap: 4px;

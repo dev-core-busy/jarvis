@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/static/css/update_widget.css?v=10">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
-    <link rel="stylesheet" href="/static/css/style.css?v=240">
+    <link rel="stylesheet" href="/static/css/style.css?v=241">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -1830,6 +1830,52 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                                 <td colspan="4"><small class="tab-note" data-i18n="profile.imgprof_hint">Ein Bildmodell ist kein Gesprächsmodell – deshalb wird hier getrennt eingestellt, wer Bilder malt. Ohne diese Angabe versucht es das Modell, mit dem gerade gesprochen wird: ein Textmodell lehnt Bildaufträge ab, und ein reines Bildmodell kann umgekehrt keine Werkzeuge aufrufen, sodass Vorgaben wie die Auflösung wirkungslos bleiben. Mit einem eingetragenen Bildprofil funktioniert die Bildgenerierung in jedem Chat, unabhängig vom gewählten Modell, und Größenangaben kommen beim Bild an. Der Eintrag gilt global und hat für Bildaufträge Vorrang – auch vor dem Profil eines Rollen-Agenten.</small></td>
                                             </tr>
 
+                                            <!-- Profil fuer sensible Daten (global, nur interne) -->
+                                            <tr>
+                                                <td>
+                                                    <h4 class="tuning-group-title" data-i18n="profile.section_sensprof">Profil für sensible Daten</h4>
+                                                    <label for="setting-sensibel-profile" class="systab-label" data-i18n="profile.sensprof_label">Dieses interne Profil bearbeitet sensible Daten</label>
+                                                </td>
+                                                <td>
+                                                    <select id="setting-sensibel-profile" class="systab-feld systab-select">
+                                                        <option value="" data-i18n="profile.sensprof_none">— erstes erlaubtes internes Profil —</option>
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    <span data-i18n="profile.systab_sensprof_wirkung">Chats und Short Tracks mit dem Schalter „sensible Daten“ wechseln auf dieses Modell, wenn das gewählte extern ist. Zur Auswahl stehen nur interne Profile.</span>
+                                                    <button type="button" class="systab-mehr" data-klick="systab-details" aria-expanded="false" data-i18n="profile.systab_details">Details</button>
+                                                </td>
+                                                <td class="systab-save">
+                                                    <button class="btn-secondary btn-small" id="btn-save-sensibel-profile" type="button" data-i18n="profile.save_btn">Speichern</button>
+                                                    <span id="sensibel-profile-status" class="systab-status"></span>
+                                                </td>
+                                            </tr>
+                                            <tr class="systab-hint" hidden>
+                                                <td colspan="4"><small class="tab-note" data-i18n="profile.sensprof_hint">Ist das Modell des Benutzers, seiner Rolle oder der Ablage extern, arbeitet ein sensibler Lauf mit diesem Profil – unabhängig davon, wer es sonst benutzen darf. Ohne Eintrag nimmt er das erste interne Profil, das der Benutzer benutzen darf. Gibt es keines, wird der Lauf mit einer Meldung abgebrochen, statt Inhalte an einen Cloud-Anbieter zu schicken.</small></td>
+                                            </tr>
+
+                                            <!-- Interne Netze fuer die Standort-Erkennung (global) -->
+                                            <tr>
+                                                <td>
+                                                    <h4 class="tuning-group-title" data-i18n="profile.section_netze">Interne Netze</h4>
+                                                    <label for="setting-interne-netze" class="systab-label" data-i18n="profile.netze_label">Diese Adressbereiche gehören zum eigenen Netz</label>
+                                                </td>
+                                                <td>
+                                                    <input data-tabfill-nein="Beispiel fuer das Format, kein Wert" type="text" id="setting-interne-netze" class="systab-feld" autocomplete="off" spellcheck="false" data-i18n-placeholder="profile.netze_ph" placeholder="z. B. 198.51.100.0/24, 2001:db8::/32">
+                                                </td>
+                                                <td>
+                                                    <span data-i18n="profile.systab_netze_wirkung">LLM-Server unter diesen Adressen gelten als intern – zusätzlich zu den privaten Bereichen (10.x, 172.16–31.x, 192.168.x).</span>
+                                                    <button type="button" class="systab-mehr" data-klick="systab-details" aria-expanded="false" data-i18n="profile.systab_details">Details</button>
+                                                </td>
+                                                <td class="systab-save">
+                                                    <button class="btn-secondary btn-small" id="btn-save-interne-netze" type="button" data-i18n="profile.save_btn">Speichern</button>
+                                                    <span id="interne-netze-status" class="systab-status"></span>
+                                                </td>
+                                            </tr>
+                                            <tr class="systab-hint" hidden>
+                                                <td colspan="4"><small class="tab-note" data-i18n="profile.netze_hint">Nicht jedes Firmennetz benutzt private Adressbereiche. Steht ein eigener LLM-Server unter einer öffentlich registrierten Adresse, hält die automatische Erkennung ihn für einen Cloud-Dienst, und sensible Läufe dürfen ihn nicht benutzen. Hier eingetragene Bereiche (Schreibweise mit Präfixlänge, durch Komma getrennt) gelten als intern, auch für Servernamen, die dorthin auflösen. Einzelne Profile lassen sich alternativ im Profil selbst auf „Intern“ stellen.</small></td>
+                                            </tr>
+
                                             <!-- Vorhaltezeit erzeugter Dokumente (global) -->
                                             <tr>
                                                 <td>
@@ -2341,6 +2387,18 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                             </datalist>
                         </div>
                         <small class="tab-note" style="margin-top: 4px; opacity: 0.7; display: block;" data-i18n="profile.temp_hint">Die Temperature steuert, wie stark das Modell vom wahrscheinlichsten nächsten Wort abweicht: niedrige Werte liefern sachliche und gut reproduzierbare Antworten, hohe Werte mehr Abwechslung und Kreativität. Der Standard ist „auto“ – der Parameter wird dann gar nicht mitgesendet und der Anbieter entscheidet selbst; das ist nötig für aktuelle Claude-Modelle, die Temperature-Angaben mit einem Fehler ablehnen. Achtung: der Anbieter-Standard liegt bei vielen OpenAI-kompatiblen Servern und bei Gemini deutlich über 0.2, und ab etwa 0.7 zerfallen die JSON-Argumente von Werkzeugaufrufen zunehmend. Wer verlässliche Tool-Aufrufe braucht, trägt deshalb eine feste Zahl ein – 0.2 entspricht dem Verhalten vor Juli 2026. Erlaubt sind Werte von 0.0 bis 2.0; für reine Text- und Schreibaufgaben ohne Tools sind 0.7 bis 1.0 ein guter Ausgangspunkt.</small>
+                    </div>
+
+                    <!-- Standort intern/extern (backend/llm_standort.py) -->
+                    <div class="form-group">
+                        <label for="profile-standort" data-i18n="profile.standort_label">Standort des Modells</label>
+                        <select id="profile-standort" class="select-field">
+                            <option value="auto" data-i18n="profile.standort_auto">Automatisch erkennen</option>
+                            <option value="intern" data-i18n="profile.standort_intern">Intern (eigenes Netz)</option>
+                            <option value="extern" data-i18n="profile.standort_extern">Extern (Cloud-Anbieter)</option>
+                        </select>
+                        <small class="tab-note prof-standort-erkannt" id="profile-standort-erkannt" hidden></small>
+                        <small class="tab-note" style="margin-top: 4px; opacity: 0.7; display: block;" data-i18n="profile.standort_hint">Chats und Short Tracks mit dem Schalter „sensible Daten“ laufen nur auf internen Modellen. Automatisch gilt als intern, was auf dieser Maschine oder unter einer privaten Adresse im eigenen Netz läuft; Google und Anthropic sind immer extern. Ein lokaler Proxy, der an einen Cloud-Dienst weiterleitet, muss hier von Hand auf „Extern“ gestellt werden.</small>
                     </div>
 
                     <!-- Prompt-Tool-Calling (nur openai_compatible) -->
@@ -6888,8 +6946,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=3"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=528"></script>
-    <script src="/static/js/i18n_fr.js?v=4"></script>
+    <script src="/static/js/i18n.js?v=529"></script>
+    <script src="/static/js/i18n_fr.js?v=5"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=41"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6956,7 +7014,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=3"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=271"></script>
+    <script src="/static/js/app.js?v=272"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

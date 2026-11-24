@@ -802,6 +802,13 @@ async function main() {
         return null;
     }
     const INIT = schneide(CHATJS, 'async function _initSessions()');
+    const SENS_HELFER = ['function _istSensibel(', 'function _sensEintraege(',
+                         'function _mitSensiblen(', 'function _sidMerken(']
+        .map(k => schneide(CHATJS, k) || '').join('\n');
+    if ((SENS_HELFER.match(/^function /gm) || []).length !== 4) {
+        console.log('ABBRUCH: Helfer des sensiblen Chats nicht aus chat.js zu schneiden');
+        process.exit(2);
+    }
     if (!INIT || !/_csList\(\)/.test(INIT)) {
         console.log('ABBRUCH: _initSessions nicht aus chat.js zu schneiden');
         process.exit(2);
@@ -815,6 +822,9 @@ async function main() {
             "async function _csCreate() { erzeugt++; return opt.anlegenScheitert ? null : { id: 'neu' + erzeugt }; }\n" +
             "function _sidKey() { return 'sid'; }\n" +
             "function _renderSidebar() {}\nasync function _restoreHistory() {}\nfunction _updateContextIndicator() {}\n" +
+            // Sensibler Chat (2026-11-24): _initSessions ruft _mitSensiblen und
+            // _sidMerken – die ECHTEN Helfer, die Map als Modulvariable.
+            "var _sensChats = new Map();\n" + SENS_HELFER + "\n" +
             INIT + "\nreturn { lauf: _initSessions, zustand: () => ({ aktiv: _activeSid, erzeugt: erzeugt, liste: _sessions.map(x => x.id) }) };");
         const speicher = { sid: 'b' };
         const ls = { getItem: k => (k in speicher ? speicher[k] : null), setItem: (k, v) => { speicher[k] = String(v); } };

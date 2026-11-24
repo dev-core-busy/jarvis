@@ -55,7 +55,18 @@ def schwaerzen(text):
     if not isinstance(text, str) or not text:
         return text
     t = _PARAM.sub(lambda m: m.group("vor") + m.group("name") + m.group("gleich") + ERSATZ, text)
-    return _USERINFO.sub(lambda m: m.group("vor") + ERSATZ, t)
+    t = _USERINFO.sub(lambda m: m.group("vor") + ERSATZ, t)
+    # Namen sensibler Ablagen (backend/sensibel.py): der Dateiname im
+    # Download-Pfad ist Inhalt. Nur wenn das Modul schon geladen ist – dieser
+    # Filter haengt auch in Prozessen ohne Dokumentablage.
+    try:
+        import sys as _sys
+        _docs = _sys.modules.get("backend.documents")
+        if _docs is not None:
+            t = _docs.sensible_namen_schwaerzen(t)
+    except Exception:  # noqa: BLE001
+        pass
+    return t
 
 
 class ProtokollFilter(logging.Filter):

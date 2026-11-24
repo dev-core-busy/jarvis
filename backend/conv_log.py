@@ -437,6 +437,22 @@ def log_conversation(
     leer bleibt.
     """
     task = task or ""
+    # Sensibler Lauf (backend/sensibel.py): nur Metadaten – wer, wann, Kanal,
+    # Modell, Schritte, Dauer, ob ein Fehler auftrat. Auftrag, System-Prompt,
+    # Nachrichten und Fehlertext sind Inhalt. Der Eintrag selbst bleibt: ohne
+    # ihn waere der Lauf in der Verlaufsliste unsichtbar, und "wann hat wer
+    # einen Auftrag gestellt" ist genau der Nachweis, der bleiben soll.
+    _sens = False
+    try:
+        from backend import sensibel as _sensibel
+        _sens = _sensibel.aktiv()
+    except Exception:  # noqa: BLE001
+        pass
+    if _sens:
+        task = _sensibel.MARKE
+        system_prompt = ""
+        messages = []
+        error = _sensibel.MARKE if error else None
     conv_id = _new_id()
     msgs, cut_count = _prepare_messages(messages or [])
     body = {
@@ -462,6 +478,9 @@ def log_conversation(
     }
     if cut_count:
         entry["truncated_msgs"] = cut_count
+    if _sens:
+        entry["sensibel"] = True
+        body["sensibel"] = True
     with _lock:
         _migrate_once()
         try:

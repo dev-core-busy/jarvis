@@ -54,6 +54,14 @@ class TraceSpan:
         # Wer/wodurch (backend/log_kontext.py): beim START gelesen – dort steht
         # der Span im Lauf, der ihn verursacht. Ohne das zeigte das Fehlerlog
         # nur "agent:Hauptagent / ReadTimeout" (ECHT 2026-11-23 11:21).
+        # Sensibler Lauf (backend/sensibel.py): beim START gelesen, wie der
+        # Kontext – ``to_dict`` gibt dann nur Metadaten heraus (Anzeige UND
+        # Fehlerlog auf Platte laufen beide darueber).
+        try:
+            from backend import sensibel as _sens
+            self.sensibel: bool = _sens.aktiv()
+        except Exception:  # noqa: BLE001
+            self.sensibel = False
         try:
             from backend import log_kontext
             self.kontext: dict = log_kontext.aktuell()
@@ -66,7 +74,22 @@ class TraceSpan:
         self.status = status
         self.error = error
 
+    # Attribute, die auch in einem sensiblen Lauf stehen bleiben: Kennungen,
+    # Modell, Zaehler, Fehlerart. Alles andere (Auftrag, Traceback mit Werten)
+    # ist Inhalt. Eine Positivliste – ein neues Attribut ist erst einmal Inhalt.
+    _META_ATTRIBUTE = frozenset({
+        "agent.id", "agent.is_sub", "agent.headless", "tool.name", "model",
+        "llm.profil", "steps", "error.type",
+    })
+
     def to_dict(self) -> dict:
+        attribute = self.attributes
+        fehler = self.error
+        if getattr(self, "sensibel", False):
+            attribute = {k: (v if k in self._META_ATTRIBUTE else "[sensibel]")
+                         for k, v in (self.attributes or {}).items()}
+            attribute["sensibel"] = True
+            fehler = "[sensibel]" if fehler else fehler
         return {
             "span_id": self.span_id,
             "name": self.name,
@@ -75,8 +98,8 @@ class TraceSpan:
             "start_time": self.start_time,
             "duration_ms": self.duration_ms,
             "status": self.status,
-            "error": self.error,
-            "attributes": self.attributes,
+            "error": fehler,
+            "attributes": attribute,
             "kontext": self.kontext,
         }
 

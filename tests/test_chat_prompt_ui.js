@@ -157,7 +157,7 @@ global.fetch = win.fetch;
  * und `_renderSidebar` an, und beides stellt der Prolog bereits – eine
  * Attrappe waere eine zweite Quelle fuer dasselbe Verhalten. */
 const teile = ['_renderSidebar', '_openSessionPrompt', '_closeSessionPrompt',
-               '_spZustand', '_saveSessionPrompt', '_selSetze'];
+               '_spZustand', '_saveSessionPrompt', '_selSetze', '_istSensibel'];
 const stuecke = teile.map(n => {
     const s = schneide(CHATJS, n);
     if (!s) { check('Schnitt: ' + n + ' gefunden', false, 'nicht im Quelltext'); }
@@ -178,6 +178,9 @@ var _sessions = [], _activeSid = null, _spSid = null, _spLaeuft = false;
 // nackten ReferenceError ab – der Renderer ist derselbe, dieser Waechter
 // prueft nur einen anderen Teil von ihm.
 var _selMode = false, _selIds = new Set();
+// Sensibler Chat (Schalter "sensible Daten", 2026-11-24): die Leiste fragt
+// _istSensibel; die Map ist Modulvariable und faellt aus jedem Schnitt.
+var _sensChats = new Map(), ws = null;
 function _renderTools() {}
 var gewechselt = [], umbenannt = [], geloescht = [];
 var $ = function (id) { return document.getElementById(id); };

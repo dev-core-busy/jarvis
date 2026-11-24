@@ -1281,6 +1281,9 @@ button.jv-pkg-cve { cursor: pointer; }
    volle Kante und fett – die Aussage steht ausserdem im Text, nicht nur in
    der Farbe. Schrift bleibt --text-primary (geerbt von .jv-pkg-cve). */
 .jv-pkg-cve-kev { background: rgba(var(--danger-rgb), .20); border-color: var(--danger); font-weight: 600; }
+/* KEV, aber laut Debian fuer seine Pakete unwichtig: Kante bleibt (die
+   Liste der CISA ist eine Tatsache), Flaeche und Gewicht treten zurueck. */
+.jv-pkg-cve-kev.ist-debian-unwichtig { background: transparent; border-color: rgba(var(--danger-rgb), .45); font-weight: 400; color: var(--text-secondary); }
 .jv-pkg-cve-neustart,
 .jv-pkg-cve-nicht_im_index,
 .jv-pkg-cve-zurueckgehalten,

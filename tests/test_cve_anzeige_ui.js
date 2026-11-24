@@ -40,7 +40,9 @@ const NOETIG = ['esc', 'klasseText', 'einstufungText', 'trackerLink', 'befundLin
                 'befundZeilen', 'inPaketliste', 'einzelKnopf', 'quittierbareIds', 'paketGezeigt',
                 'andereGezeigt', 'befundTrifft', 'paketTreffer', 'andereTrifft', 'zeichnen', 'cveBlock',
                 // Bedrohungslage (CISA KEV / EPSS), seit 2026-11-24
-                'kevAktiv', 'prozentText', 'epssHat', 'epssTitel', 'kevText', 'kevChip', 'cveChip'];
+                'kevAktiv', 'prozentText', 'epssHat', 'epssTitel', 'kevText', 'kevChip', 'cveChip',
+                // Zusatz "laut Debian unwichtig", seit 2026-11-24
+                'kevDebianUnwichtig', 'kevKopf'];
 const fehlt = NOETIG.filter(function (n) { return !funktionen[n]; });
 if (fehlt.length || !rang) {
     console.log('ABBRUCH: nicht gefunden: ' + fehlt.concat(rang ? [] : ['CVE_RANG']).join(', '));
@@ -57,7 +59,7 @@ const api = new Function(prolog + AUSFUEHREN.map(function (n) { return funktione
     + '\nreturn { befundZeilen: befundZeilen, inPaketliste: inPaketliste, einzelKnopf: einzelKnopf,'
     + ' paketGezeigt: paketGezeigt, andereGezeigt: andereGezeigt,'
     + ' befundTrifft: befundTrifft, paketTreffer: paketTreffer, andereTrifft: andereTrifft,'
-    + ' cveChip: cveChip, prozentText: prozentText,'
+    + ' cveChip: cveChip, prozentText: prozentText, kevKopf: kevKopf,'
     + ' setze: function (o) { _nurLuecken = !!o.l; _nurUngesehen = !!o.u; _gesehen = o.g || {}; } };')();
 
 function zeile(b) {
@@ -312,7 +314,52 @@ check(chip.indexOf('jv-pkg-cve-leise') >= 0 && chip.indexOf('jv-pkg-cve-kev') >=
 check(api.cveChip('libx', { klasse: 'offen', befunde: [{ id: 'k1', klasse: 'offen', kev: null }] })
       .indexOf('jv-pkg-cve-kev') < 0, 'Paketspalte: kev=null ohne Markierung');
 api.setze({});
-check(ruft('cveBlock', 'kevAktiv'), 'cveBlock() zaehlt aktiv ausgenutzte Befunde ueber kevAktiv');
+check(ruft('cveBlock', 'kevKopf'), 'cveBlock() baut die KEV-Angabe der Kopfzeile ueber kevKopf');
+
+// ── KEV, aber laut Debian unwichtig ───────────────────────────────────────
+// Anlass (ECHT, 2026-11-24): OpenSSH-Luecke, die nur unter musl ohne PAM
+// greift. CISA listet sie, Debian stuft sie "unimportant" ein – die Marke
+// "aktiv ausgenutzt" stand ohne jeden Hinweis darauf da.
+console.log('\nKEV + Debian unwichtig');
+const UNW = 'laut Debian unwichtig';
+function hatZusatz(html) { return html.indexOf('ist-debian-unwichtig') >= 0 && html.indexOf(UNW) >= 0; }
+function istRoteMarke(html) { return html.indexOf('jv-pkg-cve-kev') >= 0 && html.indexOf('ist-debian-unwichtig') < 0; }
+const unwZeile = zeile({ kev: KEV, einstufung: 'unimportant' });
+check(hatZusatz(unwZeile) && unwZeile.indexOf('aktiv ausgenutzt') >= 0,
+      'Befund KEV + unimportant: Marke bleibt, mit Zusatz', unwZeile.slice(0, 400));
+check(istRoteMarke(zeile({ kev: KEV, einstufung: 'high' })), 'Befund KEV + high: volle Marke ohne Zusatz');
+check(istRoteMarke(zeile({ kev: KEV, einstufung: '' })), 'Befund KEV ohne Einstufung: volle Marke ohne Zusatz');
+// Die Einstufung stammt nur bei Debian-Befunden vom Tracker.
+check(istRoteMarke(zeile({ kev: KEV, einstufung: 'unimportant', bereich: 'python' })),
+      'Python-Befund mit unimportant: kein Zusatz (Einstufung gilt nur fuer Debian)');
+// Ein Wurf ist ein FAIL, kein Abbruch (wie oben bei kev=null/false).
+let nullUnw;
+try { nullUnw = zeile({ kev: null, einstufung: 'unimportant' }); } catch (e) { nullUnw = 'WURF ' + e.message; }
+check(nullUnw.indexOf('WURF') !== 0 && nullUnw.indexOf(UNW) < 0 && nullUnw.indexOf('jv-pkg-cve-kev') < 0,
+      'kev=null + unimportant: weder Marke noch Zusatz', nullUnw.slice(0, 200));
+// Paketspalte: Zusatz nur, wenn ALLE KEV-Befunde des Pakets unwichtig sind.
+const bU = { id: 'u1', bereich: 'debian', klasse: 'offen', einstufung: 'unimportant', kev: KEV };
+const bH = { id: 'h1', bereich: 'debian', klasse: 'offen', einstufung: 'high', kev: KEV };
+const bOhne = { id: 'o1', bereich: 'debian', klasse: 'offen', einstufung: 'high', kev: false };
+check(hatZusatz(api.cveChip('openssh', { klasse: 'offen', befunde: [bU, bOhne] })),
+      'Paketspalte: einziger KEV-Befund unwichtig -> Zusatz (Nicht-KEV-Befund zaehlt nicht mit)');
+check(istRoteMarke(api.cveChip('openssh', { klasse: 'offen', befunde: [bU, bH] })),
+      'Paketspalte: ein echter KEV-Befund daneben -> volle Marke');
+// Kopfzeile: Zahl bleibt, davon-Angabe nennt den Anteil.
+const k1 = api.kevKopf([bU]);
+check(/aktiv ausgenutzt: 1 \(davon laut Debian unwichtig: 1\)/.test(k1) && k1.indexOf('ist-debian-unwichtig') >= 0,
+      'Kopfzeile, alle unwichtig: Zahl + davon-Angabe, leise', k1);
+const k2 = api.kevKopf([bU, bH, bOhne]);
+check(/aktiv ausgenutzt: 2 \(davon laut Debian unwichtig: 1\)/.test(k2) && istRoteMarke(k2),
+      'Kopfzeile, gemischt: Zahl 2, davon 1, volle Marke', k2);
+const k3 = api.kevKopf([bH]);
+check(/aktiv ausgenutzt: 1</.test(k3) && k3.indexOf('davon') < 0 && istRoteMarke(k3),
+      'Kopfzeile ohne unwichtige: keine davon-Angabe', k3);
+check(api.kevKopf([bOhne]) === '' && api.kevKopf([Object.assign({}, bU, { klasse: 'ausgenommen' })]) === '',
+      'Kopfzeile ohne KEV bzw. nur ausgenommen: nichts');
+// Nur das KEV-OBJEKT zaehlt (kevAktiv) – ein blosser Wahrheitswert ist kein Eintrag.
+check(api.kevKopf([Object.assign({}, bH, { kev: true })]) === '',
+      'Kopfzeile zaehlt nur KEV-Objekte (kev=true zaehlt nicht)');
 
 fertig();
 console.log('\n' + ok + ' OK, ' + fail + ' FAIL');

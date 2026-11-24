@@ -978,10 +978,46 @@
         return t;
     }
 
-    function kevChip() {
+    /* KEV-Eintrag, den Debian fuer seine Pakete als "unimportant" einstuft.
+     * Typischer Fall (ECHT, 2026-11-24): eine OpenSSH-Luecke, die nur unter
+     * musl libc ohne PAM greift – CISA listet sie, Debian baut mit glibc und
+     * PAM. Ohne Zusatz stand dort dieselbe Alarmmarke wie bei einer Luecke,
+     * die den Server wirklich trifft. Die Einstufung stammt nur fuer
+     * Debian-Befunde vom Tracker; bei Python/npm/Node gibt es sie nicht. */
+    function kevDebianUnwichtig(b) {
+        return kevAktiv(b) && b.bereich === 'debian' && b.einstufung === 'unimportant';
+    }
+
+    /** Markierung "aktiv ausgenutzt" fuer die uebergebenen KEV-Befunde. Den
+     * Zusatz "laut Debian unwichtig" traegt sie nur, wenn ihn ALLE tragen –
+     * ein einziger echter Treffer behaelt die volle Marke. */
+    function kevChip(befunde) {
+        var kev = (befunde || []).filter(kevAktiv);
+        var leise = kev.length > 0 && kev.every(kevDebianUnwichtig);
+        if (leise) {
+            return '<span class="jv-pkg-cve jv-pkg-cve-kev ist-debian-unwichtig ist-klein" title="'
+                + esc(T('pkg.cve_kev_debian_unwichtig_titel', 'Steht im Katalog nachweislich ausgenutzter Lücken der US-Behörde CISA (KEV). Debian stuft die Lücke für seine Pakete aber als unwichtig ein – meist, weil die Ausnutzung eine Bauart oder Einstellung voraussetzt, die Debian nicht verwendet. Welche, steht in der Beschreibung der Lücke.'))
+                + '">' + esc(T('pkg.cve_kev', 'aktiv ausgenutzt')) + ' · '
+                + esc(T('pkg.cve_kev_debian_unwichtig', 'laut Debian unwichtig')) + '</span>';
+        }
         return '<span class="jv-pkg-cve jv-pkg-cve-kev ist-klein" title="'
             + esc(T('pkg.cve_kev_titel', 'Steht im Katalog nachweislich ausgenutzter Lücken der US-Behörde CISA (KEV). Für Debian-Pakete gilt bei der automatischen Behebung dann keine Schwelle.'))
             + '">' + esc(T('pkg.cve_kev', 'aktiv ausgenutzt')) + '</span>';
+    }
+
+    /** Kopfzeile: Anzahl aktiv ausgenutzter Befunde, davon laut Debian unwichtig. */
+    function kevKopf(befunde) {
+        var kev = (befunde || []).filter(function (b) {
+            return kevAktiv(b) && b.klasse !== 'ausgenommen';
+        });
+        if (!kev.length) return '';
+        var nUnw = kev.filter(kevDebianUnwichtig).length;
+        return '<span class="jv-pkg-cve jv-pkg-cve-kev ist-klein'
+            + (nUnw === kev.length ? ' ist-debian-unwichtig' : '') + '">'
+            + esc(T('pkg.cve_kev', 'aktiv ausgenutzt')) + ': ' + kev.length
+            + (nUnw ? ' (' + esc(T('pkg.cve_kev_davon_unwichtig', 'davon laut Debian unwichtig: {n}')
+                .replace('{n}', String(nUnw))) + ')' : '')
+            + '</span>';
     }
 
     function bereichText(b) {
@@ -1013,7 +1049,7 @@
             + '">' + esc(klasseText(info.klasse)) + ' · ' + info.befunde.length + '</button>'
             // Eine aktiv ausgenutzte Luecke darf in der Spalte nicht hinter der
             // Klasse verschwinden – auch nicht, wenn alles "gesehen" ist.
-            + (info.befunde.some(kevAktiv) ? ' ' + kevChip() : '');
+            + (info.befunde.some(kevAktiv) ? ' ' + kevChip(info.befunde) : '');
     }
 
     function trackerLink(cve) {
@@ -1107,7 +1143,7 @@
                 + '<span class="jv-pkg-cve-id">' + befundLink(b) + '</span> '
                 + '<span class="jv-pkg-cve jv-pkg-cve-' + esc(b.klasse) + ' ist-klein">'
                 + esc(klasseText(b.klasse)) + '</span> '
-                + (kevAktiv(b) ? kevChip() + ' ' : '')
+                + (kevAktiv(b) ? kevChip([b]) + ' ' : '')
                 + '<span class="jv-pkg-cve-e">' + esc(einstufungText(b.einstufung)) + '</span>'
                 + (epssHat(b) ? ' <span class="jv-pkg-cve-e" title="' + esc(epssTitel(b)) + '">· '
                     + esc(T('pkg.cve_epss', 'Ausnutzung wahrscheinlich zu') + ' ' + prozentText(b.epss)) + '</span>' : '')
@@ -1173,13 +1209,8 @@
             if (!CVE_KLASSEN.some(function (k) { return z[k]; })) {
                 teile.push(esc(T('pkg.cve_keine', 'keine bekannten Lücken')));
             }
-            var nKev = cveBefunde().filter(function (b) {
-                return kevAktiv(b) && b.klasse !== 'ausgenommen';
-            }).length;
-            if (nKev) {
-                teile.push('<span class="jv-pkg-cve jv-pkg-cve-kev ist-klein">'
-                    + esc(T('pkg.cve_kev', 'aktiv ausgenutzt')) + ': ' + nKev + '</span>');
-            }
+            var kopfKev = kevKopf(cveBefunde());
+            if (kopfKev) teile.push(kopfKev);
             if (unges) teile.push(esc(T('pkg.cve_neu', '{n} noch nicht gesehen').replace('{n}', String(unges))));
             // Was NICHT geprueft wurde, steht da – sonst saehe es wie "keine Luecken" aus.
             var ber = erg.bereiche || {};

@@ -805,6 +805,13 @@
                 zeilen.push(e.oekosystem + ' · ' + e.paket + ' · ' + kennBetroffenText(e));
             });
         }
+        // Bedrohungslage aus den gespeicherten Dateien (ohne Abruf je Kennung).
+        var bd = d.bedrohung;
+        if (bd && kevAktiv(bd)) zeilen.push(kevText(bd.kev));
+        if (bd && epssHat(bd)) {
+            zeilen.push(T('pkg.cve_epss', 'Ausnutzung wahrscheinlich zu') + ' ' + prozentText(bd.epss)
+                + ' (' + epssTitel(bd) + ')');
+        }
         var u = d.urteil, art = 'ok', kopf;
         var gefiltert = (d.befunde || []).length && u === 'betroffen';
         if (u === 'betroffen') {
@@ -927,6 +934,56 @@
         return T('pkg.cve_e_keine', 'nicht eingestuft');
     }
 
+    /* Bedrohungslage (backend/cve_pruefung, Abschnitt "Bedrohungslage"):
+     * b.kev ist ein Objekt (gelistet), false (nicht gelistet) oder null
+     * (Katalog nicht verfuegbar). Nur das Objekt zaehlt als "aktiv
+     * ausgenutzt" – null ist unbekannt, nicht Entwarnung. */
+    function kevAktiv(b) {
+        return !!(b && b.kev && typeof b.kev === 'object');
+    }
+
+    /** 0.1234 -> "12 %", 0.0123 -> "1,2 %", 0.00043 -> "0,04 %". */
+    function prozentText(w) {
+        var p = Number(w) * 100;
+        if (!isFinite(p)) return '';
+        var st = p >= 10 ? 0 : (p >= 1 ? 1 : 2);
+        try {
+            return p.toLocaleString(undefined, { maximumFractionDigits: st, minimumFractionDigits: 0 }) + ' %';
+        } catch (e) { return p.toFixed(st) + ' %'; }
+    }
+
+    function epssHat(b) {
+        return !!b && typeof b.epss === 'number' && isFinite(b.epss);
+    }
+
+    function epssTitel(b) {
+        var t = T('pkg.cve_epss_titel', 'Wahrscheinlichkeit, dass diese Lücke in den nächsten 30 Tagen ausgenutzt wird (EPSS)');
+        if (typeof b.epss_perzentil === 'number' && isFinite(b.epss_perzentil)) {
+            // Abgerundet auf eine Stelle: aufgerundet stuende bei 0,996 "hoeher
+            // als bei 100 %" da – eine Aussage, die nie stimmen kann.
+            var p = Math.floor(b.epss_perzentil * 1000) / 10, pt;
+            try { pt = p.toLocaleString(undefined, { maximumFractionDigits: 1 }); } catch (e) { pt = String(p); }
+            t += ' – ' + T('pkg.cve_epss_perz', 'höher als bei {p} aller bekannten Lücken')
+                .replace('{p}', pt + ' %');
+        }
+        return t;
+    }
+
+    /** Ausfuehrliche Zeile zum KEV-Eintrag (Aufnahme, Frist, Ransomware). */
+    function kevText(kev) {
+        var t = T('pkg.cve_kev_lang', 'Laut CISA wird diese Lücke aktiv ausgenutzt');
+        if (kev.seit) t += ' · ' + T('pkg.cve_kev_seit', 'gelistet seit') + ' ' + kev.seit;
+        if (kev.frist) t += ' · ' + T('pkg.cve_kev_frist', 'Frist für US-Behörden') + ' ' + kev.frist;
+        if (kev.ransomware) t += ' · ' + T('pkg.cve_kev_ransom', 'bei Ransomware-Angriffen genutzt');
+        return t;
+    }
+
+    function kevChip() {
+        return '<span class="jv-pkg-cve jv-pkg-cve-kev ist-klein" title="'
+            + esc(T('pkg.cve_kev_titel', 'Steht im Katalog nachweislich ausgenutzter Lücken der US-Behörde CISA (KEV). Für Debian-Pakete gilt bei der automatischen Behebung dann keine Schwelle.'))
+            + '">' + esc(T('pkg.cve_kev', 'aktiv ausgenutzt')) + '</span>';
+    }
+
     function bereichText(b) {
         switch (b) {
             case 'debian': return T('pkg.cve_ber_debian', 'Debian');
@@ -953,7 +1010,10 @@
             + esc((info.klasse === 'offen'
                 ? T('pkg.cve_k_offen_lang', 'Debian hat für diese Version noch keine Behebung veröffentlicht')
                 : klasseText(info.klasse)) + ' – ' + T('pkg.cve_details', 'Details anzeigen'))
-            + '">' + esc(klasseText(info.klasse)) + ' · ' + info.befunde.length + '</button>';
+            + '">' + esc(klasseText(info.klasse)) + ' · ' + info.befunde.length + '</button>'
+            // Eine aktiv ausgenutzte Luecke darf in der Spalte nicht hinter der
+            // Klasse verschwinden – auch nicht, wenn alles "gesehen" ist.
+            + (info.befunde.some(kevAktiv) ? ' ' + kevChip() : '');
     }
 
     function trackerLink(cve) {
@@ -1000,10 +1060,15 @@
     function befundZeilen(befunde, q) {
         var gesehen = cveGesehen();
         var rang = function (b) { return CVE_RANG[b.klasse] != null ? CVE_RANG[b.klasse] : 9; };
+        // Innerhalb einer Klasse: aktiv ausgenutzt zuerst, dann nach EPSS –
+        // die Klasse sagt, WAS zu tun ist, die Bedrohungslage, was ZUERST.
+        var dring = function (b) { return (kevAktiv(b) ? 2 : 0) + (epssHat(b) ? b.epss : 0); };
         return befunde.slice().sort(function (a, b) {
-            return rang(a) - rang(b) || String(a.cve).localeCompare(String(b.cve));
+            return rang(a) - rang(b) || dring(b) - dring(a)
+                || String(a.cve).localeCompare(String(b.cve));
         }).map(function (b) {
             var zusatz = [];
+            if (kevAktiv(b)) zusatz.push(kevText(b.kev));
             if (b.fix) zusatz.push(T('pkg.cve_fix', 'behoben in') + ' ' + b.fix);
             if (b.kandidat && b.klasse !== 'offen') zusatz.push(T('pkg.cve_kand', 'verfügbar') + ' ' + b.kandidat);
             if (b.klasse === 'behebbar' && b.bereich === 'debian') {
@@ -1042,7 +1107,10 @@
                 + '<span class="jv-pkg-cve-id">' + befundLink(b) + '</span> '
                 + '<span class="jv-pkg-cve jv-pkg-cve-' + esc(b.klasse) + ' ist-klein">'
                 + esc(klasseText(b.klasse)) + '</span> '
+                + (kevAktiv(b) ? kevChip() + ' ' : '')
                 + '<span class="jv-pkg-cve-e">' + esc(einstufungText(b.einstufung)) + '</span>'
+                + (epssHat(b) ? ' <span class="jv-pkg-cve-e" title="' + esc(epssTitel(b)) + '">· '
+                    + esc(T('pkg.cve_epss', 'Ausnutzung wahrscheinlich zu') + ' ' + prozentText(b.epss)) + '</span>' : '')
                 + (b.veroeffentlicht ? ' <span class="jv-pkg-cve-e">· '
                     + esc(T('pkg.cve_veroeff', 'veröffentlicht') + ' ' + b.veroeffentlicht) + '</span>' : '')
                 + (gesehen[b.id] ? ' <span class="jv-pkg-cve-e">· ' + esc(T('pkg.cve_gesehen', 'gesehen')) + '</span>' : '')
@@ -1105,6 +1173,13 @@
             if (!CVE_KLASSEN.some(function (k) { return z[k]; })) {
                 teile.push(esc(T('pkg.cve_keine', 'keine bekannten Lücken')));
             }
+            var nKev = cveBefunde().filter(function (b) {
+                return kevAktiv(b) && b.klasse !== 'ausgenommen';
+            }).length;
+            if (nKev) {
+                teile.push('<span class="jv-pkg-cve jv-pkg-cve-kev ist-klein">'
+                    + esc(T('pkg.cve_kev', 'aktiv ausgenutzt')) + ': ' + nKev + '</span>');
+            }
             if (unges) teile.push(esc(T('pkg.cve_neu', '{n} noch nicht gesehen').replace('{n}', String(unges))));
             // Was NICHT geprueft wurde, steht da – sonst saehe es wie "keine Luecken" aus.
             var ber = erg.bereiche || {};
@@ -1120,6 +1195,21 @@
                 }
             });
             if (ber.debian && ber.debian.tracker_hinweis) teile.push(esc(ber.debian.tracker_hinweis));
+            // Bedrohungslage: fehlt eine Quelle, steht es da – ohne KEV hiesse
+            // "keine Markierung" sonst "nicht ausgenutzt". Ein aelteres
+            // Ergebnis ohne das Feld sagt nichts (es wurde nie eingeordnet).
+            var bed = erg.bedrohung;
+            if (bed) {
+                [['kev', T('pkg.cve_q_kev', 'CISA KEV')], ['epss', T('pkg.cve_q_epss', 'EPSS')]].forEach(function (q) {
+                    var i = bed[q[0]] || {};
+                    if (i.ok === false) {
+                        teile.push(esc(q[1] + ': ' + T('pkg.cve_q_fehlt', 'nicht verfügbar – Befunde ohne diese Einordnung')
+                            + (i.hinweis ? ' (' + i.hinweis + ')' : '')));
+                    } else if (i.hinweis) {
+                        teile.push(esc(q[1] + ': ' + i.hinweis));
+                    }
+                });
+            }
             // Pakete aus Fremdquellen (z. B. NodeSource) kennt der Debian-Tracker
             // nicht – sie werden genannt, damit "keine Markierung" nicht wie
             // "keine Luecken" aussieht.

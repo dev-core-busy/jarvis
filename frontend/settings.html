@@ -20,7 +20,7 @@
          Wer Inter zwingend will, muss die Dateien selbst ausliefern
          (WOFF2 unter /static/fonts + @font-face) – NICHT wieder extern. -->
     <link rel="icon" href="/static/favicon.png?v=6" type="image/png">
-    <link rel="stylesheet" href="/static/css/theme.css?v=79">
+    <link rel="stylesheet" href="/static/css/theme.css?v=80">
     <link rel="stylesheet" href="/static/css/update_widget.css?v=10">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
@@ -2071,7 +2071,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <option value="ab_niedrig" data-i18n="cve.schwelle_ab_niedrig">ohne „unwichtig“ (Vorgabe)</option>
                                         <option value="ab_mittel" data-i18n="cve.schwelle_ab_mittel">ohne „unwichtig“ und „niedrig“</option>
                                     </select>
-                                    <small class="tab-note" style="opacity:0.7;display:block;margin:4px 0 8px;" data-i18n="cve.schwelle_hint">Debian stuft die meisten Lücken nicht ein – darunter fast alle, für die es eine Sicherheitsmeldung gibt. Nicht eingestufte Lücken werden deshalb immer behoben.</small>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin:4px 0 8px;" data-i18n="cve.schwelle_hint">Debian stuft die meisten Lücken nicht ein – darunter fast alle, für die es eine Sicherheitsmeldung gibt. Nicht eingestufte Lücken werden deshalb immer behoben. Für Lücken, die laut der US-Behörde CISA aktiv ausgenutzt werden (KEV), gilt die Schwelle nicht.</small>
                                     <label style="display:flex;gap:6px;align-items:flex-start;font-size:0.8rem;color:var(--text-primary);cursor:pointer;">
                                         <input type="checkbox" id="cve-regulaer" style="margin-top:2px;">
                                         <span data-i18n="cve.regulaer">Behebungen auch aus der regulären Debian-Quelle einspielen</span>
@@ -2081,7 +2081,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                         <button class="btn-secondary btn-small" id="cve-speichern" type="button" style="flex:0 0 auto;padding:4px 12px;font-size:0.78rem;" data-i18n="profile.save_btn">Speichern</button>
                                         <span id="cve-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
                                     </div>
-                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="cve.hinweis">Geprüft werden alle installierten Debian-Pakete gegen den Debian Security Tracker sowie die Python-Pakete und – falls installiert – die WhatsApp-Bridge. Von Hand im Fenster „Installierte Pakete“ (Info-Symbol in der Titelleiste), regelmäßig über einen Auftrag der Art „Sicherheitslücken prüfen“. Diese Vorgaben gelten für den Knopf und für Aufträge ohne eigene Schwelle.</small>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="cve.hinweis">Geprüft werden alle installierten Debian-Pakete gegen den Debian Security Tracker sowie die Python-Pakete und – falls installiert – die WhatsApp-Bridge. Eingeordnet werden die Befunde zusätzlich danach, ob sie laut CISA aktiv ausgenutzt werden (KEV) und wie wahrscheinlich eine Ausnutzung ist (EPSS); beide Listen werden vollständig geladen, nicht je Lücke abgefragt. Von Hand im Fenster „Installierte Pakete“ (Info-Symbol in der Titelleiste), regelmäßig über einen Auftrag der Art „Sicherheitslücken prüfen“. Diese Vorgaben gelten für den Knopf und für Aufträge ohne eigene Schwelle.</small>
                                 </div>
 
                                 <!-- Lizenz. Steht hier, weil die Lizenz den Funktionsumfang des
@@ -6888,8 +6888,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=3"></script>
     <script src="/static/js/pwreveal.js?v=4"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=525"></script>
-    <script src="/static/js/i18n_fr.js?v=1"></script>
+    <script src="/static/js/i18n.js?v=528"></script>
+    <script src="/static/js/i18n_fr.js?v=4"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=41"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -6946,7 +6946,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/update_widget.js?v=11"></script>
     <script src="/static/js/cpubar.js?v=4"></script>
     <script src="/static/js/sysload.js?v=10"></script>
-    <script src="/static/js/syspackages.js?v=25"></script>
+    <script src="/static/js/syspackages.js?v=26"></script>
     <script src="/static/js/zugang_anmeldung.js?v=2"></script>
     <script src="/static/js/idp_anmeldung.js?v=8"></script>
     <script src="/static/js/agent_roles.js?v=5"></script>

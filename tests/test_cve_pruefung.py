@@ -38,6 +38,12 @@ sys.path.insert(0, str(ROOT))
 SANDKASTEN = Path(tempfile.mkdtemp(prefix="cve_test_"))
 # VOR dem Import: das Modul liest seinen Datenordner beim Laden.
 os.environ["JARVIS_CVE_DATEN"] = str(SANDKASTEN)
+# Bedrohungslage (KEV/EPSS) holt pruefen() selbst – im Waechter auf einen
+# toten lokalen Port, damit kein Lauf ins Netz geht. Gemessen wird sie in
+# tests/test_cve_bedrohung.py.
+NETZ_TOT = "http://127.0.0.1:9/"
+os.environ["JARVIS_CVE_KEV"] = NETZ_TOT + "kev.json"
+os.environ["JARVIS_CVE_EPSS"] = NETZ_TOT + "epss.csv.gz"
 
 _ok = _fail = 0
 
@@ -68,6 +74,9 @@ from backend import cve_apt, cve_pruefung  # noqa: E402
 
 if Path(cve_pruefung.DATEN) != SANDKASTEN:
     print("ABBRUCH: Datenordner zeigt aus dem Sandkasten heraus:", cve_pruefung.DATEN)
+    ende(2)
+if not (cve_pruefung.KEV_URL.startswith(NETZ_TOT) and cve_pruefung.EPSS_URL.startswith(NETZ_TOT)):
+    print("ABBRUCH: KEV/EPSS zeigen ins Netz:", cve_pruefung.KEV_URL, cve_pruefung.EPSS_URL)
     ende(2)
 
 # ═══════════════════════════════════════════════════════════════════════════

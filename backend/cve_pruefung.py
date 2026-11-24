@@ -19,6 +19,12 @@ WAS GEPRUEFT WIRD – alles, was auf DIESEM Server installiert ist, und nur das:
 Was NICHT geprueft wurde, steht mit Grund im Ergebnis (``bereiche``) – eine
 fehlende Pruefung darf nicht wie "keine Luecken" aussehen.
 
+EINGEORDNET werden die Befunde zusaetzlich nach der Bedrohungslage (seit
+2026-11-24): CISA KEV (nachweislich ausgenutzt – hebt die Schwelle der
+automatischen Behebung auf) und EPSS (Wahrscheinlichkeit einer Ausnutzung,
+nur Anzeige und Reihenfolge). Beide finden keine Luecken, sie gewichten die
+gefundenen. Einzelheiten im Abschnitt "Bedrohungslage".
+
 ⚠ DEBIAN FUEHRT LUECKEN UNTER DEM QUELLPAKET. ``libbrotli1`` hat keinen
 Eintrag, ``brotli`` schon. Wer mit dem Binaerpaket sucht, findet nichts – und
 die Null sieht wie Entwarnung aus. Verglichen wird deshalb ``${source:Version}``
@@ -54,6 +60,7 @@ from __future__ import annotations
 import datetime as dt
 import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -106,6 +113,24 @@ VEROEFF_NEU_S = 7 * 86400
 VEROEFF_DECKEL_S = 180
 VEROEFF_PARALLEL = 8
 _DATUM = re.compile(r"^\d{4}-\d{2}-\d{2}")
+# Bedrohungslage (siehe Abschnitt "Bedrohungslage"): beide Quellen als GANZE
+# Datei, gzip im Cache. EPSS rechnet einmal am Tag – oefter als alle
+# EPSS_NEU_S zu holen bringt nichts. Der KEV-Katalog wird bei jedem Lauf mit
+# If-Modified-Since gefragt (eine 304 kostet nichts, ein neuer Eintrag zaehlt).
+KEV_URL = os.environ.get(
+    "JARVIS_CVE_KEV",
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json")
+KEV_LINK = "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+KEV_CACHE = DATEN / "cisa_kev.json.gz"
+KEV_META = DATEN / "cisa_kev.meta.json"
+EPSS_URL = os.environ.get("JARVIS_CVE_EPSS",
+                          "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz")
+EPSS_CACHE = DATEN / "epss.csv.gz"
+EPSS_META = DATEN / "epss.meta.json"
+EPSS_NEU_S = 12 * 3600
+# Gemessen 2026-11-24: KEV 1,9 MB (JSON), EPSS 2,9 MB (gzip, 411.000 Zeilen).
+BEDROHUNG_MAX_BYTES = 64 * 1024 * 1024
+_EPSS_STAND = re.compile(r"score_date:(\d{4}-\d{2}-\d{2})")
 
 SCHWELLEN = ("alle", "ab_niedrig", "ab_mittel")
 VORGABEN = {"schwelle": "ab_niedrig", "regulaere_quelle": False}
@@ -991,6 +1016,215 @@ def veroeffentlichung_ergaenzen(befunde: list[dict], holen=None) -> dict:
             "ohne_datum": sum(1 for b in befunde if not b["veroeffentlicht"])}
 
 
+# ── Bedrohungslage: CISA KEV und EPSS ────────────────────────────────────────
+#
+# Debian stuft rund 95 % der trixie-Eintraege nicht ein (siehe Kopf) – die
+# Einstufung allein sagt kaum, was zuerst dran ist. Zwei Quellen beantworten
+# das von der Angreiferseite:
+#   * CISA KEV (Known Exploited Vulnerabilities): Luecken, die NACHWEISLICH
+#     ausgenutzt werden. Ein Eintrag hebt die Schwelle der automatischen
+#     Behebung auf (``plan``) – wer aktiv angegriffen wird, wartet nicht auf
+#     Debians Einstufung. Der Schalter "regulaere Quelle" bleibt davon
+#     unberuehrt: er ist eine Entscheidung ueber Paketquellen, nicht ueber
+#     Dringlichkeit.
+#   * EPSS (FIRST): Wahrscheinlichkeit einer Ausnutzung in den naechsten 30
+#     Tagen, taeglich neu gerechnet. Nur Anzeige und Reihenfolge, KEINE Weiche
+#     – ein Modellwert ist keine Beobachtung.
+# Beide werden als GANZE Datei geholt, nicht je Kennung gefragt: eine Abfrage
+# mit der Kennungsliste verriete einem Dritten, welche Luecken dieser Server
+# offen hat.
+#
+# Felder am Befund – "unbekannt" ist eine eigene Stufe (Register):
+#   ``kev``   dict (gelistet) · False (Katalog geladen, nicht gelistet) ·
+#             None (Katalog nicht verfuegbar – das ist NICHT "nicht ausgenutzt")
+#   ``epss`` / ``epss_perzentil``  Zahl 0..1, oder None (keine Datei, oder EPSS
+#             kennt die Kennung nicht – ``bedrohung.epss.ok`` trennt beides)
+
+def _quelle_laden(url: str, cache: Path, meta_pfad: Path, pruefen, name: str,
+                  neu_s: float = 0) -> dict:
+    """Eine Datei holen, PRUEFEN und erst dann den Cache ersetzen.
+
+    ``pruefen(gz_bytes)`` wirft bei unbrauchbarem Inhalt – dann bleibt der
+    fruehere Stand liegen (ein abgeschnittener Abruf oder eine Fehlerseite mit
+    200 darf einen guten Katalog nicht ersetzen). Scheitert der Abruf, gilt der
+    gespeicherte Stand, mit Hinweis – laut, nicht still.
+    Rueckgabe: {ok, hinweis}.
+    """
+    meta = _lesen(meta_pfad, {})
+    if not isinstance(meta, dict):
+        meta = {}
+    if neu_s and cache.is_file() and time.time() - float(meta.get("geholt") or 0) < neu_s:
+        return {"ok": True, "hinweis": ""}
+    kopf = {"User-Agent": "jarvis-cve-pruefung"}
+    if cache.is_file() and meta.get("last_modified"):
+        kopf["If-Modified-Since"] = meta["last_modified"]
+    try:
+        anf = urllib.request.Request(url, headers=kopf)
+        with urllib.request.urlopen(anf, timeout=120) as a:  # nosec B310 – feste https-Adresse
+            roh = a.read(BEDROHUNG_MAX_BYTES + 1)
+            lm = a.headers.get("Last-Modified") or ""
+        if len(roh) > BEDROHUNG_MAX_BYTES:
+            raise ValueError("Antwort ist unplausibel gross")
+        if roh[:2] != b"\x1f\x8b":
+            roh = gzip.compress(roh, compresslevel=6)
+        pruefen(roh)
+        DATEN.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_name(cache.name + ".tmp")
+        tmp.write_bytes(roh)
+        os.replace(tmp, cache)
+        _schreiben(meta_pfad, {"last_modified": lm, "geholt": time.time()})
+        return {"ok": True, "hinweis": ""}
+    except urllib.error.HTTPError as e:
+        if e.code == 304 and cache.is_file():
+            meta["geholt"] = time.time()
+            _schreiben(meta_pfad, meta)
+            return {"ok": True, "hinweis": ""}
+        fehler = f"HTTP {e.code}"
+    except Exception as e:  # noqa: BLE001
+        fehler = f"{type(e).__name__}: {e}"[:200]
+    if cache.is_file():
+        return {"ok": True, "hinweis": f"{name} nicht erreichbar ({fehler}) – gespeicherter Stand benutzt"}
+    return {"ok": False, "hinweis": f"{name} nicht erreichbar ({fehler})"}
+
+
+def _kev_aus(gz: bytes) -> tuple[dict, str]:
+    """{CVE: {seit, frist, ransomware, name}} und Katalogstand aus dem gzip-JSON."""
+    d = json.loads(gzip.decompress(gz))
+    liste = d.get("vulnerabilities") if isinstance(d, dict) else None
+    if not isinstance(liste, list) or not liste:
+        raise ValueError("KEV-Katalog ohne Eintraege")
+    aus: dict = {}
+    for v in liste:
+        if not isinstance(v, dict):
+            continue
+        k = str(v.get("cveID") or "").strip().upper()
+        if not k.startswith("CVE-"):
+            continue
+        aus[k] = {"seit": str(v.get("dateAdded") or "")[:10],
+                  "frist": str(v.get("dueDate") or "")[:10],
+                  # CISA fuehrt "Known" oder "Unknown" – nur "Known" ist eine Aussage.
+                  "ransomware": str(v.get("knownRansomwareCampaignUse") or "").strip().lower() == "known",
+                  "name": str(v.get("vulnerabilityName") or "")[:200]}
+    if not aus:
+        raise ValueError("KEV-Katalog ohne CVE-Kennungen")
+    return aus, str(d.get("dateReleased") or d.get("catalogVersion") or "")[:10]
+
+
+def _epss_zeilen(gz: bytes):
+    """Zeilen der EPSS-Datei; prueft den Kopf (``cve,epss,percentile``)."""
+    with gzip.GzipFile(fileobj=io.BytesIO(gz)) as g:
+        kopf_gesehen = False
+        for z in io.TextIOWrapper(g, encoding="utf-8", errors="replace"):
+            if z.startswith("#"):
+                yield z
+                continue
+            if not kopf_gesehen:
+                if z.strip().lower() != "cve,epss,percentile":
+                    raise ValueError(f"EPSS-Datei mit unbekanntem Kopf: {z.strip()[:80]}")
+                kopf_gesehen = True
+                continue
+            yield z
+        if not kopf_gesehen:
+            raise ValueError("EPSS-Datei ohne Kopfzeile")
+
+
+def _epss_pruefen(gz: bytes) -> None:
+    """Ganz durchlesen: erst am Ende prueft gzip die Pruefsumme – ein
+    abgeschnittener Abruf faellt also hier auf, nicht beim naechsten Lesen."""
+    n = sum(1 for z in _epss_zeilen(gz) if not z.startswith("#"))
+    if n == 0:
+        raise ValueError("EPSS-Datei ohne Eintraege")
+
+
+def _epss_aus(gz: bytes, ids: set[str]) -> tuple[dict, str]:
+    """{CVE: (epss, perzentil)} NUR fuer ``ids`` und das Datum der Werte."""
+    aus: dict = {}
+    stand = ""
+    for z in _epss_zeilen(gz):
+        if z.startswith("#"):
+            m = _EPSS_STAND.search(z)
+            stand = m.group(1) if m else stand
+            continue
+        k, _, rest = z.partition(",")
+        if k not in ids:
+            continue
+        s, _, p = rest.strip().partition(",")
+        try:
+            sw, pw = float(s), float(p)
+        except ValueError:
+            continue
+        if 0.0 <= sw <= 1.0 and 0.0 <= pw <= 1.0:
+            aus[k] = (sw, pw)
+    return aus, stand
+
+
+def kev_holen() -> tuple[dict, dict | None]:
+    """(Info, Katalog) – Katalog None, wenn keiner verfuegbar ist."""
+    info = _quelle_laden(KEV_URL, KEV_CACHE, KEV_META, _kev_aus, "CISA-KEV-Katalog")
+    if not KEV_CACHE.is_file():
+        return dict(info, ok=False, stand=""), None
+    try:
+        daten, stand = _kev_aus(KEV_CACHE.read_bytes())
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "stand": "",
+                "hinweis": f"gespeicherter CISA-KEV-Katalog unlesbar ({type(e).__name__})"}, None
+    return dict(info, ok=True, stand=stand, eintraege=len(daten)), daten
+
+
+def epss_holen(ids: set[str]) -> tuple[dict, dict | None]:
+    """(Info, Werte nur fuer ``ids``) – Werte None, wenn keine Datei verfuegbar ist."""
+    info = _quelle_laden(EPSS_URL, EPSS_CACHE, EPSS_META, _epss_pruefen, "EPSS-Datei",
+                         neu_s=EPSS_NEU_S)
+    if not EPSS_CACHE.is_file():
+        return dict(info, ok=False, stand=""), None
+    try:
+        daten, stand = _epss_aus(EPSS_CACHE.read_bytes(), ids)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "stand": "",
+                "hinweis": f"gespeicherte EPSS-Datei unlesbar ({type(e).__name__})"}, None
+    return dict(info, ok=True, stand=stand), daten
+
+
+def cve_kennungen(b: dict) -> list[str]:
+    """CVE-Kennungen eines Befunds: die Kennung selbst und ihre Aliase.
+
+    Python-Befunde fuehren oft eine GHSA- oder PYSEC-Kennung, die CVE steht
+    dann nur unter ``aliase`` – KEV und EPSS kennen ausschliesslich CVEs."""
+    ks = [b.get("cve")] + list(b.get("aliase") or [])
+    return sorted({k.strip().upper() for k in ks
+                   if isinstance(k, str) and k.strip().upper().startswith("CVE-")})
+
+
+def bedrohung_ergaenzen(befunde: list[dict], kev=None, epss=None) -> dict:
+    """Setzt ``kev``, ``epss`` und ``epss_perzentil`` an jedem Befund.
+
+    ``kev``/``epss`` sind fuer Tests austauschbar (Form wie ``kev_holen`` bzw.
+    ``epss_holen``). Rueckgabe: {kev: {...}, epss: {...}} fuer das Ergebnis.
+    """
+    kev = kev or kev_holen
+    epss = epss or epss_holen
+    je = {id(b): cve_kennungen(b) for b in befunde}
+    alle = set().union(*je.values()) if je else set()
+    k_info, k_daten = kev()
+    e_info, e_daten = epss(alle)
+    for b in befunde:
+        ks = je[id(b)]
+        if k_daten is None:
+            b["kev"] = None
+        else:
+            treffer = [dict(k_daten[k], kennung=k) for k in ks if k in k_daten]
+            b["kev"] = min(treffer, key=lambda t: t["seit"] or "9999") if treffer else False
+        werte = [e_daten[k] for k in ks if e_daten and k in e_daten]
+        if werte:
+            w = max(werte)
+            b["epss"], b["epss_perzentil"] = w[0], w[1]
+        else:
+            b["epss"] = b["epss_perzentil"] = None
+    return {"kev": dict(k_info, link=KEV_LINK,
+                        treffer=sum(1 for b in befunde if b.get("kev"))),
+            "epss": dict(e_info, mit_wert=sum(1 for b in befunde if b.get("epss") is not None))}
+
+
 # ── Auskunft zu EINER Kennung (Suche in der Paketliste) ──────────────────────
 #
 # Die Suche der Paketliste kennt nur BEFUNDE – also Luecken, die dieses System
@@ -1324,7 +1558,32 @@ def kennung_auskunft(roh, online=None) -> dict:
                                               laufender_kernel())
         if not bef and not aus["lokal"]:
             aus["online"] = (online or online_auskunft)(k)
+        aus["bedrohung"] = bedrohung_lokal(k)
         aus["urteil"] = _urteil(aus)
+    return aus
+
+
+def bedrohung_lokal(k: str) -> dict:
+    """KEV/EPSS zu EINER Kennung – nur aus den gespeicherten Dateien, OHNE Abruf:
+    die Auskunft fragt nicht je Kennung bei Dritten nach (Abschnitt
+    "Bedrohungslage"). Felder wie am Befund; None = Datei fehlt/unlesbar."""
+    aus = {"kev": None, "epss": None, "epss_perzentil": None}
+    if not k.startswith("CVE-"):
+        aus["kev"] = False
+        return aus
+    try:
+        if KEV_CACHE.is_file():
+            daten, _st = _kev_aus(KEV_CACHE.read_bytes())
+            aus["kev"] = dict(daten[k], kennung=k) if k in daten else False
+    except Exception:  # noqa: BLE001 – unlesbar bleibt "unbekannt"
+        pass
+    try:
+        if EPSS_CACHE.is_file():
+            w = _epss_aus(EPSS_CACHE.read_bytes(), {k})[0].get(k)
+            if w:
+                aus["epss"], aus["epss_perzentil"] = w
+    except Exception:  # noqa: BLE001
+        pass
     return aus
 
 
@@ -1369,6 +1628,14 @@ def pruefen() -> dict:
         veroeff = {"fehler": f"{type(e).__name__}: {e}"}
         for b in befunde:
             b.setdefault("veroeffentlicht", "")
+    try:
+        bedrohung = bedrohung_ergaenzen(befunde)
+    except Exception as e:  # noqa: BLE001 – die Einordnung darf die Pruefung nicht kippen
+        fehler = f"{type(e).__name__}: {e}"[:200]
+        bedrohung = {"kev": {"ok": False, "hinweis": fehler}, "epss": {"ok": False, "hinweis": fehler}}
+        for b in befunde:
+            b["kev"] = None
+            b["epss"] = b["epss_perzentil"] = None
     zaehler = {k: 0 for k in KLASSEN}
     for b in befunde:
         zaehler[b["klasse"]] = zaehler.get(b["klasse"], 0) + 1
@@ -1377,7 +1644,7 @@ def pruefen() -> dict:
             "erzeugt_am": dt.datetime.fromtimestamp(jetzt).astimezone().isoformat(timespec="seconds"),
             "host": socket.gethostname(), "dauer_s": round(jetzt - t0, 1),
             "bereiche": bereiche, "befunde": befunde, "zaehler": zaehler, "behebung": None,
-            "veroeffentlichung": veroeff}
+            "veroeffentlichung": veroeff, "bedrohung": bedrohung}
 
 
 def einstellungen() -> dict:
@@ -1424,7 +1691,12 @@ def plan(erg: dict, einst: dict, schwelle: str | None = None) -> dict:
     nur_regulaer = 0
     node_von_hand = 0
     for b in erg.get("befunde") or []:
-        if b["bereich"] == "debian" and erreicht_schwelle(b.get("einstufung", ""), schwelle):
+        # Aktiv ausgenutzt (CISA KEV) erreicht jede Schwelle – siehe
+        # Abschnitt "Bedrohungslage". Nur ein echtes dict zaehlt: None heisst
+        # "Katalog nicht verfuegbar", nicht "gelistet".
+        dringend = isinstance(b.get("kev"), dict)
+        if b["bereich"] == "debian" and (dringend
+                                         or erreicht_schwelle(b.get("einstufung", ""), schwelle)):
             if b["klasse"] == "behebbar":
                 if b.get("aus_sicherheitsquelle") or einst["regulaere_quelle"]:
                     pakete.update(b.get("beheben_mit") or [])
@@ -1812,6 +2084,14 @@ def kurzbericht(erg: dict) -> str:
         teile.append(f"{z['lock']} Python nur über die Lock-Datei")
     if z.get("nicht_in_lock"):
         teile.append(f"{z['nicht_in_lock']} Python nur von Hand (nicht in der Lock-Datei)")
+    # Aktiv ausgenutzte Luecken gehoeren in die Zeile – und ein fehlender
+    # Katalog auch: sonst sieht "keine Zahl" wie "nichts ausgenutzt" aus.
+    kev = [b for b in erg.get("befunde") or []
+           if isinstance(b.get("kev"), dict) and b.get("klasse") != "ausgenommen"]
+    if kev:
+        teile.append(f"{len(kev)} aktiv ausgenutzt (CISA KEV)")
+    if not ((erg.get("bedrohung") or {}).get("kev") or {}).get("ok", True):
+        teile.append("CISA KEV nicht verfügbar")
     beh = erg.get("behebung") or {}
     n = sum(len(r.get("installiert") or []) for r in beh.get("debian") or [])
     py = len((beh.get("python") or {}).get("geaendert") or [])

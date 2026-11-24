@@ -38,7 +38,9 @@ let rang = null;
 
 const NOETIG = ['esc', 'klasseText', 'einstufungText', 'trackerLink', 'befundLink', 'nodsaText', 'anderswoText',
                 'befundZeilen', 'inPaketliste', 'einzelKnopf', 'quittierbareIds', 'paketGezeigt',
-                'andereGezeigt', 'befundTrifft', 'paketTreffer', 'andereTrifft', 'zeichnen', 'cveBlock'];
+                'andereGezeigt', 'befundTrifft', 'paketTreffer', 'andereTrifft', 'zeichnen', 'cveBlock',
+                // Bedrohungslage (CISA KEV / EPSS), seit 2026-11-24
+                'kevAktiv', 'prozentText', 'epssHat', 'epssTitel', 'kevText', 'kevChip', 'cveChip'];
 const fehlt = NOETIG.filter(function (n) { return !funktionen[n]; });
 if (fehlt.length || !rang) {
     console.log('ABBRUCH: nicht gefunden: ' + fehlt.concat(rang ? [] : ['CVE_RANG']).join(', '));
@@ -55,6 +57,7 @@ const api = new Function(prolog + AUSFUEHREN.map(function (n) { return funktione
     + '\nreturn { befundZeilen: befundZeilen, inPaketliste: inPaketliste, einzelKnopf: einzelKnopf,'
     + ' paketGezeigt: paketGezeigt, andereGezeigt: andereGezeigt,'
     + ' befundTrifft: befundTrifft, paketTreffer: paketTreffer, andereTrifft: andereTrifft,'
+    + ' cveChip: cveChip, prozentText: prozentText,'
     + ' setze: function (o) { _nurLuecken = !!o.l; _nurUngesehen = !!o.u; _gesehen = o.g || {}; } };')();
 
 function zeile(b) {
@@ -261,6 +264,55 @@ check((tv.match(/\n/g) || []).length === titelMax + 1 && /und 3 weitere Pakete/.
 check(titelApi([Object.assign({}, dns, { quelle: 'a"b' })], 'lock').indexOf('a&quot;b') >= 0,
       'Anfuehrungszeichen im Namen werden maskiert');
 check(ruft('cveBlock', 'klassePaketeTitel'), 'cveBlock() setzt den Tooltip ueber klassePaketeTitel');
+
+// ── Bedrohungslage: CISA KEV und EPSS ─────────────────────────────────────
+// kev: Objekt = gelistet, false = nicht gelistet, null = Katalog fehlt. Nur
+// das Objekt darf "aktiv ausgenutzt" zeigen – null ist unbekannt.
+const KEV = { seit: '2026-11-01', frist: '2026-11-22', ransomware: true, name: 'x', kennung: 'CVE-2026-1' };
+const mitKev = zeile({ kev: KEV });
+check(mitKev.indexOf('jv-pkg-cve-kev') >= 0 && mitKev.indexOf('aktiv ausgenutzt') >= 0,
+      'KEV-Befund: Markierung "aktiv ausgenutzt" (Text, nicht nur Farbe)', mitKev.slice(0, 300));
+check(/gelistet seit 2026-11-01/.test(zusatz(mitKev)) && /Frist für US-Behörden 2026-11-22/.test(zusatz(mitKev))
+      && /Ransomware/.test(zusatz(mitKev)), 'Zusatzzeile nennt Aufnahme, Frist und Ransomware', zusatz(mitKev));
+check(zusatz(zeile({ kev: Object.assign({}, KEV, { ransomware: false }) })).indexOf('Ransomware') < 0,
+      'ohne Ransomware-Angabe kein Ransomware-Hinweis');
+['null', 'false'].forEach(function (w) {
+    // Ein Wurf ist hier ein FAIL, kein Abbruch: wer null fuer "gelistet"
+    // haelt, stirbt in kevText an null.seit – das ist genau der Befund.
+    let h;
+    try { h = zeile({ kev: w === 'null' ? null : false }); } catch (e) { h = 'WURF ' + e.message; }
+    check(h.indexOf('WURF') !== 0 && h.indexOf('jv-pkg-cve-kev') < 0 && h.indexOf('aktiv ausgenutzt') < 0,
+          'kev=' + w + ': keine KEV-Markierung', h.slice(0, 200));
+});
+const mitEpss = zeile({ epss: 0.4321, epss_perzentil: 0.987 });
+check(/Ausnutzung wahrscheinlich zu 43 %/.test(mitEpss), 'EPSS als Prozent in der Zeile', mitEpss.slice(0, 400));
+check(/höher als bei 98\.7 %|höher als bei 98,7 %/.test(mitEpss), 'Tooltip nennt das Perzentil', mitEpss.slice(0, 500));
+check(zeile({ epss: null }).indexOf('Ausnutzung') < 0, 'ohne EPSS-Wert keine EPSS-Angabe');
+check(/höher als bei 99[.,]9 %/.test(zeile({ epss: 0.9, epss_perzentil: 0.9996 })),
+      'Perzentil wird abgerundet (nie "hoeher als bei 100 %")');
+check(api.prozentText(0.00043).replace(',', '.') === '0.04 %' && api.prozentText(0.0123).replace(',', '.') === '1.2 %'
+      && api.prozentText(0.5) === '50 %', 'Prozentformat je Groessenordnung',
+      [api.prozentText(0.00043), api.prozentText(0.0123), api.prozentText(0.5)].join(' | '));
+// Reihenfolge INNERHALB einer Klasse: KEV vor hohem EPSS vor niedrigem EPSS
+// vor ohne Wert; die Klasse bleibt der erste Schluessel.
+const reihe = api.befundZeilen([
+    { id: 'a', bereich: 'debian', cve: 'CVE-2026-0001', klasse: 'offen', einstufung: '', epss: 0.01 },
+    { id: 'b', bereich: 'debian', cve: 'CVE-2026-0002', klasse: 'offen', einstufung: '' },
+    { id: 'c', bereich: 'debian', cve: 'CVE-2026-0003', klasse: 'offen', einstufung: '', epss: 0.9 },
+    { id: 'd', bereich: 'debian', cve: 'CVE-2026-0004', klasse: 'offen', einstufung: '', kev: KEV, epss: 0.001 },
+    { id: 'e', bereich: 'debian', cve: 'CVE-2026-0005', klasse: 'behebbar', einstufung: '' }]);
+const folge = (reihe.match(/CVE-2026-000\d/g) || []).filter(function (k, i, a) { return a.indexOf(k) === i; });
+check(folge.join(',') === 'CVE-2026-0005,CVE-2026-0004,CVE-2026-0003,CVE-2026-0001,CVE-2026-0002',
+      'Reihenfolge: Klasse, dann KEV, dann EPSS absteigend', folge.join(','));
+// Spalte "Luecken": ein KEV-Befund bleibt sichtbar, auch wenn alles gesehen ist.
+api.setze({ g: { k1: true } });
+const chip = api.cveChip('libx', { klasse: 'offen', befunde: [{ id: 'k1', klasse: 'offen', kev: KEV }] });
+check(chip.indexOf('jv-pkg-cve-leise') >= 0 && chip.indexOf('jv-pkg-cve-kev') >= 0,
+      'Paketspalte: gesehen und leise, die KEV-Markierung bleibt', chip);
+check(api.cveChip('libx', { klasse: 'offen', befunde: [{ id: 'k1', klasse: 'offen', kev: null }] })
+      .indexOf('jv-pkg-cve-kev') < 0, 'Paketspalte: kev=null ohne Markierung');
+api.setze({});
+check(ruft('cveBlock', 'kevAktiv'), 'cveBlock() zaehlt aktiv ausgenutzte Befunde ueber kevAktiv');
 
 fertig();
 console.log('\n' + ok + ' OK, ' + fail + ' FAIL');

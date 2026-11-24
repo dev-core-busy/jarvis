@@ -1277,6 +1277,10 @@ body:not(.light) .jv-erh-fehler { color: var(--danger); }
 button.jv-pkg-cve { cursor: pointer; }
 .jv-pkg-cve.ist-klein { font-size: .7rem; }
 .jv-pkg-cve-behebbar { background: rgba(var(--danger-rgb), .20); border-color: rgba(var(--danger-rgb), .60); }
+/* Aktiv ausgenutzt (CISA KEV): dieselbe Signalfarbe wie "behebbar", aber
+   volle Kante und fett – die Aussage steht ausserdem im Text, nicht nur in
+   der Farbe. Schrift bleibt --text-primary (geerbt von .jv-pkg-cve). */
+.jv-pkg-cve-kev { background: rgba(var(--danger-rgb), .20); border-color: var(--danger); font-weight: 600; }
 .jv-pkg-cve-neustart,
 .jv-pkg-cve-nicht_im_index,
 .jv-pkg-cve-zurueckgehalten,

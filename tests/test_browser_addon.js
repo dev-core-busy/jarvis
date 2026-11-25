@@ -734,7 +734,7 @@ check(/"colors":\s*cfg\.get\("colors"/.test(MAIN_SRC),
    * wird, nicht die Schreibweise des Ausdrucks. */
   for (const stelle of [/melde\(\(?[\s\S]{0,200}?ARBEITSTEXT[\s\S]{0,200}?,\s*true\)/,
                         /melde\("Melde an …",\s*true\)/,
-                        /melde\("Lese das Kommentarfeld …",\s*true\)/]) {
+                        /melde\("Lese das Kommentarfeld …",\s*true[,)]/]) {
     check(stelle.test(POPUP_JS),
           'Wartetext ' + stelle.source.slice(0, 32) + '… ist als arbeitend gemeldet');
   }
@@ -5629,6 +5629,65 @@ section("24) Einstellungen-Abschnitt und die wandernde Meldung");
         "melde() platziert selbst (fail-safe, nicht nur zeige())");
   check(/meldungPlatzieren\(\)/.test(schneidePopup("zeige") || ""),
         "und zeige() ebenfalls - VOR der Meldung, die gleich darauf folgt");
+}
+
+// ── c) Meldungen des Ueberarbeiten-Knopfes stehen UNTER diesem Knopf ────
+/* Vorgabe 2026-11-25: „Das Kommentarfeld ist leer" erschien oben vor dem
+ * Ergebnisfeld – ueber Zusatzwunsch und Trennstrich, also scheinbar als
+ * Antwort auf das Dreieck. Gemessen wird AUSGEFUEHRT: mit Anker direkt hinter
+ * der Knopfreihe, und die naechste Meldung OHNE Anker wandert zurueck. */
+{
+  const { teile, drin } = popupTeile(["melde", "meldungPlatzieren", "zeige"], []);
+  check(drin.has("meldungUnter"), "melde() nimmt meldungUnter() mit (transitiv)");
+  const dom = new JSDOM(POPUP_HTML, { url: "https://x.test/",
+                                      runScripts: "outside-only" });
+  const w = dom.window;
+  let r = null;
+  try {
+    r = JSON.parse(new w.Function(`
+      const $ = (id) => document.getElementById(id);
+      const _marke = "Marke";
+      const el = { meldung: $("meldung"), login: $("bereich-login"),
+                   arbeit: $("bereich-arbeit"), abmelden: $("btn-abmelden"),
+                   reset: $("btn-reset") };
+` + teile.join("\n") + `
+      zeige(true);
+      const knopf = $("btn-ueberarbeiten");
+      if (!knopf) return JSON.stringify({ knopf: false });
+      const hier = knopf.closest(".knopfreihe");
+      melde("Das Kommentarfeld ist leer.", false, hier);
+      const m = $("meldung");
+      const unter = hier.nextElementSibling === m;
+      const nachKnopf = !!(knopf.compareDocumentPosition(m)
+                           & w_FOLGT);
+      melde("Formuliere …", true);
+      return JSON.stringify({ knopf: true, unter, nachKnopf,
+        zurueck: m.nextElementSibling && m.nextElementSibling.id === "ergebnis" });
+    `.replace("w_FOLGT", "4"))());
+  } catch (e) {
+    r = { fehler: String(e) };
+  } finally { w.close(); }
+  if (!r || !r.knopf) {
+    console.error("Positivkontrolle: #btn-ueberarbeiten fehlt im Popup", r);
+    process.exit(2);
+  }
+  check(r.unter, "mit Anker steht die Meldung direkt unter der Knopfreihe", JSON.stringify(r));
+  check(r.nachKnopf, "also HINTER dem ausloesenden Knopf, nicht davor");
+  check(r.zurueck, "eine Meldung ohne Anker wandert wieder vor das Ergebnis");
+
+  // Der Handler muss den Anker auch WIRKLICH uebergeben.
+  const iH = POPUP_JS.indexOf('$("btn-ueberarbeiten").addEventListener');
+  const iE = iH < 0 ? -1 : POPUP_JS.indexOf('await auswerten("ueberarbeiten"', iH);
+  const handler = (iH >= 0 && iE > iH) ? POPUP_JS.slice(iH, iE) : "";
+  check(!!handler, "der Ueberarbeiten-Handler ist auffindbar");
+  for (const satz of ["Kein Jira-Ticket", "Lese das Kommentarfeld",
+                      "nicht lesbar", "Kein Text im Kommentarfeld"]) {
+    const naechstes = handler.indexOf("melde(", handler.indexOf(satz));
+    const stueck = handler.indexOf(satz) < 0 ? ""
+      : handler.slice(handler.indexOf(satz),
+                      naechstes < 0 ? handler.length : naechstes);
+    check(/\bhier\)/.test(stueck), "„" + satz + "…“ steht unter dem Knopf");
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

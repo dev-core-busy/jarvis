@@ -258,7 +258,28 @@ function meldungPlatzieren() {
   } catch (e) { /* Der Platz ist nicht der Zweck – der Text ist es. */ }
 }
 
-function melde(text, arbeitet = false) {
+/** Haengt `#meldung` direkt unter `anker` – fuer Meldungen, die zu EINEM
+ * bestimmten Knopf gehoeren.
+ *
+ * ⚠ DIE AUSKUNFT STEHT UNTER DEM KNOPF, DER SIE AUSGELOEST HAT (Vorgabe
+ * 2026-11-25). „Das Kommentarfeld ist leer" vom Knopf „Meinen Kommentar
+ * ueberarbeiten" erschien oben vor dem Ergebnisfeld, also UEBER Zusatzwunsch
+ * und Trennstrich – es las sich wie eine Antwort auf das Dreieck daneben.
+ * Gilt nur fuer den Aufruf mit Anker; jede Meldung ohne Anker wandert ueber
+ * `meldungPlatzieren()` zurueck an ihren Stammplatz (dort erscheint dann
+ * auch das Ergebnis).
+ */
+function meldungUnter(anker) {
+  const m = document.getElementById("meldung");
+  if (!m || !anker || !anker.parentNode) return;
+  try {
+    if (anker.nextElementSibling !== m) {
+      anker.parentNode.insertBefore(m, anker.nextSibling);
+    }
+  } catch (e) { /* Der Platz ist nicht der Zweck – der Text ist es. */ }
+}
+
+function melde(text, arbeitet = false, anker = null) {
   if (!text) {
     /* ⚠ AUCH INHALT UND KLASSE RAEUMEN, nicht nur verstecken.
      *
@@ -278,6 +299,7 @@ function melde(text, arbeitet = false) {
    * Sichtbarkeit an einer anderen Stelle umschaltet, wuerde eine Meldung sonst
    * in einen versteckten Abschnitt schreiben – und sie waere lautlos weg. */
   meldungPlatzieren();
+  if (anker) meldungUnter(anker);
   // Meldungen tragen {marke} – auch die aus dem Hintergrund (der kennt das
   // DOM nicht und kann selbst nicht ersetzen).
   el.meldung.textContent = String(text).split("{marke}").join(_marke);
@@ -1808,19 +1830,23 @@ async function entwurfHolen() {
 }
 
 $("btn-ueberarbeiten").addEventListener("click", async () => {
+  // Alle Auskuenfte des Lesens stehen unter diesem Knopf (siehe meldungUnter).
+  const hier = $("btn-ueberarbeiten").closest(".knopfreihe");
   if (!_key) {
-    melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
+    melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).",
+          false, hier);
     return;
   }
   if (_tabId === null) return;
   sperre(true);
-  melde("Lese das Kommentarfeld …", true);
+  melde("Lese das Kommentarfeld …", true, hier);
   let r;
   try {
     r = await entwurfHolen();
   } catch (e) {
     melde("Das Kommentarfeld ist nicht lesbar: " + ((e && e.message) || e)
-          + "\nKopiere deinen Entwurf notfalls von Hand in das Textfeld unten.");
+          + "\nKopiere deinen Entwurf notfalls von Hand in das Textfeld oben.",
+          false, hier);
     return;
   } finally {
     sperre(false);
@@ -1830,7 +1856,8 @@ $("btn-ueberarbeiten").addEventListener("click", async () => {
     // wieder Raten (gleiche Lehre wie beim Einfügen).
     const gesehen = (r && r.gesehen && r.gesehen.length)
       ? "\nGefunden: " + r.gesehen.join(", ") : "";
-    melde(((r && r.fehler) || "Kein Text im Kommentarfeld gefunden.") + gesehen);
+    melde(((r && r.fehler) || "Kein Text im Kommentarfeld gefunden.") + gesehen,
+          false, hier);
     return;
   }
   /* ⚠ AUS EINEM NICHT ERKANNTEN FELD WIRD NUR NACH RUECKFRAGE ueberarbeitet.

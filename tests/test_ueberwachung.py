@@ -97,7 +97,12 @@ for n in ast.walk(baum):
 # dann SELBST nur die Standardbibliothek benutzen, sonst waere die Ausnahme ein Loch.
 NACHBAR = {"backend", "mail_meldung"}
 fremd = importe - set(sys.stdlib_module_names) - {"__future__"} - NACHBAR
-_mm = ast.parse((MOD.parent / "mail_meldung.py").read_text(encoding="utf-8"))
+# Neben dem Pruefling – in der Gegenprobe ist das eine Kopie OHNE Nachbarn; dann
+# das Repo-Modul (bis 2026-11-25 brach dort der Basislauf mit FileNotFoundError ab).
+_MM = MOD.parent / "mail_meldung.py"
+if not _MM.is_file():
+    _MM = ROOT / "backend" / "mail_meldung.py"
+_mm = ast.parse(_MM.read_text(encoding="utf-8"))
 _mm_importe = set()
 for n in ast.walk(_mm):
     if isinstance(n, ast.Import):

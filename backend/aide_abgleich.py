@@ -26,6 +26,19 @@ DIESES MODUL teilt jeden Eintrag des Berichts ein:
     aber NUR, wenn dpkg seit dem letzten Stand ueberhaupt gelaufen ist;
   * erklaert, weil sich nichts Inhaltliches geaendert hat (nur die ctime;
     Verzeichnis nur mit Inhaltszeit/Linkzahl – seine Eintraege stehen einzeln);
+  * erklaert als Kopie: grub-Module (byteweise die Paketdatei) und die
+    Chroot-Kopien von Postfix (``/var/spool/postfix/lib/libnss_*`` byteweise
+    die Paketdatei, ``/var/spool/postfix/etc/<datei>`` byteweise die Datei
+    unter ``/etc``, die AIDE selbst ueberwacht);
+  * erklaert als Laufzeit von Postfix: NEUE Sockets, PID-Dateien, Sperre und
+    Verzeichnisse genau nach den Mustern von Debians ``31_aide_postfix`` (dort
+    als VarFile/VarDir gefuehrt: Eigentuemer und Rechte werden weiter erfasst),
+    nur wenn das Paket postfix seit dem Stand installiert oder aktualisiert
+    wurde. Bewusst KEINE Ausnahme in der AIDE-Konfiguration – die schaltete die
+    Rechtepruefung dieser Dateien ab (DEV 25.11.2026, ``aide --path-check``);
+  * erklaert als Startverweis ``/etc/rcN.d/[SK]NN<name>`` -> ``../init.d/<name>``,
+    wenn das Startskript zu einem Paket gehoert und dpkg seit dem Stand lief
+    (``update-rc.d`` im Paketskript, DEV 24.11.2026 nach ``apt install postfix``);
   * nicht erklaert – alles andere.
 
 Sind ALLE erklaert, wird ``aide.db.new`` zum neuen Stand. Sonst bleibt der alte
@@ -216,7 +229,7 @@ def _merkmale(attrs: str) -> tuple[str, set, bool]:
 
 def _md5_datei(pfad: Path) -> str | None:
     try:
-        h = hashlib.md5()  # noqa: S324 – dpkg fuehrt md5, verglichen wird damit
+        h = hashlib.md5(usedforsecurity=False)  # dpkg fuehrt md5, verglichen wird damit
         with open(pfad, "rb") as f:
             for block in iter(lambda: f.read(1 << 20), b""):
                 h.update(block)
@@ -241,7 +254,7 @@ def _git_blob(pfad: Path) -> str | None:
         daten = pfad.read_bytes()
     except OSError:
         return None
-    return hashlib.sha1(b"blob %d\0" % len(daten) + daten).hexdigest()  # noqa: S324
+    return hashlib.sha1(b"blob %d\0" % len(daten) + daten, usedforsecurity=False).hexdigest()  # git-Blob-Kennung
 
 
 def dpkg_laden() -> dict:
@@ -436,6 +449,86 @@ def _kopie_quelle(pfad: str) -> str | None:
     return None
 
 
+# Chroot von Postfix (DEV 24.11.2026, gemessen nach ``apt install postfix``):
+# /usr/lib/postfix/configure-instance.sh kopiert bei jedem Start die Dateien
+# unten aus /etc und die NSS-Module aus /usr/lib/<multiarch>/ nach
+# /var/spool/postfix. Die Liste ist die des Skripts – fail-closed: was nicht
+# darauf steht, wird nicht erklaert.
+_POSTFIX_ETC = re.compile(r"^/var/spool/postfix/etc/(?P<datei>localtime|services|resolv\.conf|hosts"
+                          r"|host\.conf|nsswitch\.conf|nss_mdns\.config)$")
+_POSTFIX_LIB = re.compile(r"^/var/spool/postfix/lib/(?P<datei>libnss_[A-Za-z0-9_]+\.so\.2)$")
+# Laufzeit von Postfix: die Muster von Debians /etc/aide/aide.conf.d/31_aide_postfix
+# (DEV 25.11.2026), dort mit VarFile/VarDir – erfasst werden Eigentuemer/Rechte,
+# nicht Inhalt und Zeit. Erklaert wird damit nur das ERSTE Auftauchen nach einer
+# Installation bzw. einem Update von postfix. Erwartete Dateiart je Muster.
+_POSTFIX_LAUFZEIT = (
+    (re.compile(r"^/var/lib/postfix/(?:master\.lock|prng_exch|smtpd?_scache\.db)$"), "f"),
+    (re.compile(r"^/var/spool/postfix/pid/(?:master\.pid|(?:inet|unix)\..+)$"), "f"),
+    (re.compile(r"^/var/spool/postfix/(?:private|public)/[a-z][a-z0-9-]*$"), "s"),
+    (re.compile(r"^/var/spool/postfix/(?:active|corrupt|defer(?:red)?|hold|saved|bounce|flush|incoming"
+                r"|maildrop|trace|private|public|pid|dev|etc|lib|usr|usr/lib|usr/lib/sasl2)$"), "d"),
+    (re.compile(r"^/var/spool/postfix$"), "d"),
+    (re.compile(r"^/var/lib/postfix$"), "d"),
+)
+# Startverweise (System V), angelegt von update-rc.d im Paketskript
+_RC_LINK = re.compile(r"^/etc/rc[0-6S]\.d/[SK]\d\d(?P<name>[A-Za-z0-9][A-Za-z0-9._+-]*)$")
+
+
+def _postfix_kopie(pfad: str, k: dict) -> str | None:
+    """Grund, wenn ``pfad`` eine byteweise Kopie aus dem Postfix-Chroot ist."""
+    m = _POSTFIX_LIB.match(pfad)
+    if m:
+        ist = _md5_datei(_p(pfad))
+        if ist is None:
+            return None
+        ende = "/" + m.group("datei")
+        for quelle, (soll, paket) in k["dpkg"]["md5"].items():
+            # nur /usr/lib/<multiarch>/<datei> bzw. /lib/<multiarch>/<datei>
+            if quelle.endswith(ende) and soll == ist and \
+                    re.match(r"^/(?:usr/)?lib/[^/]+/[^/]+$", quelle):
+                return "Paket %s (Postfix-Kopie von %s)" % (paket, quelle)
+        return None
+    m = _POSTFIX_ETC.match(pfad)
+    if m:
+        quelle = "/etc/" + m.group("datei")
+        ist = _sha256_datei(_p(pfad))
+        return ("Postfix-Kopie von %s" % quelle) if ist is not None and ist == _sha256_datei(_p(quelle)) else None
+    return None
+
+
+def _postfix_laufzeit(art: str, typ: str, pfad: str, k: dict) -> str | None:
+    """Neue Laufzeitdatei von Postfix nach einer Installation/einem Update."""
+    if art != "neu" or not k.get("dpkg_seit_basis") or "postfix" not in k["dpkg"]["versionen"] \
+            or not _paket_geaendert(k, "postfix"):
+        return None
+    for muster, soll_typ in _POSTFIX_LAUFZEIT:
+        if muster.match(pfad):
+            return "Laufzeit von Postfix (installiert/aktualisiert)" if typ == soll_typ else None
+    return None
+
+
+def _rc_verweis(art: str, typ: str, pfad: str, k: dict) -> str | None:
+    """Grund fuer einen Startverweis, den ein Paketskript angelegt bzw. mit
+    einem Update entfernt hat. Nur nach einem dpkg-Lauf seit dem Stand."""
+    m = _RC_LINK.match(pfad)
+    if not m or not k.get("dpkg_seit_basis"):
+        return None
+    skript = "/etc/init.d/" + m.group("name")
+    if art == "neu":
+        paket = k["dpkg"]["liste"].get(skript)
+        if typ != "l" or not paket:
+            return None
+        try:
+            ziel = os.readlink(_p(pfad))
+        except OSError:
+            return None
+        return ("Startverweis auf %s (Paket %s)" % (skript, paket)) if ziel == "../init.d/" + m.group("name") else None
+    if art == "entfernt":
+        alt = ((k.get("basis") or {}).get("pfade") or {}).get(skript)
+        return ("Startverweis entfernt mit Update von %s" % alt) if alt and _paket_geaendert(k, alt) else None
+    return None
+
+
 def _paket_geaendert(k: dict, paket: str) -> bool:
     b = k.get("basis") or {}
     return (b.get("versionen") or {}).get(paket) != k["dpkg"]["versionen"].get(paket)
@@ -497,6 +590,13 @@ def einteilen(e: dict, k: dict) -> str | None:
             return "Jarvis-Stand (signiert)" if baum.get(rel) and baum.get(rel) == _git_blob(_p(pfad)) else None
         return None
     m = _PYC.match(pfad)
+    rc = _rc_verweis(art, typ, pfad, k) or _postfix_laufzeit(art, typ, pfad, k)
+    if rc:
+        return rc
+    if typ == "f" and art in ("neu", "geaendert"):
+        kopie = _postfix_kopie(pfad, k)
+        if kopie:
+            return kopie
     if art in ("neu", "geaendert"):
         if typ == "f" and pfad in dp["md5"]:
             soll, paket = dp["md5"][pfad]

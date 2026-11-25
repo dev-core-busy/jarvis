@@ -54,6 +54,8 @@ BRANCH="master"
 JARVIS_DIR="/opt/jarvis"
 SCHLUESSEL=""
 SSH_443="0"
+# 1 = REPO steht ausdruecklich in $KONF (nur dann holt 'lokal' die Quelle nach)
+REPO_GESETZT=0
 
 # Welcher Installer baut diese Kopie? Steht im STAND (Feld "installer"). Der
 # Broker-Start (start_jarvis_root.sh, 0c) vergleicht es mit dem Installer IN der
@@ -85,7 +87,7 @@ if [ -f "$KONF" ]; then
             v="${v%\"}"; v="${v#\"}"
             case "$k" in
                 QUELLE)     [[ "$v" =~ ^(github|lokal)$ ]] && QUELLE="$v" ;;
-                REPO)       [[ "$v" =~ ^(https://[A-Za-z0-9./_-]+|git@github\.com:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git)$ ]] && REPO="$v" ;;
+                REPO)       [[ "$v" =~ ^(https://[A-Za-z0-9./_-]+|git@github\.com:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.git)$ ]] && REPO="$v" && REPO_GESETZT=1 ;;
                 SCHLUESSEL) [[ "$v" =~ ^/[A-Za-z0-9._/-]+$ ]] && SCHLUESSEL="$v" ;;
                 SSH_443)    [[ "$v" =~ ^[01]$ ]] && SSH_443="$v" ;;
                 BRANCH)     [[ "$v" =~ ^[A-Za-z0-9._/-]+$ ]] && BRANCH="$v" ;;
@@ -109,15 +111,20 @@ PY="$(command -v python3 || true)"
 [ -n "$PY" ] || fehler "python3 fehlt"
 
 # ── Quelle bereitstellen ────────────────────────────────────────────────────
-COMMIT=""
-if [ "$QUELLE" = "github" ]; then
+# quelle_holen: signierten Stand nach $CACHE holen und pruefen. Liefert 1 mit
+# Grund in $QH_FEHLER statt abzubrechen – im Modus 'lokal' ist der Abruf eine
+# Nebenaufgabe (siehe unten), im Modus 'github' wird daraus ein Abbruch.
+QH_FEHLER=""
+qh_fehler() { QH_FEHLER="$*"; return 1; }
+quelle_holen() {
+    local frist="$1"
     export HOME=/root GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1
     if [[ "$REPO" == git@* ]]; then
-        [ -n "$SCHLUESSEL" ] || fehler "REPO per SSH, aber kein SCHLUESSEL in $KONF – bestehende Installation bleibt."
+        [ -n "$SCHLUESSEL" ] || { qh_fehler "REPO per SSH, aber kein SCHLUESSEL in $KONF"; return 1; }
         root_privat "$SCHLUESSEL" 077 \
-            || fehler "Schluessel $SCHLUESSEL fehlt oder ist nicht root-eigen/privat (0600) – bestehende Installation bleibt."
+            || { qh_fehler "Schluessel $SCHLUESSEL fehlt oder ist nicht root-eigen/privat (0600)"; return 1; }
         root_privat "$KNOWN" 022 \
-            || fehler "Host-Anker $KNOWN fehlt oder ist fremd beschreibbar – bestehende Installation bleibt."
+            || { qh_fehler "Host-Anker $KNOWN fehlt oder ist fremd beschreibbar"; return 1; }
         # -F /dev/null: keine ssh_config (auch nicht /root/.ssh/config) redet mit.
         SSH="ssh -F /dev/null -i $SCHLUESSEL -o IdentitiesOnly=yes -o BatchMode=yes"
         SSH="$SSH -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$KNOWN -o GlobalKnownHostsFile=/dev/null"
@@ -132,35 +139,60 @@ if [ "$QUELLE" = "github" ]; then
         # Die Adresse steht im Cache selbst – ohne das holte ein Bestand nach dem
         # Umstieg https -> SSH weiter von der alten (und scheiterte).
         git -C "$CACHE" remote set-url origin "$REPO" \
-            || fehler "Adresse im Cache nicht umstellbar – bestehende Installation bleibt."
-        timeout 120 git -C "$CACHE" fetch -q --depth 1 origin "$BRANCH" \
+            || { qh_fehler "Adresse im Cache nicht umstellbar"; return 1; }
+        timeout "$frist" git -C "$CACHE" fetch -q --depth 1 origin "$BRANCH" \
             && git -C "$CACHE" reset -q --hard FETCH_HEAD \
             && git -C "$CACHE" clean -qfdx \
-            || fehler "Abruf von $REPO ($BRANCH) gescheitert – bestehende Installation bleibt."
+            || { qh_fehler "Abruf von $REPO ($BRANCH) gescheitert"; return 1; }
     else
         rm -rf "$CACHE"
-        timeout 180 git clone -q --depth 1 --branch "$BRANCH" "$REPO" "$CACHE" \
-            || fehler "Klonen von $REPO ($BRANCH) gescheitert – bestehende Installation bleibt."
+        timeout "$frist" git clone -q --depth 1 --branch "$BRANCH" "$REPO" "$CACHE" \
+            || { qh_fehler "Klonen von $REPO ($BRANCH) gescheitert"; return 1; }
     fi
     # Herkunft pruefen (H1) – an der Spitze, die gleich installiert wird. Die
     # Signatur deckt Baum und Vorgaenger ab; unsignierte Commits DARUNTER sind
     # damit mitverbuergt. ssh-keygen fest, nicht ueber PATH.
     if [ -e "$SIGNERS" ] || [ -L "$SIGNERS" ]; then
         root_privat "$SIGNERS" 022 \
-            || fehler "Signatur-Anker $SIGNERS ist nicht root-eigen oder fremd beschreibbar – bestehende Installation bleibt."
+            || { qh_fehler "Signatur-Anker $SIGNERS ist nicht root-eigen oder fremd beschreibbar"; return 1; }
         if ! git -C "$CACHE" -c gpg.ssh.allowedSignersFile="$SIGNERS" -c gpg.ssh.program=/usr/bin/ssh-keygen \
                 verify-commit HEAD >/dev/null 2>&1; then
-            fehler "Stand $(git -C "$CACHE" rev-parse --short HEAD 2>/dev/null) ist nicht mit einem zugelassenen Schluessel signiert (BSI H1) – bestehende Installation bleibt."
+            qh_fehler "Stand $(git -C "$CACHE" rev-parse --short HEAD 2>/dev/null) ist nicht mit einem zugelassenen Schluessel signiert (BSI H1)"
+            return 1
         fi
         meldung "Signatur geprueft ($(git -C "$CACHE" rev-parse --short HEAD 2>/dev/null))"
     else
         meldung "WARNUNG: kein Signatur-Anker $SIGNERS – Herkunft des Stands NICHT geprueft (BSI H1). Einrichten: signatur_einrichten.sh"
     fi
+    return 0
+}
+
+COMMIT=""
+if [ "$QUELLE" = "github" ]; then
+    quelle_holen 120 || fehler "$QH_FEHLER – bestehende Installation bleibt."
     COMMIT="$(git -C "$CACHE" rev-parse HEAD 2>/dev/null)"
     SRC="$CACHE"
 else
     SRC="$JARVIS_DIR"
     meldung "WARNUNG: Quelle 'lokal' – der Broker-Code stammt aus $SRC, das dem Dienstbenutzer gehoert. Nur fuer Entwicklungsrechner."
+    # Die signierte Quelle trotzdem nachziehen, wenn ein Zugang eingerichtet ist
+    # – NUR fuer den AIDE-Abgleich (backend/aide_abgleich.py erklaert Code unter
+    # /opt/jarvis und in der Broker-Kopie byteweise gegen $CACHE). Installiert
+    # wird weiterhin aus $SRC. Ohne das stand die Quelle auf DEV seit dem
+    # Umstieg auf 'lokal' (2026-09-29) still, und jeder Deploy erschien in der
+    # naechtlichen Pruefung als "nicht erklaert" (25.11.2026: 742 Eintraege,
+    # Grund "Spitze der Broker-Quelle nicht signiert geprueft"). Weich: ein
+    # Fehlschlag warnt nur, und die Frist ist kurz – der Broker-Start soll an
+    # einem unerreichbaren GitHub nicht zwei Minuten haengen.
+    # Nur mit ausdruecklich eingetragenem REPO: ohne broker.conf (Sandkasten,
+    # frischer Rechner) ginge sonst jeder Lauf ins Netz.
+    if [ "$REPO_GESETZT" = "1" ]; then
+        if quelle_holen 30; then
+            meldung "Signierte Quelle fuer den AIDE-Abgleich nachgezogen ($(git -C "$CACHE" rev-parse --short HEAD 2>/dev/null))"
+        else
+            meldung "WARNUNG: signierte Quelle nicht nachgezogen ($QH_FEHLER) – der AIDE-Abgleich erklaert Jarvis-Code dann nicht."
+        fi
+    fi
 fi
 [ -f "$SRC/backend/broker/daemon.py" ] || fehler "Broker-Code fehlt in $SRC"
 [ -f "$SRC/start_jarvis_root.sh" ] || fehler "start_jarvis_root.sh fehlt in $SRC"

@@ -152,6 +152,31 @@ schreibe("/var/lib/dpkg/info/foo.list", "/.\n/usr\n/usr/bin\n/usr/bin/foo\n/usr/
 schreibe("/var/lib/dpkg/status", "Package: foo\nStatus: install ok installed\nVersion: 2.0\n"
          "Conffiles:\n /etc/foo.conf %s\n\nPackage: alt\nStatus: install ok installed\nVersion: 1.0\n\n" % md5(FOO_CONF))
 schreibe("/usr/bin/bar", "fremd\n", 0o755)
+# Postfix (DEV 24.11.2026): Startskript, NSS-Modul fuer den Chroot, Kopien aus /etc
+NSS = b"\x7fELF nss"
+schreibe("/etc/init.d/postfix", "#!/bin/sh\n", 0o755)
+schreibe("/etc/init.d/fremd", "#!/bin/sh\n", 0o755)
+schreibe("/usr/lib/x86_64-linux-gnu/libnss_mdns.so.2", NSS)
+schreibe("/var/lib/dpkg/info/postfix.list", "/.\n/etc\n/etc/init.d\n/etc/init.d/postfix\n")
+schreibe("/var/lib/dpkg/info/libnss-mdns:amd64.md5sums", "%s  usr/lib/x86_64-linux-gnu/libnss_mdns.so.2\n"
+         "%s  usr/share/beispiel/sub/libnss_alt.so.2\n" % (md5(NSS), md5(NSS)))
+schreibe("/var/lib/dpkg/info/libnss-mdns:amd64.list", "/usr/lib/x86_64-linux-gnu/libnss_mdns.so.2\n")
+with open(W / "var/lib/dpkg/status", "a") as _f:
+    _f.write("Package: postfix\nStatus: install ok installed\nVersion: 3.10.13\n\n"
+             "Package: libnss-mdns\nStatus: install ok installed\nArchitecture: amd64\nVersion: 0.15\n\n")
+schreibe("/etc/hosts", "127.0.0.1 localhost\n")
+schreibe("/var/spool/postfix/etc/hosts", "127.0.0.1 localhost\n")
+schreibe("/etc/services", "smtp 25/tcp\n")
+schreibe("/var/spool/postfix/etc/services", "smtp 25/tcp\n# untergeschoben\n")
+schreibe("/var/spool/postfix/lib/libnss_mdns.so.2", NSS)
+schreibe("/var/spool/postfix/lib/libnss_boese.so.2", NSS)
+schreibe("/var/spool/postfix/lib/libnss_alt.so.2", NSS)
+schreibe("/etc/passwd", "x\n")   # byte-gleich: nur die Liste des Skripts entscheidet
+schreibe("/var/spool/postfix/etc/passwd", "x\n")
+for _ziel, _link in (("../init.d/postfix", "/etc/rc2.d/S01postfix"), ("../init.d/postfix", "/etc/rc0.d/K01postfix"),
+                     ("/tmp/boese", "/etc/rc3.d/S01postfix"), ("../init.d/fremd", "/etc/rc2.d/S02fremd")):
+    (W / _link.lstrip("/")).parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(_ziel, W / _link.lstrip("/"))
 
 # ── Sandkasten: signierte Broker-Quelle und Jarvis-Baum ──────────────────────
 CODE = "print('signiert')\n"
@@ -278,6 +303,73 @@ try:
            "entfernter Pfad eines aktualisierten Pakets: erklaert")
     pruefe(grund("entfernt", "f------------------", "/usr/share/alt/weg", k3) is None,
            "entfernter Pfad eines UNVERAENDERTEN Pakets: nicht erklaert")
+
+    # ── 2b. Postfix (DEV 24./25.11.2026) ─────────────────────────────────────
+    print("[2b] Postfix: Chroot-Kopien, Laufzeit, Startverweise")
+    kp = dict(k, dpkg_seit_basis=True, basis={"zeit": START, "versionen": {"foo": "2.0"}, "pfade": {}})
+    if kp["dpkg"]["versionen"].get("postfix") != "3.10.13" or "/etc/init.d/postfix" not in kp["dpkg"]["liste"]:
+        abbruch("Positivkontrolle: postfix steht nicht im Sandkasten-dpkg – Abschnitt 2b waere trivial")
+    pruefe((grund("neu", "f++++++++++++++++++", "/var/spool/postfix/lib/libnss_mdns.so.2") or "")
+           .startswith("Paket libnss-mdns (Postfix-Kopie von /usr/lib/x86_64-linux-gnu/libnss_mdns.so.2)"),
+           "NSS-Modul im Chroot byteweise gleich der Paketdatei: erklaert")
+    pruefe(grund("neu", "f++++++++++++++++++", "/var/spool/postfix/lib/libnss_boese.so.2") is None,
+           "NSS-Modul, das kein Paket fuehrt (gleicher Inhalt, anderer Name): nicht erklaert")
+    pruefe(grund("neu", "f++++++++++++++++++", "/var/spool/postfix/lib/libnss_alt.so.2") is None,
+           "gleichnamige Paketdatei AUSSERHALB von /usr/lib/<multiarch>: keine Quelle")
+    schreibe("/var/spool/postfix/lib/libnss_mdns.so.2", NSS + b"x")
+    pruefe(grund("geaendert", "f >b... mc..H.. .", "/var/spool/postfix/lib/libnss_mdns.so.2") is None,
+           "NSS-Modul im Chroot mit anderem Inhalt: nicht erklaert")
+    schreibe("/var/spool/postfix/lib/libnss_mdns.so.2", NSS)
+    pruefe(grund("neu", "f++++++++++++++++++", "/var/spool/postfix/etc/hosts") == "Postfix-Kopie von /etc/hosts",
+           "Chroot-Kopie byteweise gleich der Datei unter /etc: erklaert")
+    pruefe(grund("neu", "f++++++++++++++++++", "/var/spool/postfix/etc/services") is None,
+           "Chroot-Kopie mit anderem Inhalt als /etc: nicht erklaert")
+    if lies("/etc/passwd") != lies("/var/spool/postfix/etc/passwd"):
+        abbruch("Positivkontrolle: /etc/passwd und die Chroot-Datei sind nicht byte-gleich – Probe waere trivial")
+    pruefe(grund("neu", "f++++++++++++++++++", "/var/spool/postfix/etc/passwd") is None,
+           "Datei im Chroot, die das Postfix-Skript nicht kopiert (auch byte-gleich): nicht erklaert")
+    pruefe(grund("geaendert", "f =.p.. .c..... .", "/var/spool/postfix/etc/hosts") is None,
+           "Chroot-Kopie mit geaenderten Rechten: nicht erklaert (vor jeder Kopie-Regel)")
+    # Laufzeit nur nach Installation/Update von postfix
+    pruefe(grund("neu", "s++++++++++++++++++", "/var/spool/postfix/private/smtp", kp) == "Laufzeit von Postfix (installiert/aktualisiert)",
+           "neuer Socket nach Installation von postfix: erklaert")
+    pruefe(grund("neu", "f++++++++++++++++++", "/var/spool/postfix/pid/master.pid", kp) is not None
+           and grund("neu", "f++++++++++++++++++", "/var/lib/postfix/prng_exch", kp) is not None
+           and grund("neu", "d++++++++++++++++++", "/var/spool/postfix/maildrop", kp) is not None,
+           "PID-Datei, Zufallsvorrat und Warteschlangen-Verzeichnis nach Installation: erklaert")
+    pruefe(grund("neu", "f++++++++++++++++++", "/var/spool/postfix/private/smtp", kp) is None,
+           "falsche Dateiart (Datei statt Socket): nicht erklaert")
+    pruefe(grund("neu", "f++++++++++++++++++", "/var/spool/postfix/pid/boese.sh", kp) is None
+           and grund("neu", "f++++++++++++++++++", "/var/spool/postfix/usr/lib/sasl2/x.so", kp) is None,
+           "fremde Datei unter /var/spool/postfix: nicht erklaert")
+    kp_gleich = dict(kp, basis={"zeit": START, "versionen": {"postfix": "3.10.13"}, "pfade": {}})
+    pruefe(grund("neu", "s++++++++++++++++++", "/var/spool/postfix/private/smtp", kp_gleich) is None,
+           "neuer Socket OHNE Versionswechsel von postfix: nicht erklaert")
+    pruefe(grund("neu", "s++++++++++++++++++", "/var/spool/postfix/private/smtp", dict(kp, dpkg_seit_basis=False)) is None,
+           "neuer Socket ohne dpkg-Lauf seit dem Stand: nicht erklaert")
+    pruefe(grund("geaendert", "f >.... mc..H.. .", "/var/spool/postfix/pid/master.pid", kp) is None,
+           "GEAENDERTE Laufzeitdatei (Inhalt): nicht erklaert – nur das erste Auftauchen")
+    pruefe(grund("geaendert", "s =.p.. .c..... .", "/var/spool/postfix/private/smtp", kp) is None,
+           "Socket mit geaenderten Rechten: nicht erklaert, auch nach einem Update")
+    # Startverweise
+    pruefe((grund("neu", "l++++++++++++++++++", "/etc/rc2.d/S01postfix", kp) or "").startswith(
+           "Startverweis auf /etc/init.d/postfix (Paket postfix)")
+           and grund("neu", "l++++++++++++++++++", "/etc/rc0.d/K01postfix", kp) is not None,
+           "Startverweis S/K auf das Paketskript nach einem dpkg-Lauf: erklaert")
+    pruefe(grund("neu", "l++++++++++++++++++", "/etc/rc2.d/S01postfix", dict(kp, dpkg_seit_basis=False)) is None,
+           "Startverweis ohne dpkg-Lauf seit dem Stand: nicht erklaert")
+    pruefe(grund("neu", "l++++++++++++++++++", "/etc/rc3.d/S01postfix", kp) is None,
+           "Startverweis mit fremdem Ziel (/tmp/boese): nicht erklaert")
+    pruefe(grund("neu", "l++++++++++++++++++", "/etc/rc2.d/S02fremd", kp) is None,
+           "Startverweis auf ein Skript, das keinem Paket gehoert: nicht erklaert")
+    pruefe(grund("neu", "f++++++++++++++++++", "/etc/rc2.d/S01postfix", kp) is None,
+           "Datei statt Verweis unter rcN.d: nicht erklaert")
+    kp_weg = dict(kp, basis={"zeit": START, "versionen": {"postfix": "3.9.0"}, "pfade": {"/etc/init.d/postfix": "postfix"}})
+    pruefe(grund("entfernt", "l------------------", "/etc/rc2.d/S01postfix", kp_weg) == "Startverweis entfernt mit Update von postfix",
+           "entfernter Startverweis eines aktualisierten Pakets: erklaert")
+    pruefe(grund("entfernt", "l------------------", "/etc/rc2.d/S01postfix",
+                 dict(kp_weg, basis=dict(kp_weg["basis"], versionen={"postfix": "3.10.13"}))) is None,
+           "entfernter Startverweis ohne Update: nicht erklaert")
 
     # Quelle ohne Signatur bzw. fremd beschreibbar: der Code erklaert nichts
     signers = W / "etc/jarvis/allowed_signers"

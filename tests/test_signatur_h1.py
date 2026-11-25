@@ -96,8 +96,11 @@ for art, schl in (("gut", "gut"), ("unsigniert", None), ("fremd", "boese")):
     q = TMP / ("quelle_" + art)
     q.mkdir()
     sh(GIT, "init", "-q", "-b", "master", cwd=q, env=GENV)
+    # i18n: kopiert der Installer seit 2026-11-24 mit (Mailversand) – ohne sie
+    # brach dieser Waechter mit "tar: 2 0" ab (Exit 2, bis 2026-11-25 unbemerkt).
     subprocess.run("tar -C %s --exclude=__pycache__ -cf - backend deploy start_jarvis_root.sh "
-                   "jarvis.service | tar -C %s -xf -" % (ROOT, q), shell=True, check=True)
+                   "jarvis.service frontend/js/i18n.js frontend/js/i18n_fr.js | tar -C %s -xf -" % (ROOT, q),
+                   shell=True, check=True)
     commit(q, art, schl)
     QUELLEN[art] = q
 

@@ -679,6 +679,11 @@ body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000);
 }
 .jv-gear-tip-row:hover,
 .jv-gear-tip-row:focus-visible { background: rgba(var(--accent-rgb), .10); outline: none; }
+/* Befund der Serverueberwachung OHNE Abschnitt (settings_btn.js ueZeile): kein
+ * Knopf, also auch keine Klick-Anmutung. Der Text bricht um – ein Befund ist ein
+ * Satz ("Nur noch 3,0 % frei auf /var"), eine Ellipse schnitte genau den Ort ab. */
+.jv-gear-tip-row.jv-gear-tip-still { cursor: default; }
+.jv-gear-tip-row.jv-gear-tip-still:hover { background: none; }
 /* SSH-Zeile (B13): klappt die einzelnen Versuche auf */
 .jv-gear-tip-auf { margin-left: auto; color: var(--text-secondary); flex: 0 0 auto; }
 .jv-gear-tip-detail { margin: 5px 0 1px 4px; padding-left: 8px; border-left: 2px solid var(--border); }
@@ -696,6 +701,8 @@ body.light .jv-hinweis-err { color: color-mix(in srgb, var(--danger) 78%, #000);
     white-space: nowrap;
     color: var(--text-primary);
 }
+/* Befund der Serverueberwachung: ein Satz, kein Befehl – er bricht um (siehe oben). */
+.jv-gear-tip-row[data-ue] .jv-gear-tip-t { white-space: normal; overflow-wrap: anywhere; }
 /* Signalfarben sind bei 9 px auf Weiss unlesbar (var(--warning) misst 2,15:1).
  * Abgedunkelt wie beim Issues-Panel; die Pille bringt ihre eigene Flaeche mit,
  * der Wert gilt deshalb in BEIDEN Themes. */
@@ -1348,34 +1355,6 @@ button.jv-pkg-cve { cursor: pointer; }
 .jv-cpu-bar.jv-cpu-klick { cursor: pointer; }
 .jv-cpu-bar.jv-cpu-klick:hover { border-color: var(--accent); }
 .jv-cpu-bar.jv-cpu-klick:focus-visible { outline: 2px solid rgba(var(--accent-rgb), .8); outline-offset: 2px; }
-
-/* Serverueberwachung (Haertung B13, sysload.js): Rand und Marke an der
-   CPU-Anzeige bei Warnung/Alarm. Die Marke steht INNEN rechts – der Balken hat
-   overflow:hidden, ausserhalb wuerde sie abgeschnitten. Der Text dazu steht im
-   Tooltip und im Fenster (Farbe allein ist keine Information). */
-.jv-cpu-bar.jv-ue-warnung { border-color: var(--warning); box-shadow: 0 0 0 1px var(--warning); }
-.jv-cpu-bar.jv-ue-alarm { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
-.jv-cpu-bar.jv-ue-warnung::after, .jv-cpu-bar.jv-ue-alarm::after {
-    content: '!'; position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
-    width: 12px; height: 12px; border-radius: 50%; text-align: center;
-    font-size: 9px; font-weight: 700; line-height: 12px;
-    color: var(--bg-primary); background: var(--warning);
-}
-.jv-cpu-bar.jv-ue-alarm::after { background: var(--danger); }
-.jv-ue { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
-         background: var(--bg-secondary); }
-.jv-ue.jv-ue-stufe-warnung { border-color: var(--warning); }
-.jv-ue.jv-ue-stufe-alarm { border-color: var(--danger); }
-.jv-ue-h { font-size: .85rem; font-weight: 600; color: var(--text-primary); }
-.jv-ue-meta, .jv-ue-leer, .jv-ue-hinweis { font-size: .74rem; color: var(--text-secondary); margin-top: 2px; }
-.jv-ue-liste { list-style: none; margin: 6px 0 0; padding: 0; }
-.jv-ue-z { font-size: .8rem; color: var(--text-primary); padding: 3px 0 3px 8px; margin: 2px 0;
-           border-left: 3px solid var(--border); }
-.jv-ue-z b { margin-right: 4px; }
-.jv-ue-z-alarm { border-left-color: var(--danger); }
-.jv-ue-z-alarm b { color: var(--danger-text); }
-.jv-ue-z-warnung { border-left-color: var(--warning); }
-.jv-ue-seit { color: var(--text-secondary); font-size: .72rem; }
 
 .jv-load-box { width: min(1180px, 100%); }
 /* Der Koerper scrollt als Ganzes: vier Kacheln + 20 Zeilen passen auf einem

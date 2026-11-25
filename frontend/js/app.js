@@ -46,13 +46,15 @@
         try { r = sessionStorage.getItem('jarvis_settings_return') || ''; } catch (e) {}
         return allowed.indexOf(r) !== -1 ? r : '/portal';
     }
-    // Abschnitte des Sicherheits-Reiters, in die eine Zeile des Zahnrad-Panels
-    // fuehren kann. Der Name kommt aus `jarvis_settings_focus` (settings_btn.js);
-    // ein unbekannter Wert wird VERWORFEN, nicht geraten – sonst klappt ein
-    // Tippfehler irgendeinen Abschnitt auf.
+    // Abschnitte, in die eine Zeile des Zahnrad-Panels fuehren kann. Der Name
+    // kommt aus `jarvis_settings_focus` (settings_btn.js), der Reiter aus
+    // `jarvis_settings_tab`; ein unbekannter Wert wird VERWORFEN, nicht geraten –
+    // sonst klappt ein Tippfehler irgendeinen Abschnitt auf. `pakete` liegt im
+    // Reiter "KI & System" (Integritaetspruefung, seit 2026-11-25 am Zahnrad).
     const _SETTINGS_SECTIONS = {
         broker:    { hdr: 'sec-sect-broker-hdr',    body: 'sec-sect-broker-body' },
         incidents: { hdr: 'sec-sect-incidents-hdr', body: 'sec-sect-incidents-body' },
+        pakete:    { hdr: 'prof-sect-pakete-hdr',   body: 'prof-sect-pakete-body' },
     };
     function _oeffneAbschnitt(name) {
         const s = _SETTINGS_SECTIONS[name];

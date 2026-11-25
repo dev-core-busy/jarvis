@@ -45,6 +45,16 @@
  * nennt jetzt, was der Klick bei welcher Zeile tut. Ein SSH-Alarm
  * (Durchprobieren) faerbt die Badge wie eine Sperre.
  *
+ * SERVERUEBERWACHUNG (B13, Betreiberentscheid 2026-11-25): ALLE Warnungen und
+ * Alarme stehen hier, nicht an der CPU-Anzeige – gemeldet als "'Serverüberwachung
+ * Warnung' in der CPU Pill … das gehört in die Zahnrad Badge", nachdem am
+ * 2026-11-21 nur die SSH-Fehlanmeldungen umgezogen waren. Je Befund eine
+ * Zeile (der Text kommt aus derselben Vorlage `ue.art_*` wie die Mails). Zeilen
+ * der Integritaetspruefung fuehren in den Container "Paket-Updates und
+ * Integritaet" (dort liegt die Liste zur Durchsicht); die uebrigen haben keinen
+ * Abschnitt, der sie erledigt – sie sind kein Knopf und versprechen keinen Sprung.
+ * Ein Alarm faerbt die Badge wie eine Sperre.
+ *
  * Ein Klick auf die Badge fuehrt in den Sicherheits-Reiter (sessionStorage
  * `jarvis_settings_tab`, ausgewertet in app.js) – eine Warnung ohne Weg zur
  * Abhilfe ist nur Laerm (dieselbe Regel wie beim Lizenz-Banner im Portal).
@@ -121,12 +131,12 @@
      * Der Rueckweg kommt aus dem Zahnrad-Knopf: die Zeilen des Panels haengen
      * an `body` und koennen den Klick nicht an ihn weiterreichen, sonst waere
      * es dieselbe Bahn wie beim Klick auf die Badge. */
-    function nachSettings(fokus) {
+    function nachSettings(fokus, reiter) {
         var b = knoepfe()[0];
         var ziel = (b && b.getAttribute('data-jarvis-settings')) || location.pathname;
         try {
             sessionStorage.setItem('jarvis_settings_return', ziel);
-            sessionStorage.setItem('jarvis_settings_tab', 'security');
+            sessionStorage.setItem('jarvis_settings_tab', reiter || 'security');
             if (fokus) sessionStorage.setItem('jarvis_settings_focus', fokus);
             else sessionStorage.removeItem('jarvis_settings_focus');
         } catch (e) { /* egal - dann oeffnet der Vorgabe-Reiter */ }
@@ -160,6 +170,90 @@
         return art === 'blocked' ? 'incidents' : 'broker';
     }
 
+    // Befunde der Serverueberwachung, die ein Abschnitt erledigt – und welcher:
+    // {Befundart: [Reiter, Abschnitt]}. Alles andere ist ohne Sprung.
+    var UE_ZIEL = {
+        aide_offen: ['profiles', 'pakete'],
+        aide_fehler: ['profiles', 'pakete'],
+        aide_veraltet: ['profiles', 'pakete'],
+    };
+
+    function ueZiel(it) {
+        return (it && it.art === 'ue' && UE_ZIEL.hasOwnProperty(it.ue_art)) ? UE_ZIEL[it.ue_art] : null;
+    }
+
+    /** Fuehrt diese Zeile irgendwohin? (SSH klappt auf, Ueberwachung nur mit Ziel) */
+    function springt(it) {
+        if (it.art === 'ssh') return false;
+        if (it.art === 'ue') return !!ueZiel(it);
+        return true;
+    }
+
+    function ueZeit(sek) {
+        if (!sek) return '';
+        try {
+            return new Date(sek * 1000).toLocaleString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE'),
+                { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        } catch (e) { return ''; }
+    }
+
+    function ueZahl(n, stellen) {
+        var loc = ({ en: 'en-US', fr: 'fr-FR' }[window._lang] || 'de-DE');
+        try {
+            return Number(n).toLocaleString(loc, { minimumFractionDigits: stellen,
+                                                   maximumFractionDigits: stellen });
+        } catch (e) { return Number(n).toFixed(stellen); }
+    }
+
+    /** Text eines Befunds in der Oberflaechensprache (Vorlage `ue.art_*`, dieselbe
+     *  wie in den Mails); ohne Vorlage der Text des Servers. Aus sysload.js
+     *  hierher umgezogen (2026-11-25) – EINE Fassung. */
+    function ueText(it) {
+        var w = (it.werte && typeof it.werte === 'object') ? it.werte : {};
+        var art = it.ue_art;
+        if (art === 'zert_ablauf' && Number(w.tage) < 0) art = 'zert_abgelaufen';
+        if (art === 'in_drop' && it.stufe === 'warnung') art = 'in_drop_voll';
+        var schluessel = 'ue.art_' + art;
+        var vorlage = T(schluessel, '');
+        if (!vorlage || vorlage === schluessel) return String(it.titel || '');
+        return vorlage.replace(/\{(\w+)\}/g, function (_, k) {
+            var v = w[k];
+            // {marke} kommt nicht vom Server: der Name der Oberflaeche (branding.js)
+            if (k === 'marke') {
+                var m = 'Jarvis';
+                try { if (window.jarvisMarke) m = window.jarvisMarke() || m; } catch (e) { /* Rueckfall bleibt */ }
+                return m;
+            }
+            if (k === 'zuletzt') return ueZeit(v);
+            if (k === 'ablauf') return ueZeit(v).split(',')[0];
+            if (Array.isArray(v)) return v.join(', ');
+            if (typeof v === 'number' && k === 'prozent') return ueZahl(v, 1);
+            return v == null ? '' : String(v);
+        });
+    }
+
+    /* Zeile eines Befunds der Serverueberwachung. Mit Ziel ein Knopf, sonst ein
+     * stiller Eintrag – ein Knopf ohne Wirkung waere die Meldung vom 2026-11-22
+     * ("ein Klick hat keine Wirkung") noch einmal. Alles maskiert: Texte und
+     * Werte stammen aus Journal, nft und Dateinamen. */
+    function ueZeile(it) {
+        var ziel = ueZiel(it);
+        var alarm = it.stufe === 'alarm';
+        var marke = alarm ? T('ue.alarm', 'Alarm') : T('ue.warnung', 'Warnung');
+        var seit = it.ts ? T('ue.seit', 'seit {t}').replace('{t}', zeitpunkt(it.ts)) : '';
+        var innen = '<div class="jv-gear-tip-top">'
+            + '<span class="jv-gear-tip-k ' + (alarm ? 'blocked' : 'root') + '">' + esc(marke) + '</span>'
+            + '<span class="jv-gear-tip-t">' + (esc(ueText(it)) || '–') + '</span>'
+            + '</div>'
+            + '<div class="jv-gear-tip-sub">' + esc([T('ue.titel', 'Serverüberwachung'), seit]
+                .filter(Boolean).join(' · ')) + '</div>';
+        if (ziel) {
+            return '<button type="button" class="jv-gear-tip-row" data-ue="' + esc(it.ue_art)
+                + '" data-fokus="' + esc(ziel[1]) + '" data-reiter="' + esc(ziel[0]) + '">' + innen + '</button>';
+        }
+        return '<div class="jv-gear-tip-row jv-gear-tip-still" data-ue="' + esc(it.ue_art) + '">' + innen + '</div>';
+    }
+
     function tipZeichnen() {
         var el = tipEl();
         var posten = (_badge && _badge.items) || [];
@@ -167,6 +261,7 @@
         el.setAttribute('aria-label', T('security.gear_tip_title', 'Zu erledigen'));
         var zeilen = posten.map(function (it) {
             if (it.art === 'ssh') return sshZeile(it);
+            if (it.art === 'ue') return ueZeile(it);
             var blockiert = it.art === 'blocked';
             var marke = blockiert
                 ? T('security.gear_tip_blocked', 'Gesperrt')
@@ -224,7 +319,7 @@
         Array.prototype.forEach.call(el.querySelectorAll('.jv-gear-tip-row[data-fokus]'),
             function (b) {
                 b.addEventListener('click', function () {
-                    nachSettings(b.getAttribute('data-fokus'));
+                    nachSettings(b.getAttribute('data-fokus'), b.getAttribute('data-reiter') || '');
                 });
             });
     }
@@ -280,14 +375,22 @@
     /* Was ein Klick tut, je nach den Zeilen, die dastehen – ein Hinweis, der
      * fuer eine Zeile nicht stimmt, ist die gemeldete "keine Wirkung". */
     function tipHinweis(posten) {
-        var springt = posten.some(function (it) { return it.art !== 'ssh'; });
+        var mitSprung = posten.some(function (it) { return springt(it) && it.art !== 'ue'; });
         var ssh = posten.some(function (it) { return it.art === 'ssh'; });
+        var ueSprung = posten.some(function (it) { return it.art === 'ue' && springt(it); });
+        var ueStill = posten.some(function (it) { return it.art === 'ue' && !springt(it); });
         var teile = [];
-        if (springt || !posten.length) {
+        if (mitSprung || !posten.length) {
             teile.push(T('security.gear_tip_hint', 'Eintrag anklicken, um den Abschnitt zu öffnen'));
         }
         if (ssh) {
             teile.push(T('security.gear_tip_hint_ssh', 'SSH-Eintrag anklicken, um die einzelnen Versuche zu sehen'));
+        }
+        if (ueSprung) {
+            teile.push(T('security.gear_ue_hint_aide', 'Eintrag zur Integritätsprüfung anklicken, um die Liste zur Durchsicht zu öffnen'));
+        }
+        if (ueStill) {
+            teile.push(T('security.gear_ue_hint', 'Meldungen der Serverüberwachung verschwinden von selbst, sobald die Ursache behoben ist'));
         }
         return teile.map(function (s) { return '<div class="jv-gear-tip-hint">' + esc(s) + '</div>'; }).join('');
     }
@@ -357,6 +460,10 @@
             teile.push(T('security.gear_badge_ssh', 'Fehlgeschlagene SSH-Anmeldungen (24 h)')
                 + ': ' + _badge.ssh_fehl);
         }
+        if (_badge && _badge.ue_warnungen) {
+            teile.push(T('security.gear_badge_ue', 'Warnungen der Serverüberwachung')
+                + ': ' + _badge.ue_warnungen);
+        }
         return teile.join(' · ');
     }
 
@@ -415,8 +522,9 @@
             el.textContent = n > 99 ? '99+' : String(n);
             // Eine Sperre ist dringlicher als eine offene Freigabe: ein Konto
             // kommt nicht mehr herein, bis jemand handelt.
-            // Ein SSH-Alarm (Durchprobieren) wiegt wie eine Sperre.
-            el.classList.toggle('is-danger', !!(_badge && (_badge.gesperrt || _badge.ssh_alarm)));
+            // Ein SSH-Alarm (Durchprobieren) wiegt wie eine Sperre, ebenso jeder
+            // Alarm der Serverueberwachung (Dienst aus, Platz, Zertifikat, Ausgang).
+            el.classList.toggle('is-danger', !!(_badge && (_badge.gesperrt || _badge.ssh_alarm || _badge.ue_alarm)));
             el.setAttribute('aria-label', quellenText());
         });
         // Steht das Panel gerade offen, muss es dem neuen Stand folgen \u2013 sonst

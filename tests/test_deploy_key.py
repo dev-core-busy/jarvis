@@ -76,7 +76,7 @@ printf '%s\t%s\n' "${GIT_SSH_COMMAND:-}" "$*" >> "$PROBE_LOG"
 if [ "$1" = "clone" ]; then
     ziel="${@: -1}"; mkdir -p "$ziel/.git"
     tar -C "$PROBE_SRC" --exclude=__pycache__ -cf - backend deploy start_jarvis_root.sh \
-        jarvis.service | tar -C "$ziel" -xf -
+        jarvis.service frontend/js/i18n.js frontend/js/i18n_fr.js | tar -C "$ziel" -xf -
     exit 0
 fi
 if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then echo 0123456789abcdef0123456789abcdef01234567; exit 0; fi
@@ -106,8 +106,10 @@ def lauf(name, konf_zeilen=None, schluessel_modus=0o600, link=False, anker_modus
     (ziel / "STAND").write_text('{"hash": "alt"}')
     if cache_da:
         (cache / ".git").mkdir(parents=True)
+        # i18n: kopiert der Installer seit 2026-11-24 mit (Mailversand) – ohne sie
+        # brach dieser Waechter mit "tar: 2 0" ab (Exit 2, bis 2026-11-25 unbemerkt).
         subprocess.run("tar -C %s --exclude=__pycache__ -cf - backend deploy start_jarvis_root.sh "
-                       "jarvis.service | tar -C %s -xf -" % (shlex.quote(str(ROOT)),
+                       "jarvis.service frontend/js/i18n.js frontend/js/i18n_fr.js | tar -C %s -xf -" % (shlex.quote(str(ROOT)),
                                                                    shlex.quote(str(cache))),
                        shell=True, check=True)
     konf = d / "etc" / "broker.conf"
@@ -184,6 +186,27 @@ e = lauf("injekt", ["REPO=git@github.com:a/b.git;touch /tmp/x", "SCHLUESSEL=@KEY
 check("eingeschleuste REPO-Zeile ignoriert (https-Vorgabe)",
       any(x[1].startswith("clone") and "https://github.com/dev-core-busy/jarvis.git" in x[1]
           for x in e["aufrufe"]))
+
+print("[A2] Quelle 'lokal' (DEV): signierte Quelle nur fuer den AIDE-Abgleich")
+# Seit 2026-11-25: im Modus 'lokal' wird die Quelle trotzdem nachgezogen, wenn
+# REPO ausdruecklich in broker.conf steht – installiert wird weiter aus
+# --jarvis-dir. Ohne das stand sie auf DEV seit 2026-09-29 still (742 nicht
+# erklaerte AIDE-Eintraege am 25.11.).
+e = lauf("lokal_ohne", ["QUELLE=lokal"])
+check("lokal ohne REPO in broker.conf: installiert, KEIN Abruf (kein Netz im Sandkasten)",
+      e["rc"] == 0 and '"quelle": "lokal"' in e["stand"] and ssh_von(e) is None, "rc=%s %s" % (e["rc"], e["aufrufe"]))
+LOKAL_SSH = ["QUELLE=lokal", "REPO=git@github.com:dev-core-busy/jarvis.git", "SCHLUESSEL=@KEY@"]
+e = lauf("lokal_ssh", LOKAL_SSH, cache_da=True)
+t_l = shlex.split(ssh_von(e) or "")
+check("lokal mit REPO: installiert aus --jarvis-dir", e["rc"] == 0 and '"quelle": "lokal"' in e["stand"]
+      and str(ROOT) in e["stand"], e["stand"][:200])
+check("lokal mit REPO: Quelle per fetch ueber den Deploy-Key nachgezogen",
+      "-i" in t_l and e["key"] in t_l and "StrictHostKeyChecking=yes" in t_l, str(e["aufrufe"])[:300])
+check("lokal mit REPO: Meldung 'fuer den AIDE-Abgleich nachgezogen'", "AIDE-Abgleich nachgezogen" in e["aus"], e["aus"][-300:])
+e = lauf("lokal_kaputt", LOKAL_SSH, schluessel_modus=0o640)
+check("lokal, Schluessel unbrauchbar: installiert TROTZDEM, nur Warnung, kein Abruf",
+      e["rc"] == 0 and '"hash": "alt"' not in e["stand"] and ssh_von(e) is None
+      and "signierte Quelle nicht nachgezogen" in e["aus"], "rc=%s %s" % (e["rc"], e["aus"][-300:]))
 
 print("[B] deploy_key_einrichten.sh")
 src = EINR.read_text()

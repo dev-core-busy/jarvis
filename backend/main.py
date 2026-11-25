@@ -10219,7 +10219,7 @@ _ADMIN_BADGE_TIMEOUT = 3.0       # harter Deckel je Messung
 # waehrend die Badge daneben eine groessere Zahl zeigt (Register).
 _ADMIN_BADGE_ITEMS_MAX = 12
 _ADMIN_BADGE_LEER = {"root_pending": 0, "gesperrt": 0, "ssh_fehl": 0, "ssh_alarm": False,
-                     "gesamt": 0, "items": []}
+                     "ue_warnungen": 0, "ue_alarm": False, "gesamt": 0, "items": []}
 _admin_badge_stand: dict = {"ts": 0.0, "ttl": 0.0, "wert": dict(_ADMIN_BADGE_LEER)}
 
 
@@ -10269,16 +10269,29 @@ def _admin_badge_messen(user: str) -> dict:
         gesperrt = 0
         eintraege = []
     ssh_befund: dict = {}
+    ue_befunde: list[dict] = []
     try:
         # Zustand der Serverueberwachung (root-Timer, backend/ueberwachung.py):
-        # eine Datei lesen, kein fremder Prozess - faellt sie aus, fehlt nur
-        # dieser Posten.
+        # eine Datei lesen, kein fremder Prozess - faellt sie aus, fehlen nur
+        # diese Posten.
+        # ⚠ ALLE Warnungen und Alarme stehen HIER, nicht an der CPU-Anzeige
+        # (Betreiberentscheid 2026-11-21 fuer SSH, 2026-11-25 fuer den Rest:
+        # "das gehoert in die Zahnrad Badge"). Hinweise (Stufe info) zaehlen
+        # nicht: eine Badge ist eine Aufforderung zu handeln.
         from backend import ueberwachung as _ueberw
         for b in _ueberw.lesen().get("befunde") or []:
+            if not isinstance(b, dict):
+                continue
             if b.get("art") == "ssh_fehl":
                 ssh_befund = b
+            elif b.get("stufe") in ("warnung", "alarm"):
+                ue_befunde.append(b)
     except Exception:  # noqa: BLE001
         ssh_befund = {}
+        ue_befunde = []
+    # Alarme zuerst (stabil: innerhalb einer Stufe die Reihenfolge des Waechters)
+    ue_befunde.sort(key=lambda b: 0 if b.get("stufe") == "alarm" else 1)
+    ue_alarm = any(b.get("stufe") == "alarm" for b in ue_befunde)
     ssh_werte = ssh_befund.get("werte") or {}
     try:
         ssh = max(0, int(ssh_werte.get("anzahl") or 0))
@@ -10317,6 +10330,19 @@ def _admin_badge_messen(user: str) -> dict:
                             for v in (ssh_werte.get("verlauf") or [])[:10] if isinstance(v, dict)],
                 "verlauf_gesamt": int(ssh_werte.get("verlauf_gesamt") or 0),
             })
+        # Dann die uebrigen Befunde der Serverueberwachung. Text und Werte
+        # gehen roh mit: die Oberflaeche setzt sie in die Vorlage ihrer
+        # Sprache ein (ue.art_*) und maskiert alles.
+        for b in ue_befunde:
+            werte = b.get("werte")
+            posten.append({
+                "art": "ue",
+                "ue_art": str(b.get("art") or ""),
+                "stufe": "alarm" if b.get("stufe") == "alarm" else "warnung",
+                "titel": str(b.get("text") or ""),
+                "werte": werte if isinstance(werte, dict) else {},
+                "ts": int(b.get("seit") or 0),
+            })
         for e in offen:
             posten.append({
                 "art": "root",
@@ -10328,7 +10354,8 @@ def _admin_badge_messen(user: str) -> dict:
         posten = []
     return {"root_pending": pending, "gesperrt": gesperrt,
             "ssh_fehl": ssh, "ssh_alarm": ssh_alarm,
-            "gesamt": pending + gesperrt + (1 if ssh else 0),
+            "ue_warnungen": len(ue_befunde), "ue_alarm": ue_alarm,
+            "gesamt": pending + gesperrt + (1 if ssh else 0) + len(ue_befunde),
             "items": posten[:_ADMIN_BADGE_ITEMS_MAX]}
 
 

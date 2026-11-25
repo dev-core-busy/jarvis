@@ -339,10 +339,12 @@ check(w.get("items") == [],
       str(w.get("items")))
 
 # ═══════════════════════════════════════════════════════════════════════════
-abschnitt("4b. SSH-Fehlanmeldungen aus der Serverueberwachung (B13)")
+abschnitt("4b. Serverueberwachung (B13): SSH und alle Warnungen am Zahnrad")
 # ═══════════════════════════════════════════════════════════════════════════
 # Sie stehen am Zahnrad, nicht an der CPU-Anzeige (Betreiberentscheid
-# 2026-11-21) – als EIN Posten, die Zahl der Versuche steht im Eintrag.
+# 2026-11-21 fuer SSH – als EIN Posten, die Zahl der Versuche steht im
+# Eintrag –, 2026-11-25 fuer jede Warnung und jeden Alarm; Hinweise nicht).
+# Die ganze Kette Erzeuger -> Badge -> Panel misst tests/test_ueberwachung_ui.js.
 def mit_ueberwachung(ns_befunde, kracht=False):
     ue = types.ModuleType("backend.ueberwachung")
 
@@ -361,14 +363,16 @@ SSH_W = {"id": "ssh", "art": "ssh_fehl", "stufe": "warnung", "text": "x",
                                "kaputt"] + [{"zeit": 1, "anzahl": 1, "ips": ["192.0.2.%d" % i]} for i in range(12)],
                    "verlauf_gesamt": 14}}
 ns, _ = baue(pending=1, gesperrt=1)
-mit_ueberwachung([{"id": "zert", "art": "zert_ablauf", "stufe": "warnung", "werte": {}}, SSH_W])
+mit_ueberwachung([{"id": "zert", "art": "zert_ablauf", "stufe": "warnung", "werte": {"tage": 5}, "seit": 2500},
+                  {"id": "sb", "art": "out_sandbox", "stufe": "info", "werte": {}}, "kaputt", SSH_W])
 w = messe(ns)
 check(w.get("ssh_fehl") == 37 and w.get("ssh_alarm") is False,
       "Zahl der SSH-Fehlversuche aus dem Zustand der Ueberwachung", str(w))
-check(w.get("gesamt") == 3,
-      "SSH zaehlt als EIN Posten (sonst waere ein Durchprobieren sofort 99+)", str(w.get("gesamt")))
-check([e.get("art") for e in w.get("items") or []] == ["blocked", "ssh", "root"],
-      "Reihenfolge: Sperre, SSH, Freigabe", str([e.get("art") for e in w.get("items") or []]))
+check(w.get("gesamt") == 4,
+      "SSH zaehlt als EIN Posten (sonst waere ein Durchprobieren sofort 99+), die Warnung als einer, der Hinweis nicht",
+      str(w.get("gesamt")))
+check([e.get("art") for e in w.get("items") or []] == ["blocked", "ssh", "ue", "root"],
+      "Reihenfolge: Sperre, SSH, Ueberwachung, Freigabe", str([e.get("art") for e in w.get("items") or []]))
 p_ssh = posten(w, 1)
 check(p_ssh.get("anzahl") == 37 and p_ssh.get("ip") == "198.51.100.4" and p_ssh.get("user") == "gast"
       and p_ssh.get("ts") == 3000, "der SSH-Eintrag traegt Anzahl, Adresse, Benutzer, Zeitpunkt", str(p_ssh))
@@ -377,8 +381,20 @@ check(len(vl) <= 10 and vl[:1] == [{"zeit": 3000, "anzahl": 30, "ips": ["198.51.
       and p_ssh.get("verlauf_gesamt") == 14,
       "Verlauf durchgereicht: gedeckelt, Typen gesetzt, Gesamtzahl dabei", str(vl[:2]))
 check(all(isinstance(v, dict) for v in vl), "unbrauchbare Verlaufseintraege werden verworfen")
-check(not any(e.get("art") == "zert" for e in w.get("items") or []),
-      "andere Befunde der Ueberwachung erscheinen NICHT am Zahnrad")
+p_ue = posten(w, 2)
+check(p_ue.get("ue_art") == "zert_ablauf" and p_ue.get("stufe") == "warnung" and p_ue.get("werte") == {"tage": 5}
+      and p_ue.get("ts") == 2500 and w.get("ue_warnungen") == 1 and w.get("ue_alarm") is False,
+      "eine Warnung der Ueberwachung steht als eigener Posten am Zahnrad (Art, Stufe, Werte, Zeit)", str(p_ue))
+check(not any(e.get("ue_art") == "out_sandbox" for e in w.get("items") or []),
+      "ein Hinweis (Stufe info) steht NICHT am Zahnrad")
+ns, _ = baue(pending=1)
+mit_ueberwachung([{"id": "w", "art": "platz", "stufe": "warnung", "werte": {}},
+                  {"id": "a", "art": "dienst_aus", "stufe": "alarm", "werte": "kaputt"}])
+w = messe(ns)
+check([e.get("stufe") for e in w.get("items") or [] if e.get("art") == "ue"] == ["alarm", "warnung"]
+      and w.get("ue_alarm") is True and w.get("gesamt") == 3,
+      "Alarme vor Warnungen, ue_alarm gesetzt", str(w.get("items")))
+check(posten(w, 0).get("werte") == {}, "unbrauchbare Werte werden zu {} (keine fremde Form an die Oberflaeche)")
 ns, _ = baue()
 mit_ueberwachung([dict(SSH_W, stufe="alarm")])
 w = messe(ns)

@@ -69,6 +69,27 @@ PROBEN = [
     ("ausloesender Lauf sperrt die Uebernahme", 'l[1] >= b["start"] and l[0] <= jetzt', 'l[1] >= b["start"] - 1 and l[0] <= jetzt', 1),
     ("gleiche Sekunde gilt nicht als Ueberschneidung", 'l[1] >= b["start"] and l[0] <= jetzt', 'l[1] > b["start"] and l[0] <= jetzt', 1),
     ("ctime-Regel zu weit", 'if merkmale == {"c"} and not groesse:', 'if "c" in merkmale and not groesse:', 1),
+    # ── Postfix (2026-11-25) ──
+    ("NSS-Kopie ohne Inhaltsvergleich", "if quelle.endswith(ende) and soll == ist and \\", "if quelle.endswith(ende) and \\", 1),
+    ("NSS-Kopie aus beliebigem Verzeichnis", 're.match(r"^/(?:usr/)?lib/[^/]+/[^/]+$", quelle)', 're.match(r"^/", quelle)', 1),
+    ("etc-Kopie ohne Inhaltsvergleich", "if ist is not None and ist == _sha256_datei(_p(quelle)) else None",
+     "if ist is not None else None", 1),
+    ("etc-Kopie mit beliebigem Namen", '_POSTFIX_ETC = re.compile(r"^/var/spool/postfix/etc/(?P<datei>localtime',
+     '_POSTFIX_ETC = re.compile(r"^/var/spool/postfix/etc/(?P<datei>[^/]+|localtime', 1),
+    ("Laufzeit ohne Versionswechsel", '            or not _paket_geaendert(k, "postfix"):', "            or False:", 1),
+    ("Laufzeit ohne dpkg-Lauf", 'if art != "neu" or not k.get("dpkg_seit_basis") or "postfix" not in',
+     'if art != "neu" or "postfix" not in', 1),
+    ("Laufzeit: Dateiart egal", 'return "Laufzeit von Postfix (installiert/aktualisiert)" if typ == soll_typ else None',
+     'return "Laufzeit von Postfix (installiert/aktualisiert)"', 1),
+    ("Laufzeit: beliebige Datei in pid/", '(?:master\\.pid|(?:inet|unix)\\..+)$"), "f")', '.+$"), "f")', 1),
+    ("Laufzeit: auch geaenderte Eintraege", 'if art != "neu" or not k.get("dpkg_seit_basis")',
+     'if art not in ("neu", "geaendert") or not k.get("dpkg_seit_basis")', 1),
+    ("Startverweis ohne dpkg-Lauf", '    if not m or not k.get("dpkg_seit_basis"):\n        return None\n    skript',
+     '    if not m:\n        return None\n    skript', 1),
+    ("Startverweis: Ziel egal", 'if ziel == "../init.d/" + m.group("name") else None', "if True else None", 1),
+    ("Startverweis ohne Paket", '        if typ != "l" or not paket:', '        if typ != "l":', 1),
+    ("Startverweis: Dateiart egal", '        if typ != "l" or not paket:', "        if not paket:", 1),
+    ("Startverweis entfernt ohne Update", 'if alt and _paket_geaendert(k, alt) else None', "if alt else None", 1),
 ]
 
 

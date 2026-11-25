@@ -20,15 +20,13 @@
  * leben nur im Fenster und werden beim Schliessen verworfen. Ein Abruf dauert
  * serverseitig ~0,5 s (Messfenster) – es laeuft nie mehr als einer zugleich.
  *
- * SERVERUEBERWACHUNG (Haertung B13): fuer Administratoren holt das Modul alle
- * UE_TAKT_MS den Zustand von `/api/system/ueberwachung` (geschrieben von
- * einem root-Timer, backend/ueberwachung.py) und markiert die CPU-Anzeige bei
- * Warnung oder Alarm – sie ist die eine Stelle, die ein Administrator auf
- * JEDER Seite sieht. Die Einzelheiten stehen oben im Fenster. Farbe allein
- * traegt die Aussage nicht: Tooltip und Fenster nennen sie als Text.
- * Fehlgeschlagene SSH-Anmeldungen stehen NICHT hier, sondern am Zahnrad
- * (settings_btn.js, Betreiberentscheid 2026-11-21) – der Befund wird fuer
- * Markierung und Liste herausgefiltert, die Stufe hier neu bestimmt.
+ * SERVERUEBERWACHUNG (Haertung B13): steht NICHT hier, sondern ganz am
+ * Zahnrad (settings_btn.js, Badge + Panel). Betreiberentscheid 2026-11-21 fuer
+ * die SSH-Fehlanmeldungen, 2026-11-25 fuer ALLE Befunde – gemeldet als
+ * "'Serverüberwachung Warnung' in der CPU Pill … das gehört in die Zahnrad
+ * Badge". Die CPU-Anzeige zeigt die Auslastung und sonst nichts: keine
+ * Markierung, kein Zusatz im Tooltip, kein Abschnitt im Fenster, kein Abruf
+ * von /api/system/ueberwachung (Waechter tests/test_ueberwachung_ui.js).
  * ============================================================ */
 (function () {
     'use strict';
@@ -56,13 +54,6 @@
     // Zahlenspalten fangen absteigend an – "wer zieht am meisten" ist die
     // Frage, die man dort stellt; Textspalten alphabetisch.
     var ZAHL_SPALTEN = { rang: 1, pid: 1, cpu: 1, rss: 1, threads: 1 };
-
-    // Serverueberwachung: der Waechter laeuft alle 5 Minuten, eine Minute
-    // Abstand reicht fuer die Anzeige.
-    var UE_TAKT_MS = 60000;
-    var _ue = null;          // letzte Antwort von /api/system/ueberwachung
-    var _ueTimer = null;
-    var UE_STUFEN = { ok: 0, info: 1, warnung: 2, alarm: 3 };
 
     function T(key, fallback) {
         try { if (window.t) { var v = window.t(key); if (v && v !== key) return v; } } catch (e) {}
@@ -143,140 +134,7 @@
             el.setAttribute('data-i18n-title', 'wissen.cpu_load');
             el.title = T('wissen.cpu_load', 'CPU-Auslastung');
         }
-        ueMarkieren(el);
         return true;
-    }
-
-    /* ── Serverueberwachung (B13) ──────────────────────────────────────── */
-
-    // Befunde, die an der CPU-Anzeige stehen: alle ausser den
-    // SSH-Fehlanmeldungen (die zeigt das Zahnrad).
-    var UE_AM_ZAHNRAD = { ssh_fehl: 1 };
-
-    function ueBefunde() {
-        return ((_ue && _ue.befunde) || []).filter(function (b) { return !UE_AM_ZAHNRAD[b.art]; });
-    }
-
-    /** Stufe ohne die Befunde des Zahnrads – die Stufe des Servers enthaelt
-     *  sie und waere hier eine Markierung ohne passende Zeile im Fenster. */
-    function ueStufe() {
-        if (!(_admin && _ue && _ue.eingerichtet)) return 'ok';
-        var s = 'ok';
-        ueBefunde().forEach(function (b) {
-            if ((UE_STUFEN[b.stufe] || 0) > (UE_STUFEN[s] || 0)) s = b.stufe;
-        });
-        return s;
-    }
-
-    /** Markiert die CPU-Anzeige. Der Tooltip traegt die Aussage als Text,
-     *  ueberschreibt aber nicht die i18n-Bindung: beim Sprachwechsel setzt
-     *  anzeigeAusstatten() ihn neu und ruft diese Funktion wieder. */
-    function ueMarkieren(el) {
-        el = el || anzeige();
-        if (!el) return;
-        var s = ueStufe();
-        el.classList.toggle('jv-ue-alarm', s === 'alarm');
-        el.classList.toggle('jv-ue-warnung', s === 'warnung');
-        if (s === 'alarm' || s === 'warnung') {
-            var kurz = s === 'alarm' ? T('ue.kurz_alarm', 'Serverüberwachung: Alarm')
-                                     : T('ue.kurz_warnung', 'Serverüberwachung: Warnung');
-            el.title = T('load.btn', 'Systemauslastung anzeigen') + ' – ' + kurz;
-            el.setAttribute('aria-label', el.title);
-        } else {
-            el.removeAttribute('aria-label');
-        }
-    }
-
-    function ueAbrufen() {
-        if (!_admin || document.hidden) return Promise.resolve();
-        var t = token();
-        if (!t) return Promise.resolve();
-        return fetch('/api/system/ueberwachung', { headers: { 'Authorization': 'Bearer ' + t } })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) {
-                if (!d || !d.ok) return;
-                _ue = d;
-                ueMarkieren();
-                if (offen() && _letzter) zeichnen();
-            })
-            // Ein fehlgeschlagener Abruf aendert die Anzeige nicht: lieber der
-            // letzte bekannte Stand als ein Befund, den es nicht gibt.
-            .catch(function () {});
-    }
-
-    function ueStarten() {
-        if (_ueTimer) return;
-        ueAbrufen();
-        _ueTimer = setInterval(ueAbrufen, UE_TAKT_MS);
-    }
-
-    function ueStoppen() {
-        if (_ueTimer) { clearInterval(_ueTimer); _ueTimer = null; }
-        _ue = null;
-        ueMarkieren();
-    }
-
-    function ueZeit(sek) {
-        if (!sek) return '';
-        try {
-            return new Date(sek * 1000).toLocaleString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE'),
-                { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-        } catch (e) { return ''; }
-    }
-
-    /** Text eines Befunds in der Oberflaechensprache; ohne Uebersetzung der
-     *  Text des Servers (der auch im Journal steht). */
-    function ueText(b) {
-        var w = b.werte || {};
-        var art = b.art;
-        if (art === 'zert_ablauf' && Number(w.tage) < 0) art = 'zert_abgelaufen';
-        if (art === 'in_drop' && b.stufe === 'warnung') art = 'in_drop_voll';
-        var vorlage = T('ue.art_' + art, '');
-        if (!vorlage) return String(b.text || '');
-        return vorlage.replace(/\{(\w+)\}/g, function (_, k) {
-            var v = w[k];
-            // {marke} kommt nicht vom Server: der Name der Oberflaeche (branding.js)
-            if (k === 'marke') {
-                var m = 'Jarvis';
-                try { if (window.jarvisMarke) m = window.jarvisMarke() || m; } catch (e) { /* Rueckfall bleibt */ }
-                return m;
-            }
-            if (k === 'zuletzt') return ueZeit(v);
-            if (k === 'ablauf') return ueZeit(v).split(',')[0];
-            if (Array.isArray(v)) return v.join(', ');
-            if (typeof v === 'number' && k === 'prozent') return zahl(v, 1);
-            return v == null ? '' : String(v);
-        });
-    }
-
-    function ueAbschnitt() {
-        if (!_ue) return '';
-        var h = '<div class="jv-ue-h">' + esc(T('ue.titel', 'Serverüberwachung')) + '</div>';
-        if (!_ue.eingerichtet) {
-            return '<div class="jv-ue">' + h + '<div class="jv-ue-leer">'
-                + esc(T('ue.nicht_eingerichtet', 'Auf diesem Server ist keine Überwachung eingerichtet.'))
-                + '</div></div>';
-        }
-        var bf = ueBefunde().sort(function (a, b) {
-            return (UE_STUFEN[b.stufe] || 0) - (UE_STUFEN[a.stufe] || 0);
-        });
-        var alter = Math.round((_ue.alter_s || 0) / 60);
-        var stand = T('ue.geprueft', 'zuletzt geprüft vor {n} min').replace('{n}', String(alter));
-        var zeilen = bf.map(function (b) {
-            var s = UE_STUFEN[b.stufe] != null ? b.stufe : 'info';
-            return '<li class="jv-ue-z jv-ue-z-' + s + '"><b>' + esc(T('ue.' + s, s)) + '</b> '
-                + esc(ueText(b))
-                + (b.seit ? ' <span class="jv-ue-seit">' + esc(T('ue.seit', 'seit {t}').replace('{t}', ueZeit(b.seit))) + '</span>' : '')
-                + '</li>';
-        }).join('');
-        var ok = !bf.some(function (b) { return b.stufe === 'warnung' || b.stufe === 'alarm'; });
-        return '<div class="jv-ue jv-ue-stufe-' + esc(ueStufe()) + '">' + h
-            + '<div class="jv-ue-meta">' + esc(ok ? T('ue.alles_ok', 'Alles in Ordnung') : '') + (ok ? ' · ' : '')
-            + esc(stand) + '</div>'
-            + (zeilen ? '<ul class="jv-ue-liste">' + zeilen + '</ul>' : '')
-            + '<div class="jv-ue-hinweis">' + esc(T('ue.hinweis',
-                'Geprüft werden alle 5 Minuten Dienste, freier Platz, Zertifikat und die Firewall; fehlgeschlagene SSH-Anmeldungen stehen am Zahnrad. Ereignisse bleiben 24 Stunden sichtbar.'))
-            + '</div></div>';
     }
 
     // Die Anzeige entsteht womoeglich erst spaeter (cpubar.js baut sie beim
@@ -359,7 +217,6 @@
         el.classList.add('an');
         document.addEventListener('keydown', beiTaste);
         abrufen();
-        ueAbrufen();
     }
 
     function kopf() {
@@ -424,7 +281,6 @@
 
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden && offen() && !_timer && !_laeuft) abrufen();
-        if (!document.hidden && _ueTimer) ueAbrufen();
     });
 
     function fehler(text) {
@@ -610,7 +466,6 @@
         var bodyOben = body.scrollTop;
 
         body.innerHTML = '<div class="jv-pkg-meta">' + meta + '</div>'
-            + ueAbschnitt()
             + '<div class="jv-load-grid">' + tCpu + tMem + tNet + tDisk + '</div>'
             + '<div class="jv-load-top-h">' + esc(T('load.top', 'Die {n} Prozesse mit der höchsten CPU-Last')
                 .replace('{n}', String((d.prozesse || []).length))) + '</div>'
@@ -685,7 +540,6 @@
             .then(function (d) {
                 _admin = !!(d && d.is_admin);
                 if (!anzeigeAusstatten()) ausstattenSpaeter();
-                if (_admin) ueStarten(); else ueStoppen();
                 return _admin;
             })
             // Ohne belegten Admin-Status bleibt die Anzeige ohne Klick.

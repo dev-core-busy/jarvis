@@ -91,3 +91,7 @@ tests/test_agent_key_eigen.py:generic-api-key:164
 tests/test_mail_schutz.py:aws-access-token:276
 tests/test_mail_schutz.py:jwt:277
 a78fdcc85116cc60e0eaca3b4d4994fe8f43b116:.gitleaksignore:aws-access-token:74
+# Fehlalarm (2026-11-25): i18n-Schluessel "app.key_show" mit dem FR-Text
+# "Afficher/masquer" – generic-api-key haelt den Text fuer einen Schluessel.
+# Zeile im Commit 449bc0b4, in dem die Datei entstand (bleibt dort fest).
+frontend/js/i18n_fr.js:generic-api-key:4477

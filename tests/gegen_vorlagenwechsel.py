@@ -263,13 +263,35 @@ def _():
     schreib("browser-addon/popup.css", s.replace(blk.group(0), "", 1))
 
 
-@probe("KOMPLETTER ALTSTAND (popup.*, background.js)")
+# Proben, die im Gesamt-Altstand NICHT angewandt werden – je mit Grund. Jede
+# andere muss greifen, sonst bricht die Gesamtprobe als "Sabotage verfehlt" ab.
+GESAMT_AUSGENOMMEN = {
+    # Dieselbe Zeile wie die _key-Probe davor, deren Ersatz die _laeuft-
+    # Pruefung schon mit entfernt – der Anker ist danach nicht mehr da.
+    "die _laeuft-Pruefung ist weg (zweiter Lauf in den ersten hinein)",
+}
+
+
+@probe("KOMPLETTER ALTSTAND (alle Sabotagen zugleich)")
 def _():
-    for rel in ("browser-addon/popup.html", "browser-addon/popup.js",
-                "browser-addon/popup.css", "browser-addon/background.js"):
-        alt = subprocess.run(["git", "show", f"HEAD:{rel}"], cwd=ROOT,
-                             capture_output=True, text=True, check=True).stdout
-        schreib(rel, alt)
+    """Die ganze Funktion auf einmal zurueckgedreht.
+
+    ⚠ NICHT UEBER `git show HEAD:` – das war die erste Fassung, und sie war
+    stumm, seit die Funktion committet ist: HEAD IST dann der Arbeitsbaum, die
+    Probe aenderte nichts. Einen Commit OHNE die Funktion gibt es nicht (sie
+    ist aelter als der Neustart der Historie am 2026-10-15). Nachgebaut wird
+    der Altstand deshalb aus den Einzelproben – eine Quelle, die mit jeder
+    neuen Probe mitwaechst.
+    """
+    eigene = PROBEN[-1][1]
+    angewandt = 0
+    for name, fn in PROBEN:
+        if fn is eigene or name in GESAMT_AUSGENOMMEN:
+            continue
+        fn()   # AssertionError = Anker verfehlt -> Probe gilt als verfehlt
+        angewandt += 1
+    # Positivkontrolle: sonst waere "beisst" ueber eine leere Schleife moeglich.
+    assert angewandt == len(PROBEN) - 1 - len(GESAMT_AUSGENOMMEN), angewandt
 
 
 # ── Lauf ────────────────────────────────────────────────────────────────────

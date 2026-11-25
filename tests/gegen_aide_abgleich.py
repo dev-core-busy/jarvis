@@ -3,6 +3,9 @@
 
 Jede Probe sabotiert eine KOPIE von backend/aide_abgleich.py in einem
 Wegwerf-Verzeichnis; der Waechter laedt sie ueber JARVIS_AIDE_ABGLEICH_MODUL.
+Proben mit fuenftem Feld sabotieren eine Kopie eines ANDEREN Moduls
+(eigene_dateien, Policy, Freigabe, Daemon); der Waechter laedt sie ueber
+JARVIS_AIDE_ERSATZ an Stelle des Originals.
 Die Repo-Datei wird nie angefasst – ein abgebrochener Lauf hinterlaesst keinen
 Rueckstand im Arbeitsbaum.
 
@@ -20,6 +23,7 @@ _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent / "lib"))
 import schreibschutz  # noqa: E402
 schreibschutz.aktivieren(__file__)
 
+import json
 import os
 import shutil
 import subprocess
@@ -29,6 +33,13 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 MODUL = REPO / "backend" / "aide_abgleich.py"
+# Zielmodule der Proben mit fuenftem Feld: Kurzname -> (Modulname, Datei)
+ZIELE = {
+    "ed": ("backend.eigene_dateien", REPO / "backend" / "eigene_dateien.py"),
+    "policy": ("backend.broker.policy", REPO / "backend" / "broker" / "policy.py"),
+    "freigabe": ("backend.broker.freigabe", REPO / "backend" / "broker" / "freigabe.py"),
+    "daemon": ("backend.broker.daemon", REPO / "backend" / "broker" / "daemon.py"),
+}
 WAECHTER = REPO / "tests" / "test_aide_abgleich.py"
 
 # (Name, alt, neu, erwartete Trefferzahl von 'alt')
@@ -106,11 +117,72 @@ PROBEN = [
      'if merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):', 1),
     ("Neu-angelegt-Regel fuer jeden Socket", 'if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):',
      'if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"}:', 1),
+    # ── Dauerlaeufer von ECHT (2026-11-25) ──
+    ("Zeit-Regel ignoriert die Groesse", 'and "m" in merkmale and not groesse:', 'and "m" in merkmale:', 1),
+    ("Zeit-Regel trotz Pruefsumme", 'merkmale <= {"m", "c", "i", "n"} and "m"', 'merkmale <= {"m", "c", "i", "n", "H"} and "m"', 1),
+    ("Zeit-Regel fuer jede Dateiart", 'if typ == "f" and merkmale <= {"m", "c", "i", "n"}', 'if merkmale <= {"m", "c", "i", "n"}', 1),
+    ("Code-Rechte ohne Inhaltsvergleich", "if not baum or not baum.get(rel) or baum.get(rel) != _git_blob(_p(pfad)):",
+     "if not baum:", 1),
+    ("Code-Rechte: Modus egal", "    if (modus & 0o7777) not in erlaubt:\n        return None", "    if False:\n        return None", 1),
+    ("Code-Rechte: Gruppenmitglieder egal", "if pwd.getpwuid(uid).pw_gid != gid or grp.getgrgid(gid).gr_mem:",
+     "if pwd.getpwuid(uid).pw_gid != gid:", 1),
+    ("Code-Rechte: x-Bit egal", "erlaubt = (0o755, 0o775) if rel in _AUSFUEHRBAR else (0o644, 0o664)",
+     "erlaubt = (0o644, 0o664, 0o755, 0o775)", 1),
+    ("Code-Rechte: Eigentuemerwechsel erlaubt", '{"p", "A", "H", "m", "c", "i", "b", "n"}:',
+     '{"p", "A", "H", "m", "c", "i", "b", "n", "u"}:', 1),
+    ("Code-Rechte auch fuer die Broker-Kopie", 'if not pfad.startswith("/opt/jarvis/") or merkmale', "if merkmale", 1),
+    ("eigene Dateien ohne Kette", 'return "vom Broker geschrieben (vermerkt)" if ed.erklaert(pfad, alt, neu) else None',
+     'return "vom Broker geschrieben (vermerkt)"', 1),
+    ("Datenbank-Pruefsumme an letzter Datei", '            in_details = zeile.startswith("Detailed information")',
+     "            in_details = in_details or zeile.startswith(\"Detailed information\")", 1),
+    ("SHA256-Fortsetzungszeile ignoriert", "            if in_sha and mf:", "            if False and mf:", 1),
+    ("apt-Historie ohne Upgrade", 'r"^(?:Install|Upgrade|Remove', 'r"^(?:Install|Remove', 1),
+    ("ohne Basis jedes Paket geaendert", '    return paket in (k.get("pakete_seit") or ())', "    return True", 1),
+    ("Konten: UID/Shell egal", "if not (0 < uid < 1000) or f[-1] not in _OHNE_ANMELDUNG:", "if False:", 1),
+    ("Konten: bestehende Eintraege egal", "        if jetzt.get(name) != f:\n            return None", "        pass", 1),
+    ("Konten: Kennwort neuer Konten egal", 'if art == "shadow" and (name not in neue_konten or not f[0][1]):',
+     'if art == "shadow" and name not in neue_konten:', 1),
+    ("Konten: Gruppenmitglieder egal", "if not (0 < gid < 1000) or not mitglieder <= neue_konten:", "if not (0 < gid < 1000):", 1),
+    ("Konten: Gruppenkennwort egal", "if not f[0][1] or not mitglieder <= neue_konten:", "if not mitglieder <= neue_konten:", 1),
+    ("Konten ohne dpkg-Lauf", 'if art is None or not k.get("dpkg_seit_basis") or', "if art is None or", 1),
+    ("Konten: spaeterer Stand in die Basis", "basis_schreiben(dpkg_laden(), start, _konten_kandidat_lesen())",
+     "basis_schreiben(dpkg_laden(), start, konten_lesen())", 1),
+    ("Konten: Kennwort im Klartext", 'f[1] = [hashlib.sha256(pw.encode("utf-8", "replace")).hexdigest()[:16],', "f[1] = [pw,", 1),
+    ("Rotation: x-Bit egal", 'if art == "neu" and _LOG_SERIE.match(pfad) and _ohne_ausfuehrung(pfad):',
+     'if art == "neu" and _LOG_SERIE.match(pfad):', 1),
+    ("Rotation: beliebiger Name", '_LOG_SERIE = re.compile(r"^/var/log/(?:', '_LOG_SERIE = re.compile(r"^/var/log/.*|^/var/log/(?:', 1),
+    ("Protokoll-Liste beliebig", '    r"^/var/log/(?:boot', '    r"^/var/log/.*|^/var/log/(?:boot', 1),
+    ("AIDE-Arbeitsordner: Eigentuemer egal",
+     'return "Arbeitsordner der AIDE-Pruefung" if e_ is not None and _aide_benutzer(e_[0]) else None',
+     'return "Arbeitsordner der AIDE-Pruefung"', 1),
+    ("wireplumber: ganzes Home", r'_WIREPLUMBER = re.compile(r"^/home/[^/]+/\.local/state/wireplumber/[^/]+$")',
+     '_WIREPLUMBER = re.compile(r"^/home/.*$")', 1),
+    ("dynamicmaps: Inhalt egal", "return None if zeilen or not _ohne_ausfuehrung(pfad) else",
+     "return None if not _ohne_ausfuehrung(pfad) else", 1),
+    ("dynamicmaps ohne postfix-Installation",
+     'if art == "neu" and pfad == DYNAMICMAPS and k.get("dpkg_seit_basis") and _paket_geaendert(k, "postfix"):',
+     'if art == "neu" and pfad == DYNAMICMAPS and k.get("dpkg_seit_basis"):', 1),
+    ("entfernt: Verzeichnis mehrerer Pakete", 'if ep and dp.get("liste_n", {}).get(eltern) == 1 and _paket_geaendert(k, ep)',
+     "if ep and _paket_geaendert(k, ep)", 1),
+    ("entfernt: Paket unveraendert", 'if ep and dp.get("liste_n", {}).get(eltern) == 1 and _paket_geaendert(k, ep)',
+     'if ep and dp.get("liste_n", {}).get(eltern) == 1', 1),
+    # ── andere Module ──
+    ("Register: Kette ab beliebigem Stand", "    gesehen, offen = {alt}, [alt]", "    gesehen, offen = set(kanten), list(kanten)", 1, "ed"),
+    ("Register: Uebergang nicht vermerkt", "        vermerken(pfad, vorher, sha(pfad))", "        pass", 1, "ed"),
+    ("Register: jede Datei", "    return s if s in PFADE else None", "    return s", 1, "ed"),
+    ("Policy ohne Vermerk", "    with eigene_dateien.schreibt(pfad):\n        _atomar_schreiben_roh(pfad, data)",
+     "    _atomar_schreiben_roh(pfad, data)", 1, "policy"),
+    ("Freigabe ohne Vermerk", "    with eigene_dateien.schreibt(p):\n        _schreibe_privat_roh(p, inhalt)",
+     "    _schreibe_privat_roh(p, inhalt)", 1, "freigabe"),
+    ("Meta-Vermerk auch fuer Shell-Ops", 'if eigene_dateien is None or not op.startswith("broker."):',
+     "if eigene_dateien is None:", 1, "daemon"),
+    ("Meta-Ops ohne Vermerk", "        eigene_dateien.stand_vermerken(vorher)", "        pass", 1, "daemon"),
 ]
 
 
-def waechter(modul):
-    env = dict(os.environ, JARVIS_AIDE_ABGLEICH_MODUL=str(modul), PYTHONDONTWRITEBYTECODE="1")
+def waechter(modul, ersatz=None):
+    env = dict(os.environ, JARVIS_AIDE_ABGLEICH_MODUL=str(modul), PYTHONDONTWRITEBYTECODE="1",
+               JARVIS_AIDE_ERSATZ=json.dumps(ersatz or {}))
     p = subprocess.run([sys.executable, str(WAECHTER)], env=env, capture_output=True, text=True, timeout=180)
     fails = sum(1 for z in p.stdout.splitlines() if z.startswith("  FAIL"))
     return p.returncode, fails
@@ -131,15 +203,21 @@ def main():
             return 2
         print("Basislauf gruen")
         stumm = 0
-        for name, alt, neu, n in PROBEN:
-            treffer = original.count(alt)
+        for probe in PROBEN:
+            name, alt, neu, n = probe[:4]
+            ziel = probe[4] if len(probe) > 4 else None
+            quelltext = ZIELE[ziel][1].read_text(encoding="utf-8") if ziel else original
+            treffer = quelltext.count(alt)
             if treffer != n:
                 print("  PROBE KAPUTT  %-42s Anker %d statt %d Treffer" % (name, treffer, n))
                 stumm += 1
                 continue
-            kopie = tmp / "probe.py"
-            kopie.write_text(original.replace(alt, neu), encoding="utf-8")
-            rc, f = waechter(kopie)
+            kopie = tmp / ("probe_%s.py" % (ziel or "abgleich"))
+            kopie.write_text(quelltext.replace(alt, neu), encoding="utf-8")
+            if ziel:
+                rc, f = waechter(basis, {ZIELE[ziel][0]: str(kopie)})
+            else:
+                rc, f = waechter(kopie)
             if rc == 1 and f > 0:
                 print("  beisst        %-42s %d FAIL" % (name, f))
             else:

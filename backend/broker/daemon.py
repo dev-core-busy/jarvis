@@ -55,6 +55,28 @@ if _ROOT not in sys.path:
 
 from backend.broker import SOCKET_PATH, meta, ops, policy  # noqa: E402
 
+try:
+    from backend import eigene_dateien  # noqa: E402
+except ImportError:  # pragma: no cover
+    eigene_dateien = None
+
+
+def _meta_mit_vermerk(op: str, args: dict, peer: str = ""):
+    """Meta-Op ausfuehren und ihre Wirkung auf die Broker-Dateien unter
+    /etc/jarvis fuer den AIDE-Abgleich vermerken (backend/eigene_dateien.py).
+
+    Hier statt an jeder Schreibstelle: broker.conf schreiben Mailversand,
+    Fernzugang UND die Shell-Skripte firewall.sh/ssh_haertung.sh, die der
+    Fernzugang startet. Nur Meta-Ops (Admin-Oberflaeche) – eine Shell-Op eines
+    Benutzers darf eine Aenderung dieser Dateien nie "erklaeren"."""
+    if eigene_dateien is None or not op.startswith("broker."):
+        return meta.behandeln(op, args, peer=peer)
+    vorher = eigene_dateien.stand()
+    try:
+        return meta.behandeln(op, args, peer=peer)
+    finally:
+        eigene_dateien.stand_vermerken(vorher)
+
 SOCKET_GROUP = os.environ.get("JARVIS_BROKER_GROUP", "jarvis")
 # Wer ueberhaupt verbinden darf: root und der Dienstbenutzer. Die Socket-Rechte
 # (0660, Gruppe jarvis) sagen dasselbe – hier steht es ein zweites Mal, weil
@@ -174,7 +196,7 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         # Meta-Operationen direkt beantworten – im Thread des KURZ-Pools: die
         # SSH-/Firewall-Ops (fernzugang.py) laufen Sekunden und haetten sonst
         # jede andere Verbindung des Brokers so lange angehalten
-        antwort = await loop.run_in_executor(_KURZ, functools.partial(meta.behandeln, op, args, peer=peer))
+        antwort = await loop.run_in_executor(_KURZ, functools.partial(_meta_mit_vermerk, op, args, peer=peer))
         if antwort is not None:
             await send({"type": "result", **antwort})
             return

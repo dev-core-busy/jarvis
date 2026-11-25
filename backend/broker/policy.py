@@ -26,6 +26,11 @@ import threading
 import time
 from pathlib import Path
 
+try:
+    from backend import eigene_dateien
+except ImportError:  # pragma: no cover - Waechter laden das Modul einzeln
+    eigene_dateien = None
+
 POLICY_FILE = Path(os.environ.get("JARVIS_BROKER_POLICY", "/etc/jarvis/broker-policy.json"))
 AUDIT_FILE = Path(os.environ.get("JARVIS_BROKER_AUDIT", "/var/log/jarvis-broker-audit.jsonl"))
 # Zaehlerdatei: ausdruecklich gesetzt, sonst NEBEN einer umgelenkten Policy-Datei
@@ -72,7 +77,18 @@ def _load() -> dict:
 
 
 def _atomar_schreiben(pfad: Path, data: dict) -> None:
-    """Atomar schreiben (temp + rename), Datei von Anfang an nur fuer root (0600)."""
+    """Atomar schreiben (temp + rename), Datei von Anfang an nur fuer root (0600).
+
+    Der Uebergang wird fuer den AIDE-Abgleich vermerkt (backend/eigene_dateien.py):
+    eine vom Broker geschriebene Policy ist sonst jede Nacht "nicht erklaert"."""
+    if eigene_dateien is None:
+        _atomar_schreiben_roh(pfad, data)
+        return
+    with eigene_dateien.schreibt(pfad):
+        _atomar_schreiben_roh(pfad, data)
+
+
+def _atomar_schreiben_roh(pfad: Path, data: dict) -> None:
     pfad.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = pfad.with_suffix(".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

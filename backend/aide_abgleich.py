@@ -39,6 +39,19 @@ DIESES MODUL teilt jeden Eintrag des Berichts ein:
   * erklaert als Startverweis ``/etc/rcN.d/[SK]NN<name>`` -> ``../init.d/<name>``,
     wenn das Startskript zu einem Paket gehoert und dpkg seit dem Stand lief
     (``update-rc.d`` im Paketskript, DEV 24.11.2026 nach ``apt install postfix``);
+  * erklaert, weil Inhalt, Rechte und Eigentuemer gleich blieben (nur mtime/
+    ctime/Inode – in Debians Regeln wird ``m`` nur zusammen mit den Pruefsummen
+    erfasst, ein fehlendes ``H`` heisst also: gleicher Inhalt);
+  * Jarvis-Code mit gruppenbeschreibbaren Rechten (umask 002 eines Pulls per
+    ``sudo -u``), wenn der Inhalt der signierte Stand ist und die Gruppe
+    niemanden ausser dem Dienstbenutzer enthaelt;
+  * Dateien, die der Broker selbst unter /etc/jarvis schreibt, ueber eine
+    lueckenlose Kette vermerkter Uebergaenge (backend/eigene_dateien.py);
+  * Konten (passwd/group/shadow/gshadow), wenn seit dem Stand dpkg lief und nur
+    gesperrte Systemkonten HINZUGEKOMMEN sind – gegen den Kontenstand, der mit
+    dem Vergleichsstand festgehalten wurde;
+  * Protokollrotation, Arbeitsordner der AIDE-Pruefung, Desktop-Zustand
+    (wireplumber), das leere dynamicmaps.cf aus Postfix' Paketskript;
   * nicht erklaert – alles andere.
 
 Sind ALLE erklaert, wird ``aide.db.new`` zum neuen Stand. Sonst bleibt der alte
@@ -97,6 +110,11 @@ DB_VORHER = ZUSTAND_DIR + "/aide.db.vorher"
 ZUSTAND = ZUSTAND_DIR + "/abgleich.json"
 BASIS = ZUSTAND_DIR + "/basis.json.gz"
 SPERRE = ZUSTAND_DIR + "/.sperre"
+# Kontenstand zum geprueften Bericht; wird bei der Uebernahme Teil der Basis
+KONTEN_KANDIDAT = ZUSTAND_DIR + "/konten.kandidat.json"
+KONTEN_DATEIEN = ("/etc/passwd", "/etc/group", "/etc/shadow", "/etc/gshadow")
+# Shells, mit denen ein neu angelegtes Konto als "kein Anmeldekonto" gilt
+_OHNE_ANMELDUNG = ("/usr/sbin/nologin", "/sbin/nologin", "/bin/false", "/usr/bin/false")
 DPKG_INFO = "/var/lib/dpkg/info"
 DPKG_STATUS = "/var/lib/dpkg/status"
 APT_HISTORY = ("/var/log/apt/history.log", "/var/log/apt/history.log.1.gz")
@@ -136,6 +154,9 @@ _PYC = re.compile(r"^(?P<dir>.*)/__pycache__/(?P<name>[^/]+?)\.cpython-\d+(?:\.o
 _ABSCHNITT = re.compile(r"^(Added|Removed|Changed) entries:\s*$")
 _ARTEN = {"Added": "neu", "Removed": "entfernt", "Changed": "geaendert"}
 _SUMME = re.compile(r"^\s+(Added|Removed|Changed) entries:\s+(\d+)\s*$")
+_DETAIL_KOPF = re.compile(r"^(?:File|Directory|Link|Socket|FIFO|Block device|Character device|Door|Port): (/.*)$")
+_DETAIL_MERKMAL = re.compile(r"^ ([A-Za-z0-9]+)\s*: (.*)$")
+_DETAIL_WEITER = re.compile(r"^ {5,}(\S*)\s*\|\s*(\S*)\s*$")
 
 
 def _p(pfad: str) -> Path:
@@ -188,15 +209,41 @@ def bericht_lesen(text: str) -> dict:
     anders aufgebauter Bericht darf nie als "nichts gefunden" gelten.
     """
     erg = {"start": None, "ende": None, "eintraege": [], "summe": {}, "vollstaendig": False,
-           "ohne_aenderung": False}
+           "ohne_aenderung": False, "sha256": {}}
     abschnitt = None
+    # Detailangaben: "File: /pfad", darunter " SHA256    : alt | neu" und
+    # Fortsetzungszeilen (base64 ueber zwei Zeilen umbrochen, ECHT 25.11.2026)
+    # EINE Bedingung fuer "wir sind in den Detailangaben": gesetzt von der
+    # Kopfzeile "Detailed information", beendet von "The attributes of the"
+    # (danach stehen die Pruefsummen von aide.db) und vom Ende.
+    in_details, detail, sha_teile, in_sha = False, None, None, False
     for zeile in text.splitlines():
+        md = _DETAIL_KOPF.match(zeile) if in_details else None
+        if md:
+            detail, in_sha = md.group(1), False
+            continue
+        if in_details and detail is not None:
+            ma = _DETAIL_MERKMAL.match(zeile)
+            if ma:
+                in_sha = ma.group(1) == "SHA256"
+                if in_sha:
+                    sha_teile = erg["sha256"].setdefault(detail, ["", ""])
+                    links, _, rechts = ma.group(2).partition("|")
+                    sha_teile[0] += links.strip()
+                    sha_teile[1] += rechts.strip()
+                continue
+            mf = _DETAIL_WEITER.match(zeile)
+            if in_sha and mf:
+                sha_teile[0] += mf.group(1).strip()
+                sha_teile[1] += mf.group(2).strip()
+                continue
+            in_sha = False
         if zeile.startswith("Start timestamp:"):
             erg["start"] = _zeitstempel(zeile.split(":", 1)[1])
             continue
         if zeile.startswith("End timestamp:"):
             erg["ende"] = _zeitstempel(zeile.split(":", 1)[1])
-            abschnitt = None
+            abschnitt, in_details = None, False
             continue
         m = _SUMME.match(zeile)
         if m:
@@ -207,7 +254,11 @@ def bericht_lesen(text: str) -> dict:
             abschnitt = _ARTEN[m.group(1)]
             continue
         if zeile.startswith(("Detailed information", "The attributes of the")):
+            # "File: /..." und " Linkname : /ziel" tragen ": /" und zaehlten
+            # sonst als Eintrag; nach den Datenbank-Attributen gehoeren
+            # SHA256-Zeilen zu aide.db, nicht zur letzten Datei.
             abschnitt = None
+            in_details = zeile.startswith("Detailed information")
             continue
         if "AIDE found NO differences" in zeile:
             erg["ohne_aenderung"] = True
@@ -263,7 +314,7 @@ def _git_blob(pfad: Path) -> str | None:
 
 def dpkg_laden() -> dict:
     """Pruefsummen, Dateilisten, Conffiles und Versionen aus der dpkg-Datenbank."""
-    md5, liste, conff, versionen = {}, {}, {}, {}
+    md5, liste, conff, versionen, liste_n = {}, {}, {}, {}, {}
     info = _p(DPKG_INFO)
     for f in sorted(info.glob("*.md5sums")):
         paket = f.name[:-len(".md5sums")].split(":")[0]
@@ -280,6 +331,7 @@ def dpkg_laden() -> dict:
             for z in f.read_text(errors="replace").splitlines():
                 if z.startswith("/"):
                     liste.setdefault(z, paket)
+                    liste_n[z] = liste_n.get(z, 0) + 1
         except OSError:
             continue
     try:
@@ -307,7 +359,7 @@ def dpkg_laden() -> dict:
                 in_conf = False
         if name and installiert:
             versionen[name] = ver
-    return {"md5": md5, "liste": liste, "conff": conff, "versionen": versionen}
+    return {"md5": md5, "liste": liste, "conff": conff, "versionen": versionen, "liste_n": liste_n}
 
 
 def _root_privat(pfad: Path, maske: int) -> bool:
@@ -336,6 +388,7 @@ def baum_laden() -> tuple[dict | None, str]:
     Spitze nicht mit einem zugelassenen Schluessel signiert ist – dann erklaert
     der Jarvis-Stand nichts (fail-closed)."""
     q = _p(QUELLE)
+    _AUSFUEHRBAR.clear()
     if not (q / ".git").is_dir():
         return None, "keine Broker-Quelle"
     for teil in (q, q / ".git", q / ".git" / "config"):
@@ -360,12 +413,23 @@ def baum_laden() -> tuple[dict | None, str]:
         teile = kopf.split()
         if len(teile) == 3 and teile[1] == b"blob":
             baum[pfad.decode("utf-8", "replace")] = teile[2].decode()
+            if teile[0] == b"100755":
+                _AUSFUEHRBAR.add(pfad.decode("utf-8", "replace"))
     kopf = _git(["rev-parse", "HEAD"])
     return baum, (kopf.stdout.decode().strip()[:12] if kopf.returncode == 0 else "")
 
 
+_APT_PAKETE = re.compile(r"^(?:Install|Upgrade|Remove|Purge|Reinstall|Downgrade): (.*)$", re.M)
+_APT_NAME = re.compile(r"([a-z0-9][a-z0-9+.\-]+)(?::[a-z0-9_\-]+)? \(")
+
+
 def _dpkg_laeufe() -> list[tuple[float, float]]:
     """(Start, Ende) jedes Blocks in apt/history.log (auch der rotierten Datei)."""
+    return [(s, e) for s, e, _ in _apt_bloecke()]
+
+
+def _apt_bloecke() -> list[tuple[float, float, set]]:
+    """(Start, Ende, angefasste Pakete) je Block in apt/history.log."""
     laeufe = []
     for pfad in APT_HISTORY:
         try:
@@ -386,7 +450,10 @@ def _dpkg_laeufe() -> list[tuple[float, float]]:
                 en = time.mktime(time.strptime(" ".join(e.group(1).split()), "%Y-%m-%d %H:%M:%S")) if e else st
             except ValueError:
                 continue
-            laeufe.append((st, en))
+            pakete = set()
+            for zeile in _APT_PAKETE.findall(block):
+                pakete.update(_APT_NAME.findall(zeile))
+            laeufe.append((st, en, pakete))
     return laeufe
 
 
@@ -398,7 +465,7 @@ def basis_lesen() -> dict | None:
         return None
 
 
-def basis_schreiben(dp: dict, zeit: float) -> None:
+def basis_schreiben(dp: dict, zeit: float, konten: dict | None = None) -> None:
     """Paketstand zum Zeitpunkt des uebernommenen Stands – damit laesst sich
     beim naechsten Mal ein ENTFERNTER Pfad einem aktualisierten Paket zuordnen
     (dpkg kennt entfernte Dateien danach nicht mehr)."""
@@ -406,10 +473,13 @@ def basis_schreiben(dp: dict, zeit: float) -> None:
     ziel.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = ziel.with_name(ziel.name + ".tmp")
     with gzip.open(tmp, "wt", encoding="utf-8") as f:
-        json.dump({"zeit": zeit, "versionen": dp["versionen"], "pfade": dp["liste"]}, f)
+        json.dump({"zeit": zeit, "versionen": dp["versionen"], "pfade": dp["liste"], "konten": konten}, f)
     os.chmod(tmp, 0o600)
     os.replace(tmp, ziel)
 
+
+# Ausfuehrbare Dateien des signierten Stands (Modus 100755), gefuellt von baum_laden
+_AUSFUEHRBAR: set = set()
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _REF = re.compile(r"^ref: (refs/heads/[A-Za-z0-9._/-]{1,200})$")
@@ -512,9 +582,14 @@ def kontext_laden(basis_zeit: float | None) -> dict:
     basis = basis_lesen()
     if basis_zeit is None and basis:
         basis_zeit = basis.get("zeit")
-    laeufe = _dpkg_laeufe()
+    bloecke = _apt_bloecke()
+    laeufe = [(s, e) for s, e, _ in bloecke]
+    seit = set()
+    for _, e, pakete in bloecke:
+        if basis_zeit is not None and e >= basis_zeit:
+            seit |= pakete
     return {"dpkg": dp, "baum": baum, "baum_info": baum_info, "basis": basis, "quelle_nachziehen": qn,
-            "basis_zeit": basis_zeit, "laeufe": laeufe,
+            "basis_zeit": basis_zeit, "laeufe": laeufe, "pakete_seit": seit,
             "dpkg_seit_basis": basis_zeit is not None and any(e >= basis_zeit for _, e in laeufe)}
 
 
@@ -638,8 +713,219 @@ def _rc_verweis(art: str, typ: str, pfad: str, k: dict) -> str | None:
 
 
 def _paket_geaendert(k: dict, paket: str) -> bool:
+    """Wurde ``paket`` seit dem Vergleichsstand installiert, aktualisiert oder
+    entfernt? Mit Basis ueber die Versionen; OHNE Basis (Vergleichsstand aus
+    aideinit, ECHT 25.11.2026) ueber apt/history.log seit dem Stand. Bis dahin
+    galt ohne Basis JEDES Paket als geaendert (None != Version) – fail-open."""
     b = k.get("basis") or {}
-    return (b.get("versionen") or {}).get(paket) != k["dpkg"]["versionen"].get(paket)
+    if isinstance(b.get("versionen"), dict):
+        return b["versionen"].get(paket) != k["dpkg"]["versionen"].get(paket)
+    return paket in (k.get("pakete_seit") or ())
+
+
+# ── Konten ───────────────────────────────────────────────────────────────────
+
+def _konten_zeilen(text: str, art: str) -> dict:
+    """{Name: Felder} – Kennwortfelder nur als Pruefsumme plus "gesperrt"."""
+    erg = {}
+    for z in text.splitlines():
+        if not z or z.startswith("#"):
+            continue
+        f = z.split(":")
+        if art in ("shadow", "gshadow") and len(f) > 1:
+            pw = f[1]
+            f[1] = [hashlib.sha256(pw.encode("utf-8", "replace")).hexdigest()[:16],
+                    pw.startswith(("!", "*"))]
+        erg[f[0]] = f[1:]
+    return erg
+
+
+def _konten_art(pfad: str) -> str | None:
+    basis = pfad[:-1] if pfad.endswith("-") else pfad
+    return basis.rsplit("/", 1)[-1] if basis in KONTEN_DATEIEN else None
+
+
+def konten_lesen() -> dict | None:
+    """Kontenstand (Namen, IDs, Shells, Mitglieder; Kennwoerter nur als
+    Pruefsumme). None, wenn eine Datei fehlt – dann erklaert er nichts."""
+    erg = {}
+    for pfad in KONTEN_DATEIEN:
+        try:
+            erg[pfad.rsplit("/", 1)[-1]] = _konten_zeilen(_p(pfad).read_text(errors="replace"),
+                                                         pfad.rsplit("/", 1)[-1])
+        except OSError:
+            return None
+    return erg
+
+
+def _konten_erklaert(pfad: str, k: dict) -> str | None:
+    """passwd/group/shadow/gshadow (auch die "-"-Sicherung): erklaert, wenn
+    seit dem Stand dpkg lief, KEIN bestehender Eintrag sich geaendert hat oder
+    verschwunden ist und nur gesperrte Systemkonten bzw. Systemgruppen ohne
+    fremde Mitglieder hinzukamen (Paketskripte: postfix/postdrop, ECHT 24.11.)."""
+    art = _konten_art(pfad)
+    alt = ((k.get("basis") or {}).get("konten") or {})
+    if art is None or not k.get("dpkg_seit_basis") or not all(a in alt for a in ("passwd", "group")) \
+            or art not in alt:
+        return None
+    try:
+        jetzt = _konten_zeilen(_p(pfad).read_text(errors="replace"), art)
+        pw_jetzt = _konten_zeilen(_p("/etc/passwd").read_text(errors="replace"), "passwd")
+    except OSError:
+        return None
+    neue_konten = set()
+    for name, f in pw_jetzt.items():
+        if name in alt["passwd"]:
+            continue
+        try:
+            uid = int(f[1])
+        except (ValueError, IndexError):
+            return None
+        if not (0 < uid < 1000) or f[-1] not in _OHNE_ANMELDUNG:
+            return None
+        neue_konten.add(name)
+    for name, f in alt[art].items():
+        if jetzt.get(name) != f:
+            return None
+    for name in set(jetzt) - set(alt[art]):
+        f = jetzt[name]
+        if art == "passwd" and name not in neue_konten:
+            return None
+        if art == "shadow" and (name not in neue_konten or not f[0][1]):
+            return None
+        if art == "group":
+            try:
+                gid = int(f[1])
+            except (ValueError, IndexError):
+                return None
+            mitglieder = {m for m in (f[2] if len(f) > 2 else "").split(",") if m}
+            if not (0 < gid < 1000) or not mitglieder <= neue_konten:
+                return None
+        if art == "gshadow":
+            mitglieder = {m for x in f[1:3] for m in (x or "").split(",") if m} if len(f) >= 3 else set()
+            if not f[0][1] or not mitglieder <= neue_konten:
+                return None
+    return "Konten: nur gesperrte Systemkonten aus Paketskripten hinzugekommen"
+
+
+# ── Rotation, Arbeitsordner, eigene Dateien ──────────────────────────────────
+
+# Protokolle, fuer die Debian keine Regel fuehrt und die deshalb unter "Full"
+# fallen – sie werden bei jedem Start bzw. jeder Rotation neu geschrieben
+# (gemessen ECHT 25.11.2026). Erklaert wird nur der INHALT: Rechte, Eigentuemer
+# und Dateiart prueft die Regel davor in einteilen.
+_LOG_ROTATION = re.compile(
+    r"^/var/log/(?:boot\.log(?:\.\d+)?|Xorg\.\d+\.log(?:\.old)?|lynis\.log|lynis-report\.dat"
+    r"|vmware-[A-Za-z0-9-]+(?:\.\d+)?\.log|jarvis-websockify\.log(?:\.\d+)?"
+    r"|unattended-upgrades/unattended-upgrades(?:-dpkg|-shutdown)?\.log(?:\.\d+(?:\.gz)?)?"
+    r"|aide/aide\.log\.\d+(?:\.gz)?)$")
+# Rotierte Fassungen: tauchen bei jeder Rotation neu auf bzw. fallen am Ende weg
+_LOG_SERIE = re.compile(r"^/var/log/(?:[A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+?(?:\.log)?\.\d+(?:\.gz)?$")
+# dailyaidecheck benennt einen liegengebliebenen Arbeitsordner um (Debians
+# Regel nimmt nur den aktuellen Ordner aus)
+_AIDE_ALTORDNER = re.compile(r"^/var/lib/aide/dailyaidecheck\.old\.[A-Za-z0-9]+"
+                             r"(?:/dailyaidecheck(?:/(?:errorlog|arunlog|aerrlog|mailfile))?)?$")
+_WIREPLUMBER = re.compile(r"^/home/[^/]+/\.local/state/wireplumber/[^/]+$")
+DYNAMICMAPS = "/etc/postfix/dynamicmaps.cf"
+
+
+def _eigentuemer(pfad: str) -> tuple[int, int, int] | None:
+    try:
+        st = os.lstat(_p(pfad))
+    except OSError:
+        return None
+    return st.st_uid, st.st_gid, st.st_mode
+
+
+def _ohne_ausfuehrung(pfad: str) -> bool:
+    """Gewoehnliche Datei, kein x-/s-Bit, nicht fuer alle beschreibbar."""
+    import stat as _st
+    e = _eigentuemer(pfad)
+    return e is not None and _st.S_ISREG(e[2]) and (e[2] & 0o7113) == 0
+
+
+def _aide_benutzer(uid: int) -> bool:
+    if W:
+        return uid == os.getuid()
+    try:
+        import pwd
+        return pwd.getpwuid(uid).pw_name == "_aide"
+    except (KeyError, ImportError):
+        return False
+
+
+def _ed():
+    try:
+        from backend import eigene_dateien  # type: ignore
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import eigene_dateien  # type: ignore
+    return eigene_dateien
+
+
+def _eigene_erklaert(e: dict, k: dict) -> str | None:
+    """Vom Broker selbst geschriebene Datei unter /etc/jarvis: lueckenlose
+    Kette vermerkter Uebergaenge von der Pruefsumme in aide.db zur neuen."""
+    try:
+        ed = _ed()
+    except Exception:  # noqa: BLE001
+        return None
+    pfad, art = e["pfad"], e["art"]
+    if pfad not in ed.PFADE or art not in ("neu", "geaendert"):
+        return None
+    if art == "neu":
+        alt, neu = None, ed.sha(_p(pfad))
+    else:
+        teile = (k.get("sha256") or {}).get(pfad)
+        if not teile:
+            return None
+        alt, neu = ed.aus_aide(teile[0]), ed.aus_aide(teile[1])
+        if alt is None or neu is None:
+            return None
+    return "vom Broker geschrieben (vermerkt)" if ed.erklaert(pfad, alt, neu) else None
+
+
+def _code_rechte(pfad: str, rel: str, merkmale: set, k: dict) -> str | None:
+    """Jarvis-Code unter /opt/jarvis, dessen Rechte sich geaendert haben.
+
+    WARUM (ECHT 25.11.2026): ein Pull per ``sudo -u jarvis git pull`` laeuft
+    mit der umask aus pam_umask (eigene Gruppe -> 002), die Update-Pille im
+    Dienst mit 022. Jede so geschriebene Datei stand danach mit 664/775 als
+    "Rechte oder Eigentuemer geaendert" da (23 Eintraege). Erklaert ist das
+    NUR, wenn: der Inhalt der signierte Stand ist, Eigentuemer/Gruppe gleich
+    blieben, die Rechte 644/664 bzw. 755/775 nach dem Modus im signierten
+    Stand sind (kein s-Bit, nichts fuer alle beschreibbar), die Gruppe die
+    Primaergruppe des Eigentuemers ist und KEINE weiteren Mitglieder hat
+    (Schreibrecht der Gruppe ist dann keines fuer jemand anderen) und keine
+    erweiterte ACL besteht."""
+    import stat as _st
+    # H (Inhalt) ist erlaubt – ihn deckt der Vergleich mit dem signierten Blob
+    if not pfad.startswith("/opt/jarvis/") or merkmale - {"p", "A", "H", "m", "c", "i", "b", "n"}:
+        return None
+    baum = k.get("baum")
+    if not baum or not baum.get(rel) or baum.get(rel) != _git_blob(_p(pfad)):
+        return None
+    e = _eigentuemer(pfad)
+    if e is None or not _st.S_ISREG(e[2]):
+        return None
+    uid, gid, modus = e
+    erlaubt = (0o755, 0o775) if rel in _AUSFUEHRBAR else (0o644, 0o664)
+    if (modus & 0o7777) not in erlaubt:
+        return None
+    if modus & 0o020:
+        try:
+            import grp
+            import pwd
+            if pwd.getpwuid(uid).pw_gid != gid or grp.getgrgid(gid).gr_mem:
+                return None
+        except (KeyError, ImportError):
+            return None
+    try:
+        os.getxattr(_p(pfad), "system.posix_acl_access", follow_symlinks=False)
+        return None   # erweiterte ACL vorhanden
+    except OSError:
+        pass
+    return "Jarvis-Stand (signiert; Rechte nach umask %s)" % ("002" if modus & 0o020 else "022")
 
 
 def _mail_erklaert(pfad: str) -> bool:
@@ -668,17 +954,52 @@ def einteilen(e: dict, k: dict) -> str | None:
     if art == "geaendert":
         if merkmale == {"c"} and not groesse:
             return "nur Inode-Zeit (ctime)"
+        # Nur Zeiten/Inode einer Datei: m erfasst Debian ausschliesslich mit den
+        # Pruefsummen (StaticFile = m+c+Checksums), ohne "H" ist der Inhalt also
+        # gleich (SentinelOne-Koederdateien, neu installierte Kopien, ECHT 25.11.)
+        if typ == "f" and merkmale <= {"m", "c", "i", "n"} and "m" in merkmale and not groesse:
+            return "Inhalt und Rechte unveraendert (nur Zeit/Inode)"
         # Ein Verzeichnis aendert Zeit, Linkzahl, Groesse und Blockzahl mit
         # seinem INHALT, und wer es atomar tauscht (Broker-Installation),
         # auch die Inode – die Eintraege darin stehen einzeln im Bericht.
         if typ == "d" and merkmale <= {"m", "c", "n", "b", "i"}:
             return "Verzeichnisinhalt"
+        if typ == "f" and merkmale & {"p"}:
+            rel_c = _code_rel(pfad)
+            if rel_c is not None:
+                return _code_rechte(pfad, rel_c, merkmale, k)
         if merkmale & {"p", "u", "g", "l", "A", "X", "E"}:
             return None
         if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):
             return "Laufzeit-Socket neu angelegt"
     if typ == "f" and art in ("neu", "geaendert") and _mail_erklaert(pfad):
         return "Jarvis-Mailversand (eigene Konfiguration)"
+    if typ == "f":
+        eigen = _eigene_erklaert(e, k)
+        if eigen:
+            return eigen
+        if art == "geaendert" and _konten_art(pfad):
+            return _konten_erklaert(pfad, k)
+        if art == "geaendert" and _LOG_ROTATION.match(pfad):
+            return "Protokoll neu geschrieben/rotiert"
+        if art == "neu" and _LOG_SERIE.match(pfad) and _ohne_ausfuehrung(pfad):
+            return "Protokollrotation (neue Fassung)"
+        if art == "entfernt" and _LOG_SERIE.match(pfad):
+            return "Protokollrotation (aelteste Fassung entfernt)"
+        if art == "geaendert" and _WIREPLUMBER.match(pfad):
+            return "Desktop-Zustand (wireplumber)"
+        if art == "neu" and pfad == DYNAMICMAPS and k.get("dpkg_seit_basis") and _paket_geaendert(k, "postfix"):
+            # Paketskript von postfix legt die Datei mit einer Kopfzeile an;
+            # jede andere Zeile wuerde eine Bibliothek in Postfix laden.
+            try:
+                zeilen = [z for z in _p(pfad).read_text(errors="replace").splitlines()
+                          if z.strip() and not z.lstrip().startswith("#")]
+            except OSError:
+                return None
+            return None if zeilen or not _ohne_ausfuehrung(pfad) else "Postfix: leeres dynamicmaps.cf (Paketskript)"
+    if art == "neu" and _AIDE_ALTORDNER.match(pfad):
+        e_ = _eigentuemer(pfad)
+        return "Arbeitsordner der AIDE-Pruefung" if e_ is not None and _aide_benutzer(e_[0]) else None
     rel = _code_rel(pfad)
     if rel is not None:
         baum = k.get("baum")
@@ -730,6 +1051,15 @@ def einteilen(e: dict, k: dict) -> str | None:
     paket = (basis.get("pfade") or {}).get(pfad)
     if paket and _paket_geaendert(k, paket):
         return "entfernt mit Update von %s" % paket
+    # Ohne Dateiliste von damals (keine Basis): das Verzeichnis gehoert GENAU
+    # einem Paket, und das wurde seither aktualisiert (ECHT 25.11.2026:
+    # changelog.Debian.amd64.gz eines binNMU, die neue Fassung hat keinen).
+    if not paket and typ == "f":
+        eltern = pfad.rsplit("/", 1)[0]
+        ep = dp["liste"].get(eltern)
+        if ep and dp.get("liste_n", {}).get(eltern) == 1 and _paket_geaendert(k, ep) \
+                and not (k.get("basis") or {}).get("pfade"):
+            return "entfernt mit Update von %s (Verzeichnis des Pakets)" % ep
     if m:
         quelle = m.group("dir") + "/" + m.group("name") + ".py"
         qp = (basis.get("pfade") or {}).get(quelle) or dp["liste"].get(quelle)
@@ -797,6 +1127,25 @@ def _zustand_schreiben(z: dict) -> None:
     os.replace(tmp, ziel)
 
 
+def _konten_kandidat_schreiben(konten: dict | None) -> None:
+    """Kontenstand zum Zeitpunkt der Pruefung – wird erst mit der Uebernahme
+    Teil der Basis (sonst stuende darin ein Stand, den aide.db nicht kennt)."""
+    ziel = _p(KONTEN_KANDIDAT)
+    ziel.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = ziel.with_name(ziel.name + ".tmp")
+    tmp.write_text(json.dumps(konten), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, ziel)
+
+
+def _konten_kandidat_lesen() -> dict | None:
+    try:
+        d = json.loads(_p(KONTEN_KANDIDAT).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
 def _db_uebernehmen(sha_soll: str) -> str:
     """aide.db.new -> aide.db, wenn es GENAU die geprueft Fassung ist.
     Leerer Text = ok, sonst der Grund. Der alte Stand bleibt als aide.db.vorher."""
@@ -857,6 +1206,9 @@ def abgleichen() -> dict:
     except OSError:
         pass
     k = kontext_laden((basis_lesen() or {}).get("zeit") or basis_zeit)
+    k["sha256"] = b.get("sha256") or {}
+    konten = konten_lesen()
+    _konten_kandidat_schreiben(konten)
     z["quelle"] = k["baum_info"] if k["baum"] is not None else ("nicht verwendet: " + k["baum_info"])
     z["quelle_nachziehen"] = k.get("quelle_nachziehen") or {}
     offen = []
@@ -891,7 +1243,7 @@ def abgleichen() -> dict:
     if fehler:
         z["zustand"], z["grund"] = "fehler", fehler
         return z
-    basis_schreiben(k["dpkg"], b["start"])
+    basis_schreiben(k["dpkg"], b["start"], konten)
     z["zustand"], z["uebernommen_von"], z["uebernommen_zeit"] = "uebernommen", "automatisch", _jetzt()
     return z
 
@@ -994,7 +1346,7 @@ def uebernehmen(kennung: str, wer: str) -> dict:
         if fehler:
             return {"ok": False, "fehler": fehler, "zustand": z}
         start = (z.get("bericht") or {}).get("start") or _jetzt()
-        basis_schreiben(dpkg_laden(), start)
+        basis_schreiben(dpkg_laden(), start, _konten_kandidat_lesen())
         z["zustand"], z["uebernommen_von"], z["uebernommen_zeit"] = "uebernommen", wer, _jetzt()
         _zustand_schreiben(z)
     _protokoll("AIDE-Abgleich: %d nicht erklaerte Aenderung(en) von %s uebernommen (Kennung %s)"

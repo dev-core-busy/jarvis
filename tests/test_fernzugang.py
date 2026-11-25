@@ -690,18 +690,30 @@ gesetzt = f is not None and any(
     and getattr(n.targets[0].slice, "value", None) == "deine_adresse" for n in ast.walk(f))
 check("Status-Endpunkt liefert die Adresse der Web-Sitzung (deine_adresse)", gesetzt)
 dm = ast.parse((ROOT / "backend" / "broker" / "daemon.py").read_text(encoding="utf-8"))
+# Seit 2026-11-25 laeuft im Pool ein Wrapper (_meta_mit_vermerk, AIDE-Register),
+# der meta.behandeln SYNCHRON ruft. Gemessen wird deshalb die Eigenschaft: im
+# Executor laeuft behandeln selbst oder eine synchrone Modulfunktion, die es ruft,
+# und KEINE async-Funktion ruft behandeln direkt (das waere der Event-Loop).
+_sync_mit_behandeln = {
+    f.name for f in dm.body if isinstance(f, ast.FunctionDef)
+    and any(isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "behandeln" for n in ast.walk(f))}
+
+
+def _ziel_ok(knoten):
+    return getattr(knoten, "attr", "") == "behandeln" or getattr(knoten, "id", "") in _sync_mit_behandeln
+
+
 im_thread = any(
-    (isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "to_thread"
-     and n.args and isinstance(n.args[0], ast.Attribute) and n.args[0].attr == "behandeln")
-    # seit 2026-10-18 im eigenen Pool: run_in_executor(_KURZ, functools.partial(meta.behandeln, …))
+    (isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "to_thread" and n.args and _ziel_ok(n.args[0]))
+    # seit 2026-10-18 im eigenen Pool: run_in_executor(_KURZ, functools.partial(<ziel>, …))
     or (isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "run_in_executor"
         and len(n.args) >= 2 and isinstance(n.args[1], ast.Call)
         and getattr(n.args[1].func, "attr", "") == "partial" and n.args[1].args
-        and getattr(n.args[1].args[0], "attr", "") == "behandeln")
+        and _ziel_ok(n.args[1].args[0]))
     for n in ast.walk(dm))
 direkt = any(
     isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "behandeln"
-    for n in ast.walk(dm))
+    for f in ast.walk(dm) if isinstance(f, ast.AsyncFunctionDef) for n in ast.walk(f))
 check("Broker: Meta-Ops im Thread, nicht im Event-Loop", im_thread and not direkt)
 
 # ════════════════════════════════════════════════════════════════════════════

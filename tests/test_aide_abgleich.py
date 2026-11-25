@@ -23,6 +23,14 @@ Die Zusagen:
      aide.db.new unveraendert ist.
   5. Fail-closed: neuer Stand passt zeitlich nicht zum Bericht, dpkg lief
      waehrend der Pruefung, Bericht abgeschnitten -> nichts uebernommen.
+  6. Die Dauerlaeufer von ECHT (25.11.2026, 93 offen): nur Zeit/Inode bei
+     gleichem Inhalt; Jarvis-Code mit umask-002-Rechten NUR bei signiertem
+     Inhalt, eigener Gruppe ohne Mitglieder, ohne s-Bit; vom Broker selbst
+     geschriebene Dateien NUR ueber eine lueckenlose Kette (ein fremder
+     Eingriff dazwischen reisst sie); Konten NUR mit hinzugekommenen,
+     gesperrten Systemkonten nach einem dpkg-Lauf; Protokollrotation,
+     AIDE-Arbeitsordner, wireplumber, leeres dynamicmaps.cf; entfernte
+     Paketdateien ohne Basis ueber apt/history.log.
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 """
@@ -71,6 +79,19 @@ os.environ["JARVIS_AIDE_WURZEL"] = str(W)
 sys.path.insert(0, str(REPO))
 # Die Gegenprobe (tests/gegen_aide_abgleich.py) laesst eine sabotierte KOPIE
 # pruefen; der Arbeitsbaum wird dabei nie angefasst.
+# Ersatz fuer weitere Module (JSON {modulname: kopie}, in dieser Reihenfolge):
+# eigene_dateien zuerst, damit Policy/Freigabe/Daemon die Kopie importieren.
+os.environ["JARVIS_BROKER_POLICY"] = str(W / "etc/jarvis/broker-policy.json")
+os.environ["JARVIS_BROKER_FREIGABE_STATE"] = str(W / "etc/jarvis/broker-freigabe.state")
+for _name, _pfad in json.loads(os.environ.get("JARVIS_AIDE_ERSATZ", "{}")).items():
+    import importlib.util
+    _eltern, _, _kurz = _name.rpartition(".")
+    _paket = importlib.import_module(_eltern)
+    _sp = importlib.util.spec_from_file_location(_name, _pfad)
+    _m = importlib.util.module_from_spec(_sp)
+    sys.modules[_name] = _m
+    setattr(_paket, _kurz, _m)
+    _sp.loader.exec_module(_m)
 _KOPIE = os.environ.get("JARVIS_AIDE_ABGLEICH_MODUL", "")
 if _KOPIE:
     import importlib.util
@@ -130,7 +151,8 @@ def bericht(eintraege, start, ende, ohne_ende=False, summe=None):
         t += ["%s: %s" % (attrs, pfad) for _, attrs, pfad in teil]
         t.append("")
     t += ["-" * 51, "Detailed information about changes:", "-" * 51, "",
-          "File: /etc/jarvis/x", " Ctime     : 2026-11-23 17:13:04 +0100 | 2026-11-23 18:32:18 +0100", ""]
+          "File: /etc/jarvis/x", " Ctime     : 2026-11-23 17:13:04 +0100 | 2026-11-23 18:32:18 +0100", "",
+          "Link: /etc/rc2.d/S01x", " Linkname  : /etc/init.d/x                    | /tmp/y", ""]
     if not ohne_ende:
         t.append("End timestamp: %s (AIDE 0.19.1)" % zeitstempel(ende))
     return "\n".join(t) + "\n"
@@ -183,6 +205,10 @@ CODE = "print('signiert')\n"
 quelle = W / "var/lib/jarvis-broker/quelle"
 (quelle / "backend").mkdir(parents=True)
 (quelle / "backend" / "x.py").write_text(CODE)
+SKRIPT = "#!/bin/sh\necho signiert\n"
+(quelle / "deploy").mkdir()
+(quelle / "deploy" / "lauf.sh").write_text(SKRIPT)
+os.chmod(quelle / "deploy" / "lauf.sh", 0o755)
 schluessel = SANDKASTEN / "signatur"
 subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "pruef@beispiel.de", "-f", str(schluessel)],
                check=True, capture_output=True)
@@ -203,6 +229,7 @@ if r.returncode != 0:
     abbruch("signierter Commit nicht moeglich: %s" % (r.stderr or r.stdout)[-300:])
 schreibe("/opt/jarvis/backend/x.py", CODE)
 schreibe("/opt/jarvis/backend/y.py", "print('untergeschoben')\n")
+schreibe("/opt/jarvis/deploy/lauf.sh", SKRIPT, 0o755)
 
 # ── Vergleichsstaende ────────────────────────────────────────────────────────
 JETZT = time.time()
@@ -235,6 +262,8 @@ try:
     pruefe(b["vollstaendig"] and len(b["eintraege"]) == 3, "vollstaendiger Bericht: 3 Eintraege, vollstaendig")
     pruefe(not any(e["pfad"] == "/etc/jarvis/x" for e in b["eintraege"]),
            "die Detailangaben ('File: /...') zaehlen NICHT als Eintrag")
+    pruefe(not any("/tmp/y" in e["pfad"] or "init.d" in e["pfad"] for e in b["eintraege"]),
+           "Detailzeile mit absolutem Linkziel (' Linkname : /...') zaehlt NICHT als Eintrag")
     pruefe(abs((b["start"] or 0) - START) < 2, "Startzeit samt Zeitzonen-Versatz gelesen")
     pruefe(not A.bericht_lesen(bericht(E, START, ENDE, ohne_ende=True))["vollstaendig"],
            "ohne End-Zeile: NICHT vollstaendig")
@@ -468,7 +497,8 @@ try:
     pruefe(grund("geaendert", "s =.p.. mci.... .", "/var/spool/postfix/dev/log") is None,
            "Syslog-Socket mit geaenderten Rechten: nicht erklaert")
     pruefe(grund("geaendert", "s =.... mci.... .", "/var/spool/postfix/private/fremd") is None
-           and grund("geaendert", "f =.... mci.... .", "/var/spool/postfix/dev/log") is None,
+           and grund("geaendert", "f =.... mci.H.. .", "/var/spool/postfix/dev/log") is None
+           and grund("geaendert", "l =.... mci.... .", "/var/spool/postfix/dev/log") is None,
            "anderer Socket bzw. Datei statt Socket: nicht erklaert")
 
     # Quelle ohne Signatur bzw. fremd beschreibbar: der Code erklaert nichts
@@ -574,6 +604,317 @@ try:
     pruefe(z["zustand"] == "unveraendert", "Bericht ohne Aenderungen: Zustand 'unveraendert' (ist %s)" % z["zustand"])
     (W / "var/log/aide/aide.log").unlink()
     pruefe(A.nach_pruefung() == 1, "fehlender Bericht: Nachlauf endet mit 1 (die Unit wird als gescheitert sichtbar)")
+
+    # ── 6. Dauerlaeufer von ECHT (25.11.2026) ────────────────────────────────
+    print("[6a] Pruefsummen aus den Detailangaben, apt-Historie")
+    import base64 as _b64
+    ED = importlib.import_module("backend.eigene_dateien")
+    if str(ED._p("/etc/jarvis/broker.conf")) != str(W) + "/etc/jarvis/broker.conf":
+        abbruch("eigene_dateien benutzt die Sandkasten-Wurzel nicht")
+
+    def b64(hexwert):
+        return _b64.b64encode(bytes.fromhex(hexwert)).decode()
+
+    def mit_details(eintraege, details):
+        """Bericht mit Detailangaben im Format von AIDE 0.19 (umbrochenes base64)."""
+        roh = bericht(eintraege, START, ENDE)
+        zus = []
+        for pfad, (alt, neu) in details.items():
+            zus += ["File: %s" % pfad, " Size      : 10                               | 11",
+                    " SHA256    : %-32s | %s" % (alt[:32], neu[:32]),
+                    "             %-32s | %s" % (alt[32:], neu[32:]),
+                    " SHA512    : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", ""]
+        roh = roh.replace("Detailed information about changes:\n" + "-" * 51 + "\n\n",
+                          "Detailed information about changes:\n" + "-" * 51 + "\n\n" + "\n".join(zus) + "\n")
+        # Wie in AIDE 0.19: danach die Attribute der Datenbank, mit eigener SHA256
+        return roh.replace("End timestamp:", "The attributes of the (uncompressed) database(s):\n" + "-" * 51
+                           + "\n\n/var/lib/aide/aide.db\n SHA256    : " + "Q" * 32 + "\n             "
+                           + "Q" * 12 + "\n\nEnd timestamp:")
+
+    HA, HB = hashlib.sha256(b"a").hexdigest(), hashlib.sha256(b"b").hexdigest()
+    bd = A.bericht_lesen(mit_details([("geaendert", "f >.... mc..H.. .", "/etc/jarvis/broker.conf")],
+                                     {"/etc/jarvis/broker.conf": (b64(HA), b64(HB))}))
+    teile = bd.get("sha256", {}).get("/etc/jarvis/broker.conf") or ["", ""]
+    pruefe(bd["vollstaendig"] and ED.aus_aide(teile[0]) == HA and ED.aus_aide(teile[1]) == HB,
+           "SHA256 alt/neu aus den Detailangaben gelesen, auch ueber die umbrochene Zeile")
+    pruefe(ED.aus_aide(teile[0][:30]) is None, "abgeschnittene Pruefsumme gilt nicht")
+    pruefe(set(bd.get("sha256", {})) == {"/etc/jarvis/broker.conf"},
+           "Pruefsummen nur fuer Dateien mit SHA256-Detailzeile – die der Datenbank-Attribute haengt "
+           "an keiner Datei (%s)" % sorted(bd.get("sha256", {})))
+    schreibe("/var/log/apt/history.log", "\nStart-Date: 2026-11-25  06:06:50\nUpgrade: zstd:amd64 (1.5.7+dfsg-1, "
+             "1.5.7+dfsg-1+deb13u1), libzstd1:amd64 (1.5.7+dfsg-1, 1.5.7+dfsg-1+deb13u1)\nInstall: postfix:amd64 "
+             "(3.10.13-0+deb13u1), libnsl2:amd64 (1.3.0-3+b3, automatic)\nEnd-Date: 2026-11-25  06:06:52\n")
+    bl = A._apt_bloecke()
+    pruefe(len(bl) == 1 and bl[0][2] == {"zstd", "libzstd1", "postfix", "libnsl2"},
+           "apt-Historie: Paketnamen aus Install/Upgrade gelesen (%s)" % (bl[0][2] if bl else None))
+    (W / "var/log/apt/history.log").unlink()
+    k6 = A.kontext_laden(JETZT - 86400)
+    pruefe(not A._paket_geaendert(dict(k6, basis=None, pakete_seit=set()), "foo"),
+           "OHNE Basis und ohne apt-Eintrag gilt ein Paket NICHT als geaendert (vorher fail-open)")
+    pruefe(A._paket_geaendert(dict(k6, basis=None, pakete_seit={"foo"}), "foo"),
+           "ohne Basis, Paket in der apt-Historie seit dem Stand: geaendert")
+
+    def g6(art, attrs, pfad, kk=None):
+        return A.einteilen({"art": art, "attrs": attrs, "pfad": pfad}, kk or k6)
+
+    print("[6b] Nur Zeit/Inode bei gleichem Inhalt")
+    pruefe(g6("geaendert", "f =.... mc..... .", "/srv/.aaa.ini") == "Inhalt und Rechte unveraendert (nur Zeit/Inode)",
+           "mtime/ctime ohne Pruefsummen-Aenderung: erklaert (SentinelOne-Koeder)")
+    pruefe(g6("geaendert", "f =.... mci.... .", "/usr/local/sbin/jarvis-broker-admin") is not None,
+           "neu installierte, byte-gleiche Kopie (neue Inode): erklaert")
+    pruefe(g6("geaendert", "f =.... mc..H.. .", "/srv/.aaa.ini") is None, "Pruefsumme geaendert: nicht erklaert")
+    pruefe(g6("geaendert", "f >.... mc..... .", "/srv/.aaa.ini") is None, "Groesse geaendert: nicht erklaert")
+    pruefe(g6("geaendert", "f =.p.. mc..... .", "/srv/.aaa.ini") is None, "Rechte geaendert: nicht erklaert")
+    pruefe(g6("geaendert", "l =.... mc..... .", "/usr/bin/foo-link2") is None, "Verweis: die Regel gilt nur fuer Dateien")
+
+    print("[6c] Jarvis-Code mit umask-002-Rechten")
+    X = W / "opt/jarvis/backend/x.py"
+    os.chmod(X, 0o664)
+    try:
+        import grp as _grp
+        import pwd as _pwd
+        _eigene = _grp.getgrgid(os.getgid())
+        if _eigene.gr_mem or _pwd.getpwuid(os.getuid()).pw_gid != os.getgid():
+            abbruch("Positivkontrolle: Primaergruppe des Pruefers hat Mitglieder – 6c waere nicht messbar")
+    except KeyError:
+        abbruch("eigene Gruppe nicht aufloesbar")
+    if os.stat(X).st_mode & 0o777 != 0o664:
+        abbruch("Positivkontrolle: Rechte 664 nicht gesetzt")
+    pruefe((g6("geaendert", "f >bp.. mc..HA. .", "/opt/jarvis/backend/x.py") or "").startswith("Jarvis-Stand (signiert; Rechte"),
+           "signierter Inhalt, 644 -> 664, eigene Gruppe ohne Mitglieder: erklaert")
+    pruefe(A.warum_offen({"art": "geaendert", "attrs": "f >bp.. mc..HA. .", "pfad": "/opt/jarvis/backend/y.py"}, k6)
+           == "Rechte oder Eigentuemer geaendert" and g6("geaendert", "f >bp.. mc..HA. .", "/opt/jarvis/backend/y.py") is None,
+           "nicht signierter Inhalt mit 664: nicht erklaert")
+    os.chmod(W / "opt/jarvis/backend/y.py", 0o644)
+    pruefe(g6("geaendert", "f >bpu. mc..HA. .", "/opt/jarvis/backend/x.py") is None, "Eigentuemer geaendert: nicht erklaert")
+    for modus, text in ((0o666, "fuer alle beschreibbar"), (0o4664, "SUID-Bit"), (0o775, "x-Bit ohne Modus 755 im Stand")):
+        os.chmod(X, modus)
+        pruefe(g6("geaendert", "f >bp.. mc..HA. .", "/opt/jarvis/backend/x.py") is None, "%s: nicht erklaert" % text)
+    os.chmod(X, 0o664)
+    LS = W / "opt/jarvis/deploy/lauf.sh"
+    os.chmod(LS, 0o775)
+    pruefe(g6("geaendert", "f =.p.. mc..HA. .", "/opt/jarvis/deploy/lauf.sh") is not None,
+           "ausfuehrbare Datei des Stands (100755) mit 775: erklaert")
+    os.chmod(LS, 0o664)
+    pruefe(g6("geaendert", "f =.p.. mc..HA. .", "/opt/jarvis/deploy/lauf.sh") is None,
+           "ausfuehrbare Datei des Stands ohne x-Bit: nicht erklaert")
+    os.chmod(LS, 0o755)
+    _echt_grp = sys.modules["grp"]
+
+    class _FremdeMitglieder:
+        @staticmethod
+        def getgrgid(gid):
+            g = _echt_grp.getgrgid(gid)
+            return type("G", (), {"gr_mem": ["fremd"], "gr_gid": g.gr_gid, "gr_name": g.gr_name})()
+    sys.modules["grp"] = _FremdeMitglieder
+    try:
+        pruefe(g6("geaendert", "f >bp.. mc..HA. .", "/opt/jarvis/backend/x.py") is None,
+               "Gruppe mit weiteren Mitgliedern: 664 nicht erklaert")
+    finally:
+        sys.modules["grp"] = _echt_grp
+    pruefe(g6("geaendert", "f =.p.. .c..... .", "/usr/bin/foo") is None,
+           "Rechteaenderung AUSSERHALB von /opt/jarvis: weiter nicht erklaert")
+    schreibe("/usr/local/lib/jarvis-broker/backend/x.py", CODE, 0o664)
+    pruefe(g6("geaendert", "f >bp.. mc..HA. .", "/usr/local/lib/jarvis-broker/backend/x.py") is None,
+           "root-eigene Broker-Kopie mit 664 (signierter Inhalt): nicht erklaert")
+    os.chmod(X, 0o644)
+
+    print("[6d] Vom Broker selbst geschriebene Dateien: lueckenlose Kette")
+    BC = W / "etc/jarvis/broker.conf"
+    reg = W / "var/lib/jarvis-aide/eigene.json"
+    if reg.exists():
+        reg.unlink()
+    schreibe("/etc/jarvis/broker.conf", "A=1\n")
+    h0 = ED.sha(BC)
+    with ED.schreibt(BC):
+        BC.write_text("A=1\nMAIL_RELAY=x\n")
+    with ED.schreibt(BC):
+        BC.write_text("A=1\nMAIL_RELAY=y\n")
+    h2 = ED.sha(BC)
+    pruefe(ED.erklaert("/etc/jarvis/broker.conf", h0, h2), "zwei Broker-Schreibungen hintereinander: Kette lueckenlos")
+    pruefe(not ED.erklaert("/etc/jarvis/broker.conf", hashlib.sha256(b"fremd").hexdigest(), h2),
+           "Kette beginnt nicht beim Stand aus aide.db: nicht erklaert")
+    BC.write_text("A=1\nMAIL_RELAY=y\nSSH_NETZE=0.0.0.0/0\n")   # fremder Eingriff, nicht vermerkt
+    with ED.schreibt(BC):
+        BC.write_text(BC.read_text() + "MAIL_SPRACHE=de\n")       # Broker liest, aendert, schreibt
+    h4 = ED.sha(BC)
+    pruefe(not ED.erklaert("/etc/jarvis/broker.conf", h0, h4),
+           "fremder Eingriff zwischen zwei Broker-Schreibungen: Kette reisst, nicht erklaert")
+    e6 = {"art": "geaendert", "attrs": "f >.... mc..H.. .", "pfad": "/etc/jarvis/broker.conf"}
+    pruefe(g6(**e6, kk=dict(k6, sha256={"/etc/jarvis/broker.conf": (b64(h0), b64(h2))}))
+           == "vom Broker geschrieben (vermerkt)", "ueber einteilen: Pruefsummen aus dem Bericht, Kette lueckenlos")
+    pruefe(g6(**e6, kk=dict(k6, sha256={"/etc/jarvis/broker.conf": (b64(h0), b64(h4))})) is None,
+           "ueber einteilen: Kette mit fremdem Eingriff: nicht erklaert")
+    pruefe(g6(**e6, kk=dict(k6, sha256={})) is None, "ohne Pruefsummen im Bericht: nicht erklaert")
+    pruefe(g6("geaendert", "f >.p.. mc..H.. .", "/etc/jarvis/broker.conf",
+              dict(k6, sha256={"/etc/jarvis/broker.conf": (b64(h0), b64(h2))})) is None,
+           "Rechte geaendert: nicht erklaert, auch mit Kette")
+    schreibe("/etc/jarvis/anders.conf", "x\n")
+    with ED.schreibt(W / "etc/jarvis/anders.conf"):
+        (W / "etc/jarvis/anders.conf").write_text("y\n")
+    pruefe("/etc/jarvis/anders.conf" not in ED.lesen(), "Datei ausserhalb der Liste wird nicht vermerkt")
+    # Die echten Schreibstellen: Policy, Freigabe-Zustand, Meta-Ops des Daemons
+    POL = importlib.import_module("backend.broker.policy")
+    FRG = importlib.import_module("backend.broker.freigabe")
+    if str(POL.POLICY_FILE) != str(W / "etc/jarvis/broker-policy.json") or \
+            str(FRG.ZUSTAND) != str(W / "etc/jarvis/broker-freigabe.state"):
+        abbruch("Policy/Freigabe nicht auf den Sandkasten umgelenkt (Modul frueher geladen?)")
+    POL._atomar_schreiben(POL.POLICY_FILE, {"ops": {"a": {}}})
+    p1 = ED.sha(POL.POLICY_FILE)
+    POL._atomar_schreiben(POL.POLICY_FILE, {"ops": {"a": {}, "b": {}}})
+    pruefe(ED.erklaert("/etc/jarvis/broker-policy.json", None, ED.sha(POL.POLICY_FILE))
+           and p1 is not None, "Policy: neu angelegt und geaendert durch den Broker – Kette vermerkt")
+    FRG._schreibe_privat(FRG.ZUSTAND, '{"letzter_schritt": 1}')
+    pruefe(ED.erklaert("/etc/jarvis/broker-freigabe.state", None, ED.sha(FRG.ZUSTAND)),
+           "Freigabe-Zustand: Schreibung des Brokers vermerkt")
+    try:
+        DMN = importlib.import_module("backend.broker.daemon")
+    except Exception as ex:  # noqa: BLE001
+        abbruch("Broker-Daemon nicht ladbar: %s" % ex)
+    _meta_echt = DMN.meta
+
+    class _Meta:
+        @staticmethod
+        def behandeln(op, args, peer=""):
+            BC.write_text(BC.read_text() + "RDP_ERLAUBT=%s\n" % op)
+            return {"ok": True}
+    DMN.meta = _Meta
+    try:
+        vor = ED.sha(BC)
+        DMN._meta_mit_vermerk("broker.rdp", {}, peer="")
+        nach_meta = ED.sha(BC)
+        pruefe(ED.erklaert("/etc/jarvis/broker.conf", vor, nach_meta),
+               "Meta-Op (Admin, auch ueber Shell-Skripte): Aenderung an broker.conf vermerkt")
+        DMN._meta_mit_vermerk("shell_root", {}, peer="")
+        pruefe(not ED.erklaert("/etc/jarvis/broker.conf", nach_meta, ED.sha(BC)),
+               "KEINE Meta-Op (z. B. shell_root): Aenderung wird NICHT vermerkt")
+    finally:
+        DMN.meta = _meta_echt
+
+    print("[6e] Konten")
+    PW0 = "root:x:0:0:root:/root:/bin/bash\njarvis:x:1001:1001::/home/jarvis:/bin/bash\n"
+    GR0 = "root:x:0:\nsudo:x:27:admin\njarvis:x:1001:\n"
+    SH0 = "root:$y$geheim:20000:0:99999:7:::\njarvis:!:20000:0:99999:7:::\n"
+    GS0 = "root:*::\nsudo:*::admin\njarvis:!::\n"
+    for d, inh in (("passwd", PW0), ("group", GR0), ("shadow", SH0), ("gshadow", GS0)):
+        schreibe("/etc/" + d, inh)
+    konten0 = A.konten_lesen()
+    if not konten0 or "root" not in konten0.get("passwd", {}):
+        abbruch("Positivkontrolle: Kontenstand nicht lesbar")
+    pruefe(konten0["shadow"]["root"][0][0] != "$y$geheim" and "geheim" not in json.dumps(konten0),
+           "Kennwortfelder stehen nur als Pruefsumme im Kontenstand")
+    kk6 = dict(k6, dpkg_seit_basis=True, basis={"zeit": START, "versionen": {}, "pfade": {}, "konten": konten0})
+
+    def konten(pw=PW0, gr=GR0, sh=SH0, gs=GS0):
+        for d, inh in (("passwd", pw), ("group", gr), ("shadow", sh), ("gshadow", gs)):
+            schreibe("/etc/" + d, inh)
+
+    PF = "postfix:x:114:118::/var/spool/postfix:/usr/sbin/nologin\n"
+    konten(PW0 + PF, GR0 + "postfix:x:118:\npostdrop:x:119:\n", SH0 + "postfix:!:20416::::::\n",
+           GS0 + "postfix:!::\npostdrop:!::\n")
+    alle = [g6("geaendert", "f >.... mci.H.. .", "/etc/" + d, kk6) for d in ("passwd", "group", "shadow", "gshadow")]
+    pruefe(all(alle), "postfix/postdrop wie auf ECHT hinzugekommen: alle vier Dateien erklaert (%s)" % alle)
+    schreibe("/etc/passwd-", PW0)
+    pruefe(g6("geaendert", "f >.... mc..H.. .", "/etc/passwd-", kk6) is not None,
+           "Sicherung passwd- (Zwischenstand): erklaert")
+    pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/passwd", dict(kk6, dpkg_seit_basis=False)) is None,
+           "ohne dpkg-Lauf seit dem Stand: nicht erklaert")
+    pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/passwd",
+              dict(kk6, basis=dict(kk6["basis"], konten=None))) is None, "ohne Kontenstand in der Basis: nicht erklaert")
+    for pw, text in ((PW0 + "boese:x:0:0::/root:/usr/sbin/nologin\n", "neues Konto mit UID 0"),
+                     (PW0 + "boese:x:115:115::/:/bin/bash\n", "neues Systemkonto mit Anmeldeshell"),
+                     (PW0 + "mensch:x:1002:1002::/home/m:/usr/sbin/nologin\n", "neues Konto mit UID >= 1000"),
+                     (PW0.replace("/root:/bin/bash", "/root:/bin/sh"), "bestehendes Konto geaendert"),
+                     ("jarvis:x:1001:1001::/home/jarvis:/bin/bash\n", "bestehendes Konto entfernt")):
+        konten(pw=pw)
+        pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/passwd", kk6) is None, "%s: nicht erklaert" % text)
+    konten(PW0 + PF, GR0.replace("sudo:x:27:admin", "sudo:x:27:admin,postfix"))
+    pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/group", kk6) is None,
+           "neues Konto in eine BESTEHENDE Gruppe (sudo) aufgenommen: nicht erklaert")
+    konten(PW0 + PF, GR0 + "boese:x:120:jarvis\n")
+    pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/group", kk6) is None,
+           "neue Gruppe mit einem BESTEHENDEN Konto als Mitglied: nicht erklaert")
+    konten(PW0 + PF, GR0 + "boese:x:0:\n")
+    pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/group", kk6) is None, "neue Gruppe mit GID 0: nicht erklaert")
+    konten(PW0 + PF, sh=SH0 + "postfix:$y$kennwort:20416::::::\n")
+    pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/shadow", kk6) is None,
+           "neues Konto MIT Kennwort (nicht gesperrt): nicht erklaert")
+    konten(PW0 + PF, sh=SH0.replace("jarvis:!:", "jarvis:$y$neu:") + "postfix:!:20416::::::\n")
+    pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/shadow", kk6) is None,
+           "Kennwort eines bestehenden Kontos geaendert: nicht erklaert")
+    konten(PW0 + PF, gs=GS0 + "postdrop:$y$x::\n")
+    pruefe(g6("geaendert", "f >.... mci.H.. .", "/etc/gshadow", kk6) is None,
+           "neue Gruppe mit Gruppenkennwort: nicht erklaert")
+    konten()
+    # Der Kontenstand wird mit dem Abgleich festgehalten und mit der Uebernahme Basis
+    schreibe("/var/lib/aide/aide.db", b"ALTER STAND", 0o600)
+    setze_bericht([("neu", "f++++++++++++++++++", "/usr/bin/bar")])
+    neuer_stand(b"NEUER STAND 6")
+    z6 = A.abgleichen()
+    A._zustand_schreiben(z6)
+    pruefe((A._konten_kandidat_lesen() or {}).get("passwd", {}).get("root") is not None,
+           "Abgleich haelt den Kontenstand zur Pruefung fest")
+    konten(PW0 + PF)   # nach der Pruefung angelegt: gehoert NICHT in die Basis
+    A.uebernehmen(z6["kennung"], "pruefer")
+    with gzip.open(W / "var/lib/jarvis-aide/basis.json.gz", "rt") as f:
+        basis6 = json.load(f)
+    pruefe("root" in (basis6.get("konten") or {}).get("passwd", {})
+           and "postfix" not in (basis6.get("konten") or {}).get("passwd", {}),
+           "Uebernahme schreibt den Kontenstand ZUR PRUEFUNG in die Basis (nicht den spaeteren)")
+    konten()
+
+    print("[6f] Rotation, Arbeitsordner, wireplumber, dynamicmaps, entfernte Paketdateien")
+    pruefe(g6("geaendert", "f <b... mci.H.. .", "/var/log/boot.log.2") is not None
+           and g6("geaendert", "f >b... mc..H.. .", "/var/log/aide/aide.log.0") is not None
+           and g6("geaendert", "f =.... mci.H.. .", "/var/log/vmware-vmsvc-root.1.log") is not None,
+           "rotierte/neu geschriebene Protokolle ohne Debian-Regel: erklaert")
+    pruefe(g6("geaendert", "f >b... mc..H.. .", "/var/log/auth.log") is None,
+           "anderes Protokoll (nicht in der Liste): nicht erklaert")
+    pruefe(g6("geaendert", "f >bp.. mc..H.. .", "/var/log/boot.log") is None, "Protokoll mit geaenderten Rechten: nicht erklaert")
+    schreibe("/var/log/mail.log.1", "x\n", 0o640)
+    pruefe(g6("neu", "f++++++++++++++++++", "/var/log/mail.log.1") == "Protokollrotation (neue Fassung)",
+           "neue rotierte Fassung: erklaert")
+    schreibe("/var/log/mail.log.2", "x\n", 0o750)
+    pruefe(g6("neu", "f++++++++++++++++++", "/var/log/mail.log.2") is None, "neue 'Fassung' mit x-Bit: nicht erklaert")
+    schreibe("/var/log/boese.sh", "x\n", 0o640)
+    pruefe(g6("neu", "f++++++++++++++++++", "/var/log/boese.sh") is None, "neue Datei ohne Rotationsnamen: nicht erklaert")
+    pruefe(g6("entfernt", "f------------------", "/var/log/aide/aide.log.5.gz") is not None,
+           "aelteste Fassung entfernt: erklaert")
+    (W / "var/lib/aide/dailyaidecheck.old.oSYHT2jW94/dailyaidecheck").mkdir(parents=True)
+    pruefe(g6("neu", "d++++++++++++++++++", "/var/lib/aide/dailyaidecheck.old.oSYHT2jW94/dailyaidecheck")
+           == "Arbeitsordner der AIDE-Pruefung", "umbenannter Arbeitsordner von dailyaidecheck: erklaert")
+    _aide_echt = A._aide_benutzer
+    A._aide_benutzer = lambda uid: False
+    try:
+        pruefe(g6("neu", "d++++++++++++++++++", "/var/lib/aide/dailyaidecheck.old.oSYHT2jW94/dailyaidecheck") is None,
+               "Arbeitsordner, der nicht _aide gehoert: nicht erklaert")
+    finally:
+        A._aide_benutzer = _aide_echt
+    (W / "var/lib/aide/boese").mkdir()
+    pruefe(g6("neu", "d++++++++++++++++++", "/var/lib/aide/boese") is None, "anderer Ordner unter /var/lib/aide: nicht erklaert")
+    pruefe(g6("geaendert", "f =.... mc..H.. .", "/home/admin/.local/state/wireplumber/stream-properties") is not None
+           and g6("geaendert", "f =.... mc..H.. .", "/home/admin/.bashrc") is None,
+           "wireplumber-Zustand erklaert, andere Datei im Home nicht")
+    kpf = dict(k6, dpkg_seit_basis=True, basis=None, pakete_seit={"postfix"})
+    schreibe("/etc/postfix/dynamicmaps.cf", "# dict-type\tso-name (pathname)\tdict-function\tmkmap-function\n")
+    pruefe(g6("neu", "f++++++++++++++++++", "/etc/postfix/dynamicmaps.cf", kpf) is not None,
+           "dynamicmaps.cf nur mit Kopfzeile nach Installation von postfix: erklaert")
+    pruefe(g6("neu", "f++++++++++++++++++", "/etc/postfix/dynamicmaps.cf", dict(kpf, pakete_seit=set())) is None,
+           "dynamicmaps.cf ohne Installation von postfix: nicht erklaert")
+    schreibe("/etc/postfix/dynamicmaps.cf", "# kopf\npcre\t/tmp/boese.so\tdict_pcre_open\n")
+    pruefe(g6("neu", "f++++++++++++++++++", "/etc/postfix/dynamicmaps.cf", kpf) is None,
+           "dynamicmaps.cf mit einer Bibliothek: nicht erklaert")
+    with open(W / "var/lib/dpkg/info/foo.list", "a") as f:
+        f.write("/usr/share/doc/foo\n/usr/share/doc/foo/changelog.Debian.gz\n/usr/share/doc\n")
+    schreibe("/var/lib/dpkg/info/zwei.list", "/usr/share/doc\n")
+    kd = A.kontext_laden(JETZT - 86400)
+    kd = dict(kd, basis=None, pakete_seit={"foo"})
+    pruefe((g6("entfernt", "f------------------", "/usr/share/doc/foo/changelog.Debian.amd64.gz", kd) or "")
+           .startswith("entfernt mit Update von foo"), "ohne Basis: Datei im Verzeichnis eines aktualisierten Pakets erklaert")
+    pruefe(g6("entfernt", "f------------------", "/usr/share/doc/foo/changelog.Debian.amd64.gz", dict(kd, pakete_seit=set()))
+           is None, "Paket seit dem Stand nicht angefasst: nicht erklaert")
+    pruefe(g6("entfernt", "f------------------", "/usr/share/doc/weg.gz", dict(kd, pakete_seit={"foo", "zwei"})) is None,
+           "Verzeichnis gehoert mehreren Paketen: nicht erklaert")
 finally:
     shutil.rmtree(SANDKASTEN, ignore_errors=True)
 

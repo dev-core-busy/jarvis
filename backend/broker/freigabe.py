@@ -35,6 +35,11 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
+try:
+    from backend import eigene_dateien
+except ImportError:  # pragma: no cover - Waechter laden das Modul einzeln
+    eigene_dateien = None
+
 SCHLUESSEL = Path(os.environ.get("JARVIS_BROKER_FREIGABE_KEY",
                                  "/etc/jarvis/broker-freigabe.key"))
 ZUSTAND = Path(os.environ.get("JARVIS_BROKER_FREIGABE_STATE",
@@ -163,7 +168,16 @@ def _letzter_schritt() -> int:
 
 
 def _schreibe_privat(p: Path, inhalt: str) -> None:
-    """Atomar, 0600 VOR dem Umbenennen – kein Moment mit weiteren Rechten."""
+    """Atomar, 0600 VOR dem Umbenennen – kein Moment mit weiteren Rechten.
+    Der Uebergang des Zustands wird fuer den AIDE-Abgleich vermerkt."""
+    if eigene_dateien is None:
+        _schreibe_privat_roh(p, inhalt)
+        return
+    with eigene_dateien.schreibt(p):
+        _schreibe_privat_roh(p, inhalt)
+
+
+def _schreibe_privat_roh(p: Path, inhalt: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

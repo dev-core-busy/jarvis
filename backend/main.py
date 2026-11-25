@@ -201,6 +201,53 @@ from backend import static_kennung as _static_kennung
 _static_kennung.wurzel_setzen(FRONTEND_DIR)
 
 
+# ─── Sprache der Servertexte (backend/sprache.py) ──────────────────────────
+# i18n.js legt die gewaehlte Sprache als Cookie ab. Diese Middleware setzt sie
+# fuer die Anfrage und UEBERSETZT die Textfelder einer JSON-Antwort (error,
+# detail, meldung, …), wenn nicht Deutsch gewaehlt ist: der deutsche Satz im
+# Code ist der Schluessel, backend/server_texte.json haelt EN/FR. Bewusst KEIN
+# _tr(...) an jeder Stelle: viele Waechter fuehren main.py-Funktionen einzeln
+# aus, ein neuer Name darin braeche sie reihenweise (2026-11-24 mit
+# _mail_sicherheit erlebt) – und 430 Stellen waeren 430 Gelegenheiten dafuer.
+from backend import sprache as _sprache
+
+
+@app.middleware("http")
+async def _sprache_setzen(request: Request, call_next):
+    sp = _sprache.aus_anfrage(request)
+    token = _sprache.setzen(sp)
+    try:
+        response = await call_next(request)
+        if sp == "de" or not response.headers.get("content-type", "").startswith("application/json"):
+            return response
+        laenge = response.headers.get("content-length")
+        if laenge and laenge.isdigit() and int(laenge) > _sprache.ANTWORT_MAX:
+            return response
+        # Hoechstens bis zur Grenze lesen: eine gestreamte JSON-Antwort ohne
+        # Laengenangabe wuerde sonst ganz in den Speicher gezogen. Darueber
+        # hinaus geht sie unveraendert weiter (Gelesenes + Rest).
+        teile, menge, quelle = [], 0, response.body_iterator.__aiter__()
+        async for teil in quelle:
+            teil = teil if isinstance(teil, bytes) else teil.encode("utf-8")
+            teile.append(teil)
+            menge += len(teil)
+            if menge > _sprache.ANTWORT_MAX:
+                async def _rest(anfang=teile, rest=quelle):
+                    for t_ in anfang:
+                        yield t_
+                    async for t_ in rest:
+                        yield t_
+                return StreamingResponse(_rest(), status_code=response.status_code,
+                                         headers=dict(response.headers.items()), media_type=response.media_type)
+        roh = b"".join(teile)
+        neu = _sprache.antwort_uebersetzen(roh, sp)
+        kopf = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+        return Response(content=neu if neu is not None else roh, status_code=response.status_code,
+                        headers=kopf, media_type=response.media_type)
+    finally:
+        _sprache.zuruecksetzen(token)
+
+
 @app.middleware("http")
 async def no_cache_static(request: Request, call_next):
     """/static/: langer Cache nur unter passender Inhalts-Kennung, sonst

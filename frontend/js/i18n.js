@@ -12149,6 +12149,18 @@ const _I18N = {
 
 window._lang = localStorage.getItem('jarvis_lang') || 'de';
 
+// Die gewaehlte Sprache auch fuer den SERVER: als Cookie geht sie mit jeder
+// Anfrage mit (auch Downloads, Formulare, WebSockets), und der Server
+// antwortet in dieser Sprache (backend/sprache.py, server_texte.json). Vorher
+// kamen Fehler und Hinweise des Servers bei FR deutsch (gemeldet 2026-11-24).
+function _sprachCookie(lang) {
+    try {
+        document.cookie = 'jarvis_lang=' + encodeURIComponent(lang) + '; path=/; max-age=31536000; SameSite=Lax'
+            + (location.protocol === 'https:' ? '; Secure' : '');
+    } catch (e) { /* ohne Cookie antwortet der Server deutsch */ }
+}
+_sprachCookie(window._lang);
+
 /** Rueckfallkette je Sprache: fr faellt auf Englisch, dann Deutsch. */
 var _I18N_RUECKFALL = { de: ['de'], en: ['en', 'de'], fr: ['fr', 'en', 'de'] };
 
@@ -12290,6 +12302,7 @@ window.setLang = function(lang) {
     if (!_I18N[lang]) return;
     window._lang = lang;
     localStorage.setItem('jarvis_lang', lang);
+    _sprachCookie(lang);
     window.applyLang();
 };
 

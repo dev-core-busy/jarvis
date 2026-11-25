@@ -1,0 +1,2055 @@
+{
+ "_hinweis": "Servertexte in DE/EN/FR (backend/sprache.py). 'de' ist GENAU der Satz im Code; {w1}, {w2} stehen fuer Werte aus f-Strings. Waechter: tests/test_server_sprache.py.",
+ "saetze": [
+  {
+   "de": "API (Application Programming Interface)-Key ungültig (401 Unauthorized)",
+   "en": "API key invalid (401 Unauthorized)",
+   "fr": "Clé API non valide (401 Unauthorized)"
+  },
+  {
+   "de": "API-Key fehlt",
+   "en": "API key missing",
+   "fr": "Clé API manquante"
+  },
+  {
+   "de": "API-Key ungültig (400 Bad Request)",
+   "en": "API key invalid (400 Bad Request)",
+   "fr": "Clé API non valide (400 Bad Request)"
+  },
+  {
+   "de": "API-Key ungültig (401 Unauthorized)",
+   "en": "API key invalid (401 Unauthorized)",
+   "fr": "Clé API non valide (401 Unauthorized)"
+  },
+  {
+   "de": "API-Key ungültig oder keine Berechtigung (403 Forbidden)",
+   "en": "API key invalid or no permission (403 Forbidden)",
+   "fr": "Clé API non valide ou absence d'autorisation (403 Forbidden)"
+  },
+  {
+   "de": "Ablage nicht gefunden.",
+   "en": "Storage not found.",
+   "fr": "Dépôt introuvable."
+  },
+  {
+   "de": "Account wegen Sicherheitsverstoss gesperrt.",
+   "en": "Account locked due to a security violation.",
+   "fr": "Compte bloqué en raison d'une violation de sécurité."
+  },
+  {
+   "de": "Adresse oder Anbieter wurde geändert – bitte den Schlüssel neu eingeben, sonst ginge der gespeicherte an das neue Ziel.",
+   "en": "The address or provider was changed – please enter the key again, otherwise the stored one would go to the new target.",
+   "fr": "L'adresse ou le fournisseur a été modifié – veuillez saisir à nouveau la clé, sinon la clé enregistrée serait envoyée à la nouvelle cible."
+  },
+  {
+   "de": "Adressen aus dem Internet sind fuer deinen Benutzer nicht freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Internet“).",
+   "en": "Internet addresses are not enabled for your user (Settings → Security → Permissions, column “Internet”).",
+   "fr": "Les adresses Internet ne sont pas activées pour votre utilisateur (Paramètres → Sécurité → Autorisations, colonne « Internet »)."
+  },
+  {
+   "de": "Aktuelles Kennwort ist falsch.",
+   "en": "The current password is wrong.",
+   "fr": "Le mot de passe actuel est incorrect."
+  },
+  {
+   "de": "Alle Felder müssen ausgefüllt sein.",
+   "en": "All fields must be filled in.",
+   "fr": "Tous les champs doivent être remplis."
+  },
+  {
+   "de": "Anhang nicht gefunden",
+   "en": "Attachment not found",
+   "fr": "Pièce jointe introuvable"
+  },
+  {
+   "de": "Anmeldung ist gerade nicht möglich (Anmeldedaten des Servers nicht lesbar). Bitte den Administrator informieren.",
+   "en": "Sign-in is not possible right now (server credentials cannot be read). Please inform the administrator.",
+   "fr": "La connexion est actuellement impossible (les identifiants du serveur ne sont pas lisibles). Veuillez en informer l'administrateur."
+  },
+  {
+   "de": "Anmeldung über das Firmenverzeichnis ist gerade nicht möglich (keine gesicherte Verbindung zum Domain-Controller). Bitte den Administrator informieren.",
+   "en": "Sign-in via the company directory is not possible right now (no secure connection to the domain controller). Please inform the administrator.",
+   "fr": "La connexion via l'annuaire de l'entreprise est actuellement impossible (aucune connexion sécurisée au contrôleur de domaine). Veuillez en informer l'administrateur."
+  },
+  {
+   "de": "Auftrag nicht gefunden",
+   "en": "Job not found",
+   "fr": "Tâche introuvable"
+  },
+  {
+   "de": "Auftrag nicht gefunden oder noch nicht abgeschlossen.",
+   "en": "Job not found or not finished yet.",
+   "fr": "Tâche introuvable ou pas encore terminée."
+  },
+  {
+   "de": "Avatar-Assistent ist deaktiviert",
+   "en": "The avatar assistant is disabled",
+   "fr": "L'assistant avatar est désactivé"
+  },
+  {
+   "de": "Basis-URL nicht ermittelbar.",
+   "en": "Base URL could not be determined.",
+   "fr": "Impossible de déterminer l'URL de base."
+  },
+  {
+   "de": "Beim Entfernen eines Schemas werden seine Dateien gelöscht – bitte bestätigen.",
+   "en": "Removing a schema deletes its files – please confirm.",
+   "fr": "La suppression d'un schéma supprime ses fichiers – veuillez confirmer."
+  },
+  {
+   "de": "Beispiel-Prompts konnten nicht angelegt werden.",
+   "en": "Example prompts could not be created.",
+   "fr": "Les exemples de prompts n'ont pas pu être créés."
+  },
+  {
+   "de": "Benutzername oder Passwort falsch",
+   "en": "Wrong username or password",
+   "fr": "Nom d'utilisateur ou mot de passe incorrect"
+  },
+  {
+   "de": "Benutzername und Passwort erforderlich",
+   "en": "Username and password required",
+   "fr": "Nom d'utilisateur et mot de passe requis"
+  },
+  {
+   "de": "Bereich enthält keine Seiten.",
+   "en": "The space contains no pages.",
+   "fr": "L'espace ne contient aucune page."
+  },
+  {
+   "de": "Bereich nicht sichtbar/erlaubt.",
+   "en": "Space not visible/allowed.",
+   "fr": "Espace non visible/non autorisé."
+  },
+  {
+   "de": "Bitte beide Tabellen angeben.",
+   "en": "Please specify both tables.",
+   "fr": "Veuillez indiquer les deux tables."
+  },
+  {
+   "de": "Bitte den Zwei-Faktor-Code eingeben.",
+   "en": "Please enter the two-factor code.",
+   "fr": "Veuillez saisir le code à deux facteurs."
+  },
+  {
+   "de": "Bitte eine Abfrage wählen oder eine Frage eingeben.",
+   "en": "Please choose a query or enter a question.",
+   "fr": "Veuillez choisir une requête ou saisir une question."
+  },
+  {
+   "de": "Bitte eine Analyse waehlen oder eine Frage eingeben.",
+   "en": "Please choose an analysis or enter a question.",
+   "fr": "Veuillez choisir une analyse ou saisir une question."
+  },
+  {
+   "de": "Bitte eine Anfrage eingeben.",
+   "en": "Please enter a request.",
+   "fr": "Veuillez saisir une demande."
+  },
+  {
+   "de": "Bitte einen Confluence-Bereich wählen.",
+   "en": "Please choose a Confluence space.",
+   "fr": "Veuillez choisir un espace Confluence."
+  },
+  {
+   "de": "Bitte einen Seitentitel angeben.",
+   "en": "Please enter a page title.",
+   "fr": "Veuillez indiquer un titre de page."
+  },
+  {
+   "de": "Bitte hoechstens 5 Schlagworte angeben.",
+   "en": "Please enter at most 5 keywords.",
+   "fr": "Veuillez indiquer au maximum 5 mots-clés."
+  },
+  {
+   "de": "Bitte mindestens 2 Schlagworte angeben.",
+   "en": "Please enter at least 2 keywords.",
+   "fr": "Veuillez indiquer au moins 2 mots-clés."
+  },
+  {
+   "de": "Bitte mindestens eine Wissensgruppe wählen",
+   "en": "Please choose at least one knowledge group",
+   "fr": "Veuillez choisir au moins un groupe de connaissances"
+  },
+  {
+   "de": "Bitte zuerst ein WebDAV-Kennwort setzen.",
+   "en": "Please set a WebDAV password first.",
+   "fr": "Veuillez d'abord définir un mot de passe WebDAV."
+  },
+  {
+   "de": "Bitte zur Bestätigung auch das Kennwort eingeben.",
+   "en": "Please also enter the password to confirm.",
+   "fr": "Veuillez également saisir le mot de passe pour confirmer."
+  },
+  {
+   "de": "Confluence ist nicht aktiv oder nicht konfiguriert.",
+   "en": "Confluence is not active or not configured.",
+   "fr": "Confluence n'est pas actif ou pas configuré."
+  },
+  {
+   "de": "Confluence ist nicht aktiv – der Skill 'Confluence' muss unter Einstellungen → Skills eingeschaltet werden.",
+   "en": "Confluence is not active – the skill 'Confluence' must be switched on under Settings → Skills.",
+   "fr": "Confluence n'est pas actif – la compétence « Confluence » doit être activée sous Paramètres → Compétences."
+  },
+  {
+   "de": "Confluence ist nicht konfiguriert.",
+   "en": "Confluence is not configured.",
+   "fr": "Confluence n'est pas configuré."
+  },
+  {
+   "de": "Das Formular wurde nicht gefunden.",
+   "en": "The form was not found.",
+   "fr": "Le formulaire est introuvable."
+  },
+  {
+   "de": "Das Lösungsarchiv ist ausgeschaltet.",
+   "en": "The solution archive is switched off.",
+   "fr": "L'archive des solutions est désactivée."
+  },
+  {
+   "de": "Das Token wird abgelehnt (unbekannt, pausiert oder widerrufen).",
+   "en": "The token is rejected (unknown, paused or revoked).",
+   "fr": "Le jeton est refusé (inconnu, suspendu ou révoqué)."
+  },
+  {
+   "de": "Das eigene Konto lässt sich nicht sperren.",
+   "en": "Your own account cannot be locked.",
+   "fr": "Votre propre compte ne peut pas être bloqué."
+  },
+  {
+   "de": "Das ist ein Wurzelordner – bitte über die Ordner-Verwaltung entfernen",
+   "en": "This is a root folder – please remove it via the folder management",
+   "fr": "Ceci est un dossier racine – veuillez le supprimer via la gestion des dossiers"
+  },
+  {
+   "de": "Das ist ein Wurzelordner – bitte über die Ordner-Verwaltung umbenennen",
+   "en": "This is a root folder – please rename it via the folder management",
+   "fr": "Ceci est un dossier racine – veuillez le renommer via la gestion des dossiers"
+  },
+  {
+   "de": "Datei ist kein UTF-8-Text",
+   "en": "The file is not UTF-8 text",
+   "fr": "Le fichier n'est pas un texte UTF-8"
+  },
+  {
+   "de": "Datei konnte nicht geloescht werden.",
+   "en": "The file could not be deleted.",
+   "fr": "Le fichier n'a pas pu être supprimé."
+  },
+  {
+   "de": "Datei konnte nicht gespeichert werden.",
+   "en": "The file could not be saved.",
+   "fr": "Le fichier n'a pas pu être enregistré."
+  },
+  {
+   "de": "Datei liegt bereits in diesem Ordner",
+   "en": "The file is already in this folder",
+   "fr": "Le fichier se trouve déjà dans ce dossier"
+  },
+  {
+   "de": "Datei liegt nicht in einem Knowledge-Ordner",
+   "en": "The file is not in a knowledge folder",
+   "fr": "Le fichier ne se trouve pas dans un dossier de connaissances"
+  },
+  {
+   "de": "Datei liegt nicht in einem Wissens-Ordner",
+   "en": "The file is not in a knowledge folder",
+   "fr": "Le fichier ne se trouve pas dans un dossier de connaissances"
+  },
+  {
+   "de": "Datei nicht gefunden",
+   "en": "File not found",
+   "fr": "Fichier introuvable"
+  },
+  {
+   "de": "Datei zu groß (max. 50 MB)",
+   "en": "File too large (max. 50 MB)",
+   "fr": "Fichier trop volumineux (50 Mo max.)"
+  },
+  {
+   "de": "Den Wissensgraphen sehen nur Wissenseditoren – globale alles, Editoren einer Wissensgruppe deren Inhalte.",
+   "en": "Only knowledge editors can see the knowledge graph – global editors everything, editors of a knowledge group its contents.",
+   "fr": "Seuls les éditeurs de connaissances voient le graphe de connaissances – les éditeurs globaux tout, les éditeurs d'un groupe de connaissances son contenu."
+  },
+  {
+   "de": "Der 2FA-Schlüssel ist auf dem Server gerade nicht lesbar. Bitte den Administrator verständigen.",
+   "en": "The 2FA key cannot be read on the server right now. Please notify the administrator.",
+   "fr": "La clé 2FA n'est actuellement pas lisible sur le serveur. Veuillez prévenir l'administrateur."
+  },
+  {
+   "de": "Der Begriff kommt auch in Dokumenten außerhalb deiner Wissensgruppen vor – die Seite fasste sie mit zusammen.",
+   "en": "The term also appears in documents outside your knowledge groups – the page combined them.",
+   "fr": "Le terme apparaît aussi dans des documents en dehors de vos groupes de connaissances – la page les a regroupés."
+  },
+  {
+   "de": "Der Benutzer-Chat ist nicht aktiv – der Skill 'Benutzer-Chat' muss unter Einstellungen → Skills eingeschaltet werden.",
+   "en": "The user chat is not active – the skill 'User chat' must be switched on under Settings → Skills.",
+   "fr": "Le chat utilisateur n'est pas actif – la compétence « Chat utilisateur » doit être activée sous Paramètres → Compétences."
+  },
+  {
+   "de": "Der Benutzer-Chat ist nicht mehr aktiv. Ein Administrator hat den Bereich abgeschaltet.",
+   "en": "The user chat is no longer active. An administrator has switched the area off.",
+   "fr": "Le chat utilisateur n'est plus actif. Un administrateur a désactivé cet espace."
+  },
+  {
+   "de": "Der Confluence-Skill ist nicht aktiv.",
+   "en": "The Confluence skill is not active.",
+   "fr": "La compétence Confluence n'est pas active."
+  },
+  {
+   "de": "Der E-Mail-Skill ist nicht aktiv. Ein Administrator aktiviert ihn unter Einstellungen → Skills.",
+   "en": "The email skill is not active. An administrator activates it under Settings → Skills.",
+   "fr": "La compétence e-mail n'est pas active. Un administrateur l'active sous Paramètres → Compétences."
+  },
+  {
+   "de": "Der Eintrag wurde nicht gefunden.",
+   "en": "The entry was not found.",
+   "fr": "L'entrée est introuvable."
+  },
+  {
+   "de": "Der Excel-Assistent ist nicht aktiv. Ein Administrator aktiviert ihn unter Einstellungen → Skills.",
+   "en": "The Excel assistant is not active. An administrator activates it under Settings → Skills.",
+   "fr": "L'assistant Excel n'est pas actif. Un administrateur l'active sous Paramètres → Compétences."
+  },
+  {
+   "de": "Der Index wird im Hintergrund aktualisiert.",
+   "en": "The index is being updated in the background.",
+   "fr": "L'index est mis à jour en arrière-plan."
+  },
+  {
+   "de": "Der Newsfeed-Bestand ist unlesbar.",
+   "en": "The newsfeed data cannot be read.",
+   "fr": "Les données du fil d'actualités sont illisibles."
+  },
+  {
+   "de": "Der SQL-Assistent ist nicht aktiv.",
+   "en": "The SQL assistant is not active.",
+   "fr": "L'assistant SQL n'est pas actif."
+  },
+  {
+   "de": "Der Skill „AI Mouse“ ist auf diesem Server nicht aktiv. Ein Administrator schaltet ihn unter Einstellungen → Skills ein.",
+   "en": "The skill “AI Mouse” is not active on this server. An administrator switches it on under Settings → Skills.",
+   "fr": "La compétence « AI Mouse » n'est pas active sur ce serveur. Un administrateur l'active sous Paramètres → Compétences."
+  },
+  {
+   "de": "Der Skill „Short Tracks\" ist nicht aktiv (Einstellungen → Skills).",
+   "en": "The skill “Short Tracks” is not active (Settings → Skills).",
+   "fr": "La compétence « Short Tracks » n'est pas active (Paramètres → Compétences)."
+  },
+  {
+   "de": "Der Speicherort antwortet gerade nicht",
+   "en": "The storage location is not responding right now",
+   "fr": "L'emplacement de stockage ne répond pas pour le moment"
+  },
+  {
+   "de": "Der Speicherort antwortet nicht – ob die Datei gelöscht wurde, ist unbekannt. Bitte später die Liste neu laden.",
+   "en": "The storage location is not responding – it is unknown whether the file was deleted. Please reload the list later.",
+   "fr": "L'emplacement de stockage ne répond pas – on ne sait pas si le fichier a été supprimé. Veuillez recharger la liste plus tard."
+  },
+  {
+   "de": "Der Text ist leer.",
+   "en": "The text is empty.",
+   "fr": "Le texte est vide."
+  },
+  {
+   "de": "Der Wissensgraph ist ausgeschaltet",
+   "en": "The knowledge graph is switched off",
+   "fr": "Le graphe de connaissances est désactivé"
+  },
+  {
+   "de": "Die Abgabe wurde nicht gefunden.",
+   "en": "The submission was not found.",
+   "fr": "La soumission est introuvable."
+  },
+  {
+   "de": "Die Adresse wurde geändert – bitte Kennwort bzw. Token neu eingeben, sonst ginge der gespeicherte Wert an die neue Adresse.",
+   "en": "The address was changed – please enter the password or token again, otherwise the stored value would go to the new address.",
+   "fr": "L'adresse a été modifiée – veuillez saisir à nouveau le mot de passe ou le jeton, sinon la valeur enregistrée serait envoyée à la nouvelle adresse."
+  },
+  {
+   "de": "Die Anmeldeberechtigung ist gerade nicht prüfbar. Bitte mit Kennwort anmelden.",
+   "en": "The sign-in permission cannot be checked right now. Please sign in with your password.",
+   "fr": "L'autorisation de connexion ne peut pas être vérifiée pour le moment. Veuillez vous connecter avec votre mot de passe."
+  },
+  {
+   "de": "Die Anmeldung über das Firmenkonto ist abgelaufen. Bitte erneut anmelden.",
+   "en": "The sign-in via the company account has expired. Please sign in again.",
+   "fr": "La connexion via le compte d'entreprise a expiré. Veuillez vous reconnecter."
+  },
+  {
+   "de": "Die Anwendung wird gerade gebaut – das dauert etwa eine halbe Minute. Bitte gleich noch einmal herunterladen.",
+   "en": "The application is being built right now – this takes about half a minute. Please download again shortly.",
+   "fr": "L'application est en cours de construction – cela prend environ une demi-minute. Veuillez la télécharger à nouveau dans un instant."
+  },
+  {
+   "de": "Die Datei ist leer.",
+   "en": "The file is empty.",
+   "fr": "Le fichier est vide."
+  },
+  {
+   "de": "Die Datei konnte auf dem Server nicht abgelegt werden.",
+   "en": "The file could not be stored on the server.",
+   "fr": "Le fichier n'a pas pu être enregistré sur le serveur."
+  },
+  {
+   "de": "Die Frage ist leer.",
+   "en": "The question is empty.",
+   "fr": "La question est vide."
+  },
+  {
+   "de": "Die Frage wurde nicht gefunden.",
+   "en": "The question was not found.",
+   "fr": "La question est introuvable."
+  },
+  {
+   "de": "Die Vorgabe wurde nicht gefunden.",
+   "en": "The default was not found.",
+   "fr": "La valeur par défaut est introuvable."
+  },
+  {
+   "de": "Die Vorlage wurde nicht gefunden.",
+   "en": "The template was not found.",
+   "fr": "Le modèle est introuvable."
+  },
+  {
+   "de": "Die Wiki-Seite stützt sich auch auf Dokumente außerhalb deiner Wissensgruppen.",
+   "en": "The wiki page also relies on documents outside your knowledge groups.",
+   "fr": "La page wiki s'appuie aussi sur des documents en dehors de vos groupes de connaissances."
+  },
+  {
+   "de": "Die Zwei-Faktor-Anmeldung ist nicht eingeschaltet.",
+   "en": "Two-factor sign-in is not switched on.",
+   "fr": "La connexion à deux facteurs n'est pas activée."
+  },
+  {
+   "de": "Die Zwei-Faktor-Anmeldung lässt sich in der App nicht ändern. Bitte im Browser anmelden.",
+   "en": "Two-factor sign-in cannot be changed in the app. Please sign in in the browser.",
+   "fr": "La connexion à deux facteurs ne peut pas être modifiée dans l'application. Veuillez vous connecter dans le navigateur."
+  },
+  {
+   "de": "Die automatische Anmeldung ist nicht möglich. Bitte melde dich mit Kennwort an.",
+   "en": "Automatic sign-in is not possible. Please sign in with your password.",
+   "fr": "La connexion automatique n'est pas possible. Veuillez vous connecter avec votre mot de passe."
+  },
+  {
+   "de": "Die eigene Sitzung lässt sich hier nicht beenden – dafür gibt es den Abmelden-Knopf.",
+   "en": "Your own session cannot be ended here – use the sign-out button for that.",
+   "fr": "Votre propre session ne peut pas être terminée ici – utilisez pour cela le bouton de déconnexion."
+  },
+  {
+   "de": "Die eigene Zwei-Faktor-Anmeldung schaltest du unter Konto mit deinem Kennwort ab.",
+   "en": "You switch off your own two-factor sign-in under Account with your password.",
+   "fr": "Vous désactivez votre propre connexion à deux facteurs sous Compte avec votre mot de passe."
+  },
+  {
+   "de": "Die gewählte übergeordnete Seite gehört nicht zu diesem Bereich.",
+   "en": "The selected parent page does not belong to this space.",
+   "fr": "La page parente choisie n'appartient pas à cet espace."
+  },
+  {
+   "de": "Diese Abfrage wurde vom Administrator ausgeblendet.",
+   "en": "This query has been hidden by the administrator.",
+   "fr": "Cette requête a été masquée par l'administrateur."
+  },
+  {
+   "de": "Diese Ablage nimmt keine Fragen an – das Fragefeld ist in ihren Einstellungen ausgeschaltet.",
+   "en": "This storage does not accept questions – the question field is switched off in its settings.",
+   "fr": "Ce dépôt n'accepte pas de questions – le champ de question est désactivé dans ses paramètres."
+  },
+  {
+   "de": "Diese Analyse wurde vom Administrator ausgeblendet.",
+   "en": "This analysis has been hidden by the administrator.",
+   "fr": "Cette analyse a été masquée par l'administrateur."
+  },
+  {
+   "de": "Diese Datei kann hier nicht gelöscht werden: der Speicherort erlaubt kein Löschen (z. B. nur lesend eingebundene Freigabe).",
+   "en": "This file cannot be deleted here: the storage location does not allow deleting (e.g. a share mounted read-only).",
+   "fr": "Ce fichier ne peut pas être supprimé ici : l'emplacement de stockage n'autorise pas la suppression (p. ex. un partage monté en lecture seule)."
+  },
+  {
+   "de": "Diese Regel ist abgeschaltet. Schalte sie ein, um sie zu benutzen.",
+   "en": "This rule is switched off. Switch it on to use it.",
+   "fr": "Cette règle est désactivée. Activez-la pour l'utiliser."
+  },
+  {
+   "de": "Diese Sitzung kann keine Administrator-Rechte bekommen.",
+   "en": "This session cannot be given administrator rights.",
+   "fr": "Cette session ne peut pas obtenir de droits d'administrateur."
+  },
+  {
+   "de": "Diese Wissensgruppe gehört nicht zu deinem Bereich.",
+   "en": "This knowledge group does not belong to your area.",
+   "fr": "Ce groupe de connaissances n'appartient pas à votre domaine."
+  },
+  {
+   "de": "Dieser Endpunkt ist auf lokalen Zugriff (Loopback) beschraenkt.",
+   "en": "This endpoint is restricted to local access (loopback).",
+   "fr": "Ce point de terminaison est limité à l'accès local (loopback)."
+  },
+  {
+   "de": "Dieser Endpunkt kann nicht beschraenkt werden (Konfigurations-Endpunkt – sonst waere die Einstellung nicht mehr aenderbar).",
+   "en": "This endpoint cannot be restricted (configuration endpoint – otherwise the setting could no longer be changed).",
+   "fr": "Ce point de terminaison ne peut pas être restreint (point de configuration – sinon le paramètre ne serait plus modifiable)."
+  },
+  {
+   "de": "Dieser Pfad liegt nicht in einem Wissensordner.",
+   "en": "This path is not in a knowledge folder.",
+   "fr": "Ce chemin ne se trouve pas dans un dossier de connaissances."
+  },
+  {
+   "de": "Dieser Unter-Agent gehört einem anderen Benutzer.",
+   "en": "This sub-agent belongs to another user.",
+   "fr": "Ce sous-agent appartient à un autre utilisateur."
+  },
+  {
+   "de": "Dieses Postfach ist noch mit keinem Konto verknuepft. Einmal anmelden – danach geht es von selbst.",
+   "en": "This mailbox is not linked to an account yet. Sign in once – after that it works by itself.",
+   "fr": "Cette boîte aux lettres n'est encore liée à aucun compte. Connectez-vous une fois – ensuite cela fonctionne tout seul."
+  },
+  {
+   "de": "Dir ist kein Wissensbereich zugewiesen.",
+   "en": "You have not been assigned a knowledge area.",
+   "fr": "Aucun domaine de connaissances ne vous a été attribué."
+  },
+  {
+   "de": "Domain und E-Mail erforderlich",
+   "en": "Domain and email required",
+   "fr": "Domaine et e-mail requis"
+  },
+  {
+   "de": "Ein Lauf ist bereits aktiv.",
+   "en": "A run is already active.",
+   "fr": "Une exécution est déjà active."
+  },
+  {
+   "de": "Ein Zugangstoken wird nur über eine verschlüsselte Adresse (wss://) gesendet.",
+   "en": "An access token is only sent over an encrypted address (wss://).",
+   "fr": "Un jeton d'accès n'est envoyé que via une adresse chiffrée (wss://)."
+  },
+  {
+   "de": "Einbindung nicht gefunden.",
+   "en": "Integration not found.",
+   "fr": "Intégration introuvable."
+  },
+  {
+   "de": "Eine Datei mit diesem Namen gibt es schon.",
+   "en": "A file with this name already exists.",
+   "fr": "Un fichier portant ce nom existe déjà."
+  },
+  {
+   "de": "Eine Datei ohne Wissensgruppe können nur globale Wissens-Editoren zuordnen",
+   "en": "Only global knowledge editors can assign a file without a knowledge group",
+   "fr": "Seuls les éditeurs de connaissances globaux peuvent attribuer un fichier sans groupe de connaissances"
+  },
+  {
+   "de": "Eintrag nicht gefunden",
+   "en": "Entry not found",
+   "fr": "Entrée introuvable"
+  },
+  {
+   "de": "Es fehlen Nachrichten-Kennung oder Text.",
+   "en": "Message ID or text missing.",
+   "fr": "Identifiant du message ou texte manquant."
+  },
+  {
+   "de": "Es fehlt die Nachricht (Inhalt oder Kennung).",
+   "en": "The message is missing (content or ID).",
+   "fr": "Le message est manquant (contenu ou identifiant)."
+  },
+  {
+   "de": "Es fehlt die Nachricht.",
+   "en": "The message is missing.",
+   "fr": "Le message est manquant."
+  },
+  {
+   "de": "Es fehlt die Nachrichten-Kennung (msg_id).",
+   "en": "The message ID (msg_id) is missing.",
+   "fr": "L'identifiant du message (msg_id) est manquant."
+  },
+  {
+   "de": "Es gibt noch keinen Schema-Graphen.",
+   "en": "There is no schema graph yet.",
+   "fr": "Il n'existe pas encore de graphe de schéma."
+  },
+  {
+   "de": "Es gibt noch keinen Schema-Graphen. Ein Administrator lädt Schema-Dateien unter Einstellungen → SQL-Assistent hoch.",
+   "en": "There is no schema graph yet. An administrator uploads schema files under Settings → SQL assistant.",
+   "fr": "Il n'existe pas encore de graphe de schéma. Un administrateur charge les fichiers de schéma sous Paramètres → Assistant SQL."
+  },
+  {
+   "de": "Es ist keine Vorlage gewählt.",
+   "en": "No template is selected.",
+   "fr": "Aucun modèle n'est sélectionné."
+  },
+  {
+   "de": "Es läuft bereits eine Frage von dir – bitte warten.",
+   "en": "A question of yours is already running – please wait.",
+   "fr": "Une de vos questions est déjà en cours – veuillez patienter."
+  },
+  {
+   "de": "Es läuft bereits eine Prüfung.",
+   "en": "A check is already running.",
+   "fr": "Une vérification est déjà en cours."
+  },
+  {
+   "de": "Es läuft gerade keine Auswertung.",
+   "en": "No evaluation is running right now.",
+   "fr": "Aucune évaluation n'est en cours."
+  },
+  {
+   "de": "Es wurde nichts zum Aendern uebergeben.",
+   "en": "Nothing to change was submitted.",
+   "fr": "Aucune modification n'a été transmise."
+  },
+  {
+   "de": "Es wurde weder eine Zertifikatsdatei noch ein Zeitstempel-Dienst uebergeben.",
+   "en": "Neither a certificate file nor a timestamp service was submitted.",
+   "fr": "Ni fichier de certificat ni service d'horodatage n'a été transmis."
+  },
+  {
+   "de": "Freigabe nicht gefunden",
+   "en": "Share not found",
+   "fr": "Partage introuvable"
+  },
+  {
+   "de": "Fuer dieses Konto ist eine Zwei-Faktor-Anmeldung eingeschaltet. Bitte melde dich hier mit Kennwort und Code an.",
+   "en": "Two-factor sign-in is switched on for this account. Please sign in here with password and code.",
+   "fr": "La connexion à deux facteurs est activée pour ce compte. Veuillez vous connecter ici avec mot de passe et code."
+  },
+  {
+   "de": "Für Administratoren ist die Zwei-Faktor-Anmeldung Pflicht und lässt sich nicht abschalten.",
+   "en": "Two-factor sign-in is mandatory for administrators and cannot be switched off.",
+   "fr": "La connexion à deux facteurs est obligatoire pour les administrateurs et ne peut pas être désactivée."
+  },
+  {
+   "de": "Für Administratoren ist die Zwei-Faktor-Anmeldung Pflicht. Bitte jetzt einrichten.",
+   "en": "Two-factor sign-in is mandatory for administrators. Please set it up now.",
+   "fr": "La connexion à deux facteurs est obligatoire pour les administrateurs. Veuillez la configurer maintenant."
+  },
+  {
+   "de": "Für diesen Bereich nicht freigegeben.",
+   "en": "Not enabled for this area.",
+   "fr": "Non autorisé pour ce domaine."
+  },
+  {
+   "de": "Für dieses Konto besteht keine Sperre.",
+   "en": "There is no lock for this account.",
+   "fr": "Il n'y a aucun blocage pour ce compte."
+  },
+  {
+   "de": "Für dieses Konto ist der Internet-Zugriff nicht freigegeben (Einstellungen → Sicherheit → Berechtigungen).",
+   "en": "Internet access is not enabled for this account (Settings → Security → Permissions).",
+   "fr": "L'accès à Internet n'est pas activé pour ce compte (Paramètres → Sécurité → Autorisations)."
+  },
+  {
+   "de": "Für dieses Konto ist keine Zwei-Faktor-Anmeldung eingeschaltet.",
+   "en": "Two-factor sign-in is not switched on for this account.",
+   "fr": "La connexion à deux facteurs n'est pas activée pour ce compte."
+  },
+  {
+   "de": "Für dieses Paket liegt kein Update vor – bitte neu prüfen.",
+   "en": "There is no update for this package – please check again.",
+   "fr": "Aucune mise à jour n'est disponible pour ce paquet – veuillez vérifier à nouveau."
+  },
+  {
+   "de": "Groesse nicht vorgesehen",
+   "en": "Size not supported",
+   "fr": "Taille non prévue"
+  },
+  {
+   "de": "Gruppe nicht gefunden",
+   "en": "Group not found",
+   "fr": "Groupe introuvable"
+  },
+  {
+   "de": "In der App und über die kennwortlose Anmeldung gibt es keine Administrator-Rechte.",
+   "en": "In the app and via passwordless sign-in there are no administrator rights.",
+   "fr": "Dans l'application et via la connexion sans mot de passe, il n'y a pas de droits d'administrateur."
+  },
+  {
+   "de": "Indizierung läuft bereits",
+   "en": "Indexing is already running",
+   "fr": "L'indexation est déjà en cours"
+  },
+  {
+   "de": "Indizierung läuft – bitte warten",
+   "en": "Indexing is running – please wait",
+   "fr": "Indexation en cours – veuillez patienter"
+  },
+  {
+   "de": "Internet-Sperre aufheben braucht eine Root-Freigabe: Einstellungen → Sicherheit → Root-Freigaben, Eintrag freigeben und erneut ausführen.",
+   "en": "Lifting the internet block requires a root approval: Settings → Security → Root approvals, approve the entry and run again.",
+   "fr": "La levée du blocage Internet nécessite une autorisation root : Paramètres → Sécurité → Autorisations root, approuvez l'entrée et réexécutez."
+  },
+  {
+   "de": "Issue nicht gefunden",
+   "en": "Issue not found",
+   "fr": "Ticket introuvable"
+  },
+  {
+   "de": "Jira-Skill ist nicht aktiv.",
+   "en": "The Jira skill is not active.",
+   "fr": "La compétence Jira n'est pas active."
+  },
+  {
+   "de": "Job nicht gefunden",
+   "en": "Job not found",
+   "fr": "Tâche introuvable"
+  },
+  {
+   "de": "Kamera nicht verfuegbar",
+   "en": "Camera not available",
+   "fr": "Caméra non disponible"
+  },
+  {
+   "de": "Kein Agent aktiv",
+   "en": "No agent active",
+   "fr": "Aucun agent actif"
+  },
+  {
+   "de": "Kein AgentManager aktiv",
+   "en": "No AgentManager active",
+   "fr": "Aucun AgentManager actif"
+  },
+  {
+   "de": "Kein Audio angegeben",
+   "en": "No audio specified",
+   "fr": "Aucun audio indiqué"
+  },
+  {
+   "de": "Kein Benutzer angegeben",
+   "en": "No user specified",
+   "fr": "Aucun utilisateur indiqué"
+  },
+  {
+   "de": "Kein Benutzer angegeben.",
+   "en": "No user specified.",
+   "fr": "Aucun utilisateur indiqué."
+  },
+  {
+   "de": "Kein Dateipfad",
+   "en": "No file path",
+   "fr": "Aucun chemin de fichier"
+  },
+  {
+   "de": "Kein Dateipfad angegeben",
+   "en": "No file path specified",
+   "fr": "Aucun chemin de fichier indiqué"
+  },
+  {
+   "de": "Kein Destillat vorhanden.",
+   "en": "No distillate available.",
+   "fr": "Aucun distillat disponible."
+  },
+  {
+   "de": "Kein Face-Crop verfuegbar",
+   "en": "No face crop available",
+   "fr": "Aucun recadrage de visage disponible"
+  },
+  {
+   "de": "Kein Issuer eingetragen.",
+   "en": "No issuer entered.",
+   "fr": "Aucun émetteur saisi."
+  },
+  {
+   "de": "Kein Kamerabild verfuegbar",
+   "en": "No camera image available",
+   "fr": "Aucune image de caméra disponible"
+  },
+  {
+   "de": "Kein Konto angegeben.",
+   "en": "No account specified.",
+   "fr": "Aucun compte indiqué."
+  },
+  {
+   "de": "Kein Lauf gewaehlt",
+   "en": "No run selected",
+   "fr": "Aucune exécution sélectionnée"
+  },
+  {
+   "de": "Kein Pfad",
+   "en": "No path",
+   "fr": "Aucun chemin"
+  },
+  {
+   "de": "Kein SAP-Zugriff – nicht in der SAP-Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „SAP“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No SAP access – not enabled in the SAP user list/group (Settings → Security → Permissions, column “SAP”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès SAP – non activé dans la liste/le groupe d'utilisateurs SAP (Paramètres → Sécurité → Autorisations, colonne « SAP » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein SQL angegeben.",
+   "en": "No SQL specified.",
+   "fr": "Aucun SQL indiqué."
+  },
+  {
+   "de": "Kein Schlüssel übergeben",
+   "en": "No key submitted",
+   "fr": "Aucune clé transmise"
+  },
+  {
+   "de": "Kein Service angegeben und kein Standard-Service hinterlegt.",
+   "en": "No service specified and no default service configured.",
+   "fr": "Aucun service indiqué et aucun service par défaut configuré."
+  },
+  {
+   "de": "Kein TOTP-Setup gefunden",
+   "en": "No TOTP setup found",
+   "fr": "Aucune configuration TOTP trouvée"
+  },
+  {
+   "de": "Kein Tabellenname angegeben.",
+   "en": "No table name specified.",
+   "fr": "Aucun nom de table indiqué."
+  },
+  {
+   "de": "Kein Task-Text angegeben",
+   "en": "No task text specified",
+   "fr": "Aucun texte de tâche indiqué"
+  },
+  {
+   "de": "Kein Text angegeben",
+   "en": "No text specified",
+   "fr": "Aucun texte indiqué"
+  },
+  {
+   "de": "Kein Thumbnail verfuegbar",
+   "en": "No thumbnail available",
+   "fr": "Aucune miniature disponible"
+  },
+  {
+   "de": "Kein Token uebergeben.",
+   "en": "No token submitted.",
+   "fr": "Aucun jeton transmis."
+  },
+  {
+   "de": "Kein VEMAS-Zugriff – nicht in der VEMAS-Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „VEMAS“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No VEMAS access – not enabled in the VEMAS user list/group (Settings → Security → Permissions, column “VEMAS”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès VEMAS – non activé dans la liste/le groupe d'utilisateurs VEMAS (Paramètres → Sécurité → Autorisations, colonne « VEMAS » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Vorlagenname",
+   "en": "No template name",
+   "fr": "Aucun nom de modèle"
+  },
+  {
+   "de": "Kein Zielordner angegeben",
+   "en": "No target folder specified",
+   "fr": "Aucun dossier cible indiqué"
+  },
+  {
+   "de": "Kein Zugriff auf AI Mouse – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „AI-Maus“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No access to AI Mouse – not enabled in the user list/group (Settings → Security → Permissions, column “AI Mouse”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès à AI Mouse – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « AI Mouse » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Zugriff auf Feedback – der Bereich steht offen, wer Wissen bearbeiten darf: entweder als globaler Wissens-Editor (Einstellungen → Sicherheit → Berechtigungen, Spalte „Wissen“) oder als Editor einer einzelnen Wissensgruppe (Einstellungen → Wissen → Wissensgruppen). Ohne angelegte Wissensgruppe gibt es den Bereich nicht. Ggf. neu einloggen für Gruppen-Aktualisierung.",
+   "en": "No access to feedback – the area is open to those who may edit knowledge: either as a global knowledge editor (Settings → Security → Permissions, column “Knowledge”) or as editor of an individual knowledge group (Settings → Knowledge → Knowledge groups). Without a knowledge group the area does not exist. Sign in again if needed to refresh groups.",
+   "fr": "Pas d'accès aux retours – l'espace est ouvert à ceux qui peuvent modifier les connaissances : soit en tant qu'éditeur de connaissances global (Paramètres → Sécurité → Autorisations, colonne « Connaissances »), soit en tant qu'éditeur d'un groupe de connaissances (Paramètres → Connaissances → Groupes de connaissances). Sans groupe de connaissances, l'espace n'existe pas. Si nécessaire, reconnectez-vous pour actualiser les groupes."
+  },
+  {
+   "de": "Kein Zugriff auf Jira-Daten – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No access to Jira data – not enabled in the user list/group (Settings → Security → Permissions, column “Jira”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès aux données Jira – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Jira » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Zugriff auf Short Tracks – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Short Tracks“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No access to Short Tracks – not enabled in the user list/group (Settings → Security → Permissions, column “Short Tracks”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès à Short Tracks – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Short Tracks » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Zugriff auf den Bereich Claude Subagent – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Claude“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No access to the Claude subagent area – not enabled in the user list/group (Settings → Security → Permissions, column “Claude”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès à l'espace sous-agent Claude – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Claude » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Zugriff auf den E-Mail-Bereich – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „E-Mail“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No access to the email area – not enabled in the user list/group (Settings → Security → Permissions, column “Email”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès à l'espace e-mail – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « E-mail » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Zugriff auf den Jira-Assistenten – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No access to the Jira assistant – not enabled in the user list/group (Settings → Security → Permissions, column “Jira”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès à l'assistant Jira – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Jira » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Zugriff auf den SQL-Assistenten – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „SQL-Assistent“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No access to the SQL assistant – not enabled in the user list/group (Settings → Security → Permissions, column “SQL assistant”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès à l'assistant SQL – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Assistant SQL » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Zugriff auf den Tabellen-Assistenten – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Excel“; ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No access to the spreadsheet assistant – not enabled in the user list/group (Settings → Security → Permissions, column “Excel”; sign in again if needed to refresh groups)",
+   "fr": "Pas d'accès à l'assistant tableur – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Excel » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Kein Zugriff auf die Vorlagen des Jira-Assistenten – weder freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“) noch Administrator",
+   "en": "No access to the Jira assistant templates – neither enabled (Settings → Security → Permissions, column “Jira”) nor administrator",
+   "fr": "Pas d'accès aux modèles de l'assistant Jira – ni activé (Paramètres → Sécurité → Autorisations, colonne « Jira ») ni administrateur"
+  },
+  {
+   "de": "Kein Zugriff auf diese Datei",
+   "en": "No access to this file",
+   "fr": "Pas d'accès à ce fichier"
+  },
+  {
+   "de": "Kein aktives Profil",
+   "en": "No active profile",
+   "fr": "Aucun profil actif"
+  },
+  {
+   "de": "Kein laufender Job",
+   "en": "No running job",
+   "fr": "Aucune tâche en cours"
+  },
+  {
+   "de": "Kein laufender Job zu dieser ID",
+   "en": "No running job with this ID",
+   "fr": "Aucune tâche en cours avec cet identifiant"
+  },
+  {
+   "de": "Keine Adresse angegeben.",
+   "en": "No address specified.",
+   "fr": "Aucune adresse indiquée."
+  },
+  {
+   "de": "Keine Anmeldeberechtigung",
+   "en": "No sign-in permission",
+   "fr": "Aucune autorisation de connexion"
+  },
+  {
+   "de": "Keine Anmeldeberechtigung mehr – bitte neu anmelden.",
+   "en": "Sign-in permission no longer valid – please sign in again.",
+   "fr": "L'autorisation de connexion n'est plus valable – veuillez vous reconnecter."
+  },
+  {
+   "de": "Keine Audio-Datei vorhanden",
+   "en": "No audio file available",
+   "fr": "Aucun fichier audio disponible"
+  },
+  {
+   "de": "Keine Audiodaten generiert",
+   "en": "No audio data generated",
+   "fr": "Aucune donnée audio générée"
+  },
+  {
+   "de": "Keine Aufgabe angegeben",
+   "en": "No task specified",
+   "fr": "Aucune tâche indiquée"
+  },
+  {
+   "de": "Keine Aufgabe fuer Sub-Agent",
+   "en": "No task for the sub-agent",
+   "fr": "Aucune tâche pour le sous-agent"
+  },
+  {
+   "de": "Keine Aufnahme empfangen",
+   "en": "No recording received",
+   "fr": "Aucun enregistrement reçu"
+  },
+  {
+   "de": "Keine Berechtigung fuer dieses Profil",
+   "en": "No permission for this profile",
+   "fr": "Aucune autorisation pour ce profil"
+  },
+  {
+   "de": "Keine Berechtigung zum Bearbeiten von Wissen – nicht in Editoren-Liste/-Gruppe (ggf. neu einloggen für Gruppen-Aktualisierung)",
+   "en": "No permission to edit knowledge – not in the editor list/group (sign in again if needed to refresh groups)",
+   "fr": "Aucune autorisation de modifier les connaissances – ne figure pas dans la liste/le groupe des éditeurs (si nécessaire, reconnectez-vous pour actualiser les groupes)"
+  },
+  {
+   "de": "Keine Berechtigung, diese Wissensgruppe zu bearbeiten",
+   "en": "No permission to edit this knowledge group",
+   "fr": "Aucune autorisation de modifier ce groupe de connaissances"
+  },
+  {
+   "de": "Keine Berechtigung, diese Wissensgruppe zu löschen",
+   "en": "No permission to delete this knowledge group",
+   "fr": "Aucune autorisation de supprimer ce groupe de connaissances"
+  },
+  {
+   "de": "Keine Datei ausgewaehlt.",
+   "en": "No file selected.",
+   "fr": "Aucun fichier sélectionné."
+  },
+  {
+   "de": "Keine Datei konnte uebernommen werden.",
+   "en": "No file could be imported.",
+   "fr": "Aucun fichier n'a pu être importé."
+  },
+  {
+   "de": "Keine Dateien angegeben",
+   "en": "No files specified",
+   "fr": "Aucun fichier indiqué"
+  },
+  {
+   "de": "Keine Dateien empfangen.",
+   "en": "No files received.",
+   "fr": "Aucun fichier reçu."
+  },
+  {
+   "de": "Keine Frage angegeben",
+   "en": "No question specified",
+   "fr": "Aucune question indiquée"
+  },
+  {
+   "de": "Keine Frage angegeben.",
+   "en": "No question specified.",
+   "fr": "Aucune question indiquée."
+  },
+  {
+   "de": "Keine Frage übermittelt.",
+   "en": "No question submitted.",
+   "fr": "Aucune question transmise."
+  },
+  {
+   "de": "Keine Grenze angegeben.",
+   "en": "No limit specified.",
+   "fr": "Aucune limite indiquée."
+  },
+  {
+   "de": "Keine Gruppe angegeben.",
+   "en": "No group specified.",
+   "fr": "Aucun groupe indiqué."
+  },
+  {
+   "de": "Keine Jira-Freigabe.",
+   "en": "No Jira permission.",
+   "fr": "Aucune autorisation Jira."
+  },
+  {
+   "de": "Keine Lernnotiz",
+   "en": "No learning note",
+   "fr": "Aucune note d'apprentissage"
+  },
+  {
+   "de": "Keine Quelle angegeben.",
+   "en": "No source specified.",
+   "fr": "Aucune source indiquée."
+  },
+  {
+   "de": "Keine Suchbegriffe angegeben.",
+   "en": "No search terms specified.",
+   "fr": "Aucun terme de recherche indiqué."
+  },
+  {
+   "de": "Keine URL angegeben",
+   "en": "No URL specified",
+   "fr": "Aucune URL indiquée"
+  },
+  {
+   "de": "Keine Wiki-Seite vorhanden",
+   "en": "No wiki page available",
+   "fr": "Aucune page wiki disponible"
+  },
+  {
+   "de": "Keine gueltige CRM-Nummer (erwartet z.B. 'CRM-12345').",
+   "en": "Not a valid CRM number (expected e.g. 'CRM-12345').",
+   "fr": "Numéro CRM non valide (attendu p. ex. « CRM-12345 »)."
+  },
+  {
+   "de": "Keine gültige Sitzung.",
+   "en": "No valid session.",
+   "fr": "Aucune session valide."
+  },
+  {
+   "de": "Kennwort fehlt.",
+   "en": "Password missing.",
+   "fr": "Mot de passe manquant."
+  },
+  {
+   "de": "Kennwort konnte nicht gesetzt werden.",
+   "en": "The password could not be set.",
+   "fr": "Le mot de passe n'a pas pu être défini."
+  },
+  {
+   "de": "Kennwort muss zuerst geaendert werden.",
+   "en": "The password must be changed first.",
+   "fr": "Le mot de passe doit d'abord être modifié."
+  },
+  {
+   "de": "Kennwort und aktueller 2FA-Code erforderlich",
+   "en": "Password and current 2FA code required",
+   "fr": "Mot de passe et code 2FA actuel requis"
+  },
+  {
+   "de": "Kennwort zur Bestätigung erforderlich.",
+   "en": "Password required for confirmation.",
+   "fr": "Mot de passe requis pour confirmer."
+  },
+  {
+   "de": "Key nicht gefunden",
+   "en": "Key not found",
+   "fr": "Clé introuvable"
+  },
+  {
+   "de": "Knoten nicht gefunden",
+   "en": "Node not found",
+   "fr": "Nœud introuvable"
+  },
+  {
+   "de": "Konto wegen eines Sicherheitsverstosses gesperrt.",
+   "en": "Account locked due to a security violation.",
+   "fr": "Compte bloqué en raison d'une violation de sécurité."
+  },
+  {
+   "de": "Konto wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden.",
+   "en": "Account locked due to a security violation. Please contact a local administrator.",
+   "fr": "Compte bloqué en raison d'une violation de sécurité. Veuillez contacter un administrateur local."
+  },
+  {
+   "de": "Konto wegen eines Sicherheitsverstoßes gesperrt.",
+   "en": "Account locked due to a security violation.",
+   "fr": "Compte bloqué en raison d'une violation de sécurité."
+  },
+  {
+   "de": "Konversation nicht gefunden",
+   "en": "Conversation not found",
+   "fr": "Conversation introuvable"
+  },
+  {
+   "de": "Letztes Profil kann nicht gelöscht werden",
+   "en": "The last profile cannot be deleted",
+   "fr": "Le dernier profil ne peut pas être supprimé"
+  },
+  {
+   "de": "Liste 'benutzer' erwartet.",
+   "en": "List 'benutzer' expected.",
+   "fr": "Liste « benutzer » attendue."
+  },
+  {
+   "de": "Name darf nicht leer sein",
+   "en": "The name must not be empty",
+   "fr": "Le nom ne doit pas être vide"
+  },
+  {
+   "de": "Name fehlt",
+   "en": "Name missing",
+   "fr": "Nom manquant"
+  },
+  {
+   "de": "Negotiate-Token nicht lesbar",
+   "en": "Negotiate token cannot be read",
+   "fr": "Jeton Negotiate illisible"
+  },
+  {
+   "de": "Neues Kennwort und Bestätigung stimmen nicht überein.",
+   "en": "The new password and its confirmation do not match.",
+   "fr": "Le nouveau mot de passe et sa confirmation ne correspondent pas."
+  },
+  {
+   "de": "Newsfeed ist nicht aktiv.",
+   "en": "The newsfeed is not active.",
+   "fr": "Le fil d'actualités n'est pas actif."
+  },
+  {
+   "de": "Nicht authentifiziert",
+   "en": "Not authenticated",
+   "fr": "Non authentifié"
+  },
+  {
+   "de": "Nicht autorisiert",
+   "en": "Not authorized",
+   "fr": "Non autorisé"
+  },
+  {
+   "de": "Nicht berechtigt",
+   "en": "Not permitted",
+   "fr": "Non autorisé"
+  },
+  {
+   "de": "Nicht gefunden",
+   "en": "Not found",
+   "fr": "Introuvable"
+  },
+  {
+   "de": "Nicht gefunden.",
+   "en": "Not found.",
+   "fr": "Introuvable."
+  },
+  {
+   "de": "Nicht konfiguriert (Serveradresse fehlt).",
+   "en": "Not configured (server address missing).",
+   "fr": "Non configuré (adresse du serveur manquante)."
+  },
+  {
+   "de": "Nicht konfiguriert (URL/Token fehlen).",
+   "en": "Not configured (URL/token missing).",
+   "fr": "Non configuré (URL/jeton manquant)."
+  },
+  {
+   "de": "Nicht konfiguriert (Zugangsdaten fehlen).",
+   "en": "Not configured (credentials missing).",
+   "fr": "Non configuré (identifiants manquants)."
+  },
+  {
+   "de": "Nicht konfiguriert.",
+   "en": "Not configured.",
+   "fr": "Non configuré."
+  },
+  {
+   "de": "Nur Administratoren dürfen diese Daten abrufen.",
+   "en": "Only administrators may retrieve this data.",
+   "fr": "Seuls les administrateurs peuvent consulter ces données."
+  },
+  {
+   "de": "Nur Administratoren oder Wissens-Editoren dürfen diese Daten lesen.",
+   "en": "Only administrators or knowledge editors may read this data.",
+   "fr": "Seuls les administrateurs ou les éditeurs de connaissances peuvent lire ces données."
+  },
+  {
+   "de": "Nur Administratoren.",
+   "en": "Administrators only.",
+   "fr": "Réservé aux administrateurs."
+  },
+  {
+   "de": "Nur Jira-Tickets werden unterstuetzt.",
+   "en": "Only Jira tickets are supported.",
+   "fr": "Seuls les tickets Jira sont pris en charge."
+  },
+  {
+   "de": "Nur ein einfacher Ordnername – Unterordner werden im Ordner selbst angelegt",
+   "en": "Only a simple folder name – subfolders are created inside the folder itself",
+   "fr": "Uniquement un nom de dossier simple – les sous-dossiers sont créés dans le dossier lui-même"
+  },
+  {
+   "de": "Nur extract_*-Dateien können gelöscht werden",
+   "en": "Only extract_* files can be deleted",
+   "fr": "Seuls les fichiers extract_* peuvent être supprimés"
+  },
+  {
+   "de": "Nur fuer Administratoren.",
+   "en": "Administrators only.",
+   "fr": "Réservé aux administrateurs."
+  },
+  {
+   "de": "Nur fuer Wissens-Editoren.",
+   "en": "Knowledge editors only.",
+   "fr": "Réservé aux éditeurs de connaissances."
+  },
+  {
+   "de": "Nur globale Wissens-Editoren dürfen Speicherordner zuordnen",
+   "en": "Only global knowledge editors may assign storage folders",
+   "fr": "Seuls les éditeurs de connaissances globaux peuvent attribuer des dossiers de stockage"
+  },
+  {
+   "de": "Nur globale Wissens-Editoren dürfen die Editoren einer Gruppe ändern",
+   "en": "Only global knowledge editors may change the editors of a group",
+   "fr": "Seuls les éditeurs de connaissances globaux peuvent modifier les éditeurs d'un groupe"
+  },
+  {
+   "de": "Nur ueber HTTPS moeglich.",
+   "en": "Only possible via HTTPS.",
+   "fr": "Possible uniquement via HTTPS."
+  },
+  {
+   "de": "Nur von localhost erreichbar",
+   "en": "Only reachable from localhost",
+   "fr": "Accessible uniquement depuis localhost"
+  },
+  {
+   "de": "OData nicht konfiguriert.",
+   "en": "OData not configured.",
+   "fr": "OData non configuré."
+  },
+  {
+   "de": "Ordner existiert nicht",
+   "en": "The folder does not exist",
+   "fr": "Le dossier n'existe pas"
+  },
+  {
+   "de": "Ordner muss unter data/rag oder /mnt/rag liegen",
+   "en": "The folder must be under data/rag or /mnt/rag",
+   "fr": "Le dossier doit se trouver sous data/rag ou /mnt/rag"
+  },
+  {
+   "de": "Ordner nicht gefunden",
+   "en": "Folder not found",
+   "fr": "Dossier introuvable"
+  },
+  {
+   "de": "Paketbericht fehlgeschlagen",
+   "en": "Package report failed",
+   "fr": "Échec du rapport des paquets"
+  },
+  {
+   "de": "Parameter müssen ein JSON-Objekt sein.",
+   "en": "Parameters must be a JSON object.",
+   "fr": "Les paramètres doivent être un objet JSON."
+  },
+  {
+   "de": "Passwort zur Bestätigung erforderlich",
+   "en": "Password required for confirmation",
+   "fr": "Mot de passe requis pour confirmer"
+  },
+  {
+   "de": "Pfad fehlt",
+   "en": "Path missing",
+   "fr": "Chemin manquant"
+  },
+  {
+   "de": "Profil nicht gefunden",
+   "en": "Profile not found",
+   "fr": "Profil introuvable"
+  },
+  {
+   "de": "Programmzugang wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden.",
+   "en": "Program access locked due to a security violation. Please contact a local administrator.",
+   "fr": "Accès programme bloqué en raison d'une violation de sécurité. Veuillez contacter un administrateur local."
+  },
+  {
+   "de": "Prüfung fehlgeschlagen.",
+   "en": "Check failed.",
+   "fr": "Échec de la vérification."
+  },
+  {
+   "de": "Referenz nicht gefunden.",
+   "en": "Reference not found.",
+   "fr": "Référence introuvable."
+  },
+  {
+   "de": "Regel nicht gefunden.",
+   "en": "Rule not found.",
+   "fr": "Règle introuvable."
+  },
+  {
+   "de": "Rolle nicht gefunden",
+   "en": "Role not found",
+   "fr": "Rôle introuvable"
+  },
+  {
+   "de": "SAP ist nicht konfiguriert. Entweder hinterlegt ein Administrator einen gemeinsamen Lesezugang unter Einstellungen → SAP, oder du traegst deinen eigenen SAP-Zugang unter 'Mein SAP-Zugang' ein.",
+   "en": "SAP is not configured. Either an administrator stores a shared read access under Settings → SAP, or you enter your own SAP access under 'My SAP access'.",
+   "fr": "SAP n'est pas configuré. Soit un administrateur enregistre un accès en lecture commun sous Paramètres → SAP, soit vous saisissez votre propre accès SAP sous « Mon accès SAP »."
+  },
+  {
+   "de": "Seite enthält keinen lesbaren Text.",
+   "en": "The page contains no readable text.",
+   "fr": "La page ne contient aucun texte lisible."
+  },
+  {
+   "de": "Server nicht gefunden",
+   "en": "Server not found",
+   "fr": "Serveur introuvable"
+  },
+  {
+   "de": "Server und Domain erforderlich",
+   "en": "Server and domain required",
+   "fr": "Serveur et domaine requis"
+  },
+  {
+   "de": "Sicherheitsupdates abschalten braucht eine Root-Freigabe: Einstellungen → Sicherheit → Root-Freigaben, Eintrag freigeben und erneut ausführen.",
+   "en": "Switching off security updates requires a root approval: Settings → Security → Root approvals, approve the entry and run again.",
+   "fr": "La désactivation des mises à jour de sécurité nécessite une autorisation root : Paramètres → Sécurité → Autorisations root, approuvez l'entrée et réexécutez."
+  },
+  {
+   "de": "Space-Key fehlt.",
+   "en": "Space key missing.",
+   "fr": "Clé d'espace manquante."
+  },
+  {
+   "de": "Speichern fehlgeschlagen",
+   "en": "Saving failed",
+   "fr": "Échec de l'enregistrement"
+  },
+  {
+   "de": "Spracheingabe nicht erkannt",
+   "en": "Speech input not recognized",
+   "fr": "Saisie vocale non reconnue"
+  },
+  {
+   "de": "Spracherkennung fehlgeschlagen",
+   "en": "Speech recognition failed",
+   "fr": "Échec de la reconnaissance vocale"
+  },
+  {
+   "de": "Spracherkennung ist auf diesem Server nicht eingerichtet",
+   "en": "Speech recognition is not set up on this server",
+   "fr": "La reconnaissance vocale n'est pas configurée sur ce serveur"
+  },
+  {
+   "de": "Standort nicht gefunden",
+   "en": "Location not found",
+   "fr": "Emplacement introuvable"
+  },
+  {
+   "de": "Support-Assistent ist nicht aktiv.",
+   "en": "The support assistant is not active.",
+   "fr": "L'assistant de support n'est pas actif."
+  },
+  {
+   "de": "System-Skill oder nicht gefunden",
+   "en": "System skill or not found",
+   "fr": "Compétence système ou introuvable"
+  },
+  {
+   "de": "Systemauslastung konnte nicht gemessen werden",
+   "en": "The system load could not be measured",
+   "fr": "La charge du système n'a pas pu être mesurée"
+  },
+  {
+   "de": "Timeout (Zeitüberschreitung) – Server antwortet nicht innerhalb von 15s",
+   "en": "Timeout – the server does not respond within 15 s",
+   "fr": "Délai dépassé – le serveur ne répond pas dans les 15 s"
+  },
+  {
+   "de": "Timeout – Server antwortet nicht",
+   "en": "Timeout – the server does not respond",
+   "fr": "Délai dépassé – le serveur ne répond pas"
+  },
+  {
+   "de": "Token unbekannt, pausiert oder widerrufen.",
+   "en": "Token unknown, paused or revoked.",
+   "fr": "Jeton inconnu, suspendu ou révoqué."
+  },
+  {
+   "de": "Ungültige Anfrage",
+   "en": "Invalid request",
+   "fr": "Requête non valide"
+  },
+  {
+   "de": "Ungültige Domain",
+   "en": "Invalid domain",
+   "fr": "Domaine non valide"
+  },
+  {
+   "de": "Ungültige E-Mail-Adresse",
+   "en": "Invalid email address",
+   "fr": "Adresse e-mail non valide"
+  },
+  {
+   "de": "Ungültiger Header-Name für den API-Schlüssel.",
+   "en": "Invalid header name for the API key.",
+   "fr": "Nom d'en-tête non valide pour la clé API."
+  },
+  {
+   "de": "Ungültiger JSON-Body.",
+   "en": "Invalid JSON body.",
+   "fr": "Corps JSON non valide."
+  },
+  {
+   "de": "Ungültiger JSON-Body. Tipp für Windows CMD: Doppelte Anführungszeichen escapen, z.B. {\\\"text\\\": \\\"...\\\"}",
+   "en": "Invalid JSON body. Tip for Windows CMD: escape double quotes, e.g. {\\\"text\\\": \\\"...\\\"}",
+   "fr": "Corps JSON non valide. Astuce pour Windows CMD : échappez les guillemets doubles, p. ex. {\\\"text\\\": \\\"...\\\"}"
+  },
+  {
+   "de": "Ungültiger JSON-Rumpf",
+   "en": "Invalid JSON body",
+   "fr": "Corps JSON non valide"
+  },
+  {
+   "de": "Ungültiger Name",
+   "en": "Invalid name",
+   "fr": "Nom non valide"
+  },
+  {
+   "de": "Ungültiger Ordnername",
+   "en": "Invalid folder name",
+   "fr": "Nom de dossier non valide"
+  },
+  {
+   "de": "Ungültiger Pfad",
+   "en": "Invalid path",
+   "fr": "Chemin non valide"
+  },
+  {
+   "de": "Ungültiger Private Key (kein PEM-Format)",
+   "en": "Invalid private key (not in PEM format)",
+   "fr": "Clé privée non valide (pas au format PEM)"
+  },
+  {
+   "de": "Ungültiger Rumpf",
+   "en": "Invalid body",
+   "fr": "Corps non valide"
+  },
+  {
+   "de": "Ungültiger Rumpf.",
+   "en": "Invalid body.",
+   "fr": "Corps non valide."
+  },
+  {
+   "de": "Ungültiger Wert",
+   "en": "Invalid value",
+   "fr": "Valeur non valide"
+  },
+  {
+   "de": "Ungültiger Zielordner",
+   "en": "Invalid target folder",
+   "fr": "Dossier cible non valide"
+  },
+  {
+   "de": "Ungültiger oder fehlender API-Key",
+   "en": "Invalid or missing API key",
+   "fr": "Clé API non valide ou manquante"
+  },
+  {
+   "de": "Ungültiger oder fehlender Delegations-Schlüssel. Neu erzeugen unter /claude → Mein Delegations-Schlüssel.",
+   "en": "Invalid or missing delegation key. Create a new one under /claude → My delegation key.",
+   "fr": "Clé de délégation non valide ou manquante. Créez-en une nouvelle sous /claude → Ma clé de délégation."
+  },
+  {
+   "de": "Ungültiger übergeordneter Ordner",
+   "en": "Invalid parent folder",
+   "fr": "Dossier parent non valide"
+  },
+  {
+   "de": "Ungültiges Rating",
+   "en": "Invalid rating",
+   "fr": "Évaluation non valide"
+  },
+  {
+   "de": "Ungültiges Zertifikat (kein PEM-Format)",
+   "en": "Invalid certificate (not in PEM format)",
+   "fr": "Certificat non valide (pas au format PEM)"
+  },
+  {
+   "de": "Unter-Agenten direkt starten darf nur der lokale Administrator.",
+   "en": "Only the local administrator may start sub-agents directly.",
+   "fr": "Seul l'administrateur local peut démarrer directement des sous-agents."
+  },
+  {
+   "de": "Upload zu groß (max. 200 MB gesamt).",
+   "en": "Upload too large (max. 200 MB in total).",
+   "fr": "Envoi trop volumineux (200 Mo au total max.)."
+  },
+  {
+   "de": "VEMAS ist nicht konfiguriert.",
+   "en": "VEMAS is not configured.",
+   "fr": "VEMAS n'est pas configuré."
+  },
+  {
+   "de": "VEMAS ist nicht konfiguriert. Ein Administrator hinterlegt Serveradresse und Zugang unter Einstellungen → Vemas.",
+   "en": "VEMAS is not configured. An administrator stores the server address and access under Settings → Vemas.",
+   "fr": "VEMAS n'est pas configuré. Un administrateur enregistre l'adresse du serveur et l'accès sous Paramètres → Vemas."
+  },
+  {
+   "de": "Vision-Skill nicht geladen",
+   "en": "Vision skill not loaded",
+   "fr": "Compétence vision non chargée"
+  },
+  {
+   "de": "Von dieser Seite liess sich kein Text gewinnen.",
+   "en": "No text could be obtained from this page.",
+   "fr": "Aucun texte n'a pu être extrait de cette page."
+  },
+  {
+   "de": "Vorlage nicht gefunden",
+   "en": "Template not found",
+   "fr": "Modèle introuvable"
+  },
+  {
+   "de": "Vorlage nicht gefunden.",
+   "en": "Template not found.",
+   "fr": "Modèle introuvable."
+  },
+  {
+   "de": "Watcher nicht gefunden",
+   "en": "Watcher not found",
+   "fr": "Watcher introuvable"
+  },
+  {
+   "de": "Wurzelordner können hier nicht umbenannt werden",
+   "en": "Root folders cannot be renamed here",
+   "fr": "Les dossiers racine ne peuvent pas être renommés ici"
+  },
+  {
+   "de": "Zertifikat gespeichert. Bitte Service neu starten.",
+   "en": "Certificate saved. Please restart the service.",
+   "fr": "Certificat enregistré. Veuillez redémarrer le service."
+  },
+  {
+   "de": "Zertifikat nicht gefunden",
+   "en": "Certificate not found",
+   "fr": "Certificat introuvable"
+  },
+  {
+   "de": "Zu viele Anmeldeversuche von dieser Adresse. Bitte in einigen Sekunden erneut versuchen.",
+   "en": "Too many sign-in attempts from this address. Please try again in a few seconds.",
+   "fr": "Trop de tentatives de connexion depuis cette adresse. Veuillez réessayer dans quelques secondes."
+  },
+  {
+   "de": "Zu viele Fehlversuche von dieser Adresse. Bitte warte 5 Minuten.",
+   "en": "Too many failed attempts from this address. Please wait 5 minutes.",
+   "fr": "Trop de tentatives échouées depuis cette adresse. Veuillez patienter 5 minutes."
+  },
+  {
+   "de": "Zu viele Login-Versuche. Bitte warte 5 Minuten.",
+   "en": "Too many sign-in attempts. Please wait 5 minutes.",
+   "fr": "Trop de tentatives de connexion. Veuillez patienter 5 minutes."
+  },
+  {
+   "de": "Zu viele Versuche. Bitte warte 5 Minuten.",
+   "en": "Too many attempts. Please wait 5 minutes.",
+   "fr": "Trop de tentatives. Veuillez patienter 5 minutes."
+  },
+  {
+   "de": "Zugriff verweigert",
+   "en": "Access denied",
+   "fr": "Accès refusé"
+  },
+  {
+   "de": "Zum Anzeigen bitte mit deinem Kennwort bestätigen.",
+   "en": "To display, please confirm with your password.",
+   "fr": "Pour afficher, veuillez confirmer avec votre mot de passe."
+  },
+  {
+   "de": "Zusammenfassung fehlgeschlagen.",
+   "en": "Summary failed.",
+   "fr": "Échec du résumé."
+  },
+  {
+   "de": "Zustand der Serverüberwachung nicht lesbar",
+   "en": "The server monitoring state cannot be read",
+   "fr": "L'état de la surveillance du serveur est illisible"
+  },
+  {
+   "de": "Zwei-Faktor-Anmeldung ist aktiv – Passwort zur Bestätigung erforderlich",
+   "en": "Two-factor sign-in is active – password required for confirmation",
+   "fr": "La connexion à deux facteurs est active – mot de passe requis pour confirmer"
+  },
+  {
+   "de": "`fid` fehlt.",
+   "en": "`fid` missing.",
+   "fr": "`fid` manquant."
+  },
+  {
+   "de": "`ids` fehlt oder ist keine Liste.",
+   "en": "`ids` missing or not a list.",
+   "fr": "`ids` manquant ou n'est pas une liste."
+  },
+  {
+   "de": "cert und key erforderlich",
+   "en": "cert and key required",
+   "fr": "cert et key requis"
+  },
+  {
+   "de": "crm fehlt (erwartet z.B. 'CRM-12345').",
+   "en": "crm missing (expected e.g. 'CRM-12345').",
+   "fr": "crm manquant (attendu p. ex. « CRM-12345 »)."
+  },
+  {
+   "de": "crm fehlt.",
+   "en": "crm missing.",
+   "fr": "crm manquant."
+  },
+  {
+   "de": "edge-tts nicht installiert",
+   "en": "edge-tts not installed",
+   "fr": "edge-tts non installé"
+  },
+  {
+   "de": "einheit/stufe/zeitraum ungueltig",
+   "en": "einheit/stufe/zeitraum invalid",
+   "fr": "einheit/stufe/zeitraum non valide"
+  },
+  {
+   "de": "groups darf nur Gruppenkennungen enthalten",
+   "en": "groups may only contain group IDs",
+   "fr": "groups ne doit contenir que des identifiants de groupe"
+  },
+  {
+   "de": "ids fehlt",
+   "en": "ids missing",
+   "fr": "ids manquant"
+  },
+  {
+   "de": "kein Bild",
+   "en": "no image",
+   "fr": "aucune image"
+  },
+  {
+   "de": "kein Logo",
+   "en": "no logo",
+   "fr": "aucun logo"
+  },
+  {
+   "de": "kein Symbol",
+   "en": "no icon",
+   "fr": "aucune icône"
+  },
+  {
+   "de": "kein Video",
+   "en": "no video",
+   "fr": "aucune vidéo"
+  },
+  {
+   "de": "keine gültige Gruppe angegeben",
+   "en": "no valid group specified",
+   "fr": "aucun groupe valide indiqué"
+  },
+  {
+   "de": "key fehlt",
+   "en": "key missing",
+   "fr": "key manquant"
+  },
+  {
+   "de": "key fehlt.",
+   "en": "key missing.",
+   "fr": "key manquant."
+  },
+  {
+   "de": "key und decision (allow|deny|pending) erforderlich",
+   "en": "key and decision (allow|deny|pending) required",
+   "fr": "key et decision (allow|deny|pending) requis"
+  },
+  {
+   "de": "ldap3 nicht installiert",
+   "en": "ldap3 not installed",
+   "fr": "ldap3 non installé"
+  },
+  {
+   "de": "nicht erreichbar",
+   "en": "not reachable",
+   "fr": "non joignable"
+  },
+  {
+   "de": "nicht gefunden",
+   "en": "not found",
+   "fr": "introuvable"
+  },
+  {
+   "de": "old_name und new_name erforderlich",
+   "en": "old_name and new_name required",
+   "fr": "old_name et new_name requis"
+  },
+  {
+   "de": "page_id, page_ids oder space erforderlich.",
+   "en": "page_id, page_ids or space required.",
+   "fr": "page_id, page_ids ou space requis."
+  },
+  {
+   "de": "pfade: keine gültige Liste.",
+   "en": "pfade: not a valid list.",
+   "fr": "pfade : liste non valide."
+  },
+  {
+   "de": "phone fehlt.",
+   "en": "phone missing.",
+   "fr": "phone manquant."
+  },
+  {
+   "de": "quelle fehlt",
+   "en": "quelle missing",
+   "fr": "quelle manquant"
+  },
+  {
+   "de": "quelle muss lokal oder fern sein",
+   "en": "quelle must be lokal or fern",
+   "fr": "quelle doit être lokal ou fern"
+  },
+  {
+   "de": "query fehlt",
+   "en": "query missing",
+   "fr": "query manquant"
+  },
+  {
+   "de": "sql fehlt.",
+   "en": "sql missing.",
+   "fr": "sql manquant."
+  },
+  {
+   "de": "ziel fehlt – ein Abruf-Schluessel gilt nur fuer eine bestimmte Adresse",
+   "en": "ziel missing – a retrieval key only applies to one specific address",
+   "fr": "ziel manquant – une clé de récupération ne vaut que pour une adresse précise"
+  },
+  {
+   "de": "ziele fehlt (Liste von Adressen)",
+   "en": "ziele missing (list of addresses)",
+   "fr": "ziele manquant (liste d'adresses)"
+  },
+  {
+   "de": "👍 Danke! Das freut mich.",
+   "en": "👍 Thank you! I'm glad.",
+   "fr": "👍 Merci ! Cela me fait plaisir."
+  },
+  {
+   "de": "'{w1}' ist Speicherordner einer Wissensgruppe – umbenennen nur in der Verwaltung",
+   "en": "'{w1}' is the storage folder of a knowledge group – rename it only in the administration",
+   "fr": "« {w1} » est le dossier de stockage d'un groupe de connaissances – renommez-le uniquement dans l'administration"
+  },
+  {
+   "de": "'{w1}' ist Speicherordner einer Wissensgruppe – verschieben nur in der Verwaltung",
+   "en": "'{w1}' is the storage folder of a knowledge group – move it only in the administration",
+   "fr": "« {w1} » est le dossier de stockage d'un groupe de connaissances – déplacez-le uniquement dans l'administration"
+  },
+  {
+   "de": "Abruf fehlgeschlagen: {w1}",
+   "en": "Retrieval failed: {w1}",
+   "fr": "Échec de la récupération : {w1}"
+  },
+  {
+   "de": "Analyse fehlgeschlagen: {w1}",
+   "en": "Analysis failed: {w1}",
+   "fr": "Échec de l'analyse : {w1}"
+  },
+  {
+   "de": "Anlegen fehlgeschlagen: {w1}",
+   "en": "Creation failed: {w1}",
+   "fr": "Échec de la création : {w1}"
+  },
+  {
+   "de": "Auswertung fehlgeschlagen: {w1}",
+   "en": "Evaluation failed: {w1}",
+   "fr": "Échec de l'évaluation : {w1}"
+  },
+  {
+   "de": "Bridge nicht erreichbar: {w1}",
+   "en": "Bridge not reachable: {w1}",
+   "fr": "Pont non joignable : {w1}"
+  },
+  {
+   "de": "Das SQL ist länger als {w1} Zeichen.",
+   "en": "The SQL is longer than {w1} characters.",
+   "fr": "Le SQL dépasse {w1} caractères."
+  },
+  {
+   "de": "Der Schlüssel dieses Kontos liegt geschützt beim Root-Dienst des Servers und lässt sich in der Oberfläche nicht anzeigen. Als root auf dem Server: jarvis-broker-admin totp-zeigen {w1}",
+   "en": "This account's key is kept protected by the server's root service and cannot be displayed in the interface. As root on the server: jarvis-broker-admin totp-zeigen {w1}",
+   "fr": "La clé de ce compte est conservée de manière protégée par le service root du serveur et ne peut pas être affichée dans l'interface. En tant que root sur le serveur : jarvis-broker-admin totp-zeigen {w1}"
+  },
+  {
+   "de": "Der Titel ist zu lang (max. {w1} Zeichen).",
+   "en": "The title is too long (max. {w1} characters).",
+   "fr": "Le titre est trop long ({w1} caractères max.)."
+  },
+  {
+   "de": "Die Einstellung ist gespeichert, aber die persönlichen Kennwörter ließen sich nicht entfernen: {w1}",
+   "en": "The setting is saved, but the personal passwords could not be removed: {w1}",
+   "fr": "Le paramètre est enregistré, mais les mots de passe personnels n'ont pas pu être supprimés : {w1}"
+  },
+  {
+   "de": "Die Einstellung ist gespeichert, aber die persönlichen Zugänge ließen sich nicht entfernen: {w1}",
+   "en": "The setting is saved, but the personal accesses could not be removed: {w1}",
+   "fr": "Le paramètre est enregistré, mais les accès personnels n'ont pas pu être supprimés : {w1}"
+  },
+  {
+   "de": "Die Frage ist länger als {w1} Zeichen.",
+   "en": "The question is longer than {w1} characters.",
+   "fr": "La question dépasse {w1} caractères."
+  },
+  {
+   "de": "Die Pruefung konnte nicht laufen: {w1}",
+   "en": "The check could not run: {w1}",
+   "fr": "La vérification n'a pas pu s'exécuter : {w1}"
+  },
+  {
+   "de": "Endpunkt nicht gefunden: {w1}",
+   "en": "Endpoint not found: {w1}",
+   "fr": "Point de terminaison introuvable : {w1}"
+  },
+  {
+   "de": "Erzeugen fehlgeschlagen ({w1})",
+   "en": "Generation failed ({w1})",
+   "fr": "Échec de la génération ({w1})"
+  },
+  {
+   "de": "Fallback-Loeschen fehlgeschlagen: {w1}",
+   "en": "Fallback deletion failed: {w1}",
+   "fr": "Échec de la suppression de secours : {w1}"
+  },
+  {
+   "de": "Format .{w1} nicht erlaubt",
+   "en": "Format .{w1} not allowed",
+   "fr": "Format .{w1} non autorisé"
+  },
+  {
+   "de": "Format .{w1} nicht erlaubt (nur .docx oder .dotx)",
+   "en": "Format .{w1} not allowed (only .docx or .dotx)",
+   "fr": "Format .{w1} non autorisé (uniquement .docx ou .dotx)"
+  },
+  {
+   "de": "Format .{w1} nicht erlaubt (nur .pptx oder .potx)",
+   "en": "Format .{w1} not allowed (only .pptx or .potx)",
+   "fr": "Format .{w1} non autorisé (uniquement .pptx ou .potx)"
+  },
+  {
+   "de": "Format nicht unterstützt: '{w1}'. Erlaubt: {w2}",
+   "en": "Format not supported: '{w1}'. Allowed: {w2}",
+   "fr": "Format non pris en charge : « {w1} ». Autorisés : {w2}"
+  },
+  {
+   "de": "Fragen-Generierung fuer '{w1}' nicht unterstuetzt",
+   "en": "Question generation for '{w1}' not supported",
+   "fr": "Génération de questions pour « {w1} » non prise en charge"
+  },
+  {
+   "de": "Freigabe konnte nicht getrennt werden: {w1}",
+   "en": "The share could not be disconnected: {w1}",
+   "fr": "Le partage n'a pas pu être déconnecté : {w1}"
+  },
+  {
+   "de": "Freigabe konnte nicht verbunden werden: {w1}",
+   "en": "The share could not be connected: {w1}",
+   "fr": "Le partage n'a pas pu être connecté : {w1}"
+  },
+  {
+   "de": "Fuer '{w1}' bist du nicht freigeschaltet.",
+   "en": "You are not enabled for '{w1}'.",
+   "fr": "Vous n'êtes pas autorisé pour « {w1} »."
+  },
+  {
+   "de": "Jira nicht erreichbar: {w1}",
+   "en": "Jira not reachable: {w1}",
+   "fr": "Jira non joignable : {w1}"
+  },
+  {
+   "de": "Keine Berechtigung für die Wissensgruppe '{w1}'",
+   "en": "No permission for the knowledge group '{w1}'",
+   "fr": "Aucune autorisation pour le groupe de connaissances « {w1} »"
+  },
+  {
+   "de": "Konnte nicht gespeichert werden: {w1}",
+   "en": "Could not be saved: {w1}",
+   "fr": "Impossible d'enregistrer : {w1}"
+  },
+  {
+   "de": "Loeschen fehlgeschlagen ({w1})",
+   "en": "Deletion failed ({w1})",
+   "fr": "Échec de la suppression ({w1})"
+  },
+  {
+   "de": "Löschen fehlgeschlagen: {w1}",
+   "en": "Deletion failed: {w1}",
+   "fr": "Échec de la suppression : {w1}"
+  },
+  {
+   "de": "Manifest fehlgeschlagen: {w1}",
+   "en": "Manifest failed: {w1}",
+   "fr": "Échec du manifeste : {w1}"
+  },
+  {
+   "de": "Nur Wissens-Ordner unter '{w1}/' können gelöscht werden",
+   "en": "Only knowledge folders under '{w1}/' can be deleted",
+   "fr": "Seuls les dossiers de connaissances sous « {w1}/ » peuvent être supprimés"
+  },
+  {
+   "de": "Nur Wissens-Ordner unter '{w1}/' können umbenannt werden",
+   "en": "Only knowledge folders under '{w1}/' can be renamed",
+   "fr": "Seuls les dossiers de connaissances sous « {w1}/ » peuvent être renommés"
+  },
+  {
+   "de": "Ordner '{w1}' existiert bereits",
+   "en": "Folder '{w1}' already exists",
+   "fr": "Le dossier « {w1} » existe déjà"
+  },
+  {
+   "de": "Ordner '{w1}' ist den gewählten Wissensgruppen nicht zugeordnet",
+   "en": "Folder '{w1}' is not assigned to the selected knowledge groups",
+   "fr": "Le dossier « {w1} » n'est pas attribué aux groupes de connaissances choisis"
+  },
+  {
+   "de": "Ordner '{w1}' nicht konfiguriert",
+   "en": "Folder '{w1}' not configured",
+   "fr": "Dossier « {w1} » non configuré"
+  },
+  {
+   "de": "Ordner '{w1}' nicht verfuegbar",
+   "en": "Folder '{w1}' not available",
+   "fr": "Dossier « {w1} » non disponible"
+  },
+  {
+   "de": "Ordner nicht lesbar: {w1}",
+   "en": "Folder cannot be read: {w1}",
+   "fr": "Dossier illisible : {w1}"
+  },
+  {
+   "de": "Parameter sind kein gültiges JSON: {w1}",
+   "en": "Parameters are not valid JSON: {w1}",
+   "fr": "Les paramètres ne sont pas un JSON valide : {w1}"
+  },
+  {
+   "de": "Protokoll nicht lesbar: {w1}",
+   "en": "Log cannot be read: {w1}",
+   "fr": "Journal illisible : {w1}"
+  },
+  {
+   "de": "Speichern fehlgeschlagen ({w1})",
+   "en": "Saving failed ({w1})",
+   "fr": "Échec de l'enregistrement ({w1})"
+  },
+  {
+   "de": "Sprachtranskription fehlgeschlagen: {w1}",
+   "en": "Speech transcription failed: {w1}",
+   "fr": "Échec de la transcription vocale : {w1}"
+  },
+  {
+   "de": "Standort nicht erreichbar: {w1}",
+   "en": "Location not reachable: {w1}",
+   "fr": "Emplacement non joignable : {w1}"
+  },
+  {
+   "de": "Transkription fehlgeschlagen: {w1}",
+   "en": "Transcription failed: {w1}",
+   "fr": "Échec de la transcription : {w1}"
+  },
+  {
+   "de": "Umbenennen fehlgeschlagen: {w1}",
+   "en": "Renaming failed: {w1}",
+   "fr": "Échec du renommage : {w1}"
+  },
+  {
+   "de": "Unerwartete Antwort (HTTP {w1}). Ist die Adresse wirklich ein Jarvis-Standort?",
+   "en": "Unexpected response (HTTP {w1}). Is the address really a Jarvis location?",
+   "fr": "Réponse inattendue (HTTP {w1}). L'adresse est-elle vraiment un emplacement Jarvis ?"
+  },
+  {
+   "de": "Verbindung fehlgeschlagen: {w1}",
+   "en": "Connection failed: {w1}",
+   "fr": "Échec de la connexion : {w1}"
+  },
+  {
+   "de": "Verschieben fehlgeschlagen: {w1}",
+   "en": "Moving failed: {w1}",
+   "fr": "Échec du déplacement : {w1}"
+  },
+  {
+   "de": "Zielordner '{w1}' existiert nicht",
+   "en": "Target folder '{w1}' does not exist",
+   "fr": "Le dossier cible « {w1} » n'existe pas"
+  },
+  {
+   "de": "Zielordner '{w1}' ist kein Wissens-Ordner",
+   "en": "Target folder '{w1}' is not a knowledge folder",
+   "fr": "Le dossier cible « {w1} » n'est pas un dossier de connaissances"
+  },
+  {
+   "de": "Zu viele Fehlversuche für dieses Konto. Bitte warte {w1} Minute{w2}.",
+   "en": "Too many failed attempts for this account. Please wait {w1} minute(s).",
+   "fr": "Trop de tentatives échouées pour ce compte. Veuillez patienter {w1} minute(s)."
+  },
+  {
+   "de": "{w1}: nur https-Adressen.",
+   "en": "{w1}: https addresses only.",
+   "fr": "{w1} : adresses https uniquement."
+  },
+  {
+   "de": "Übergeordneter Ordner '{w1}' nicht konfiguriert",
+   "en": "Parent folder '{w1}' not configured",
+   "fr": "Dossier parent « {w1} » non configuré"
+  },
+  {
+   "de": "✏️ History auf {w1} Nachrichten gekürzt ({w2} Einträge entfernt)",
+   "en": "✏️ History shortened to {w1} messages ({w2} entries removed)",
+   "fr": "✏️ Historique réduit à {w1} messages ({w2} entrées supprimées)"
+  },
+  {
+   "de": "📄 Lese PDF {w1} – bei beschaedigtem Text mit Texterkennung, das kann etwas dauern…",
+   "en": "📄 Reading PDF {w1} – if the text is damaged, with text recognition; this may take a moment…",
+   "fr": "📄 Lecture du PDF {w1} – en cas de texte endommagé avec reconnaissance de texte, cela peut prendre un moment…"
+  },
+  {
+   "de": "📎 Datei {w1} bereitgestellt",
+   "en": "📎 File {w1} provided",
+   "fr": "📎 Fichier {w1} mis à disposition"
+  },
+  {
+   "de": "🔧 Danke für dein Feedback! Ich habe analysiert, warum die Antwort {w1} war, und eine Lernnotiz gespeichert.",
+   "en": "🔧 Thank you for your feedback! I analysed why the answer was {w1} and saved a learning note.",
+   "fr": "🔧 Merci pour votre retour ! J'ai analysé pourquoi la réponse était {w1} et enregistré une note d'apprentissage."
+  },
+  {
+   "de": "🧠 Vision LLM-Aktion für {w1}: {w2}",
+   "en": "🧠 Vision LLM action for {w1}: {w2}",
+   "fr": "🧠 Action LLM vision pour {w1} : {w2}"
+  }
+ ]
+}

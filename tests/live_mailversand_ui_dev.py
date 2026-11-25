@@ -219,6 +219,12 @@ def main(benutzer: str) -> int:
                         t_fr = js("document.getElementById('mv-result').textContent") or ""
                         check("FR: Fehlermeldung des Servers französisch, kein deutscher Satz",
                               "non valide" in t_fr and "Keine" not in t_fr and "gültige" not in t_fr, t_fr)
+                        # Servertexte allgemein (backend/sprache.py): der Browser
+                        # schickt nach dem Klick das Cookie mit, der Server antwortet
+                        # franzoesisch – hier an einer Abweisung ohne Anmeldekopf.
+                        ab = js("fetch('/api/broker/mailversand/status').then(r=>r.json()).then(d=>d.detail||'')") or ""
+                        check("FR: Abweisung des Servers französisch (Cookie aus dem Klick)",
+                              ab == "Non authentifié", ab)
             st, jetzt = stand(tok)
             check("nichts gespeichert: Server-Stand wie vorgefunden", st == 200 and jetzt == vorher,
                   f"{st} {jetzt}")

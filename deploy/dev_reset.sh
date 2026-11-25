@@ -36,7 +36,8 @@
 #   jarvis-dev-reset --wiederherstellen [--kein-neustart]
 #                                        nur die neueste Sicherung zurueckholen
 #   zusaetzlich: --dir <pfad> (Vorgabe /opt/jarvis), --dienst <name>,
-#                --kein-neustart
+#                --broker <name> (Vorgabe jarvis-broker.service, "" = keiner),
+#                --kein-neustart (weder Broker noch Dienst)
 # Exit: 0 = zurueckgesetzt (oder nichts zu tun) · 2 = falscher Aufruf/Umgebung
 #       3 = Abweichungen vorhanden, NICHT zurueckgesetzt · 1 = Fehler
 
@@ -48,6 +49,16 @@ MODUS="sichern"          # sichern | pruefen | uebernehmen
 NEUSTART=1
 WIEDERHER=0
 SICHERUNG=""        # von --uebernehmen gesetzt; sonst die neueste
+# Der Root-Broker hat eine EIGENE Code-Kopie und zieht beim Start die signierte
+# Quelle fuer den AIDE-Abgleich nach (broker_installieren.sh, Modus 'lokal').
+# Bis 2026-11-25 startete dieses Skript nur den Dienst neu: nach jedem c+p lief
+# der Broker mit altem Code weiter, und die Quelle stand auf dem VORIGEN Commit
+# – die naechtliche Integritaetspruefung haette jede Datei des neuen Commits als
+# "nicht erklaert" gemeldet (gesehen nach 46d0d36a: 34 Dateien).
+BROKER="jarvis-broker.service"
+# Ueberschreibbar wie im Installer (Sandkasten-Probe); Vorgaben = DEV
+QUELLE_DIR="${JARVIS_BROKER_CACHE:-/var/lib/jarvis-broker/quelle}"
+BROKER_SOCK="${JARVIS_BROKER_SOCK:-/run/jarvis-broker.sock}"
 INSTALLIERT="/usr/local/sbin/jarvis-dev-reset"   # feste, root-eigene Kopie
 
 meldung() { echo "[DEV-Reset] $*"; }
@@ -59,6 +70,7 @@ while [ $# -gt 0 ]; do
         --uebernehmen)   MODUS="uebernehmen"; shift ;;
         --dir)           DIR="${2:-}"; shift 2 ;;
         --dienst)        DIENST="${2:-}"; shift 2 ;;
+        --broker)        BROKER="${2-}"; shift 2 ;;
         --kein-neustart) NEUSTART=0; shift ;;
         --wiederherstellen) WIEDERHER=1; shift ;;
         *) echo "Unbekanntes Argument: $1" >&2; exit 2 ;;
@@ -251,6 +263,35 @@ ROOTIG=$(find "$DIR/.git" -user root | wc -l)
 if [ "$ROOTIG" -gt 0 ]; then
     meldung "$ROOTIG root-eigene Datei(en) in .git – richtiggestellt."
     chown -R "$NUTZER":"$NUTZER" "$DIR/.git"
+fi
+
+if [ "$NEUSTART" = "1" ] && [ -n "$BROKER" ] && systemctl cat "$BROKER" >/dev/null 2>&1; then
+    # Broker VOR dem Dienst (Register: so gibt es keinen Moment, in dem das
+    # Backend neuer ist als der Broker). Danach braucht der Socket einige
+    # Sekunden – wer sofort weitermacht, sieht 502.
+    systemctl restart "$BROKER"
+    RC=$?
+    [ "$RC" -eq 0 ] || fehler "Neustart von $BROKER fehlgeschlagen (Exit $RC) – Dienst NICHT neu gestartet"
+    for _ in $(seq 1 30); do
+        systemctl is-active -q "$BROKER" && [ -S "$BROKER_SOCK" ] && break
+        sleep 2
+    done
+    B_AKTIV="$(systemctl is-active "$BROKER")"
+    meldung "$BROKER: $B_AKTIV"
+    [ "$B_AKTIV" = "active" ] || fehler "$BROKER laeuft nach dem Neustart nicht"
+    # Steht die signierte Quelle jetzt auf dem neuen Stand? Die Quelle gehoert
+    # root (kein git im Baum des Dienstbenutzers, Befund K1).
+    if [ -d "$QUELLE_DIR/.git" ]; then
+        Q="$(HOME=/root GIT_CONFIG_NOSYSTEM=1 git -C "$QUELLE_DIR" rev-parse HEAD 2>/dev/null)"
+        SOLL="$(g rev-parse HEAD)"
+        if [ -n "$Q" ] && [ "$Q" = "$SOLL" ]; then
+            meldung "Signierte Quelle (AIDE-Abgleich): ${Q:0:8} = HEAD"
+        else
+            meldung "WARNUNG: signierte Quelle steht auf ${Q:0:8} statt ${SOLL:0:8} – die naechtliche"
+            meldung "  Integritaetspruefung meldet den neuen Code als nicht erklaert. Grund im Journal:"
+            meldung "  journalctl -u $BROKER | grep Broker-Installation"
+        fi
+    fi
 fi
 
 if [ "$NEUSTART" = "1" ]; then

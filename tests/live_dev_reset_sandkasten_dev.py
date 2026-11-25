@@ -16,6 +16,10 @@ Dienstbenutzer) - nie gegen /opt/jarvis:
      Leerzeichen, unverfolgt), nennt die geloeschte Datei, setzt zurueck
      (Exit 0) - die geloeschte Datei ist danach wieder da
   3. die Sicherung enthaelt die geaenderten Inhalte (nicht die alten)
+  5. Neustart (seit 2026-11-25): Broker VOR dem Dienst, danach die Meldung, ob
+     die signierte Quelle (AIDE-Abgleich) auf dem neuen HEAD steht – bei einer
+     alten Quelle eine WARNUNG; ohne Broker (--broker "") kein Broker-Neustart.
+     systemctl ist dafuer ein Ersatz im PATH, der jeden Aufruf mitschreibt.
 
 Aufruf AUF DEV als root (das Skript verlangt root und eine root-eigene Kopie):
     python3 /opt/jarvis/tests/live_dev_reset_sandkasten_dev.py [--skript <pfad>]
@@ -179,6 +183,54 @@ try:
                   not [n for n in namen if '"' in n or "->" in n], str(sorted(namen)))
     else:
         check("Sicherung lesbar", False, str(ARCHIVE))
+
+    # ── 5. Neustart: Broker vor Dienst, Quelle geprueft ───────────────────
+    print("\n5. Neustart")
+    import socket
+    ERSATZ = BASIS / "bin"
+    ERSATZ.mkdir()
+    PROTO = BASIS / "systemctl.log"
+    (ERSATZ / "systemctl").write_text(
+        "#!/bin/bash\necho \"$*\" >> %s\n"
+        "case \"$1\" in is-active) [ \"$2\" = -q ] || echo active; exit 0 ;; esac\nexit 0\n" % PROTO)
+    os.chmod(ERSATZ / "systemctl", 0o755)
+    SOCK = BASIS / "broker.sock"
+    so = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    so.bind(str(SOCK))
+    # Quelle: root-eigener Klon desselben origin (wie /var/lib/jarvis-broker/quelle)
+    QUELLE = Path(tempfile.mkdtemp(prefix="devreset-quelle-", dir="/tmp"))
+    subprocess.run(["git", "clone", "-q", str(BASIS / "origin.git"), str(QUELLE / "q")], check=True,
+                   capture_output=True, env=dict(os.environ, GIT_CONFIG_NOSYSTEM="1"))
+
+    def neustart_lauf(*extra):
+        PROTO.write_text("")
+        env = dict(os.environ, PATH="%s:%s" % (ERSATZ, os.environ.get("PATH", "")),
+                   JARVIS_BROKER_CACHE=str(QUELLE / "q"), JARVIS_BROKER_SOCK=str(SOCK))
+        r = subprocess.run([str(KOPIE), "--dir", str(BAUM), "--dienst", "probe-dienst.service",
+                            "--uebernehmen"] + list(extra), capture_output=True, text=True, env=env)
+        aus = r.stdout + r.stderr
+        ARCHIVE.extend(re.findall(r"gesichert: (/root/dev-abweichungen-\S+\.tgz)", aus))
+        return r.returncode, aus, [z for z in PROTO.read_text().splitlines() if z.startswith("restart")]
+
+    code, aus, neu_st = neustart_lauf("--broker", "probe-broker.service")
+    check("Exit 0 mit Neustart", code == 0, "Exit %s\n%s" % (code, aus[-600:]))
+    check("Broker wird VOR dem Dienst neu gestartet",
+          neu_st == ["restart probe-broker.service", "restart probe-dienst.service"], str(neu_st))
+    check("Quelle auf HEAD: bestaetigt, keine Warnung",
+          "Signierte Quelle (AIDE-Abgleich):" in aus and "= HEAD" in aus and "WARNUNG" not in aus, aus[-400:])
+    # Quelle zurueckdrehen: ein Commit weiter im Baum, Quelle bleibt stehen
+    (BAUM / "neu.txt").write_text("x\n", encoding="utf-8")
+    os.chown(BAUM / "neu.txt", pw.pw_uid, pw.pw_gid)
+    git("add", "neu.txt", cwd=BAUM)
+    git("commit", "-q", "-m", "weiter", cwd=BAUM)
+    git("push", "-q", "origin", "master", cwd=BAUM)
+    code, aus, neu_st = neustart_lauf("--broker", "probe-broker.service")
+    check("Quelle auf altem Stand: WARNUNG mit Hinweis aufs Journal",
+          code == 0 and "WARNUNG: signierte Quelle steht auf" in aus and "journalctl" in aus, aus[-500:])
+    code, aus, neu_st = neustart_lauf("--broker", "")
+    check("--broker \"\": nur der Dienst wird neu gestartet", neu_st == ["restart probe-dienst.service"], str(neu_st))
+    so.close()
+    shutil.rmtree(QUELLE, ignore_errors=True)
 
     print("\n4. Rueckstaende")
     neu = set(Path("/root").glob("dev-abweichungen-*.tgz")) - VORHER_ARCHIVE - {Path(a) for a in ARCHIVE}

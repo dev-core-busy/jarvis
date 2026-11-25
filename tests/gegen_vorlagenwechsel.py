@@ -245,7 +245,9 @@ def _():
 @probe("Version nicht hochgezaehlt (niemand erfaehrt vom neuen Haken)")
 def _():
     for f in ("browser-addon/manifest.json", "browser-addon/manifest.firefox.json"):
-        ersetze(f, '"version": "0.10.1"', '"version": "0.9.0"')
+        # Muster statt fester Zahl: jede spaetere Version wuerde den Anker
+        # sonst verfehlen und die Probe abbrechen lassen.
+        resub(f, r'"version": "\d+\.\d+\.\d+"', '"version": "0.9.0"')
 
 
 @probe("die Anleitung im Portal nennt den Haken nicht")

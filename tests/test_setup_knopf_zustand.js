@@ -27,7 +27,10 @@ const I18N = lies('frontend/js/i18n.js');
 const SITZUNG = lies('frontend/js/sitzung.js');
 const ICONS = lies('frontend/js/icons.js');
 
-let ok = 0, fail = 0, bilanz = false;
+// Absturz -> Exit 2, stilles Ende -> Exit 1 (EINE Quelle, test_waechter_bilanz.js)
+const fertig = require('./lib/bilanz')({ stumm: true });
+
+let ok = 0, fail = 0;
 function check(text, bed, zusatz) {
   if (typeof text !== 'string' || typeof bed === 'string') {
     console.log('ABBRUCH: check(text, bedingung) vertauscht'); process.exit(2);
@@ -35,12 +38,6 @@ function check(text, bed, zusatz) {
   if (bed) { ok++; console.log('  \x1b[32m✓\x1b[0m ' + text); }
   else { fail++; console.log('  \x1b[31m✗\x1b[0m ' + text + (zusatz ? '  [' + zusatz + ']' : '')); }
 }
-process.on('unhandledRejection', (e) => {
-  fail++; console.log('  \x1b[31m✗\x1b[0m unbehandelte Zurueckweisung: ' + e);
-});
-process.on('exit', (code) => {
-  if (!bilanz && code === 0) { console.log('\x1b[31mABGEBROCHEN – keine Bilanz\x1b[0m'); process.exitCode = 1; }
-});
 
 // Knoepfe wie in settings.html (Ausgangstext = der kombinierte Platzhalter)
 const KNOEPFE = [
@@ -121,7 +118,7 @@ const warte = (ms) => new Promise(r => setTimeout(r, ms || 0));
   check('nach erfolgreichem Einschalten -> "Reparieren"', txt(w, 'sec-unatt-setup') === 'Reparieren', txt(w, 'sec-unatt-setup'));
   check('und der Knopf ist wieder bedienbar', !w.document.getElementById('sec-unatt-setup').disabled);
 
-  bilanz = true;
+  fertig();
   console.log('\n\x1b[1mErgebnis: ' + ok + ' OK, ' + fail + ' FAIL\x1b[0m');
   process.exit(fail ? 1 : 0);
 })();

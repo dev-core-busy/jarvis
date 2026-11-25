@@ -422,11 +422,11 @@ def jetzt_ausfuehren() -> dict:
         steps.append({"name": name, "ok": bool(ok), "detail": (detail or "")[:300]})
 
     if not _pkg_installed():
-        step(f"{PKG} vorhanden", False, "zuerst „Einschalten / Reparieren“")
+        step(f"{PKG} vorhanden", False, "zuerst „Einschalten“")
         return {"ok": False, "error": f"{PKG} ist nicht installiert", "steps": steps,
                 "status": status()}
     if not _limits_ok():
-        step("Begrenzungen wirksam", False, "zuerst „Einschalten / Reparieren“")
+        step("Begrenzungen wirksam", False, "zuerst „Einschalten“ bzw. „Reparieren“")
         return {"ok": False, "error": "Begrenzungen nicht wirksam – Lauf abgelehnt",
                 "steps": steps, "status": status()}
 

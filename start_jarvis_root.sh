@@ -738,7 +738,7 @@ if [ "${JARVIS_EGRESS_AUTOFIX:-1}" != "0" ] && command -v nft >/dev/null 2>&1; t
                 if [ -z "$REST" ]; then
                     echo "[Egress] ✓ nachgezogen – Netzwerk-Freigaben funktionieren wieder."
                 else
-                    echo "[Egress] WARNUNG: die alte Regel steht weiterhin (rc=$RC). Abhilfe von Hand: Einstellungen -> Sicherheit -> Internet-Zugang -> 'Einrichten / Reparieren'." >&2
+                    echo "[Egress] WARNUNG: die alte Regel steht weiterhin (rc=$RC). Abhilfe von Hand: Einstellungen -> Sicherheit -> Internet-Zugang -> 'Reparieren'." >&2
                 fi
             fi
         fi

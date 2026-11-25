@@ -8432,7 +8432,7 @@ async def startup_egress_kette():
             if zeilen:
                 print(f"[Egress]   betroffen: {zeilen}", flush=True)
             print("[Egress]   Abhilfe: Einstellungen -> Sicherheit -> Internet-Zugang "
-                  "-> 'Einrichten / Reparieren'. Die Sperre selbst aendert sich "
+                  "-> 'Reparieren'. Die Sperre selbst aendert sich "
                   "dadurch NICHT.", flush=True)
         except Exception as e:                                # noqa: BLE001
             # ⚠ NICHT STILL: eine Warnung, die selbst ausfaellt, ist wertlos -

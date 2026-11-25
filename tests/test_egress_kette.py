@@ -181,7 +181,7 @@ else:
           "nft_active" in rumpf)
     check("er prueft auf True, nicht auf Falsyness (None = nicht messbar)",
           "kernel_drop') is not True" in rumpf or 'kernel_drop") is not True' in rumpf)
-    check("und er nennt den WEG zur Abhilfe", "Einrichten" in rumpf)
+    check("und er nennt den WEG zur Abhilfe", "Reparieren" in rumpf)
     check("er veraendert NICHTS (kein setup aus dem Backend)",
           "egress_setup" not in rumpf)
 
@@ -204,7 +204,7 @@ check("er misst die WIRKSAMEN Regeln, nicht die Datei",
 check("⚠ massgeblich ist der Zustand danach, nicht der Rueckgabewert",
       block.count("nft list table inet jarvis_egress") >= 2)
 check("er ist abschaltbar", 'JARVIS_EGRESS_AUTOFIX:-1' in block)
-check("ein Fehlschlag nennt den Handweg", "Einrichten / Reparieren" in block)
+check("ein Fehlschlag nennt den Handweg", "'Reparieren'" in block)
 res = subprocess.run(["bash", "-n", str(REPO / "start_jarvis_root.sh")],
                      capture_output=True, text=True)
 check("das Skript ist syntaktisch gueltig", res.returncode == 0)

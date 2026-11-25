@@ -367,7 +367,7 @@
         // ── Betriebsart umschalten (Ein-Klick, analog Sandbox/Egress-Panel) ──
         setupBrokerMode: function () {
             if (!window.confirm(T('security.broker_setup_confirm',
-                'Getrennten Betrieb jetzt aktivieren/reparieren?\n\n'
+                'Getrennten Betrieb jetzt aktivieren?\n\n'
                 + 'Das Backend wird auf einen unprivilegierten Dienst-Benutzer umgestellt, '
                 + 'Root-Operationen laufen danach über den Root-Broker. '
                 + 'jarvis.service und jarvis-broker.service starten dabei NEU – die '
@@ -738,7 +738,7 @@
                      + 'Die Regel enthält ein <code>drop</code> ohne Benutzerbindung; '
                      + 'CIFS- und NFS-Verbindungen baut der Kernel auf und sie tragen '
                      + 'keine Benutzerkennung – sie fallen deshalb hinein. '
-                     + '„Einrichten / Reparieren“ zieht die Regel nach; '
+                     + '„Reparieren“ zieht die Regel nach; '
                      + 'an der Sperre selbst ändert sich dadurch nichts.'
                      + (d.kernel_drop_zeilen
                         ? '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
@@ -748,6 +748,8 @@
             var res = (d.resolvers && d.resolvers.length)
                 ? '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">Erlaubte DNS-Resolver: ' + esc(d.resolvers.join(', ')) + '</div>' : '';
             box.innerHTML = '<div style="margin-bottom:6px;">' + head + '</div>' + rows + res;
+            Mgr._setupKnopf('sec-egress-setup', !!(d.configured || d.nft_active),
+                'security.egress_einrichten', 'Einrichten');
         },
 
         setupEgress: function () {
@@ -777,7 +779,7 @@
                     if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Einrichtung.'; }
                 })
                 .then(function () {
-                    if (btn) { btn.disabled = false; btn.textContent = orig || T('security.egress_setup', 'Einrichten / Reparieren'); }
+                    if (btn) { btn.disabled = false; btn.textContent = btn.getAttribute('data-label') || orig || T('security.egress_setup', 'Einrichten / Reparieren'); }
                 });
         },
 
@@ -876,8 +878,24 @@
                     T('security.sandbox_live_limits', 'Live-Test: Obergrenzen lassen sich anwenden'));
             }
             Mgr.renderSandboxCfg(h);
+            Mgr._setupKnopf('sec-sandbox-setup', !!d.active, 'security.sandbox_aktivieren', 'Aktivieren');
             box.innerHTML = '<div style="margin-bottom:6px;">' + head + '</div>'
                 + '<div style="line-height:1.75;">' + rows + '</div>';
+        },
+
+        // Einrichtungs-Knopf nach Zustand beschriften: "Einschalten" o. ae., solange
+        // die Funktion aus ist, "Reparieren", sobald sie eingeschaltet ist. Der
+        // i18n-Schluessel wandert mit, damit ein Sprachwechsel die richtige
+        // Beschriftung setzt; data-label merkt sie fuer das Ende einer Aktion
+        // (sonst stellte _runAction den Text vom Klickzeitpunkt wieder her).
+        _setupKnopf: function (id, eingeschaltet, keyAus, fbAus) {
+            var btn = $(id);
+            if (!btn) return;
+            var key = eingeschaltet ? 'security.setup_repair' : keyAus;
+            var text = eingeschaltet ? T('security.setup_repair', 'Reparieren') : T(keyAus, fbAus);
+            btn.setAttribute('data-i18n', key);
+            btn.setAttribute('data-label', text);
+            if (!btn.disabled) btn.textContent = text;
         },
 
         // Generischer POST-Aktions-Helfer (Einrichten/Deaktivieren) mit Schritt-Ausgabe
@@ -922,7 +940,7 @@
                     if (!btn) return;
                     btn.disabled = false;
                     if (o.symbol) btn.innerHTML = origHtml;
-                    else btn.textContent = orig || o.busy;
+                    else btn.textContent = btn.getAttribute('data-label') || orig || o.busy;
                 });
         },
 
@@ -1104,6 +1122,7 @@
             if (d.ok) head = _P('ok') + '<b>' + esc(T('security.unatt_on', 'Aktiv – Sicherheitspatches werden automatisch eingespielt')) + '</b>';
             else if (d.enabled) head = _P('warn') + '<b>' + esc(T('security.unatt_partial', 'Eingeschaltet, aber nicht vollständig eingerichtet')) + '</b>';
             else head = _P('aus') + '<b>' + esc(T('security.unatt_off', 'Aus – Sicherheitspatches müssen von Hand eingespielt werden')) + '</b>';
+            Mgr._setupKnopf('sec-unatt-setup', !!d.enabled, 'security.unattended_einschalten', 'Einschalten');
             var timers = d.timers || {};
             var rows = ''
                 + row(d.package_installed, 'Paket unattended-upgrades installiert')

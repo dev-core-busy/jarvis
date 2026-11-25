@@ -245,7 +245,7 @@ def sandbox_benutzer(internet: bool) -> tuple:
         return "", ("eingestellter Sandbox-Benutzer ungueltig oder nicht vorhanden: "
                     + ", ".join(falsch))
     return "", ("kein Sandbox-Benutzer eingerichtet (Einstellungen → Sicherheit → "
-                "Systemschutz / Sandbox → Aktivieren / Reparieren)")
+                "Systemschutz / Sandbox → Aktivieren)")
 
 
 def sandbox_uids() -> list:

@@ -69,7 +69,7 @@
     function datum(sek) {
         if (!sek) return '';
         try {
-            return new Date(sek * 1000).toLocaleDateString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE'),
+            return new Date(sek * 1000).toLocaleDateString(({ en: 'en-GB', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE'),
                 { day: '2-digit', month: '2-digit', year: 'numeric' });
         } catch (e) { return ''; }
     }

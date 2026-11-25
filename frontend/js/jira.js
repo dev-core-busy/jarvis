@@ -144,7 +144,7 @@
                Sorte Schleife, die im Short-Tracks-Reiter 40 Abrufe in 250 ms
                erzeugt hat. */
             window.addEventListener('jarvis-lang-changed', function () {
-                var lg = (window._lang === 'en' || window._lang === 'fr') ? 'en' : 'de';   // Server kennt nur de/en
+                var lg = (window._lang === 'en' || window._lang === 'fr' || window._lang === 'nl') ? 'en' : 'de';   // Server kennt nur de/en
                 if (Manager._bereicheLang && Manager._bereicheLang !== lg) {
                     Manager.loadVorlagen();
                 }
@@ -557,7 +557,7 @@
             box.innerHTML = '<span class="kb-hint">' + esc(t('jvorl.loading', 'Lade Vorlagen …')) + '</span>';
             // Sprache mitgeben: Name und Hinweis der Bereiche kommen uebersetzt
             // vom Server – applyLang() erreicht sie nicht.
-            var lg = (window._lang === 'en' || window._lang === 'fr') ? 'en' : 'de';   // Server kennt nur de/en
+            var lg = (window._lang === 'en' || window._lang === 'fr' || window._lang === 'nl') ? 'en' : 'de';   // Server kennt nur de/en
             this._bereicheLang = lg;
             return fetch('/api/jira/assist/vorlagen?lang=' + lg, { headers: authHeaders() })
                 .then(function (r) { return r.json(); })

@@ -40,7 +40,7 @@
         return (s && s !== key) ? s : fallback;
     }
     // UI-Sprache (de/en/fr) – fuer die Wechselerkennung und die Anzeige.
-    function sprache() { return ({ en: 'en', fr: 'fr' })[window._lang] || 'de'; }
+    function sprache() { return ({ en: 'en', fr: 'fr', nl: 'nl' })[window._lang] || 'de'; }
     // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
     function serverSprache() { return sprache() === 'de' ? 'de' : 'en'; }
     function melde(id, text, art) {

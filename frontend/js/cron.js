@@ -5,7 +5,7 @@
 // Datumsformat nach Oberflaechensprache (Code-Review 2026-10-07: fest 'de-DE',
 // die englische Oberflaeche zeigte deutsches Format). window.t() kennt keine
 // Platzhalter – {e} wird an der Aufrufstelle ersetzt.
-function _cronOrt() { return ({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE'); }
+function _cronOrt() { return ({ en: 'en-GB', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE'); }
 
 function _authHeaders() {
     return { 'Authorization': 'Bearer ' + (window.authToken || window.JarvisSitzung.token()) };

@@ -103,6 +103,11 @@ let FR = {};
 try {
     FR = new Function('var _I18N = {};\n' + lies('frontend/js/i18n_fr.js') + '\nreturn _I18N.fr;')() || {};
 } catch (e) { FR = {}; }
+// NL ebenso (i18n_nl.js, seit 2026-11-25).
+let NL = {};
+try {
+    NL = new Function('var _I18N = {};\n' + lies('frontend/js/i18n_nl.js') + '\nreturn _I18N.nl;')() || {};
+} catch (e) { NL = {}; }
 
 // ══════════════════════════════════════════════════════════════════════════
 abschnitt('1) Grundlage – das Woerterbuch wird ueberhaupt gelesen');
@@ -110,6 +115,7 @@ abschnitt('1) Grundlage – das Woerterbuch wird ueberhaupt gelesen');
 pruefe(Object.keys(DE).length > 500, 'der de-Block liefert Werte', String(Object.keys(DE).length));
 pruefe(Object.keys(EN).length > 500, 'der en-Block liefert Werte', String(Object.keys(EN).length));
 pruefe(Object.keys(FR).length > 500, 'der fr-Block liefert Werte', String(Object.keys(FR).length));
+pruefe(Object.keys(NL).length > 500, 'der nl-Block liefert Werte', String(Object.keys(NL).length));
 // Positivkontrolle: der Platzhalter ist ueberhaupt in Gebrauch. Ohne diese
 // Zeile waere ein leeres Ergebnis unten aus dem falschen Grund gruen.
 const mitMarke = Object.keys(DE).filter((k) => /\{marke/.test(DE[k]));
@@ -118,7 +124,7 @@ pruefe(mitMarke.length >= 10, 'der Platzhalter {marke} ist in Gebrauch', String(
 // ══════════════════════════════════════════════════════════════════════════
 abschnitt('2) REGEL: kein Vorgabe-Produktname in einem Oberflaechen-Text');
 // ══════════════════════════════════════════════════════════════════════════
-for (const [lang, tab] of [['de', DE], ['en', EN], ['fr', FR]]) {
+for (const [lang, tab] of [['de', DE], ['en', EN], ['fr', FR], ['nl', NL]]) {
     const schuldig = Object.keys(tab)
         .filter((k) => /jarvis/i.test(tab[k]))
         .filter((k) => !(k in AUSNAHMEN));
@@ -129,7 +135,7 @@ for (const [lang, tab] of [['de', DE], ['en', EN], ['fr', FR]]) {
 // Eine Ausnahme, die gar nicht mehr zutrifft, ist eine stille Freigabe fuer
 // die Zukunft – sie gehoert heraus.
 const unnoetig = Object.keys(AUSNAHMEN)
-    .filter((k) => !(/jarvis/i.test(DE[k] || '') || /jarvis/i.test(EN[k] || '') || /jarvis/i.test(FR[k] || '')));
+    .filter((k) => !(/jarvis/i.test(DE[k] || '') || /jarvis/i.test(EN[k] || '') || /jarvis/i.test(FR[k] || '') || /jarvis/i.test(NL[k] || '')));
 pruefe(unnoetig.length === 0, 'keine Ausnahme ohne Anlass', unnoetig.join(', '));
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -143,6 +149,8 @@ pruefe(nurDe.length === 0, 'kein Schluessel mit {marke} nur auf Deutsch', nurDe.
 pruefe(nurEn.length === 0, 'kein Schluessel mit {marke} nur auf Englisch', nurEn.join(', '));
 const ohneFr = mitMarke.filter((k) => !/\{marke/.test(FR[k] || ''));
 pruefe(ohneFr.length === 0, 'jeder Schluessel mit {marke} traegt ihn auch auf Franzoesisch', ohneFr.join(', '));
+const ohneNl = mitMarke.filter((k) => !/\{marke/.test(NL[k] || ''));
+pruefe(ohneNl.length === 0, 'jeder Schluessel mit {marke} traegt ihn auch auf Niederlaendisch', ohneNl.join(', '));
 
 // ══════════════════════════════════════════════════════════════════════════
 abschnitt('4) Nicht-DOM-Senken loesen den Platzhalter am Aufrufort auf');
@@ -334,6 +342,8 @@ const JS_AUSNAHMEN = [
     { datei: 'frontend/js/chat.js', text: 'I am Jarvis, your AI assistant',    grund: 'Vorschau, danach replace(/Jarvis/g)' },
     { datei: 'frontend/js/app.js',  text: 'je suis Jarvis, votre assistant IA', grund: 'Vorschau, danach replace(/Jarvis/g)' },
     { datei: 'frontend/js/chat.js', text: 'je suis Jarvis, votre assistant IA', grund: 'Vorschau, danach replace(/Jarvis/g)' },
+    { datei: 'frontend/js/app.js',  text: 'ik ben Jarvis, uw AI-assistent',     grund: 'Vorschau, danach replace(/Jarvis/g)' },
+    { datei: 'frontend/js/chat.js', text: 'ik ben Jarvis, uw AI-assistent',     grund: 'Vorschau, danach replace(/Jarvis/g)' },
     { datei: 'frontend/js/chat.js', text: 'Hallo! Ich bin Jarvis.',            grund: 'chat.greeting, applyAssistantName' },
     // Kopfzeilennamen des Drahtformats – kein Anzeigename.
     { datei: 'frontend/js/email.js',       text: 'X-Jarvis-Cert-Warn', grund: 'HTTP-Kopfzeile' },
@@ -394,7 +404,7 @@ for (const d of JS_WURZELN) {
     }
     for (const f of fs.readdirSync(voll).filter((x) => x.endsWith('.js'))) {
         const pfad = d + '/' + f;
-        if (pfad === 'frontend/js/i18n.js' || pfad === 'frontend/js/i18n_fr.js') continue;   // Abschnitt 2 prueft die Werte
+        if (pfad === 'frontend/js/i18n.js' || pfad === 'frontend/js/i18n_fr.js' || pfad === 'frontend/js/i18n_nl.js') continue;   // Abschnitt 2 prueft die Werte
         jsGelesen++;
         let treffer;
         try { treffer = markenStrings(lies(pfad)); }

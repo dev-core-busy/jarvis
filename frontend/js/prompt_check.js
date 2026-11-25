@@ -199,7 +199,7 @@
                 body: JSON.stringify({
                     prompt: text, kontext: kontext,
                     sensibel: !!(sensEl && sensEl.checked),
-                    lang: (window._lang === 'en' || window._lang === 'fr') ? 'en' : 'de'
+                    lang: (window._lang === 'en' || window._lang === 'fr' || window._lang === 'nl') ? 'en' : 'de'
                 })
             });
             var d = await r.json().catch(function () { return {}; });

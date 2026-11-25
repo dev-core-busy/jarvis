@@ -170,7 +170,7 @@ window.Fehleranalyse = (function () {
     function zeit(ts) {
         var d = new Date(Number(ts) * 1000);
         if (isNaN(d.getTime())) return '?';
-        var l = ({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE');
+        var l = ({ en: 'en-GB', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE');
         try { return d.toLocaleString(l, { dateStyle: 'short', timeStyle: 'short' }); }
         catch (e) { return d.toISOString(); }
     }
@@ -353,7 +353,7 @@ window.Fehleranalyse = (function () {
                         beschreibung: $('fa-beschreibung') ? $('fa-beschreibung').value : '' };
         try {
             var url = mitAnalyse
-                ? '/api/fehleranalyse/analyse?lang=' + ((window._lang === 'en' || window._lang === 'fr') ? 'en' : 'de')
+                ? '/api/fehleranalyse/analyse?lang=' + ((window._lang === 'en' || window._lang === 'fr' || window._lang === 'nl') ? 'en' : 'de')
                 : '/api/fehleranalyse/dossier';
             var d = await hole(url, koerper);
             if (mitAnalyse) analyseZeigen(d);

@@ -2373,6 +2373,7 @@ _I18N.fr = {
     "mv.sprache_de": "allemand",
     "mv.sprache_en": "anglais",
     "mv.sprache_fr": "français",
+    "mv.sprache_nl": "néerlandais",
     "mv.absender_label": "Adresse de l'expéditeur",
     "mv.name_label": "Nom de l'expéditeur",
     "mv.betreff_label": "L'objet commence par",

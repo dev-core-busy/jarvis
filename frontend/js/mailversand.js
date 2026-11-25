@@ -92,12 +92,12 @@
         },
 
         sprachName: function (code) {
-            return T('mv.sprache_' + (code || 'de'), { de: 'Deutsch', en: 'Englisch', fr: 'Französisch' }[code] || 'Deutsch');
+            return T('mv.sprache_' + (code || 'de'), { de: 'Deutsch', en: 'Englisch', fr: 'Französisch', nl: 'Niederländisch' }[code] || 'Deutsch');
         },
 
         aktuelleSprache: function () {
             var l = window._lang || 'de';
-            return ['de', 'en', 'fr'].indexOf(l) >= 0 ? l : 'de';
+            return ['de', 'en', 'fr', 'nl'].indexOf(l) >= 0 ? l : 'de';
         },
 
         marke: function () {

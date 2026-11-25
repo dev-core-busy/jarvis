@@ -40,7 +40,7 @@
         return v.split('{marke}').join(marke);
     }
     function fmtTs(ts) {
-        try { return new Date((ts || 0) * 1000).toLocaleString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE')); }
+        try { return new Date((ts || 0) * 1000).toLocaleString(({ en: 'en-GB', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE')); }
         catch (e) { return '' + ts; }
     }
     function chanLabel(ch) {

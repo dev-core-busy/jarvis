@@ -56,7 +56,7 @@
         if (!iso) return '';
         var d = new Date(iso);
         if (isNaN(d.getTime())) return '';
-        var lang = ({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE');
+        var lang = ({ en: 'en-GB', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE');
         try {
             return d.toLocaleDateString(lang, { day: '2-digit', month: '2-digit', year: 'numeric' });
         } catch (e) { return iso.slice(0, 10); }

@@ -656,7 +656,7 @@ def _apply_update_gesperrt() -> dict:
 _BROKER_PFADE = ("backend/broker/", "start_jarvis_root.sh", "deploy/security/",
                  "backend/mail_meldung.py", "backend/ueberwachung.py", "backend/aide_abgleich.py",
                  "backend/eigene_dateien.py",
-                 "frontend/js/i18n.js", "frontend/js/i18n_fr.js")
+                 "frontend/js/i18n.js", "frontend/js/i18n_fr.js", "frontend/js/i18n_nl.js")
 
 
 def _broker_betroffen(vorher_hash: str) -> bool:

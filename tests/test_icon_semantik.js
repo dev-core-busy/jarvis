@@ -389,12 +389,13 @@ for (const name of BEREICHSSEITEN) {
     const kopf = m ? m[0] : '';
 
     const langBtns = (kopf.match(/class="lang-toggle-btn"/g) || []).length;
-    // Seit 2026-11-24 drei Sprachen: das Markup traegt je Sprache einen Knopf,
+    // Seit 2026-11-25 vier Sprachen: das Markup traegt je Sprache einen Knopf,
     // i18n.js macht daraus das Klappmenue (kein Umschaltknopf, der rotiert).
-    pruefe(`${name}: DE|EN|FR je ein Knopf (nicht ein Umschaltknopf)`, langBtns === 3,
+    pruefe(`${name}: DE|EN|FR|NL je ein Knopf (nicht ein Umschaltknopf)`, langBtns === 4,
         `gefunden: ${langBtns}`);
-    pruefe(`${name}: DE, EN und FR sind belegt`,
-        /data-lang="de"/.test(kopf) && /data-lang="en"/.test(kopf) && /data-lang="fr"/.test(kopf));
+    pruefe(`${name}: DE, EN, FR und NL sind belegt`,
+        /data-lang="de"/.test(kopf) && /data-lang="en"/.test(kopf) && /data-lang="fr"/.test(kopf)
+        && /data-lang="nl"/.test(kopf));
     // theme.js verdrahtet genau diese Id – eine eigene waere ein Eigenbau.
     pruefe(`${name}: Thema-Knopf traegt id="btn-theme-toggle"`,
         /id="btn-theme-toggle"/.test(kopf));

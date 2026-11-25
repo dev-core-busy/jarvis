@@ -625,18 +625,21 @@ def _einzeilig(s, n: int = 200) -> str:
     return re.sub(r"[\r\n\t]+", " ", str(s or "")).strip()[:n]
 
 
-# ── Sprache der Mails (i18n.js / i18n_fr.js) ─────────────────────────────────
+# ── Sprache der Mails (i18n.js / i18n_fr.js / i18n_nl.js) ─────────────────────
 # Die Meldungen sind in der Sprache verfasst, die in der Oberflaeche gewaehlt
 # ist (MAIL_SPRACHE, gesetzt beim Speichern und beim Umschalten der Sprache in
 # den Einstellungen). Die Texte kommen aus DERSELBEN Quelle wie die Oberflaeche
 # – eine zweite Kopie hier liefe auseinander. Gelesen wird die root-eigene
-# Kopie neben diesem Modul (broker_installieren.sh kopiert die beiden Dateien
-# mit), nie die des Dienstbenutzers. Fehlt ein Text: Rueckfall fr -> en -> de,
+# Kopie neben diesem Modul (broker_installieren.sh kopiert die Woerterbuecher
+# mit), nie die des Dienstbenutzers. Fehlt ein Text: Rueckfall fr/nl -> en -> de,
 # zuletzt der hier mitgegebene deutsche Text.
-SPRACHEN = ("de", "en", "fr")
-_RUECKFALL = {"de": ("de",), "en": ("en", "de"), "fr": ("fr", "en", "de")}
+SPRACHEN = ("de", "en", "fr", "nl")
+_RUECKFALL = {"de": ("de",), "en": ("en", "de"), "fr": ("fr", "en", "de"), "nl": ("nl", "en", "de")}
 I18N_JS = Path(__file__).resolve().parent.parent / "frontend" / "js" / "i18n.js"
 I18N_FR = Path(__file__).resolve().parent.parent / "frontend" / "js" / "i18n_fr.js"
+I18N_NL = Path(__file__).resolve().parent.parent / "frontend" / "js" / "i18n_nl.js"
+# Woerterbuecher, die sich als _I18N.<sprache> anhaengen (JSON-Schreibweise)
+_ZUSATZ = (("fr", I18N_FR), ("nl", I18N_NL))
 _TEXTE_CACHE: dict = {}
 
 
@@ -662,12 +665,12 @@ def _js_text(roh: str) -> str:
 def _texte_laden() -> dict:
     """{sprache: {schluessel: text}} fuer die Schluessel, die Mails brauchen."""
     try:
-        stempel = (I18N_JS.stat().st_mtime, I18N_FR.stat().st_mtime if I18N_FR.exists() else 0)
+        stempel = (I18N_JS.stat().st_mtime,) + tuple(d.stat().st_mtime if d.exists() else 0 for _, d in _ZUSATZ)
     except OSError:
         return {}
     if _TEXTE_CACHE.get("stempel") == stempel:
         return _TEXTE_CACHE["texte"]
-    texte: dict = {"de": {}, "en": {}, "fr": {}}
+    texte: dict = {s: {} for s in SPRACHEN}
     wichtig = re.compile(r"^(?:mvm\.|ue\.art_)")
     try:
         js = I18N_JS.read_text(encoding="utf-8")
@@ -677,11 +680,13 @@ def _texte_laden() -> dict:
                 for m in re.finditer(r"^\s*'([A-Za-z0-9_.\-]+)'\s*:\s*'((?:[^'\\\n]|\\.)*)'", teil, re.M):
                     if wichtig.match(m.group(1)) and m.group(1) not in texte[sprache]:
                         texte[sprache][m.group(1)] = _js_text(m.group(2))
-        if I18N_FR.exists():
+        for sprache, datei in _ZUSATZ:
+            if not datei.exists():
+                continue
             for m in re.finditer(r'^\s*"([A-Za-z0-9_.\-]+)"\s*:\s*"((?:[^"\\\n]|\\.)*)"',
-                                 I18N_FR.read_text(encoding="utf-8"), re.M):
+                                 datei.read_text(encoding="utf-8"), re.M):
                 if wichtig.match(m.group(1)):
-                    texte["fr"][m.group(1)] = json.loads('"%s"' % m.group(2))
+                    texte[sprache][m.group(1)] = json.loads('"%s"' % m.group(2))
     except (OSError, ValueError):
         return {}
     _TEXTE_CACHE.update(stempel=stempel, texte=texte)
@@ -707,7 +712,7 @@ def zeitpunkt(sek, sprache: str, mit_uhr: bool = True) -> str:
         return ""
     if not sek:
         return ""
-    datum = time.strftime("%d/%m/%Y" if sprache in ("en", "fr") else "%d.%m.%Y", t)
+    datum = time.strftime("%d/%m/%Y" if sprache in ("en", "fr") else ("%d-%m-%Y" if sprache == "nl" else "%d.%m.%Y"), t)
     return datum + (time.strftime(" %H:%M", t) if mit_uhr else "")
 
 

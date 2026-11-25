@@ -435,7 +435,8 @@
             var lt = el('div', { 'class': 'lang-toggle', id: 'jv-kopf-lang' },
                 '<button class="lang-toggle-btn" data-lang="de" data-setlang="de" title="Deutsch">DE</button>'
                 + '<button class="lang-toggle-btn" data-lang="en" data-setlang="en" title="English">EN</button>'
-                + '<button class="lang-toggle-btn" data-lang="fr" data-setlang="fr" title="Français">FR</button>');
+                + '<button class="lang-toggle-btn" data-lang="fr" data-setlang="fr" title="Français">FR</button>'
+                + '<button class="lang-toggle-btn" data-lang="nl" data-setlang="nl" title="Nederlands">NL</button>');
             var such = g.querySelector('.st-such-wrap');
             if (such) nachDem(such, lt); else g.insertBefore(lt, g.firstChild);
             var lang = window._lang || (function () { try { return localStorage.getItem('jarvis_lang'); } catch (e) { return ''; } })() || 'de';

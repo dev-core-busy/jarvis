@@ -118,6 +118,9 @@ pruefe(S.satz_uebersetzen("Nicht authentifiziert", "en") == "Not authenticated",
 pruefe(S.satz_uebersetzen("Nicht authentifiziert", "de") is None, "de: nichts zu tun")
 pruefe(S.satz_uebersetzen("Ordner 'Handbuch' existiert bereits", "fr") == "Le dossier « Handbuch » existe déjà",
        "Satz mit Wert (Muster) -> fr, Wert bleibt")
+pruefe(S.satz_uebersetzen("Nicht authentifiziert", "nl") not in (None, "Nicht authentifiziert",
+       S.satz_uebersetzen("Nicht authentifiziert", "en")), "fester Satz -> nl (eigener Text, kein Rueckfall)")
+pruefe(S.aus_anfrage(Anfrage(c={"jarvis_lang": "nl"})) == "nl", "Cookie nl")
 pruefe(S.satz_uebersetzen("Satz, den es nicht gibt", "fr") is None, "unbekannter Satz bleibt unberuehrt")
 roh = json.dumps({"ok": False, "detail": "Nicht authentifiziert", "liste": ["Nicht authentifiziert"],
                   "error": 5}).encode()
@@ -212,11 +215,11 @@ for e in alle:
         doppelt.append(de)
     gesehen.add(de)
     p = set(re.findall(r"\{w\d+\}", de))
-    for sp in ("en", "fr"):
+    for sp in ("en", "fr", "nl"):
         t = e.get(sp) or ""
         if not t.strip() or not set(re.findall(r"\{w\d+\}", t)) <= p:
             schlecht.append("%s:%s" % (sp, de[:40]))
-pruefe(not schlecht, "jeder Eintrag hat EN und FR mit passenden Platzhaltern%s"
+pruefe(not schlecht, "jeder Eintrag hat EN, FR und NL mit passenden Platzhaltern%s"
        % (" – " + ", ".join(schlecht[:5]) if schlecht else ""))
 pruefe(not doppelt, "kein deutscher Satz doppelt%s" % (" – " + ", ".join(doppelt[:3]) if doppelt else ""))
 
@@ -225,7 +228,7 @@ print("[5] Regel ueber main.py")
 saetze = antwortsaetze(REPO / "backend/main.py")
 pruefe(len(saetze) >= 300, "Positivkontrolle: Antwortsaetze in main.py gefunden (%d)" % len(saetze))
 fehlt = sorted(s for _, s in saetze if s not in gesehen)
-pruefe(not fehlt, "jeder deutsche Antwortsatz in main.py hat EN/FR in server_texte.json%s"
+pruefe(not fehlt, "jeder deutsche Antwortsatz in main.py hat EN/FR/NL in server_texte.json%s"
        % ((" – %d fehlen, z.B. %r" % (len(fehlt), fehlt[:3])) if fehlt else ""))
 
 print("\nERGEBNIS: %d OK, %d FAIL" % (OK, FAIL))

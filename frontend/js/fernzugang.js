@@ -383,7 +383,7 @@
             }
             (vs.anmeldungen || []).forEach(function (a) {
                 var tag = '';
-                try { tag = new Date(a.zuletzt).toLocaleDateString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE')); } catch (e) { tag = ''; }
+                try { tag = new Date(a.zuletzt).toLocaleDateString(({ en: 'en-GB', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE')); } catch (e) { tag = ''; }
                 dazu(a.ip, a.ip, T('security.ssh_vs_anm', '%n× per SSH angemeldet (%k), zuletzt %d')
                     .replace('%n', a.anzahl).replace('%k', (a.konten || []).join(', ')).replace('%d', tag));
             });

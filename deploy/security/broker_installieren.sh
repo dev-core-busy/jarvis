@@ -234,11 +234,11 @@ mkdir -m 0755 "$NEU" || fehler "kann $NEU nicht anlegen"
 # unten per chmod -R go=rX fuer alle lesbar gemacht worden. Ohne -h wuerde der
 # Link selbst kopiert und zeigte in die beschreibbare Welt. Beides darf nicht
 # sein; das Repo enthaelt keine Links.
-# Die Uebersetzungen (i18n.js, i18n_fr.js) kommen mit: der E-Mail-Versand
+# Die Uebersetzungen (i18n.js, i18n_fr.js, i18n_nl.js) kommen mit: der E-Mail-Versand
 # (backend/mail_meldung.py) schreibt seine Meldungen in der Oberflaechensprache
 # und liest die Texte als root – aus dieser Kopie, nicht aus der Datei des
 # Dienstbenutzers (2026-11-24).
-I18N_DATEIEN="frontend/js/i18n.js frontend/js/i18n_fr.js"
+I18N_DATEIEN="frontend/js/i18n.js frontend/js/i18n_fr.js frontend/js/i18n_nl.js"
 LINKS=$(find "$SRC/backend" "$SRC/deploy" "$SRC/start_jarvis_root.sh" "$SRC/jarvis.service" \
         $(for f in $I18N_DATEIEN; do echo "$SRC/$f"; done) -type l 2>/dev/null | head -5)
 if [ -n "$LINKS" ]; then

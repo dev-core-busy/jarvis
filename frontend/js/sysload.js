@@ -79,7 +79,7 @@
     /** Zahl mit fester Nachkommazahl im Format der Oberflaechensprache
      *  (DE: Komma). `toFixed` allein schriebe immer einen Punkt. */
     function zahl(n, stellen) {
-        var loc = ({ en: 'en-US', fr: 'fr-FR' }[window._lang] || 'de-DE');
+        var loc = ({ en: 'en-US', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE');
         try {
             return Number(n).toLocaleString(loc, { minimumFractionDigits: stellen,
                                                    maximumFractionDigits: stellen });

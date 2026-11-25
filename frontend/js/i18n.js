@@ -1,16 +1,17 @@
 /**
- * Jarvis i18n – Deutsch / English / Français UI Übersetzungen
+ * Jarvis i18n – Deutsch / English / Français / Nederlands UI Übersetzungen
  *
- * Das franzoesische Woerterbuch liegt in i18n_fr.js (direkt nach dieser Datei
- * eingebunden, haengt sich als _I18N.fr an). Fehlt dort ein Schluessel, gilt
- * Englisch, dann Deutsch – ein Franzose liest Englisch eher als Deutsch.
+ * Das franzoesische Woerterbuch liegt in i18n_fr.js, das niederlaendische in
+ * i18n_nl.js (beide direkt nach dieser Datei eingebunden, haengen sich als
+ * _I18N.fr bzw. _I18N.nl an). Fehlt dort ein Schluessel, gilt Englisch, dann
+ * Deutsch – ein Franzose liest Englisch eher als Deutsch.
  *
  * Nutzung:
  *   window.t('key')              → übersetzter String
- *   window.setLang('de'|'en'|'fr') → Sprache wechseln + UI neu rendern
+ *   window.setLang('de'|'en'|'fr'|'nl') → Sprache wechseln + UI neu rendern
  *   window.applyLang()           → manuell nach dynamischem Re-Render aufrufen
  *
- * Das Backend kennt nur de/en: Aufrufe mit ?lang= schicken fuer fr 'en'.
+ * Das Backend kennt nur de/en: Aufrufe mit ?lang= schicken fuer fr und nl 'en'.
  *
  * HTML:  <span data-i18n="key"></span>
  *        <input data-i18n-placeholder="key">
@@ -2502,6 +2503,7 @@ const _I18N = {
         'mv.sprache_de':'Deutsch',
         'mv.sprache_en':'Englisch',
         'mv.sprache_fr':'Französisch',
+        'mv.sprache_nl':'Niederländisch',
         'mv.absender_label':'Absenderadresse',
         'mv.name_label':'Absendername',
         'mv.betreff_label':'Betreff beginnt mit',
@@ -8577,6 +8579,7 @@ const _I18N = {
         'mv.sprache_de':'German',
         'mv.sprache_en':'English',
         'mv.sprache_fr':'French',
+        'mv.sprache_nl':'Dutch',
         'mv.absender_label':'Sender address',
         'mv.name_label':'Sender name',
         'mv.betreff_label':'Subject starts with',
@@ -12161,8 +12164,8 @@ function _sprachCookie(lang) {
 }
 _sprachCookie(window._lang);
 
-/** Rueckfallkette je Sprache: fr faellt auf Englisch, dann Deutsch. */
-var _I18N_RUECKFALL = { de: ['de'], en: ['en', 'de'], fr: ['fr', 'en', 'de'] };
+/** Rueckfallkette je Sprache: fr und nl fallen auf Englisch, dann Deutsch. */
+var _I18N_RUECKFALL = { de: ['de'], en: ['en', 'de'], fr: ['fr', 'en', 'de'], nl: ['nl', 'en', 'de'] };
 
 /** Gibt den übersetzten String zurück (Fallback je Sprache, dann Key selbst). */
 window.t = function(key) {
@@ -12179,7 +12182,7 @@ window.applyLang = function() {
     // Sprach-Attribut fuer CSS-Sprachbloecke (.i18n-de / .i18n-en):
     // html[data-lang="en"] blendet .i18n-de aus und umgekehrt. Wird fuer
     // lange Fliesstext-Inhalte (z.B. API-Dokumentation) statt Einzel-Keys genutzt.
-    // Fuer fr gibt es keine eigenen Bloecke – theme.css zeigt dort .i18n-en.
+    // Fuer fr und nl gibt es keine eigenen Bloecke – theme.css zeigt dort .i18n-en.
     document.documentElement.setAttribute('data-lang', window._lang);
     document.documentElement.setAttribute('lang', window._lang);
     // Textinhalt
@@ -12260,9 +12263,9 @@ function _sprachGruppeOrdnen(gruppe) {
         aktiv = knoepfe.filter(function (k) { return k.dataset.lang === 'de'; })[0] || knoepfe[0];
         aktiv.classList.add('active');
     }
-    // Feste Folge der angebotenen Sprachen (DE, EN, FR) – unabhaengig davon,
+    // Feste Folge der angebotenen Sprachen (DE, EN, FR, NL) – unabhaengig davon,
     // in welcher Reihenfolge vorher gewechselt wurde.
-    var FOLGE = ['de', 'en', 'fr'];
+    var FOLGE = ['de', 'en', 'fr', 'nl'];
     var rang = function (k) { var r = FOLGE.indexOf(k.dataset.lang); return r < 0 ? FOLGE.length : r; };
     knoepfe.sort(function (a, b) { return rang(a) - rang(b); });
     // Die uebrigen ans Ende haengen – damit steht der aktive Knopf von selbst vorn.
@@ -12306,7 +12309,7 @@ window.setLang = function(lang) {
     window.applyLang();
 };
 
-// Sprachknoepfe mit data-setlang="de|en|fr" (BSI H4, 2026-10-04): ersetzt das
+// Sprachknoepfe mit data-setlang="de|en|fr|nl" (BSI H4, 2026-10-04): ersetzt das
 // fruehere onclick="window.setLang('de')" – die Content-Security-Policy laesst
 // keine Inline-Handler zu. EIN delegierter Zuhoerer auf document, damit auch
 // spaeter eingefuegte Knoepfe greifen. Opt-in ueber das eigene Attribut, NICHT

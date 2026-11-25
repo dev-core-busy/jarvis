@@ -298,7 +298,7 @@
             var since='';
             if(d.since){
                 var dt=new Date(d.since);
-                var loc=({en:'en-GB',fr:'fr-FR'}[window._lang]||'de-DE');
+                var loc=({en:'en-GB',fr:'fr-FR',nl:'nl-NL'}[window._lang]||'de-DE');
                 var s=dt.toLocaleString(loc,{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
                 since='\n'+(reachable?T('portal.llm_since_ok'):T('portal.llm_since_down'))+s;
             }

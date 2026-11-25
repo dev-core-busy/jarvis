@@ -51,7 +51,7 @@
         try { return (localStorage.getItem('jarvis_lang') || 'de'); } catch (e) { return 'de'; }
     }
     // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
-    function serverLang() { return (lang() === 'en' || lang() === 'fr') ? 'en' : 'de'; }
+    function serverLang() { return (lang() === 'en' || lang() === 'fr' || lang() === 'nl') ? 'en' : 'de'; }
     function toPortal() { window.location.replace('/portal'); }
 
     var _catalog = null;     // {categories, analyses, bi_tools}
@@ -1716,7 +1716,7 @@
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (d && d.info) {
-                    _letzterTest = { d: d, zeit: new Date().toLocaleString({ en: 'en-GB', fr: 'fr-FR' }[lang()] || 'de-DE') };
+                    _letzterTest = { d: d, zeit: new Date().toLocaleString({ en: 'en-GB', fr: 'fr-FR', nl: 'nl-NL' }[lang()] || 'de-DE') };
                     accRenderTestInfo();
                 }
                 if (d && d.ok) {

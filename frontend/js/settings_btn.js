@@ -192,13 +192,13 @@
     function ueZeit(sek) {
         if (!sek) return '';
         try {
-            return new Date(sek * 1000).toLocaleString(({ en: 'en-GB', fr: 'fr-FR' }[window._lang] || 'de-DE'),
+            return new Date(sek * 1000).toLocaleString(({ en: 'en-GB', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE'),
                 { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
         } catch (e) { return ''; }
     }
 
     function ueZahl(n, stellen) {
-        var loc = ({ en: 'en-US', fr: 'fr-FR' }[window._lang] || 'de-DE');
+        var loc = ({ en: 'en-US', fr: 'fr-FR', nl: 'nl-NL' }[window._lang] || 'de-DE');
         try {
             return Number(n).toLocaleString(loc, { minimumFractionDigits: stellen,
                                                    maximumFractionDigits: stellen });

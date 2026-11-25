@@ -1,2055 +1,2465 @@
 {
- "_hinweis": "Servertexte in DE/EN/FR (backend/sprache.py). 'de' ist GENAU der Satz im Code; {w1}, {w2} stehen fuer Werte aus f-Strings. Waechter: tests/test_server_sprache.py.",
+ "_hinweis": "Servertexte in DE/EN/FR/NL (backend/sprache.py). 'de' ist GENAU der Satz im Code; {w1}, {w2} stehen fuer Werte aus f-Strings. Waechter: tests/test_server_sprache.py.",
  "saetze": [
   {
    "de": "API (Application Programming Interface)-Key ungültig (401 Unauthorized)",
    "en": "API key invalid (401 Unauthorized)",
-   "fr": "Clé API non valide (401 Unauthorized)"
+   "fr": "Clé API non valide (401 Unauthorized)",
+   "nl": "API-sleutel ongeldig (401 Unauthorized)"
   },
   {
    "de": "API-Key fehlt",
    "en": "API key missing",
-   "fr": "Clé API manquante"
+   "fr": "Clé API manquante",
+   "nl": "API-sleutel ontbreekt"
   },
   {
    "de": "API-Key ungültig (400 Bad Request)",
    "en": "API key invalid (400 Bad Request)",
-   "fr": "Clé API non valide (400 Bad Request)"
+   "fr": "Clé API non valide (400 Bad Request)",
+   "nl": "API-sleutel ongeldig (400 Bad Request)"
   },
   {
    "de": "API-Key ungültig (401 Unauthorized)",
    "en": "API key invalid (401 Unauthorized)",
-   "fr": "Clé API non valide (401 Unauthorized)"
+   "fr": "Clé API non valide (401 Unauthorized)",
+   "nl": "API-sleutel ongeldig (401 Unauthorized)"
   },
   {
    "de": "API-Key ungültig oder keine Berechtigung (403 Forbidden)",
    "en": "API key invalid or no permission (403 Forbidden)",
-   "fr": "Clé API non valide ou absence d'autorisation (403 Forbidden)"
+   "fr": "Clé API non valide ou absence d'autorisation (403 Forbidden)",
+   "nl": "API-sleutel ongeldig of geen toestemming (403 Forbidden)"
   },
   {
    "de": "Ablage nicht gefunden.",
    "en": "Storage not found.",
-   "fr": "Dépôt introuvable."
+   "fr": "Dépôt introuvable.",
+   "nl": "Opslag niet gevonden."
   },
   {
    "de": "Account wegen Sicherheitsverstoss gesperrt.",
    "en": "Account locked due to a security violation.",
-   "fr": "Compte bloqué en raison d'une violation de sécurité."
+   "fr": "Compte bloqué en raison d'une violation de sécurité.",
+   "nl": "Account vergrendeld wegens een beveiligingsschending."
   },
   {
    "de": "Adresse oder Anbieter wurde geändert – bitte den Schlüssel neu eingeben, sonst ginge der gespeicherte an das neue Ziel.",
    "en": "The address or provider was changed – please enter the key again, otherwise the stored one would go to the new target.",
-   "fr": "L'adresse ou le fournisseur a été modifié – veuillez saisir à nouveau la clé, sinon la clé enregistrée serait envoyée à la nouvelle cible."
+   "fr": "L'adresse ou le fournisseur a été modifié – veuillez saisir à nouveau la clé, sinon la clé enregistrée serait envoyée à la nouvelle cible.",
+   "nl": "Het adres of de provider is gewijzigd – voer de sleutel opnieuw in, anders zou de opgeslagen sleutel naar het nieuwe doel gaan."
   },
   {
    "de": "Adressen aus dem Internet sind fuer deinen Benutzer nicht freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Internet“).",
    "en": "Internet addresses are not enabled for your user (Settings → Security → Permissions, column “Internet”).",
-   "fr": "Les adresses Internet ne sont pas activées pour votre utilisateur (Paramètres → Sécurité → Autorisations, colonne « Internet »)."
+   "fr": "Les adresses Internet ne sont pas activées pour votre utilisateur (Paramètres → Sécurité → Autorisations, colonne « Internet »).",
+   "nl": "Internetadressen zijn niet ingeschakeld voor uw gebruiker (Instellingen → Beveiliging → Rechten, kolom “Internet”)."
   },
   {
    "de": "Aktuelles Kennwort ist falsch.",
    "en": "The current password is wrong.",
-   "fr": "Le mot de passe actuel est incorrect."
+   "fr": "Le mot de passe actuel est incorrect.",
+   "nl": "Het huidige wachtwoord is onjuist."
   },
   {
    "de": "Alle Felder müssen ausgefüllt sein.",
    "en": "All fields must be filled in.",
-   "fr": "Tous les champs doivent être remplis."
+   "fr": "Tous les champs doivent être remplis.",
+   "nl": "Alle velden moeten worden ingevuld."
   },
   {
    "de": "Anhang nicht gefunden",
    "en": "Attachment not found",
-   "fr": "Pièce jointe introuvable"
+   "fr": "Pièce jointe introuvable",
+   "nl": "Bijlage niet gevonden"
   },
   {
    "de": "Anmeldung ist gerade nicht möglich (Anmeldedaten des Servers nicht lesbar). Bitte den Administrator informieren.",
    "en": "Sign-in is not possible right now (server credentials cannot be read). Please inform the administrator.",
-   "fr": "La connexion est actuellement impossible (les identifiants du serveur ne sont pas lisibles). Veuillez en informer l'administrateur."
+   "fr": "La connexion est actuellement impossible (les identifiants du serveur ne sont pas lisibles). Veuillez en informer l'administrateur.",
+   "nl": "Aanmelden is momenteel niet mogelijk (serverreferenties kunnen niet worden gelezen). Neem contact op met de beheerder."
   },
   {
    "de": "Anmeldung über das Firmenverzeichnis ist gerade nicht möglich (keine gesicherte Verbindung zum Domain-Controller). Bitte den Administrator informieren.",
    "en": "Sign-in via the company directory is not possible right now (no secure connection to the domain controller). Please inform the administrator.",
-   "fr": "La connexion via l'annuaire de l'entreprise est actuellement impossible (aucune connexion sécurisée au contrôleur de domaine). Veuillez en informer l'administrateur."
+   "fr": "La connexion via l'annuaire de l'entreprise est actuellement impossible (aucune connexion sécurisée au contrôleur de domaine). Veuillez en informer l'administrateur.",
+   "nl": "Aanmelden via de bedrijfsmap is momenteel niet mogelijk (geen beveiligde verbinding met de domeincontroller). Neem contact op met de beheerder."
   },
   {
    "de": "Auftrag nicht gefunden",
    "en": "Job not found",
-   "fr": "Tâche introuvable"
+   "fr": "Tâche introuvable",
+   "nl": "Taak niet gevonden"
   },
   {
    "de": "Auftrag nicht gefunden oder noch nicht abgeschlossen.",
    "en": "Job not found or not finished yet.",
-   "fr": "Tâche introuvable ou pas encore terminée."
+   "fr": "Tâche introuvable ou pas encore terminée.",
+   "nl": "Taak niet gevonden of nog niet voltooid."
   },
   {
    "de": "Avatar-Assistent ist deaktiviert",
    "en": "The avatar assistant is disabled",
-   "fr": "L'assistant avatar est désactivé"
+   "fr": "L'assistant avatar est désactivé",
+   "nl": "De avatar-assistent is uitgeschakeld"
   },
   {
    "de": "Basis-URL nicht ermittelbar.",
    "en": "Base URL could not be determined.",
-   "fr": "Impossible de déterminer l'URL de base."
+   "fr": "Impossible de déterminer l'URL de base.",
+   "nl": "Basis-URL kon niet worden bepaald."
   },
   {
    "de": "Beim Entfernen eines Schemas werden seine Dateien gelöscht – bitte bestätigen.",
    "en": "Removing a schema deletes its files – please confirm.",
-   "fr": "La suppression d'un schéma supprime ses fichiers – veuillez confirmer."
+   "fr": "La suppression d'un schéma supprime ses fichiers – veuillez confirmer.",
+   "nl": "Als u een schema verwijdert, worden de bijbehorende bestanden gewist – bevestig dit alstublieft."
   },
   {
    "de": "Beispiel-Prompts konnten nicht angelegt werden.",
    "en": "Example prompts could not be created.",
-   "fr": "Les exemples de prompts n'ont pas pu être créés."
+   "fr": "Les exemples de prompts n'ont pas pu être créés.",
+   "nl": "Voorbeeldprompts konden niet worden aangemaakt."
   },
   {
    "de": "Benutzername oder Passwort falsch",
    "en": "Wrong username or password",
-   "fr": "Nom d'utilisateur ou mot de passe incorrect"
+   "fr": "Nom d'utilisateur ou mot de passe incorrect",
+   "nl": "Onjuiste gebruikersnaam of onjuist wachtwoord"
   },
   {
    "de": "Benutzername und Passwort erforderlich",
    "en": "Username and password required",
-   "fr": "Nom d'utilisateur et mot de passe requis"
+   "fr": "Nom d'utilisateur et mot de passe requis",
+   "nl": "Gebruikersnaam en wachtwoord vereist"
   },
   {
    "de": "Bereich enthält keine Seiten.",
    "en": "The space contains no pages.",
-   "fr": "L'espace ne contient aucune page."
+   "fr": "L'espace ne contient aucune page.",
+   "nl": "De space bevat geen pagina's."
   },
   {
    "de": "Bereich nicht sichtbar/erlaubt.",
    "en": "Space not visible/allowed.",
-   "fr": "Espace non visible/non autorisé."
+   "fr": "Espace non visible/non autorisé.",
+   "nl": "Space niet zichtbaar/toegestaan."
   },
   {
    "de": "Bitte beide Tabellen angeben.",
    "en": "Please specify both tables.",
-   "fr": "Veuillez indiquer les deux tables."
+   "fr": "Veuillez indiquer les deux tables.",
+   "nl": "Geef beide tabellen op."
   },
   {
    "de": "Bitte den Zwei-Faktor-Code eingeben.",
    "en": "Please enter the two-factor code.",
-   "fr": "Veuillez saisir le code à deux facteurs."
+   "fr": "Veuillez saisir le code à deux facteurs.",
+   "nl": "Voer de tweefactorcode in."
   },
   {
    "de": "Bitte eine Abfrage wählen oder eine Frage eingeben.",
    "en": "Please choose a query or enter a question.",
-   "fr": "Veuillez choisir une requête ou saisir une question."
+   "fr": "Veuillez choisir une requête ou saisir une question.",
+   "nl": "Kies een query of voer een vraag in."
   },
   {
    "de": "Bitte eine Analyse waehlen oder eine Frage eingeben.",
    "en": "Please choose an analysis or enter a question.",
-   "fr": "Veuillez choisir une analyse ou saisir une question."
+   "fr": "Veuillez choisir une analyse ou saisir une question.",
+   "nl": "Kies een analyse of voer een vraag in."
   },
   {
    "de": "Bitte eine Anfrage eingeben.",
    "en": "Please enter a request.",
-   "fr": "Veuillez saisir une demande."
+   "fr": "Veuillez saisir une demande.",
+   "nl": "Voer een verzoek in."
   },
   {
    "de": "Bitte einen Confluence-Bereich wählen.",
    "en": "Please choose a Confluence space.",
-   "fr": "Veuillez choisir un espace Confluence."
+   "fr": "Veuillez choisir un espace Confluence.",
+   "nl": "Kies een Confluence-space."
   },
   {
    "de": "Bitte einen Seitentitel angeben.",
    "en": "Please enter a page title.",
-   "fr": "Veuillez indiquer un titre de page."
+   "fr": "Veuillez indiquer un titre de page.",
+   "nl": "Voer een paginatitel in."
   },
   {
    "de": "Bitte hoechstens 5 Schlagworte angeben.",
    "en": "Please enter at most 5 keywords.",
-   "fr": "Veuillez indiquer au maximum 5 mots-clés."
+   "fr": "Veuillez indiquer au maximum 5 mots-clés.",
+   "nl": "Voer maximaal 5 trefwoorden in."
   },
   {
    "de": "Bitte mindestens 2 Schlagworte angeben.",
    "en": "Please enter at least 2 keywords.",
-   "fr": "Veuillez indiquer au moins 2 mots-clés."
+   "fr": "Veuillez indiquer au moins 2 mots-clés.",
+   "nl": "Voer minimaal 2 trefwoorden in."
   },
   {
    "de": "Bitte mindestens eine Wissensgruppe wählen",
    "en": "Please choose at least one knowledge group",
-   "fr": "Veuillez choisir au moins un groupe de connaissances"
+   "fr": "Veuillez choisir au moins un groupe de connaissances",
+   "nl": "Kies minimaal één kennisgroep"
   },
   {
    "de": "Bitte zuerst ein WebDAV-Kennwort setzen.",
    "en": "Please set a WebDAV password first.",
-   "fr": "Veuillez d'abord définir un mot de passe WebDAV."
+   "fr": "Veuillez d'abord définir un mot de passe WebDAV.",
+   "nl": "Stel eerst een WebDAV-wachtwoord in."
   },
   {
    "de": "Bitte zur Bestätigung auch das Kennwort eingeben.",
    "en": "Please also enter the password to confirm.",
-   "fr": "Veuillez également saisir le mot de passe pour confirmer."
+   "fr": "Veuillez également saisir le mot de passe pour confirmer.",
+   "nl": "Voer ook het wachtwoord in ter bevestiging."
   },
   {
    "de": "Confluence ist nicht aktiv oder nicht konfiguriert.",
    "en": "Confluence is not active or not configured.",
-   "fr": "Confluence n'est pas actif ou pas configuré."
+   "fr": "Confluence n'est pas actif ou pas configuré.",
+   "nl": "Confluence is niet actief of niet geconfigureerd."
   },
   {
    "de": "Confluence ist nicht aktiv – der Skill 'Confluence' muss unter Einstellungen → Skills eingeschaltet werden.",
    "en": "Confluence is not active – the skill 'Confluence' must be switched on under Settings → Skills.",
-   "fr": "Confluence n'est pas actif – la compétence « Confluence » doit être activée sous Paramètres → Compétences."
+   "fr": "Confluence n'est pas actif – la compétence « Confluence » doit être activée sous Paramètres → Compétences.",
+   "nl": "Confluence is niet actief – de skill 'Confluence' moet worden ingeschakeld onder Instellingen → Skills."
   },
   {
    "de": "Confluence ist nicht konfiguriert.",
    "en": "Confluence is not configured.",
-   "fr": "Confluence n'est pas configuré."
+   "fr": "Confluence n'est pas configuré.",
+   "nl": "Confluence is niet geconfigureerd."
   },
   {
    "de": "Das Formular wurde nicht gefunden.",
    "en": "The form was not found.",
-   "fr": "Le formulaire est introuvable."
+   "fr": "Le formulaire est introuvable.",
+   "nl": "Het formulier is niet gevonden."
   },
   {
    "de": "Das Lösungsarchiv ist ausgeschaltet.",
    "en": "The solution archive is switched off.",
-   "fr": "L'archive des solutions est désactivée."
+   "fr": "L'archive des solutions est désactivée.",
+   "nl": "Het oplossingsarchief is uitgeschakeld."
   },
   {
    "de": "Das Token wird abgelehnt (unbekannt, pausiert oder widerrufen).",
    "en": "The token is rejected (unknown, paused or revoked).",
-   "fr": "Le jeton est refusé (inconnu, suspendu ou révoqué)."
+   "fr": "Le jeton est refusé (inconnu, suspendu ou révoqué).",
+   "nl": "Het token wordt geweigerd (onbekend, gepauzeerd of ingetrokken)."
   },
   {
    "de": "Das eigene Konto lässt sich nicht sperren.",
    "en": "Your own account cannot be locked.",
-   "fr": "Votre propre compte ne peut pas être bloqué."
+   "fr": "Votre propre compte ne peut pas être bloqué.",
+   "nl": "Uw eigen account kan niet worden vergrendeld."
   },
   {
    "de": "Das ist ein Wurzelordner – bitte über die Ordner-Verwaltung entfernen",
    "en": "This is a root folder – please remove it via the folder management",
-   "fr": "Ceci est un dossier racine – veuillez le supprimer via la gestion des dossiers"
+   "fr": "Ceci est un dossier racine – veuillez le supprimer via la gestion des dossiers",
+   "nl": "Dit is een hoofdmap – verwijder deze via het mapbeheer"
   },
   {
    "de": "Das ist ein Wurzelordner – bitte über die Ordner-Verwaltung umbenennen",
    "en": "This is a root folder – please rename it via the folder management",
-   "fr": "Ceci est un dossier racine – veuillez le renommer via la gestion des dossiers"
+   "fr": "Ceci est un dossier racine – veuillez le renommer via la gestion des dossiers",
+   "nl": "Dit is een hoofdmap – hernoem deze via het mapbeheer"
   },
   {
    "de": "Datei ist kein UTF-8-Text",
    "en": "The file is not UTF-8 text",
-   "fr": "Le fichier n'est pas un texte UTF-8"
+   "fr": "Le fichier n'est pas un texte UTF-8",
+   "nl": "Het bestand is geen UTF-8-tekst"
   },
   {
    "de": "Datei konnte nicht geloescht werden.",
    "en": "The file could not be deleted.",
-   "fr": "Le fichier n'a pas pu être supprimé."
+   "fr": "Le fichier n'a pas pu être supprimé.",
+   "nl": "Het bestand kon niet worden verwijderd."
   },
   {
    "de": "Datei konnte nicht gespeichert werden.",
    "en": "The file could not be saved.",
-   "fr": "Le fichier n'a pas pu être enregistré."
+   "fr": "Le fichier n'a pas pu être enregistré.",
+   "nl": "Het bestand kon niet worden opgeslagen."
   },
   {
    "de": "Datei liegt bereits in diesem Ordner",
    "en": "The file is already in this folder",
-   "fr": "Le fichier se trouve déjà dans ce dossier"
+   "fr": "Le fichier se trouve déjà dans ce dossier",
+   "nl": "Het bestand staat al in deze map"
   },
   {
    "de": "Datei liegt nicht in einem Knowledge-Ordner",
    "en": "The file is not in a knowledge folder",
-   "fr": "Le fichier ne se trouve pas dans un dossier de connaissances"
+   "fr": "Le fichier ne se trouve pas dans un dossier de connaissances",
+   "nl": "Het bestand staat niet in een kennismap"
   },
   {
    "de": "Datei liegt nicht in einem Wissens-Ordner",
    "en": "The file is not in a knowledge folder",
-   "fr": "Le fichier ne se trouve pas dans un dossier de connaissances"
+   "fr": "Le fichier ne se trouve pas dans un dossier de connaissances",
+   "nl": "Het bestand staat niet in een kennismap"
   },
   {
    "de": "Datei nicht gefunden",
    "en": "File not found",
-   "fr": "Fichier introuvable"
+   "fr": "Fichier introuvable",
+   "nl": "Bestand niet gevonden"
   },
   {
    "de": "Datei zu groß (max. 50 MB)",
    "en": "File too large (max. 50 MB)",
-   "fr": "Fichier trop volumineux (50 Mo max.)"
+   "fr": "Fichier trop volumineux (50 Mo max.)",
+   "nl": "Bestand te groot (max. 50 MB)"
   },
   {
    "de": "Den Wissensgraphen sehen nur Wissenseditoren – globale alles, Editoren einer Wissensgruppe deren Inhalte.",
    "en": "Only knowledge editors can see the knowledge graph – global editors everything, editors of a knowledge group its contents.",
-   "fr": "Seuls les éditeurs de connaissances voient le graphe de connaissances – les éditeurs globaux tout, les éditeurs d'un groupe de connaissances son contenu."
+   "fr": "Seuls les éditeurs de connaissances voient le graphe de connaissances – les éditeurs globaux tout, les éditeurs d'un groupe de connaissances son contenu.",
+   "nl": "Alleen kennisbewerkers kunnen de kennisgrafiek zien – globale bewerkers alles, bewerkers van een kennisgroep de inhoud ervan."
   },
   {
    "de": "Der 2FA-Schlüssel ist auf dem Server gerade nicht lesbar. Bitte den Administrator verständigen.",
    "en": "The 2FA key cannot be read on the server right now. Please notify the administrator.",
-   "fr": "La clé 2FA n'est actuellement pas lisible sur le serveur. Veuillez prévenir l'administrateur."
+   "fr": "La clé 2FA n'est actuellement pas lisible sur le serveur. Veuillez prévenir l'administrateur.",
+   "nl": "De 2FA-sleutel kan momenteel niet op de server worden gelezen. Neem contact op met de beheerder."
   },
   {
    "de": "Der Begriff kommt auch in Dokumenten außerhalb deiner Wissensgruppen vor – die Seite fasste sie mit zusammen.",
    "en": "The term also appears in documents outside your knowledge groups – the page combined them.",
-   "fr": "Le terme apparaît aussi dans des documents en dehors de vos groupes de connaissances – la page les a regroupés."
+   "fr": "Le terme apparaît aussi dans des documents en dehors de vos groupes de connaissances – la page les a regroupés.",
+   "nl": "De term komt ook voor in documenten buiten uw kennisgroepen – de pagina heeft ze samengevoegd."
   },
   {
    "de": "Der Benutzer-Chat ist nicht aktiv – der Skill 'Benutzer-Chat' muss unter Einstellungen → Skills eingeschaltet werden.",
    "en": "The user chat is not active – the skill 'User chat' must be switched on under Settings → Skills.",
-   "fr": "Le chat utilisateur n'est pas actif – la compétence « Chat utilisateur » doit être activée sous Paramètres → Compétences."
+   "fr": "Le chat utilisateur n'est pas actif – la compétence « Chat utilisateur » doit être activée sous Paramètres → Compétences.",
+   "nl": "De gebruikerschat is niet actief – de skill 'Gebruikerschat' moet worden ingeschakeld onder Instellingen → Skills."
   },
   {
    "de": "Der Benutzer-Chat ist nicht mehr aktiv. Ein Administrator hat den Bereich abgeschaltet.",
    "en": "The user chat is no longer active. An administrator has switched the area off.",
-   "fr": "Le chat utilisateur n'est plus actif. Un administrateur a désactivé cet espace."
+   "fr": "Le chat utilisateur n'est plus actif. Un administrateur a désactivé cet espace.",
+   "nl": "De gebruikerschat is niet meer actief. Een beheerder heeft dit onderdeel uitgeschakeld."
   },
   {
    "de": "Der Confluence-Skill ist nicht aktiv.",
    "en": "The Confluence skill is not active.",
-   "fr": "La compétence Confluence n'est pas active."
+   "fr": "La compétence Confluence n'est pas active.",
+   "nl": "De Confluence-skill is niet actief."
   },
   {
    "de": "Der E-Mail-Skill ist nicht aktiv. Ein Administrator aktiviert ihn unter Einstellungen → Skills.",
    "en": "The email skill is not active. An administrator activates it under Settings → Skills.",
-   "fr": "La compétence e-mail n'est pas active. Un administrateur l'active sous Paramètres → Compétences."
+   "fr": "La compétence e-mail n'est pas active. Un administrateur l'active sous Paramètres → Compétences.",
+   "nl": "De e-mailskill is niet actief. Een beheerder activeert deze onder Instellingen → Skills."
   },
   {
    "de": "Der Eintrag wurde nicht gefunden.",
    "en": "The entry was not found.",
-   "fr": "L'entrée est introuvable."
+   "fr": "L'entrée est introuvable.",
+   "nl": "Het item is niet gevonden."
   },
   {
    "de": "Der Excel-Assistent ist nicht aktiv. Ein Administrator aktiviert ihn unter Einstellungen → Skills.",
    "en": "The Excel assistant is not active. An administrator activates it under Settings → Skills.",
-   "fr": "L'assistant Excel n'est pas actif. Un administrateur l'active sous Paramètres → Compétences."
+   "fr": "L'assistant Excel n'est pas actif. Un administrateur l'active sous Paramètres → Compétences.",
+   "nl": "De Excel-assistent is niet actief. Een beheerder activeert deze onder Instellingen → Skills."
   },
   {
    "de": "Der Index wird im Hintergrund aktualisiert.",
    "en": "The index is being updated in the background.",
-   "fr": "L'index est mis à jour en arrière-plan."
+   "fr": "L'index est mis à jour en arrière-plan.",
+   "nl": "De index wordt op de achtergrond bijgewerkt."
   },
   {
    "de": "Der Newsfeed-Bestand ist unlesbar.",
    "en": "The newsfeed data cannot be read.",
-   "fr": "Les données du fil d'actualités sont illisibles."
+   "fr": "Les données du fil d'actualités sont illisibles.",
+   "nl": "De nieuwsfeedgegevens kunnen niet worden gelezen."
   },
   {
    "de": "Der SQL-Assistent ist nicht aktiv.",
    "en": "The SQL assistant is not active.",
-   "fr": "L'assistant SQL n'est pas actif."
+   "fr": "L'assistant SQL n'est pas actif.",
+   "nl": "De SQL-assistent is niet actief."
   },
   {
    "de": "Der Skill „AI Mouse“ ist auf diesem Server nicht aktiv. Ein Administrator schaltet ihn unter Einstellungen → Skills ein.",
    "en": "The skill “AI Mouse” is not active on this server. An administrator switches it on under Settings → Skills.",
-   "fr": "La compétence « AI Mouse » n'est pas active sur ce serveur. Un administrateur l'active sous Paramètres → Compétences."
+   "fr": "La compétence « AI Mouse » n'est pas active sur ce serveur. Un administrateur l'active sous Paramètres → Compétences.",
+   "nl": "De skill “AI Mouse” is niet actief op deze server. Een beheerder schakelt deze in onder Instellingen → Skills."
   },
   {
    "de": "Der Skill „Short Tracks\" ist nicht aktiv (Einstellungen → Skills).",
    "en": "The skill “Short Tracks” is not active (Settings → Skills).",
-   "fr": "La compétence « Short Tracks » n'est pas active (Paramètres → Compétences)."
+   "fr": "La compétence « Short Tracks » n'est pas active (Paramètres → Compétences).",
+   "nl": "De skill “Short Tracks” is niet actief (Instellingen → Skills)."
   },
   {
    "de": "Der Speicherort antwortet gerade nicht",
    "en": "The storage location is not responding right now",
-   "fr": "L'emplacement de stockage ne répond pas pour le moment"
+   "fr": "L'emplacement de stockage ne répond pas pour le moment",
+   "nl": "De opslaglocatie reageert momenteel niet"
   },
   {
    "de": "Der Speicherort antwortet nicht – ob die Datei gelöscht wurde, ist unbekannt. Bitte später die Liste neu laden.",
    "en": "The storage location is not responding – it is unknown whether the file was deleted. Please reload the list later.",
-   "fr": "L'emplacement de stockage ne répond pas – on ne sait pas si le fichier a été supprimé. Veuillez recharger la liste plus tard."
+   "fr": "L'emplacement de stockage ne répond pas – on ne sait pas si le fichier a été supprimé. Veuillez recharger la liste plus tard.",
+   "nl": "De opslaglocatie reageert niet – het is onbekend of het bestand is verwijderd. Laad de lijst later opnieuw."
   },
   {
    "de": "Der Text ist leer.",
    "en": "The text is empty.",
-   "fr": "Le texte est vide."
+   "fr": "Le texte est vide.",
+   "nl": "De tekst is leeg."
   },
   {
    "de": "Der Wissensgraph ist ausgeschaltet",
    "en": "The knowledge graph is switched off",
-   "fr": "Le graphe de connaissances est désactivé"
+   "fr": "Le graphe de connaissances est désactivé",
+   "nl": "De kennisgrafiek is uitgeschakeld"
   },
   {
    "de": "Die Abgabe wurde nicht gefunden.",
    "en": "The submission was not found.",
-   "fr": "La soumission est introuvable."
+   "fr": "La soumission est introuvable.",
+   "nl": "De inzending is niet gevonden."
   },
   {
    "de": "Die Adresse wurde geändert – bitte Kennwort bzw. Token neu eingeben, sonst ginge der gespeicherte Wert an die neue Adresse.",
    "en": "The address was changed – please enter the password or token again, otherwise the stored value would go to the new address.",
-   "fr": "L'adresse a été modifiée – veuillez saisir à nouveau le mot de passe ou le jeton, sinon la valeur enregistrée serait envoyée à la nouvelle adresse."
+   "fr": "L'adresse a été modifiée – veuillez saisir à nouveau le mot de passe ou le jeton, sinon la valeur enregistrée serait envoyée à la nouvelle adresse.",
+   "nl": "Het adres is gewijzigd – voer het wachtwoord of token opnieuw in, anders zou de opgeslagen waarde naar het nieuwe adres gaan."
   },
   {
    "de": "Die Anmeldeberechtigung ist gerade nicht prüfbar. Bitte mit Kennwort anmelden.",
    "en": "The sign-in permission cannot be checked right now. Please sign in with your password.",
-   "fr": "L'autorisation de connexion ne peut pas être vérifiée pour le moment. Veuillez vous connecter avec votre mot de passe."
+   "fr": "L'autorisation de connexion ne peut pas être vérifiée pour le moment. Veuillez vous connecter avec votre mot de passe.",
+   "nl": "De aanmeldtoestemming kan momenteel niet worden gecontroleerd. Meld u aan met uw wachtwoord."
   },
   {
    "de": "Die Anmeldung über das Firmenkonto ist abgelaufen. Bitte erneut anmelden.",
    "en": "The sign-in via the company account has expired. Please sign in again.",
-   "fr": "La connexion via le compte d'entreprise a expiré. Veuillez vous reconnecter."
+   "fr": "La connexion via le compte d'entreprise a expiré. Veuillez vous reconnecter.",
+   "nl": "De aanmelding via het bedrijfsaccount is verlopen. Meld u opnieuw aan."
   },
   {
    "de": "Die Anwendung wird gerade gebaut – das dauert etwa eine halbe Minute. Bitte gleich noch einmal herunterladen.",
    "en": "The application is being built right now – this takes about half a minute. Please download again shortly.",
-   "fr": "L'application est en cours de construction – cela prend environ une demi-minute. Veuillez la télécharger à nouveau dans un instant."
+   "fr": "L'application est en cours de construction – cela prend environ une demi-minute. Veuillez la télécharger à nouveau dans un instant.",
+   "nl": "De toepassing wordt momenteel gebouwd – dit duurt ongeveer een halve minuut. Download over enkele ogenblikken opnieuw."
   },
   {
    "de": "Die Datei ist leer.",
    "en": "The file is empty.",
-   "fr": "Le fichier est vide."
+   "fr": "Le fichier est vide.",
+   "nl": "Het bestand is leeg."
   },
   {
    "de": "Die Datei konnte auf dem Server nicht abgelegt werden.",
    "en": "The file could not be stored on the server.",
-   "fr": "Le fichier n'a pas pu être enregistré sur le serveur."
+   "fr": "Le fichier n'a pas pu être enregistré sur le serveur.",
+   "nl": "Het bestand kon niet op de server worden opgeslagen."
   },
   {
    "de": "Die Frage ist leer.",
    "en": "The question is empty.",
-   "fr": "La question est vide."
+   "fr": "La question est vide.",
+   "nl": "De vraag is leeg."
   },
   {
    "de": "Die Frage wurde nicht gefunden.",
    "en": "The question was not found.",
-   "fr": "La question est introuvable."
+   "fr": "La question est introuvable.",
+   "nl": "De vraag is niet gevonden."
   },
   {
    "de": "Die Vorgabe wurde nicht gefunden.",
    "en": "The default was not found.",
-   "fr": "La valeur par défaut est introuvable."
+   "fr": "La valeur par défaut est introuvable.",
+   "nl": "De standaardwaarde is niet gevonden."
   },
   {
    "de": "Die Vorlage wurde nicht gefunden.",
    "en": "The template was not found.",
-   "fr": "Le modèle est introuvable."
+   "fr": "Le modèle est introuvable.",
+   "nl": "De sjabloon is niet gevonden."
   },
   {
    "de": "Die Wiki-Seite stützt sich auch auf Dokumente außerhalb deiner Wissensgruppen.",
    "en": "The wiki page also relies on documents outside your knowledge groups.",
-   "fr": "La page wiki s'appuie aussi sur des documents en dehors de vos groupes de connaissances."
+   "fr": "La page wiki s'appuie aussi sur des documents en dehors de vos groupes de connaissances.",
+   "nl": "De wikipagina steunt ook op documenten buiten uw kennisgroepen."
   },
   {
    "de": "Die Zwei-Faktor-Anmeldung ist nicht eingeschaltet.",
    "en": "Two-factor sign-in is not switched on.",
-   "fr": "La connexion à deux facteurs n'est pas activée."
+   "fr": "La connexion à deux facteurs n'est pas activée.",
+   "nl": "Tweefactorauthenticatie is niet ingeschakeld."
   },
   {
    "de": "Die Zwei-Faktor-Anmeldung lässt sich in der App nicht ändern. Bitte im Browser anmelden.",
    "en": "Two-factor sign-in cannot be changed in the app. Please sign in in the browser.",
-   "fr": "La connexion à deux facteurs ne peut pas être modifiée dans l'application. Veuillez vous connecter dans le navigateur."
+   "fr": "La connexion à deux facteurs ne peut pas être modifiée dans l'application. Veuillez vous connecter dans le navigateur.",
+   "nl": "Tweefactorauthenticatie kan niet in de app worden gewijzigd. Meld u aan in de browser."
   },
   {
    "de": "Die automatische Anmeldung ist nicht möglich. Bitte melde dich mit Kennwort an.",
    "en": "Automatic sign-in is not possible. Please sign in with your password.",
-   "fr": "La connexion automatique n'est pas possible. Veuillez vous connecter avec votre mot de passe."
+   "fr": "La connexion automatique n'est pas possible. Veuillez vous connecter avec votre mot de passe.",
+   "nl": "Automatisch aanmelden is niet mogelijk. Meld u aan met uw wachtwoord."
   },
   {
    "de": "Die eigene Sitzung lässt sich hier nicht beenden – dafür gibt es den Abmelden-Knopf.",
    "en": "Your own session cannot be ended here – use the sign-out button for that.",
-   "fr": "Votre propre session ne peut pas être terminée ici – utilisez pour cela le bouton de déconnexion."
+   "fr": "Votre propre session ne peut pas être terminée ici – utilisez pour cela le bouton de déconnexion.",
+   "nl": "Uw eigen sessie kan hier niet worden beëindigd – gebruik daarvoor de afmeldknop."
   },
   {
    "de": "Die eigene Zwei-Faktor-Anmeldung schaltest du unter Konto mit deinem Kennwort ab.",
    "en": "You switch off your own two-factor sign-in under Account with your password.",
-   "fr": "Vous désactivez votre propre connexion à deux facteurs sous Compte avec votre mot de passe."
+   "fr": "Vous désactivez votre propre connexion à deux facteurs sous Compte avec votre mot de passe.",
+   "nl": "U schakelt uw eigen tweefactorauthenticatie uit onder Account met uw wachtwoord."
   },
   {
    "de": "Die gewählte übergeordnete Seite gehört nicht zu diesem Bereich.",
    "en": "The selected parent page does not belong to this space.",
-   "fr": "La page parente choisie n'appartient pas à cet espace."
+   "fr": "La page parente choisie n'appartient pas à cet espace.",
+   "nl": "De geselecteerde bovenliggende pagina hoort niet bij deze space."
   },
   {
    "de": "Diese Abfrage wurde vom Administrator ausgeblendet.",
    "en": "This query has been hidden by the administrator.",
-   "fr": "Cette requête a été masquée par l'administrateur."
+   "fr": "Cette requête a été masquée par l'administrateur.",
+   "nl": "Deze query is door de beheerder verborgen."
   },
   {
    "de": "Diese Ablage nimmt keine Fragen an – das Fragefeld ist in ihren Einstellungen ausgeschaltet.",
    "en": "This storage does not accept questions – the question field is switched off in its settings.",
-   "fr": "Ce dépôt n'accepte pas de questions – le champ de question est désactivé dans ses paramètres."
+   "fr": "Ce dépôt n'accepte pas de questions – le champ de question est désactivé dans ses paramètres.",
+   "nl": "Deze opslag accepteert geen vragen – het vraagveld is uitgeschakeld in de instellingen ervan."
   },
   {
    "de": "Diese Analyse wurde vom Administrator ausgeblendet.",
    "en": "This analysis has been hidden by the administrator.",
-   "fr": "Cette analyse a été masquée par l'administrateur."
+   "fr": "Cette analyse a été masquée par l'administrateur.",
+   "nl": "Deze analyse is door de beheerder verborgen."
   },
   {
    "de": "Diese Datei kann hier nicht gelöscht werden: der Speicherort erlaubt kein Löschen (z. B. nur lesend eingebundene Freigabe).",
    "en": "This file cannot be deleted here: the storage location does not allow deleting (e.g. a share mounted read-only).",
-   "fr": "Ce fichier ne peut pas être supprimé ici : l'emplacement de stockage n'autorise pas la suppression (p. ex. un partage monté en lecture seule)."
+   "fr": "Ce fichier ne peut pas être supprimé ici : l'emplacement de stockage n'autorise pas la suppression (p. ex. un partage monté en lecture seule).",
+   "nl": "Dit bestand kan hier niet worden verwijderd: de opslaglocatie staat verwijderen niet toe (bijv. een share die alleen-lezen is aangekoppeld)."
   },
   {
    "de": "Diese Regel ist abgeschaltet. Schalte sie ein, um sie zu benutzen.",
    "en": "This rule is switched off. Switch it on to use it.",
-   "fr": "Cette règle est désactivée. Activez-la pour l'utiliser."
+   "fr": "Cette règle est désactivée. Activez-la pour l'utiliser.",
+   "nl": "Deze regel is uitgeschakeld. Schakel deze in om hem te gebruiken."
   },
   {
    "de": "Diese Sitzung kann keine Administrator-Rechte bekommen.",
    "en": "This session cannot be given administrator rights.",
-   "fr": "Cette session ne peut pas obtenir de droits d'administrateur."
+   "fr": "Cette session ne peut pas obtenir de droits d'administrateur.",
+   "nl": "Deze sessie kan geen beheerdersrechten krijgen."
   },
   {
    "de": "Diese Wissensgruppe gehört nicht zu deinem Bereich.",
    "en": "This knowledge group does not belong to your area.",
-   "fr": "Ce groupe de connaissances n'appartient pas à votre domaine."
+   "fr": "Ce groupe de connaissances n'appartient pas à votre domaine.",
+   "nl": "Deze kennisgroep hoort niet bij uw domein."
   },
   {
    "de": "Dieser Endpunkt ist auf lokalen Zugriff (Loopback) beschraenkt.",
    "en": "This endpoint is restricted to local access (loopback).",
-   "fr": "Ce point de terminaison est limité à l'accès local (loopback)."
+   "fr": "Ce point de terminaison est limité à l'accès local (loopback).",
+   "nl": "Dit eindpunt is beperkt tot lokale toegang (loopback)."
   },
   {
    "de": "Dieser Endpunkt kann nicht beschraenkt werden (Konfigurations-Endpunkt – sonst waere die Einstellung nicht mehr aenderbar).",
    "en": "This endpoint cannot be restricted (configuration endpoint – otherwise the setting could no longer be changed).",
-   "fr": "Ce point de terminaison ne peut pas être restreint (point de configuration – sinon le paramètre ne serait plus modifiable)."
+   "fr": "Ce point de terminaison ne peut pas être restreint (point de configuration – sinon le paramètre ne serait plus modifiable).",
+   "nl": "Dit eindpunt kan niet worden beperkt (configuratie-eindpunt – anders zou de instelling niet meer kunnen worden gewijzigd)."
   },
   {
    "de": "Dieser Pfad liegt nicht in einem Wissensordner.",
    "en": "This path is not in a knowledge folder.",
-   "fr": "Ce chemin ne se trouve pas dans un dossier de connaissances."
+   "fr": "Ce chemin ne se trouve pas dans un dossier de connaissances.",
+   "nl": "Dit pad staat niet in een kennismap."
   },
   {
    "de": "Dieser Unter-Agent gehört einem anderen Benutzer.",
    "en": "This sub-agent belongs to another user.",
-   "fr": "Ce sous-agent appartient à un autre utilisateur."
+   "fr": "Ce sous-agent appartient à un autre utilisateur.",
+   "nl": "Deze subagent hoort bij een andere gebruiker."
   },
   {
    "de": "Dieses Postfach ist noch mit keinem Konto verknuepft. Einmal anmelden – danach geht es von selbst.",
    "en": "This mailbox is not linked to an account yet. Sign in once – after that it works by itself.",
-   "fr": "Cette boîte aux lettres n'est encore liée à aucun compte. Connectez-vous une fois – ensuite cela fonctionne tout seul."
+   "fr": "Cette boîte aux lettres n'est encore liée à aucun compte. Connectez-vous une fois – ensuite cela fonctionne tout seul.",
+   "nl": "Deze mailbox is nog niet aan een account gekoppeld. Meld u één keer aan – daarna werkt het vanzelf."
   },
   {
    "de": "Dir ist kein Wissensbereich zugewiesen.",
    "en": "You have not been assigned a knowledge area.",
-   "fr": "Aucun domaine de connaissances ne vous a été attribué."
+   "fr": "Aucun domaine de connaissances ne vous a été attribué.",
+   "nl": "U hebt geen kennisdomein toegewezen gekregen."
   },
   {
    "de": "Domain und E-Mail erforderlich",
    "en": "Domain and email required",
-   "fr": "Domaine et e-mail requis"
+   "fr": "Domaine et e-mail requis",
+   "nl": "Domein en e-mail vereist"
   },
   {
    "de": "Ein Lauf ist bereits aktiv.",
    "en": "A run is already active.",
-   "fr": "Une exécution est déjà active."
+   "fr": "Une exécution est déjà active.",
+   "nl": "Er is al een run actief."
   },
   {
    "de": "Ein Zugangstoken wird nur über eine verschlüsselte Adresse (wss://) gesendet.",
    "en": "An access token is only sent over an encrypted address (wss://).",
-   "fr": "Un jeton d'accès n'est envoyé que via une adresse chiffrée (wss://)."
+   "fr": "Un jeton d'accès n'est envoyé que via une adresse chiffrée (wss://).",
+   "nl": "Een toegangstoken wordt alleen via een versleuteld adres (wss://) verzonden."
   },
   {
    "de": "Einbindung nicht gefunden.",
    "en": "Integration not found.",
-   "fr": "Intégration introuvable."
+   "fr": "Intégration introuvable.",
+   "nl": "Integratie niet gevonden."
   },
   {
    "de": "Eine Datei mit diesem Namen gibt es schon.",
    "en": "A file with this name already exists.",
-   "fr": "Un fichier portant ce nom existe déjà."
+   "fr": "Un fichier portant ce nom existe déjà.",
+   "nl": "Er bestaat al een bestand met deze naam."
   },
   {
    "de": "Eine Datei ohne Wissensgruppe können nur globale Wissens-Editoren zuordnen",
    "en": "Only global knowledge editors can assign a file without a knowledge group",
-   "fr": "Seuls les éditeurs de connaissances globaux peuvent attribuer un fichier sans groupe de connaissances"
+   "fr": "Seuls les éditeurs de connaissances globaux peuvent attribuer un fichier sans groupe de connaissances",
+   "nl": "Alleen globale kennisbewerkers kunnen een bestand zonder kennisgroep toewijzen"
   },
   {
    "de": "Eintrag nicht gefunden",
    "en": "Entry not found",
-   "fr": "Entrée introuvable"
+   "fr": "Entrée introuvable",
+   "nl": "Item niet gevonden"
   },
   {
    "de": "Es fehlen Nachrichten-Kennung oder Text.",
    "en": "Message ID or text missing.",
-   "fr": "Identifiant du message ou texte manquant."
+   "fr": "Identifiant du message ou texte manquant.",
+   "nl": "Bericht-ID of tekst ontbreekt."
   },
   {
    "de": "Es fehlt die Nachricht (Inhalt oder Kennung).",
    "en": "The message is missing (content or ID).",
-   "fr": "Le message est manquant (contenu ou identifiant)."
+   "fr": "Le message est manquant (contenu ou identifiant).",
+   "nl": "Het bericht ontbreekt (inhoud of ID)."
   },
   {
    "de": "Es fehlt die Nachricht.",
    "en": "The message is missing.",
-   "fr": "Le message est manquant."
+   "fr": "Le message est manquant.",
+   "nl": "Het bericht ontbreekt."
   },
   {
    "de": "Es fehlt die Nachrichten-Kennung (msg_id).",
    "en": "The message ID (msg_id) is missing.",
-   "fr": "L'identifiant du message (msg_id) est manquant."
+   "fr": "L'identifiant du message (msg_id) est manquant.",
+   "nl": "De bericht-ID (msg_id) ontbreekt."
   },
   {
    "de": "Es gibt noch keinen Schema-Graphen.",
    "en": "There is no schema graph yet.",
-   "fr": "Il n'existe pas encore de graphe de schéma."
+   "fr": "Il n'existe pas encore de graphe de schéma.",
+   "nl": "Er is nog geen schemagrafiek."
   },
   {
    "de": "Es gibt noch keinen Schema-Graphen. Ein Administrator lädt Schema-Dateien unter Einstellungen → SQL-Assistent hoch.",
    "en": "There is no schema graph yet. An administrator uploads schema files under Settings → SQL assistant.",
-   "fr": "Il n'existe pas encore de graphe de schéma. Un administrateur charge les fichiers de schéma sous Paramètres → Assistant SQL."
+   "fr": "Il n'existe pas encore de graphe de schéma. Un administrateur charge les fichiers de schéma sous Paramètres → Assistant SQL.",
+   "nl": "Er is nog geen schemagrafiek. Een beheerder uploadt schemabestanden onder Instellingen → SQL-assistent."
   },
   {
    "de": "Es ist keine Vorlage gewählt.",
    "en": "No template is selected.",
-   "fr": "Aucun modèle n'est sélectionné."
+   "fr": "Aucun modèle n'est sélectionné.",
+   "nl": "Er is geen sjabloon geselecteerd."
   },
   {
    "de": "Es läuft bereits eine Frage von dir – bitte warten.",
    "en": "A question of yours is already running – please wait.",
-   "fr": "Une de vos questions est déjà en cours – veuillez patienter."
+   "fr": "Une de vos questions est déjà en cours – veuillez patienter.",
+   "nl": "Een vraag van u wordt al uitgevoerd – even geduld."
   },
   {
    "de": "Es läuft bereits eine Prüfung.",
    "en": "A check is already running.",
-   "fr": "Une vérification est déjà en cours."
+   "fr": "Une vérification est déjà en cours.",
+   "nl": "Er wordt al een controle uitgevoerd."
   },
   {
    "de": "Es läuft gerade keine Auswertung.",
    "en": "No evaluation is running right now.",
-   "fr": "Aucune évaluation n'est en cours."
+   "fr": "Aucune évaluation n'est en cours.",
+   "nl": "Er loopt momenteel geen beoordeling."
   },
   {
    "de": "Es wurde nichts zum Aendern uebergeben.",
    "en": "Nothing to change was submitted.",
-   "fr": "Aucune modification n'a été transmise."
+   "fr": "Aucune modification n'a été transmise.",
+   "nl": "Er is niets om te wijzigen ingediend."
   },
   {
    "de": "Es wurde weder eine Zertifikatsdatei noch ein Zeitstempel-Dienst uebergeben.",
    "en": "Neither a certificate file nor a timestamp service was submitted.",
-   "fr": "Ni fichier de certificat ni service d'horodatage n'a été transmis."
+   "fr": "Ni fichier de certificat ni service d'horodatage n'a été transmis.",
+   "nl": "Er is noch een certificaatbestand noch een tijdstempelservice ingediend."
   },
   {
    "de": "Freigabe nicht gefunden",
    "en": "Share not found",
-   "fr": "Partage introuvable"
+   "fr": "Partage introuvable",
+   "nl": "Share niet gevonden"
   },
   {
    "de": "Fuer dieses Konto ist eine Zwei-Faktor-Anmeldung eingeschaltet. Bitte melde dich hier mit Kennwort und Code an.",
    "en": "Two-factor sign-in is switched on for this account. Please sign in here with password and code.",
-   "fr": "La connexion à deux facteurs est activée pour ce compte. Veuillez vous connecter ici avec mot de passe et code."
+   "fr": "La connexion à deux facteurs est activée pour ce compte. Veuillez vous connecter ici avec mot de passe et code.",
+   "nl": "Tweefactorauthenticatie is ingeschakeld voor dit account. Meld u hier aan met wachtwoord en code."
   },
   {
    "de": "Für Administratoren ist die Zwei-Faktor-Anmeldung Pflicht und lässt sich nicht abschalten.",
    "en": "Two-factor sign-in is mandatory for administrators and cannot be switched off.",
-   "fr": "La connexion à deux facteurs est obligatoire pour les administrateurs et ne peut pas être désactivée."
+   "fr": "La connexion à deux facteurs est obligatoire pour les administrateurs et ne peut pas être désactivée.",
+   "nl": "Tweefactorauthenticatie is verplicht voor beheerders en kan niet worden uitgeschakeld."
   },
   {
    "de": "Für Administratoren ist die Zwei-Faktor-Anmeldung Pflicht. Bitte jetzt einrichten.",
    "en": "Two-factor sign-in is mandatory for administrators. Please set it up now.",
-   "fr": "La connexion à deux facteurs est obligatoire pour les administrateurs. Veuillez la configurer maintenant."
+   "fr": "La connexion à deux facteurs est obligatoire pour les administrateurs. Veuillez la configurer maintenant.",
+   "nl": "Tweefactorauthenticatie is verplicht voor beheerders. Stel deze nu in."
   },
   {
    "de": "Für diesen Bereich nicht freigegeben.",
    "en": "Not enabled for this area.",
-   "fr": "Non autorisé pour ce domaine."
+   "fr": "Non autorisé pour ce domaine.",
+   "nl": "Niet ingeschakeld voor dit domein."
   },
   {
    "de": "Für dieses Konto besteht keine Sperre.",
    "en": "There is no lock for this account.",
-   "fr": "Il n'y a aucun blocage pour ce compte."
+   "fr": "Il n'y a aucun blocage pour ce compte.",
+   "nl": "Er is geen vergrendeling voor dit account."
   },
   {
    "de": "Für dieses Konto ist der Internet-Zugriff nicht freigegeben (Einstellungen → Sicherheit → Berechtigungen).",
    "en": "Internet access is not enabled for this account (Settings → Security → Permissions).",
-   "fr": "L'accès à Internet n'est pas activé pour ce compte (Paramètres → Sécurité → Autorisations)."
+   "fr": "L'accès à Internet n'est pas activé pour ce compte (Paramètres → Sécurité → Autorisations).",
+   "nl": "Internettoegang is niet ingeschakeld voor dit account (Instellingen → Beveiliging → Rechten)."
   },
   {
    "de": "Für dieses Konto ist keine Zwei-Faktor-Anmeldung eingeschaltet.",
    "en": "Two-factor sign-in is not switched on for this account.",
-   "fr": "La connexion à deux facteurs n'est pas activée pour ce compte."
+   "fr": "La connexion à deux facteurs n'est pas activée pour ce compte.",
+   "nl": "Tweefactorauthenticatie is niet ingeschakeld voor dit account."
   },
   {
    "de": "Für dieses Paket liegt kein Update vor – bitte neu prüfen.",
    "en": "There is no update for this package – please check again.",
-   "fr": "Aucune mise à jour n'est disponible pour ce paquet – veuillez vérifier à nouveau."
+   "fr": "Aucune mise à jour n'est disponible pour ce paquet – veuillez vérifier à nouveau.",
+   "nl": "Er is geen update voor dit pakket – controleer opnieuw."
   },
   {
    "de": "Groesse nicht vorgesehen",
    "en": "Size not supported",
-   "fr": "Taille non prévue"
+   "fr": "Taille non prévue",
+   "nl": "Grootte niet ondersteund"
   },
   {
    "de": "Gruppe nicht gefunden",
    "en": "Group not found",
-   "fr": "Groupe introuvable"
+   "fr": "Groupe introuvable",
+   "nl": "Groep niet gevonden"
   },
   {
    "de": "In der App und über die kennwortlose Anmeldung gibt es keine Administrator-Rechte.",
    "en": "In the app and via passwordless sign-in there are no administrator rights.",
-   "fr": "Dans l'application et via la connexion sans mot de passe, il n'y a pas de droits d'administrateur."
+   "fr": "Dans l'application et via la connexion sans mot de passe, il n'y a pas de droits d'administrateur.",
+   "nl": "In de app en bij aanmelden zonder wachtwoord zijn er geen beheerdersrechten."
   },
   {
    "de": "Indizierung läuft bereits",
    "en": "Indexing is already running",
-   "fr": "L'indexation est déjà en cours"
+   "fr": "L'indexation est déjà en cours",
+   "nl": "Indexering loopt al"
   },
   {
    "de": "Indizierung läuft – bitte warten",
    "en": "Indexing is running – please wait",
-   "fr": "Indexation en cours – veuillez patienter"
+   "fr": "Indexation en cours – veuillez patienter",
+   "nl": "Indexering loopt – even geduld"
   },
   {
    "de": "Internet-Sperre aufheben braucht eine Root-Freigabe: Einstellungen → Sicherheit → Root-Freigaben, Eintrag freigeben und erneut ausführen.",
    "en": "Lifting the internet block requires a root approval: Settings → Security → Root approvals, approve the entry and run again.",
-   "fr": "La levée du blocage Internet nécessite une autorisation root : Paramètres → Sécurité → Autorisations root, approuvez l'entrée et réexécutez."
+   "fr": "La levée du blocage Internet nécessite une autorisation root : Paramètres → Sécurité → Autorisations root, approuvez l'entrée et réexécutez.",
+   "nl": "Het opheffen van de internetblokkade vereist een root-goedkeuring: Instellingen → Beveiliging → Root-goedkeuringen, keur het item goed en voer het opnieuw uit."
   },
   {
    "de": "Issue nicht gefunden",
    "en": "Issue not found",
-   "fr": "Ticket introuvable"
+   "fr": "Ticket introuvable",
+   "nl": "Issue niet gevonden"
   },
   {
    "de": "Jira-Skill ist nicht aktiv.",
    "en": "The Jira skill is not active.",
-   "fr": "La compétence Jira n'est pas active."
+   "fr": "La compétence Jira n'est pas active.",
+   "nl": "De Jira-skill is niet actief."
   },
   {
    "de": "Job nicht gefunden",
    "en": "Job not found",
-   "fr": "Tâche introuvable"
+   "fr": "Tâche introuvable",
+   "nl": "Taak niet gevonden"
   },
   {
    "de": "Kamera nicht verfuegbar",
    "en": "Camera not available",
-   "fr": "Caméra non disponible"
+   "fr": "Caméra non disponible",
+   "nl": "Camera niet beschikbaar"
   },
   {
    "de": "Kein Agent aktiv",
    "en": "No agent active",
-   "fr": "Aucun agent actif"
+   "fr": "Aucun agent actif",
+   "nl": "Geen agent actief"
   },
   {
    "de": "Kein AgentManager aktiv",
    "en": "No AgentManager active",
-   "fr": "Aucun AgentManager actif"
+   "fr": "Aucun AgentManager actif",
+   "nl": "Geen AgentManager actief"
   },
   {
    "de": "Kein Audio angegeben",
    "en": "No audio specified",
-   "fr": "Aucun audio indiqué"
+   "fr": "Aucun audio indiqué",
+   "nl": "Geen audio opgegeven"
   },
   {
    "de": "Kein Benutzer angegeben",
    "en": "No user specified",
-   "fr": "Aucun utilisateur indiqué"
+   "fr": "Aucun utilisateur indiqué",
+   "nl": "Geen gebruiker opgegeven"
   },
   {
    "de": "Kein Benutzer angegeben.",
    "en": "No user specified.",
-   "fr": "Aucun utilisateur indiqué."
+   "fr": "Aucun utilisateur indiqué.",
+   "nl": "Geen gebruiker opgegeven."
   },
   {
    "de": "Kein Dateipfad",
    "en": "No file path",
-   "fr": "Aucun chemin de fichier"
+   "fr": "Aucun chemin de fichier",
+   "nl": "Geen bestandspad"
   },
   {
    "de": "Kein Dateipfad angegeben",
    "en": "No file path specified",
-   "fr": "Aucun chemin de fichier indiqué"
+   "fr": "Aucun chemin de fichier indiqué",
+   "nl": "Geen bestandspad opgegeven"
   },
   {
    "de": "Kein Destillat vorhanden.",
    "en": "No distillate available.",
-   "fr": "Aucun distillat disponible."
+   "fr": "Aucun distillat disponible.",
+   "nl": "Geen distillaat beschikbaar."
   },
   {
    "de": "Kein Face-Crop verfuegbar",
    "en": "No face crop available",
-   "fr": "Aucun recadrage de visage disponible"
+   "fr": "Aucun recadrage de visage disponible",
+   "nl": "Geen gezichtsuitsnede beschikbaar"
   },
   {
    "de": "Kein Issuer eingetragen.",
    "en": "No issuer entered.",
-   "fr": "Aucun émetteur saisi."
+   "fr": "Aucun émetteur saisi.",
+   "nl": "Geen uitgever ingevoerd."
   },
   {
    "de": "Kein Kamerabild verfuegbar",
    "en": "No camera image available",
-   "fr": "Aucune image de caméra disponible"
+   "fr": "Aucune image de caméra disponible",
+   "nl": "Geen camerabeeld beschikbaar"
   },
   {
    "de": "Kein Konto angegeben.",
    "en": "No account specified.",
-   "fr": "Aucun compte indiqué."
+   "fr": "Aucun compte indiqué.",
+   "nl": "Geen account opgegeven."
   },
   {
    "de": "Kein Lauf gewaehlt",
    "en": "No run selected",
-   "fr": "Aucune exécution sélectionnée"
+   "fr": "Aucune exécution sélectionnée",
+   "nl": "Geen run geselecteerd"
   },
   {
    "de": "Kein Pfad",
    "en": "No path",
-   "fr": "Aucun chemin"
+   "fr": "Aucun chemin",
+   "nl": "Geen pad"
   },
   {
    "de": "Kein SAP-Zugriff – nicht in der SAP-Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „SAP“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No SAP access – not enabled in the SAP user list/group (Settings → Security → Permissions, column “SAP”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès SAP – non activé dans la liste/le groupe d'utilisateurs SAP (Paramètres → Sécurité → Autorisations, colonne « SAP » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès SAP – non activé dans la liste/le groupe d'utilisateurs SAP (Paramètres → Sécurité → Autorisations, colonne « SAP » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen SAP-toegang – niet ingeschakeld in de SAP-gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “SAP”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein SQL angegeben.",
    "en": "No SQL specified.",
-   "fr": "Aucun SQL indiqué."
+   "fr": "Aucun SQL indiqué.",
+   "nl": "Geen SQL opgegeven."
   },
   {
    "de": "Kein Schlüssel übergeben",
    "en": "No key submitted",
-   "fr": "Aucune clé transmise"
+   "fr": "Aucune clé transmise",
+   "nl": "Geen sleutel ingediend"
   },
   {
    "de": "Kein Service angegeben und kein Standard-Service hinterlegt.",
    "en": "No service specified and no default service configured.",
-   "fr": "Aucun service indiqué et aucun service par défaut configuré."
+   "fr": "Aucun service indiqué et aucun service par défaut configuré.",
+   "nl": "Geen service opgegeven en geen standaardservice geconfigureerd."
   },
   {
    "de": "Kein TOTP-Setup gefunden",
    "en": "No TOTP setup found",
-   "fr": "Aucune configuration TOTP trouvée"
+   "fr": "Aucune configuration TOTP trouvée",
+   "nl": "Geen TOTP-installatie gevonden"
   },
   {
    "de": "Kein Tabellenname angegeben.",
    "en": "No table name specified.",
-   "fr": "Aucun nom de table indiqué."
+   "fr": "Aucun nom de table indiqué.",
+   "nl": "Geen tabelnaam opgegeven."
   },
   {
    "de": "Kein Task-Text angegeben",
    "en": "No task text specified",
-   "fr": "Aucun texte de tâche indiqué"
+   "fr": "Aucun texte de tâche indiqué",
+   "nl": "Geen taaktekst opgegeven"
   },
   {
    "de": "Kein Text angegeben",
    "en": "No text specified",
-   "fr": "Aucun texte indiqué"
+   "fr": "Aucun texte indiqué",
+   "nl": "Geen tekst opgegeven"
   },
   {
    "de": "Kein Thumbnail verfuegbar",
    "en": "No thumbnail available",
-   "fr": "Aucune miniature disponible"
+   "fr": "Aucune miniature disponible",
+   "nl": "Geen miniatuur beschikbaar"
   },
   {
    "de": "Kein Token uebergeben.",
    "en": "No token submitted.",
-   "fr": "Aucun jeton transmis."
+   "fr": "Aucun jeton transmis.",
+   "nl": "Geen token ingediend."
   },
   {
    "de": "Kein VEMAS-Zugriff – nicht in der VEMAS-Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „VEMAS“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No VEMAS access – not enabled in the VEMAS user list/group (Settings → Security → Permissions, column “VEMAS”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès VEMAS – non activé dans la liste/le groupe d'utilisateurs VEMAS (Paramètres → Sécurité → Autorisations, colonne « VEMAS » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès VEMAS – non activé dans la liste/le groupe d'utilisateurs VEMAS (Paramètres → Sécurité → Autorisations, colonne « VEMAS » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen VEMAS-toegang – niet ingeschakeld in de VEMAS-gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “VEMAS”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Vorlagenname",
    "en": "No template name",
-   "fr": "Aucun nom de modèle"
+   "fr": "Aucun nom de modèle",
+   "nl": "Geen sjabloonnaam"
   },
   {
    "de": "Kein Zielordner angegeben",
    "en": "No target folder specified",
-   "fr": "Aucun dossier cible indiqué"
+   "fr": "Aucun dossier cible indiqué",
+   "nl": "Geen doelmap opgegeven"
   },
   {
    "de": "Kein Zugriff auf AI Mouse – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „AI-Maus“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No access to AI Mouse – not enabled in the user list/group (Settings → Security → Permissions, column “AI Mouse”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès à AI Mouse – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « AI Mouse » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès à AI Mouse – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « AI Mouse » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toegang tot AI Mouse – niet ingeschakeld in de gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “AI Mouse”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Zugriff auf Feedback – der Bereich steht offen, wer Wissen bearbeiten darf: entweder als globaler Wissens-Editor (Einstellungen → Sicherheit → Berechtigungen, Spalte „Wissen“) oder als Editor einer einzelnen Wissensgruppe (Einstellungen → Wissen → Wissensgruppen). Ohne angelegte Wissensgruppe gibt es den Bereich nicht. Ggf. neu einloggen für Gruppen-Aktualisierung.",
    "en": "No access to feedback – the area is open to those who may edit knowledge: either as a global knowledge editor (Settings → Security → Permissions, column “Knowledge”) or as editor of an individual knowledge group (Settings → Knowledge → Knowledge groups). Without a knowledge group the area does not exist. Sign in again if needed to refresh groups.",
-   "fr": "Pas d'accès aux retours – l'espace est ouvert à ceux qui peuvent modifier les connaissances : soit en tant qu'éditeur de connaissances global (Paramètres → Sécurité → Autorisations, colonne « Connaissances »), soit en tant qu'éditeur d'un groupe de connaissances (Paramètres → Connaissances → Groupes de connaissances). Sans groupe de connaissances, l'espace n'existe pas. Si nécessaire, reconnectez-vous pour actualiser les groupes."
+   "fr": "Pas d'accès aux retours – l'espace est ouvert à ceux qui peuvent modifier les connaissances : soit en tant qu'éditeur de connaissances global (Paramètres → Sécurité → Autorisations, colonne « Connaissances »), soit en tant qu'éditeur d'un groupe de connaissances (Paramètres → Connaissances → Groupes de connaissances). Sans groupe de connaissances, l'espace n'existe pas. Si nécessaire, reconnectez-vous pour actualiser les groupes.",
+   "nl": "Geen toegang tot feedback – het onderdeel is open voor wie kennis mag bewerken: ofwel als globale kennisbewerker (Instellingen → Beveiliging → Rechten, kolom “Kennis”) ofwel als bewerker van een afzonderlijke kennisgroep (Instellingen → Kennis → Kennisgroepen). Zonder kennisgroep bestaat het onderdeel niet. Meld u zo nodig opnieuw aan om groepen te vernieuwen."
   },
   {
    "de": "Kein Zugriff auf Jira-Daten – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No access to Jira data – not enabled in the user list/group (Settings → Security → Permissions, column “Jira”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès aux données Jira – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Jira » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès aux données Jira – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Jira » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toegang tot Jira-gegevens – niet ingeschakeld in de gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “Jira”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Zugriff auf Short Tracks – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Short Tracks“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No access to Short Tracks – not enabled in the user list/group (Settings → Security → Permissions, column “Short Tracks”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès à Short Tracks – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Short Tracks » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès à Short Tracks – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Short Tracks » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toegang tot Short Tracks – niet ingeschakeld in de gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “Short Tracks”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Zugriff auf den Bereich Claude Subagent – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Claude“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No access to the Claude subagent area – not enabled in the user list/group (Settings → Security → Permissions, column “Claude”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès à l'espace sous-agent Claude – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Claude » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès à l'espace sous-agent Claude – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Claude » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toegang tot het Claude-subagentdomein – niet ingeschakeld in de gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “Claude”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Zugriff auf den E-Mail-Bereich – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „E-Mail“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No access to the email area – not enabled in the user list/group (Settings → Security → Permissions, column “Email”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès à l'espace e-mail – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « E-mail » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès à l'espace e-mail – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « E-mail » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toegang tot het e-maildomein – niet ingeschakeld in de gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “E-mail”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Zugriff auf den Jira-Assistenten – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No access to the Jira assistant – not enabled in the user list/group (Settings → Security → Permissions, column “Jira”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès à l'assistant Jira – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Jira » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès à l'assistant Jira – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Jira » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toegang tot de Jira-assistent – niet ingeschakeld in de gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “Jira”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Zugriff auf den SQL-Assistenten – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „SQL-Assistent“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No access to the SQL assistant – not enabled in the user list/group (Settings → Security → Permissions, column “SQL assistant”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès à l'assistant SQL – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Assistant SQL » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès à l'assistant SQL – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Assistant SQL » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toegang tot de SQL-assistent – niet ingeschakeld in de gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “SQL-assistent”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Zugriff auf den Tabellen-Assistenten – nicht in der Benutzerliste/-Gruppe freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Excel“; ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No access to the spreadsheet assistant – not enabled in the user list/group (Settings → Security → Permissions, column “Excel”; sign in again if needed to refresh groups)",
-   "fr": "Pas d'accès à l'assistant tableur – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Excel » ; si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Pas d'accès à l'assistant tableur – non activé dans la liste/le groupe d'utilisateurs (Paramètres → Sécurité → Autorisations, colonne « Excel » ; si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toegang tot de spreadsheetassistent – niet ingeschakeld in de gebruikerslijst/-groep (Instellingen → Beveiliging → Rechten, kolom “Excel”; meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Kein Zugriff auf die Vorlagen des Jira-Assistenten – weder freigeschaltet (Einstellungen → Sicherheit → Berechtigungen, Spalte „Jira“) noch Administrator",
    "en": "No access to the Jira assistant templates – neither enabled (Settings → Security → Permissions, column “Jira”) nor administrator",
-   "fr": "Pas d'accès aux modèles de l'assistant Jira – ni activé (Paramètres → Sécurité → Autorisations, colonne « Jira ») ni administrateur"
+   "fr": "Pas d'accès aux modèles de l'assistant Jira – ni activé (Paramètres → Sécurité → Autorisations, colonne « Jira ») ni administrateur",
+   "nl": "Geen toegang tot de sjablonen van de Jira-assistent – noch ingeschakeld (Instellingen → Beveiliging → Rechten, kolom “Jira”) noch beheerder"
   },
   {
    "de": "Kein Zugriff auf diese Datei",
    "en": "No access to this file",
-   "fr": "Pas d'accès à ce fichier"
+   "fr": "Pas d'accès à ce fichier",
+   "nl": "Geen toegang tot dit bestand"
   },
   {
    "de": "Kein aktives Profil",
    "en": "No active profile",
-   "fr": "Aucun profil actif"
+   "fr": "Aucun profil actif",
+   "nl": "Geen actief profiel"
   },
   {
    "de": "Kein laufender Job",
    "en": "No running job",
-   "fr": "Aucune tâche en cours"
+   "fr": "Aucune tâche en cours",
+   "nl": "Geen lopende taak"
   },
   {
    "de": "Kein laufender Job zu dieser ID",
    "en": "No running job with this ID",
-   "fr": "Aucune tâche en cours avec cet identifiant"
+   "fr": "Aucune tâche en cours avec cet identifiant",
+   "nl": "Geen lopende taak met deze ID"
   },
   {
    "de": "Keine Adresse angegeben.",
    "en": "No address specified.",
-   "fr": "Aucune adresse indiquée."
+   "fr": "Aucune adresse indiquée.",
+   "nl": "Geen adres opgegeven."
   },
   {
    "de": "Keine Anmeldeberechtigung",
    "en": "No sign-in permission",
-   "fr": "Aucune autorisation de connexion"
+   "fr": "Aucune autorisation de connexion",
+   "nl": "Geen aanmeldtoestemming"
   },
   {
    "de": "Keine Anmeldeberechtigung mehr – bitte neu anmelden.",
    "en": "Sign-in permission no longer valid – please sign in again.",
-   "fr": "L'autorisation de connexion n'est plus valable – veuillez vous reconnecter."
+   "fr": "L'autorisation de connexion n'est plus valable – veuillez vous reconnecter.",
+   "nl": "Aanmeldtoestemming niet meer geldig – meld u opnieuw aan."
   },
   {
    "de": "Keine Audio-Datei vorhanden",
    "en": "No audio file available",
-   "fr": "Aucun fichier audio disponible"
+   "fr": "Aucun fichier audio disponible",
+   "nl": "Geen audiobestand beschikbaar"
   },
   {
    "de": "Keine Audiodaten generiert",
    "en": "No audio data generated",
-   "fr": "Aucune donnée audio générée"
+   "fr": "Aucune donnée audio générée",
+   "nl": "Geen audiogegevens gegenereerd"
   },
   {
    "de": "Keine Aufgabe angegeben",
    "en": "No task specified",
-   "fr": "Aucune tâche indiquée"
+   "fr": "Aucune tâche indiquée",
+   "nl": "Geen taak opgegeven"
   },
   {
    "de": "Keine Aufgabe fuer Sub-Agent",
    "en": "No task for the sub-agent",
-   "fr": "Aucune tâche pour le sous-agent"
+   "fr": "Aucune tâche pour le sous-agent",
+   "nl": "Geen taak voor de subagent"
   },
   {
    "de": "Keine Aufnahme empfangen",
    "en": "No recording received",
-   "fr": "Aucun enregistrement reçu"
+   "fr": "Aucun enregistrement reçu",
+   "nl": "Geen opname ontvangen"
   },
   {
    "de": "Keine Berechtigung fuer dieses Profil",
    "en": "No permission for this profile",
-   "fr": "Aucune autorisation pour ce profil"
+   "fr": "Aucune autorisation pour ce profil",
+   "nl": "Geen toestemming voor dit profiel"
   },
   {
    "de": "Keine Berechtigung zum Bearbeiten von Wissen – nicht in Editoren-Liste/-Gruppe (ggf. neu einloggen für Gruppen-Aktualisierung)",
    "en": "No permission to edit knowledge – not in the editor list/group (sign in again if needed to refresh groups)",
-   "fr": "Aucune autorisation de modifier les connaissances – ne figure pas dans la liste/le groupe des éditeurs (si nécessaire, reconnectez-vous pour actualiser les groupes)"
+   "fr": "Aucune autorisation de modifier les connaissances – ne figure pas dans la liste/le groupe des éditeurs (si nécessaire, reconnectez-vous pour actualiser les groupes)",
+   "nl": "Geen toestemming om kennis te bewerken – niet in de bewerkerslijst/-groep (meld u zo nodig opnieuw aan om groepen te vernieuwen)"
   },
   {
    "de": "Keine Berechtigung, diese Wissensgruppe zu bearbeiten",
    "en": "No permission to edit this knowledge group",
-   "fr": "Aucune autorisation de modifier ce groupe de connaissances"
+   "fr": "Aucune autorisation de modifier ce groupe de connaissances",
+   "nl": "Geen toestemming om deze kennisgroep te bewerken"
   },
   {
    "de": "Keine Berechtigung, diese Wissensgruppe zu löschen",
    "en": "No permission to delete this knowledge group",
-   "fr": "Aucune autorisation de supprimer ce groupe de connaissances"
+   "fr": "Aucune autorisation de supprimer ce groupe de connaissances",
+   "nl": "Geen toestemming om deze kennisgroep te verwijderen"
   },
   {
    "de": "Keine Datei ausgewaehlt.",
    "en": "No file selected.",
-   "fr": "Aucun fichier sélectionné."
+   "fr": "Aucun fichier sélectionné.",
+   "nl": "Geen bestand geselecteerd."
   },
   {
    "de": "Keine Datei konnte uebernommen werden.",
    "en": "No file could be imported.",
-   "fr": "Aucun fichier n'a pu être importé."
+   "fr": "Aucun fichier n'a pu être importé.",
+   "nl": "Er kon geen bestand worden geïmporteerd."
   },
   {
    "de": "Keine Dateien angegeben",
    "en": "No files specified",
-   "fr": "Aucun fichier indiqué"
+   "fr": "Aucun fichier indiqué",
+   "nl": "Geen bestanden opgegeven"
   },
   {
    "de": "Keine Dateien empfangen.",
    "en": "No files received.",
-   "fr": "Aucun fichier reçu."
+   "fr": "Aucun fichier reçu.",
+   "nl": "Geen bestanden ontvangen."
   },
   {
    "de": "Keine Frage angegeben",
    "en": "No question specified",
-   "fr": "Aucune question indiquée"
+   "fr": "Aucune question indiquée",
+   "nl": "Geen vraag opgegeven"
   },
   {
    "de": "Keine Frage angegeben.",
    "en": "No question specified.",
-   "fr": "Aucune question indiquée."
+   "fr": "Aucune question indiquée.",
+   "nl": "Geen vraag opgegeven."
   },
   {
    "de": "Keine Frage übermittelt.",
    "en": "No question submitted.",
-   "fr": "Aucune question transmise."
+   "fr": "Aucune question transmise.",
+   "nl": "Geen vraag ingediend."
   },
   {
    "de": "Keine Grenze angegeben.",
    "en": "No limit specified.",
-   "fr": "Aucune limite indiquée."
+   "fr": "Aucune limite indiquée.",
+   "nl": "Geen limiet opgegeven."
   },
   {
    "de": "Keine Gruppe angegeben.",
    "en": "No group specified.",
-   "fr": "Aucun groupe indiqué."
+   "fr": "Aucun groupe indiqué.",
+   "nl": "Geen groep opgegeven."
   },
   {
    "de": "Keine Jira-Freigabe.",
    "en": "No Jira permission.",
-   "fr": "Aucune autorisation Jira."
+   "fr": "Aucune autorisation Jira.",
+   "nl": "Geen Jira-toestemming."
   },
   {
    "de": "Keine Lernnotiz",
    "en": "No learning note",
-   "fr": "Aucune note d'apprentissage"
+   "fr": "Aucune note d'apprentissage",
+   "nl": "Geen leernotitie"
   },
   {
    "de": "Keine Quelle angegeben.",
    "en": "No source specified.",
-   "fr": "Aucune source indiquée."
+   "fr": "Aucune source indiquée.",
+   "nl": "Geen bron opgegeven."
   },
   {
    "de": "Keine Suchbegriffe angegeben.",
    "en": "No search terms specified.",
-   "fr": "Aucun terme de recherche indiqué."
+   "fr": "Aucun terme de recherche indiqué.",
+   "nl": "Geen zoektermen opgegeven."
   },
   {
    "de": "Keine URL angegeben",
    "en": "No URL specified",
-   "fr": "Aucune URL indiquée"
+   "fr": "Aucune URL indiquée",
+   "nl": "Geen URL opgegeven"
   },
   {
    "de": "Keine Wiki-Seite vorhanden",
    "en": "No wiki page available",
-   "fr": "Aucune page wiki disponible"
+   "fr": "Aucune page wiki disponible",
+   "nl": "Geen wikipagina beschikbaar"
   },
   {
    "de": "Keine gueltige CRM-Nummer (erwartet z.B. 'CRM-12345').",
    "en": "Not a valid CRM number (expected e.g. 'CRM-12345').",
-   "fr": "Numéro CRM non valide (attendu p. ex. « CRM-12345 »)."
+   "fr": "Numéro CRM non valide (attendu p. ex. « CRM-12345 »).",
+   "nl": "Geen geldig CRM-nummer (verwacht bijv. 'CRM-12345')."
   },
   {
    "de": "Keine gültige Sitzung.",
    "en": "No valid session.",
-   "fr": "Aucune session valide."
+   "fr": "Aucune session valide.",
+   "nl": "Geen geldige sessie."
   },
   {
    "de": "Kennwort fehlt.",
    "en": "Password missing.",
-   "fr": "Mot de passe manquant."
+   "fr": "Mot de passe manquant.",
+   "nl": "Wachtwoord ontbreekt."
   },
   {
    "de": "Kennwort konnte nicht gesetzt werden.",
    "en": "The password could not be set.",
-   "fr": "Le mot de passe n'a pas pu être défini."
+   "fr": "Le mot de passe n'a pas pu être défini.",
+   "nl": "Het wachtwoord kon niet worden ingesteld."
   },
   {
    "de": "Kennwort muss zuerst geaendert werden.",
    "en": "The password must be changed first.",
-   "fr": "Le mot de passe doit d'abord être modifié."
+   "fr": "Le mot de passe doit d'abord être modifié.",
+   "nl": "Het wachtwoord moet eerst worden gewijzigd."
   },
   {
    "de": "Kennwort und aktueller 2FA-Code erforderlich",
    "en": "Password and current 2FA code required",
-   "fr": "Mot de passe et code 2FA actuel requis"
+   "fr": "Mot de passe et code 2FA actuel requis",
+   "nl": "Wachtwoord en actuele 2FA-code vereist"
   },
   {
    "de": "Kennwort zur Bestätigung erforderlich.",
    "en": "Password required for confirmation.",
-   "fr": "Mot de passe requis pour confirmer."
+   "fr": "Mot de passe requis pour confirmer.",
+   "nl": "Wachtwoord vereist ter bevestiging."
   },
   {
    "de": "Key nicht gefunden",
    "en": "Key not found",
-   "fr": "Clé introuvable"
+   "fr": "Clé introuvable",
+   "nl": "Sleutel niet gevonden"
   },
   {
    "de": "Knoten nicht gefunden",
    "en": "Node not found",
-   "fr": "Nœud introuvable"
+   "fr": "Nœud introuvable",
+   "nl": "Knooppunt niet gevonden"
   },
   {
    "de": "Konto wegen eines Sicherheitsverstosses gesperrt.",
    "en": "Account locked due to a security violation.",
-   "fr": "Compte bloqué en raison d'une violation de sécurité."
+   "fr": "Compte bloqué en raison d'une violation de sécurité.",
+   "nl": "Account vergrendeld wegens een beveiligingsschending."
   },
   {
    "de": "Konto wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden.",
    "en": "Account locked due to a security violation. Please contact a local administrator.",
-   "fr": "Compte bloqué en raison d'une violation de sécurité. Veuillez contacter un administrateur local."
+   "fr": "Compte bloqué en raison d'une violation de sécurité. Veuillez contacter un administrateur local.",
+   "nl": "Account vergrendeld wegens een beveiligingsschending. Neem contact op met een lokale beheerder."
   },
   {
    "de": "Konto wegen eines Sicherheitsverstoßes gesperrt.",
    "en": "Account locked due to a security violation.",
-   "fr": "Compte bloqué en raison d'une violation de sécurité."
+   "fr": "Compte bloqué en raison d'une violation de sécurité.",
+   "nl": "Account vergrendeld wegens een beveiligingsschending."
   },
   {
    "de": "Konversation nicht gefunden",
    "en": "Conversation not found",
-   "fr": "Conversation introuvable"
+   "fr": "Conversation introuvable",
+   "nl": "Gesprek niet gevonden"
   },
   {
    "de": "Letztes Profil kann nicht gelöscht werden",
    "en": "The last profile cannot be deleted",
-   "fr": "Le dernier profil ne peut pas être supprimé"
+   "fr": "Le dernier profil ne peut pas être supprimé",
+   "nl": "Het laatste profiel kan niet worden verwijderd"
   },
   {
    "de": "Liste 'benutzer' erwartet.",
    "en": "List 'benutzer' expected.",
-   "fr": "Liste « benutzer » attendue."
+   "fr": "Liste « benutzer » attendue.",
+   "nl": "Lijst 'benutzer' verwacht."
   },
   {
    "de": "Name darf nicht leer sein",
    "en": "The name must not be empty",
-   "fr": "Le nom ne doit pas être vide"
+   "fr": "Le nom ne doit pas être vide",
+   "nl": "De naam mag niet leeg zijn"
   },
   {
    "de": "Name fehlt",
    "en": "Name missing",
-   "fr": "Nom manquant"
+   "fr": "Nom manquant",
+   "nl": "Naam ontbreekt"
   },
   {
    "de": "Negotiate-Token nicht lesbar",
    "en": "Negotiate token cannot be read",
-   "fr": "Jeton Negotiate illisible"
+   "fr": "Jeton Negotiate illisible",
+   "nl": "Negotiate-token kan niet worden gelezen"
   },
   {
    "de": "Neues Kennwort und Bestätigung stimmen nicht überein.",
    "en": "The new password and its confirmation do not match.",
-   "fr": "Le nouveau mot de passe et sa confirmation ne correspondent pas."
+   "fr": "Le nouveau mot de passe et sa confirmation ne correspondent pas.",
+   "nl": "Het nieuwe wachtwoord en de bevestiging komen niet overeen."
   },
   {
    "de": "Newsfeed ist nicht aktiv.",
    "en": "The newsfeed is not active.",
-   "fr": "Le fil d'actualités n'est pas actif."
+   "fr": "Le fil d'actualités n'est pas actif.",
+   "nl": "De nieuwsfeed is niet actief."
   },
   {
    "de": "Nicht authentifiziert",
    "en": "Not authenticated",
-   "fr": "Non authentifié"
+   "fr": "Non authentifié",
+   "nl": "Niet geauthenticeerd"
   },
   {
    "de": "Nicht autorisiert",
    "en": "Not authorized",
-   "fr": "Non autorisé"
+   "fr": "Non autorisé",
+   "nl": "Niet geautoriseerd"
   },
   {
    "de": "Nicht berechtigt",
    "en": "Not permitted",
-   "fr": "Non autorisé"
+   "fr": "Non autorisé",
+   "nl": "Niet toegestaan"
   },
   {
    "de": "Nicht gefunden",
    "en": "Not found",
-   "fr": "Introuvable"
+   "fr": "Introuvable",
+   "nl": "Niet gevonden"
   },
   {
    "de": "Nicht gefunden.",
    "en": "Not found.",
-   "fr": "Introuvable."
+   "fr": "Introuvable.",
+   "nl": "Niet gevonden."
   },
   {
    "de": "Nicht konfiguriert (Serveradresse fehlt).",
    "en": "Not configured (server address missing).",
-   "fr": "Non configuré (adresse du serveur manquante)."
+   "fr": "Non configuré (adresse du serveur manquante).",
+   "nl": "Niet geconfigureerd (serveradres ontbreekt)."
   },
   {
    "de": "Nicht konfiguriert (URL/Token fehlen).",
    "en": "Not configured (URL/token missing).",
-   "fr": "Non configuré (URL/jeton manquant)."
+   "fr": "Non configuré (URL/jeton manquant).",
+   "nl": "Niet geconfigureerd (URL/token ontbreekt)."
   },
   {
    "de": "Nicht konfiguriert (Zugangsdaten fehlen).",
    "en": "Not configured (credentials missing).",
-   "fr": "Non configuré (identifiants manquants)."
+   "fr": "Non configuré (identifiants manquants).",
+   "nl": "Niet geconfigureerd (referenties ontbreken)."
   },
   {
    "de": "Nicht konfiguriert.",
    "en": "Not configured.",
-   "fr": "Non configuré."
+   "fr": "Non configuré.",
+   "nl": "Niet geconfigureerd."
   },
   {
    "de": "Nur Administratoren dürfen diese Daten abrufen.",
    "en": "Only administrators may retrieve this data.",
-   "fr": "Seuls les administrateurs peuvent consulter ces données."
+   "fr": "Seuls les administrateurs peuvent consulter ces données.",
+   "nl": "Alleen beheerders mogen deze gegevens opvragen."
   },
   {
    "de": "Nur Administratoren oder Wissens-Editoren dürfen diese Daten lesen.",
    "en": "Only administrators or knowledge editors may read this data.",
-   "fr": "Seuls les administrateurs ou les éditeurs de connaissances peuvent lire ces données."
+   "fr": "Seuls les administrateurs ou les éditeurs de connaissances peuvent lire ces données.",
+   "nl": "Alleen beheerders of kennisbewerkers mogen deze gegevens lezen."
   },
   {
    "de": "Nur Administratoren.",
    "en": "Administrators only.",
-   "fr": "Réservé aux administrateurs."
+   "fr": "Réservé aux administrateurs.",
+   "nl": "Alleen voor beheerders."
   },
   {
    "de": "Nur Jira-Tickets werden unterstuetzt.",
    "en": "Only Jira tickets are supported.",
-   "fr": "Seuls les tickets Jira sont pris en charge."
+   "fr": "Seuls les tickets Jira sont pris en charge.",
+   "nl": "Alleen Jira-tickets worden ondersteund."
   },
   {
    "de": "Nur ein einfacher Ordnername – Unterordner werden im Ordner selbst angelegt",
    "en": "Only a simple folder name – subfolders are created inside the folder itself",
-   "fr": "Uniquement un nom de dossier simple – les sous-dossiers sont créés dans le dossier lui-même"
+   "fr": "Uniquement un nom de dossier simple – les sous-dossiers sont créés dans le dossier lui-même",
+   "nl": "Alleen een eenvoudige mapnaam – submappen worden in de map zelf aangemaakt"
   },
   {
    "de": "Nur extract_*-Dateien können gelöscht werden",
    "en": "Only extract_* files can be deleted",
-   "fr": "Seuls les fichiers extract_* peuvent être supprimés"
+   "fr": "Seuls les fichiers extract_* peuvent être supprimés",
+   "nl": "Alleen extract_*-bestanden kunnen worden verwijderd"
   },
   {
    "de": "Nur fuer Administratoren.",
    "en": "Administrators only.",
-   "fr": "Réservé aux administrateurs."
+   "fr": "Réservé aux administrateurs.",
+   "nl": "Alleen voor beheerders."
   },
   {
    "de": "Nur fuer Wissens-Editoren.",
    "en": "Knowledge editors only.",
-   "fr": "Réservé aux éditeurs de connaissances."
+   "fr": "Réservé aux éditeurs de connaissances.",
+   "nl": "Alleen voor kennisbewerkers."
   },
   {
    "de": "Nur globale Wissens-Editoren dürfen Speicherordner zuordnen",
    "en": "Only global knowledge editors may assign storage folders",
-   "fr": "Seuls les éditeurs de connaissances globaux peuvent attribuer des dossiers de stockage"
+   "fr": "Seuls les éditeurs de connaissances globaux peuvent attribuer des dossiers de stockage",
+   "nl": "Alleen globale kennisbewerkers mogen opslagmappen toewijzen"
   },
   {
    "de": "Nur globale Wissens-Editoren dürfen die Editoren einer Gruppe ändern",
    "en": "Only global knowledge editors may change the editors of a group",
-   "fr": "Seuls les éditeurs de connaissances globaux peuvent modifier les éditeurs d'un groupe"
+   "fr": "Seuls les éditeurs de connaissances globaux peuvent modifier les éditeurs d'un groupe",
+   "nl": "Alleen globale kennisbewerkers mogen de bewerkers van een groep wijzigen"
   },
   {
    "de": "Nur ueber HTTPS moeglich.",
    "en": "Only possible via HTTPS.",
-   "fr": "Possible uniquement via HTTPS."
+   "fr": "Possible uniquement via HTTPS.",
+   "nl": "Alleen mogelijk via HTTPS."
   },
   {
    "de": "Nur von localhost erreichbar",
    "en": "Only reachable from localhost",
-   "fr": "Accessible uniquement depuis localhost"
+   "fr": "Accessible uniquement depuis localhost",
+   "nl": "Alleen bereikbaar vanaf localhost"
   },
   {
    "de": "OData nicht konfiguriert.",
    "en": "OData not configured.",
-   "fr": "OData non configuré."
+   "fr": "OData non configuré.",
+   "nl": "OData niet geconfigureerd."
   },
   {
    "de": "Ordner existiert nicht",
    "en": "The folder does not exist",
-   "fr": "Le dossier n'existe pas"
+   "fr": "Le dossier n'existe pas",
+   "nl": "De map bestaat niet"
   },
   {
    "de": "Ordner muss unter data/rag oder /mnt/rag liegen",
    "en": "The folder must be under data/rag or /mnt/rag",
-   "fr": "Le dossier doit se trouver sous data/rag ou /mnt/rag"
+   "fr": "Le dossier doit se trouver sous data/rag ou /mnt/rag",
+   "nl": "De map moet onder data/rag of /mnt/rag staan"
   },
   {
    "de": "Ordner nicht gefunden",
    "en": "Folder not found",
-   "fr": "Dossier introuvable"
+   "fr": "Dossier introuvable",
+   "nl": "Map niet gevonden"
   },
   {
    "de": "Paketbericht fehlgeschlagen",
    "en": "Package report failed",
-   "fr": "Échec du rapport des paquets"
+   "fr": "Échec du rapport des paquets",
+   "nl": "Pakketrapport mislukt"
   },
   {
    "de": "Parameter müssen ein JSON-Objekt sein.",
    "en": "Parameters must be a JSON object.",
-   "fr": "Les paramètres doivent être un objet JSON."
+   "fr": "Les paramètres doivent être un objet JSON.",
+   "nl": "Parameters moeten een JSON-object zijn."
   },
   {
    "de": "Passwort zur Bestätigung erforderlich",
    "en": "Password required for confirmation",
-   "fr": "Mot de passe requis pour confirmer"
+   "fr": "Mot de passe requis pour confirmer",
+   "nl": "Wachtwoord vereist ter bevestiging"
   },
   {
    "de": "Pfad fehlt",
    "en": "Path missing",
-   "fr": "Chemin manquant"
+   "fr": "Chemin manquant",
+   "nl": "Pad ontbreekt"
   },
   {
    "de": "Profil nicht gefunden",
    "en": "Profile not found",
-   "fr": "Profil introuvable"
+   "fr": "Profil introuvable",
+   "nl": "Profiel niet gevonden"
   },
   {
    "de": "Programmzugang wegen eines Sicherheitsverstosses gesperrt. Bitte an einen lokalen Administrator wenden.",
    "en": "Program access locked due to a security violation. Please contact a local administrator.",
-   "fr": "Accès programme bloqué en raison d'une violation de sécurité. Veuillez contacter un administrateur local."
+   "fr": "Accès programme bloqué en raison d'une violation de sécurité. Veuillez contacter un administrateur local.",
+   "nl": "Programmatoegang vergrendeld wegens een beveiligingsschending. Neem contact op met een lokale beheerder."
   },
   {
    "de": "Prüfung fehlgeschlagen.",
    "en": "Check failed.",
-   "fr": "Échec de la vérification."
+   "fr": "Échec de la vérification.",
+   "nl": "Controle mislukt."
   },
   {
    "de": "Referenz nicht gefunden.",
    "en": "Reference not found.",
-   "fr": "Référence introuvable."
+   "fr": "Référence introuvable.",
+   "nl": "Verwijzing niet gevonden."
   },
   {
    "de": "Regel nicht gefunden.",
    "en": "Rule not found.",
-   "fr": "Règle introuvable."
+   "fr": "Règle introuvable.",
+   "nl": "Regel niet gevonden."
   },
   {
    "de": "Rolle nicht gefunden",
    "en": "Role not found",
-   "fr": "Rôle introuvable"
+   "fr": "Rôle introuvable",
+   "nl": "Rol niet gevonden"
   },
   {
    "de": "SAP ist nicht konfiguriert. Entweder hinterlegt ein Administrator einen gemeinsamen Lesezugang unter Einstellungen → SAP, oder du traegst deinen eigenen SAP-Zugang unter 'Mein SAP-Zugang' ein.",
    "en": "SAP is not configured. Either an administrator stores a shared read access under Settings → SAP, or you enter your own SAP access under 'My SAP access'.",
-   "fr": "SAP n'est pas configuré. Soit un administrateur enregistre un accès en lecture commun sous Paramètres → SAP, soit vous saisissez votre propre accès SAP sous « Mon accès SAP »."
+   "fr": "SAP n'est pas configuré. Soit un administrateur enregistre un accès en lecture commun sous Paramètres → SAP, soit vous saisissez votre propre accès SAP sous « Mon accès SAP ».",
+   "nl": "SAP is niet geconfigureerd. Een beheerder legt ofwel een gedeelde leestoegang vast onder Instellingen → SAP, ofwel voert u uw eigen SAP-toegang in onder 'Mijn SAP-toegang'."
   },
   {
    "de": "Seite enthält keinen lesbaren Text.",
    "en": "The page contains no readable text.",
-   "fr": "La page ne contient aucun texte lisible."
+   "fr": "La page ne contient aucun texte lisible.",
+   "nl": "De pagina bevat geen leesbare tekst."
   },
   {
    "de": "Server nicht gefunden",
    "en": "Server not found",
-   "fr": "Serveur introuvable"
+   "fr": "Serveur introuvable",
+   "nl": "Server niet gevonden"
   },
   {
    "de": "Server und Domain erforderlich",
    "en": "Server and domain required",
-   "fr": "Serveur et domaine requis"
+   "fr": "Serveur et domaine requis",
+   "nl": "Server en domein vereist"
   },
   {
    "de": "Sicherheitsupdates abschalten braucht eine Root-Freigabe: Einstellungen → Sicherheit → Root-Freigaben, Eintrag freigeben und erneut ausführen.",
    "en": "Switching off security updates requires a root approval: Settings → Security → Root approvals, approve the entry and run again.",
-   "fr": "La désactivation des mises à jour de sécurité nécessite une autorisation root : Paramètres → Sécurité → Autorisations root, approuvez l'entrée et réexécutez."
+   "fr": "La désactivation des mises à jour de sécurité nécessite une autorisation root : Paramètres → Sécurité → Autorisations root, approuvez l'entrée et réexécutez.",
+   "nl": "Het uitschakelen van beveiligingsupdates vereist een root-goedkeuring: Instellingen → Beveiliging → Root-goedkeuringen, keur het item goed en voer het opnieuw uit."
   },
   {
    "de": "Space-Key fehlt.",
    "en": "Space key missing.",
-   "fr": "Clé d'espace manquante."
+   "fr": "Clé d'espace manquante.",
+   "nl": "Space-sleutel ontbreekt."
   },
   {
    "de": "Speichern fehlgeschlagen",
    "en": "Saving failed",
-   "fr": "Échec de l'enregistrement"
+   "fr": "Échec de l'enregistrement",
+   "nl": "Opslaan mislukt"
   },
   {
    "de": "Spracheingabe nicht erkannt",
    "en": "Speech input not recognized",
-   "fr": "Saisie vocale non reconnue"
+   "fr": "Saisie vocale non reconnue",
+   "nl": "Spraakinvoer niet herkend"
   },
   {
    "de": "Spracherkennung fehlgeschlagen",
    "en": "Speech recognition failed",
-   "fr": "Échec de la reconnaissance vocale"
+   "fr": "Échec de la reconnaissance vocale",
+   "nl": "Spraakherkenning mislukt"
   },
   {
    "de": "Spracherkennung ist auf diesem Server nicht eingerichtet",
    "en": "Speech recognition is not set up on this server",
-   "fr": "La reconnaissance vocale n'est pas configurée sur ce serveur"
+   "fr": "La reconnaissance vocale n'est pas configurée sur ce serveur",
+   "nl": "Spraakherkenning is niet ingesteld op deze server"
   },
   {
    "de": "Standort nicht gefunden",
    "en": "Location not found",
-   "fr": "Emplacement introuvable"
+   "fr": "Emplacement introuvable",
+   "nl": "Locatie niet gevonden"
   },
   {
    "de": "Support-Assistent ist nicht aktiv.",
    "en": "The support assistant is not active.",
-   "fr": "L'assistant de support n'est pas actif."
+   "fr": "L'assistant de support n'est pas actif.",
+   "nl": "De support-assistent is niet actief."
   },
   {
    "de": "System-Skill oder nicht gefunden",
    "en": "System skill or not found",
-   "fr": "Compétence système ou introuvable"
+   "fr": "Compétence système ou introuvable",
+   "nl": "Systeemskill of niet gevonden"
   },
   {
    "de": "Systemauslastung konnte nicht gemessen werden",
    "en": "The system load could not be measured",
-   "fr": "La charge du système n'a pas pu être mesurée"
+   "fr": "La charge du système n'a pas pu être mesurée",
+   "nl": "De systeembelasting kon niet worden gemeten"
   },
   {
    "de": "Timeout (Zeitüberschreitung) – Server antwortet nicht innerhalb von 15s",
    "en": "Timeout – the server does not respond within 15 s",
-   "fr": "Délai dépassé – le serveur ne répond pas dans les 15 s"
+   "fr": "Délai dépassé – le serveur ne répond pas dans les 15 s",
+   "nl": "Time-out – de server reageert niet binnen 15 s"
   },
   {
    "de": "Timeout – Server antwortet nicht",
    "en": "Timeout – the server does not respond",
-   "fr": "Délai dépassé – le serveur ne répond pas"
+   "fr": "Délai dépassé – le serveur ne répond pas",
+   "nl": "Time-out – de server reageert niet"
   },
   {
    "de": "Token unbekannt, pausiert oder widerrufen.",
    "en": "Token unknown, paused or revoked.",
-   "fr": "Jeton inconnu, suspendu ou révoqué."
+   "fr": "Jeton inconnu, suspendu ou révoqué.",
+   "nl": "Token onbekend, gepauzeerd of ingetrokken."
   },
   {
    "de": "Ungültige Anfrage",
    "en": "Invalid request",
-   "fr": "Requête non valide"
+   "fr": "Requête non valide",
+   "nl": "Ongeldig verzoek"
   },
   {
    "de": "Ungültige Domain",
    "en": "Invalid domain",
-   "fr": "Domaine non valide"
+   "fr": "Domaine non valide",
+   "nl": "Ongeldig domein"
   },
   {
    "de": "Ungültige E-Mail-Adresse",
    "en": "Invalid email address",
-   "fr": "Adresse e-mail non valide"
+   "fr": "Adresse e-mail non valide",
+   "nl": "Ongeldig e-mailadres"
   },
   {
    "de": "Ungültiger Header-Name für den API-Schlüssel.",
    "en": "Invalid header name for the API key.",
-   "fr": "Nom d'en-tête non valide pour la clé API."
+   "fr": "Nom d'en-tête non valide pour la clé API.",
+   "nl": "Ongeldige headernaam voor de API-sleutel."
   },
   {
    "de": "Ungültiger JSON-Body.",
    "en": "Invalid JSON body.",
-   "fr": "Corps JSON non valide."
+   "fr": "Corps JSON non valide.",
+   "nl": "Ongeldige JSON-body."
   },
   {
    "de": "Ungültiger JSON-Body. Tipp für Windows CMD: Doppelte Anführungszeichen escapen, z.B. {\\\"text\\\": \\\"...\\\"}",
    "en": "Invalid JSON body. Tip for Windows CMD: escape double quotes, e.g. {\\\"text\\\": \\\"...\\\"}",
-   "fr": "Corps JSON non valide. Astuce pour Windows CMD : échappez les guillemets doubles, p. ex. {\\\"text\\\": \\\"...\\\"}"
+   "fr": "Corps JSON non valide. Astuce pour Windows CMD : échappez les guillemets doubles, p. ex. {\\\"text\\\": \\\"...\\\"}",
+   "nl": "Ongeldige JSON-body. Tip voor Windows CMD: escape dubbele aanhalingstekens, bijv. {\\\"text\\\": \\\"...\\\"}"
   },
   {
    "de": "Ungültiger JSON-Rumpf",
    "en": "Invalid JSON body",
-   "fr": "Corps JSON non valide"
+   "fr": "Corps JSON non valide",
+   "nl": "Ongeldige JSON-body"
   },
   {
    "de": "Ungültiger Name",
    "en": "Invalid name",
-   "fr": "Nom non valide"
+   "fr": "Nom non valide",
+   "nl": "Ongeldige naam"
   },
   {
    "de": "Ungültiger Ordnername",
    "en": "Invalid folder name",
-   "fr": "Nom de dossier non valide"
+   "fr": "Nom de dossier non valide",
+   "nl": "Ongeldige mapnaam"
   },
   {
    "de": "Ungültiger Pfad",
    "en": "Invalid path",
-   "fr": "Chemin non valide"
+   "fr": "Chemin non valide",
+   "nl": "Ongeldig pad"
   },
   {
    "de": "Ungültiger Private Key (kein PEM-Format)",
    "en": "Invalid private key (not in PEM format)",
-   "fr": "Clé privée non valide (pas au format PEM)"
+   "fr": "Clé privée non valide (pas au format PEM)",
+   "nl": "Ongeldige privésleutel (niet in PEM-indeling)"
   },
   {
    "de": "Ungültiger Rumpf",
    "en": "Invalid body",
-   "fr": "Corps non valide"
+   "fr": "Corps non valide",
+   "nl": "Ongeldige body"
   },
   {
    "de": "Ungültiger Rumpf.",
    "en": "Invalid body.",
-   "fr": "Corps non valide."
+   "fr": "Corps non valide.",
+   "nl": "Ongeldige body."
   },
   {
    "de": "Ungültiger Wert",
    "en": "Invalid value",
-   "fr": "Valeur non valide"
+   "fr": "Valeur non valide",
+   "nl": "Ongeldige waarde"
   },
   {
    "de": "Ungültiger Zielordner",
    "en": "Invalid target folder",
-   "fr": "Dossier cible non valide"
+   "fr": "Dossier cible non valide",
+   "nl": "Ongeldige doelmap"
   },
   {
    "de": "Ungültiger oder fehlender API-Key",
    "en": "Invalid or missing API key",
-   "fr": "Clé API non valide ou manquante"
+   "fr": "Clé API non valide ou manquante",
+   "nl": "Ongeldige of ontbrekende API-sleutel"
   },
   {
    "de": "Ungültiger oder fehlender Delegations-Schlüssel. Neu erzeugen unter /claude → Mein Delegations-Schlüssel.",
    "en": "Invalid or missing delegation key. Create a new one under /claude → My delegation key.",
-   "fr": "Clé de délégation non valide ou manquante. Créez-en une nouvelle sous /claude → Ma clé de délégation."
+   "fr": "Clé de délégation non valide ou manquante. Créez-en une nouvelle sous /claude → Ma clé de délégation.",
+   "nl": "Ongeldige of ontbrekende delegatiesleutel. Maak een nieuwe aan onder /claude → Mijn delegatiesleutel."
   },
   {
    "de": "Ungültiger übergeordneter Ordner",
    "en": "Invalid parent folder",
-   "fr": "Dossier parent non valide"
+   "fr": "Dossier parent non valide",
+   "nl": "Ongeldige bovenliggende map"
   },
   {
    "de": "Ungültiges Rating",
    "en": "Invalid rating",
-   "fr": "Évaluation non valide"
+   "fr": "Évaluation non valide",
+   "nl": "Ongeldige beoordeling"
   },
   {
    "de": "Ungültiges Zertifikat (kein PEM-Format)",
    "en": "Invalid certificate (not in PEM format)",
-   "fr": "Certificat non valide (pas au format PEM)"
+   "fr": "Certificat non valide (pas au format PEM)",
+   "nl": "Ongeldig certificaat (niet in PEM-indeling)"
   },
   {
    "de": "Unter-Agenten direkt starten darf nur der lokale Administrator.",
    "en": "Only the local administrator may start sub-agents directly.",
-   "fr": "Seul l'administrateur local peut démarrer directement des sous-agents."
+   "fr": "Seul l'administrateur local peut démarrer directement des sous-agents.",
+   "nl": "Alleen de lokale beheerder mag subagents rechtstreeks starten."
   },
   {
    "de": "Upload zu groß (max. 200 MB gesamt).",
    "en": "Upload too large (max. 200 MB in total).",
-   "fr": "Envoi trop volumineux (200 Mo au total max.)."
+   "fr": "Envoi trop volumineux (200 Mo au total max.).",
+   "nl": "Upload te groot (max. 200 MB in totaal)."
   },
   {
    "de": "VEMAS ist nicht konfiguriert.",
    "en": "VEMAS is not configured.",
-   "fr": "VEMAS n'est pas configuré."
+   "fr": "VEMAS n'est pas configuré.",
+   "nl": "VEMAS is niet geconfigureerd."
   },
   {
    "de": "VEMAS ist nicht konfiguriert. Ein Administrator hinterlegt Serveradresse und Zugang unter Einstellungen → Vemas.",
    "en": "VEMAS is not configured. An administrator stores the server address and access under Settings → Vemas.",
-   "fr": "VEMAS n'est pas configuré. Un administrateur enregistre l'adresse du serveur et l'accès sous Paramètres → Vemas."
+   "fr": "VEMAS n'est pas configuré. Un administrateur enregistre l'adresse du serveur et l'accès sous Paramètres → Vemas.",
+   "nl": "VEMAS is niet geconfigureerd. Een beheerder legt het serveradres en de toegang vast onder Instellingen → Vemas."
   },
   {
    "de": "Vision-Skill nicht geladen",
    "en": "Vision skill not loaded",
-   "fr": "Compétence vision non chargée"
+   "fr": "Compétence vision non chargée",
+   "nl": "Vision-skill niet geladen"
   },
   {
    "de": "Von dieser Seite liess sich kein Text gewinnen.",
    "en": "No text could be obtained from this page.",
-   "fr": "Aucun texte n'a pu être extrait de cette page."
+   "fr": "Aucun texte n'a pu être extrait de cette page.",
+   "nl": "Van deze pagina kon geen tekst worden opgehaald."
   },
   {
    "de": "Vorlage nicht gefunden",
    "en": "Template not found",
-   "fr": "Modèle introuvable"
+   "fr": "Modèle introuvable",
+   "nl": "Sjabloon niet gevonden"
   },
   {
    "de": "Vorlage nicht gefunden.",
    "en": "Template not found.",
-   "fr": "Modèle introuvable."
+   "fr": "Modèle introuvable.",
+   "nl": "Sjabloon niet gevonden."
   },
   {
    "de": "Watcher nicht gefunden",
    "en": "Watcher not found",
-   "fr": "Watcher introuvable"
+   "fr": "Watcher introuvable",
+   "nl": "Watcher niet gevonden"
   },
   {
    "de": "Wurzelordner können hier nicht umbenannt werden",
    "en": "Root folders cannot be renamed here",
-   "fr": "Les dossiers racine ne peuvent pas être renommés ici"
+   "fr": "Les dossiers racine ne peuvent pas être renommés ici",
+   "nl": "Hoofdmappen kunnen hier niet worden hernoemd"
   },
   {
    "de": "Zertifikat gespeichert. Bitte Service neu starten.",
    "en": "Certificate saved. Please restart the service.",
-   "fr": "Certificat enregistré. Veuillez redémarrer le service."
+   "fr": "Certificat enregistré. Veuillez redémarrer le service.",
+   "nl": "Certificaat opgeslagen. Start de service opnieuw."
   },
   {
    "de": "Zertifikat nicht gefunden",
    "en": "Certificate not found",
-   "fr": "Certificat introuvable"
+   "fr": "Certificat introuvable",
+   "nl": "Certificaat niet gevonden"
   },
   {
    "de": "Zu viele Anmeldeversuche von dieser Adresse. Bitte in einigen Sekunden erneut versuchen.",
    "en": "Too many sign-in attempts from this address. Please try again in a few seconds.",
-   "fr": "Trop de tentatives de connexion depuis cette adresse. Veuillez réessayer dans quelques secondes."
+   "fr": "Trop de tentatives de connexion depuis cette adresse. Veuillez réessayer dans quelques secondes.",
+   "nl": "Te veel aanmeldpogingen vanaf dit adres. Probeer het over enkele seconden opnieuw."
   },
   {
    "de": "Zu viele Fehlversuche von dieser Adresse. Bitte warte 5 Minuten.",
    "en": "Too many failed attempts from this address. Please wait 5 minutes.",
-   "fr": "Trop de tentatives échouées depuis cette adresse. Veuillez patienter 5 minutes."
+   "fr": "Trop de tentatives échouées depuis cette adresse. Veuillez patienter 5 minutes.",
+   "nl": "Te veel mislukte pogingen vanaf dit adres. Wacht 5 minuten."
   },
   {
    "de": "Zu viele Login-Versuche. Bitte warte 5 Minuten.",
    "en": "Too many sign-in attempts. Please wait 5 minutes.",
-   "fr": "Trop de tentatives de connexion. Veuillez patienter 5 minutes."
+   "fr": "Trop de tentatives de connexion. Veuillez patienter 5 minutes.",
+   "nl": "Te veel aanmeldpogingen. Wacht 5 minuten."
   },
   {
    "de": "Zu viele Versuche. Bitte warte 5 Minuten.",
    "en": "Too many attempts. Please wait 5 minutes.",
-   "fr": "Trop de tentatives. Veuillez patienter 5 minutes."
+   "fr": "Trop de tentatives. Veuillez patienter 5 minutes.",
+   "nl": "Te veel pogingen. Wacht 5 minuten."
   },
   {
    "de": "Zugriff verweigert",
    "en": "Access denied",
-   "fr": "Accès refusé"
+   "fr": "Accès refusé",
+   "nl": "Toegang geweigerd"
   },
   {
    "de": "Zum Anzeigen bitte mit deinem Kennwort bestätigen.",
    "en": "To display, please confirm with your password.",
-   "fr": "Pour afficher, veuillez confirmer avec votre mot de passe."
+   "fr": "Pour afficher, veuillez confirmer avec votre mot de passe.",
+   "nl": "Bevestig met uw wachtwoord om weer te geven."
   },
   {
    "de": "Zusammenfassung fehlgeschlagen.",
    "en": "Summary failed.",
-   "fr": "Échec du résumé."
+   "fr": "Échec du résumé.",
+   "nl": "Samenvatting mislukt."
   },
   {
    "de": "Zustand der Serverüberwachung nicht lesbar",
    "en": "The server monitoring state cannot be read",
-   "fr": "L'état de la surveillance du serveur est illisible"
+   "fr": "L'état de la surveillance du serveur est illisible",
+   "nl": "De status van de servermonitoring kan niet worden gelezen"
   },
   {
    "de": "Zwei-Faktor-Anmeldung ist aktiv – Passwort zur Bestätigung erforderlich",
    "en": "Two-factor sign-in is active – password required for confirmation",
-   "fr": "La connexion à deux facteurs est active – mot de passe requis pour confirmer"
+   "fr": "La connexion à deux facteurs est active – mot de passe requis pour confirmer",
+   "nl": "Tweefactorauthenticatie is actief – wachtwoord vereist ter bevestiging"
   },
   {
    "de": "`fid` fehlt.",
    "en": "`fid` missing.",
-   "fr": "`fid` manquant."
+   "fr": "`fid` manquant.",
+   "nl": "`fid` ontbreekt."
   },
   {
    "de": "`ids` fehlt oder ist keine Liste.",
    "en": "`ids` missing or not a list.",
-   "fr": "`ids` manquant ou n'est pas une liste."
+   "fr": "`ids` manquant ou n'est pas une liste.",
+   "nl": "`ids` ontbreekt of is geen lijst."
   },
   {
    "de": "cert und key erforderlich",
    "en": "cert and key required",
-   "fr": "cert et key requis"
+   "fr": "cert et key requis",
+   "nl": "cert en key vereist"
   },
   {
    "de": "crm fehlt (erwartet z.B. 'CRM-12345').",
    "en": "crm missing (expected e.g. 'CRM-12345').",
-   "fr": "crm manquant (attendu p. ex. « CRM-12345 »)."
+   "fr": "crm manquant (attendu p. ex. « CRM-12345 »).",
+   "nl": "crm ontbreekt (verwacht bijv. 'CRM-12345')."
   },
   {
    "de": "crm fehlt.",
    "en": "crm missing.",
-   "fr": "crm manquant."
+   "fr": "crm manquant.",
+   "nl": "crm ontbreekt."
   },
   {
    "de": "edge-tts nicht installiert",
    "en": "edge-tts not installed",
-   "fr": "edge-tts non installé"
+   "fr": "edge-tts non installé",
+   "nl": "edge-tts niet geïnstalleerd"
   },
   {
    "de": "einheit/stufe/zeitraum ungueltig",
    "en": "einheit/stufe/zeitraum invalid",
-   "fr": "einheit/stufe/zeitraum non valide"
+   "fr": "einheit/stufe/zeitraum non valide",
+   "nl": "einheit/stufe/zeitraum ongeldig"
   },
   {
    "de": "groups darf nur Gruppenkennungen enthalten",
    "en": "groups may only contain group IDs",
-   "fr": "groups ne doit contenir que des identifiants de groupe"
+   "fr": "groups ne doit contenir que des identifiants de groupe",
+   "nl": "groups mag alleen groeps-ID's bevatten"
   },
   {
    "de": "ids fehlt",
    "en": "ids missing",
-   "fr": "ids manquant"
+   "fr": "ids manquant",
+   "nl": "ids ontbreekt"
   },
   {
    "de": "kein Bild",
    "en": "no image",
-   "fr": "aucune image"
+   "fr": "aucune image",
+   "nl": "geen afbeelding"
   },
   {
    "de": "kein Logo",
    "en": "no logo",
-   "fr": "aucun logo"
+   "fr": "aucun logo",
+   "nl": "geen logo"
   },
   {
    "de": "kein Symbol",
    "en": "no icon",
-   "fr": "aucune icône"
+   "fr": "aucune icône",
+   "nl": "geen pictogram"
   },
   {
    "de": "kein Video",
    "en": "no video",
-   "fr": "aucune vidéo"
+   "fr": "aucune vidéo",
+   "nl": "geen video"
   },
   {
    "de": "keine gültige Gruppe angegeben",
    "en": "no valid group specified",
-   "fr": "aucun groupe valide indiqué"
+   "fr": "aucun groupe valide indiqué",
+   "nl": "geen geldige groep opgegeven"
   },
   {
    "de": "key fehlt",
    "en": "key missing",
-   "fr": "key manquant"
+   "fr": "key manquant",
+   "nl": "key ontbreekt"
   },
   {
    "de": "key fehlt.",
    "en": "key missing.",
-   "fr": "key manquant."
+   "fr": "key manquant.",
+   "nl": "key ontbreekt."
   },
   {
    "de": "key und decision (allow|deny|pending) erforderlich",
    "en": "key and decision (allow|deny|pending) required",
-   "fr": "key et decision (allow|deny|pending) requis"
+   "fr": "key et decision (allow|deny|pending) requis",
+   "nl": "key en decision (allow|deny|pending) vereist"
   },
   {
    "de": "ldap3 nicht installiert",
    "en": "ldap3 not installed",
-   "fr": "ldap3 non installé"
+   "fr": "ldap3 non installé",
+   "nl": "ldap3 niet geïnstalleerd"
   },
   {
    "de": "nicht erreichbar",
    "en": "not reachable",
-   "fr": "non joignable"
+   "fr": "non joignable",
+   "nl": "niet bereikbaar"
   },
   {
    "de": "nicht gefunden",
    "en": "not found",
-   "fr": "introuvable"
+   "fr": "introuvable",
+   "nl": "niet gevonden"
   },
   {
    "de": "old_name und new_name erforderlich",
    "en": "old_name and new_name required",
-   "fr": "old_name et new_name requis"
+   "fr": "old_name et new_name requis",
+   "nl": "old_name en new_name vereist"
   },
   {
    "de": "page_id, page_ids oder space erforderlich.",
    "en": "page_id, page_ids or space required.",
-   "fr": "page_id, page_ids ou space requis."
+   "fr": "page_id, page_ids ou space requis.",
+   "nl": "page_id, page_ids of space vereist."
   },
   {
    "de": "pfade: keine gültige Liste.",
    "en": "pfade: not a valid list.",
-   "fr": "pfade : liste non valide."
+   "fr": "pfade : liste non valide.",
+   "nl": "pfade: geen geldige lijst."
   },
   {
    "de": "phone fehlt.",
    "en": "phone missing.",
-   "fr": "phone manquant."
+   "fr": "phone manquant.",
+   "nl": "phone ontbreekt."
   },
   {
    "de": "quelle fehlt",
    "en": "quelle missing",
-   "fr": "quelle manquant"
+   "fr": "quelle manquant",
+   "nl": "quelle ontbreekt"
   },
   {
    "de": "quelle muss lokal oder fern sein",
    "en": "quelle must be lokal or fern",
-   "fr": "quelle doit être lokal ou fern"
+   "fr": "quelle doit être lokal ou fern",
+   "nl": "quelle moet lokal of fern zijn"
   },
   {
    "de": "query fehlt",
    "en": "query missing",
-   "fr": "query manquant"
+   "fr": "query manquant",
+   "nl": "query ontbreekt"
   },
   {
    "de": "sql fehlt.",
    "en": "sql missing.",
-   "fr": "sql manquant."
+   "fr": "sql manquant.",
+   "nl": "sql ontbreekt."
   },
   {
    "de": "ziel fehlt – ein Abruf-Schluessel gilt nur fuer eine bestimmte Adresse",
    "en": "ziel missing – a retrieval key only applies to one specific address",
-   "fr": "ziel manquant – une clé de récupération ne vaut que pour une adresse précise"
+   "fr": "ziel manquant – une clé de récupération ne vaut que pour une adresse précise",
+   "nl": "ziel ontbreekt – een ophaalsleutel geldt maar voor één specifiek adres"
   },
   {
    "de": "ziele fehlt (Liste von Adressen)",
    "en": "ziele missing (list of addresses)",
-   "fr": "ziele manquant (liste d'adresses)"
+   "fr": "ziele manquant (liste d'adresses)",
+   "nl": "ziele ontbreekt (lijst met adressen)"
   },
   {
    "de": "👍 Danke! Das freut mich.",
    "en": "👍 Thank you! I'm glad.",
-   "fr": "👍 Merci ! Cela me fait plaisir."
+   "fr": "👍 Merci ! Cela me fait plaisir.",
+   "nl": "👍 Hartelijk dank! Fijn om te horen."
   },
   {
    "de": "'{w1}' ist Speicherordner einer Wissensgruppe – umbenennen nur in der Verwaltung",
    "en": "'{w1}' is the storage folder of a knowledge group – rename it only in the administration",
-   "fr": "« {w1} » est le dossier de stockage d'un groupe de connaissances – renommez-le uniquement dans l'administration"
+   "fr": "« {w1} » est le dossier de stockage d'un groupe de connaissances – renommez-le uniquement dans l'administration",
+   "nl": "'{w1}' is de opslagmap van een kennisgroep – hernoem deze alleen in het beheer"
   },
   {
    "de": "'{w1}' ist Speicherordner einer Wissensgruppe – verschieben nur in der Verwaltung",
    "en": "'{w1}' is the storage folder of a knowledge group – move it only in the administration",
-   "fr": "« {w1} » est le dossier de stockage d'un groupe de connaissances – déplacez-le uniquement dans l'administration"
+   "fr": "« {w1} » est le dossier de stockage d'un groupe de connaissances – déplacez-le uniquement dans l'administration",
+   "nl": "'{w1}' is de opslagmap van een kennisgroep – verplaats deze alleen in het beheer"
   },
   {
    "de": "Abruf fehlgeschlagen: {w1}",
    "en": "Retrieval failed: {w1}",
-   "fr": "Échec de la récupération : {w1}"
+   "fr": "Échec de la récupération : {w1}",
+   "nl": "Ophalen mislukt: {w1}"
   },
   {
    "de": "Analyse fehlgeschlagen: {w1}",
    "en": "Analysis failed: {w1}",
-   "fr": "Échec de l'analyse : {w1}"
+   "fr": "Échec de l'analyse : {w1}",
+   "nl": "Analyse mislukt: {w1}"
   },
   {
    "de": "Anlegen fehlgeschlagen: {w1}",
    "en": "Creation failed: {w1}",
-   "fr": "Échec de la création : {w1}"
+   "fr": "Échec de la création : {w1}",
+   "nl": "Aanmaken mislukt: {w1}"
   },
   {
    "de": "Auswertung fehlgeschlagen: {w1}",
    "en": "Evaluation failed: {w1}",
-   "fr": "Échec de l'évaluation : {w1}"
+   "fr": "Échec de l'évaluation : {w1}",
+   "nl": "Beoordeling mislukt: {w1}"
   },
   {
    "de": "Bridge nicht erreichbar: {w1}",
    "en": "Bridge not reachable: {w1}",
-   "fr": "Pont non joignable : {w1}"
+   "fr": "Pont non joignable : {w1}",
+   "nl": "Bridge niet bereikbaar: {w1}"
   },
   {
    "de": "Das SQL ist länger als {w1} Zeichen.",
    "en": "The SQL is longer than {w1} characters.",
-   "fr": "Le SQL dépasse {w1} caractères."
+   "fr": "Le SQL dépasse {w1} caractères.",
+   "nl": "De SQL is langer dan {w1} tekens."
   },
   {
    "de": "Der Schlüssel dieses Kontos liegt geschützt beim Root-Dienst des Servers und lässt sich in der Oberfläche nicht anzeigen. Als root auf dem Server: jarvis-broker-admin totp-zeigen {w1}",
    "en": "This account's key is kept protected by the server's root service and cannot be displayed in the interface. As root on the server: jarvis-broker-admin totp-zeigen {w1}",
-   "fr": "La clé de ce compte est conservée de manière protégée par le service root du serveur et ne peut pas être affichée dans l'interface. En tant que root sur le serveur : jarvis-broker-admin totp-zeigen {w1}"
+   "fr": "La clé de ce compte est conservée de manière protégée par le service root du serveur et ne peut pas être affichée dans l'interface. En tant que root sur le serveur : jarvis-broker-admin totp-zeigen {w1}",
+   "nl": "De sleutel van dit account wordt beschermd bewaard door de root-service van de server en kan niet in de interface worden weergegeven. Als root op de server: jarvis-broker-admin totp-zeigen {w1}"
   },
   {
    "de": "Der Titel ist zu lang (max. {w1} Zeichen).",
    "en": "The title is too long (max. {w1} characters).",
-   "fr": "Le titre est trop long ({w1} caractères max.)."
+   "fr": "Le titre est trop long ({w1} caractères max.).",
+   "nl": "De titel is te lang (max. {w1} tekens)."
   },
   {
    "de": "Die Einstellung ist gespeichert, aber die persönlichen Kennwörter ließen sich nicht entfernen: {w1}",
    "en": "The setting is saved, but the personal passwords could not be removed: {w1}",
-   "fr": "Le paramètre est enregistré, mais les mots de passe personnels n'ont pas pu être supprimés : {w1}"
+   "fr": "Le paramètre est enregistré, mais les mots de passe personnels n'ont pas pu être supprimés : {w1}",
+   "nl": "De instelling is opgeslagen, maar de persoonlijke wachtwoorden konden niet worden verwijderd: {w1}"
   },
   {
    "de": "Die Einstellung ist gespeichert, aber die persönlichen Zugänge ließen sich nicht entfernen: {w1}",
    "en": "The setting is saved, but the personal accesses could not be removed: {w1}",
-   "fr": "Le paramètre est enregistré, mais les accès personnels n'ont pas pu être supprimés : {w1}"
+   "fr": "Le paramètre est enregistré, mais les accès personnels n'ont pas pu être supprimés : {w1}",
+   "nl": "De instelling is opgeslagen, maar de persoonlijke toegangen konden niet worden verwijderd: {w1}"
   },
   {
    "de": "Die Frage ist länger als {w1} Zeichen.",
    "en": "The question is longer than {w1} characters.",
-   "fr": "La question dépasse {w1} caractères."
+   "fr": "La question dépasse {w1} caractères.",
+   "nl": "De vraag is langer dan {w1} tekens."
   },
   {
    "de": "Die Pruefung konnte nicht laufen: {w1}",
    "en": "The check could not run: {w1}",
-   "fr": "La vérification n'a pas pu s'exécuter : {w1}"
+   "fr": "La vérification n'a pas pu s'exécuter : {w1}",
+   "nl": "De controle kon niet worden uitgevoerd: {w1}"
   },
   {
    "de": "Endpunkt nicht gefunden: {w1}",
    "en": "Endpoint not found: {w1}",
-   "fr": "Point de terminaison introuvable : {w1}"
+   "fr": "Point de terminaison introuvable : {w1}",
+   "nl": "Eindpunt niet gevonden: {w1}"
   },
   {
    "de": "Erzeugen fehlgeschlagen ({w1})",
    "en": "Generation failed ({w1})",
-   "fr": "Échec de la génération ({w1})"
+   "fr": "Échec de la génération ({w1})",
+   "nl": "Genereren mislukt ({w1})"
   },
   {
    "de": "Fallback-Loeschen fehlgeschlagen: {w1}",
    "en": "Fallback deletion failed: {w1}",
-   "fr": "Échec de la suppression de secours : {w1}"
+   "fr": "Échec de la suppression de secours : {w1}",
+   "nl": "Verwijderen van de terugvaloptie mislukt: {w1}"
   },
   {
    "de": "Format .{w1} nicht erlaubt",
    "en": "Format .{w1} not allowed",
-   "fr": "Format .{w1} non autorisé"
+   "fr": "Format .{w1} non autorisé",
+   "nl": "Indeling .{w1} niet toegestaan"
   },
   {
    "de": "Format .{w1} nicht erlaubt (nur .docx oder .dotx)",
    "en": "Format .{w1} not allowed (only .docx or .dotx)",
-   "fr": "Format .{w1} non autorisé (uniquement .docx ou .dotx)"
+   "fr": "Format .{w1} non autorisé (uniquement .docx ou .dotx)",
+   "nl": "Indeling .{w1} niet toegestaan (alleen .docx of .dotx)"
   },
   {
    "de": "Format .{w1} nicht erlaubt (nur .pptx oder .potx)",
    "en": "Format .{w1} not allowed (only .pptx or .potx)",
-   "fr": "Format .{w1} non autorisé (uniquement .pptx ou .potx)"
+   "fr": "Format .{w1} non autorisé (uniquement .pptx ou .potx)",
+   "nl": "Indeling .{w1} niet toegestaan (alleen .pptx of .potx)"
   },
   {
    "de": "Format nicht unterstützt: '{w1}'. Erlaubt: {w2}",
    "en": "Format not supported: '{w1}'. Allowed: {w2}",
-   "fr": "Format non pris en charge : « {w1} ». Autorisés : {w2}"
+   "fr": "Format non pris en charge : « {w1} ». Autorisés : {w2}",
+   "nl": "Indeling niet ondersteund: '{w1}'. Toegestaan: {w2}"
   },
   {
    "de": "Fragen-Generierung fuer '{w1}' nicht unterstuetzt",
    "en": "Question generation for '{w1}' not supported",
-   "fr": "Génération de questions pour « {w1} » non prise en charge"
+   "fr": "Génération de questions pour « {w1} » non prise en charge",
+   "nl": "Vraaggeneratie voor '{w1}' niet ondersteund"
   },
   {
    "de": "Freigabe konnte nicht getrennt werden: {w1}",
    "en": "The share could not be disconnected: {w1}",
-   "fr": "Le partage n'a pas pu être déconnecté : {w1}"
+   "fr": "Le partage n'a pas pu être déconnecté : {w1}",
+   "nl": "De share kon niet worden ontkoppeld: {w1}"
   },
   {
    "de": "Freigabe konnte nicht verbunden werden: {w1}",
    "en": "The share could not be connected: {w1}",
-   "fr": "Le partage n'a pas pu être connecté : {w1}"
+   "fr": "Le partage n'a pas pu être connecté : {w1}",
+   "nl": "De share kon niet worden gekoppeld: {w1}"
   },
   {
    "de": "Fuer '{w1}' bist du nicht freigeschaltet.",
    "en": "You are not enabled for '{w1}'.",
-   "fr": "Vous n'êtes pas autorisé pour « {w1} »."
+   "fr": "Vous n'êtes pas autorisé pour « {w1} ».",
+   "nl": "U bent niet ingeschakeld voor '{w1}'."
   },
   {
    "de": "Jira nicht erreichbar: {w1}",
    "en": "Jira not reachable: {w1}",
-   "fr": "Jira non joignable : {w1}"
+   "fr": "Jira non joignable : {w1}",
+   "nl": "Jira niet bereikbaar: {w1}"
   },
   {
    "de": "Keine Berechtigung für die Wissensgruppe '{w1}'",
    "en": "No permission for the knowledge group '{w1}'",
-   "fr": "Aucune autorisation pour le groupe de connaissances « {w1} »"
+   "fr": "Aucune autorisation pour le groupe de connaissances « {w1} »",
+   "nl": "Geen toestemming voor de kennisgroep '{w1}'"
   },
   {
    "de": "Konnte nicht gespeichert werden: {w1}",
    "en": "Could not be saved: {w1}",
-   "fr": "Impossible d'enregistrer : {w1}"
+   "fr": "Impossible d'enregistrer : {w1}",
+   "nl": "Kon niet worden opgeslagen: {w1}"
   },
   {
    "de": "Loeschen fehlgeschlagen ({w1})",
    "en": "Deletion failed ({w1})",
-   "fr": "Échec de la suppression ({w1})"
+   "fr": "Échec de la suppression ({w1})",
+   "nl": "Verwijderen mislukt ({w1})"
   },
   {
    "de": "Löschen fehlgeschlagen: {w1}",
    "en": "Deletion failed: {w1}",
-   "fr": "Échec de la suppression : {w1}"
+   "fr": "Échec de la suppression : {w1}",
+   "nl": "Verwijderen mislukt: {w1}"
   },
   {
    "de": "Manifest fehlgeschlagen: {w1}",
    "en": "Manifest failed: {w1}",
-   "fr": "Échec du manifeste : {w1}"
+   "fr": "Échec du manifeste : {w1}",
+   "nl": "Manifest mislukt: {w1}"
   },
   {
    "de": "Nur Wissens-Ordner unter '{w1}/' können gelöscht werden",
    "en": "Only knowledge folders under '{w1}/' can be deleted",
-   "fr": "Seuls les dossiers de connaissances sous « {w1}/ » peuvent être supprimés"
+   "fr": "Seuls les dossiers de connaissances sous « {w1}/ » peuvent être supprimés",
+   "nl": "Alleen kennismappen onder '{w1}/' kunnen worden verwijderd"
   },
   {
    "de": "Nur Wissens-Ordner unter '{w1}/' können umbenannt werden",
    "en": "Only knowledge folders under '{w1}/' can be renamed",
-   "fr": "Seuls les dossiers de connaissances sous « {w1}/ » peuvent être renommés"
+   "fr": "Seuls les dossiers de connaissances sous « {w1}/ » peuvent être renommés",
+   "nl": "Alleen kennismappen onder '{w1}/' kunnen worden hernoemd"
   },
   {
    "de": "Ordner '{w1}' existiert bereits",
    "en": "Folder '{w1}' already exists",
-   "fr": "Le dossier « {w1} » existe déjà"
+   "fr": "Le dossier « {w1} » existe déjà",
+   "nl": "Map '{w1}' bestaat al"
   },
   {
    "de": "Ordner '{w1}' ist den gewählten Wissensgruppen nicht zugeordnet",
    "en": "Folder '{w1}' is not assigned to the selected knowledge groups",
-   "fr": "Le dossier « {w1} » n'est pas attribué aux groupes de connaissances choisis"
+   "fr": "Le dossier « {w1} » n'est pas attribué aux groupes de connaissances choisis",
+   "nl": "Map '{w1}' is niet toegewezen aan de geselecteerde kennisgroepen"
   },
   {
    "de": "Ordner '{w1}' nicht konfiguriert",
    "en": "Folder '{w1}' not configured",
-   "fr": "Dossier « {w1} » non configuré"
+   "fr": "Dossier « {w1} » non configuré",
+   "nl": "Map '{w1}' niet geconfigureerd"
   },
   {
    "de": "Ordner '{w1}' nicht verfuegbar",
    "en": "Folder '{w1}' not available",
-   "fr": "Dossier « {w1} » non disponible"
+   "fr": "Dossier « {w1} » non disponible",
+   "nl": "Map '{w1}' niet beschikbaar"
   },
   {
    "de": "Ordner nicht lesbar: {w1}",
    "en": "Folder cannot be read: {w1}",
-   "fr": "Dossier illisible : {w1}"
+   "fr": "Dossier illisible : {w1}",
+   "nl": "Map kan niet worden gelezen: {w1}"
   },
   {
    "de": "Parameter sind kein gültiges JSON: {w1}",
    "en": "Parameters are not valid JSON: {w1}",
-   "fr": "Les paramètres ne sont pas un JSON valide : {w1}"
+   "fr": "Les paramètres ne sont pas un JSON valide : {w1}",
+   "nl": "Parameters zijn geen geldige JSON: {w1}"
   },
   {
    "de": "Protokoll nicht lesbar: {w1}",
    "en": "Log cannot be read: {w1}",
-   "fr": "Journal illisible : {w1}"
+   "fr": "Journal illisible : {w1}",
+   "nl": "Logboek kan niet worden gelezen: {w1}"
   },
   {
    "de": "Speichern fehlgeschlagen ({w1})",
    "en": "Saving failed ({w1})",
-   "fr": "Échec de l'enregistrement ({w1})"
+   "fr": "Échec de l'enregistrement ({w1})",
+   "nl": "Opslaan mislukt ({w1})"
   },
   {
    "de": "Sprachtranskription fehlgeschlagen: {w1}",
    "en": "Speech transcription failed: {w1}",
-   "fr": "Échec de la transcription vocale : {w1}"
+   "fr": "Échec de la transcription vocale : {w1}",
+   "nl": "Spraaktranscriptie mislukt: {w1}"
   },
   {
    "de": "Standort nicht erreichbar: {w1}",
    "en": "Location not reachable: {w1}",
-   "fr": "Emplacement non joignable : {w1}"
+   "fr": "Emplacement non joignable : {w1}",
+   "nl": "Locatie niet bereikbaar: {w1}"
   },
   {
    "de": "Transkription fehlgeschlagen: {w1}",
    "en": "Transcription failed: {w1}",
-   "fr": "Échec de la transcription : {w1}"
+   "fr": "Échec de la transcription : {w1}",
+   "nl": "Transcriptie mislukt: {w1}"
   },
   {
    "de": "Umbenennen fehlgeschlagen: {w1}",
    "en": "Renaming failed: {w1}",
-   "fr": "Échec du renommage : {w1}"
+   "fr": "Échec du renommage : {w1}",
+   "nl": "Hernoemen mislukt: {w1}"
   },
   {
    "de": "Unerwartete Antwort (HTTP {w1}). Ist die Adresse wirklich ein Jarvis-Standort?",
    "en": "Unexpected response (HTTP {w1}). Is the address really a Jarvis location?",
-   "fr": "Réponse inattendue (HTTP {w1}). L'adresse est-elle vraiment un emplacement Jarvis ?"
+   "fr": "Réponse inattendue (HTTP {w1}). L'adresse est-elle vraiment un emplacement Jarvis ?",
+   "nl": "Onverwacht antwoord (HTTP {w1}). Is het adres werkelijk een Jarvis-locatie?"
   },
   {
    "de": "Verbindung fehlgeschlagen: {w1}",
    "en": "Connection failed: {w1}",
-   "fr": "Échec de la connexion : {w1}"
+   "fr": "Échec de la connexion : {w1}",
+   "nl": "Verbinding mislukt: {w1}"
   },
   {
    "de": "Verschieben fehlgeschlagen: {w1}",
    "en": "Moving failed: {w1}",
-   "fr": "Échec du déplacement : {w1}"
+   "fr": "Échec du déplacement : {w1}",
+   "nl": "Verplaatsen mislukt: {w1}"
   },
   {
    "de": "Zielordner '{w1}' existiert nicht",
    "en": "Target folder '{w1}' does not exist",
-   "fr": "Le dossier cible « {w1} » n'existe pas"
+   "fr": "Le dossier cible « {w1} » n'existe pas",
+   "nl": "Doelmap '{w1}' bestaat niet"
   },
   {
    "de": "Zielordner '{w1}' ist kein Wissens-Ordner",
    "en": "Target folder '{w1}' is not a knowledge folder",
-   "fr": "Le dossier cible « {w1} » n'est pas un dossier de connaissances"
+   "fr": "Le dossier cible « {w1} » n'est pas un dossier de connaissances",
+   "nl": "Doelmap '{w1}' is geen kennismap"
   },
   {
    "de": "Zu viele Fehlversuche für dieses Konto. Bitte warte {w1} Minute{w2}.",
    "en": "Too many failed attempts for this account. Please wait {w1} minute(s).",
-   "fr": "Trop de tentatives échouées pour ce compte. Veuillez patienter {w1} minute(s)."
+   "fr": "Trop de tentatives échouées pour ce compte. Veuillez patienter {w1} minute(s).",
+   "nl": "Te veel mislukte pogingen voor dit account. Wacht {w1} minu(u)t(en)."
   },
   {
    "de": "{w1}: nur https-Adressen.",
    "en": "{w1}: https addresses only.",
-   "fr": "{w1} : adresses https uniquement."
+   "fr": "{w1} : adresses https uniquement.",
+   "nl": "{w1}: alleen https-adressen."
   },
   {
    "de": "Übergeordneter Ordner '{w1}' nicht konfiguriert",
    "en": "Parent folder '{w1}' not configured",
-   "fr": "Dossier parent « {w1} » non configuré"
+   "fr": "Dossier parent « {w1} » non configuré",
+   "nl": "Bovenliggende map '{w1}' niet geconfigureerd"
   },
   {
    "de": "✏️ History auf {w1} Nachrichten gekürzt ({w2} Einträge entfernt)",
    "en": "✏️ History shortened to {w1} messages ({w2} entries removed)",
-   "fr": "✏️ Historique réduit à {w1} messages ({w2} entrées supprimées)"
+   "fr": "✏️ Historique réduit à {w1} messages ({w2} entrées supprimées)",
+   "nl": "✏️ Geschiedenis ingekort tot {w1} berichten ({w2} items verwijderd)"
   },
   {
    "de": "📄 Lese PDF {w1} – bei beschaedigtem Text mit Texterkennung, das kann etwas dauern…",
    "en": "📄 Reading PDF {w1} – if the text is damaged, with text recognition; this may take a moment…",
-   "fr": "📄 Lecture du PDF {w1} – en cas de texte endommagé avec reconnaissance de texte, cela peut prendre un moment…"
+   "fr": "📄 Lecture du PDF {w1} – en cas de texte endommagé avec reconnaissance de texte, cela peut prendre un moment…",
+   "nl": "📄 PDF {w1} wordt gelezen – bij beschadigde tekst met tekstherkenning; dit kan even duren…"
   },
   {
    "de": "📎 Datei {w1} bereitgestellt",
    "en": "📎 File {w1} provided",
-   "fr": "📎 Fichier {w1} mis à disposition"
+   "fr": "📎 Fichier {w1} mis à disposition",
+   "nl": "📎 Bestand {w1} aangeleverd"
   },
   {
    "de": "🔧 Danke für dein Feedback! Ich habe analysiert, warum die Antwort {w1} war, und eine Lernnotiz gespeichert.",
    "en": "🔧 Thank you for your feedback! I analysed why the answer was {w1} and saved a learning note.",
-   "fr": "🔧 Merci pour votre retour ! J'ai analysé pourquoi la réponse était {w1} et enregistré une note d'apprentissage."
+   "fr": "🔧 Merci pour votre retour ! J'ai analysé pourquoi la réponse était {w1} et enregistré une note d'apprentissage.",
+   "nl": "🔧 Hartelijk dank voor uw feedback! Ik heb geanalyseerd waarom het antwoord {w1} was en een leernotitie opgeslagen."
   },
   {
    "de": "🧠 Vision LLM-Aktion für {w1}: {w2}",
    "en": "🧠 Vision LLM action for {w1}: {w2}",
-   "fr": "🧠 Action LLM vision pour {w1} : {w2}"
+   "fr": "🧠 Action LLM vision pour {w1} : {w2}",
+   "nl": "🧠 Vision-LLM-actie voor {w1}: {w2}"
   }
  ]
 }

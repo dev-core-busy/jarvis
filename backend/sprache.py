@@ -1,4 +1,4 @@
-"""Servertexte in der Sprache der Oberflaeche (de/en/fr).
+"""Servertexte in der Sprache der Oberflaeche (de/en/fr/nl).
 
 WARUM (gemeldet 2026-11-24): Die Oberflaeche war vollstaendig dreisprachig,
 aber was der SERVER sagte – Fehler, Hinweise, Ablehnungen –, kam als fester
@@ -17,7 +17,7 @@ WIE UEBERSETZT WIRD: die Middleware in main.py reicht jede JSON-Antwort an
 dem ``backend/server_texte.json`` einen Eintrag hat, werden ersetzt. Der Satz
 im Code IST der Schluessel – kein Endpunkt muss dafuer geaendert werden. Saetze
 mit Werten (f-Strings) stehen dort mit ``{w1}``, ``{w2}`` … und werden als
-Muster erkannt. Fehlt eine Uebersetzung: fr -> en -> der deutsche Satz.
+Muster erkannt. Fehlt eine Uebersetzung: fr/nl -> en -> der deutsche Satz.
 Die Datei ist bewusst NICHT i18n.js: diese Saetze braucht nur der Server, im
 Browser kosteten sie jeden Seitenaufruf ~60 KB.
 
@@ -31,9 +31,9 @@ import json
 import re
 from pathlib import Path
 
-SPRACHEN = ("de", "en", "fr")
+SPRACHEN = ("de", "en", "fr", "nl")
 COOKIE = "jarvis_lang"
-_RUECKFALL = {"de": ("de",), "en": ("en", "de"), "fr": ("fr", "en", "de")}
+_RUECKFALL = {"de": ("de",), "en": ("en", "de"), "fr": ("fr", "en", "de"), "nl": ("nl", "en", "de")}
 
 _aktuell: contextvars.ContextVar = contextvars.ContextVar("jarvis_sprache", default="de")
 _cache: dict = {}
@@ -75,7 +75,7 @@ TEXTE = Path(__file__).resolve().parent / "server_texte.json"
 
 
 def texte() -> list:
-    """Eintraege [{"de":…, "en":…, "fr":…}] aus server_texte.json (Cache nach mtime)."""
+    """Eintraege [{"de":…, "en":…, "fr":…, "nl":…}] aus server_texte.json (Cache nach mtime)."""
     try:
         stempel = TEXTE.stat().st_mtime
     except OSError:

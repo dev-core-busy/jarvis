@@ -75,8 +75,9 @@
         .doc-toc ul { margin: 6px 0 0 18px; padding: 0; line-height: 1.9; }
         /* Sprachbloecke: html[data-lang] wird per Inline-Skript gesetzt (Default DE) */
         html[data-lang="en"] .i18n-de,
-        html[data-lang="fr"] .i18n-de { display: none !important; }
-        html:not([data-lang="en"]):not([data-lang="fr"]) .i18n-en { display: none !important; }
+        html[data-lang="fr"] .i18n-de,
+        html[data-lang="nl"] .i18n-de { display: none !important; }
+        html:not([data-lang="en"]):not([data-lang="fr"]):not([data-lang="nl"]) .i18n-en { display: none !important; }
         .lang-sw { display: flex; gap: 2px; width: max-content; margin: 14px 0 -34px auto;
             position: relative; z-index: 2; background: rgba(var(--fg-rgb), 0.05);
             border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
@@ -760,12 +761,12 @@
         </div>
       </div><!-- /i18n-en -->
     </div>
-<script src="/static/js/support_api_sprache.js?v=2"></script>
+<script src="/static/js/support_api_sprache.js?v=3"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>
 <script src="/static/js/sitzung.js?v=4"></script>
-<script src="/static/js/konto_hinweise.js?v=3"></script>
+<script src="/static/js/konto_hinweise.js?v=4"></script>
 <script src="/static/js/icons.js?v=11"></script>
 <script src="/static/js/pwreveal.js?v=4"></script>
 <script src="/static/js/stt.js?v=3"></script>

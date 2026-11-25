@@ -104,7 +104,7 @@
         return (s && s !== key) ? s : fallback;
     }
     // UI-Sprache (de/en/fr) – fuer die Wechselerkennung und die Anzeige.
-    function sprache() { return ({ en: 'en', fr: 'fr' })[window._lang] || 'de'; }
+    function sprache() { return ({ en: 'en', fr: 'fr', nl: 'nl' })[window._lang] || 'de'; }
     // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
     function serverSprache() { return sprache() === 'de' ? 'de' : 'en'; }
     function esc(s) {
@@ -849,7 +849,7 @@
             } catch (e) { }
         });
         $('ad-lang').addEventListener('click', function () {
-            var neu = { de: 'en', en: 'fr' }[sprache()] || 'de';   // DE → EN → FR → DE
+            var neu = { de: 'en', en: 'fr', fr: 'nl' }[sprache()] || 'de';   // DE → EN → FR → NL → DE
             if (window.setLang) window.setLang(neu);
             $('ad-lang').textContent = neu.toUpperCase();
             // Der Bereichskatalog kommt uebersetzt vom SERVER – applyLang()

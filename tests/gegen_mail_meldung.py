@@ -99,7 +99,8 @@ PROBEN = [
     ("i18n nicht in der Broker-Kopie", "deploy/security/broker_installieren.sh",
      "        backend deploy start_jarvis_root.sh jarvis.service $I18N_DATEIEN 2>/dev/null \\",
      "        backend deploy start_jarvis_root.sh jarvis.service 2>/dev/null \\", 1),
-    ("Update startet Broker nicht fuer i18n", "backend/update_manager.py", '"frontend/js/i18n.js", "frontend/js/i18n_fr.js"', '', 1),
+    ("Update startet Broker nicht fuer i18n", "backend/update_manager.py",
+     '"frontend/js/i18n.js", "frontend/js/i18n_fr.js", "frontend/js/i18n_nl.js"', '', 1),
     ("0c ohne Schleifensperre", "start_jarvis_root.sh", "        export JARVIS_BROKER_NACHINSTALL=1\n", "", 1),
     ("Installer ohne Vermerk", "deploy/security/broker_installieren.sh",
      'json.dump({"quelle": quelle, "commit": commit, "hash": h, "installer": installer,',
@@ -140,7 +141,7 @@ def main() -> int:
         (tmp / "deploy" / "security").mkdir(parents=True)
         shutil.copy2(REPO / "deploy/security/broker_installieren.sh", tmp / "deploy/security/broker_installieren.sh")
         (tmp / "frontend" / "js").mkdir(parents=True)
-        for f in ("i18n.js", "i18n_fr.js"):
+        for f in ("i18n.js", "i18n_fr.js", "i18n_nl.js"):
             shutil.copy2(REPO / "frontend/js" / f, tmp / "frontend/js" / f)
         original = {}
         for _, datei, alt, _, soll in PROBEN:

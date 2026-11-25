@@ -4,9 +4,9 @@
 (function () {
     function apply(l) {
         document.documentElement.setAttribute('data-lang', l);
-        // Die Doku gibt es nur DE/EN – Franzoesisch liest die englische Fassung
-        // (theme.css blendet bei data-lang="fr" die .i18n-en-Bloecke ein).
-        var anzeige = (l === 'fr') ? 'en' : l;
+        // Die Doku gibt es nur DE/EN – Franzoesisch und Niederlaendisch lesen die
+        // englische Fassung (theme.css blendet bei data-lang="fr"/"nl" die .i18n-en-Bloecke ein).
+        var anzeige = (l === 'fr' || l === 'nl') ? 'en' : l;
         document.title = (anzeige === 'en') ? 'Jarvis Support API – REST Documentation'
                                             : 'Jarvis Support-API – REST-Dokumentation';
         document.querySelectorAll('.lang-sw button').forEach(function (b) {

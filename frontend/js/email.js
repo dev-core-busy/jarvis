@@ -338,7 +338,7 @@
         // Sprache mitgeben: Name und Hinweis der Bereiche kommen uebersetzt vom
         // Server (sie stehen dort neben der Werkzeugliste, damit Text und
         // Wirkung nicht auseinanderlaufen) – applyLang() erreicht sie nicht.
-        var lg = (window._lang === 'en' || window._lang === 'fr') ? 'en' : 'de';   // Server kennt nur de/en
+        var lg = (window._lang === 'en' || window._lang === 'fr' || window._lang === 'nl') ? 'en' : 'de';   // Server kennt nur de/en
         _bereicheLang = lg;
         return fetch('/api/email/admin/overview?lang=' + lg, { headers: kopf() })
             .then(function (r) { return r.json(); })
@@ -746,7 +746,7 @@
         // Vergleich verhindert einen zweiten Abruf beim Seitenaufbau, wo
         // applyLang() dasselbe Ereignis feuert.
         window.addEventListener('jarvis-lang-changed', function () {
-            var lg = (window._lang === 'en' || window._lang === 'fr') ? 'en' : 'de';   // Server kennt nur de/en
+            var lg = (window._lang === 'en' || window._lang === 'fr' || window._lang === 'nl') ? 'en' : 'de';   // Server kennt nur de/en
             if (_bereicheLang && _bereicheLang !== lg) ladeUebersicht();
         });
     }

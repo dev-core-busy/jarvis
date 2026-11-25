@@ -356,10 +356,10 @@ try:
     # ── 10. Sprache der Mails = Oberflaechensprache (gemeldet 2026-11-24) ───
     print("[10] Sprache")
     alle = mm._texte_laden()
-    pruefe(all(len(alle.get(sp_, {})) >= 40 for sp_ in ("de", "en", "fr")),
-           "Positivkontrolle: Texte aus i18n.js/i18n_fr.js gelesen (%s)" % {k_: len(v) for k_, v in alle.items()})
+    pruefe(all(len(alle.get(sp_, {})) >= 40 for sp_ in ("de", "en", "fr", "nl")),
+           "Positivkontrolle: Texte aus i18n.js/i18n_fr.js/i18n_nl.js gelesen (%s)" % {k_: len(v) for k_, v in alle.items()})
     # REGEL am Syntaxbaum: jeder Schluessel, den Mailmodul, Ueberwachung und
-    # AIDE-Abgleich benutzen, steht in ALLEN drei Sprachen (fehlt einer, faellt
+    # AIDE-Abgleich benutzen, steht in ALLEN vier Sprachen (fehlt einer, faellt
     # die Mail still auf Deutsch zurueck – genau der gemeldete Zustand).
     benutzt = set()
     for datei in ("backend/mail_meldung.py", "backend/ueberwachung.py", "backend/aide_abgleich.py"):
@@ -375,8 +375,8 @@ try:
                 ("benutzer", "kanal", "muster", "ip", "anzahl")} | {"mvm.ue_" + s_ for s_ in
                 ("alarm", "warnung", "behoben")} | {"mvm.aide_art_" + a_ for a_ in ("neu", "entfernt", "geaendert")}
     benutzt = {b_ for b_ in benutzt if not b_.endswith("_")}
-    fehlt = sorted("%s:%s" % (sp_, k_) for k_ in benutzt for sp_ in ("de", "en", "fr") if k_ not in alle.get(sp_, {}))
-    pruefe(len(benutzt) >= 30 and not fehlt, "jeder benutzte Mailtext steht in DE, EN und FR (%d)%s"
+    fehlt = sorted("%s:%s" % (sp_, k_) for k_ in benutzt for sp_ in ("de", "en", "fr", "nl") if k_ not in alle.get(sp_, {}))
+    pruefe(len(benutzt) >= 30 and not fehlt, "jeder benutzte Mailtext steht in DE, EN, FR und NL (%d)%s"
            % (len(benutzt), (" – fehlt: " + ", ".join(fehlt[:8])) if fehlt else ""))
     konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_SPRACHE=en\nMAIL_MARKE=Fabrikam\n")
     mm._p(mm.ZUSTAND).unlink(missing_ok=True)
@@ -422,8 +422,12 @@ try:
     r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "a@beispiel.de",
                                               "relay": "", "quellen": ["aide"], "sprache": "fr"})
     pruefe(r.get("ok") and mm.konf()["sprache"] == "fr", "Speichern uebernimmt die Sprache")
+    r = meta.behandeln("broker.mailversand", {"aktion": "sprache", "sprache": "nl"})
+    pruefe(r.get("ok") and mm.konf()["sprache"] == "nl", "Niederlaendisch wird als Mailsprache angenommen")
+    pruefe(mm.text("mvm.ue_warnung", "x", "nl") == alle["nl"].get("mvm.ue_warnung") != alle["en"].get("mvm.ue_warnung"),
+           "Mailtext in NL kommt aus i18n_nl.js (nicht der englische Rueckfall)")
     bi = (REPO / "deploy/security/broker_installieren.sh").read_text()
-    pruefe('I18N_DATEIEN="frontend/js/i18n.js frontend/js/i18n_fr.js"' in bi and "$I18N_DATEIEN 2>/dev/null" in bi,
+    pruefe('I18N_DATEIEN="frontend/js/i18n.js frontend/js/i18n_fr.js frontend/js/i18n_nl.js"' in bi and "$I18N_DATEIEN 2>/dev/null" in bi,
            "Broker-Kopie enthaelt die Uebersetzungen (root liest nicht die Datei des Dienstes)")
     pruefe(mm.I18N_JS.parent.parent.parent == REPO / "backend" / ".." or
            mm.I18N_JS == (REPO / "frontend/js/i18n.js").resolve(),
@@ -466,8 +470,10 @@ try:
                 codes.add(c.args[0].value)
     i18n = (REPO / "frontend/js/i18n.js").read_text()
     fr = (REPO / "frontend/js/i18n_fr.js").read_text()
-    fehlt = sorted(c_ for c_ in codes if i18n.count("'mv.m_%s':" % c_) != 2 or ('"mv.m_%s":' % c_) not in fr)
-    pruefe(len(codes) >= 25 and not fehlt, "jede Kennung (%d) steht als mv.m_<code> in DE, EN und FR%s"
+    nl = (REPO / "frontend/js/i18n_nl.js").read_text()
+    fehlt = sorted(c_ for c_ in codes if i18n.count("'mv.m_%s':" % c_) != 2 or ('"mv.m_%s":' % c_) not in fr
+                   or ('"mv.m_%s":' % c_) not in nl)
+    pruefe(len(codes) >= 25 and not fehlt, "jede Kennung (%d) steht als mv.m_<code> in DE, EN, FR und NL%s"
            % (len(codes), (" – fehlt: " + ", ".join(fehlt)) if fehlt else ""))
     konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\n")
     r = meta.behandeln("broker.mailversand", {"aktion": "speichern", "empfaenger": "a@beispiel.de",
@@ -516,7 +522,8 @@ try:
                and any(getattr(t, "id", "") == "_BROKER_PFADE" for t in n.targets)), None)
     werte = {e.value for e in getattr(pf, "elts", []) if isinstance(e, ast.Constant)}
     fehlt = {"backend/mail_meldung.py", "backend/ueberwachung.py", "backend/aide_abgleich.py",
-             "start_jarvis_root.sh", "backend/broker/", "frontend/js/i18n.js", "frontend/js/i18n_fr.js"} - werte
+             "start_jarvis_root.sh", "backend/broker/", "frontend/js/i18n.js", "frontend/js/i18n_fr.js",
+             "frontend/js/i18n_nl.js"} - werte
     pruefe(not fehlt, "Update startet den Broker bei Aenderung der root-Module neu (%s)" % (", ".join(sorted(fehlt)) or "alle da"))
     # Installer-Wechsel (0c): sonst kaemen neue mitkopierte Dateien (i18n)
     # erst beim UEBERNAECHSTEN Broker-Neustart an – auf DEV nachgestellt.

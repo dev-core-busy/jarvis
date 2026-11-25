@@ -94,10 +94,11 @@
 
 /* ─── Sprachbloecke (lange Fliesstext-Inhalte, z.B. API-Doku) ─────────
    i18n.js applyLang() setzt html[data-lang]. Default (kein Attribut) = DE.
-   Franzoesisch hat keine eigenen Bloecke und zeigt die englischen. */
+   Franzoesisch und Niederlaendisch haben keine eigenen Bloecke und zeigen die englischen. */
 html[data-lang="en"] .i18n-de,
-html[data-lang="fr"] .i18n-de { display: none !important; }
-html:not([data-lang="en"]):not([data-lang="fr"]) .i18n-en { display: none !important; }
+html[data-lang="fr"] .i18n-de,
+html[data-lang="nl"] .i18n-de { display: none !important; }
+html:not([data-lang="en"]):not([data-lang="fr"]):not([data-lang="nl"]) .i18n-en { display: none !important; }
 
 /* ─── Sprachauswahl als Klappmenue (i18n.js _sprachGruppeOrdnen) ───────
    Sichtbar ist nur die aktive Sprache; ein Klick darauf klappt die uebrigen

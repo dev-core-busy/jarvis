@@ -569,16 +569,16 @@
             + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     }
 
-    // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
+    // Sprache fuer den Server: er kennt nur de/en, Franzoesisch/Niederlaendisch bekommen Englisch.
     function supServerLang() {
         var l = localStorage.getItem('jarvis_lang') || 'de';
-        return (l === 'en' || l === 'fr') ? 'en' : 'de';
+        return (l === 'en' || l === 'fr' || l === 'nl') ? 'en' : 'de';
     }
 
     function relTime(ts) {
         var diff = Math.floor(Date.now() / 1000) - (ts || 0);
         var spr = localStorage.getItem('jarvis_lang') || 'de';
-        var pre = { en: '', fr: 'il y a ' }[spr], post = spr === 'en' ? ' ago' : '';
+        var pre = { en: '', fr: 'il y a ', nl: '' }[spr], post = { en: ' ago', nl: ' geleden' }[spr] || '';
         if (pre === undefined) pre = 'vor ';
         if (diff < 60) return T('sup.now', 'gerade eben');
         if (diff < 3600) return pre + Math.floor(diff / 60) + ' ' + T('sup.min', 'Min') + post;

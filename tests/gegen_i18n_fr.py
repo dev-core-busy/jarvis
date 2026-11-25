@@ -43,7 +43,7 @@ PROBEN = [
     ("schliessendes </b> verloren", FR,
      '<b>La clé reste visible ici.</b>', '<b>La clé reste visible ici.'),
     ("Seite bindet i18n_fr.js nicht ein", PORTAL,
-     '<script src="/static/js/i18n_fr.js?v=1"></script>', ''),
+     '<script src="/static/js/i18n_fr.js?v=', '<script src="/static/js/i18n_fr_weg.js?v='),
     ("Rueckfall fr ohne Englisch", I18N,
      "fr: ['fr', 'en', 'de']", "fr: ['fr', 'de']"),
     ("Klick auf aktive Sprache setzt nur neu", I18N,

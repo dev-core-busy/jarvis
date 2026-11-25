@@ -40,10 +40,10 @@
         });
     }
     function lang() {
-        return ({ en: 'en', fr: 'fr' })[localStorage.getItem('jarvis_lang')] || 'de';
+        return ({ en: 'en', fr: 'fr', nl: 'nl' })[localStorage.getItem('jarvis_lang')] || 'de';
     }
     // Sprache fuer den Server: er kennt nur de/en, Franzoesisch bekommt Englisch.
-    function serverLang() { return (lang() === 'en' || lang() === 'fr') ? 'en' : 'de'; }
+    function serverLang() { return (lang() === 'en' || lang() === 'fr' || lang() === 'nl') ? 'en' : 'de'; }
     function toPortal() { window.location.replace('/portal'); }
 
     var _catalog = null;     // {categories, analyses, tools}

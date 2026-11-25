@@ -76,7 +76,7 @@ printf '%s\t%s\n' "${GIT_SSH_COMMAND:-}" "$*" >> "$PROBE_LOG"
 if [ "$1" = "clone" ]; then
     ziel="${@: -1}"; mkdir -p "$ziel/.git"
     tar -C "$PROBE_SRC" --exclude=__pycache__ -cf - backend deploy start_jarvis_root.sh \
-        jarvis.service frontend/js/i18n.js frontend/js/i18n_fr.js | tar -C "$ziel" -xf -
+        jarvis.service frontend/js/i18n.js frontend/js/i18n_fr.js frontend/js/i18n_nl.js | tar -C "$ziel" -xf -
     exit 0
 fi
 if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then echo 0123456789abcdef0123456789abcdef01234567; exit 0; fi
@@ -109,7 +109,7 @@ def lauf(name, konf_zeilen=None, schluessel_modus=0o600, link=False, anker_modus
         # i18n: kopiert der Installer seit 2026-11-24 mit (Mailversand) – ohne sie
         # brach dieser Waechter mit "tar: 2 0" ab (Exit 2, bis 2026-11-25 unbemerkt).
         subprocess.run("tar -C %s --exclude=__pycache__ -cf - backend deploy start_jarvis_root.sh "
-                       "jarvis.service frontend/js/i18n.js frontend/js/i18n_fr.js | tar -C %s -xf -" % (shlex.quote(str(ROOT)),
+                       "jarvis.service frontend/js/i18n.js frontend/js/i18n_fr.js frontend/js/i18n_nl.js | tar -C %s -xf -" % (shlex.quote(str(ROOT)),
                                                                    shlex.quote(str(cache))),
                        shell=True, check=True)
     konf = d / "etc" / "broker.conf"

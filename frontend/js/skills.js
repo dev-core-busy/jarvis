@@ -119,7 +119,7 @@
     // Die Liste wird VORHER kopiert: sortiert wird nur die Anzeige, nie
     // this.skills – dort haengen Filter und Neuzeichnen dran.
     function sortiereNachName(liste) {
-        const spr = ({ en: 'en', fr: 'fr' }[window._lang] || 'de');
+        const spr = ({ en: 'en', fr: 'fr', nl: 'nl' }[window._lang] || 'de');
         return liste.slice().sort((a, b) => String(a && a.name || '')
             .localeCompare(String(b && b.name || ''), spr,
                            { sensitivity: 'base', numeric: true }));

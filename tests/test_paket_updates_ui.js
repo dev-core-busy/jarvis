@@ -241,6 +241,30 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 80));
     pruefe(!!d.querySelector('#sec-unatt-jetzt svg, #sec-unatt-jetzt .jv-ico') || d.getElementById('sec-unatt-jetzt').textContent === '',
            'der Symbol-Knopf behaelt sein Symbol (kein Text hineingeschrieben)');
 
+    abschnitt('4d. "Prüfung jetzt starten": Kreis, obwohl systemd den Start noch nicht meldet (ECHT 2026-11-25)');
+    // Der Status direkt nach dem Start sagt noch laeuft:'' (start --no-block) –
+    // genau dieser Wettlauf zeigte den alten Bericht ohne Kreis.
+    ({ w, d, rufe } = baue(antwort(AIDE_OFFEN)));
+    const aKnopf = d.getElementById('sec-aide-pruefen'), aMeld = d.getElementById('sec-aide-result');
+    pruefe(!!aKnopf && !!aMeld, 'Knopf und Meldungskasten der AIDE-Pruefung im Ausschnitt (Positivkontrolle)');
+    if (aKnopf && aMeld) {
+        w.SecurityIncidents.aidePruefen();
+        await warte();
+        pruefe(rufe.some((r) => r.pfad === '/api/security/aide/pruefen' && r.methode === 'POST'), 'Start schickt POST');
+        pruefe(/Prüfung gestartet/.test(aMeld.textContent) && !!aMeld.querySelector('.jv-pkg-spin'),
+               'Startmeldung MIT drehendem Kreis', aMeld.innerHTML.slice(0, 160));
+        const ast = d.getElementById('sec-aide-status');
+        pruefe(/läuft gerade/.test(ast.textContent) && !!ast.querySelector('.jv-pkg-spin'),
+               'Zustand zeigt "läuft" mit Kreis, obwohl der Status noch keinen Lauf meldet', ast.innerHTML.slice(0, 160));
+        pruefe(aKnopf.disabled, 'Knopf waehrend des Laufs gesperrt');
+        // Frist abgelaufen, kein Lauf mehr: Startmeldung verschwindet, Knopf wieder frei
+        w.SecurityIncidents._aideStart = Date.now() - 10 * 60 * 1000;
+        w.SecurityIncidents.renderAide(AIDE_OFFEN);
+        pruefe(aMeld.style.display === 'none' && !aMeld.querySelector('.jv-pkg-spin'),
+               'nach dem Lauf: Startmeldung weg', aMeld.innerHTML.slice(0, 120));
+        pruefe(!aKnopf.disabled && !/läuft gerade/.test(ast.textContent), 'nach dem Lauf: Knopf frei, Bericht steht da');
+    }
+
     abschnitt('5. Ladefehler');
     ({ w, d, rufe } = baue({ ok: false, fehler: 'Broker nicht erreichbar' }, 502));
     w.SecurityIncidents.onShowUnattended();

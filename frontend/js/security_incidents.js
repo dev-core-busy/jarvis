@@ -1290,18 +1290,40 @@
                 return;
             }
             var z = a.zustand || {}, h = '';
+            // "start --no-block" kehrt zurueck, BEVOR systemd die Unit aktiviert –
+            // das Nachladen direkt danach sah "inactive" und zeigte den alten
+            // Bericht ohne Kreis (ECHT 2026-11-25). Deshalb gilt ein frisch
+            // ausgeloester Start bis AIDE_START_FRIST als laufend.
+            var frisch = !!Mgr._aideStart && (Date.now() - Mgr._aideStart) < Mgr.AIDE_START_FRIST;
+            if (a.laeuft) Mgr._aideStart = 0;
+            var laeuft = !!a.eingerichtet && (!!a.laeuft || frisch);
+            var knopf = $('sec-aide-pruefen');
+            if (knopf) knopf.disabled = laeuft;
+            var meld = $('sec-aide-result');
+            if (meld && meld.getAttribute('data-aide-start')) {
+                if (laeuft) {
+                    meld.innerHTML = _kreisel() + '<b>' + esc(T('security.aide_gestartet',
+                        'Prüfung gestartet – das Ergebnis erscheint hier nach einigen Minuten.')) + '</b>';
+                } else {
+                    // Pruefung beendet: das Ergebnis steht jetzt im Zustand darueber.
+                    meld.removeAttribute('data-aide-start');
+                    meld.style.display = 'none';
+                    meld.innerHTML = '';
+                }
+            }
             if (!a.eingerichtet) {
                 h += _P('aus') + esc(T('security.aide_nicht_eingerichtet',
                     'Der automatische Abgleich ist auf diesem Server nicht eingerichtet (Härtung B7).'));
-            } else if (a.laeuft) {
+            } else if (laeuft) {
                 h += _kreisel() + esc(T('security.aide_laeuft', 'Die Prüfung läuft gerade – das dauert einige Minuten.'));
                 // Nachladen, solange sie laeuft – nur ein Wecker zugleich, und nur
-                // solange der Abschnitt im Dokument steht.
+                // solange der Abschnitt im Dokument steht. Solange systemd den
+                // Start noch nicht meldet, kurz nachfragen.
                 if (!Mgr._aideWecker) {
                     Mgr._aideWecker = setTimeout(function () {
                         Mgr._aideWecker = null;
                         if ($('sec-aide-status')) Mgr.loadUpdates();
-                    }, 60000);
+                    }, a.laeuft ? 60000 : 5000);
                 }
             } else if (!z.zustand) {
                 h += _P('aus') + esc(T('security.aide_noch_nie', 'Noch kein Abgleich gelaufen.'));
@@ -1364,6 +1386,8 @@
                 })
                 .catch(function () {
                     if (out) { out.style.display = 'block'; out.textContent = T('security.upd_netz', 'Keine Antwort vom Server.'); }
+                    // Auch ohne Antwort den Folgeschritt rufen – sonst bleibt z. B. ein gesperrter Knopf gesperrt.
+                    if (nachher) nachher({ ok: false });
                 });
         },
 
@@ -1393,11 +1417,37 @@
                 function (d) { if (d.ok && !d.verzoegert) Mgr.loadUpdates(); });
         },
 
+        // So lange gilt ein ausgeloester Start als laufend, auch wenn systemd die
+        // Unit noch nicht als aktiv meldet (Speicherpruefung, Startverzoegerung).
+        AIDE_START_FRIST: 120000,
+
         aidePruefen: function () {
+            var knopf = $('sec-aide-pruefen'), out = $('sec-aide-result');
+            if (knopf) knopf.disabled = true;
+            // Laufender Vorgang = drehender Kreis – schon waehrend der Anfrage.
+            if (out) {
+                out.removeAttribute('data-aide-start');
+                out.style.display = 'block';
+                out.style.borderColor = 'var(--border)';
+                out.style.background = 'transparent';
+                out.innerHTML = _kreisel() + esc(T('security.aide_startet', 'Prüfung wird gestartet…'));
+            }
             Mgr._postJson('/api/security/aide/pruefen', {}, 'sec-aide-result',
                 T('security.aide_gestartet', 'Prüfung gestartet – das Ergebnis erscheint hier nach einigen Minuten.'),
                 T('security.aide_start_fail', 'Prüfung nicht gestartet'),
-                function () { Mgr.loadUpdates(); });
+                function (d) {
+                    if (d && d.ok) {
+                        Mgr._aideStart = Date.now();
+                        if (out) {
+                            out.setAttribute('data-aide-start', '1');
+                            out.innerHTML = _kreisel() + '<b>' + esc(T('security.aide_gestartet',
+                                'Prüfung gestartet – das Ergebnis erscheint hier nach einigen Minuten.')) + '</b>';
+                        }
+                    } else if (knopf) {
+                        knopf.disabled = false;
+                    }
+                    Mgr.loadUpdates();
+                });
         },
 
         aideUebernehmen: function () {

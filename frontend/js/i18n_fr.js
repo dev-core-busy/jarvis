@@ -2563,6 +2563,7 @@ _I18N.fr = {
     "security.aide_confirm": "Accepter {n} modifications inexpliquées comme nouvelle référence ?\n\nNe confirmez que si vous pouvez justifier chaque modification. Votre nom sera consigné dans le journal de sécurité.",
     "security.aide_erklaert": "Expliqué",
     "security.aide_fehler": "Échec de la comparaison",
+    "security.aide_startet": "Lancement de la vérification…",
     "security.aide_gestartet": "Vérification lancée – le résultat apparaîtra ici au bout de quelques minutes.",
     "security.aide_laeuft": "La vérification est en cours – cela prend quelques minutes.",
     "security.aide_letzter": "Dernière comparaison",

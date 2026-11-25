@@ -8488,6 +8488,8 @@ body.light .kb-cl-spanne { color: #5b6678; }
 }
 
 .kbsync-ok      { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+/* Kreis in der Pille "laeuft" (knowledge_sync.js): kleiner als im Fliesstext */
+.kbsync-pill .jv-pkg-spin { width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
 .kbsync-running { color: var(--accent);  border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .kbsync-paused  { color: var(--text-muted); }
 .kbsync-error   { color: var(--danger);  border-color: color-mix(in srgb, var(--danger) 45%, transparent); }

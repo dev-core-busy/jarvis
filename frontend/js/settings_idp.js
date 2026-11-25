@@ -45,6 +45,20 @@
         e.style.color = fehler ? 'var(--danger)' : 'var(--text-primary)';
     }
 
+    // Laufender Vorgang = drehender Kreis (.jv-pkg-spin, theme.css) – Vereinbarung, eingefordert 2026-11-25.
+    // Per DOM statt innerHTML: der Text bleibt Text.
+    function laeuft(id, text) {
+        var e = $(id);
+        if (!e) return;
+        e.textContent = '';
+        var k = document.createElement('span');
+        k.className = 'jv-pkg-spin';
+        k.setAttribute('aria-hidden', 'true');
+        e.appendChild(k);
+        e.appendChild(document.createTextNode(text || ''));
+        e.style.color = 'var(--text-primary)';
+    }
+
     // ── Unter-Container: Verbindung zum IdP ─────────────────────────────
 
     // Der Modus-Schalter gilt nur fuer die IdP-Anmeldung: ohne sie gibt es
@@ -148,7 +162,7 @@
     function testen() {
         var btn = $('idp-testen');
         if (btn) btn.disabled = true;
-        meldung('idp-msg', T('security.idp_test_laeuft', 'Verbindung wird geprüft …'));
+        laeuft('idp-msg', T('security.idp_test_laeuft', 'Verbindung wird geprüft …'));
         anfrage('/api/admin/oidc/test', 'POST', {}).then(function (res) {
             if (btn) btn.disabled = false;
             var d = res.d;

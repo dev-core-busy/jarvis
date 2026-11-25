@@ -109,13 +109,15 @@ const AIDE_OFFEN = { eingerichtet: true, laeuft: '', naechste_pruefung: 17955741
 const AIDE_GUT = { eingerichtet: true, laeuft: '', db: true,
     zustand: { zustand: 'uebernommen', zeit: 1795484000, offen_anzahl: 0, uebernommen_von: 'automatisch', erklaert: { Paket: 3 } } };
 
-function baue(daten, status) {
+function baue(daten, status, haengt) {
     const dom = new JSDOM(AUSSCHNITT.html, { url: 'https://x/settings', runScripts: 'outside-only' });
     const w = dom.window;
     const rufe = [];
     w.fetch = (url, o) => {
         const pfad = String(url).split('?')[0];
         rufe.push({ pfad: pfad, methode: (o && o.method) || 'GET', rumpf: o && o.body });
+        // Ein Abruf, der nie antwortet: misst den Zustand WAEHREND der Aktion
+        if (haengt && pfad === haengt) return new Promise(() => {});
         if (pfad === '/api/security/updates') {
             const s = status || 200;
             return Promise.resolve({ ok: s < 400, status: s, json: () => Promise.resolve(daten) });
@@ -201,6 +203,43 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 80));
     await warte();
     pruefe(d.getElementById('sec-upd-einspielen').disabled, 'nichts offen: "Alle einspielen" ist aus');
     pruefe(/Keine offenen Updates/.test(d.getElementById('sec-upd-status').textContent), 'nichts offen: so benannt');
+
+    abschnitt('4c. Laufende Vorgaenge: drehender Kreis, kein Statuspunkt (gemeldet 2026-11-25)');
+    // Positivkontrolle: die Gestalt gibt es auf jeder Seite (theme.css) und sie dreht
+    const THEME = lies('frontend/css/theme.css');
+    pruefe(/\.jv-pkg-spin\s*\{[^}]*animation:\s*jv-pkg-spin/.test(THEME) && /@keyframes jv-pkg-spin/.test(THEME),
+           'Positivkontrolle: .jv-pkg-spin dreht (theme.css)');
+    ({ w, d, rufe } = baue(antwort(AIDE_GUT)));
+    w.SecurityIncidents.renderAide({ eingerichtet: true, laeuft: 'dailyaidecheck.service', db: true, zustand: {} });
+    const st = d.getElementById('sec-aide-status');
+    pruefe(/läuft gerade/.test(st.textContent), 'AIDE laeuft: Text "Die Prüfung läuft gerade" steht da (Positivkontrolle)');
+    pruefe(!!st.querySelector('.jv-pkg-spin') && !st.querySelector('.jv-punkt'),
+           'AIDE laeuft: drehender Kreis davor, kein Statuspunkt', st.innerHTML.slice(0, 160));
+    ({ w, d, rufe } = baue(antwort(AIDE_GUT), 200, '/api/security/unattended'));
+    w.SecurityIncidents.loadUnattended(true);   // Knopf "Status prüfen (Trockenlauf)"
+    await warte();
+    const tl = d.getElementById('sec-unatt-status');
+    if (!/Trockenlauf läuft/.test(tl.textContent)) {
+        pruefe(false, 'Trockenlauf: Laufmeldung erscheint (Positivkontrolle)', tl.textContent.slice(0, 120));
+    } else {
+        pruefe(!!tl.querySelector('.jv-pkg-spin'), 'Trockenlauf laeuft: drehender Kreis davor', tl.innerHTML.slice(0, 160));
+    }
+    ({ w, d, rufe } = baue(antwort(AIDE_OFFEN), 200, '/api/security/updates/einspielen'));
+    w.SecurityIncidents.onShowUnattended();
+    await warte();
+    w.SecurityIncidents.einspielenUpdates();
+    await warte();
+    const knopf = d.getElementById('sec-upd-einspielen');
+    pruefe(knopf.disabled && /werden eingespielt/.test(knopf.textContent) && !!knopf.querySelector('.jv-pkg-spin'),
+           'waehrend "Alle einspielen": Knopf gesperrt, Laufmeldung MIT drehendem Kreis', knopf.innerHTML.slice(0, 160));
+    ({ w, d, rufe } = baue(antwort(AIDE_GUT), 200, '/api/security/unattended/jetzt'));
+    w.SecurityIncidents.jetztUnattended();
+    await warte();
+    const kasten = d.getElementById('sec-unatt-result');
+    pruefe(/werden eingespielt/.test(kasten.textContent) && !!kasten.querySelector('.jv-pkg-spin'),
+           'Symbol-Knopf: Laufmeldung im Ergebniskasten MIT drehendem Kreis', kasten.innerHTML.slice(0, 160));
+    pruefe(!!d.querySelector('#sec-unatt-jetzt svg, #sec-unatt-jetzt .jv-ico') || d.getElementById('sec-unatt-jetzt').textContent === '',
+           'der Symbol-Knopf behaelt sein Symbol (kein Text hineingeschrieben)');
 
     abschnitt('5. Ladefehler');
     ({ w, d, rufe } = baue({ ok: false, fehler: 'Broker nicht erreichbar' }, 502));

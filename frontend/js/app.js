@@ -3094,12 +3094,13 @@
         if (btnTestProfile) {
             btnTestProfile.addEventListener('click', async () => {
                 btnTestProfile.disabled = true;
-                btnTestProfile.textContent = window.t('common.testing');
+                // Laufender Vorgang = drehender Kreis (.jv-pkg-spin, theme.css) – Vereinbarung, eingefordert 2026-11-25
+                btnTestProfile.innerHTML = '<span class="jv-pkg-spin" aria-hidden="true"></span>' + escapeHtml(window.t('common.testing'));
                 profileTestResult.style.display = '';
                 profileTestResult.style.background = 'rgba(var(--fg-rgb),0.05)';
                 profileTestResult.style.border = '1px solid rgba(var(--fg-rgb),0.1)';
                 profileTestResult.style.color = 'var(--text-muted)';
-                profileTestResult.textContent = window.t('profile.testing');
+                profileTestResult.innerHTML = '<span class="jv-pkg-spin" aria-hidden="true"></span>' + escapeHtml(window.t('profile.testing'));
                 try {
                     // Aktuelle Formularwerte verwenden (nicht die gespeicherten)
                     const testPayload = {

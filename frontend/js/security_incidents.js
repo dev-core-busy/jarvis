@@ -19,6 +19,14 @@
     function _P(art) {
         return '<span class="jv-punkt jv-punkt-' + art + '" aria-hidden="true"></span> ';
     }
+    // Drehender Kreis vor JEDEM "laeuft gerade"/"wird ..." – die Vereinbarung fuer
+    // laufende Vorgaenge (gemeldet 2026-11-25: "Die Prüfung läuft gerade" stand mit
+    // einem Warn-Punkt da). Dieselbe Gestalt wie im Paketfenster (.jv-pkg-spin in
+    // theme.css, auf jeder Seite geladen). Ein Punkt sagt "Zustand", der Kreis "es
+    // passiert gerade etwas".
+    function _kreisel() {
+        return '<span class="jv-pkg-spin" aria-hidden="true"></span>';
+    }
 
     function T(key, def) {
         var v = (window.t && window.t(key) !== key ? window.t(key) : null) || def;
@@ -881,13 +889,13 @@
             var origHtml = btn ? btn.innerHTML : '';
             if (btn) {
                 btn.disabled = true;
-                if (!o.symbol) btn.textContent = o.busy;
+                if (!o.symbol) btn.innerHTML = _kreisel() + esc(o.busy);
             }
             if (o.symbol && out) {
                 out.style.display = 'block';
                 out.style.borderColor = 'var(--border)';
                 out.style.background = 'transparent';
-                out.textContent = o.busy;
+                out.innerHTML = _kreisel() + esc(o.busy);
             }
             fetch(o.url, { method: 'POST', headers: authHeaders() })
                 .then(function (r) { return r.json(); })
@@ -1073,7 +1081,7 @@
             // 90 s brauchen (Deckel im Backend). Deshalb ansagen, wie lange es
             // dauern kann, und den Knopf sperren – sonst klickt man nach.
             if (live) {
-                if (box) box.innerHTML = esc(T('security.unatt_dryrun_wait',
+                if (box) box.innerHTML = _kreisel() + esc(T('security.unatt_dryrun_wait',
                     'Trockenlauf läuft – das kann bis zu 45 Sekunden dauern…'));
                 if (btn) btn.disabled = true;
             }
@@ -1286,7 +1294,7 @@
                 h += _P('aus') + esc(T('security.aide_nicht_eingerichtet',
                     'Der automatische Abgleich ist auf diesem Server nicht eingerichtet (Härtung B7).'));
             } else if (a.laeuft) {
-                h += _P('warn') + esc(T('security.aide_laeuft', 'Die Prüfung läuft gerade – das dauert einige Minuten.'));
+                h += _kreisel() + esc(T('security.aide_laeuft', 'Die Prüfung läuft gerade – das dauert einige Minuten.'));
                 // Nachladen, solange sie laeuft – nur ein Wecker zugleich, und nur
                 // solange der Abschnitt im Dokument steht.
                 if (!Mgr._aideWecker) {

@@ -1107,7 +1107,7 @@ class JarvisKnowledgeManager {
                 <span class="kb-learned-title">${window.t('knowledge.compact.title')}</span>
                 <button class="kb-learned-open-btn" id="kb-compact-btn" data-kb-aktion="compactLearned"
                         title="${window.t('knowledge.compact.btn_title')}" ${cs.running ? 'disabled' : ''}>
-                    ${cs.running ? window.t('knowledge.compact.running') : window.t('knowledge.compact.btn')}
+                    ${cs.running ? '<span class="jv-pkg-spin" aria-hidden="true"></span>' + window.t('knowledge.compact.running') : window.t('knowledge.compact.btn')}
                 </button>
                 <button class="kb-learned-open-btn" data-kb-aktion="showCompactInfo"
                         title="${window.t('knowledge.compact.info_title')}" style="font-weight:700;">❓</button>
@@ -2026,17 +2026,31 @@ class JarvisKnowledgeManager {
 
     // ─── Wissens-Verdichtung ──────────────────────────────────────────
 
-    _compactStatusLine(msg, color) {
+    // laeuft: Laufender Vorgang = drehender Kreis (.jv-pkg-spin, theme.css) – Vereinbarung, eingefordert 2026-11-25
+    _compactStatusLine(msg, color, laeuft) {
         const st = document.getElementById('kb-compact-status');
         if (!st) return;
         st.style.display = 'block';
         st.style.color = color || 'var(--text-muted)';
         st.textContent = msg;
+        if (laeuft) {
+            const k = document.createElement('span');
+            k.className = 'jv-pkg-spin';
+            k.setAttribute('aria-hidden', 'true');
+            st.insertBefore(k, st.firstChild);
+        }
     }
 
     async compactLearned(btn) {
-        if (btn) { btn.disabled = true; btn.textContent = window.t('knowledge.compact.running'); }
-        this._compactStatusLine(window.t('knowledge.compact.status_running'), 'var(--warning)');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = window.t('knowledge.compact.running');
+            const k = document.createElement('span');
+            k.className = 'jv-pkg-spin';
+            k.setAttribute('aria-hidden', 'true');
+            btn.insertBefore(k, btn.firstChild);
+        }
+        this._compactStatusLine(window.t('knowledge.compact.status_running'), 'var(--text-muted)', true);
         try {
             const resp = await fetch('/api/knowledge/compact', {
                 method: 'POST',

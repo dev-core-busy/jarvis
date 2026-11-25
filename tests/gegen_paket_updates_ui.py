@@ -34,6 +34,16 @@ PROBEN = [
     ("Uebernehmen-Knopf immer sichtbar", "            if (ue) ue.style.display = 'none';\n", "", 1),
     ("Updates beim Oeffnen nicht geladen", " this.loadCve(); this.loadUpdates(); },", " this.loadCve(); },", 1),
     ("Ladefehler laesst Einspielen aktiv", "                if (ein) ein.disabled = true;\n", "", 1),
+    # Drehender Kreis bei laufenden Vorgaengen (gemeldet 2026-11-25)
+    ("AIDE laeuft mit Statuspunkt statt Kreis", "h += _kreisel() + esc(T('security.aide_laeuft'",
+     "h += _P('warn') + esc(T('security.aide_laeuft'", 1),
+    ("Laufmeldung im Knopf ohne Kreis", "if (!o.symbol) btn.innerHTML = _kreisel() + esc(o.busy);",
+     "if (!o.symbol) btn.textContent = o.busy;", 1),
+    ("Laufmeldung im Ergebniskasten ohne Kreis", "out.innerHTML = _kreisel() + esc(o.busy);", "out.textContent = o.busy;", 1),
+    ("Trockenlauf ohne Kreis", "if (box) box.innerHTML = _kreisel() + esc(T('security.unatt_dryrun_wait',",
+     "if (box) box.innerHTML = esc(T('security.unatt_dryrun_wait',", 1),
+    ("Kreis ohne die gemeinsame Gestalt", """return '<span class="jv-pkg-spin" aria-hidden="true"></span>';""",
+     """return '<span class="jv-spin" aria-hidden="true"></span>';""", 1),
 ]
 SETTINGS = REPO / "frontend" / "settings.html"
 # Proben an der Lage im Markup (Container seit 2026-11-24)

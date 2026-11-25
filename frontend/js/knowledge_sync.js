@@ -208,7 +208,7 @@
             return `
             <div class="kbsync-card${p.state === 'paused' ? ' is-paused' : ''}">
                 <div class="kbsync-hdr">
-                    <span class="kbsync-pill kbsync-${zustand}">${esc(zLabel)}</span>
+                    <span class="kbsync-pill kbsync-${zustand}">${zustand === 'running' ? '<span class="jv-pkg-spin" aria-hidden="true"></span>' : ''}${esc(zLabel)}</span>
                     <span class="kbsync-name">${esc(p.name || p.url)}</span>
                     <span class="kbsync-url">${esc(p.url)}</span>
                     <span class="kbsync-spacer"></span>

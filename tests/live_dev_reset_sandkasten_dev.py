@@ -81,6 +81,7 @@ KOPIE = KOPIE_DIR / "dev_reset.sh"
 shutil.copyfile(SKRIPT, KOPIE)
 os.chmod(KOPIE, 0o755)
 ARCHIVE = []
+WEGWERF = []   # weitere Ablagen dieses Laufs (auch nach einem Abbruch entfernen)
 
 
 def als_nutzer(*args, cwd=None):
@@ -199,8 +200,17 @@ try:
     so.bind(str(SOCK))
     # Quelle: root-eigener Klon desselben origin (wie /var/lib/jarvis-broker/quelle)
     QUELLE = Path(tempfile.mkdtemp(prefix="devreset-quelle-", dir="/tmp"))
-    subprocess.run(["git", "clone", "-q", str(BASIS / "origin.git"), str(QUELLE / "q")], check=True,
-                   capture_output=True, env=dict(os.environ, GIT_CONFIG_NOSYSTEM="1"))
+    WEGWERF.append(QUELLE)
+    # Der Ursprung gehoert dem Dienstbenutzer: als root verweigert git den Klon
+    # ("dubious ownership", auch mit -c safe.directory – upload-pack erbt es
+    # nicht). Also als Dienstbenutzer klonen und danach root uebergeben: die
+    # echte Quelle ist root-eigen, und dev_reset.sh liest sie als root.
+    os.chown(QUELLE, pw.pw_uid, pw.pw_gid)
+    als_nutzer("git", "clone", "-q", str(BASIS / "origin.git"), str(QUELLE / "q"))
+    subprocess.run(["chown", "-R", "root:root", str(QUELLE)], check=True)
+    if not (QUELLE / "q" / ".git").is_dir():
+        print("ABBRUCH: Sandkasten-Quelle nicht angelegt")
+        sys.exit(2)
 
     def neustart_lauf(*extra):
         PROTO.write_text("")
@@ -247,6 +257,8 @@ except Exception as e:  # noqa: BLE001
 finally:
     shutil.rmtree(BASIS, ignore_errors=True)
     shutil.rmtree(KOPIE_DIR, ignore_errors=True)
+    for w_ in WEGWERF:
+        shutil.rmtree(w_, ignore_errors=True)
     for a in ARCHIVE:
         try:
             os.unlink(a)

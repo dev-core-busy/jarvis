@@ -90,6 +90,22 @@ PROBEN = [
     ("Startverweis ohne Paket", '        if typ != "l" or not paket:', '        if typ != "l":', 1),
     ("Startverweis: Dateiart egal", '        if typ != "l" or not paket:', "        if not paket:", 1),
     ("Startverweis entfernt ohne Update", 'if alt and _paket_geaendert(k, alt) else None', "if alt else None", 1),
+    # ── Installierter Stand / Quelle nachziehen (2026-11-25) ──
+    ("Stand ohne 40-Hex-Pruefung", "    if _SHA.match(head):\n        return head", "    if head:\n        return head", 1),
+    ("Ref-Datei folgt Links", "fd = os.open(pfad, os.O_RDONLY | os.O_NOFOLLOW)", "fd = os.open(pfad, os.O_RDONLY)", 1),
+    (".git als Link erlaubt", "        if os.path.islink(g) or not g.is_dir():", "        if not g.is_dir():", 1),
+    ("'..' im Ref erlaubt", '    if not m or ".." in m.group(1):', "    if not m:", 1),
+    ("Nachziehen auch bei gleichem Stand", "    if ist == soll:\n", "    if False:\n", 1),
+    ("Installer mit falschem Commit", '"--nur-quelle", soll]', '"--nur-quelle", "0" * 40]', 1),
+    ("Installer ohne Rechtepruefung", "    if not _root_privat(inst, 0o022):\n        return {\"ok\": False, \"grund\": \"Installer fehlt",
+     "    if False:\n        return {\"ok\": False, \"grund\": \"Installer fehlt", 1),
+    ("Grund fehlt bei offener Code-Datei", 'zusatz = "" if qn.get("ok", True) else', 'zusatz = "" if True else', 1),
+    ("Abgleich zieht nicht nach", "    qn = quelle_nachziehen()\n", "    qn = {\"ok\": True}\n", 1),
+    ("Syslog-Socket nicht als Laufzeit", '    (re.compile(r"^/var/spool/postfix/dev/log$"), "s"),\n', "", 1),
+    ("Neu-angelegt-Regel fuer jede Dateiart", 'if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):',
+     'if merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):', 1),
+    ("Neu-angelegt-Regel fuer jeden Socket", 'if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):',
+     'if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"}:', 1),
 ]
 
 

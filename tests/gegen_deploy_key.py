@@ -31,6 +31,15 @@ EINR = "deploy/security/deploy_key_einrichten.sh"
 UM = "backend/update_manager.py"
 
 PROBEN = [
+    # --nur-quelle (2026-11-25)
+    ("nur-quelle holt die Spitze statt des Commits", W, INST,
+     '    quelle_holen 60 "$NUR_QUELLE" || fehler "$QH_FEHLER"\n',
+     '    quelle_holen 60 || fehler "$QH_FEHLER"\n'),
+    ("nur-quelle installiert doch", W, INST,
+     '    meldung "Signierte Quelle auf ${NUR_QUELLE:0:12} gestellt (nur Quelle, nichts installiert)"\n    exit 0\n',
+     '    meldung "Signierte Quelle auf ${NUR_QUELLE:0:12} gestellt (nur Quelle, nichts installiert)"\n'),
+    ("nur-quelle ohne Cache holt den Commit nicht", W, INST,
+     '        if [ "$ref" != "$BRANCH" ]; then\n', '        if false; then\n'),
     ("Schluessel-Rechte nicht geprueft", W, INST,
      '        root_privat "$SCHLUESSEL" 077 \\\n',
      '        true \\\n'),

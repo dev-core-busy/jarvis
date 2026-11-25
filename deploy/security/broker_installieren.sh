@@ -32,6 +32,14 @@
 #
 # Aufruf (root):
 #   broker_installieren.sh [--quelle github|lokal] [--jarvis-dir DIR]
+#   broker_installieren.sh --nur-quelle <commit>
+#       stellt NUR die signierte Quelle ($CACHE) auf genau diesen Commit und
+#       prueft seine Signatur – installiert nichts. Fuer den AIDE-Abgleich
+#       (backend/aide_abgleich.py): er erklaert den Code unter /opt/jarvis
+#       gegen den Commit, der dort INSTALLIERT ist, nicht gegen die Spitze von
+#       master (seit 2026-11-25; vorher zog nur ein Broker-Start die Quelle
+#       nach, und jedes Update ohne Broker-Pfad erschien nachts als "nicht
+#       erklaert"). Exit 0 = Quelle steht auf dem Commit, 1 = nicht.
 # Exit: 0 = neu installiert · 3 = bereits aktuell · 1 = Fehler (bestehende
 #       Installation bleibt unangetastet) · 2 = falscher Aufruf
 #
@@ -99,10 +107,13 @@ if [ -f "$KONF" ]; then
     fi
 fi
 
+NUR_QUELLE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --quelle)     QUELLE="${2:-}"; shift 2 ;;
         --jarvis-dir) JARVIS_DIR="${2:-}"; shift 2 ;;
+        --nur-quelle) NUR_QUELLE="${2:-}"; shift 2
+                      [[ "$NUR_QUELLE" =~ ^[0-9a-f]{40}$ ]] || { echo "--nur-quelle <40 Hex-Zeichen>" >&2; exit 2; } ;;
         *) echo "Unbekanntes Argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -116,8 +127,10 @@ PY="$(command -v python3 || true)"
 # Nebenaufgabe (siehe unten), im Modus 'github' wird daraus ein Abbruch.
 QH_FEHLER=""
 qh_fehler() { QH_FEHLER="$*"; return 1; }
+# Zweites Argument: der Stand, der geholt wird (Vorgabe $BRANCH, mit
+# --nur-quelle ein Commit – GitHub liefert erreichbare Commits auch per Kennung).
 quelle_holen() {
-    local frist="$1"
+    local frist="$1" ref="${2:-$BRANCH}"
     export HOME=/root GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1
     if [[ "$REPO" == git@* ]]; then
         [ -n "$SCHLUESSEL" ] || { qh_fehler "REPO per SSH, aber kein SCHLUESSEL in $KONF"; return 1; }
@@ -140,14 +153,19 @@ quelle_holen() {
         # Umstieg https -> SSH weiter von der alten (und scheiterte).
         git -C "$CACHE" remote set-url origin "$REPO" \
             || { qh_fehler "Adresse im Cache nicht umstellbar"; return 1; }
-        timeout "$frist" git -C "$CACHE" fetch -q --depth 1 origin "$BRANCH" \
+        timeout "$frist" git -C "$CACHE" fetch -q --depth 1 origin "$ref" \
             && git -C "$CACHE" reset -q --hard FETCH_HEAD \
             && git -C "$CACHE" clean -qfdx \
-            || { qh_fehler "Abruf von $REPO ($BRANCH) gescheitert"; return 1; }
+            || { qh_fehler "Abruf von $REPO ($ref) gescheitert"; return 1; }
     else
         rm -rf "$CACHE"
         timeout "$frist" git clone -q --depth 1 --branch "$BRANCH" "$REPO" "$CACHE" \
             || { qh_fehler "Klonen von $REPO ($BRANCH) gescheitert"; return 1; }
+        if [ "$ref" != "$BRANCH" ]; then
+            timeout "$frist" git -C "$CACHE" fetch -q --depth 1 origin "$ref" \
+                && git -C "$CACHE" reset -q --hard FETCH_HEAD \
+                || { qh_fehler "Abruf von $REPO ($ref) gescheitert"; return 1; }
+        fi
     fi
     # Herkunft pruefen (H1) – an der Spitze, die gleich installiert wird. Die
     # Signatur deckt Baum und Vorgaenger ab; unsignierte Commits DARUNTER sind
@@ -166,6 +184,15 @@ quelle_holen() {
     fi
     return 0
 }
+
+# ── Nur die Quelle (AIDE-Abgleich) ──────────────────────────────────────────
+if [ -n "$NUR_QUELLE" ]; then
+    quelle_holen 60 "$NUR_QUELLE" || fehler "$QH_FEHLER"
+    IST="$(git -C "$CACHE" rev-parse HEAD 2>/dev/null)"
+    [ "$IST" = "$NUR_QUELLE" ] || fehler "Quelle steht auf ${IST:0:12} statt ${NUR_QUELLE:0:12}"
+    meldung "Signierte Quelle auf ${NUR_QUELLE:0:12} gestellt (nur Quelle, nichts installiert)"
+    exit 0
+fi
 
 COMMIT=""
 if [ "$QUELLE" = "github" ]; then

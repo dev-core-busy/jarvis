@@ -31,6 +31,13 @@ EINR = "deploy/security/signatur_einrichten.sh"
 UM = "backend/update_manager.py"
 
 PROBEN = [
+    # --nur-quelle (2026-11-25): Endpruefung "Quelle steht auf dem verlangten Commit"
+    ("nur-quelle ohne Endpruefung", W, INST,
+     '    [ "$IST" = "$NUR_QUELLE" ] || fehler',
+     '    true || fehler'),
+    ("nur-quelle nimmt jede Kennung", W, INST,
+     '                      [[ "$NUR_QUELLE" =~ ^[0-9a-f]{40}$ ]] || { echo',
+     '                      true || { echo'),
     ("Installer prueft die Signatur nicht", W, INST,
      '        if ! git -C "$CACHE" -c gpg.ssh.allowedSignersFile="$SIGNERS" -c gpg.ssh.program=/usr/bin/ssh-keygen \\\n'
      '                verify-commit HEAD >/dev/null 2>&1; then\n',

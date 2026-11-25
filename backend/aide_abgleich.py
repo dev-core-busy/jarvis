@@ -102,6 +102,10 @@ DPKG_STATUS = "/var/lib/dpkg/status"
 APT_HISTORY = ("/var/log/apt/history.log", "/var/log/apt/history.log.1.gz")
 QUELLE = "/var/lib/jarvis-broker/quelle"
 SIGNERS = "/etc/jarvis/allowed_signers"
+# Installierter Stand: aus den DATEIEN in .git gelesen, nie per git (K1)
+JARVIS_GIT = "/opt/jarvis/.git"
+# Stellt die Quelle auf einen Commit (--nur-quelle), aus der root-eigenen Broker-Kopie
+INSTALLER = "/usr/local/lib/jarvis-broker/deploy/security/broker_installieren.sh"
 SSH_KEYGEN = "/usr/bin/ssh-keygen"
 GIT = "/usr/bin/git"
 PRUEF_UNIT = "dailyaidecheck.service"
@@ -407,14 +411,109 @@ def basis_schreiben(dp: dict, zeit: float) -> None:
     os.replace(tmp, ziel)
 
 
+_SHA = re.compile(r"^[0-9a-f]{40}$")
+_REF = re.compile(r"^ref: (refs/heads/[A-Za-z0-9._/-]{1,200})$")
+
+
+def _klein_lesen(pfad: Path, grenze: int = 4 << 20) -> str | None:
+    """Gewoehnliche Datei ohne Link am Ende, hoechstens ``grenze`` Bytes."""
+    import stat as _st
+    try:
+        fd = os.open(pfad, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not _st.S_ISREG(st.st_mode) or st.st_size > grenze:
+            return None
+        return os.read(fd, grenze).decode("ascii", "replace")
+    finally:
+        os.close(fd)
+
+
+def installierter_stand() -> str | None:
+    """Commit, der unter /opt/jarvis installiert ist – oder None.
+
+    ⚠ OHNE git: ``.git`` gehoert dem Dienstbenutzer, ein git-Aufruf als root
+    darin waere ein Weg zu root (Befund K1, Kopf dieser Datei). Gelesen werden
+    nur HEAD, die Ref-Datei bzw. packed-refs, und angenommen wird nur eine
+    Kennung aus 40 Hex-Zeichen – ein umgebogener Verweis kann damit nichts
+    preisgeben, hoechstens auf einen anderen Commit zeigen, und der muss dann
+    selbst signiert sein, um etwas zu erklaeren."""
+    g = _p(JARVIS_GIT)
+    try:
+        if os.path.islink(g) or not g.is_dir():
+            return None
+    except OSError:
+        return None
+    head = (_klein_lesen(g / "HEAD", 4096) or "").strip()
+    if _SHA.match(head):
+        return head
+    m = _REF.match(head)
+    if not m or ".." in m.group(1):
+        return None
+    ref = m.group(1)
+    wert = (_klein_lesen(g / ref, 4096) or "").strip()
+    if _SHA.match(wert):
+        return wert
+    for zeile in (_klein_lesen(g / "packed-refs") or "").splitlines():
+        teile = zeile.strip().split(" ")
+        if len(teile) == 2 and teile[1] == ref and _SHA.match(teile[0]):
+            return teile[0]
+    return None
+
+
+def quelle_nachziehen() -> dict:
+    """Stellt die signierte Quelle auf den INSTALLIERTEN Commit, bevor eingeteilt wird.
+
+    WARUM (2026-11-25): bis dahin zog nur ein Broker-Start die Quelle nach. Ein
+    Update ohne Broker-Pfad (Update-Pille, Auto-Update, Pull von Hand) liess sie
+    auf dem alten Commit stehen, und jede Datei des neuen erschien in der Nacht
+    als "nicht erklaert" (ECHT nach eaa8e036, DEV nach jedem c+p). Verglichen
+    wird gegen den installierten Commit, nicht gegen die Spitze von master:
+    ein Server, der hinterherhinkt, ist kein Befund.
+
+    Der Installer prueft die Signatur selbst; scheitert er, bleibt es beim
+    fail-closed-Verhalten von ``baum_laden`` (nichts erklaert, Grund genannt)."""
+    soll = installierter_stand()
+    if not soll:
+        return {"ok": False, "grund": "installierter Stand nicht lesbar"}
+    ist = ""
+    if (_p(QUELLE) / ".git").is_dir():
+        r = _git(["rev-parse", "HEAD"])
+        ist = r.stdout.decode().strip() if r.returncode == 0 else ""
+    if ist == soll:
+        return {"ok": True, "stand": soll[:12], "nachgezogen": False}
+    inst = _p(INSTALLER)
+    if not _root_privat(inst, 0o022):
+        return {"ok": False, "grund": "Installer fehlt oder ist nicht root-eigen", "stand": soll[:12]}
+    umg = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"}
+    if W:
+        umg = dict(os.environ, LANG="C", LC_ALL="C")
+    try:
+        r = subprocess.run(["/bin/bash", str(inst), "--nur-quelle", soll], capture_output=True,
+                           timeout=180, env=umg)
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        return {"ok": False, "grund": "Installer: %s" % ex, "stand": soll[:12]}
+    if r.returncode != 0:
+        letzte = ((r.stderr or r.stdout).decode("utf-8", "replace").strip().splitlines() or ["?"])[-1]
+        return {"ok": False, "grund": letzte[:200], "stand": soll[:12]}
+    return {"ok": True, "stand": soll[:12], "nachgezogen": True, "von": ist[:12]}
+
+
 def kontext_laden(basis_zeit: float | None) -> dict:
     dp = dpkg_laden()
+    qn = quelle_nachziehen()
+    if qn.get("nachgezogen") or not qn.get("ok"):
+        _protokoll("AIDE-Abgleich: Quelle %s" % (
+            "auf den installierten Stand %s nachgezogen (vorher %s)" % (qn.get("stand"), qn.get("von") or "-")
+            if qn.get("ok") else "NICHT nachgezogen: %s" % qn.get("grund")))
     baum, baum_info = baum_laden()
     basis = basis_lesen()
     if basis_zeit is None and basis:
         basis_zeit = basis.get("zeit")
     laeufe = _dpkg_laeufe()
-    return {"dpkg": dp, "baum": baum, "baum_info": baum_info, "basis": basis,
+    return {"dpkg": dp, "baum": baum, "baum_info": baum_info, "basis": basis, "quelle_nachziehen": qn,
             "basis_zeit": basis_zeit, "laeufe": laeufe,
             "dpkg_seit_basis": basis_zeit is not None and any(e >= basis_zeit for _, e in laeufe)}
 
@@ -465,12 +564,21 @@ _POSTFIX_LAUFZEIT = (
     (re.compile(r"^/var/lib/postfix/(?:master\.lock|prng_exch|smtpd?_scache\.db)$"), "f"),
     (re.compile(r"^/var/spool/postfix/pid/(?:master\.pid|(?:inet|unix)\..+)$"), "f"),
     (re.compile(r"^/var/spool/postfix/(?:private|public)/[a-z][a-z0-9-]*$"), "s"),
+    # Syslog-Socket im Chroot: legt rsyslog ueber die Postfix-Einstellung an
+    # (ECHT 25.11.2026: "neu, gehoert keinem Paket"); Debians Regeln kennen ihn nicht.
+    (re.compile(r"^/var/spool/postfix/dev/log$"), "s"),
     (re.compile(r"^/var/spool/postfix/(?:active|corrupt|defer(?:red)?|hold|saved|bounce|flush|incoming"
                 r"|maildrop|trace|private|public|pid|dev|etc|lib|usr|usr/lib|usr/lib/sasl2)$"), "d"),
     (re.compile(r"^/var/spool/postfix$"), "d"),
     (re.compile(r"^/var/lib/postfix$"), "d"),
 )
 # Startverweise (System V), angelegt von update-rc.d im Paketskript
+# Laufzeit-Sockets, die bei jedem Start NEU angelegt werden (neue Inode, neue
+# Zeiten) und fuer die Debian keine Regel ohne Inode fuehrt: nach einem Neustart
+# von rsyslog stuende der Syslog-Socket sonst jede Nacht als "geaendert" da.
+# Erklaert nur, wenn sich NICHTS ausser Zeit/Inode/Linkzahl geaendert hat –
+# Rechte und Eigentuemer bleiben ein Befund (Regel davor in einteilen).
+_SOCKET_NEU_ANGELEGT = re.compile(r"^/var/spool/postfix/dev/log$")
 _RC_LINK = re.compile(r"^/etc/rc[0-6S]\.d/[SK]\d\d(?P<name>[A-Za-z0-9][A-Za-z0-9._+-]*)$")
 
 
@@ -567,6 +675,8 @@ def einteilen(e: dict, k: dict) -> str | None:
             return "Verzeichnisinhalt"
         if merkmale & {"p", "u", "g", "l", "A", "X", "E"}:
             return None
+        if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):
+            return "Laufzeit-Socket neu angelegt"
     if typ == "f" and art in ("neu", "geaendert") and _mail_erklaert(pfad):
         return "Jarvis-Mailversand (eigene Konfiguration)"
     rel = _code_rel(pfad)
@@ -646,9 +756,12 @@ def warum_offen(e: dict, k: dict) -> str:
     if art != "entfernt" and pfad in dp["conff"]:
         return "Konfiguration von %s lokal geaendert" % dp["conff"][pfad][1]
     if _code_rel(pfad) is not None:
+        qn = k.get("quelle_nachziehen") or {}
+        zusatz = "" if qn.get("ok", True) else "; Quelle nicht auf den installierten Stand %s gebracht: %s" % (
+            qn.get("stand", "?"), qn.get("grund", "?"))
         if k.get("baum") is None:
-            return "Jarvis-Code nicht pruefbar (%s)" % k.get("baum_info", "")
-        return "weicht vom signierten Stand der Broker-Quelle ab (%s)" % k.get("baum_info", "")
+            return "Jarvis-Code nicht pruefbar (%s%s)" % (k.get("baum_info", ""), zusatz)
+        return "weicht vom signierten Stand der Broker-Quelle ab (%s%s)" % (k.get("baum_info", ""), zusatz)
     if art == "entfernt":
         return "entfernt, keinem aktualisierten Paket zuzuordnen"
     return "gehoert keinem Paket" if art == "neu" else "geaendert, gehoert keinem Paket"
@@ -745,6 +858,7 @@ def abgleichen() -> dict:
         pass
     k = kontext_laden((basis_lesen() or {}).get("zeit") or basis_zeit)
     z["quelle"] = k["baum_info"] if k["baum"] is not None else ("nicht verwendet: " + k["baum_info"])
+    z["quelle_nachziehen"] = k.get("quelle_nachziehen") or {}
     offen = []
     for e in b["eintraege"]:
         grund = einteilen(e, k)

@@ -86,7 +86,7 @@ GIT.chmod(0o755)
 
 
 def lauf(name, konf_zeilen=None, schluessel_modus=0o600, link=False, anker_modus=0o644,
-         cache_da=False, ohne_schluessel=False):
+         cache_da=False, ohne_schluessel=False, args=None):
     d = TMP / name
     (d / "etc").mkdir(parents=True)
     ziel, cache, log = d / "ziel", d / "cache", d / "git.log"
@@ -125,7 +125,7 @@ def lauf(name, konf_zeilen=None, schluessel_modus=0o600, link=False, anker_modus
                # echten Commits; auf einem eingerichteten Server laege sonst der
                # echte Anker unter /etc/jarvis (test_signatur_h1.py prueft sie).
                JARVIS_BROKER_SIGNERS=str(d / "kein_anker"))
-    r = subprocess.run(["unshare", "-r", "bash", str(INST), "--jarvis-dir", str(ROOT)],
+    r = subprocess.run(["unshare", "-r", "bash", str(INST)] + (args or ["--jarvis-dir", str(ROOT)]),
                        env=env, capture_output=True, text=True, timeout=180)
     aufrufe = []
     if log.exists():
@@ -207,6 +207,22 @@ e = lauf("lokal_kaputt", LOKAL_SSH, schluessel_modus=0o640)
 check("lokal, Schluessel unbrauchbar: installiert TROTZDEM, nur Warnung, kein Abruf",
       e["rc"] == 0 and '"hash": "alt"' not in e["stand"] and ssh_von(e) is None
       and "signierte Quelle nicht nachgezogen" in e["aus"], "rc=%s %s" % (e["rc"], e["aus"][-300:]))
+
+print("[A3] --nur-quelle: genau der installierte Commit, ueber denselben Zugang")
+# Die git-Attrappe meldet bei rev-parse immer diese Kennung (siehe oben)
+KENN = "0123456789abcdef0123456789abcdef01234567"
+e = lauf("nq_cache", SSH_KONF, cache_da=True, args=["--nur-quelle", KENN])
+t_q = shlex.split(ssh_von(e) or "")
+check("--nur-quelle mit Cache: Exit 0, nichts installiert", e["rc"] == 0 and '"hash": "alt"' in e["stand"],
+      "rc=%s %s" % (e["rc"], e["aus"][-300:]))
+check("--nur-quelle holt GENAU den Commit (fetch origin <kennung>)",
+      any(a.endswith("fetch -q --depth 1 origin " + KENN) for _, a in e["aufrufe"]), str([a for _, a in e["aufrufe"]]))
+check("--nur-quelle: Abruf ueber den Deploy-Key", "-i" in t_q and e["key"] in t_q, str(t_q)[:200])
+e = lauf("nq_ohne_cache", SSH_KONF, args=["--nur-quelle", KENN])
+seq = [a.split()[0] if not a.startswith("-C") else a.split()[2] for _, a in e["aufrufe"]]
+check("--nur-quelle ohne Cache: erst klonen, dann den Commit holen",
+      e["rc"] == 0 and "clone" in seq and any(a.endswith("origin " + KENN) for _, a in e["aufrufe"]),
+      "rc=%s %s" % (e["rc"], seq))
 
 print("[B] deploy_key_einrichten.sh")
 src = EINR.read_text()

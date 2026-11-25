@@ -149,6 +149,43 @@ rc, aus, stand = installiere("ohneanker", QUELLEN["unsigniert"], anker=None)
 check("ohne Anker -> installiert, aber mit Warnung",
       rc == 0 and '"hash": "alt"' not in stand and "Herkunft des Stands NICHT geprueft" in aus)
 
+# ─── [A2] --nur-quelle: nur die signierte Quelle, keine Installation ─────────
+print("[A2] broker_installieren.sh --nur-quelle")
+
+
+def nur_quelle(name, quelle, kennung=None):
+    d = TMP / ("nq_" + name)
+    (d / "ziel").mkdir(parents=True)
+    (d / "ziel" / "STAND").write_text('{"hash": "alt"}')
+    a = d / "anker"
+    shutil.copy(ANKER, a)
+    a.chmod(0o644)
+    sha = kennung or sh(GIT, "rev-parse", "HEAD", cwd=quelle, env=GENV).stdout.strip()
+    env = dict(GENV, PATH="%s:%s" % (WRAP.parent, os.environ.get("PATH", "")),
+               PROBE_QUELLE=str(quelle), JARVIS_BROKER_INSTALL_DIR=str(d / "ziel"),
+               JARVIS_BROKER_KONF=str(d / "keine.conf"), JARVIS_BROKER_CACHE=str(d / "cache"),
+               JARVIS_BROKER_KNOWN_HOSTS=str(d / "known"), JARVIS_BROKER_ADMIN_BIN=str(d / "admin"),
+               JARVIS_BROKER_SIGNERS=str(a))
+    r = subprocess.run(["unshare", "-r", "bash", str(INST), "--nur-quelle", sha],
+                       env=env, capture_output=True, text=True, timeout=180)
+    ist = sh(GIT, "rev-parse", "HEAD", cwd=d / "cache", env=GENV).stdout.strip() if (d / "cache").is_dir() else ""
+    return r.returncode, r.stdout + r.stderr, (d / "ziel" / "STAND").read_text(), ist, sha
+
+
+rc, aus, stand, ist, sha = nur_quelle("gut", QUELLEN["gut"])
+check("--nur-quelle, gut signiert: Exit 0, Quelle steht auf dem Commit", rc == 0 and ist == sha, "rc=%s %s" % (rc, aus[-300:]))
+check("--nur-quelle installiert NICHTS (STAND unveraendert)", '"hash": "alt"' in stand)
+rc, aus, stand, ist, sha = nur_quelle("unsigniert", QUELLEN["unsigniert"])
+check("--nur-quelle, unsigniert: Exit 1 mit Signaturgrund", rc == 1 and "nicht mit einem zugelassenen" in aus,
+      "rc=%s %s" % (rc, aus[-300:]))
+rc, aus, stand, ist, sha = nur_quelle("fremd", QUELLEN["fremd"])
+check("--nur-quelle, fremder Schluessel: Exit 1", rc == 1 and '"hash": "alt"' in stand, "rc=%s" % rc)
+rc, aus, _, _, _ = nur_quelle("andere", QUELLEN["gut"], kennung="b" * 40)
+check("--nur-quelle: steht die Quelle danach nicht auf dem verlangten Commit -> Exit 1",
+      rc == 1 and "statt" in aus, "rc=%s %s" % (rc, aus[-200:]))
+r = subprocess.run(["unshare", "-r", "bash", str(INST), "--nur-quelle", "kein-hash"], capture_output=True, text=True)
+check("--nur-quelle mit ungueltiger Kennung: Exit 2", r.returncode == 2, "rc=%s" % r.returncode)
+
 # ─── [B] App-Update ──────────────────────────────────────────────────────────
 print("[B] update_manager")
 sys.path.insert(0, str(ROOT))

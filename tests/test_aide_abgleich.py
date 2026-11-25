@@ -371,6 +371,106 @@ try:
                  dict(kp_weg, basis=dict(kp_weg["basis"], versionen={"postfix": "3.10.13"}))) is None,
            "entfernter Startverweis ohne Update: nicht erklaert")
 
+    # ── 2c. Installierter Stand und Nachziehen der Quelle (2026-11-25) ───────
+    print("[2c] Installierter Stand, Quelle nachziehen, Syslog-Socket")
+    QK = git("rev-parse", "HEAD").stdout.strip()
+    if len(QK) != 40:
+        abbruch("Positivkontrolle: Kennung der Sandkasten-Quelle nicht lesbar")
+    GD = W / "opt/jarvis/.git"
+    ANDERS = "a" * 40
+
+    def git_dir(head, ref_wert=None, packed=None):
+        shutil.rmtree(GD, ignore_errors=True)
+        (GD / "refs/heads").mkdir(parents=True)
+        (GD / "HEAD").write_text(head)
+        if ref_wert is not None:
+            (GD / "refs/heads/master").write_text(ref_wert + "\n")
+        if packed is not None:
+            (GD / "packed-refs").write_text(packed)
+
+    git_dir("ref: refs/heads/master\n", ANDERS)
+    pruefe(A.installierter_stand() == ANDERS, "installierter Stand ueber HEAD -> refs/heads/master")
+    git_dir("ref: refs/heads/master\n", None, "# pack-refs with: peeled\n%s refs/heads/master\n" % ANDERS)
+    pruefe(A.installierter_stand() == ANDERS, "installierter Stand ueber packed-refs")
+    git_dir(ANDERS + "\n")
+    pruefe(A.installierter_stand() == ANDERS, "losgeloester HEAD (Kennung direkt)")
+    # Das Ziel ausserhalb von refs/ EXISTIERT und traegt eine gueltige Kennung –
+    # sonst waere die Probe auch ohne die Schranke None (Register: falsche Sonde).
+    git_dir("ref: refs/heads/../../x_ziel\n")
+    (GD / "x_ziel").write_text(ANDERS + "\n")
+    pruefe(A.installierter_stand() is None, "Ref mit '..' wird verworfen (Ziel existiert und waere gueltig)")
+    git_dir("ref: refs/heads/master\n", "kein-hash")
+    pruefe(A.installierter_stand() is None, "Ref-Datei ohne 40 Hex-Zeichen wird verworfen")
+    git_dir("ref: refs/heads/master\n")
+    (SANDKASTEN / "link_ziel").write_text(ANDERS + "\n")   # gueltig – nur der LINK darf es verhindern
+    (GD / "refs/heads/master").symlink_to(SANDKASTEN / "link_ziel")
+    pruefe(A.installierter_stand() is None, "Ref-Datei als Link wird nicht gelesen (Ziel waere gueltig)")
+    shutil.rmtree(GD, ignore_errors=True)
+    (W / "opt/jarvis/echtes_git").mkdir(parents=True, exist_ok=True)
+    (W / "opt/jarvis/echtes_git/HEAD").write_text(ANDERS + "\n")   # gueltig – nur der LINK darf es verhindern
+    GD.symlink_to(W / "opt/jarvis/echtes_git")
+    pruefe(A.installierter_stand() is None, ".git als Link wird nicht gelesen (Ziel waere gueltig)")
+    GD.unlink()
+
+    INST = W / "usr/local/lib/jarvis-broker/deploy/security/broker_installieren.sh"
+    INST.parent.mkdir(parents=True, exist_ok=True)
+    AUFRUF = SANDKASTEN / "installer_aufrufe.log"
+
+    def installer(rc=0, meldung="Signierte Quelle gestellt"):
+        INST.write_text("#!/bin/bash\necho \"$*\" >> %s\necho '%s' >&2\nexit %d\n" % (AUFRUF, meldung, rc))
+        os.chmod(INST, 0o755)
+        if AUFRUF.exists():
+            AUFRUF.unlink()
+
+    def aufrufe():
+        return AUFRUF.read_text().splitlines() if AUFRUF.exists() else []
+
+    installer()
+    git_dir("ref: refs/heads/master\n", QK)
+    q = A.quelle_nachziehen()
+    pruefe(q.get("ok") and q.get("nachgezogen") is False and not aufrufe(),
+           "Quelle schon auf dem installierten Stand: nichts zu tun, kein Installer-Aufruf (%s)" % q)
+    git_dir("ref: refs/heads/master\n", ANDERS)
+    q = A.quelle_nachziehen()
+    pruefe(q.get("ok") and q.get("nachgezogen") is True and aufrufe() == ["--nur-quelle " + ANDERS],
+           "abweichender Stand: Installer genau mit --nur-quelle <installierter Commit> (%s)" % aufrufe())
+    installer(rc=1, meldung="[Broker-Installation] FEHLER: Stand aaaaaaa ist nicht signiert")
+    q = A.quelle_nachziehen()
+    pruefe(not q.get("ok") and "nicht signiert" in q.get("grund", ""),
+           "Installer scheitert: Grund steht im Ergebnis (%s)" % q.get("grund"))
+    kq = dict(k, quelle_nachziehen=q)
+    pruefe("nicht signiert" in A.warum_offen({"art": "geaendert", "attrs": "f >b... mc..H.. .",
+                                              "pfad": "/opt/jarvis/backend/y.py"}, kq),
+           "der Grund erscheint bei jeder offenen Code-Datei")
+    installer()
+    os.chmod(INST, 0o777)
+    q = A.quelle_nachziehen()
+    pruefe(not q.get("ok") and "root-eigen" in q.get("grund", "") and not aufrufe(),
+           "fremd beschreibbarer Installer wird NICHT ausgefuehrt")
+    shutil.rmtree(GD, ignore_errors=True)
+    q = A.quelle_nachziehen()
+    pruefe(not q.get("ok") and "nicht lesbar" in q.get("grund", ""), "ohne lesbaren Stand: nichts gestartet, Grund genannt")
+    # Der Abgleich ruft das Nachziehen WIRKLICH (ueber kontext_laden)
+    installer()
+    git_dir("ref: refs/heads/master\n", ANDERS)
+    kk2 = A.kontext_laden(JETZT - 86400)
+    pruefe(aufrufe() == ["--nur-quelle " + ANDERS] and (kk2.get("quelle_nachziehen") or {}).get("nachgezogen"),
+           "kontext_laden zieht die Quelle vor dem Einteilen nach (%s)" % aufrufe())
+    shutil.rmtree(GD, ignore_errors=True)
+    INST.unlink()
+
+    # Syslog-Socket im Postfix-Chroot (ECHT 25.11.: neu, gehoerte keinem Paket)
+    kp2 = dict(k, dpkg_seit_basis=True, basis={"zeit": START, "versionen": {}, "pfade": {}})
+    pruefe(grund("neu", "s++++++++++++++++++", "/var/spool/postfix/dev/log", kp2) is not None,
+           "Syslog-Socket im Chroot nach Installation von postfix: erklaert")
+    pruefe(grund("geaendert", "s =.... mci.... .", "/var/spool/postfix/dev/log") == "Laufzeit-Socket neu angelegt",
+           "Syslog-Socket neu angelegt (nur Zeit/Inode): erklaert")
+    pruefe(grund("geaendert", "s =.p.. mci.... .", "/var/spool/postfix/dev/log") is None,
+           "Syslog-Socket mit geaenderten Rechten: nicht erklaert")
+    pruefe(grund("geaendert", "s =.... mci.... .", "/var/spool/postfix/private/fremd") is None
+           and grund("geaendert", "f =.... mci.... .", "/var/spool/postfix/dev/log") is None,
+           "anderer Socket bzw. Datei statt Socket: nicht erklaert")
+
     # Quelle ohne Signatur bzw. fremd beschreibbar: der Code erklaert nichts
     signers = W / "etc/jarvis/allowed_signers"
     gesichert = signers.read_text()

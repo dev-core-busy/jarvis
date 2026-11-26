@@ -75,7 +75,6 @@ const AUSNAHMEN = {
     // fester Markup-Text): technische Kennungen, die auf dem Server so heissen.
     'security.adbind_user_bsp':         'Beispiel-Dienstkonto svc-jarvis im Kunden-AD (wie bisher im Markup)',
     'secdoc.b04':                       'Linux-Konto jarvis in ALLOWED_USERS',
-    'secdoc.b10':                       'Pfad /mnt/jarvis-kb',
     'secdoc.b19':                       'OS-Benutzer jarvis_sandbox, nftables-Tabelle jarvis_sandbox_lo',
     'secdoc.b44':                       'OS-Benutzer jarvis_sandbox',
     'secdoc.b49':                       'Dienstname jarvis-broker.service',

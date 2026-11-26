@@ -1029,6 +1029,60 @@ try:
            "Abgleich legt fuer JEDEN offenen Eintrag einen Abdruck an (%s / %s)"
            % (len(z7.get("abdruecke") or []), z7.get("offen_anzahl")))
     A._gemeldet_schreiben(None)
+
+    # ── 8. Taeglicher Rechtewechsel am apt-Planer-Protokoll (DEV+ECHT 26.11.) ──
+    # Lynis (umask 027) schreibt eipp.log.xz nachts mit 640, unattended-upgrade
+    # (umask 022) morgens mit 644; Debians VarFile prueft die Rechte.
+    print("[8] apt-Planer-Protokoll eipp.log.xz")
+    EI = "/var/log/apt/eipp.log.xz"
+    ATT = "f   p..    . A. ."   # woertlich aus dem AIDE-Bericht von DEV
+    k8 = A.kontext_laden(JETZT - 86400)
+    if k8.get("dpkg_seit_basis"):
+        abbruch("Positivkontrolle: im Kontext lief dpkg seit dem Stand – [8] waere nicht vom Paketweg getrennt")
+
+    def g8(attrs=ATT, pfad=EI, art="geaendert"):
+        return A.einteilen({"art": art, "attrs": attrs, "pfad": pfad}, k8)
+
+    for modus in (0o640, 0o644):
+        schreibe(EI, b"\xfd7zXZ", modus)
+        pruefe(g8() is not None, "eipp.log.xz %o nach Rechtewechsel: erklaert" % modus)
+    for modus, text in ((0o666, "666 (fuer alle beschreibbar)"), (0o600, "600"), (0o755, "x-Bit"),
+                        (0o4644, "SUID-Bit"), (0o664, "664")):
+        schreibe(EI, b"\xfd7zXZ", modus)
+        pruefe(g8() is None, "eipp.log.xz mit %s: nicht erklaert" % text)
+    schreibe(EI, b"\xfd7zXZ", 0o644)
+    pruefe(g8("f   pu.    . A. .") is None, "eipp.log.xz mit Eigentuemerwechsel: nicht erklaert")
+    pruefe(g8("f   p.g    . A. .") is None, "eipp.log.xz mit Gruppenwechsel: nicht erklaert")
+    pruefe(g8("f   p..    . A.X.") is None, "eipp.log.xz mit geaenderten xattrs: nicht erklaert")
+    _rk, _rg = A._root_konto, A._root_gruppe
+    A._root_konto = lambda uid: False
+    try:
+        pruefe(g8() is None, "eipp.log.xz gehoert nicht root: nicht erklaert")
+    finally:
+        A._root_konto = _rk
+    A._root_gruppe = lambda gid: False
+    try:
+        pruefe(g8() is None, "eipp.log.xz nicht in Gruppe root: nicht erklaert")
+    finally:
+        A._root_gruppe = _rg
+    _gx = os.getxattr
+    os.getxattr = lambda *a, **kw: b"\x02\x00\x00\x00"
+    try:
+        pruefe(g8() is None, "eipp.log.xz mit erweiterter ACL: nicht erklaert")
+    finally:
+        os.getxattr = _gx
+    schreibe("/var/log/apt/history.log", "x\n", 0o640)
+    schreibe("/var/log/apt/eipp.log.xz.alt", "x\n", 0o640)
+    pruefe(g8(pfad="/var/log/apt/history.log") is None and g8(pfad="/var/log/apt/eipp.log.xz.alt") is None,
+           "Rechtewechsel an anderen apt-Protokollen: nicht erklaert")
+    # Wirkung ueber den ganzen Abgleich: der Eintrag zaehlt nicht als offen
+    schreibe("/var/lib/aide/aide.db", b"ALTER STAND", 0o600)
+    setze_bericht([("geaendert", ATT, EI), ("neu", "f++++++++++++++++++", "/usr/bin/bar")])
+    neuer_stand(b"NEUER STAND 8")
+    z8 = A.abgleichen()
+    pruefe(z8.get("offen_anzahl") == 1 and all(o.get("pfad") != EI for o in z8.get("offen") or []),
+           "Abgleich: eipp.log.xz erklaert, der echte Fund bleibt offen (%s offen)" % z8.get("offen_anzahl"))
+    A._gemeldet_schreiben(None)
 finally:
     shutil.rmtree(SANDKASTEN, ignore_errors=True)
 

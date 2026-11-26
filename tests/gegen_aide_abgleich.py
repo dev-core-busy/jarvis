@@ -184,6 +184,16 @@ PROBEN = [
      "            pass   # neuer Vergleichsstand", 1),
     ("Abdruecke nur fuer den ersten Eintrag", '{_abdruck(o, k["sha256"]) for o in offen}',
      '{_abdruck(o, k["sha256"]) for o in offen[:1]}', 1),
+    # ── apt-Planer-Protokoll (2026-11-26) ──
+    ("eipp: Modus egal", "if (e[2] & 0o7777) not in _EIPP_MODI:", "if False:", 1),
+    ("eipp: auch 666/664 erlaubt", "_EIPP_MODI = (0o640, 0o644)", "_EIPP_MODI = (0o640, 0o644, 0o664, 0o666)", 1),
+    ("eipp: Eigentuemer egal", "not (_root_konto(e[0]) and _root_gruppe(e[1])):", "False:", 1),
+    ("eipp: Gruppe egal", "not (_root_konto(e[0]) and _root_gruppe(e[1])):", "not _root_konto(e[0]):", 1),
+    ("eipp: Merkmale egal", 'or not merkmale <= {"p", "A", "m", "c", "i"}:', ":", 1),
+    ("eipp: ACL egal", '        return None   # erweiterte ACL vorhanden\n    except OSError:\n        pass\n'
+     '    return "apt-Planer', '        pass\n    except OSError:\n        pass\n    return "apt-Planer', 1),
+    ("eipp: jede Datei", "if pfad != EIPP or", "if", 1),
+    ("eipp: Regel fehlt", "        eipp = _eipp_rechte(pfad, merkmale) if typ", "        eipp = None if typ", 1),
     # ── andere Module ──
     ("Register: Kette ab beliebigem Stand", "    gesehen, offen = {alt}, [alt]", "    gesehen, offen = set(kanten), list(kanten)", 1, "ed"),
     ("Register: Uebergang nicht vermerkt", "        vermerken(pfad, vorher, sha(pfad))", "        pass", 1, "ed"),

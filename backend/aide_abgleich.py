@@ -840,6 +840,32 @@ _LOG_SERIE = re.compile(r"^/var/log/(?:[A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+?(?:\.lo
 _AIDE_ALTORDNER = re.compile(r"^/var/lib/aide/dailyaidecheck\.old\.[A-Za-z0-9]+"
                              r"(?:/dailyaidecheck(?:/(?:errorlog|arunlog|aerrlog|mailfile))?)?$")
 _WIREPLUMBER = re.compile(r"^/home/[^/]+/\.local/state/wireplumber/[^/]+$")
+# Planer-Protokoll von apt: Debian fuehrt es als VarFile (Inhalt egal, Rechte
+# geprueft). apt legt es bei JEDEM Lauf mit 0644 neu an, die umask schneidet
+# ab: Lynis (umask 027, ``apt-get --dry-run upgrade`` in PKGS-7392) schreibt
+# es nachts mit 640, unattended-upgrade (umask 022) morgens wieder mit 644 –
+# gemessen DEV und ECHT 24.-26.11.2026, jede Nacht ein Rechtewechsel.
+EIPP = "/var/log/apt/eipp.log.xz"
+_EIPP_MODI = (0o640, 0o644)
+
+
+def _eipp_rechte(pfad: str, merkmale: set) -> str | None:
+    """Rechtewechsel 640 <-> 644 am apt-Planer-Protokoll – nur root:root,
+    gewoehnliche Datei, ohne erweiterte ACL. Alles andere bleibt offen."""
+    import stat as _st
+    if pfad != EIPP or "p" not in merkmale or not merkmale <= {"p", "A", "m", "c", "i"}:
+        return None
+    e = _eigentuemer(pfad)
+    if e is None or not _st.S_ISREG(e[2]) or not (_root_konto(e[0]) and _root_gruppe(e[1])):
+        return None
+    if (e[2] & 0o7777) not in _EIPP_MODI:
+        return None
+    try:
+        os.getxattr(_p(pfad), "system.posix_acl_access", follow_symlinks=False)
+        return None   # erweiterte ACL vorhanden
+    except OSError:
+        pass
+    return "apt-Planer-Protokoll (Rechte nach umask des Aufrufers)"
 DYNAMICMAPS = "/etc/postfix/dynamicmaps.cf"
 
 
@@ -1016,6 +1042,9 @@ def einteilen(e: dict, k: dict) -> str | None:
             rel_c = _code_rel(pfad)
             if rel_c is not None:
                 return _code_rechte(pfad, rel_c, merkmale, k)
+        eipp = _eipp_rechte(pfad, merkmale) if typ == "f" else None
+        if eipp:
+            return eipp
         if merkmale & {"p", "u", "g", "l", "A", "X", "E"}:
             return None
         if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):

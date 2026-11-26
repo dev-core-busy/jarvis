@@ -12426,7 +12426,18 @@ const _I18N = {
 
 // ─── Core ──────────────────────────────────────────────────────────────────
 
-window._lang = localStorage.getItem('jarvis_lang') || 'de';
+// Ohne eigene Wahl im Browser gilt die Standardsprache der Installation: der
+// Server gibt sie einem Browser ohne Sprach-Cookie mit der Seite als Cookie
+// mit (backend/sprache.py, cookie_vorgabe). Erst danach Deutsch. Vorher stand
+// eine in Franzoesisch installierte Oberflaeche beim ersten Aufruf auf Deutsch
+// (2026-11-26).
+function _sprachAusCookie() {
+    try {
+        var m = document.cookie.match(/(?:^|;\s*)jarvis_lang=([a-z]{2})(?:;|$)/);
+        return (m && ['de', 'en', 'fr', 'nl'].indexOf(m[1]) >= 0) ? m[1] : null;
+    } catch (e) { return null; }
+}
+window._lang = localStorage.getItem('jarvis_lang') || _sprachAusCookie() || 'de';
 
 // Die gewaehlte Sprache auch fuer den SERVER: als Cookie geht sie mit jeder
 // Anfrage mit (auch Downloads, Formulare, WebSockets), und der Server

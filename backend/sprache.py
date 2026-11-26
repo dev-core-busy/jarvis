@@ -21,6 +21,16 @@ Muster erkannt. Fehlt eine Uebersetzung: fr/nl -> en -> der deutsche Satz.
 Die Datei ist bewusst NICHT i18n.js: diese Saetze braucht nur der Server, im
 Browser kosteten sie jeden Seitenaufruf ~60 KB.
 
+STANDARDSPRACHE DER INSTALLATION (2026-11-26): ein Browser, der noch nie eine
+Sprache gewaehlt hat, bekam bisher immer Deutsch – auch auf einem Server, der
+in Franzoesisch installiert wurde. ``extra.standard_sprache`` in settings.json
+(``vorgabe()``) gilt jetzt fuer Anfragen ohne Cookie, und die Middleware gibt
+sie einem solchen Browser mit der HTML-Seite als Cookie mit
+(``cookie_vorgabe``) – i18n.js liest dieses Cookie, solange im Browser keine
+eigene Wahl gespeichert ist. Bewusst unter ``extra``: settings.json behaelt
+beim Speichern nur bekannte Schluessel und diesen Abschnitt.
+Waechter ``tests/test_standard_sprache.py`` + ``test_standard_sprache_ui.js``.
+
 Waechter: ``tests/test_server_sprache.py`` (Wirkung + Regel: jeder deutsche
 Antwortsatz in main.py hat EN/FR), Gegenprobe ``tests/gegen_server_sprache.py``.
 """
@@ -28,6 +38,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import os
 import re
 from pathlib import Path
 
@@ -44,15 +55,56 @@ def normieren(wert) -> str:
     return w if w in SPRACHEN else ""
 
 
+# settings.json des Dienstes (DATA_DIR wie backend/config.py). In der
+# root-eigenen Broker-Kopie gibt es die Datei dort nicht – vorgabe() ist dann leer.
+EINSTELLUNGEN = Path(os.getenv("DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))) \
+    / "settings.json"
+_vorgabe_cache: dict = {}
+
+
+def vorgabe() -> str:
+    """Standardsprache der Installation (``extra.standard_sprache``), "" = keine.
+
+    Liest die Datei direkt (kein Import von backend.config: dieses Modul laeuft
+    auch in der Broker-Kopie) und merkt sich den Wert je Aenderungszeit."""
+    try:
+        stempel = EINSTELLUNGEN.stat().st_mtime_ns
+    except OSError:
+        return ""
+    if _vorgabe_cache.get("stempel") == stempel:
+        return _vorgabe_cache["wert"]
+    try:
+        extra = json.loads(EINSTELLUNGEN.read_text(encoding="utf-8")).get("extra") or {}
+        wert = normieren(extra.get("standard_sprache")) if isinstance(extra, dict) else ""
+    except (OSError, ValueError, AttributeError):
+        wert = ""
+    _vorgabe_cache.update(stempel=stempel, wert=wert)
+    return wert
+
+
 def aus_anfrage(request) -> str:
-    """Sprache einer Anfrage: ``?lang=`` > Cookie ``jarvis_lang`` > de."""
+    """Sprache einer Anfrage: ``?lang=`` > Cookie ``jarvis_lang`` > Vorgabe der Installation > de."""
     try:
         q = normieren(request.query_params.get("lang"))
         if q:
             return q
-        return normieren(request.cookies.get(COOKIE)) or "de"
+        return normieren(request.cookies.get(COOKIE)) or vorgabe() or "de"
     except Exception:  # noqa: BLE001
         return "de"
+
+
+def cookie_vorgabe(request) -> str:
+    """Sprache, die einer Anfrage OHNE gueltiges Sprach-Cookie als Cookie
+    mitgegeben wird – "" = nichts setzen (Cookie da oder keine Vorgabe).
+
+    Eine eigene Wahl des Browsers wird nie ueberschrieben: liegt ein gueltiges
+    Cookie vor, bleibt es."""
+    try:
+        if normieren(request.cookies.get(COOKIE)):
+            return ""
+    except Exception:  # noqa: BLE001
+        return ""
+    return vorgabe()
 
 
 def setzen(sprache: str):

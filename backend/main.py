@@ -218,6 +218,12 @@ async def _sprache_setzen(request: Request, call_next):
     token = _sprache.setzen(sp)
     try:
         response = await call_next(request)
+        # Browser ohne eigene Wahl: Standardsprache der Installation als Cookie
+        # mit der Seite – i18n.js liest es beim Laden (backend/sprache.py).
+        vg = _sprache.cookie_vorgabe(request)
+        if vg and response.headers.get("content-type", "").startswith("text/html"):
+            response.set_cookie(_sprache.COOKIE, vg, max_age=31536000, path="/", samesite="lax",
+                                secure=request.url.scheme == "https", httponly=False)
         if sp == "de" or not response.headers.get("content-type", "").startswith("application/json"):
             return response
         laenge = response.headers.get("content-length")

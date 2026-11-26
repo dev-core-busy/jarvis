@@ -40,7 +40,10 @@ MOUNT_OPTS = "ro,nosuid,nodev,noexec"
 READONLY_OPS = {"sandbox_status", "egress_status", "apt_upgrades_status",
                 "tika_status", "unlock_screen", "vnc_restart",
                 # Offene Updates und AIDE-Zustand: reine Abfragen beim Oeffnen der Seite
-                "paket_updates_status", "aide_status"}
+                "paket_updates_status", "aide_status",
+                # Lauf der Serverueberwachung nachholen, damit die Zahnrad-Badge dem
+                # AIDE-Zustand folgt (beim Laden des Abschnitts, ohne Inhalt)
+                "ueberwachung_auffrischen"}
 
 
 # Obergrenze fuer das Op-Argument ``timeout`` (Sekunden): dieselbe wie die
@@ -622,6 +625,25 @@ def _op_aide_uebernehmen(args, stream):
     return {"ok": True, "rc": 0,
             "result": aide_abgleich.uebernehmen(str(args.get("kennung") or ""), str(args.get("wer") or "")),
             "stdout": "", "stderr": ""}
+
+
+def _op_ueberwachung_auffrischen(args, stream):
+    """Einen Lauf der Serverueberwachung SOFORT ausfuehren (statt bis zu
+    TAKT_S auf den Timer zu warten). Ueber systemd, nicht im Prozess: systemd
+    reiht einen Start hinter einen gerade laufenden Lauf ein, zwei Laeufe
+    schreiben also nie gleichzeitig Zustand und Journal-Cursor. Keine
+    Argumente – die Unit ist fest."""
+    from backend import ueberwachung
+    try:
+        r = subprocess.run(["systemctl", "start", ueberwachung.UNIT], capture_output=True,
+                           text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        # Der Lauf geht weiter (systemd), er dauert nur laenger – kein Fehler.
+        return {"ok": True, "rc": 0, "result": {"gestartet": True, "fertig": False},
+                "stdout": "", "stderr": ""}
+    return {"ok": r.returncode == 0, "rc": r.returncode,
+            "result": {"gestartet": r.returncode == 0, "fertig": r.returncode == 0},
+            "stdout": "", "stderr": (r.stderr or "")[-500:]}
 
 
 def _op_cve_beheben(args, stream):
@@ -1681,6 +1703,11 @@ _REGISTRY = {
         _op_aide_uebernehmen, lambda a: "aide_uebernehmen",
         lambda a: "Nicht erklaerte AIDE-Aenderungen nach Durchsicht als neuen Stand uebernehmen "
                   "(Kennung %s)" % str(a.get("kennung") or "")[:16],
+        True, (),
+    ),
+    "ueberwachung_auffrischen": (
+        _op_ueberwachung_auffrischen, lambda a: "ueberwachung_auffrischen",
+        lambda a: "Serverueberwachung jetzt einmal laufen lassen (Zahnrad-Badge nachziehen)",
         True, (),
     ),
     "cve_beheben": (

@@ -636,6 +636,57 @@ def lauf(pfad: Path = ZUSTAND_DATEI) -> int:
     return 0
 
 
+# ── Abgleich mit dem AIDE-Zustand (Dienst) ───────────────────────────────────
+
+UNIT = "jarvis-ueberwachung.service"
+
+
+def aide_weicht_ab(befunde: list, aide: dict | None, jetzt: float | None = None) -> bool:
+    """Steht in den Befunden der Ueberwachung ein ANDERER AIDE-Zustand als im
+    Abgleich selbst (``aide_abgleich.status()``)?
+
+    WARUM: die Zahnrad-Badge zaehlt die Befunde dieser Datei, und die schreibt
+    der Timer nur alle TAKT_S. Wer einen offenen Abgleich uebernimmt (oder eine
+    Pruefung durchlaufen ist), sah die Badge bis zu fuenf Minuten lang weiter
+    "AIDE: n Aenderungen nicht erklaert" melden (DEV 2026-11-26). Ist die Antwort
+    hier ja, stoesst der Dienst einen Lauf an (Broker-Op ``ueberwachung_auffrischen``).
+
+    Rein (ohne System) – geprueft in tests/test_ueberwachung_aide_frisch.py.
+    Ohne belegten AIDE-Zustand (Fehler, nicht eingerichtet): nein – ein Lauf,
+    den man nicht begruenden kann, ist Last ohne Aussage.
+    """
+    if not isinstance(aide, dict) or not aide.get("eingerichtet") or aide.get("fehler"):
+        return False
+    jetzt = time.time() if jetzt is None else jetzt
+    z = aide.get("zustand") if isinstance(aide.get("zustand"), dict) else {}
+    soll = set()
+    if z.get("zustand") == "offen":
+        soll.add(("aide_offen", str(z.get("kennung") or "")))
+    elif z.get("zustand") == "fehler":
+        soll.add(("aide_fehler", ""))
+    # "Veraltet" laesst sich aus dem Abgleich allein nur bei bekannter Zeit
+    # sagen (der Einrichtungszeitpunkt liegt nur als Datei-mtime vor, die liest
+    # der Dienst nicht) – ohne Zeit bleibt der Befund unbewertet.
+    zeit = z.get("zeit")
+    veraltet_soll = (jetzt - float(zeit) > AIDE_VERALTET_S) if isinstance(zeit, (int, float)) and zeit else None
+    ist = set()
+    veraltet_ist = False
+    for b in befunde or []:
+        if not isinstance(b, dict):
+            continue
+        art = b.get("art")
+        if art == "aide_offen":
+            werte = b.get("werte") if isinstance(b.get("werte"), dict) else {}
+            ist.add(("aide_offen", str(werte.get("kennung") or "")))
+        elif art == "aide_fehler":
+            ist.add(("aide_fehler", ""))
+        elif art == "aide_veraltet":
+            veraltet_ist = True
+    if soll != ist:
+        return True
+    return veraltet_soll is not None and veraltet_soll != veraltet_ist
+
+
 # ── Lesen (Dienst, fuer die Anzeige) ─────────────────────────────────────────
 
 def lesen(pfad: Path = ZUSTAND_DATEI, jetzt: float | None = None) -> dict:

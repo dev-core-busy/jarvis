@@ -11057,7 +11057,38 @@ async def security_updates_status(user: str = Depends(require_local_auth)):
         return JSONResponse({"ok": False, "error": upd.get("error") or upd.get("stderr")}, status_code=502)
     erg = dict(upd.get("result") or {})
     erg["aide"] = (aide.get("result") or {}) if aide.get("ok") else {"fehler": aide.get("error") or aide.get("stderr")}
+    await _badge_aide_nachziehen(erg["aide"], user)
     return JSONResponse(erg)
+
+
+async def _badge_aide_nachziehen(aide: dict, user: str) -> bool:
+    """Zieht die Zahnrad-Badge nach, wenn ihr AIDE-Befund nicht mehr stimmt.
+
+    Die Badge zaehlt die Befunde der Serverueberwachung, und die schreibt der
+    Timer nur alle fuenf Minuten. Nach "Nach Durchsicht uebernehmen" oder einer
+    durchgelaufenen Pruefung meldete sie deshalb weiter "n Aenderungen nicht
+    erklaert" (DEV 2026-11-26). Jeder Knopf des Abschnitts laedt danach diesen
+    Endpunkt neu – hier also EINE Stelle fuer alle. Ein Lauf wird nur bei
+    Abweichung angestossen (``ueberwachung.aide_weicht_ab``); danach gilt der
+    gemerkte Badge-Stand nicht mehr.
+    """
+    try:
+        from backend import ueberwachung as _ueberw
+        stand = await asyncio.to_thread(_ueberw.lesen)
+        if not stand.get("eingerichtet") or not _ueberw.aide_weicht_ab(stand.get("befunde") or [], aide):
+            return False
+        from backend import broker_client
+        bres = await broker_client.call("ueberwachung_auffrischen", {}, user=user, timeout=40)
+    except Exception as e:  # noqa: BLE001
+        print(f"[zahnrad] Ueberwachung nicht nachgezogen: {e}", flush=True)
+        return False
+    if not bres.get("ok"):
+        # z. B. "unbekannte Op", solange der Broker nach einem Update nicht neu
+        # gestartet ist – die Badge bleibt dann beim Takt des Timers.
+        print(f"[zahnrad] Ueberwachung nicht nachgezogen: {bres.get('error') or bres.get('stderr')}", flush=True)
+        return False
+    _admin_badge_stand["ts"] = 0.0
+    return True
 
 
 @app.post("/api/security/updates/einspielen")

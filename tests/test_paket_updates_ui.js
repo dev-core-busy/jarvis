@@ -271,6 +271,47 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms || 80));
     await warte();
     pruefe(/nicht ermittelbar/.test(d.getElementById('sec-upd-status').textContent), 'Fehler bleibt als Meldung stehen');
     pruefe(d.getElementById('sec-upd-einspielen').disabled, '"Alle einspielen" ist dann aus');
+    const badgeNachFehler = (() => { let n = 0; w.JarvisSettingsBtn = { aktualisiere: () => { n++; } };
+        return () => n; })();
+    w.SecurityIncidents.loadUpdates();
+    await warte();
+    pruefe(badgeNachFehler() === 0, 'Ladefehler: Zahnrad-Badge wird NICHT neu abgefragt (nichts Neues belegt)');
+
+    abschnitt('6. Zahnrad-Badge folgt jedem Knopf des Abschnitts (gemeldet 2026-11-26)');
+    // Die Badge zaehlt den AIDE-Befund der Serverueberwachung; der Server zieht
+    // ihn beim Laden des Abschnitts nach (main._badge_aide_nachziehen). Die
+    // Seite muss danach die Badge neu abfragen – sonst steht die alte Zahl bis
+    // zum naechsten 60-s-Takt da.
+    ({ w, d, rufe } = baue(antwort(AIDE_OFFEN)));
+    let badgeRufe = 0;
+    w.JarvisSettingsBtn = { aktualisiere: () => { badgeRufe++; } };
+    const neuKnopf = d.getElementById('sec-upd-neu');
+    pruefe(!!neuKnopf && /Liste aktualisieren/.test(neuKnopf.textContent), 'Knopf "Liste aktualisieren" im Ausschnitt (Positivkontrolle)');
+    w.SecurityIncidents.onShowUnattended();
+    await warte();
+    const nachAnzeige = badgeRufe;
+    pruefe(nachAnzeige >= 1, 'Abschnitt geladen: Badge neu abgefragt', 'Aufrufe: ' + nachAnzeige);
+    if (neuKnopf) {
+        neuKnopf.click();
+        await warte();
+        pruefe(rufe.filter((r) => r.pfad === '/api/security/updates').length >= 2, '"Liste aktualisieren" laedt neu (Positivkontrolle)');
+        pruefe(badgeRufe === nachAnzeige + 1, '"Liste aktualisieren": Badge danach neu abgefragt', 'Aufrufe: ' + badgeRufe);
+    }
+    const vorUe = badgeRufe;
+    d.getElementById('sec-aide-uebernehmen').click();
+    await warte();
+    pruefe(rufe.some((r) => r.pfad === '/api/security/aide/uebernehmen'), '"Nach Durchsicht übernehmen" schickt POST (Positivkontrolle)');
+    pruefe(badgeRufe === vorUe + 1, '"Nach Durchsicht übernehmen": Badge danach neu abgefragt', 'Aufrufe: ' + badgeRufe);
+    // Reihenfolge: erst die neue Antwort, dann die Badge – sonst fragte sie,
+    // bevor der Server die Ueberwachung nachgezogen hat.
+    {
+        ({ w, d, rufe } = baue(antwort(AIDE_GUT), 200, '/api/security/updates'));
+        let frueh = 0;
+        w.JarvisSettingsBtn = { aktualisiere: () => { frueh++; } };
+        w.SecurityIncidents.loadUpdates();
+        await warte();
+        pruefe(frueh === 0, 'solange die Antwort aussteht, wird die Badge NICHT gefragt');
+    }
 
     w.close();
     bilanz();

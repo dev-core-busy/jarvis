@@ -1246,7 +1246,16 @@
             if (box) box.textContent = T('security.upd_laedt', 'Wird geladen…');
             fetch('/api/security/updates', { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
-                .then(function (d) { Mgr.renderUpdates(d); })
+                .then(function (d) {
+                    Mgr.renderUpdates(d);
+                    // Jeder Knopf dieses Abschnitts (aktualisieren, uebernehmen,
+                    // pruefen, einspielen) endet hier. Der Server hat die
+                    // Ueberwachung bei Bedarf schon nachgezogen – die Zahnrad-Badge
+                    // soll das sofort zeigen, nicht erst beim naechsten 60-s-Takt.
+                    if (d && window.JarvisSettingsBtn && window.JarvisSettingsBtn.aktualisiere) {
+                        window.JarvisSettingsBtn.aktualisiere();
+                    }
+                })
                 .catch(function () { Mgr.renderUpdates(null); });
         },
 

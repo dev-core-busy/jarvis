@@ -192,6 +192,13 @@ probe("chat.js: sensible Kennung wird gemerkt",
       (CJ, "    function _sidMerken(sid) {\n        if (_istSensibel(sid)) return;\n", "    function _sidMerken(sid) {\n"))
 probe("chat.js: Server-Liste verdraengt sensible Chats",
       (CJ, "        _sessions = _mitSensiblen(await _csList());", "        _sessions = await _csList();"))
+# ── Newsfeed-Uebersetzungen ──
+NFU = B + "newsfeed_uebersetzung.py"
+probe("Newsfeed-Uebersetzung wird im Lauf abgelegt",
+      (NFU, "    from backend import sensibel  # noqa: PLC0415\n    if sensibel.aktiv():\n        return\n"
+            "    from backend import newsfeed as nf", "    from backend import newsfeed as nf"))
+probe("Newsfeed-Uebersetzung wird im Lauf angestossen",
+      (NFU, "    if sensibel.aktiv() or not offen:", "    if not offen:"))
 
 # ── Ablauf ──────────────────────────────────────────────────────────────────
 for name, aend in PROBEN:

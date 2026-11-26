@@ -154,6 +154,9 @@
     }
     window.AdLdaps = { zerlegen: _adZerlegen, adresseAus: _adAdresseAus, ziel: _adZiel };
 
+    // Zuletzt geladener Stand – nur fuer den Sprachwechsel (siehe unten).
+    var _adLetzt = null;
+
     async function _adLoad() {
         try {
             const r = await fetch('/api/auth/ad_status', {
@@ -171,6 +174,7 @@
             document.getElementById('ad-bind-user').value = d.bind_user || '';
             document.getElementById('ad-bind-password').value = '';
             document.getElementById('ad-bind-pw-hint').textContent = window.t(d.bind_password_set ? 'security.ad_pw_saved' : 'security.ad_pw_none');
+            _adLetzt = d;
             FREIGABEN.forEach(function (f) { _bestand[f.feld] = d[f.lesen] || ''; });
             _adUpdateStatus(d);
             _adCertMount(d);
@@ -350,6 +354,23 @@
             srvFeld.addEventListener('change', _adSchemaUebernehmen);
             srvFeld.addEventListener('input', _adAnkerWarnung);
         }
+    });
+    // Sprachwechsel ohne Neuladen: die Texte hier setzt das Modul aus t(),
+    // data-i18n erreicht sie nicht. Nachgezogen werden NUR die Texte aus dem
+    // zuletzt geladenen Stand – ein neues _adLoad() schriebe die Felder neu und
+    // verwuerfe eine gerade begonnene Eingabe. Nur bei echtem Wechsel:
+    // applyLang() feuert das Ereignis auch ohne.
+    var _adSprache = window._lang;
+    window.addEventListener('jarvis-lang-changed', function () {
+        if (window._lang === _adSprache) return;
+        _adSprache = window._lang;
+        if (!_adLetzt) return;
+        var d = _adLetzt;
+        var hint = document.getElementById('ad-bind-pw-hint');
+        if (hint) hint.textContent = window.t(d.bind_password_set ? 'security.ad_pw_saved' : 'security.ad_pw_none');
+        _adUpdateStatus(d);
+        _adCertMount(d);
+        _adLdapsAnzeigen();
     });
     _adLoad();
 })();

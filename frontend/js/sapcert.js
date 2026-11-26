@@ -77,6 +77,9 @@
         var btnPruef = el('button', 'sapcert-btn',
             T('sapcert.check', 'Zertifikat prüfen'));
         btnPruef.type = 'button';
+        // Schluessel am Knopf: ein Sprachwechsel ohne Neuladen setzt die
+        // Beschriftung ueber applyLang() neu (gemeldet 2026-11-26).
+        btnPruef.setAttribute('data-i18n', 'sapcert.check');
         var stand = el('span', 'sapcert-state');
         zeile.appendChild(btnPruef);
         zeile.appendChild(stand);

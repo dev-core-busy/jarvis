@@ -140,7 +140,7 @@
         _uhr: null,
         _fristBis: { haertung: 0, netze: 0 },
 
-        onShow: function () { this._bind(); this.laden(); },
+        onShow: function () { this._bind(); this._gezeigt = true; this.laden(); },
 
         _bind: function () {
             if (this._bound) return;
@@ -676,7 +676,7 @@
         _bound: false,
         _stand: null,
 
-        onShow: function () { this._bind(); this.laden(); },
+        onShow: function () { this._bind(); this._gezeigt = true; this.laden(); },
 
         _bind: function () {
             if (this._bound) return;
@@ -776,4 +776,15 @@
     Fz._rechnen = { ipZuZahl: ipZuZahl, netzNormieren: netzNormieren, enthaelt: enthaelt,
                     schluesselLesen: schluesselLesen, fingerabdruck: fingerabdruck };
     window.Fernzugang = Fz;
+
+    // Sprachwechsel ohne Neuladen: Konten, Netze und RDP-Zustand baut das Modul
+    // aus t() – neu laden, was schon gezeigt war, und nur bei echtem Wechsel
+    // (applyLang() feuert das Ereignis auch ohne).
+    var sprache = window._lang;
+    window.addEventListener('jarvis-lang-changed', function () {
+        if (window._lang === sprache) return;
+        sprache = window._lang;
+        if (Fz._gezeigt) Fz.laden();
+        if (Rdp._gezeigt) Rdp.laden();
+    });
 })();

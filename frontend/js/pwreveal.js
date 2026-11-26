@@ -281,6 +281,9 @@
         inp.placeholder = gesetzt ? PLATZHALTER_STERNE : '';
         inp.title = gesetzt ? t('common.pw_keep',
             'Ein Kennwort ist gespeichert. Leer lassen = unverändert.') : '';
+        // Schluessel mitfuehren: applyLang() setzt den Titel beim Sprachwechsel neu
+        if (gesetzt) inp.setAttribute('data-i18n-title', 'common.pw_keep');
+        else inp.removeAttribute('data-i18n-title');
     }
 
     /**
@@ -385,8 +388,11 @@
         if (hat) {
             // tabfill: nein – Punkte fuer ein hinterlegtes Kennwort
             inp.placeholder = PLATZHALTER_STERNE;
-            if (!inp.title) inp.title = t('common.pw_keep',
-                'Ein Kennwort ist gespeichert. Leer lassen = unverändert.');
+            if (!inp.title) {
+                inp.title = t('common.pw_keep',
+                    'Ein Kennwort ist gespeichert. Leer lassen = unverändert.');
+                inp.setAttribute('data-i18n-title', 'common.pw_keep');
+            }
         }
 
         // Der Wrapper wird nur angelegt, wenn es keinen tauglichen gibt: viele

@@ -517,6 +517,43 @@ check(lauf_tmp.gehoert_arbeitsbereich(pfad, "max.muster") is False,
 
 
 # ══════════════════════════════════════════════════════════════════════════
+section("12b. Newsfeed-Uebersetzungen (data/newsfeed_uebersetzt.json)")
+try:
+    from backend import newsfeed as _nf
+    from backend import newsfeed_uebersetzung as _nfu
+except Exception as e:  # noqa: BLE001
+    abbruch(f"newsfeed_uebersetzung nicht ladbar: {e}")
+_nf.DATEI = TMP / "newsfeed.json"
+_nfu.DATEI = TMP / "newsfeed_uebersetzt.json"
+if TMP not in _nfu.DATEI.parents or TMP not in _nf.DATEI.parents:
+    abbruch("Newsfeed-Ablagen liegen nicht im Sandkasten")
+_e = _nf.eintrag_speichern("", "Titel", "Text.")
+_erg = {"titel": GEHEIM, "text": GEHEIM}
+sync_im_lauf(lambda: _nfu._ablegen(_e["id"], "fr", "q1", _erg))
+check(GEHEIM not in lesen(_nfu.DATEI), "im Lauf: keine Uebersetzung abgelegt")
+# In einer LAUFENDEN Schleife messen: ohne Loop gibt anstossen() ohnehin 0
+# zurueck, die Pruefung waere trivial wahr (Gegenprobe war stumm).
+
+
+async def _nfu_anstoss(sensibel_an):
+    try:
+        if sensibel_an:
+            async with sensibel.anfrage(True):
+                return _nfu.anstossen([(_e["id"], "fr", "q1", "T", "X")])
+        return _nfu.anstossen([(_e["id"], "fr", "q1", "T", "X")])
+    finally:
+        for _t in list(_nfu._AUFGABEN):
+            _t.cancel()
+        _nfu._LAEUFT.clear()
+
+
+check(asyncio.run(_nfu_anstoss(True)) == 0, "im Lauf: keine Uebersetzung angestossen")
+check(asyncio.run(_nfu_anstoss(False)) == 1, "Positivkontrolle: ausserhalb wird angestossen")
+_nfu._ablegen(_e["id"], "fr", "q1", _erg)
+check(GEHEIM in lesen(_nfu.DATEI), "Positivkontrolle: ausserhalb wird abgelegt")
+
+
+# ══════════════════════════════════════════════════════════════════════════
 section("13. Verdrahtung (Regeln am Syntaxbaum)")
 MAIN = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
 mbaum = ast.parse(MAIN)

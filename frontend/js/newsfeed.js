@@ -40,6 +40,9 @@
     // Neu laden alle fuenf Minuten: eine frische Meldung erreicht ein offen
     // stehendes Portal, ohne dass jemand neu laedt.
     var NACHLADEN_MS = 5 * 60 * 1000;
+    // Nachfragen, solange der Server noch uebersetzt (siehe portalStart).
+    var NACHFRAGE_MS = 12 * 1000;
+    var NACHFRAGEN = 5;
 
     function T(k, fb) {
         try { var v = window.t ? window.t(k) : ''; return (v && v !== k) ? v : fb; }
@@ -422,11 +425,23 @@
                 knopf.setAttribute('aria-label', knopf.title);
             });
         }
+        /* SPRACHE: der Server liefert die Meldungen in der gewaehlten Sprache,
+           sobald er sie uebersetzt hat (backend/newsfeed_uebersetzung.py).
+           Fehlt eine Uebersetzung noch, kommt das Original mit
+           `uebersetzung_offen` – dann wird NACHGEFRAGT, aber begrenzt
+           (NACHFRAGEN), damit ein dauerhaft scheiternder Uebersetzer keine
+           Abrufschleife erzeugt; danach bleibt es beim 5-Minuten-Takt. */
+        var nachfragen = 0, nachfrageWecker = null;
         function laden() {
-            return fetch('/api/newsfeed', { headers: kopfzeilen() })
+            var lang = window._lang || 'de';
+            return fetch('/api/newsfeed?lang=' + encodeURIComponent(lang), { headers: kopfzeilen() })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) {
                     if (!d || !d.ok) return;
+                    if (d.uebersetzung_offen && nachfragen < NACHFRAGEN && !nachfrageWecker) {
+                        nachfragen++;
+                        nachfrageWecker = setTimeout(function () { nachfrageWecker = null; laden(); }, NACHFRAGE_MS);
+                    }
                     var neu = JSON.stringify([d.eintraege, d.verweil_s, d.scroll_s, d.stand, !!d.ausgeblendet]);
                     if (neu === signatur) return;   // unveraendert: Band nicht zuruecksetzen
                     signatur = neu;
@@ -434,6 +449,15 @@
                 })
                 .catch(function () {});
         }
+        // Sprachwechsel: neu holen – nur bei echtem Wechsel (applyLang()
+        // feuert das Ereignis auch ohne), mit frischem Nachfrage-Kontingent.
+        var sprache = window._lang;
+        window.addEventListener('jarvis-lang-changed', function () {
+            if (window._lang === sprache) return;
+            sprache = window._lang;
+            nachfragen = 0;
+            laden();
+        });
         _portal = { laden: laden, intervall: setInterval(laden, NACHLADEN_MS) };
         return laden();
     }

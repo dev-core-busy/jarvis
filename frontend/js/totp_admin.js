@@ -247,10 +247,21 @@
         });
     }
 
+    var _gezeigt = false;
     function onShow() {
+        _gezeigt = true;
         load();
         schutzLaden();
     }
+    // Sprachwechsel ohne Neuladen: Liste und Hinweise baut das Modul aus t()
+    // – neu laden, wenn der Reiter schon gezeigt war, und nur bei echtem Wechsel
+    // (applyLang() feuert das Ereignis auch ohne).
+    var _sprache = window._lang;
+    window.addEventListener('jarvis-lang-changed', function () {
+        if (window._lang === _sprache) return;
+        _sprache = window._lang;
+        if (_gezeigt) onShow();
+    });
 
     window.TotpAdmin = { onShow: onShow, _render: render, _sperrenZeigen: sperrenZeigen };
 })();

@@ -22858,9 +22858,16 @@ def _newsfeed_unlesbar() -> JSONResponse:
 
 
 @app.get("/api/newsfeed")
-async def newsfeed_lesen(user: str = Depends(require_auth)):
-    """Die neuesten Meldungen samt Verweil- und Scrolldauer – fuer die Portal-Kachel."""
+async def newsfeed_lesen(request: Request, user: str = Depends(require_auth)):
+    """Die neuesten Meldungen samt Verweil- und Scrolldauer – fuer die Portal-Kachel.
+
+    ``?lang=`` (sonst das Cookie ``jarvis_lang``) waehlt die Sprache: abgelegte
+    Uebersetzungen ersetzen Ueberschrift und Text, fehlende stoesst
+    ``backend/newsfeed_uebersetzung.py`` im Hintergrund an – die Antwort wartet
+    nicht darauf (``uebersetzung_offen``: das Portal holt nach). Der Stand
+    bleibt der des Originals: Ausblenden haengt an ihm, nicht an der Sprache."""
     from backend import newsfeed as nf  # noqa: PLC0415
+    from backend import newsfeed_uebersetzung as nfu  # noqa: PLC0415
     from backend import atomar  # noqa: PLC0415
     if not _skill_active("newsfeed"):
         return JSONResponse({"ok": False, "error": "Newsfeed ist nicht aktiv."},
@@ -22869,6 +22876,10 @@ async def newsfeed_lesen(user: str = Depends(require_auth)):
         daten = await asyncio.to_thread(nf.anzeige, _norm_login(user))
     except atomar.Unlesbar:
         return _newsfeed_unlesbar()
+    sprache = nfu.sprache_aus(request.query_params.get("lang")
+                              or request.cookies.get("jarvis_lang"))
+    daten["eintraege"], offen = await asyncio.to_thread(nfu.anwenden, daten["eintraege"], sprache)
+    daten["uebersetzung_offen"] = nfu.anstossen(offen) > 0
     return JSONResponse({"ok": True, **daten})
 
 

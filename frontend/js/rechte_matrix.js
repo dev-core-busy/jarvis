@@ -592,6 +592,17 @@
         sichtbarkeitBeobachten();
         // Der Bestand kommt asynchron (settings_ad.js meldet es).
         document.addEventListener('jarvis-ad-geladen', nachladen);
+        // Sprachwechsel ohne Neuladen: Kopf, Zeilenart, Tooltips, Erbe-Hinweis
+        // und "Uebernehmen (n)" baut zeichnen() aus t() – data-i18n erreicht sie
+        // nicht (gemeldet 2026-11-26: bei FR blieb die Tabelle deutsch). Neu
+        // gezeichnet wird aus dem Speicher (offene Haken bleiben erhalten), und
+        // nur bei echtem Wechsel: applyLang() feuert das Ereignis auch ohne.
+        var sprache = window._lang;
+        window.addEventListener('jarvis-lang-changed', function () {
+            if (window._lang === sprache) return;
+            sprache = window._lang;
+            if (el('rmx-tabwrap') && (_spalten.length || _zeilen.length)) zeichnen();
+        });
     }
 
     window.RechteMatrix = { aufbauen: aufbauen };

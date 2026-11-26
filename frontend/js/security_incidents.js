@@ -58,14 +58,27 @@
         _auditCache: null,   // zwischengespeicherte Audit-Einträge (pro loadBroker geleert)
 
         // ── Einstellungen ───────────────────────────────────────────────
-        onShow: function () { this._bind(); this.load(); },
+        onShow: function () { this._bind(); this._gezeigt = true; this.load(); },
         // Nur der Teil, der im Reiter "KI & System" gebraucht wird (der
         // Update-Schalter liegt dort). _bind() ist idempotent (this._bound).
-        onShowUnattended: function () { this._bind(); this.loadUnattended(false); this.loadCve(); this.loadUpdates(); },
+        onShowUnattended: function () { this._bind(); this._unattGezeigt = true; this.loadUnattended(false); this.loadCve(); this.loadUpdates(); },
 
         _bind: function () {
             if (this._bound) return;
             this._bound = true;
+            // Sprachwechsel ohne Neuladen: alle Zustaende hier baut das Modul
+            // aus t() zusammen, data-i18n erreicht sie nicht (gemeldet
+            // 2026-11-26: bei FR blieben Sandbox-, Firewall- und Broker-Status
+            // deutsch). Neu geladen wird nur, was schon einmal gezeigt war, ohne
+            // Live-Test – und nur bei echtem Wechsel: applyLang() feuert das
+            // Ereignis auch ohne.
+            var sprache = window._lang;
+            window.addEventListener('jarvis-lang-changed', function () {
+                if (window._lang === sprache) return;
+                sprache = window._lang;
+                if (Mgr._gezeigt) Mgr.load();
+                if (Mgr._unattGezeigt) { Mgr.loadUnattended(false); Mgr.loadCve(); Mgr.loadUpdates(); }
+            });
             ['sec-guard-enabled', 'sec-guard-heuristic', 'sec-guard-llm'].forEach(function (id) {
                 var el = $(id);
                 if (el) el.addEventListener('change', function () { Mgr.saveConfig(); });
@@ -332,7 +345,7 @@
                 head = _P('warn') + '<b>' + esc(T('security.broker_legacy', 'Alt-Betrieb (Backend läuft als root)')) + '</b> – '
                     + esc(T('security.broker_legacy_hint', 'Freigabeliste + Audit sind aktiv, aber ohne Prozess-Trennung. Empfehlung: getrennten Betrieb aktivieren (Button unten).'));
             } else if (d.mode === 'broker') {
-                head = _P('warn') + '<b>Broker erreichbar, Backend läuft aber noch als root.</b>';
+                head = _P('warn') + '<b>' + esc(T('security.broker_root_still', 'Broker erreichbar, Backend läuft aber noch als root.')) + '</b>';
             } else {
                 head = _P('err') + '<b>' + esc(T('security.broker_none', 'Root-Broker nicht erreichbar')) + '</b> – '
                     + esc(T('security.broker_none_hint', 'Root-Operationen schlagen fehl (jarvis-broker.service prüfen).'));
@@ -407,7 +420,7 @@
                 .then(function (d) {
                     d = d || {};
                     if (!d.ok) {
-                        show('✗ ' + esc(d.error || 'Start fehlgeschlagen'), false);
+                        show('✗ ' + esc(d.error || T('security.start_failed', 'Start fehlgeschlagen')), false);
                         finish();
                         return;
                     }
@@ -695,7 +708,7 @@
 
         loadEgress: function (live) {
             var box = $('sec-egress-status');
-            if (box && live) box.innerHTML = 'Live-Test läuft…';
+            if (box && live) box.innerHTML = _kreisel() + esc(T('security.live_test_running', 'Live-Test läuft…'));
             fetch('/api/security/egress' + (live ? '?live=1' : ''), { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) { Mgr.renderEgress(d); })
@@ -705,7 +718,7 @@
         renderEgress: function (d) {
             var box = $('sec-egress-status');
             if (!box) return;
-            if (!d) { box.innerHTML = '<span style="color:var(--text-muted);">Status nicht verfügbar.</span>'; return; }
+            if (!d) { box.innerHTML = '<span style="color:var(--text-muted);">' + esc(T('security.status_na', 'Status nicht verfügbar.')) + '</span>'; return; }
             function row(ok, label) {
                 var mark = ok === true ? '✓' : (ok === false ? '✗' : '?');
                 return '<div>' + mark + ' ' + esc(label) + '</div>';
@@ -717,36 +730,40 @@
             // deshalb steht sie ganz oben und nicht als weitere Zeile unten.
             var veraltet = (d.kernel_drop === true);
             var head = veraltet
-                ? _P('warn') + '<b>Aktiv – aber die Regel ist veraltet</b>'
+                ? _P('warn') + '<b>' + esc(T('security.eg_veraltet', 'Aktiv – aber die Regel ist veraltet')) + '</b>'
                 : (d.ok
                     ? (d.egress_blocked === false
-                        ? _P('warn') + '<b>Eingerichtet – aber Live-Test: Internet noch erreichbar!</b>'
-                        : _P('ok') + '<b>Aktiv' + (d.egress_blocked === true ? ' &amp; live verifiziert' : '') + '</b>')
-                    : _P('err') + '<b>Nicht (vollständig) eingerichtet</b>');
+                        ? _P('warn') + '<b>' + esc(T('security.eg_offen', 'Eingerichtet – aber Live-Test: Internet noch erreichbar!')) + '</b>'
+                        : _P('ok') + '<b>' + esc(d.egress_blocked === true
+                            ? T('security.aktiv_live', 'Aktiv & live verifiziert') : T('common.active', 'Aktiv')) + '</b>')
+                    : _P('err') + '<b>' + esc(T('security.eg_nicht', 'Nicht (vollständig) eingerichtet')) + '</b>');
             var rows = ''
-                + row(d.configured, 'Einstellung gesetzt (No-Internet-Sandbox-Benutzer)')
-                + row(d.user_exists, 'Gesperrter OS-Benutzer: ' + (d.user || '') + (d.uid != null ? ' (uid ' + d.uid + ')' : ' — fehlt'))
-                + row(d.nft_active, 'Firewall-Regel aktiv (nftables)')
-                + row(d.service_enabled, 'Autostart nach Reboot (systemd)');
+                + row(d.configured, T('security.eg_row_conf', 'Einstellung gesetzt (No-Internet-Sandbox-Benutzer)'))
+                + row(d.user_exists, T('security.eg_row_user', 'Gesperrter OS-Benutzer: {user}').replace('{user}', d.user || '') + Mgr._uidText(d))
+                + row(d.nft_active, T('security.eg_row_nft', 'Firewall-Regel aktiv (nftables)'))
+                + row(d.service_enabled, T('security.eg_row_service', 'Autostart nach Reboot (systemd)'));
             if (d.egress_blocked === true || d.egress_blocked === false) {
-                rows += row(d.egress_blocked, 'Live-Test: öffentliches Internet ' + (d.egress_blocked ? 'geblockt' : 'ERREICHBAR ⚠'));
+                rows += row(d.egress_blocked, d.egress_blocked
+                    ? T('security.eg_live_ok', 'Live-Test: öffentliches Internet geblockt')
+                    : T('security.eg_live_offen', 'Live-Test: öffentliches Internet ERREICHBAR ⚠'));
             }
             if (veraltet) {
                 rows += '<div style="margin-top:6px;padding:8px 10px;border-radius:6px;'
                      + 'border-left:3px solid var(--danger,#c0392b);background:var(--bg-glass);">'
-                     + '<b>Netzwerk-Freigaben sind damit nicht einbindbar.</b> '
-                     + 'Die Regel enthält ein <code>drop</code> ohne Benutzerbindung; '
-                     + 'CIFS- und NFS-Verbindungen baut der Kernel auf und sie tragen '
-                     + 'keine Benutzerkennung – sie fallen deshalb hinein. '
-                     + '„Reparieren“ zieht die Regel nach; '
-                     + 'an der Sperre selbst ändert sich dadurch nichts.'
+                     // Wert mit Markup (<b>, <code>) aus dem Woerterbuch – Quelle ist i18n.js, kein Servertext
+                     + T('security.eg_kernel_drop', '<b>Netzwerk-Freigaben sind damit nicht einbindbar.</b> '
+                       + 'Die Regel enthält ein <code>drop</code> ohne Benutzerbindung; '
+                       + 'CIFS- und NFS-Verbindungen baut der Kernel auf und sie tragen '
+                       + 'keine Benutzerkennung – sie fallen deshalb hinein. '
+                       + '„Reparieren“ zieht die Regel nach; '
+                       + 'an der Sperre selbst ändert sich dadurch nichts.')
                      + (d.kernel_drop_zeilen
                         ? '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">'
                           + esc(d.kernel_drop_zeilen) + '</div>' : '')
                      + '</div>';
             }
             var res = (d.resolvers && d.resolvers.length)
-                ? '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">Erlaubte DNS-Resolver: ' + esc(d.resolvers.join(', ')) + '</div>' : '';
+                ? '<div style="color:var(--text-muted);font-size:0.75rem;margin-top:4px;">' + esc(T('security.eg_resolver', 'Erlaubte DNS-Resolver')) + ': ' + esc(d.resolvers.join(', ')) + '</div>' : '';
             box.innerHTML = '<div style="margin-bottom:6px;">' + head + '</div>' + rows + res;
             Mgr._setupKnopf('sec-egress-setup', !!(d.configured || d.nft_active),
                 'security.egress_einrichten', 'Einrichten');
@@ -770,13 +787,14 @@
                             return (s.ok ? '✓' : '✗') + ' ' + esc(s.name) + (s.detail && !s.ok ? ' – ' + esc(s.detail) : '');
                         }).join('<br>');
                         out.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">'
-                            + (good ? 'Einrichtung erfolgreich &amp; verifiziert.' : 'Einrichtung unvollständig – Details:')
+                            + esc(good ? T('security.eg_setup_ok', 'Einrichtung erfolgreich & verifiziert.')
+                                : T('security.setup_partial', 'Einrichtung unvollständig – Details:'))
                             + '</div>' + lines;
                     }
                     Mgr.renderEgress(d.status);
                 })
                 .catch(function () {
-                    if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Einrichtung.'; }
+                    if (out) { out.style.display = 'block'; out.innerHTML = esc(T('security.setup_error', 'Fehler bei der Einrichtung.')); }
                 })
                 .then(function () {
                     if (btn) { btn.disabled = false; btn.textContent = btn.getAttribute('data-label') || orig || T('security.egress_setup', 'Einrichten / Reparieren'); }
@@ -784,10 +802,10 @@
         },
 
         teardownEgress: function () {
-            if (!window.confirm('Harte Egress-Sperre wirklich deaktivieren?\n\n'
+            if (!window.confirm(T('security.eg_teardown_confirm', 'Harte Egress-Sperre wirklich deaktivieren?\n\n'
                 + 'Benutzer ohne Internet-Freigabe können danach per Shell (curl, rohe Sockets) '
                 + 'wieder ins öffentliche Internet. Die Tool-Sperre (Bildersuche, Browser, Google) '
-                + 'bleibt aktiv.')) return;
+                + 'bleibt aktiv.'))) return;
             var btn = $('sec-egress-teardown');
             var out = $('sec-egress-result');
             var orig = btn ? btn.textContent : '';
@@ -807,15 +825,15 @@
                         // Seit 2026-10-18 freigabepflichtig: ohne Schritte steht der Grund in d.error
                         if (!lines && d.error) lines = esc(d.error);
                         out.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">'
-                            + (good ? 'Egress-Sperre deaktiviert.'
-                                : (d.pending ? esc(T('security.freigabe_noetig', 'Root-Freigabe erforderlich'))
-                                    : 'Deaktivierung unvollständig – Details:'))
+                            + esc(good ? T('security.eg_teardown_ok', 'Egress-Sperre deaktiviert.')
+                                : (d.pending ? T('security.freigabe_noetig', 'Root-Freigabe erforderlich')
+                                    : T('security.teardown_partial', 'Deaktivierung unvollständig – Details:')))
                             + '</div>' + lines;
                     }
                     if (d.status) Mgr.renderEgress(d.status);
                 })
                 .catch(function () {
-                    if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Deaktivierung.'; }
+                    if (out) { out.style.display = 'block'; out.innerHTML = esc(T('security.teardown_error', 'Fehler bei der Deaktivierung.')); }
                 })
                 .then(function () {
                     if (btn) { btn.disabled = false; btn.textContent = orig || T('security.egress_teardown', 'Deaktivieren'); }
@@ -824,7 +842,7 @@
 
         loadSandbox: function (live) {
             var box = $('sec-sandbox-status');
-            if (box && live) box.innerHTML = 'Isolationstest läuft…';
+            if (box && live) box.innerHTML = _kreisel() + esc(T('security.sb_test_running', 'Isolationstest läuft…'));
             fetch('/api/security/sandbox' + (live ? '?live=1' : ''), { headers: authHeaders() })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (d) { Mgr.renderSandbox(d); })
@@ -843,25 +861,25 @@
             var head;
             if (d.ok) {
                 head = (iso && iso.secret_readable)
-                    ? _P('warn') + '<b>Aktiv – aber Secrets für den Sandbox-Benutzer noch lesbar!</b>'
-                    : _P('ok') + '<b>Aktiv' + (iso ? ' &amp; live verifiziert' : '') + '</b>';
+                    ? _P('warn') + '<b>' + esc(T('security.sb_secret_offen', 'Aktiv – aber Secrets für den Sandbox-Benutzer noch lesbar!')) + '</b>'
+                    : _P('ok') + '<b>' + esc(iso ? T('security.aktiv_live', 'Aktiv & live verifiziert') : T('common.active', 'Aktiv')) + '</b>';
             } else if (d.active && !d.user_exists) {
-                head = _P('warn') + '<b>Konfiguriert, aber OS-Benutzer fehlt</b>';
+                head = _P('warn') + '<b>' + esc(T('security.sb_ohne_user', 'Konfiguriert, aber OS-Benutzer fehlt')) + '</b>';
             } else if (d.active && !d.secrets_locked) {
-                head = _P('warn') + '<b>Aktiv, aber Secret-Dateirechte offen</b>';
+                head = _P('warn') + '<b>' + esc(T('security.sb_rechte_offen', 'Aktiv, aber Secret-Dateirechte offen')) + '</b>';
             } else if (!d.active) {
                 // Seit BSI H10 heisst "kein Sandbox-Benutzer": Domain-Benutzer
                 // bekommen KEINE Shell (fail-closed), nicht "nur Code-Haertung".
                 head = _P('err') + '<b>' + esc(T('security.sandbox_none',
                     'Nicht eingerichtet – Netzwerk-Benutzer können keine Shell-Befehle ausführen')) + '</b>';
             } else {
-                head = _P('err') + '<b>Nicht vollständig eingerichtet</b>';
+                head = _P('err') + '<b>' + esc(T('security.sb_teilweise', 'Nicht vollständig eingerichtet')) + '</b>';
             }
             var h = d.h10 || {};
             var rows = ''
-                + row(d.active, 'OS-Sandbox aktiviert (Einstellung sandbox_shell_user)')
-                + row(d.user_exists, 'Unprivilegierter OS-Benutzer: ' + (d.user || '') + (d.uid != null ? ' (uid ' + d.uid + ')' : ' — fehlt'))
-                + row(d.secrets_locked, 'Secret-Dateien gesperrt (nur root lesbar)')
+                + row(d.active, T('security.sb_row_active', 'OS-Sandbox aktiviert (Einstellung sandbox_shell_user)'))
+                + row(d.user_exists, T('security.sb_row_user', 'Unprivilegierter OS-Benutzer: {user}').replace('{user}', d.user || '') + Mgr._uidText(d))
+                + row(d.secrets_locked, T('security.sb_row_secrets', 'Secret-Dateien gesperrt (nur root lesbar)'))
                 + row(h.bwrap === true && h.isolation_gewuenscht === true,
                       T('security.sandbox_row_iso', 'Eigener Arbeitsbereich und eigene Prozesssicht je Benutzer'))
                 + row(h.systemd_run === true,
@@ -870,8 +888,10 @@
                 + row(h.lo_sperre === true ? true : (h.lo_sperre === false ? false : null),
                       T('security.sandbox_row_lo', 'Lokale Dienste dieses Servers aus der Sandbox gesperrt'));
             if (iso) {
-                rows += row(iso.secret_readable === false, 'Live-Test: Secrets für Sandbox-Benutzer ' + (iso.secret_readable ? 'LESBAR ⚠' : 'nicht lesbar'));
-                rows += row(iso.tmp_writable === true, 'Live-Test: Arbeitsbereich /tmp schreibbar');
+                rows += row(iso.secret_readable === false, iso.secret_readable
+                    ? T('security.sb_live_secret_offen', 'Live-Test: Secrets für Sandbox-Benutzer LESBAR ⚠')
+                    : T('security.sb_live_secret_ok', 'Live-Test: Secrets für Sandbox-Benutzer nicht lesbar'));
+                rows += row(iso.tmp_writable === true, T('security.sb_live_tmp', 'Live-Test: Arbeitsbereich /tmp schreibbar'));
                 if ('loopback_offen' in iso) rows += row(iso.loopback_offen === false,
                     T('security.sandbox_live_lo', 'Live-Test: {marke} selbst aus der Sandbox nicht erreichbar'));
                 if ('grenzen_anwendbar' in iso) rows += row(iso.grenzen_anwendbar === true,
@@ -881,6 +901,11 @@
             Mgr._setupKnopf('sec-sandbox-setup', !!d.active, 'security.sandbox_aktivieren', 'Aktivieren');
             box.innerHTML = '<div style="margin-bottom:6px;">' + head + '</div>'
                 + '<div style="line-height:1.75;">' + rows + '</div>';
+        },
+
+        // Angabe hinter dem OS-Benutzer: "(uid 996)" oder "— fehlt" (Egress und Sandbox).
+        _uidText: function (d) {
+            return d.uid != null ? ' (uid ' + d.uid + ')' : ' ' + T('security.row_uid_fehlt', '— fehlt');
         },
 
         // Einrichtungs-Knopf nach Zustand beschriften: "Einschalten" o. ae., solange
@@ -935,7 +960,7 @@
                     }
                     if (o.render && d.status) o.render(d.status);
                 })
-                .catch(function () { if (out) { out.style.display = 'block'; out.innerHTML = 'Fehler bei der Ausführung.'; } })
+                .catch(function () { if (out) { out.style.display = 'block'; out.innerHTML = esc(T('security.action_error', 'Fehler bei der Ausführung.')); } })
                 .then(function () {
                     if (!btn) return;
                     btn.disabled = false;
@@ -947,8 +972,8 @@
         setupSandbox: function () {
             Mgr._runAction({
                 url: '/api/security/sandbox/setup', btn: 'sec-sandbox-setup', result: 'sec-sandbox-result',
-                busy: T('security.busy_setup', 'Wird eingerichtet…'), okMsg: 'OS-Sandbox aktiv & verifiziert.',
-                failMsg: 'Einrichtung unvollständig – Details:',
+                busy: T('security.busy_setup', 'Wird eingerichtet…'), okMsg: T('security.sb_setup_ok', 'OS-Sandbox aktiv & verifiziert.'),
+                failMsg: T('security.setup_partial', 'Einrichtung unvollständig – Details:'),
                 render: function (s) { Mgr.renderSandbox(s); }
             });
         },
@@ -1113,7 +1138,7 @@
         renderUnattended: function (d) {
             var box = $('sec-unatt-status');
             if (!box) return;
-            if (!d) { box.innerHTML = '<span style="color:var(--text-muted);">Status nicht verfügbar.</span>'; return; }
+            if (!d) { box.innerHTML = '<span style="color:var(--text-muted);">' + esc(T('security.status_na', 'Status nicht verfügbar.')) + '</span>'; return; }
             function row(ok, label) {
                 var mark = ok === true ? '✓' : (ok === false ? '✗' : '?');
                 return '<div>' + mark + ' ' + esc(label) + '</div>';
@@ -1125,15 +1150,16 @@
             Mgr._setupKnopf('sec-unatt-setup', !!d.enabled, 'security.unattended_einschalten', 'Einschalten');
             var timers = d.timers || {};
             var rows = ''
-                + row(d.package_installed, 'Paket unattended-upgrades installiert')
-                + row(d.unattended === '1', 'Automatik eingeschaltet (APT::Periodic::Unattended-Upgrade)')
-                + row(d.update_lists === '1', 'Paketindex wird täglich aktualisiert')
-                + row(d.limits_ok, 'Begrenzungen gesetzt: nur Sicherheits-Quelle, kein Neustart, kein Aufräumen')
-                + row(timers['apt-daily.timer'], 'apt-daily.timer aktiv')
-                + row(timers['apt-daily-upgrade.timer'], 'apt-daily-upgrade.timer aktiv');
+                + row(d.package_installed, T('security.ua_row_pkg', 'Paket unattended-upgrades installiert'))
+                + row(d.unattended === '1', T('security.ua_row_auto', 'Automatik eingeschaltet (APT::Periodic::Unattended-Upgrade)'))
+                + row(d.update_lists === '1', T('security.ua_row_lists', 'Paketindex wird täglich aktualisiert'))
+                + row(d.limits_ok, T('security.ua_row_limits', 'Begrenzungen gesetzt: nur Sicherheits-Quelle, kein Neustart, kein Aufräumen'))
+                + row(timers['apt-daily.timer'], T('security.ua_row_timer', '{timer} aktiv').replace('{timer}', 'apt-daily.timer'))
+                + row(timers['apt-daily-upgrade.timer'], T('security.ua_row_timer', '{timer} aktiv').replace('{timer}', 'apt-daily-upgrade.timer'));
             if (d.security_only === true || d.security_only === false) {
-                rows += row(d.security_only, 'Trockenlauf: ' + (d.security_only
-                    ? 'nur Debian-Security-Quelle' : 'Quelle nicht erkannt – Ausgabe prüfen'));
+                rows += row(d.security_only, d.security_only
+                    ? T('security.ua_dry_ok', 'Trockenlauf: nur Debian-Security-Quelle')
+                    : T('security.ua_dry_unklar', 'Trockenlauf: Quelle nicht erkannt – Ausgabe prüfen'));
             }
             var extra = '';
             if (d.origins && d.origins.length) {
@@ -1174,8 +1200,8 @@
             Mgr._runAction({
                 url: '/api/security/unattended/setup', btn: 'sec-unatt-setup', result: 'sec-unatt-result',
                 busy: T('security.busy_setup', 'Wird eingerichtet…'),
-                okMsg: 'Automatische Sicherheitsupdates aktiv & geprüft.',
-                failMsg: 'Einrichtung unvollständig – Details:',
+                okMsg: T('security.ua_setup_ok', 'Automatische Sicherheitsupdates aktiv & geprüft.'),
+                failMsg: T('security.setup_partial', 'Einrichtung unvollständig – Details:'),
                 render: function (s) { Mgr.renderUnattended(s); }
             });
         },
@@ -1200,12 +1226,12 @@
             Mgr._runAction({
                 url: '/api/security/unattended/teardown', btn: 'sec-unatt-teardown', result: 'sec-unatt-result',
                 busy: T('security.busy_teardown', 'Wird ausgeschaltet…'),
-                okMsg: 'Automatische Sicherheitsupdates ausgeschaltet.',
-                failMsg: 'Ausschalten unvollständig – Details:',
+                okMsg: T('security.ua_teardown_ok', 'Automatische Sicherheitsupdates ausgeschaltet.'),
+                failMsg: T('security.ua_teardown_partial', 'Ausschalten unvollständig – Details:'),
                 render: function (s) { Mgr.renderUnattended(s); },
-                confirm: 'Automatische Sicherheitsupdates wirklich ausschalten?\n\n'
+                confirm: T('security.ua_teardown_confirm', 'Automatische Sicherheitsupdates wirklich ausschalten?\n\n'
                     + 'Debian-Sicherheitspatches müssen danach von Hand eingespielt werden. '
-                    + 'Die tägliche Aktualisierung des Paketindex bleibt aktiv.'
+                    + 'Die tägliche Aktualisierung des Paketindex bleibt aktiv.')
             });
         },
 

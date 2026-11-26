@@ -968,92 +968,92 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <div id="sec-secdoc-modal" class="modal" style="z-index:10001;">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h2>🛡️ Sicherheitsschicht – technische Funktionsanalyse</h2>
+                <h2>🛡️ <span data-i18n="secdoc.b01">Sicherheitsschicht – technische Funktionsanalyse</span></h2>
                 <div style="display:flex;align-items:center;gap:8px;">
-                    <button type="button" id="sec-secdoc-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken"
+                    <button type="button" id="sec-secdoc-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken" data-i18n-title="secdoc.pdf_title" data-i18n-aria="secdoc.pdf_aria"
                             style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:600;font-size:0.82rem;cursor:pointer;line-height:1;">🖨️ PDF</button>
-                    <button class="btn-icon" id="sec-secdoc-close" aria-label="Schließen">
+                    <button class="btn-icon" id="sec-secdoc-close" aria-label="Schließen" data-i18n-aria="common.close">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     </button>
                 </div>
             </div>
             <div class="modal-body" style="overflow-y:auto;">
 
-                <p class="kb-hint">Diese Sicherheitsschicht schützt den Agenten gegen Rechteausweitung, Datenabfluss und Prompt-Injection durch Netzwerk-/Domain-Benutzer. <b>Leitprinzip:</b> Zugriffskontrolle wird im Code am Tool-Dispatch <b>erzwungen</b> – nicht als Bitte im System-Prompt. Sie ist dadurch <b>nicht</b> per Prompt, Base64-Kodierung oder „gelernten Fakten" umgehbar.</p>
+                <p class="kb-hint" data-i18n-html="secdoc.b02">Diese Sicherheitsschicht schützt den Agenten gegen Rechteausweitung, Datenabfluss und Prompt-Injection durch Netzwerk-/Domain-Benutzer. <b>Leitprinzip:</b> Zugriffskontrolle wird im Code am Tool-Dispatch <b>erzwungen</b> – nicht als Bitte im System-Prompt. Sie ist dadurch <b>nicht</b> per Prompt, Base64-Kodierung oder „gelernten Fakten" umgehbar.</p>
 
-                <h3>1. Rollenmodell</h3>
+                <h3 data-i18n-html="secdoc.b03">1. Rollenmodell</h3>
                 <ul>
-                    <li><b>Lokale Administratoren</b> (<code>ALLOWED_USERS</code> = <code>jarvis</code>/<code>root</code> sowie in <i>Sicherheit → LDAP → Administratoren</i> freigeschaltete AD-Konten): voller Zugriff, keine Einschränkung.</li>
-                    <li><b>Netzwerk-/Domain-Benutzer</b> (LDAP, nicht privilegiert): unterliegen sämtlichen unten beschriebenen Beschränkungen. Erkennung in <code>agent.py</code> über <code>_LOCAL_PRIVILEGED_USERS</code>; die Prüfungen laufen in <code>_execute_tool()</code> pro Tool-Aufruf.</li>
+                    <li data-i18n-html="secdoc.b04"><b>Lokale Administratoren</b> (<code>ALLOWED_USERS</code> = <code>jarvis</code>/<code>root</code> sowie in <i>Sicherheit → LDAP → Administratoren</i> freigeschaltete AD-Konten): voller Zugriff, keine Einschränkung.</li>
+                    <li data-i18n-html="secdoc.b05"><b>Netzwerk-/Domain-Benutzer</b> (LDAP, nicht privilegiert): unterliegen sämtlichen unten beschriebenen Beschränkungen. Erkennung in <code>agent.py</code> über <code>_LOCAL_PRIVILEGED_USERS</code>; die Prüfungen laufen in <code>_execute_tool()</code> pro Tool-Aufruf.</li>
                 </ul>
 
-                <h3>2. Dateisystem-Confinement (<code>filesystem</code>-Tool)</h3>
-                <p class="kb-hint">Umgesetzt in <code>backend/sandbox.py → authorize_fs(action, path)</code>. Pfade werden vollständig aufgelöst (Symlinks), um Ausbrüche wie <code>/tmp/link → /etc/shadow</code> zu verhindern.</p>
+                <h3 data-i18n-html="secdoc.b06">2. Dateisystem-Confinement (<code>filesystem</code>-Tool)</h3>
+                <p class="kb-hint" data-i18n-html="secdoc.b07">Umgesetzt in <code>backend/sandbox.py → authorize_fs(action, path)</code>. Pfade werden vollständig aufgelöst (Symlinks), um Ausbrüche wie <code>/tmp/link → /etc/shadow</code> zu verhindern.</p>
                 <table>
-                    <tr><th>Aktion</th><th>Erlaubt für Domain-Benutzer</th></tr>
-                    <tr><td>write / append / mkdir</td><td>nur <code>/tmp</code> und <code>data/documents</code> (<code>WRITE_ROOTS</code>)</td></tr>
-                    <tr><td>read / list / exists</td><td>nur Wissens-/Arbeitsverzeichnisse (<code>READ_ROOTS</code>: <code>/tmp</code>, <code>/mnt/jarvis-kb</code>, <code>data/knowledge</code>, <code>data/documents</code>)</td></tr>
+                    <tr data-i18n-html="secdoc.b08"><th>Aktion</th><th>Erlaubt für Domain-Benutzer</th></tr>
+                    <tr data-i18n-html="secdoc.b09"><td>write / append / mkdir</td><td>nur <code>/tmp</code> und <code>data/documents</code> (<code>WRITE_ROOTS</code>)</td></tr>
+                    <tr data-i18n-html="secdoc.b10"><td>read / list / exists</td><td>nur Wissens-/Arbeitsverzeichnisse (<code>READ_ROOTS</code>: <code>/tmp</code>, <code>/mnt/jarvis-kb</code>, <code>data/knowledge</code>, <code>data/documents</code>)</td></tr>
                 </table>
-                <p class="kb-hint"><b>Immer gesperrt</b> (<code>is_sensitive()</code>): Secrets (<code>.env</code>, <code>settings.json</code>, <code>memory.json</code>, <code>auth_state.json</code>, <code>*.key/.pem/.crt/.p12</code>, <code>id_rsa</code>, <code>.ssh/</code>, <code>certs/</code>), System (<code>/root</code>, <code>/etc/shadow</code>, <code>/etc/sudoers</code>, <code>/boot</code>, <code>/proc</code>, <code>/sys</code>) und App-Interna (<code>data/settings.json</code>, <code>data/logs</code>, Audit-/Konversations-Logs).</p>
+                <p class="kb-hint" data-i18n-html="secdoc.b11"><b>Immer gesperrt</b> (<code>is_sensitive()</code>): Secrets (<code>.env</code>, <code>settings.json</code>, <code>memory.json</code>, <code>auth_state.json</code>, <code>*.key/.pem/.crt/.p12</code>, <code>id_rsa</code>, <code>.ssh/</code>, <code>certs/</code>), System (<code>/root</code>, <code>/etc/shadow</code>, <code>/etc/sudoers</code>, <code>/boot</code>, <code>/proc</code>, <code>/sys</code>) und App-Interna (<code>data/settings.json</code>, <code>data/logs</code>, Audit-/Konversations-Logs).</p>
 
-                <h3>3. Shell-Härtung (<code>shell_execute</code>)</h3>
-                <p class="kb-hint">Mehrstufige Prüfung in <code>agent.py</code> + <code>sandbox.authorize_shell()</code>:</p>
+                <h3 data-i18n-html="secdoc.b12">3. Shell-Härtung (<code>shell_execute</code>)</h3>
+                <p class="kb-hint" data-i18n-html="secdoc.b13">Mehrstufige Prüfung in <code>agent.py</code> + <code>sandbox.authorize_shell()</code>:</p>
                 <ul>
-                    <li><b>Systemverändernde Befehle</b> blockiert (<code>_LDAP_SHELL_FORBIDDEN</code>): <code>rm, chmod, chown, apt/pip/npm install, systemctl, reboot, dd, mkfs, useradd, passwd, tee</code> …</li>
-                    <li><b>Verschleierung</b> blockiert (<code>SHELL_OBFUSCATION</code>): <code>base64 -d</code>, <code>xxd -r</code>, <code>eval</code>, <code>source</code>, Pipe in <code>bash/sh/python/perl/…</code>. Schließt die Base64-Umgehung.</li>
-                    <li><b>Secret-/Root-Pfade</b> blockiert (<code>SHELL_SECRET_PATHS</code>) – interpreterunabhängig (greift auch bei <code>cat</code> oder <code>python open()</code>).</li>
-                    <li><b>Schreib-Umleitungen</b> (<code>&gt;</code>) nur nach <code>/tmp</code>.</li>
+                    <li data-i18n-html="secdoc.b14"><b>Systemverändernde Befehle</b> blockiert (<code>_LDAP_SHELL_FORBIDDEN</code>): <code>rm, chmod, chown, apt/pip/npm install, systemctl, reboot, dd, mkfs, useradd, passwd, tee</code> …</li>
+                    <li data-i18n-html="secdoc.b15"><b>Verschleierung</b> blockiert (<code>SHELL_OBFUSCATION</code>): <code>base64 -d</code>, <code>xxd -r</code>, <code>eval</code>, <code>source</code>, Pipe in <code>bash/sh/python/perl/…</code>. Schließt die Base64-Umgehung.</li>
+                    <li data-i18n-html="secdoc.b16"><b>Secret-/Root-Pfade</b> blockiert (<code>SHELL_SECRET_PATHS</code>) – interpreterunabhängig (greift auch bei <code>cat</code> oder <code>python open()</code>).</li>
+                    <li data-i18n-html="secdoc.b17"><b>Schreib-Umleitungen</b> (<code>&gt;</code>) nur nach <code>/tmp</code>.</li>
                 </ul>
 
-                <h3>4. OS-Sandbox (harte Grenze)</h3>
-                <p class="kb-hint"><b>Pflicht für Domain-Benutzer</b> (seit BSI H10). Der Sandbox-Benutzer kommt aus der Einstellung <code>sandbox_shell_user</code>, leer = <code>jarvis_sandbox</code>. Der Root-Broker (Op <code>sandbox_lauf</code>) führt jeden Befehl so aus: <code>systemd-run --scope</code> (Speicher, Prozesse, CPU, Laufzeit) → <code>runuser</code> als <b>unprivilegierter Betriebssystem-Benutzer</b> → <code>bwrap</code> mit eigenem <code>/tmp</code> je Benutzer und eigener Prozesssicht. Benutzer ohne Internet-Freigabe bekommen zusätzlich einen eigenen Netz-Namespace (<code>--unshare-net</code>). Für alle Sandbox-Benutzer sperrt die nftables-Tabelle <code>jarvis_sandbox_lo</code> den Loopback (DNS ausgenommen). Damit erzwingt das <b>Betriebssystem</b> die Grenze – unabhängig davon, wie ein Befehl formuliert oder kodiert ist (Python, Base64, …). Fehlt einer dieser Bausteine, wird der Befehl <b>nicht</b> ausgeführt (fail-closed). Für lokale Administratoren gilt dasselbe nur mit dem Schalter <i>Sandbox auch für Administratoren</i> (Einstellung <code>sandbox_auch_admins</code>, dann im echten <code>/tmp</code>, die privaten Bereiche der Domain-Benutzer verdeckt).</p>
+                <h3 data-i18n-html="secdoc.b18">4. OS-Sandbox (harte Grenze)</h3>
+                <p class="kb-hint" data-i18n-html="secdoc.b19"><b>Pflicht für Domain-Benutzer</b> (seit BSI H10). Der Sandbox-Benutzer kommt aus der Einstellung <code>sandbox_shell_user</code>, leer = <code>jarvis_sandbox</code>. Der Root-Broker (Op <code>sandbox_lauf</code>) führt jeden Befehl so aus: <code>systemd-run --scope</code> (Speicher, Prozesse, CPU, Laufzeit) → <code>runuser</code> als <b>unprivilegierter Betriebssystem-Benutzer</b> → <code>bwrap</code> mit eigenem <code>/tmp</code> je Benutzer und eigener Prozesssicht. Benutzer ohne Internet-Freigabe bekommen zusätzlich einen eigenen Netz-Namespace (<code>--unshare-net</code>). Für alle Sandbox-Benutzer sperrt die nftables-Tabelle <code>jarvis_sandbox_lo</code> den Loopback (DNS ausgenommen). Damit erzwingt das <b>Betriebssystem</b> die Grenze – unabhängig davon, wie ein Befehl formuliert oder kodiert ist (Python, Base64, …). Fehlt einer dieser Bausteine, wird der Befehl <b>nicht</b> ausgeführt (fail-closed). Für lokale Administratoren gilt dasselbe nur mit dem Schalter <i>Sandbox auch für Administratoren</i> (Einstellung <code>sandbox_auch_admins</code>, dann im echten <code>/tmp</code>, die privaten Bereiche der Domain-Benutzer verdeckt).</p>
 
-                <h3>5. Keine Rechteausweitung über Sub-Agenten</h3>
-                <p class="kb-hint">Beim Start eines Sub-Agenten (z. B. <code>coding_agent</code>, Agent-Orchestrator) werden Benutzeridentität und Internet-Freigabe vererbt. Ein Sub-Agent eines Domain-Benutzers unterliegt denselben Confinement-Regeln; er läuft nicht mit leerem/privilegiertem Kontext.</p>
+                <h3 data-i18n-html="secdoc.b20">5. Keine Rechteausweitung über Sub-Agenten</h3>
+                <p class="kb-hint" data-i18n-html="secdoc.b21">Beim Start eines Sub-Agenten (z. B. <code>coding_agent</code>, Agent-Orchestrator) werden Benutzeridentität und Internet-Freigabe vererbt. Ein Sub-Agent eines Domain-Benutzers unterliegt denselben Confinement-Regeln; er läuft nicht mit leerem/privilegiertem Kontext.</p>
 
-                <h3>6. Angriffserkennung (Guard)</h3>
-                <p class="kb-hint">In <code>backend/security_guard.py</code>, ausgewertet pro Chat-/Support-/WhatsApp-Eingabe (<code>inspect()</code>):</p>
+                <h3 data-i18n-html="secdoc.b22">6. Angriffserkennung (Guard)</h3>
+                <p class="kb-hint" data-i18n-html="secdoc.b23">In <code>backend/security_guard.py</code>, ausgewertet pro Chat-/Support-/WhatsApp-Eingabe (<code>inspect()</code>):</p>
                 <ul>
-                    <li><b>Heuristik:</b> Regex-Signaturen bekannter Jailbreak-/Injection-Muster („ignore all previous instructions", DAN, „reveal system prompt", „bypass safety" …).</li>
-                    <li><b>LLM-Klassifikator</b> (optional): bewertet Eingaben zusätzlich. <b>Hybrid</b> (beide aktiv): der Klassifikator bestätigt jeden Heuristik-Verdacht vor der Sperre (weniger Fehlalarme).</li>
-                    <li><b>Base64-Erkennung</b> (<code>decode_and_scan()</code>): dekodiert Base64-Blöcke der Eingabe und prüft den Klartext auf Jailbreak-/Shell-/Secret-Indikatoren – schließt die Guard-Umgehung durch Kodierung.</li>
+                    <li data-i18n-html="secdoc.b24"><b>Heuristik:</b> Regex-Signaturen bekannter Jailbreak-/Injection-Muster („ignore all previous instructions", DAN, „reveal system prompt", „bypass safety" …).</li>
+                    <li data-i18n-html="secdoc.b25"><b>LLM-Klassifikator</b> (optional): bewertet Eingaben zusätzlich. <b>Hybrid</b> (beide aktiv): der Klassifikator bestätigt jeden Heuristik-Verdacht vor der Sperre (weniger Fehlalarme).</li>
+                    <li data-i18n-html="secdoc.b26"><b>Base64-Erkennung</b> (<code>decode_and_scan()</code>): dekodiert Base64-Blöcke der Eingabe und prüft den Klartext auf Jailbreak-/Shell-/Secret-Indikatoren – schließt die Guard-Umgehung durch Kodierung.</li>
                 </ul>
 
-                <h3>7. Verstoß-Protokoll &amp; automatische Sperre</h3>
-                <p class="kb-hint">Jeder im Dispatch verweigerte Zugriff wird als Verstoß protokolliert (<code>record_violation()</code>) – mit Tool, Klartext-Detail, auslösender Anfrage (Prompt), IP und Kanal. Ab einer Schwelle innerhalb eines Zeitfensters wird das Konto <b>automatisch gesperrt</b>.</p>
+                <h3 data-i18n-html="secdoc.b27">7. Verstoß-Protokoll &amp; automatische Sperre</h3>
+                <p class="kb-hint" data-i18n-html="secdoc.b28">Jeder im Dispatch verweigerte Zugriff wird als Verstoß protokolliert (<code>record_violation()</code>) – mit Tool, Klartext-Detail, auslösender Anfrage (Prompt), IP und Kanal. Ab einer Schwelle innerhalb eines Zeitfensters wird das Konto <b>automatisch gesperrt</b>.</p>
                 <ul>
-                    <li>Standard: <b>3 Verstöße in 600 s</b> → Sperre. Konfigurierbar über <code>security_autoblock_enabled</code>, <code>security_autoblock_count</code>, <code>security_autoblock_window</code>.</li>
-                    <li>Lokale Administratoren werden nie automatisch gesperrt (<code>exempt</code>).</li>
-                    <li>Gesperrte Konten können sich noch anmelden, sehen aber nur den Sperr-Bildschirm samt Protokoll. Freischalten ausschließlich durch einen lokalen Benutzer (<i>Gesperrte Konten → Freischalten</i>).</li>
-                    <li>Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
-                    <li>Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Internet-Sperre (Firewall)</i>.</li>
-                    <li>OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Einrichten/Reparieren via <code>POST /api/security/sandbox/setup</code>, Grenzen und Admin-Schalter via <code>POST /api/security/sandbox/config</code> (<code>auch_admins</code>, <code>speicher_mb</code>, <code>prozesse</code>, <code>cpu_prozent</code>). Ein Abschalten gibt es nicht. Bedienung unter <i>Sicherheit → Angriffsprävention und Sicherheitsvorfälle → Systemschutz / Sandbox</i>.</li>
-                    <li>Automatische Sicherheitsupdates (System): Status via <code>GET /api/security/unattended</code> (mit <code>?live=1</code> Trockenlauf), Ein-/Ausschalten via <code>POST /api/security/unattended/setup</code> bzw. <code>/teardown</code>. Richtet <code>unattended-upgrades</code> bewusst eng ein: nur die Debian-Sicherheits-Quelle, kein automatischer Neustart, kein automatisches Aufräumen von Paketen. Beim Ausschalten bleibt die tägliche Aktualisierung des Paketindex aktiv. Bedienung unter <i>KI &amp; System → Paket-Updates und Integrität → Automatische Sicherheitsupdates</i>.</li>
-                    <li>Root-Broker (Trennung UI-/Ausführungsebene): Betriebsmodus via <code>GET /api/broker/status</code>, Ein-Klick-Umschaltung via <code>POST /api/broker/setup</code> (getrennter Betrieb) bzw. <code>POST /api/broker/teardown</code> (Alt-Betrieb), Freigabeliste via <code>GET /api/broker/ops</code>, Admin-Entscheidung via <code>POST /api/broker/ops/decide</code> (Body <code>{key, decision: allow|deny|pending}</code>), Eintrag löschen via <code>POST /api/broker/ops/remove</code>, Audit-Log via <code>GET /api/broker/audit?n=100</code>. Bedienung unter <i>Sicherheit → Root-Freigaben (Root-Broker)</i>.</li>
-                    <li>Zeitversetzte Auslöser (seit 2026-07-29): Zeitgesteuerte Aufträge (<code>POST/PUT /api/cron</code>, <code>POST /api/cron/{id}/run</code>) und Trigger-Watcher (<code>POST/PUT /api/watchers</code>) darf <b>nur ein Administrator</b> anlegen bzw. ändern; das Werkzeug <code>cron_create</code> ist für Netzwerk-Benutzer gesperrt. Grund: ein solcher Eintrag startet später selbständig einen Agenten mit vollem Werkzeugkasten – außerhalb jeder Sitzung, ohne Freigabe. Sehen und Löschen <em>eigener</em> Einträge bleibt erlaubt (Altbestand aufräumbar). Ausnahme: unter <i>Sicherheit → Erinnerungen per Messenger</i> freigegebene Absender (<code>GET/POST /api/reminders/senders</code>) dürfen sich <b>einmalige Erinnerungen</b> an sich selbst setzen – reiner Nachrichtenversand ohne Agent, gedeckelt auf 20 offene je Absender.</li>
+                    <li data-i18n-html="secdoc.b29">Standard: <b>3 Verstöße in 600 s</b> → Sperre. Konfigurierbar über <code>security_autoblock_enabled</code>, <code>security_autoblock_count</code>, <code>security_autoblock_window</code>.</li>
+                    <li data-i18n-html="secdoc.b30">Lokale Administratoren werden nie automatisch gesperrt (<code>exempt</code>).</li>
+                    <li data-i18n-html="secdoc.b31">Gesperrte Konten können sich noch anmelden, sehen aber nur den Sperr-Bildschirm samt Protokoll. Freischalten ausschließlich durch einen lokalen Benutzer (<i>Gesperrte Konten → Freischalten</i>).</li>
+                    <li data-i18n-html="secdoc.b32">Anzeige: „Letzte Zugriffs-Verstöße" und „Gesperrte Konten" in diesem Bereich; API: <code>/api/security/violations</code>, <code>/api/security/incidents</code>, <code>/api/security/sandbox</code>.</li>
+                    <li data-i18n-html="secdoc.b33">Internet-Egress-Sperre (harte Firewall-Grenze für Benutzer ohne Internet-Freigabe): Status via <code>GET /api/security/egress</code> (mit <code>?live=1</code> Live-Test), Ein-Klick-Einrichtung via <code>POST /api/security/egress/setup</code>, Deaktivierung via <code>POST /api/security/egress/teardown</code>. Bedienung unter <i>Sicherheit → Berechtigungen → Internet-Sperre (Firewall)</i>.</li>
+                    <li data-i18n-html="secdoc.b34">OS-Sandbox (Systemschutz Netzwerk-Benutzer): Status via <code>GET /api/security/sandbox</code> (mit <code>?live=1</code> Isolationstest), Einrichten/Reparieren via <code>POST /api/security/sandbox/setup</code>, Grenzen und Admin-Schalter via <code>POST /api/security/sandbox/config</code> (<code>auch_admins</code>, <code>speicher_mb</code>, <code>prozesse</code>, <code>cpu_prozent</code>). Ein Abschalten gibt es nicht. Bedienung unter <i>Sicherheit → Angriffsprävention und Sicherheitsvorfälle → Systemschutz / Sandbox</i>.</li>
+                    <li data-i18n-html="secdoc.b35">Automatische Sicherheitsupdates (System): Status via <code>GET /api/security/unattended</code> (mit <code>?live=1</code> Trockenlauf), Ein-/Ausschalten via <code>POST /api/security/unattended/setup</code> bzw. <code>/teardown</code>. Richtet <code>unattended-upgrades</code> bewusst eng ein: nur die Debian-Sicherheits-Quelle, kein automatischer Neustart, kein automatisches Aufräumen von Paketen. Beim Ausschalten bleibt die tägliche Aktualisierung des Paketindex aktiv. Bedienung unter <i>KI &amp; System → Paket-Updates und Integrität → Automatische Sicherheitsupdates</i>.</li>
+                    <li data-i18n-html="secdoc.b36">Root-Broker (Trennung UI-/Ausführungsebene): Betriebsmodus via <code>GET /api/broker/status</code>, Ein-Klick-Umschaltung via <code>POST /api/broker/setup</code> (getrennter Betrieb) bzw. <code>POST /api/broker/teardown</code> (Alt-Betrieb), Freigabeliste via <code>GET /api/broker/ops</code>, Admin-Entscheidung via <code>POST /api/broker/ops/decide</code> (Body <code>{key, decision: allow|deny|pending}</code>), Eintrag löschen via <code>POST /api/broker/ops/remove</code>, Audit-Log via <code>GET /api/broker/audit?n=100</code>. Bedienung unter <i>Sicherheit → Root-Freigaben (Root-Broker)</i>.</li>
+                    <li data-i18n-html="secdoc.b37">Zeitversetzte Auslöser (seit 2026-07-29): Zeitgesteuerte Aufträge (<code>POST/PUT /api/cron</code>, <code>POST /api/cron/{id}/run</code>) und Trigger-Watcher (<code>POST/PUT /api/watchers</code>) darf <b>nur ein Administrator</b> anlegen bzw. ändern; das Werkzeug <code>cron_create</code> ist für Netzwerk-Benutzer gesperrt. Grund: ein solcher Eintrag startet später selbständig einen Agenten mit vollem Werkzeugkasten – außerhalb jeder Sitzung, ohne Freigabe. Sehen und Löschen <em>eigener</em> Einträge bleibt erlaubt (Altbestand aufräumbar). Ausnahme: unter <i>Sicherheit → Erinnerungen per Messenger</i> freigegebene Absender (<code>GET/POST /api/reminders/senders</code>) dürfen sich <b>einmalige Erinnerungen</b> an sich selbst setzen – reiner Nachrichtenversand ohne Agent, gedeckelt auf 20 offene je Absender.</li>
                 </ul>
 
-                <h3>8. Schutz vor Kontext-Vergiftung</h3>
+                <h3 data-i18n-html="secdoc.b38">8. Schutz vor Kontext-Vergiftung</h3>
                 <ul>
-                    <li><b>Lern-Filter</b> (<code>learning.py → _sanitize_learned()</code>): sicherheits-/rechte-bezogene „Fakten" (z. B. „root ist erlaubt", Secrets, <code>sudo</code>, <code>base64</code>) werden vor dem Speichern verworfen – es lässt sich keine Rechteausweitung „antrainieren".</li>
-                    <li><b>Untrusted-Rahmung:</b> Gedächtnis/gelernte Fakten werden dem Modell als <code>[UNTRUSTED_CONTEXT]</code> übergeben – reine Information, keine Anweisungen.</li>
-                    <li><b>Unveränderliche Sicherheits-Grundregel</b> an oberster Stelle des System-Prompts: Rechte kommen nur vom System; keine kodierten Anweisungen ausführen; Domain-Benutzer sind keine Administratoren. Diese Regel ist dem Modell übergeordnet, ersetzt aber nicht die Code-Erzwingung.</li>
+                    <li data-i18n-html="secdoc.b39"><b>Lern-Filter</b> (<code>learning.py → _sanitize_learned()</code>): sicherheits-/rechte-bezogene „Fakten" (z. B. „root ist erlaubt", Secrets, <code>sudo</code>, <code>base64</code>) werden vor dem Speichern verworfen – es lässt sich keine Rechteausweitung „antrainieren".</li>
+                    <li data-i18n-html="secdoc.b40"><b>Untrusted-Rahmung:</b> Gedächtnis/gelernte Fakten werden dem Modell als <code>[UNTRUSTED_CONTEXT]</code> übergeben – reine Information, keine Anweisungen.</li>
+                    <li data-i18n-html="secdoc.b41"><b>Unveränderliche Sicherheits-Grundregel</b> an oberster Stelle des System-Prompts: Rechte kommen nur vom System; keine kodierten Anweisungen ausführen; Domain-Benutzer sind keine Administratoren. Diese Regel ist dem Modell übergeordnet, ersetzt aber nicht die Code-Erzwingung.</li>
                 </ul>
 
-                <h3>9. Konfiguration</h3>
+                <h3 data-i18n-html="secdoc.b42">9. Konfiguration</h3>
                 <ul>
-                    <li><i>Einstellungen → Sicherheit</i>: Sicherheitsschicht (Master), Heuristik, LLM-Klassifikator; Anzeige Sandbox-Status + Verstöße + gesperrte Konten.</li>
-                    <li><code>sandbox_shell_user</code> – OS-Sandbox-Benutzer (leer = <code>jarvis_sandbox</code>; ohne Sandbox-Benutzer keine Shell für Domain-Benutzer).</li>
-                    <li><code>sandbox_auch_admins</code> – Sandbox auch für lokale Administratoren (Vorgabe an; eine bestehende Installation, in der der Schalter nie gesetzt war, behält beim Update „aus“).</li>
-                    <li><code>sandbox_grenze_speicher_mb</code> / <code>sandbox_grenze_prozesse</code> / <code>sandbox_grenze_cpu_prozent</code> – Grenzen je Shell-Befehl (Vorgabe 2048 / 256 / 200).</li>
-                    <li><code>security_autoblock_*</code> – Auto-Sperre-Schwelle/-Fenster.</li>
+                    <li data-i18n-html="secdoc.b43"><i>Einstellungen → Sicherheit</i>: Sicherheitsschicht (Master), Heuristik, LLM-Klassifikator; Anzeige Sandbox-Status + Verstöße + gesperrte Konten.</li>
+                    <li data-i18n-html="secdoc.b44"><code>sandbox_shell_user</code> – OS-Sandbox-Benutzer (leer = <code>jarvis_sandbox</code>; ohne Sandbox-Benutzer keine Shell für Domain-Benutzer).</li>
+                    <li data-i18n-html="secdoc.b45"><code>sandbox_auch_admins</code> – Sandbox auch für lokale Administratoren (Vorgabe an; eine bestehende Installation, in der der Schalter nie gesetzt war, behält beim Update „aus“).</li>
+                    <li data-i18n-html="secdoc.b46"><code>sandbox_grenze_speicher_mb</code> / <code>sandbox_grenze_prozesse</code> / <code>sandbox_grenze_cpu_prozent</code> – Grenzen je Shell-Befehl (Vorgabe 2048 / 256 / 200).</li>
+                    <li data-i18n-html="secdoc.b47"><code>security_autoblock_*</code> – Auto-Sperre-Schwelle/-Fenster.</li>
                 </ul>
 
-                <h3>10. Trennung UI-/Ausführungsebene (Root-Broker)</h3>
-                <p class="kb-hint">Im getrennten Betrieb läuft das Backend (Web-Oberfläche, Chat, Agent) als <b>unprivilegierter Dienst-Benutzer</b>; alles, was root braucht, läuft über den separaten <b>Root-Broker</b> (<code>jarvis-broker.service</code>, Unix-Socket). Der Broker kennt nur <b>benannte, validierte Operationen</b> (Dienst-Neustart, VNC, Sandbox, Mounts, Zertifikate …). Jede Operation wird beim ersten Auftauchen als <b>auditierbarer Eintrag</b> registriert: Systemoperationen automatisch erlaubt (vom Admin widerrufbar), <b>beliebige Root-Shell-Befehle des Agenten dagegen erst nach expliziter Admin-Freigabe</b> (Status „wartet auf Freigabe"). Policy und Audit-Log gehören root und sind vom Backend nicht manipulierbar. Verwaltung unter <i>Sicherheit → Root-Freigaben</i>.</p>
+                <h3 data-i18n-html="secdoc.b48">10. Trennung UI-/Ausführungsebene (Root-Broker)</h3>
+                <p class="kb-hint" data-i18n-html="secdoc.b49">Im getrennten Betrieb läuft das Backend (Web-Oberfläche, Chat, Agent) als <b>unprivilegierter Dienst-Benutzer</b>; alles, was root braucht, läuft über den separaten <b>Root-Broker</b> (<code>jarvis-broker.service</code>, Unix-Socket). Der Broker kennt nur <b>benannte, validierte Operationen</b> (Dienst-Neustart, VNC, Sandbox, Mounts, Zertifikate …). Jede Operation wird beim ersten Auftauchen als <b>auditierbarer Eintrag</b> registriert: Systemoperationen automatisch erlaubt (vom Admin widerrufbar), <b>beliebige Root-Shell-Befehle des Agenten dagegen erst nach expliziter Admin-Freigabe</b> (Status „wartet auf Freigabe"). Policy und Audit-Log gehören root und sind vom Backend nicht manipulierbar. Verwaltung unter <i>Sicherheit → Root-Freigaben</i>.</p>
 
-                <h3>11. Grenzen &amp; Restrisiko</h3>
-                <p class="kb-hint">Die Muster-Prüfungen (Regex, Guard-Heuristik) sind <b>Defense-in-Depth</b>. Die harte Garantie für Shell-Befehle liefert die <b>OS-Sandbox</b> (Punkt 4) bzw. im getrennten Betrieb der <b>unprivilegierte Dienst-Benutzer + Root-Broker</b> (Punkt 10). Auf Alt-Installationen ohne Trennung (Backend als root) bleibt ein prinzipielles Restrisiko, da als root ausgeführter Code Wege finden kann. Empfehlung: Rechte-Trennung einrichten (<code>deploy/security/setup_broker.sh</code>), OS-Sandbox aktivieren und Secrets per Dateirechten absichern.</p>
+                <h3 data-i18n-html="secdoc.b50">11. Grenzen &amp; Restrisiko</h3>
+                <p class="kb-hint" data-i18n-html="secdoc.b51">Die Muster-Prüfungen (Regex, Guard-Heuristik) sind <b>Defense-in-Depth</b>. Die harte Garantie für Shell-Befehle liefert die <b>OS-Sandbox</b> (Punkt 4) bzw. im getrennten Betrieb der <b>unprivilegierte Dienst-Benutzer + Root-Broker</b> (Punkt 10). Auf Alt-Installationen ohne Trennung (Backend als root) bleibt ein prinzipielles Restrisiko, da als root ausgeführter Code Wege finden kann. Empfehlung: Rechte-Trennung einrichten (<code>deploy/security/setup_broker.sh</code>), OS-Sandbox aktivieren und Secrets per Dateirechten absichern.</p>
 
             </div>
         </div>
@@ -1063,54 +1063,54 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <div id="sec-fwdoc-modal" class="modal" style="z-index:10001;">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h2>🧱 Harte Egress-Sperre – technische Funktionsanalyse</h2>
+                <h2>🧱 <span data-i18n="fwdoc.b01">Harte Egress-Sperre – technische Funktionsanalyse</span></h2>
                 <div style="display:flex;align-items:center;gap:8px;">
-                    <button type="button" id="sec-fwdoc-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken"
+                    <button type="button" id="sec-fwdoc-pdf" title="Als PDF speichern (an PDF-Drucker drucken)" aria-label="Als PDF drucken" data-i18n-title="secdoc.pdf_title" data-i18n-aria="secdoc.pdf_aria"
                             style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-secondary);font-weight:600;font-size:0.82rem;cursor:pointer;line-height:1;">🖨️ PDF</button>
-                    <button class="btn-icon" id="sec-fwdoc-close" aria-label="Schließen">
+                    <button class="btn-icon" id="sec-fwdoc-close" aria-label="Schließen" data-i18n-aria="common.close">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     </button>
                 </div>
             </div>
             <div class="modal-body" style="overflow-y:auto;">
 
-                <p class="kb-hint">Die Egress-Sperre stellt sicher, dass Benutzer <b>ohne</b> Internet-Freigabe wirklich <b>keine Informationen aus dem Internet</b> beziehen oder Daten dorthin abfließen lassen können – auch nicht über Umwege. <b>Leitprinzip:</b> Die weiche Berechtigung (wer darf ins Internet) wird durch eine <b>harte Grenze auf Betriebssystem-Ebene</b> ergänzt, die unabhängig von der Formulierung eines Befehls wirkt.</p>
+                <p class="kb-hint" data-i18n-html="fwdoc.b02">Die Egress-Sperre stellt sicher, dass Benutzer <b>ohne</b> Internet-Freigabe wirklich <b>keine Informationen aus dem Internet</b> beziehen oder Daten dorthin abfließen lassen können – auch nicht über Umwege. <b>Leitprinzip:</b> Die weiche Berechtigung (wer darf ins Internet) wird durch eine <b>harte Grenze auf Betriebssystem-Ebene</b> ergänzt, die unabhängig von der Formulierung eines Befehls wirkt.</p>
 
-                <h3>1. Zwei Ebenen</h3>
+                <h3 data-i18n-html="fwdoc.b03">1. Zwei Ebenen</h3>
                 <ul>
-                    <li><b>Tool-Ebene (im Hauptprozess):</b> Tools, die Informationen aus dem Internet holen (<code>search_image</code>, <code>browser_control</code>, <code>browser_cdp</code>, <code>google_calendar/drive/gmail</code> sowie jedes Tool mit <code>requires_internet = True</code>), werden im Dispatch (<code>agent.py → _execute_tool</code>) für nicht freigeschaltete Benutzer blockiert. <b>Jira/Confluence sind intern</b> (self-hosted) und daher bewusst <b>nicht</b> gesperrt.</li>
-                    <li><b>Netzwerk-Ebene (harte Grenze):</b> <code>shell_execute</code> solcher Benutzer läuft als separater, per Firewall netzwerkgesperrter OS-Benutzer. Das ist der Gegenstand dieser Beschreibung.</li>
+                    <li data-i18n-html="fwdoc.b04"><b>Tool-Ebene (im Hauptprozess):</b> Tools, die Informationen aus dem Internet holen (<code>search_image</code>, <code>browser_control</code>, <code>browser_cdp</code>, <code>google_calendar/drive/gmail</code> sowie jedes Tool mit <code>requires_internet = True</code>), werden im Dispatch (<code>agent.py → _execute_tool</code>) für nicht freigeschaltete Benutzer blockiert. <b>Jira/Confluence sind intern</b> (self-hosted) und daher bewusst <b>nicht</b> gesperrt.</li>
+                    <li data-i18n-html="fwdoc.b05"><b>Netzwerk-Ebene (harte Grenze):</b> <code>shell_execute</code> solcher Benutzer läuft als separater, per Firewall netzwerkgesperrter OS-Benutzer. Das ist der Gegenstand dieser Beschreibung.</li>
                 </ul>
 
-                <h3>2. Warum eine zweite Ebene nötig ist</h3>
-                <p class="kb-hint">Die vorgelagerte Egress-Heuristik (<code>_shell_hits_internet()</code>) erkennt gängige Wege (<code>curl</code>, <code>wget</code>, <code>ssh</code>, <code>git</code>, <code>urllib</code>/<code>requests</code>/<code>httpx</code>, <code>socket.connect</code> …) und blockt sie mit klarer Meldung. Eine Regex kann ausgehenden Verkehr aber <b>nicht lückenlos</b> verhindern (z. B. rohe Sockets über eine Variable, eigene Protokolle). Diese Restlücke schließt die OS-Firewall.</p>
+                <h3 data-i18n-html="fwdoc.b06">2. Warum eine zweite Ebene nötig ist</h3>
+                <p class="kb-hint" data-i18n-html="fwdoc.b07">Die vorgelagerte Egress-Heuristik (<code>_shell_hits_internet()</code>) erkennt gängige Wege (<code>curl</code>, <code>wget</code>, <code>ssh</code>, <code>git</code>, <code>urllib</code>/<code>requests</code>/<code>httpx</code>, <code>socket.connect</code> …) und blockt sie mit klarer Meldung. Eine Regex kann ausgehenden Verkehr aber <b>nicht lückenlos</b> verhindern (z. B. rohe Sockets über eine Variable, eigene Protokolle). Diese Restlücke schließt die OS-Firewall.</p>
 
-                <h3>3. Funktionsweise der Firewall</h3>
-                <p class="kb-hint">Umgesetzt in <code>backend/egress_guard.py</code>. Für Benutzer ohne Internet-Freigabe wird <code>shell_execute</code> via <code>runuser</code> als dedizierter OS-Benutzer <code>jarvis_sandbox_noinet</code> ausgeführt (Einstellung <code>sandbox_shell_user_noinet</code>). Für dessen UID gilt eine eigenständige <code>nftables</code>-Regel (<code>table inet jarvis_egress</code>, <code>meta skuid</code>-Match):</p>
+                <h3 data-i18n-html="fwdoc.b08">3. Funktionsweise der Firewall</h3>
+                <p class="kb-hint" data-i18n-html="fwdoc.b09">Umgesetzt in <code>backend/egress_guard.py</code>. Für Benutzer ohne Internet-Freigabe wird <code>shell_execute</code> via <code>runuser</code> als dedizierter OS-Benutzer <code>jarvis_sandbox_noinet</code> ausgeführt (Einstellung <code>sandbox_shell_user_noinet</code>). Für dessen UID gilt eine eigenständige <code>nftables</code>-Regel (<code>table inet jarvis_egress</code>, <code>meta skuid</code>-Match):</p>
                 <table>
-                    <tr><th>Ziel</th><th>Regel für den gesperrten Benutzer</th></tr>
-                    <tr><td>Loopback (<code>127.0.0.0/8</code>, <code>::1</code>)</td><td>erlaubt</td></tr>
-                    <tr><td>Internes LAN (<code>10/8</code>, <code>172.16/12</code>, <code>192.168/16</code>, <code>169.254/16</code>)</td><td>erlaubt – z. B. internes Jira/Confluence</td></tr>
-                    <tr><td>DNS (Port 53) zu den konfigurierten Resolvern</td><td>erlaubt (Namensauflösung)</td></tr>
-                    <tr><td><b>Alles Übrige (öffentliches Internet)</b></td><td><b>verworfen (DROP)</b></td></tr>
+                    <tr data-i18n-html="fwdoc.b10"><th>Ziel</th><th>Regel für den gesperrten Benutzer</th></tr>
+                    <tr data-i18n-html="fwdoc.b11"><td>Loopback (<code>127.0.0.0/8</code>, <code>::1</code>)</td><td>erlaubt</td></tr>
+                    <tr data-i18n-html="fwdoc.b12"><td>Internes LAN (<code>10/8</code>, <code>172.16/12</code>, <code>192.168/16</code>, <code>169.254/16</code>)</td><td>erlaubt – z. B. internes Jira/Confluence</td></tr>
+                    <tr data-i18n-html="fwdoc.b13"><td>DNS (Port 53) zu den konfigurierten Resolvern</td><td>erlaubt (Namensauflösung)</td></tr>
+                    <tr data-i18n-html="fwdoc.b14"><td><b>Alles Übrige (öffentliches Internet)</b></td><td><b>verworfen (DROP)</b></td></tr>
                 </table>
-                <p class="kb-hint">Die Tabelle ist eigenständig und beeinflusst bestehende Regeln (Docker/NAT) nicht. Ein <code>systemd</code>-Dienst (<code>jarvis-egress.service</code>) lädt sie nach jedem Reboot. UID und Resolver werden bei der Einrichtung <b>automatisch erkannt</b> – die Sperre funktioniert dadurch ohne manuelle Anpassung auf jedem Server.</p>
+                <p class="kb-hint" data-i18n-html="fwdoc.b15">Die Tabelle ist eigenständig und beeinflusst bestehende Regeln (Docker/NAT) nicht. Ein <code>systemd</code>-Dienst (<code>jarvis-egress.service</code>) lädt sie nach jedem Reboot. UID und Resolver werden bei der Einrichtung <b>automatisch erkannt</b> – die Sperre funktioniert dadurch ohne manuelle Anpassung auf jedem Server.</p>
 
-                <h3>4. Wer ist betroffen?</h3>
-                <p class="kb-hint">Nur Benutzer <b>ohne</b> Internet-Freigabe (Steuerung unter <i>Sicherheit → Berechtigungen, Spalte „Internet“</i> via <code>ad_internet_users</code>/<code>ad_internet_group</code>). Lokale Administratoren und freigeschaltete Benutzer laufen über den normalen Sandbox-Benutzer <b>mit</b> Internet. Die beiden Ebenen (OS-Sandbox und Egress-Sperre) sind unabhängig schaltbar.</p>
+                <h3 data-i18n-html="fwdoc.b16">4. Wer ist betroffen?</h3>
+                <p class="kb-hint" data-i18n-html="fwdoc.b17">Nur Benutzer <b>ohne</b> Internet-Freigabe (Steuerung unter <i>Sicherheit → Berechtigungen, Spalte „Internet“</i> via <code>ad_internet_users</code>/<code>ad_internet_group</code>). Lokale Administratoren und freigeschaltete Benutzer laufen über den normalen Sandbox-Benutzer <b>mit</b> Internet. Die beiden Ebenen (OS-Sandbox und Egress-Sperre) sind unabhängig schaltbar.</p>
 
-                <h3>5. Einrichtung &amp; Verifikation (in dieser Oberfläche)</h3>
+                <h3 data-i18n-html="fwdoc.b18">5. Einrichtung &amp; Verifikation (in dieser Oberfläche)</h3>
                 <ul>
-                    <li><b>Einrichten / Reparieren</b> (<code>POST /api/security/egress/setup</code>): legt den OS-Benutzer an, schreibt die nftables-Regel + den Autostart-Dienst und setzt die Einstellung. Idempotent.</li>
-                    <li><b>Status prüfen (Live-Test)</b> (<code>GET /api/security/egress?live=1</code>): führt als gesperrter Benutzer einen echten Verbindungsversuch aus und zeigt, ob öffentliches Internet blockiert ist.</li>
-                    <li><b>Deaktivieren</b> (<code>POST /api/security/egress/teardown</code>): entfernt Regel + Autostart und leert die Einstellung. Die Tool-Ebenen-Sperre bleibt aktiv.</li>
+                    <li data-i18n-html="fwdoc.b19"><b>Einrichten / Reparieren</b> (<code>POST /api/security/egress/setup</code>): legt den OS-Benutzer an, schreibt die nftables-Regel + den Autostart-Dienst und setzt die Einstellung. Idempotent.</li>
+                    <li data-i18n-html="fwdoc.b20"><b>Status prüfen (Live-Test)</b> (<code>GET /api/security/egress?live=1</code>): führt als gesperrter Benutzer einen echten Verbindungsversuch aus und zeigt, ob öffentliches Internet blockiert ist.</li>
+                    <li data-i18n-html="fwdoc.b21"><b>Deaktivieren</b> (<code>POST /api/security/egress/teardown</code>): entfernt Regel + Autostart und leert die Einstellung. Die Tool-Ebenen-Sperre bleibt aktiv.</li>
                 </ul>
 
-                <h3>6. Grenzen &amp; Restrisiko</h3>
+                <h3 data-i18n-html="fwdoc.b22">6. Grenzen &amp; Restrisiko</h3>
                 <ul>
-                    <li>DNS zu den internen Resolvern ist erlaubt (nötig für Namensauflösung); ein theoretisches DNS-Tunneling bleibt damit möglich. Für maximale Strenge lässt sich DNS für den gesperrten Benutzer ganz sperren.</li>
-                    <li>Die Einstufung „intern" für Jira/Confluence gilt nur bei self-hostetem Betrieb. Zeigen sie auf eine Cloud (<code>*.atlassian.net</code>), wären sie „Internet" und müssten anders eingestuft werden.</li>
-                    <li>In-Prozess-Tools (Bildersuche, Browser, Google) werden nicht über die Firewall, sondern über die <b>Tool-Ebene</b> gesperrt (Punkt&nbsp;1) – die Firewall betrifft ausschließlich <code>shell_execute</code>.</li>
+                    <li data-i18n-html="fwdoc.b23">DNS zu den internen Resolvern ist erlaubt (nötig für Namensauflösung); ein theoretisches DNS-Tunneling bleibt damit möglich. Für maximale Strenge lässt sich DNS für den gesperrten Benutzer ganz sperren.</li>
+                    <li data-i18n-html="fwdoc.b24">Die Einstufung „intern" für Jira/Confluence gilt nur bei self-hostetem Betrieb. Zeigen sie auf eine Cloud (<code>*.atlassian.net</code>), wären sie „Internet" und müssten anders eingestuft werden.</li>
+                    <li data-i18n-html="fwdoc.b25">In-Prozess-Tools (Bildersuche, Browser, Google) werden nicht über die Firewall, sondern über die <b>Tool-Ebene</b> gesperrt (Punkt&nbsp;1) – die Firewall betrifft ausschließlich <code>shell_execute</code>.</li>
                 </ul>
 
             </div>
@@ -6347,16 +6347,16 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(var(--fg-rgb),0.09);border-radius:10px;background:rgba(var(--fg-rgb),0.02);">
                                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                                         <span style="font-size:1rem;">🔎</span>
-                                        <span style="font-weight:600;font-size:0.9rem;">Verzeichnis-Suche (Service-Konto, optional)</span>
+                                        <span style="font-weight:600;font-size:0.9rem;" data-i18n="security.adbind_h">Verzeichnis-Suche (Service-Konto, optional)</span>
                                     </div>
-                                    <p class="kb-hint" style="margin:0 0 10px;">Für die <b>Durchsuchen</b>-Buttons an den Feldern unten. Ein nur-lesendes Service-Konto ermöglicht komfortables Blättern ohne Passwortabfrage. Leer lassen = beim Durchsuchen wird einmalig ein AD-Passwort abgefragt (wird nicht gespeichert).</p>
+                                    <p class="kb-hint" style="margin:0 0 10px;" data-i18n-html="security.adbind_hint">Für die <b>Durchsuchen</b>-Buttons an den Feldern unten. Ein nur-lesendes Service-Konto ermöglicht komfortables Blättern ohne Passwortabfrage. Leer lassen = beim Durchsuchen wird einmalig ein AD-Passwort abgefragt (wird nicht gespeichert).</p>
                                     <div class="form-group" style="margin-bottom:8px;">
-                                        <label><span>Bind-Benutzer</span><span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;">– z.B. <code>svc-jarvis</code> oder <code>svc-jarvis@domain</code></span></label>
-                                        <input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="text" id="ad-bind-user" autocomplete="off" placeholder="Leer = Passwortabfrage beim Durchsuchen" style="width:60%;box-sizing:border-box;">
+                                        <label><span data-i18n="security.adbind_user">Bind-Benutzer</span><span style="color:var(--text-muted);font-weight:400;font-size:0.78rem;margin-left:6px;" data-i18n-html="security.adbind_user_bsp">– z.B. <code>svc-jarvis</code> oder <code>svc-jarvis@domain</code></span></label>
+                                        <input data-tabfill-nein="beschreibt, was ein LEERES Feld bewirkt – kein Wert" type="text" id="ad-bind-user" autocomplete="off" placeholder="Leer = Passwortabfrage beim Durchsuchen" data-i18n-placeholder="security.adbind_user_ph" style="width:60%;box-sizing:border-box;">
                                     </div>
                                     <div class="form-group" style="margin-bottom:0;">
-                                        <label><span>Bind-Passwort</span></label>
-                                        <input type="password" id="ad-bind-password" autocomplete="new-password" placeholder="•••••• (leer lassen = unverändert)" style="width:60%;box-sizing:border-box;" data-pw-quelle="einstellung" data-pw-kennung="ad_bind_password">
+                                        <label><span data-i18n="security.adbind_pw">Bind-Passwort</span></label>
+                                        <input type="password" id="ad-bind-password" autocomplete="new-password" placeholder="•••••• (leer lassen = unverändert)" data-i18n-placeholder="security.adbind_pw_ph" style="width:60%;box-sizing:border-box;" data-pw-quelle="einstellung" data-pw-kennung="ad_bind_password">
                                         <div id="ad-bind-pw-hint" style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;"></div>
                                     </div>
                                 </div>
@@ -6425,12 +6425,12 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div style="margin:6px 0 4px;padding:12px 14px;border:1px solid rgba(var(--fg-rgb),0.09);border-radius:10px;background:rgba(var(--fg-rgb),0.02);">
                                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                                         <span style="font-size:1rem;">🧱</span>
-                                        <span style="font-weight:600;font-size:0.9rem;">Harte Egress-Sperre (Firewall)</span>
+                                        <span style="font-weight:600;font-size:0.9rem;" data-i18n="security.eg_h">Harte Egress-Sperre (Firewall)</span>
                                     </div>
-                                    <p class="kb-hint" style="margin:0 0 10px;">Ergänzt die Internet-Freigabe in der Tabelle oben um eine <b>Betriebssystem-Firewall</b>: Shell-Befehle von Benutzern <b>ohne</b> Internet-Freigabe laufen als gesperrter OS-Benutzer, der nur internes Netz (LAN, Jira/Confluence), Loopback und DNS erreicht – öffentliches Internet wird verworfen. Das ist die harte Grenze und fängt auch ab, was die Muster-Erkennung verpasst (z.&nbsp;B. rohe Sockets). Einmalige Einrichtung pro Server.</p>
+                                    <p class="kb-hint" style="margin:0 0 10px;" data-i18n-html="security.eg_intro">Ergänzt die Internet-Freigabe in der Tabelle oben um eine <b>Betriebssystem-Firewall</b>: Shell-Befehle von Benutzern <b>ohne</b> Internet-Freigabe laufen als gesperrter OS-Benutzer, der nur internes Netz (LAN, Jira/Confluence), Loopback und DNS erreicht – öffentliches Internet wird verworfen. Das ist die harte Grenze und fängt auch ab, was die Muster-Erkennung verpasst (z. B. rohe Sockets). Einmalige Einrichtung pro Server.</p>
                                     <button type="button" id="sec-fwdoc-btn" class="sec-btn"
-                                            style="margin:0 0 10px;">❓ <span>Funktionsweise &amp; Sicherheitsfeatures</span></button>
-                                    <div id="sec-egress-status" style="font-size:0.82rem;line-height:1.75;margin-bottom:10px;color:var(--text-secondary,#cbd5e1);">Status wird geladen…</div>
+                                            style="margin:0 0 10px;">❓ <span data-i18n="security.eg_doc_btn">Funktionsweise &amp; Sicherheitsfeatures</span></button>
+                                    <div id="sec-egress-status" style="font-size:0.82rem;line-height:1.75;margin-bottom:10px;color:var(--text-secondary,#cbd5e1);"><span class="jv-pkg-spin" aria-hidden="true"></span><span data-i18n="security.status_laedt">Status wird geladen…</span></div>
                                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                                         <button type="button" id="sec-egress-setup" data-i18n="security.egress_setup" class="sec-btn primary">Einrichten / Reparieren</button>
                                         <button type="button" id="sec-egress-verify" data-i18n="security.egress_verify" class="sec-btn">Status prüfen (Live-Test)</button>
@@ -6509,8 +6509,8 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
 
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_ad.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
-                                <script src="/static/js/settings_ad.js?v=10"></script>
-                                <script src="/static/js/settings_idp.js?v=7"></script>
+                                <script src="/static/js/settings_ad.js?v=11"></script>
+                                <script src="/static/js/settings_idp.js?v=8"></script>
                             </div>
                         </div>
 
@@ -6556,7 +6556,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                 <div id="sec-totp-list"></div>
                                 <!-- BSI H4 (CSP ohne Inline-Skript, 2026-10-04): ausgelagert nach js/settings_totp.js,
                                      synchron an derselben Stelle – Zeitpunkt unveraendert. -->
-                                <script src="/static/js/settings_totp.js?v=2"></script>
+                                <script src="/static/js/settings_totp.js?v=3"></script>
                             </div>
                         </div>
 
@@ -6985,11 +6985,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
          den Platz el.onclick wie bisher danach ueberschreiben kann. -->
     <script src="/static/js/settings_bedienung.js?v=9"></script>
     <script src="/static/js/konto_hinweise.js?v=4"></script>
-    <script src="/static/js/pwreveal.js?v=4"></script>
+    <script src="/static/js/pwreveal.js?v=5"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=542"></script>
-    <script src="/static/js/i18n_fr.js?v=17"></script>
-    <script src="/static/js/i18n_nl.js?v=1"></script>
+    <script src="/static/js/i18n.js?v=543"></script>
+    <script src="/static/js/i18n_fr.js?v=18"></script>
+    <script src="/static/js/i18n_nl.js?v=2"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=42"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -7015,14 +7015,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/jira.js?v=35"></script>
     <script src="/static/js/dienst_zugang.js?v=1"></script>
     <!-- sapcert.js VOR sap.js: der Reiter haengt den Baustein beim Laden ein. -->
-    <script src="/static/js/sapcert.js?v=4"></script>
+    <script src="/static/js/sapcert.js?v=5"></script>
     <script src="/static/js/sap.js?v=19"></script>
     <script src="/static/js/vemas.js?v=13"></script>
     <script src="/static/js/email.js?v=14"></script>
     <script src="/static/js/short_tracks_admin.js?v=5"></script>
     <script src="/static/js/ai_mouse_admin.js?v=16"></script>
     <script src="/static/js/feedback_admin.js?v=8"></script>
-    <script src="/static/js/newsfeed.js?v=6"></script>
+    <script src="/static/js/newsfeed.js?v=7"></script>
     <script src="/static/js/newsfeed_admin.js?v=3"></script>
     <script src="/static/js/sql_admin.js?v=10"></script>
     <script src="/static/js/kundenverwaltung.js?v=10"></script>
@@ -7030,13 +7030,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/telemetry.js?v=17"></script>
     <script src="/static/js/branding.js?v=31"></script>
     <script src="/static/js/theme.js?v=3"></script>
-    <script src="/static/js/security_incidents.js?v=53"></script>
-    <script src="/static/js/fernzugang.js?v=6"></script>
+    <script src="/static/js/security_incidents.js?v=54"></script>
+    <script src="/static/js/fernzugang.js?v=7"></script>
     <script src="/static/js/mailversand.js?v=8"></script>
-    <script src="/static/js/totp_admin.js?v=6"></script>
+    <script src="/static/js/totp_admin.js?v=7"></script>
     <script src="/static/js/ldap_picker.js?v=18"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
-    <script src="/static/js/rechte_matrix.js?v=9"></script>
+    <script src="/static/js/rechte_matrix.js?v=10"></script>
     <script src="/static/js/excel_admin.js?v=9"></script>
     <script src="/static/js/modal_expand.js?v=3"></script>
     <script src="/static/js/sessions.js?v=10"></script>

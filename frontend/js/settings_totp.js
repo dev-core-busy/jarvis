@@ -24,15 +24,15 @@
             const d = await r.json();
             setupEl.style.display = 'none';
             if (d.enabled) {
-                statusEl.innerHTML = '<p style="color:var(--success);font-size:0.85rem;">' + window.t('security.totp_enabled_msg') + '</p>';
+                statusEl.innerHTML = '<p data-i18n="security.totp_enabled_msg" style="color:var(--success);font-size:0.85rem;">' + window.t('security.totp_enabled_msg') + '</p>';
                 startBtn.style.display = 'none';
                 disableEl.style.display = '';
             } else {
-                statusEl.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">' + window.t('security.totp_disabled_msg') + '</p>';
+                statusEl.innerHTML = '<p data-i18n="security.totp_disabled_msg" style="color:var(--text-secondary);font-size:0.85rem;">' + window.t('security.totp_disabled_msg') + '</p>';
                 disableEl.style.display = 'none';
                 startBtn.style.display = '';
             }
-        } catch(e) { statusEl.innerHTML = '<p style="color:var(--danger);font-size:0.85rem;">' + window.t('security.totp_error_load') + '</p>'; }
+        } catch(e) { statusEl.innerHTML = '<p data-i18n="security.totp_error_load" style="color:var(--danger);font-size:0.85rem;">' + window.t('security.totp_error_load') + '</p>'; }
 
         startBtn.onclick = async function() {
             errEl.textContent = '';
@@ -41,7 +41,7 @@
                 const sr = await fetch('/api/auth/totp/setup', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t } });
                 const sd = await sr.json();
                 if (!sr.ok || !sd.qr_code) { errEl.textContent = sd.error || window.t('security.totp_error_load'); return; }
-                statusEl.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">' + window.t('security.totp_scan_hint') + '</p>';
+                statusEl.innerHTML = '<p data-i18n="security.totp_scan_hint" style="color:var(--text-secondary);font-size:0.85rem;">' + window.t('security.totp_scan_hint') + '</p>';
                 document.getElementById('totp-settings-qr').innerHTML = '<img src="' + sd.qr_code + '" style="border-radius:8px;">';
                 document.getElementById('totp-settings-secret').textContent = sd.secret;
                 document.getElementById('totp-settings-code').value = '';

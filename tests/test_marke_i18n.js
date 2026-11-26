@@ -71,6 +71,16 @@ const AUSNAHMEN = {
     'cert.pbrowser.4':                  'die Datei heisst jarvis.cer (Content-Disposition)',
     'cert.win.step1':                   'die Datei heisst jarvis.cer (Content-Disposition)',
     'cert.browser.step4':               'die Datei heisst jarvis.cer (Content-Disposition)',
+    // Hilfe-Popups des Sicherheits-Reiters (seit 2026-11-26 uebersetzt, vorher
+    // fester Markup-Text): technische Kennungen, die auf dem Server so heissen.
+    'security.adbind_user_bsp':         'Beispiel-Dienstkonto svc-jarvis im Kunden-AD (wie bisher im Markup)',
+    'secdoc.b04':                       'Linux-Konto jarvis in ALLOWED_USERS',
+    'secdoc.b10':                       'Pfad /mnt/jarvis-kb',
+    'secdoc.b19':                       'OS-Benutzer jarvis_sandbox, nftables-Tabelle jarvis_sandbox_lo',
+    'secdoc.b44':                       'OS-Benutzer jarvis_sandbox',
+    'secdoc.b49':                       'Dienstname jarvis-broker.service',
+    'fwdoc.b09':                        'OS-Benutzer jarvis_sandbox_noinet, nftables-Tabelle jarvis_egress',
+    'fwdoc.b15':                        'Dienstname jarvis-egress.service',
 };
 
 /* Nicht-DOM-Senken: dort wirkt der TreeWalker von branding.js nicht. */

@@ -96,6 +96,15 @@
             });
             sel.value = d.oidc_namensclaim || 'preferred_username';
         }
+        texte(d);
+    }
+
+    // Die Texte aus dem Stand – eigene Funktion, damit ein Sprachwechsel sie
+    // nachziehen kann, ohne die Felder neu zu schreiben (eine begonnene Eingabe
+    // bliebe sonst nicht stehen).
+    var _letzt = null;
+    function texte(d) {
+        _letzt = d;
         var st = $('idp-secret-status');
         if (st) {
             st.textContent = !d.client_secret_gesetzt
@@ -189,7 +198,16 @@
         if ($('idp-aktiv')) $('idp-aktiv').addEventListener('change', modusZeile);
     }
 
-    function start() { containerVerdrahten(); }
+    function start() {
+        containerVerdrahten();
+        // Nur bei echtem Wechsel: applyLang() feuert das Ereignis auch ohne.
+        var sprache = window._lang;
+        window.addEventListener('jarvis-lang-changed', function () {
+            if (window._lang === sprache) return;
+            sprache = window._lang;
+            if (_letzt) texte(_letzt);
+        });
+    }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
 

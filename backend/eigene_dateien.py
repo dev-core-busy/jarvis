@@ -46,7 +46,9 @@ from pathlib import Path
 # sehen im Waechter denselben Sandkasten)
 W = os.environ.get("JARVIS_AIDE_WURZEL", "")
 
-PFADE = ("/etc/jarvis/broker.conf", "/etc/jarvis/broker-policy.json", "/etc/jarvis/broker-freigabe.state")
+PFADE = ("/etc/jarvis/broker.conf", "/etc/jarvis/broker-policy.json", "/etc/jarvis/broker-freigabe.state",
+         # Ausgangsfilter (D1): Konfiguration aus der Oberflaeche, Satz aus ausgang.sh
+         "/etc/jarvis/ausgang.conf", "/etc/jarvis/ausgang.nft")
 # Im (AIDE-ausgenommenen, root-eigenen 0700) Zustandsverzeichnis des Abgleichs
 ZUSTAND_DIR = "/var/lib/jarvis-aide"
 REGISTER = ZUSTAND_DIR + "/eigene.json"

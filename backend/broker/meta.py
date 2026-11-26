@@ -123,6 +123,27 @@ def _behandeln(op: str, args: dict, peer: str = "") -> dict | None:
         policy.audit(by, op, audit_key, "executed" if erg.get("ok") else "fehler",
                      rc=erg.get("rc"), detail=str(erg.get("meldung", ""))[:200], peer=peer)
         return erg
+    # ── Ausgangsfilter (Haertung D1, Regeln in deploy/security/ausgang.sh) ──
+    if op == "broker.ausgang_status":
+        from backend.broker import ausgang
+        return ausgang.status(args.get("stunden", ausgang.STUNDEN_VORGABE))
+    # pruefen schreibt nichts (Wegwerf-Kopie) und braucht keinen Code;
+    # speichern und entfernen entscheiden, was der Server nach aussen darf.
+    if op == "broker.ausgang":
+        from backend.broker import ausgang
+        aktion = str(args.get("aktion", ""))
+        audit_key = f"{op}:{aktion}"
+        if aktion == "pruefen":
+            return ausgang.pruefen(args.get("text"))
+        if aktion not in ("speichern", "entfernen"):
+            return {"ok": False, "meldung": f"Unbekannte Aktion: {aktion[:40]}"}
+        fehler = _nachweis(args, by, op, audit_key, peer)
+        if fehler:
+            return fehler
+        erg = ausgang.speichern(args.get("text")) if aktion == "speichern" else ausgang.entfernen()
+        policy.audit(by, op, audit_key, "executed" if erg.get("ok") else "fehler",
+                     rc=erg.get("rc"), detail=str(erg.get("meldung", ""))[:200], peer=peer)
+        return erg
     # Schluessel hinterlegen/entfernen: IMMER mit Code – ein Schluessel ist ein
     # dauerhafter Weg zu root, der Jarvis ueberlebt (Schranken in fernzugang.py)
     if op == "broker.ssh_schluessel":

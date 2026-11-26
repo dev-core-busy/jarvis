@@ -56,6 +56,14 @@ PROBEN = [
     ("SSH: Folgelauf zaehlt dieselbe Verbindung erneut", "ue",
      'if v["schluessel"] not in gezaehlt]', "]", 1),
     ("Ausgang Dienstbenutzer nur Warnung", "ue", '("out_dienst", "alarm",', '("out_dienst", "warnung",', 1),
+    # Ausgangsfilter (D1, 26.11.2026)
+    ("Ausgangsfilter: verworfener Dienst nur Warnung", "ue", '("aus_dienst", "alarm",', '("aus_dienst", "warnung",', 1),
+    ("Ausgangsfilter: Zeilen werden uebersehen", "ue",
+     '_NFT = re.compile(r"nft-(?:(?P<r>in|out|fwd)-drop|aus-(?P<a>drop|frei)): ")',
+     '_NFT = re.compile(r"nft-(?:(?P<r>in|out|fwd)-drop|(?P<a>NIE)): ")', 1),
+    ("Ausgangsfilter: Dienst nicht erkannt", "ue",
+     '            art = "aus_dienst" if uid_dienst is not None and z["uid"] == str(uid_dienst) else "aus_drop"',
+     '            art = "aus_drop"', 1),
     # AIDE-Abgleich (24.11.2026)
     ("AIDE: offener Abgleich stumm", "ue", '        if a.get("zustand") == "offen":', '        if False:', 1),
     ("AIDE: gescheiterter Abgleich stumm", "ue", '        elif a.get("zustand") == "fehler":', '        elif False:', 1),

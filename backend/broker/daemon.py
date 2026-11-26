@@ -25,6 +25,9 @@ Meta-Operationen (Admin-UI), Regeln in backend/broker/meta.py:
 - broker.ssh_schluessel – {aktion: hinzufuegen|entfernen, konto, schluessel|fingerabdruck, nachweis}
 - broker.rdp_status     – RDP (xrdp/3389): erlaubt, installiert, laeuft, im Filter frei
 - broker.rdp            – {aktion: an|aus[, nachweis]}; "an" nur mit Freigabe-Code
+- broker.ausgang_status – Ausgangsfilter (D1): Konfiguration, geladen, Protokoll {stunden}
+- broker.ausgang        – {aktion: pruefen|speichern|entfernen, text, nachweis};
+                          speichern/entfernen nur mit Freigabe-Code (ausgang.py)
 - broker.mailversand_status – E-Mail-Versand: Postfix, Empfaenger, Relay, Quellen
 - broker.mailversand     – {aktion: einrichten|speichern|test, …}; ohne Freigabe-Code
 - broker.mail_melden     – {art, benutzer, kanal, muster, ip, anzahl}: Sicherheitsmeldung

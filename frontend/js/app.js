@@ -995,6 +995,8 @@
                     if (window.RdpSchalter) window.RdpSchalter.onShow();
                     // E-Mail-Versand (mailversand.js) – dieselbe Lage
                     if (window.MailVersand) window.MailVersand.onShow();
+                    // Ausgangsfilter (ausgangsfilter.js) – dieselbe Lage
+                    if (window.Ausgangsfilter) window.Ausgangsfilter.onShow();
                     if (window.agentKeysOnShow) window.agentKeysOnShow();
                 } else if (target === 'instructions' && tabInstructions) {
                     tabInstructions.style.display = '';

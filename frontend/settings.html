@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/static/css/update_widget.css?v=10">
     <link rel="stylesheet" href="/static/vendor/clippy/clippy.css?v=1">
     <link rel="stylesheet" href="/static/css/avatar.css?v=11">
-    <link rel="stylesheet" href="/static/css/style.css?v=244">
+    <link rel="stylesheet" href="/static/css/style.css?v=245">
     <link rel="stylesheet" href="/static/css/chat-bubbles.css?v=7">
     <!-- Feedback-Reiter. EINE Datei fuer /settings und /feedback: Tabelle,
          Sterne und Abgabe-Karte werden an beiden Orten gebraucht, zwei
@@ -2096,6 +2096,36 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
                                     <button type="button" id="rdp-schliessen" class="sec-btn danger" style="display:none;margin-top:4px;" data-i18n="rdp.schliessen">Jetzt schließen</button>
                                     <div id="rdp-result" class="sec-ssh-result" style="display:none;margin-top:8px;"></div>
                                     <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n="rdp.hinweis">Erlaubt die Anmeldung am Server-Desktop mit einem Remote-Desktop-Programm (z. B. „Remotedesktopverbindung“ unter Windows) über Port 3389. Ausgeschaltet ist der Dienst angehalten und der Port in der Firewall geschlossen; eine laufende Remote-Desktop-Sitzung wird dabei getrennt. Zum Einschalten brauchst du den Freigabe-Code der Root-Freigaben. Der Desktop in der Weboberfläche ist davon nicht betroffen.</small>
+                                </div>
+
+                                <!-- Ausgangsfilter (Haertung D1): Freigaben fuer Verbindungen
+                                     nach aussen ansehen und bearbeiten. Logik: ausgangsfilter.js
+                                     (window.Ausgangsfilter), Broker: backend/broker/ausgang.py,
+                                     Regeln: deploy/security/ausgang.sh. Speichern und Entfernen
+                                     brauchen den Freigabe-Code, Pruefen nicht. -->
+                                <div class="tuning-group" id="ausgangsfilter">
+                                    <h4 class="tuning-group-title" data-i18n="af.titel">Verbindungen nach außen (Ausgangsfilter)</h4>
+                                    <div id="af-status" class="kb-hint" style="margin:0 0 6px;" data-i18n="af.laedt">Status wird geladen…</div>
+                                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 8px;">
+                                        <label for="af-modus" style="font-size:0.82rem;color:var(--text-secondary);" data-i18n="af.modus">Modus</label>
+                                        <select id="af-modus" style="width:auto;">
+                                            <option value="protokoll" data-i18n="af.modus_protokoll">Nur aufzeichnen (nichts wird gesperrt)</option>
+                                            <option value="sperre" data-i18n="af.modus_sperre">Sperren (Verbindungen ohne Freigabe werden verworfen)</option>
+                                        </select>
+                                    </div>
+                                    <div style="font-size:0.82rem;font-weight:600;margin:6px 0 4px;" data-i18n="af.freigaben">Freigaben</div>
+                                    <div id="af-freigaben" class="af-box"></div>
+                                    <button type="button" id="af-neu" class="sec-btn small" style="margin-top:6px;" data-i18n="af.neu">+ Freigabe</button>
+                                    <div style="font-size:0.82rem;font-weight:600;margin:12px 0 4px;" data-i18n="af.ohne">Verbindungen ohne Freigabe (letzte 24 Stunden)</div>
+                                    <div id="af-treffer" class="af-box"></div>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                                        <button type="button" id="af-pruefen" class="sec-btn" data-i18n="af.pruefen">Prüfen</button>
+                                        <button type="button" id="af-speichern" class="sec-btn primary" data-i18n="af.speichern">Speichern und anwenden</button>
+                                        <button type="button" id="af-entfernen" class="sec-btn danger" style="display:none;" data-i18n="af.entfernen">Filter entfernen</button>
+                                        <button type="button" id="af-neu-laden" class="sec-btn" data-i18n="af.neu_laden">Neu laden</button>
+                                    </div>
+                                    <div id="af-result" class="sec-ssh-result" style="display:none;margin-top:8px;"></div>
+                                    <small class="tab-note" style="opacity:0.7;display:block;margin-top:6px;" data-i18n-html="af.hinweis">Legt fest, wohin der Server Verbindungen aufbauen darf – je Benutzerkonto, Protokoll, Port und Ziel. <b>Benutzer</b>: Kontoname, uid oder „alle“ (nötig für Netzlaufwerke, die der Kernel selbst verbindet). <b>Ports</b>: z. B. „443“, „22,443“, „8000-8100“ oder „-“ für alle. <b>Ziele</b>: IPv4-Adressen oder Netze, kommagetrennt, oder „*“ für jedes Ziel. Zuerst im Modus „Nur aufzeichnen“ betreiben und die Liste darunter leeren, erst dann sperren. Speichern und Entfernen brauchen den Freigabe-Code der Root-Freigaben.</small>
                                 </div>
 
                                 <!-- Sicherheitslücken-Prüfung (CVE): Vorgaben für die
@@ -6987,9 +7017,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/konto_hinweise.js?v=4"></script>
     <script src="/static/js/pwreveal.js?v=5"></script>
     <script src="/static/js/auswahlliste.js?v=1"></script>
-    <script src="/static/js/i18n.js?v=545"></script>
-    <script src="/static/js/i18n_fr.js?v=19"></script>
-    <script src="/static/js/i18n_nl.js?v=3"></script>
+    <script src="/static/js/i18n.js?v=546"></script>
+    <script src="/static/js/i18n_fr.js?v=20"></script>
+    <script src="/static/js/i18n_nl.js?v=4"></script>
 <script src="/static/js/tabfill.js?v=5"></script>
     <script src="/static/js/cron.js?v=42"></script>
     <!-- context.js entfiel 2026-08-05 mit dem Abschnitt „Kontext / History" -->
@@ -7033,6 +7063,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/security_incidents.js?v=55"></script>
     <script src="/static/js/fernzugang.js?v=7"></script>
     <script src="/static/js/mailversand.js?v=8"></script>
+    <script src="/static/js/ausgangsfilter.js?v=1"></script>
     <script src="/static/js/totp_admin.js?v=7"></script>
     <script src="/static/js/ldap_picker.js?v=18"></script>
     <script src="/static/js/freigabe_dialog.js?v=3"></script>
@@ -7057,7 +7088,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Jarvis CA" -i jarvis-ca.crt
     <script src="/static/js/settings_search.js?v=6"></script>
     <script src="/static/js/loeschkonzept.js?v=3"></script>
     <script src="/static/js/wissensgraph_steuerung.js?v=2"></script>
-    <script src="/static/js/app.js?v=277"></script>
+    <script src="/static/js/app.js?v=278"></script>
 <!-- Avatar-Assistent (nur aktiv, wenn der Avatar-Skill eingeschaltet ist) -->
 <script src="/static/vendor/clippy/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/clippy/clippy.min.js"></script>

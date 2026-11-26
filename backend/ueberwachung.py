@@ -17,6 +17,10 @@ WAS GEPRUEFT WIRD (alle 5 Minuten, jarvis-ueberwachung.timer, als root)
   Warnung; von den Sandbox-Benutzern ein Hinweis (dafuer gibt es die Sperre).
   ``nft-in-drop`` ist ein Hinweis mit Zaehler; ist die Drossel (5/min) in
   einem Lauf nahezu ausgeschoepft, eine Warnung.
+* Ausgangsfilter (D1, ``deploy/security/ausgang.sh``): ``nft-aus-drop``
+  (Sperrmodus) vom Dienstbenutzer ist ein ALARM – eine Funktion faellt aus,
+  weil ihr eine Freigabe fehlt; von anderen Benutzern eine Warnung.
+  ``nft-aus-frei`` (Protokollmodus, nichts verworfen) ist ein Hinweis.
 
 EREIGNISSE BLEIBEN 24 STUNDEN SICHTBAR
 --------------------------------------
@@ -79,7 +83,7 @@ ERINNERN_S = 24 * 3600       # anhaltender Alarm: Erinnerung im Journal
 # Vorgaben – ueberschreibbar in KONF_DATEI (root-eigen, siehe konf_laden)
 VORGABE = {
     "DIENSTE": ("jarvis.service jarvis-broker.service jarvis-firewall.service "
-                "jarvis-egress.service whatsapp-bridge.service auditd.service "
+                "jarvis-egress.service jarvis-ausgang.service whatsapp-bridge.service auditd.service "
                 "ssh.service chrony.service sentinelone.service"),
     "PFADE": "/ /var/log",
     "PLATZ_WARNUNG": "15",
@@ -189,7 +193,7 @@ def _mit_kennung(msg: str, kennung) -> str:
     ``nft-out-drop`` und den Rest; das Praefix fehlt dann im Text (auf DEV
     gemessen 2026-11-20). Echte Firewall-Zeilen tragen es im Text. Fuer die
     Auswertung wird beides gleich: Kennung wieder voran."""
-    if isinstance(kennung, str) and re.fullmatch(r"nft-(?:in|out|fwd)-drop", kennung) \
+    if isinstance(kennung, str) and re.fullmatch(r"nft-(?:(?:in|out|fwd)-drop|aus-(?:drop|frei))", kennung) \
             and not msg.startswith(kennung + ":"):
         return kennung + ": " + msg
     return msg
@@ -315,7 +319,9 @@ def ssh_fehlversuche(eintraege: list[dict]) -> list[dict]:
     return [dict(v, schluessel=k) for k, v in verb.items() if v["fehl"] and not v["ok"]]
 
 
-_NFT = re.compile(r"nft-(?P<r>in|out|fwd)-drop: ")
+# Ausgangsfilter (D1, deploy/security/ausgang.sh): nft-aus-drop im Sperrmodus,
+# nft-aus-frei im Protokollmodus (nichts verworfen, nur aufgezeichnet)
+_NFT = re.compile(r"nft-(?:(?P<r>in|out|fwd)-drop|aus-(?P<a>drop|frei)): ")
 
 
 def nft_zeilen(eintraege: list[dict]) -> list[dict]:
@@ -325,7 +331,7 @@ def nft_zeilen(eintraege: list[dict]) -> list[dict]:
         if not m:
             continue
         felder = dict(re.findall(r"\b([A-Z]+)=(\S*)", e["msg"][m.end():]))
-        aus.append({"richtung": m.group("r"), "zeit": e["zeit"], "src": felder.get("SRC", ""),
+        aus.append({"richtung": m.group("r") or "aus_" + m.group("a"), "zeit": e["zeit"], "src": felder.get("SRC", ""),
                     "dst": felder.get("DST", ""), "dpt": felder.get("DPT", ""),
                     "uid": felder.get("UID", "")})
     return aus
@@ -419,11 +425,16 @@ def auswerten(eing: dict, vorher: dict, konf: dict, jetzt: float) -> tuple[dict,
         if z["richtung"] == "out":
             art = "out_dienst" if uid_dienst is not None and z["uid"] == str(uid_dienst) else \
                 "out_sandbox" if z["uid"] in sandbox else "out_fremd"
+        elif z["richtung"] == "aus_drop":
+            # Sperrmodus: der Dienst selbst abgewiesen = eine Funktion faellt aus
+            art = "aus_dienst" if uid_dienst is not None and z["uid"] == str(uid_dienst) else "aus_drop"
+        elif z["richtung"] == "aus_frei":
+            art = "aus_frei"
         else:
             art = z["richtung"] + "_drop"
         e = zaehl.setdefault(art, {"zeit": jetzt, "art": art, "anzahl": 0, "ziele": [], "uids": []})
         e["anzahl"] += 1
-        ziel = "%s:%s" % (z["dst"] if z["richtung"] == "out" else z["src"], z["dpt"])
+        ziel = "%s:%s" % (z["dst"] if z["richtung"] in ("out", "aus_drop", "aus_frei") else z["src"], z["dpt"])
         if ziel not in e["ziele"] and len(e["ziele"]) < 10:
             e["ziele"].append(ziel)
         if z["uid"] and z["uid"] not in e["uids"]:
@@ -457,13 +468,16 @@ def auswerten(eing: dict, vorher: dict, konf: dict, jetzt: float) -> tuple[dict,
             ("out_dienst", "alarm", "Der Dienstbenutzer wollte ins Netz und wurde abgewiesen: %d Pakete in 24 h, Ziele %s"),
             ("out_fremd", "warnung", "Abgewiesene Verbindungen eines unerwarteten Benutzers (UID %s): %d Pakete in 24 h"),
             ("out_sandbox", "info", "Abgewiesene Internetzugriffe der Sandbox: %d Pakete in 24 h"),
-            ("fwd_drop", "info", "Verworfene weitergeleitete Pakete: %d in 24 h")):
+            ("fwd_drop", "info", "Verworfene weitergeleitete Pakete: %d in 24 h"),
+            ("aus_dienst", "alarm", "Der Ausgangsfilter hat Verbindungen des Dienstbenutzers verworfen: %d Pakete in 24 h, Ziele %s"),
+            ("aus_drop", "warnung", "Der Ausgangsfilter hat Verbindungen ohne Freigabe verworfen: %d Pakete in 24 h, Ziele %s"),
+            ("aus_frei", "info", "Verbindungen ohne Freigabe (nur aufgezeichnet): %d in 24 h, Ziele %s")):
         n, es = summe(art)
         if not n:
             continue
         ziele = sorted({z for e in es for z in e.get("ziele", [])})[:10]
         uids = sorted({u for e in es for u in e.get("uids", [])})
-        if art == "out_dienst":
+        if art in ("out_dienst", "aus_dienst", "aus_drop", "aus_frei"):
             text = satz % (n, ", ".join(ziele))
         elif art == "out_fremd":
             text = satz % (", ".join(uids), n)

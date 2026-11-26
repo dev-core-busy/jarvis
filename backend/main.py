@@ -11412,6 +11412,51 @@ async def broker_rdp(request: Request, user: str = Depends(require_local_auth)):
                         status_code=200 if res.get("ok") else 409)
 
 
+@app.get("/api/broker/ausgang/status")
+async def broker_ausgang_status(request: Request, user: str = Depends(require_local_auth)):
+    """Ausgangsfilter (Haertung D1): Konfiguration als Text und zerlegt, geladen/
+    Policy, Boot-Unit und die Protokollzeilen ohne Freigabe der letzten Stunden
+    (?stunden=, Vorgabe 24), je Benutzer/Ziel/Port gezaehlt. Liest nur (Admin)."""
+    try:
+        stunden = int(request.query_params.get("stunden") or 24)
+    except ValueError:
+        stunden = 24
+    from backend import broker_client
+    res = await broker_client.call("broker.ausgang_status", {"stunden": stunden}, user=user, timeout=90)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "error": res.get("error", "Broker nicht erreichbar")},
+                            status_code=502)
+    res.pop("type", None)
+    return JSONResponse(res)
+
+
+@app.post("/api/broker/ausgang")
+async def broker_ausgang(request: Request, user: str = Depends(require_local_auth)):
+    """Ausgangsfilter pruefen/speichern/entfernen (Admin). Body: {aktion:
+    pruefen|speichern|entfernen, text, nachweis}. speichern und entfernen brauchen
+    den Freigabe-Code (der BROKER prueft ihn); pruefen schreibt nichts."""
+    try:
+        body = await _json_objekt(request)
+    except Exception:  # noqa: BLE001
+        body = {}
+    aktion = str(body.get("aktion") or "").strip()
+    if aktion not in ("pruefen", "speichern", "entfernen"):
+        return JSONResponse({"ok": False, "error": "aktion: pruefen|speichern|entfernen"}, status_code=400)
+    text = body.get("text")
+    args = {"aktion": aktion, "by": user,
+            "text": text[:20000] if isinstance(text, str) else "",
+            "nachweis": str(body.get("nachweis") or "").strip()[:12]}
+    from backend import broker_client
+    res = await broker_client.call("broker.ausgang", args, user=user, timeout=180)
+    if not res.get("ok") and res.get("grund"):
+        return JSONResponse({"ok": False, "grund": res.get("grund"),
+                             "error": res.get("error", "")}, status_code=403)
+    return JSONResponse({"ok": bool(res.get("ok")), "rc": res.get("rc"),
+                         "meldung": res.get("meldung") or res.get("error", ""),
+                         "regeln": res.get("regeln"), "zurueck": bool(res.get("zurueck"))},
+                        status_code=200 if res.get("ok") else 409)
+
+
 @app.get("/api/broker/mailversand/status")
 async def broker_mailversand_status(request: Request, user: str = Depends(require_local_auth)):
     """E-Mail-Versand (backend/mail_meldung.py): Postfix installiert/aktiv, lauscht

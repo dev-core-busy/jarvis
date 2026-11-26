@@ -177,6 +177,25 @@ pruefe(ids(s) == {"in_drop": "info"}, "einige nft-in-drop: Hinweis")
 grenze = int(float(KONF["IN_WARNUNG"]))
 s, _ = ue.auswerten(eingabe(kern=j(*[IN] * grenze)), {}, KONF, JETZT)
 pruefe(ids(s).get("in_drop") == "warnung", "Drossel ausgeschoepft (%d in einem Lauf): Warnung" % grenze)
+# Ausgangsfilter (D1): nft-aus-drop (Sperrmodus) und nft-aus-frei (Protokollmodus)
+AUS = ("nft-aus-%s: IN= OUT=ens192 SRC=192.0.2.10 DST=198.51.100.7 LEN=60 TOS=0x00 PREC=0x00 TTL=64 "
+       "ID=3 DF PROTO=TCP SPT=40001 DPT=8443 WINDOW=64240 RES=0x00 SYN URGP=0 UID=%s GID=%s")
+z = ue.nft_zeilen(j(AUS % ("drop", 1001, 1001), AUS % ("frei", 0, 0)))
+pruefe(len(z) == 2 and z[0]["richtung"] == "aus_drop" and z[1]["richtung"] == "aus_frei"
+       and z[0]["dst"] == "198.51.100.7" and z[1]["uid"] == "0",
+       "nft-aus-Zeilen zerlegt (Wirkung, Ziel, UID)")
+zerlegt = AUS % ("drop", 1001, 1001)
+pruefe(ue._mit_kennung(zerlegt[len("nft-aus-drop: "):], "nft-aus-drop") == zerlegt,
+       "von journald zerlegte nft-aus-Zeile wird wieder vollstaendig")
+s, _ = ue.auswerten(eingabe(kern=j(AUS % ("drop", 1001, 1001))), {}, KONF, JETZT)
+pruefe(ids(s).get("aus_dienst") == "alarm" and "198.51.100.7:8443" in
+       next((b["werte"].get("ziele", []) for b in s["befunde"] if b["id"] == "aus_dienst"), []),
+       "nft-aus-drop vom Dienstbenutzer: ALARM mit Ziel")
+s, _ = ue.auswerten(eingabe(kern=j(AUS % ("drop", 4242, 4242))), {}, KONF, JETZT)
+pruefe(ids(s) == {"aus_drop": "warnung"}, "nft-aus-drop eines anderen Benutzers: Warnung (%s)" % ids(s))
+s, _ = ue.auswerten(eingabe(kern=j(*[AUS % ("frei", 0, 0)] * 3)), {}, KONF, JETZT)
+pruefe(ids(s) == {"aus_frei": "info"} and next((b["werte"]["anzahl"] for b in s["befunde"] if b["id"] == "aus_frei"), 0) == 3,
+       "nft-aus-frei (nur aufgezeichnet): Hinweis mit Zaehler")
 
 # ── 3. Dienste ───────────────────────────────────────────────────────────────
 print("[3] Dienste")
@@ -194,6 +213,7 @@ s, _ = ue.auswerten(eingabe(fehlgeschlagen=["x.timer", "y.service"]), {}, KONF, 
 pruefe(ids(s) == {"failed": "warnung"}, "Units im Zustand failed: Warnung")
 dienste_vorgabe = set(ue.VORGABE["DIENSTE"].split())
 pruefe({"jarvis.service", "jarvis-broker.service", "jarvis-firewall.service", "jarvis-egress.service",
+        "jarvis-ausgang.service",
         "auditd.service", "ssh.service"} <= dienste_vorgabe,
        "Vorgabe umfasst Dienst, Broker, Firewall, Ausgangsfilter, auditd, ssh")
 

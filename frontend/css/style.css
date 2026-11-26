@@ -5666,6 +5666,12 @@ body.light .kb-cl-spanne { color: #5b6678; }
     color: var(--text-primary); white-space: pre-wrap; word-break: break-word; }
 .sec-ssh-result.ok     { border-color: rgba(var(--success-rgb), 0.5); background: rgba(var(--success-rgb), 0.08); }
 .sec-ssh-result.fehler { border-color: rgba(var(--danger-rgb), 0.5);  background: rgba(var(--danger-rgb), 0.08); }
+/* Ausgangsfilter (ausgangsfilter.js): Tabellen mit Eingabefeldern, waagerecht
+   rollbar statt die Spalten zu quetschen */
+.af-box { overflow-x: auto; }
+.af-tabelle input, .af-tabelle select { width: 100%; min-width: 70px; box-sizing: border-box;
+    padding: 3px 6px; font-size: 0.78rem; }
+.af-tabelle td { vertical-align: middle; }
 
 /* Zustände */
 .kb-loading {

@@ -409,6 +409,20 @@ regeln_setzen() {
     done
 }
 
+# Die Regeln hat regeln_setzen(_nft) schon geladen; persistieren() aktiviert die
+# Unit fuer den naechsten Boot. Ohne Start stand sie bis dahin als "aktiviert,
+# laeuft aber nicht (inactive)" da, und die Serverueberwachung meldete einen
+# Ausfall, den es nicht gab (frisch installierte VM, 2026-11-26). Der Start laedt
+# die eben gespeicherte Datei erneut: die nft-Datei loescht und legt ihre Tabelle
+# in EINER Transaktion an, iptables-restore ersetzt die Tabellen – beides ohne
+# Luecke und ohne Verdopplung. Eine schon laufende Unit bleibt unberuehrt. Ein
+# gescheiterter Start bricht nicht ab: die Regeln stehen bereits.
+_unit_starten() {
+    systemctl is-active --quiet jarvis-firewall.service && return 0
+    systemctl start jarvis-firewall.service >/dev/null 2>&1 \
+        || echo "WARNUNG: jarvis-firewall.service liess sich nicht starten – die Regeln sind trotzdem geladen (systemctl status jarvis-firewall)." >&2
+}
+
 persistieren() {
     # Kein netfilter-persistent installiert – die Regeln werden beim Boot aus
     # der gespeicherten Datei geladen. Eigene Unit statt eines Eintrags in
@@ -439,6 +453,7 @@ WantedBy=sysinit.target
 UNIT2
         systemctl daemon-reload
         systemctl enable jarvis-firewall.service >/dev/null 2>&1
+        _unit_starten
         echo "Regeln gespeichert (/etc/jarvis/firewall.nft) + Unit aktiviert."
         return
     fi
@@ -467,6 +482,7 @@ WantedBy=sysinit.target
 UNIT
     systemctl daemon-reload
     systemctl enable jarvis-firewall.service >/dev/null 2>&1
+    _unit_starten
     echo "Regeln gespeichert (/etc/jarvis/firewall-v*.rules) + Unit aktiviert."
 }
 

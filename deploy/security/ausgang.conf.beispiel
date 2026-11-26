@@ -1,0 +1,35 @@
+# Vorlage fuer /etc/jarvis/ausgang.conf (Ausgangsfilter, Haertung D1).
+# Platzhalter: 192.0.2.x / 198.51.100.x (RFC 5737). Echte Adressen stehen nur
+# auf dem Server. Erzeugt wird der Satz mit deploy/security/ausgang.sh.
+#
+# Erst MODUS=protokoll: nichts wird verworfen, Unbekanntes landet im Journal
+# (journalctl -k | grep nft-aus-frei). Erst danach MODUS=sperre.
+MODUS=protokoll
+
+# Namensaufloesung und Zeit (interne Server)
+erlaube alle         udp  53      192.0.2.53,192.0.2.54
+erlaube _chrony      udp  123     192.0.2.123
+
+# Netzwerkfreigaben: der Kernel baut CIFS selbst auf, ohne Socket-Eigentuemer –
+# deshalb "alle", aber nur zu den Dateiservern
+erlaube alle         tcp  445     192.0.2.45,192.0.2.46
+
+# Dienst: nach aussen nur 22/443, intern jedes Ziel und jeder Port. Endpunkte
+# aus den Einstellungen (Modelle, LDAP, Freigaben) kommen und gehen – eine
+# Liste einzelner Ports blockierte jeden neuen, bis ihn jemand nachtraegt
+# (Festlegung Betreiber 2026-11-26).
+erlaube jarvis       tcp  22,443  *
+erlaube jarvis       tcp  -       192.0.2.0/24
+
+# Paketquellen (apt laeuft als _apt)
+erlaube _apt         tcp  80,443  *
+
+# Mail ueber das interne Relay
+erlaube postfix      tcp  25      192.0.2.25
+
+# Administration: Ping ins eigene Netz, Mail nur ueber das Relay
+erlaube admin        icmp -       192.0.2.0/24
+erlaube admin        tcp  25,587  192.0.2.25
+
+# root: Update per Git (Port 22)
+erlaube root         tcp  22      *

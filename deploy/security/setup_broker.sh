@@ -125,15 +125,38 @@ systemctl enable jarvis-broker.service >/dev/null 2>&1
 systemctl restart jarvis.service
 systemctl enable jarvis.service >/dev/null 2>&1
 sleep 2
+BROKER_SOCK=/run/jarvis-broker.sock
+NEUSTART_SEIT="$(date +%s)"
 systemctl restart jarvis-broker.service
-sleep 4
+
+# Auf den Broker-Socket warten, den der NEUE Prozess angelegt hat.
+#
+# WARUM (2026-11-25, frisch installierte VM): hier stand "sleep 4" und danach
+# EINE Pruefung. Beim ersten Start baut der Broker vor dem Socket noch
+# x11vnc/websockify auf; der Socket kam ~10 s nach dem Neustart, das Skript
+# meldete "Migration unvollstaendig" (Exit 1), obwohl alles lief. Dieselbe
+# Falle beschreibt CLAUDE.md fuer Tests nach einem Broker-Neustart.
+# Ein Socket von VOR dem Neustart zaehlt nicht: die Datei kann liegen bleiben,
+# und dann hiesse "vorhanden" nur, dass der alte Prozess einmal lief. Der
+# Daemon legt die Datei beim Start neu an (bind braucht einen freien Pfad) –
+# ihre Aenderungszeit ist also nicht aelter als der Neustart.
+_auf_socket_warten() {  # <pfad> <seit-epoch> <hoechstens-sekunden>
+    local pfad="$1" seit="$2" max="$3" t=0
+    while :; do
+        if [ -S "$pfad" ] && [ "$(stat -c %Z "$pfad" 2>/dev/null || echo 0)" -ge "$seit" ]; then
+            return 0
+        fi
+        [ "$t" -ge "$max" ] && return 1
+        sleep 1; t=$((t+1))
+    done
+}
 
 step "5/5 Verifikation"
 ok=1
-if [ -S /run/jarvis-broker.sock ]; then
-    echo "   ✅ Broker-Socket vorhanden: /run/jarvis-broker.sock ($(stat -c '%U:%G %a' /run/jarvis-broker.sock))"
+if _auf_socket_warten "$BROKER_SOCK" "$NEUSTART_SEIT" 60; then
+    echo "   ✅ Broker-Socket vorhanden: $BROKER_SOCK ($(stat -c '%U:%G %a' "$BROKER_SOCK"))"
 else
-    echo "   ❌ Broker-Socket fehlt – journalctl -u jarvis-broker.service pruefen"; ok=0
+    echo "   ❌ Broker-Socket fehlt (60 s nach dem Neustart) – journalctl -u jarvis-broker.service pruefen"; ok=0
 fi
 MAIN_PID="$(systemctl show -p MainPID --value jarvis.service)"
 if [ -n "$MAIN_PID" ] && [ "$MAIN_PID" != "0" ]; then

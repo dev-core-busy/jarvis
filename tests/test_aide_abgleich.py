@@ -915,6 +915,120 @@ try:
            is None, "Paket seit dem Stand nicht angefasst: nicht erklaert")
     pruefe(g6("entfernt", "f------------------", "/usr/share/doc/weg.gz", dict(kd, pakete_seit={"foo", "zwei"})) is None,
            "Verzeichnis gehoert mehreren Paketen: nicht erklaert")
+
+    # ── 7. Mail von DEV (26.11.2026, 258 nicht erklaert) ─────────────────────
+    print("[7a] Rechte in der signierten Broker-Quelle")
+    QL = "/var/lib/jarvis-broker/quelle"
+    k7 = A.kontext_laden(JETZT - 86400)
+    if "deploy/lauf.sh" not in A._AUSFUEHRBAR or "backend/x.py" in A._AUSFUEHRBAR:
+        abbruch("Positivkontrolle: Modus 100755 aus dem signierten Stand nicht gelesen – 7a waere trivial")
+
+    def g7(art, attrs, pfad, kk=None):
+        return A.einteilen({"art": art, "attrs": attrs, "pfad": pfad}, kk or k7)
+
+    QS, QX = quelle / "deploy" / "lauf.sh", quelle / "backend" / "x.py"
+    os.chmod(QS, 0o755)
+    os.chmod(QX, 0o644)
+    pruefe((g7("geaendert", "f =.p.. mci..A. .", QL + "/deploy/lauf.sh") or "").startswith("Jarvis-Stand (signierte Quelle"),
+           "Skript der Quelle 644 -> 755 wie im signierten Stand (100755): erklaert")
+    pruefe(g7("geaendert", "f >.p.. mci.HA. .", QL + "/backend/x.py") is not None,
+           "Datei der Quelle mit 644 wie im Stand: erklaert")
+    for modus, text in ((0o775, "775 (keine umask-002-Toleranz in der root-eigenen Quelle)"),
+                        (0o644, "Skript ohne x-Bit, obwohl 100755 im Stand"), (0o4755, "SUID-Bit")):
+        os.chmod(QS, modus)
+        pruefe(g7("geaendert", "f =.p.. mci..A. .", QL + "/deploy/lauf.sh") is None, "Quelle mit %s: nicht erklaert" % text)
+    os.chmod(QS, 0o755)
+    os.chmod(QX, 0o755)
+    pruefe(g7("geaendert", "f =.p.. mci..A. .", QL + "/backend/x.py") is None,
+           "Datei der Quelle mit x-Bit, im Stand 100644: nicht erklaert")
+    os.chmod(QX, 0o644)
+    QX.write_text(CODE + "# untergeschoben\n")
+    pruefe(g7("geaendert", "f >.p.. mci.HA. .", QL + "/backend/x.py") is None,
+           "Quelle mit anderem Inhalt als der signierte Stand: nicht erklaert")
+    QX.write_text(CODE)
+    os.chmod(QX, 0o644)
+    _rk = A._root_konto
+    A._root_konto = lambda uid: False
+    try:
+        pruefe(g7("geaendert", "f =.p.. mci..A. .", QL + "/deploy/lauf.sh") is None,
+               "Datei der Quelle gehoert nicht root: nicht erklaert")
+    finally:
+        A._root_konto = _rk
+    pruefe(g7("geaendert", "f =.pu. mci..A. .", QL + "/deploy/lauf.sh") is None,
+           "Eigentuemer der Quelle geaendert: nicht erklaert")
+
+    print("[7b] Debian-Sicherungen, dev_reset, Protokolle")
+    for pfad in ("/var/backups/dpkg.status.0", "/var/backups/dpkg.status.1.gz", "/var/backups/alternatives.tar.0",
+                 "/var/backups/apt.extended_states.2.gz", "/root/dev-abweichungen-20261125-073844-4056.tgz"):
+        schreibe(pfad, "x\n", 0o644)
+    pruefe(g7("geaendert", "f >b... mci.H.. .", "/var/backups/dpkg.status.0") is not None
+           and g7("neu", "f++++++++++++++++++", "/var/backups/dpkg.status.1.gz") is not None
+           and g7("geaendert", "f >b... mci.H.. .", "/var/backups/alternatives.tar.0") is not None
+           and g7("geaendert", "f >b... mci.H.. .", "/var/backups/apt.extended_states.2.gz") is not None,
+           "naechtliche Rotation von dpkg-db-backup: erklaert")
+    pruefe(g7("entfernt", "f------------------", "/var/backups/dpkg.status.6.gz") is not None,
+           "aelteste Sicherung der Paketdatenbank entfernt: erklaert")
+    pruefe(g7("geaendert", "f =.p.. mci.... .", "/var/backups/dpkg.status.0") is None,
+           "Sicherung mit geaenderten Rechten: nicht erklaert")
+    os.chmod(W / "var/backups/dpkg.status.0", 0o755)
+    pruefe(g7("geaendert", "f >b... mci.H.. .", "/var/backups/dpkg.status.0") is None, "Sicherung mit x-Bit: nicht erklaert")
+    os.chmod(W / "var/backups/dpkg.status.0", 0o666)
+    pruefe(g7("geaendert", "f >b... mci.H.. .", "/var/backups/dpkg.status.0") is None,
+           "Sicherung fuer alle beschreibbar: nicht erklaert")
+    os.chmod(W / "var/backups/dpkg.status.0", 0o644)
+    _rk = A._root_konto
+    A._root_konto = lambda uid: False
+    try:
+        pruefe(g7("geaendert", "f >b... mci.H.. .", "/var/backups/dpkg.status.0") is None
+               and g7("neu", "f++++++++++++++++++", "/root/dev-abweichungen-20261125-073844-4056.tgz") is None,
+               "Sicherung, die nicht root gehoert: nicht erklaert")
+    finally:
+        A._root_konto = _rk
+    schreibe("/var/backups/passwd.bak", "x\n", 0o600)
+    pruefe(g7("geaendert", "f >b... mci.H.. .", "/var/backups/passwd.bak") is None,
+           "andere Datei unter /var/backups: nicht erklaert")
+    pruefe(g7("neu", "f++++++++++++++++++", "/root/dev-abweichungen-20261125-073844-4056.tgz") is not None
+           and g7("entfernt", "f------------------", "/root/dev-abweichungen-20261124-104814-529912.tgz") is not None,
+           "Sicherung von dev_reset: erklaert")
+    schreibe("/root/kev2/backend/x.py", "x\n", 0o644)
+    schreibe("/root/dev-abweichungen.tgz", "x\n", 0o644)
+    pruefe(g7("neu", "f++++++++++++++++++", "/root/kev2/backend/x.py") is None
+           and g7("neu", "f++++++++++++++++++", "/root/dev-abweichungen.tgz") is None,
+           "andere Dateien in /root: nicht erklaert")
+    pruefe(g7("geaendert", "f =.... mc..H.. .", "/var/log/wtmp.db") is not None
+           and g7("geaendert", "f <.... mc..H.. .", "/var/log/cups/access_log") is not None
+           and g7("geaendert", "f <.... mc..H.. .", "/var/log/cups/access_log.1") is not None,
+           "Anmeldedatenbank und cups-Zugriffsprotokoll: erklaert")
+    pruefe(g7("geaendert", "f =.p.. mc..... .", "/var/log/wtmp.db") is None,
+           "Anmeldedatenbank mit geaenderten Rechten: nicht erklaert")
+
+    print("[7c] Mail nur fuer NEUE Befunde")
+    A._gemeldet_schreiben(None)
+    z7 = {"zustand": "offen", "abdruecke": ["a1", "b2"]}
+    noetig, stand = A.meldung_noetig(z7)
+    pruefe(noetig, "erster offener Abgleich: Mail")
+    A._gemeldet_schreiben(stand)
+    pruefe(not A.meldung_noetig(z7)[0], "dieselben Befunde in der naechsten Nacht: KEINE Mail")
+    pruefe(not A.meldung_noetig({"zustand": "offen", "abdruecke": ["a1"]})[0], "ein Befund weniger: keine Mail")
+    pruefe(A.meldung_noetig({"zustand": "offen", "abdruecke": ["a1", "b2", "c3"]})[0], "ein NEUER Befund dazu: Mail")
+    A._gemeldet_schreiben({"fehler": "aide.db.new fehlt"})
+    pruefe(not A.meldung_noetig({"zustand": "fehler", "grund": "aide.db.new fehlt"})[0]
+           and A.meldung_noetig({"zustand": "fehler", "grund": "Bericht unvollstaendig"})[0],
+           "gleicher Fehler: keine Mail, anderer Fehler: Mail")
+    A._gemeldet_schreiben(stand)
+    A.mail_melden({"zustand": "uebernommen"})
+    pruefe(A.meldung_noetig(z7)[0], "nach einer Uebernahme gilt alles wieder als neu")
+    eA = {"pfad": "/etc/x", "art": "geaendert", "attrs": "f >.... mc..H.. ."}
+    pruefe(A._abdruck(eA, {"/etc/x": ["p", "A"]}) != A._abdruck(eA, {"/etc/x": ["p", "B"]}),
+           "dieselbe Datei erneut geaendert (andere Pruefsumme): neuer Abdruck")
+    schreibe("/var/lib/aide/aide.db", b"ALTER STAND", 0o600)
+    setze_bericht([("neu", "f++++++++++++++++++", "/usr/bin/bar"), ("neu", "f++++++++++++++++++", "/usr/bin/baz")])
+    neuer_stand(b"NEUER STAND 7")
+    z7 = A.abgleichen()
+    pruefe(z7["zustand"] == "offen" and len(z7.get("abdruecke") or []) == z7["offen_anzahl"] == 2,
+           "Abgleich legt fuer JEDEN offenen Eintrag einen Abdruck an (%s / %s)"
+           % (len(z7.get("abdruecke") or []), z7.get("offen_anzahl")))
+    A._gemeldet_schreiben(None)
 finally:
     shutil.rmtree(SANDKASTEN, ignore_errors=True)
 

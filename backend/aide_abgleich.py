@@ -110,6 +110,8 @@ DB_VORHER = ZUSTAND_DIR + "/aide.db.vorher"
 ZUSTAND = ZUSTAND_DIR + "/abgleich.json"
 BASIS = ZUSTAND_DIR + "/basis.json.gz"
 SPERRE = ZUSTAND_DIR + "/.sperre"
+# Was zuletzt per Mail gemeldet wurde (Abdruecke bzw. Fehlergrund)
+GEMELDET = ZUSTAND_DIR + "/gemeldet.json"
 # Kontenstand zum geprueften Bericht; wird bei der Uebernahme Teil der Basis
 KONTEN_KANDIDAT = ZUSTAND_DIR + "/konten.kandidat.json"
 KONTEN_DATEIEN = ("/etc/passwd", "/etc/group", "/etc/shadow", "/etc/gshadow")
@@ -818,7 +820,19 @@ _LOG_ROTATION = re.compile(
     r"^/var/log/(?:boot\.log(?:\.\d+)?|Xorg\.\d+\.log(?:\.old)?|lynis\.log|lynis-report\.dat"
     r"|vmware-[A-Za-z0-9-]+(?:\.\d+)?\.log|jarvis-websockify\.log(?:\.\d+)?"
     r"|unattended-upgrades/unattended-upgrades(?:-dpkg|-shutdown)?\.log(?:\.\d+(?:\.gz)?)?"
-    r"|aide/aide\.log\.\d+(?:\.gz)?)$")
+    r"|aide/aide\.log\.\d+(?:\.gz)?"
+    # DEV 26.11.2026: Anmeldedatenbank (wtmpdb, jede Anmeldung) und das
+    # Zugriffsprotokoll von cups (rotiert woechentlich)
+    r"|wtmp\.db|cups/access_log(?:\.\d+)?)$")
+# Debians naechtliche Sicherung der Paketdatenbank (dpkg-db-backup.timer, 00:00):
+# rotiert jede Nacht die Serie .0 -> .1.gz -> ... -> .6.gz und faellt am Ende
+# weg. Gemessen DEV 26.11.2026 (dpkg.status/arch/diversions/statoverride);
+# alternatives.tar und apt.extended_states gehoeren zur selben Rotation.
+_DPKG_SICHERUNG = re.compile(
+    r"^/var/backups/(?:dpkg\.(?:status|arch|diversions|statoverride)|alternatives\.tar|apt\.extended_states)"
+    r"\.\d+(?:\.gz)?$")
+# Sicherungen, die deploy/dev_reset.sh vor einem Zuruecksetzen anlegt (DEV)
+_DEV_SICHERUNG = re.compile(r"^/root/dev-abweichungen-\d{8}-\d{6}-\d+\.tgz$")
 # Rotierte Fassungen: tauchen bei jeder Rotation neu auf bzw. fallen am Ende weg
 _LOG_SERIE = re.compile(r"^/var/log/(?:[A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+?(?:\.log)?\.\d+(?:\.gz)?$")
 # dailyaidecheck benennt einen liegengebliebenen Arbeitsordner um (Debians
@@ -842,6 +856,23 @@ def _ohne_ausfuehrung(pfad: str) -> bool:
     import stat as _st
     e = _eigentuemer(pfad)
     return e is not None and _st.S_ISREG(e[2]) and (e[2] & 0o7113) == 0
+
+
+def _root_konto(uid: int) -> bool:
+    """root – im Sandkasten (W) der Pruefer selbst."""
+    return uid == (os.getuid() if W else 0)
+
+
+def _root_gruppe(gid: int) -> bool:
+    return gid == (os.getgid() if W else 0)
+
+
+def _root_ablage(pfad: str) -> bool:
+    """Gewoehnliche Datei von root, ohne x-/s-Bit, fuer niemanden sonst
+    beschreibbar – so legen dpkg-db-backup und dev_reset ihre Sicherungen an."""
+    import stat as _st
+    e = _eigentuemer(pfad)
+    return e is not None and _st.S_ISREG(e[2]) and _root_konto(e[0]) and (e[2] & 0o7133) == 0
 
 
 def _aide_benutzer(uid: int) -> bool:
@@ -899,8 +930,14 @@ def _code_rechte(pfad: str, rel: str, merkmale: set, k: dict) -> str | None:
     (Schreibrecht der Gruppe ist dann keines fuer jemand anderen) und keine
     erweiterte ACL besteht."""
     import stat as _st
+    # Die signierte Broker-Quelle (root-eigen, umask 022): ihre Dateien stehen
+    # nach dem Nachziehen mit GENAU dem Modus des signierten Stands da. DEV
+    # 26.11.2026: die Quelle stammte vom 29.09. und trug alle Skripte mit 644;
+    # das erste Nachziehen setzte die 18 Dateien mit 100755 im Stand auf 755,
+    # und jede davon stand als "Rechte oder Eigentuemer geaendert" in der Mail.
+    in_quelle = pfad.startswith(QUELLE + "/")
     # H (Inhalt) ist erlaubt – ihn deckt der Vergleich mit dem signierten Blob
-    if not pfad.startswith("/opt/jarvis/") or merkmale - {"p", "A", "H", "m", "c", "i", "b", "n"}:
+    if not (pfad.startswith("/opt/jarvis/") or in_quelle) or merkmale - {"p", "A", "H", "m", "c", "i", "b", "n"}:
         return None
     baum = k.get("baum")
     if not baum or not baum.get(rel) or baum.get(rel) != _git_blob(_p(pfad)):
@@ -909,6 +946,17 @@ def _code_rechte(pfad: str, rel: str, merkmale: set, k: dict) -> str | None:
     if e is None or not _st.S_ISREG(e[2]):
         return None
     uid, gid, modus = e
+    if in_quelle:
+        # Nur root:root und nur der Modus des Stands – keine umask-002-Toleranz
+        if not (_root_konto(uid) and _root_gruppe(gid)) or \
+                (modus & 0o7777) != (0o755 if rel in _AUSFUEHRBAR else 0o644):
+            return None
+        try:
+            os.getxattr(_p(pfad), "system.posix_acl_access", follow_symlinks=False)
+            return None   # erweiterte ACL vorhanden
+        except OSError:
+            pass
+        return "Jarvis-Stand (signierte Quelle; Rechte wie im Stand)"
     erlaubt = (0o755, 0o775) if rel in _AUSFUEHRBAR else (0o644, 0o664)
     if (modus & 0o7777) not in erlaubt:
         return None
@@ -986,6 +1034,12 @@ def einteilen(e: dict, k: dict) -> str | None:
             return "Protokollrotation (neue Fassung)"
         if art == "entfernt" and _LOG_SERIE.match(pfad):
             return "Protokollrotation (aelteste Fassung entfernt)"
+        for muster, name in ((_DPKG_SICHERUNG, "Sicherung der Paketdatenbank (dpkg-db-backup)"),
+                             (_DEV_SICHERUNG, "Sicherung von dev_reset")):
+            if muster.match(pfad):
+                if art == "entfernt":
+                    return name + " (entfernt)"
+                return name if _root_ablage(pfad) else None
         if art == "geaendert" and _WIREPLUMBER.match(pfad):
             return "Desktop-Zustand (wireplumber)"
         if art == "neu" and pfad == DYNAMICMAPS and k.get("dpkg_seit_basis") and _paket_geaendert(k, "postfix"):
@@ -1220,6 +1274,10 @@ def abgleichen() -> dict:
             schluessel = grund.split(" ", 1)[0] if grund.startswith(("Paket ", "Bytecode", "Konfiguration")) else grund
             z["erklaert"][schluessel] = z["erklaert"].get(schluessel, 0) + 1
     z["offen_anzahl"] = len(offen)
+    # Abdruck JEDES offenen Eintrags (auch jenseits von OFFEN_MAX): daran
+    # erkennt mail_melden, ob seit der letzten Mail etwas NEUES dazukam.
+    # Die neue Pruefsumme gehoert dazu – eine erneut geaenderte Datei ist neu.
+    z["abdruecke"] = sorted({_abdruck(o, k["sha256"]) for o in offen})
     # Die schwersten zuerst: wird die Liste gekuerzt, fallen nie sie heraus.
     rang = ("Rechte", "Linkziel", "Inhalt weicht", "Konfiguration")
     offen.sort(key=lambda o: next((i for i, r in enumerate(rang) if o["warum"].startswith(r)), len(rang)))
@@ -1311,15 +1369,78 @@ def mail_text(z: dict, sprache: str | None = None) -> tuple[str, str] | None:
     return (t("mvm.aide_betreff", "AIDE: {n} nicht erklärte Änderung(en)", n=n), "\n".join(zeilen))
 
 
+def _abdruck(e: dict, sha: dict) -> str:
+    teile = [e.get("pfad", ""), e.get("art", ""), e.get("attrs", ""), ((sha or {}).get(e.get("pfad")) or ["", ""])[-1]]
+    return hashlib.sha256("\0".join(teile).encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _gemeldet_lesen() -> dict:
+    try:
+        d = json.loads(_p(GEMELDET).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _gemeldet_schreiben(d: dict | None) -> None:
+    ziel = _p(GEMELDET)
+    if d is None:
+        try:
+            ziel.unlink()
+        except OSError:
+            pass
+        return
+    ziel.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = ziel.with_name(ziel.name + ".tmp")
+    tmp.write_text(json.dumps(d), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, ziel)
+
+
+def meldung_noetig(z: dict) -> tuple[bool, dict | None]:
+    """(melden?, Stand, der nach erfolgreichem Versand als gemeldet gilt).
+
+    WARUM (DEV 26.11.2026, "solche unnoetigen Mails"): solange niemand
+    uebernimmt, vergleicht AIDE jede Nacht gegen denselben alten Stand und
+    findet dieselben Eintraege wieder – bis dahin kam damit JEDE Nacht
+    dieselbe Mail. Gemeldet wird jetzt nur, was seit der letzten Mail NEU
+    dazukam (Abdruck je Eintrag samt neuer Pruefsumme); ein gleichbleibender
+    Fehler ebenso nur einmal. Die Durchsicht in der Oberflaeche zeigt
+    weiterhin ALLE offenen Eintraege."""
+    zustand = z.get("zustand")
+    if zustand == "offen":
+        jetzt = set(z.get("abdruecke") or [])
+        if not jetzt:   # Altzustand ohne Abdruecke oder nur dpkg waehrend der Pruefung
+            jetzt = {"grund:" + str(z.get("grund") or "")}
+        vorher = set(_gemeldet_lesen().get("offen") or [])
+        return bool(jetzt - vorher), {"offen": sorted(jetzt)}
+    if zustand == "fehler":
+        grund = str(z.get("grund") or "")
+        return _gemeldet_lesen().get("fehler") != grund, {"fehler": grund}
+    return False, None
+
+
 def mail_melden(z: dict) -> dict | None:
     """Meldung per E-Mail (Quelle "aide"); im Testmodus (W) nie. Wirft nie."""
-    if W:
-        return None
     try:
+        noetig, stand = meldung_noetig(z)
+        if z.get("zustand") in ("uebernommen", "unveraendert"):
+            _gemeldet_schreiben(None)   # neuer Vergleichsstand: alles Spaetere ist neu
+        if not noetig:
+            if z.get("zustand") in ("offen", "fehler"):
+                _protokoll("AIDE-Abgleich: nichts Neues seit der letzten Mail – keine Mail")
+            return None
+        if W:
+            return None
         inhalt = mail_text(z)
         if not inhalt:
             return None
-        return _mm().senden("aide", inhalt[0], inhalt[1])
+        r = _mm().senden("aide", inhalt[0], inhalt[1])
+        # Nur ein zugestellter (oder bewusst nicht gewollter) Versand zaehlt als
+        # gemeldet – nach einem Fehlschlag versucht es die naechste Nacht erneut.
+        if isinstance(r, dict) and (r.get("gesendet") or (r.get("ok") and not r.get("gedrosselt"))):
+            _gemeldet_schreiben(stand)
+        return r
     except Exception as e:  # noqa: BLE001
         print("Mail nicht verschickt: %s" % e, flush=True)
         return None
@@ -1349,6 +1470,7 @@ def uebernehmen(kennung: str, wer: str) -> dict:
         basis_schreiben(dpkg_laden(), start, _konten_kandidat_lesen())
         z["zustand"], z["uebernommen_von"], z["uebernommen_zeit"] = "uebernommen", wer, _jetzt()
         _zustand_schreiben(z)
+        _gemeldet_schreiben(None)
     _protokoll("AIDE-Abgleich: %d nicht erklaerte Aenderung(en) von %s uebernommen (Kennung %s)"
                % (z.get("offen_anzahl", 0), wer, kennung))
     return {"ok": True, "zustand": z}

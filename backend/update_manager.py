@@ -264,6 +264,26 @@ def _mit_diagnose(fehler: str, *roh: str) -> str:
 
 # ─── Git-Hilfsfunktionen ─────────────────────────────────────────────────────
 
+def _git_umgebung() -> dict | None:
+    """Umgebung fuer git: Meldungen englisch, wenn die Oberflaeche nicht deutsch ist.
+
+    Der Dienst laeuft mit deutscher Locale, git meldet dann „Schwerwiegend:
+    konnte nicht … zugreifen" – und genau dieser Rohtext steht in der
+    Fehlermeldung der Update-Pill, auch bei franzoesischer Oberflaeche.
+    Eigene Kataloge fuer fr/nl bringt git nicht mit; Englisch ist der neutrale
+    Rueckfall. ``LANGUAGE`` statt ``LC_ALL``: es betrifft nur die Meldungen,
+    Zeichensatz und Sortierung bleiben. Die Rechte-/Zugangsmarker oben sind
+    ohnehin die englischen Fragmente. Ohne Sprachkontext (Auto-Update) bleibt
+    alles wie bisher (None = geerbte Umgebung)."""
+    try:
+        from backend import sprache as _sp  # noqa: PLC0415
+        if _sp.aktuell() in ("", "de"):
+            return None
+    except Exception:  # noqa: BLE001 – im Zweifel die geerbte Umgebung
+        return None
+    return {**os.environ, "LANGUAGE": "en"}
+
+
 def _git(*args, timeout=20) -> tuple[int, str, str]:
     """Führt einen Git-Befehl aus und gibt (returncode, stdout, stderr) zurück."""
     try:
@@ -271,6 +291,7 @@ def _git(*args, timeout=20) -> tuple[int, str, str]:
             ["git", *args],
             cwd=PROJECT_ROOT,
             capture_output=True, text=True, timeout=timeout,
+            env=_git_umgebung(),
         )
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except subprocess.TimeoutExpired:

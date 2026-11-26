@@ -28,6 +28,7 @@ REPO = Path(__file__).resolve().parent.parent
 WAECHTER = REPO / "tests" / "test_server_sprache.py"
 SP = "backend/sprache.py"
 MAIN = "backend/main.py"
+UPD = "backend/update_manager.py"
 PY = str(REPO / "venv/bin/python") if (REPO / "venv/bin/python").exists() else sys.executable
 
 PROBEN = [
@@ -44,9 +45,21 @@ PROBEN = [
      '        kopf = dict(response.headers.items())', 1),
     ("Groessengrenze fehlt", SP, '    if not roh or len(roh) > ANTWORT_MAX:', '    if not roh:', 1),
     ("unbekannte Sprache durchgelassen", SP, '    return w if w in SPRACHEN else ""', '    return w', 1),
+    # 2026-11-26: Lizenz-Banner und Update-Pill
+    ("license_banner nicht uebersetzt", SP, '"msg",\n          # Lizenz-Warnung im Portal (/api/me, nur Admins)\n          "license_banner")',
+     '"msg")', 1),
+    ("git ohne Sprachumgebung", UPD, '            env=_git_umgebung(),\n', '', 1),
+    ("Sprachumgebung immer geerbt", UPD, '    return {**os.environ, "LANGUAGE": "en"}', '    return None', 1),
 ]
-# Probe auf die Textdatei: ein Satz fehlt -> Regel ueber main.py muss beissen
-TEXT_PROBE = "Nicht authentifiziert"
+# Proben auf die Textdatei: ein Satz fehlt -> die Regel ueber main.py bzw. die
+# Regeln fuer Lizenz-Banner und Update-Pill muessen beissen
+TEXT_PROBEN = [
+    "Nicht authentifiziert",
+    "Kein Lizenzschlüssel eingetragen – die Lizenzgrenzen greifen in {w1} Tagen.",
+    "Lizenz wurde widerrufen",
+    "git fetch fehlgeschlagen: {w1}",
+    "git log fehlgeschlagen",
+]
 
 
 def lauf(wurzel: Path) -> tuple[int, int, str]:
@@ -87,23 +100,28 @@ def main() -> int:
             else:
                 stumm += 1
                 print("  STUMM   %-34s Exit %d, %d FAIL" % (name, rc, fails))
-        # Textdatei: ein Satz fehlt
+        # Textdatei: je Probe fehlt ein Satz
         tdatei = tmp / "backend" / "server_texte.json"
         t_orig = tdatei.read_text(encoding="utf-8")
-        d = json.loads(t_orig)
-        d["saetze"] = [e for e in d["saetze"] if e["de"] != TEXT_PROBE]
-        tdatei.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-        try:
-            rc, fails, _ = lauf(tmp)
-        finally:
-            tdatei.write_text(t_orig, encoding="utf-8")
-        name = "Satz fehlt in server_texte.json"
-        if rc == 1 and fails:
-            print("  BEISST  %-34s %d FAIL" % (name, fails))
-        else:
-            stumm += 1
-            print("  STUMM   %-34s Exit %d, %d FAIL" % (name, rc, fails))
-        gesamt = len(PROBEN) + 1
+        for satz in TEXT_PROBEN:
+            d = json.loads(t_orig)
+            vorher = len(d["saetze"])
+            d["saetze"] = [e for e in d["saetze"] if e["de"] != satz]
+            if len(d["saetze"]) != vorher - 1:
+                print("ABBRUCH: Probesatz nicht genau einmal in server_texte.json: %r" % satz[:60])
+                return 2
+            tdatei.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+            try:
+                rc, fails, _ = lauf(tmp)
+            finally:
+                tdatei.write_text(t_orig, encoding="utf-8")
+            name = "fehlt: " + satz[:26]
+            if rc == 1 and fails:
+                print("  BEISST  %-34s %d FAIL" % (name, fails))
+            else:
+                stumm += 1
+                print("  STUMM   %-34s Exit %d, %d FAIL" % (name, rc, fails))
+        gesamt = len(PROBEN) + len(TEXT_PROBEN)
         print("\nERGEBNIS: %d/%d Proben beissen" % (gesamt - stumm, gesamt))
         return 1 if stumm else 0
     finally:

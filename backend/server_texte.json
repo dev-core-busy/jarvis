@@ -2460,6 +2460,90 @@
    "en": "🧠 Vision LLM action for {w1}: {w2}",
    "fr": "🧠 Action LLM vision pour {w1} : {w2}",
    "nl": "🧠 Vision-LLM-actie voor {w1}: {w2}"
+  },
+  {
+   "de": "Kein Lizenzschlüssel eingetragen – die Lizenzgrenzen greifen in {w1} Tagen.",
+   "en": "No licence key entered – the licence limits take effect in {w1} days.",
+   "fr": "Aucune clé de licence saisie – les limites de licence s'appliqueront dans {w1} jours.",
+   "nl": "Geen licentiesleutel ingevoerd – de licentielimieten gaan over {w1} dagen in."
+  },
+  {
+   "de": "Lizenz läuft in {w1} Tagen ab ({w2}).",
+   "en": "Licence expires in {w1} days ({w2}).",
+   "fr": "La licence expire dans {w1} jours ({w2}).",
+   "nl": "Licentie verloopt over {w1} dagen ({w2})."
+  },
+  {
+   "de": "Lizenzstatus seit {w1} Tagen nicht erreichbar (Karenz {w2} Tage)",
+   "en": "Licence status unreachable for {w1} days (grace period {w2} days)",
+   "fr": "Statut de licence inaccessible depuis {w1} jours (délai de grâce {w2} jours)",
+   "nl": "Licentiestatus al {w1} dagen niet bereikbaar (respijtperiode {w2} dagen)"
+  },
+  {
+   "de": "Lizenz ist im Statusdienst nicht bekannt",
+   "en": "Licence is not known to the status service",
+   "fr": "La licence est inconnue du service de statut",
+   "nl": "Licentie is niet bekend bij de statusdienst"
+  },
+  {
+   "de": "Lizenz wurde widerrufen",
+   "en": "Licence has been revoked",
+   "fr": "La licence a été révoquée",
+   "nl": "Licentie is ingetrokken"
+  },
+  {
+   "de": "Lizenz ist an eine andere Hardware gebunden",
+   "en": "Licence is bound to different hardware",
+   "fr": "La licence est liée à un autre matériel",
+   "nl": "Licentie is gebonden aan andere hardware"
+  },
+  {
+   "de": "git fetch fehlgeschlagen: {w1}",
+   "en": "git fetch failed: {w1}",
+   "fr": "Échec de git fetch : {w1}",
+   "nl": "git fetch mislukt: {w1}"
+  },
+  {
+   "de": "git fetch fehlgeschlagen: {w1}\n\n⚠ Kein Lesezugang zum Repository – es ist privat. Einmalig als root einrichten: deploy/security/deploy_key_einrichten.sh (aus der root-eigenen Broker-Kopie), dann die beiden angezeigten Schlüssel bei GitHub als Deploy Key (nur lesend) eintragen.",
+   "en": "git fetch failed: {w1}\n\n⚠ No read access to the repository – it is private. Set up once as root: deploy/security/deploy_key_einrichten.sh (from the root-owned broker copy), then enter the two keys shown as a deploy key (read-only) on GitHub.",
+   "fr": "Échec de git fetch : {w1}\n\n⚠ Pas d'accès en lecture au dépôt – il est privé. À configurer une fois en tant que root : deploy/security/deploy_key_einrichten.sh (depuis la copie du broker appartenant à root), puis saisir les deux clés affichées comme clé de déploiement (lecture seule) sur GitHub.",
+   "nl": "git fetch mislukt: {w1}\n\n⚠ Geen leestoegang tot de repository – deze is privé. Eenmalig als root instellen: deploy/security/deploy_key_einrichten.sh (uit de broker-kopie van root), daarna de twee getoonde sleutels als deploy key (alleen lezen) bij GitHub invoeren."
+  },
+  {
+   "de": "{w1}\n\n⚠ Kein Lesezugang zum Repository – es ist privat. Einmalig als root einrichten: deploy/security/deploy_key_einrichten.sh (aus der root-eigenen Broker-Kopie), dann die beiden angezeigten Schlüssel bei GitHub als Deploy Key (nur lesend) eintragen.",
+   "en": "{w1}\n\n⚠ No read access to the repository – it is private. Set up once as root: deploy/security/deploy_key_einrichten.sh (from the root-owned broker copy), then enter the two keys shown as a deploy key (read-only) on GitHub.",
+   "fr": "{w1}\n\n⚠ Pas d'accès en lecture au dépôt – il est privé. À configurer une fois en tant que root : deploy/security/deploy_key_einrichten.sh (depuis la copie du broker appartenant à root), puis saisir les deux clés affichées comme clé de déploiement (lecture seule) sur GitHub.",
+   "nl": "{w1}\n\n⚠ Geen leestoegang tot de repository – deze is privé. Eenmalig als root instellen: deploy/security/deploy_key_einrichten.sh (uit de broker-kopie van root), daarna de twee getoonde sleutels als deploy key (alleen lezen) bij GitHub invoeren."
+  },
+  {
+   "de": "git log fehlgeschlagen",
+   "en": "git log failed",
+   "fr": "Échec de git log",
+   "nl": "git log mislukt"
+  },
+  {
+   "de": "git pull fehlgeschlagen (Code {w1}, keine Ausgabe)",
+   "en": "git pull failed (code {w1}, no output)",
+   "fr": "Échec de git pull (code {w1}, aucune sortie)",
+   "nl": "git pull mislukt (code {w1}, geen uitvoer)"
+  },
+  {
+   "de": "Update abgelehnt: der Stand auf GitHub ist nicht mit einem zugelassenen Schlüssel signiert. Übernommen wird nur, was der Betreiber signiert hat – bitte den Stand signiert neu veröffentlichen (signierter Commit auf master).\n\n{w1}",
+   "en": "Update rejected: the version on GitHub is not signed with an approved key. Only what the operator has signed is applied – please republish the version signed (signed commit on master).\n\n{w1}",
+   "fr": "Mise à jour refusée : la version sur GitHub n'est pas signée avec une clé autorisée. Seul ce que l'exploitant a signé est repris – veuillez republier la version signée (commit signé sur master).\n\n{w1}",
+   "nl": "Update geweigerd: de versie op GitHub is niet ondertekend met een toegestane sleutel. Alleen wat de beheerder heeft ondertekend wordt overgenomen – publiceer de versie opnieuw ondertekend (ondertekende commit op master).\n\n{w1}"
+  },
+  {
+   "de": "Update abgelehnt: der Stand auf GitHub setzt nicht auf dem Stand dieses Servers auf (die Versionsgeschichte wurde neu geschrieben). Ein automatisches Zusammenführen würde hier Konflikte hinterlassen – bitte den Server einmalig von Hand auf den neuen Stand umstellen (git fetch, verify-commit, reset --hard).\n\n{w1}",
+   "en": "Update rejected: the version on GitHub does not build on this server's version (the version history was rewritten). An automatic merge would leave conflicts here – please switch the server to the new version manually once (git fetch, verify-commit, reset --hard).\n\n{w1}",
+   "fr": "Mise à jour refusée : la version sur GitHub ne s'appuie pas sur celle de ce serveur (l'historique des versions a été réécrit). Une fusion automatique laisserait des conflits – veuillez basculer une fois le serveur manuellement vers la nouvelle version (git fetch, verify-commit, reset --hard).\n\n{w1}",
+   "nl": "Update geweigerd: de versie op GitHub bouwt niet voort op de versie van deze server (de versiegeschiedenis is herschreven). Automatisch samenvoegen zou hier conflicten achterlaten – zet de server eenmalig handmatig over naar de nieuwe versie (git fetch, verify-commit, reset --hard).\n\n{w1}"
+  },
+  {
+   "de": "Update nicht möglich: ein früheres Update konnte lokale Änderungen nicht zurückspielen, im Arbeitsverzeichnis steht noch ein ungelöster Konflikt. Bitte einmalig von Hand auflösen (als Dienstbenutzer im Programmverzeichnis): die genannten Dateien auf den Stand der Software setzen (git checkout HEAD -- <datei>) und den gesicherten lokalen Stand prüfen (git stash list / git stash show -p) – danach läuft das Update wieder.\n\n{w1}",
+   "en": "Update not possible: an earlier update could not restore local changes, an unresolved conflict remains in the working directory. Please resolve it manually once (as the service user in the program directory): reset the listed files to the software version (git checkout HEAD -- <datei>) and check the saved local version (git stash list / git stash show -p) – then the update works again.\n\n{w1}",
+   "fr": "Mise à jour impossible : une mise à jour précédente n'a pas pu restaurer des modifications locales, un conflit non résolu subsiste dans le répertoire de travail. Veuillez le résoudre une fois manuellement (en tant qu'utilisateur du service dans le répertoire du programme) : remettre les fichiers indiqués à la version du logiciel (git checkout HEAD -- <datei>) et vérifier la version locale sauvegardée (git stash list / git stash show -p) – ensuite la mise à jour fonctionne à nouveau.\n\n{w1}",
+   "nl": "Update niet mogelijk: een eerdere update kon lokale wijzigingen niet terugzetten, in de werkmap staat nog een onopgelost conflict. Los dit eenmalig handmatig op (als dienstgebruiker in de programmamap): zet de genoemde bestanden terug naar de softwareversie (git checkout HEAD -- <datei>) en controleer de opgeslagen lokale versie (git stash list / git stash show -p) – daarna werkt de update weer.\n\n{w1}"
   }
  ]
 }

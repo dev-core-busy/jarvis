@@ -92,7 +92,9 @@ def texte() -> list:
 
 
 # Diese Felder einer JSON-Antwort sind Saetze fuer Menschen (oberste Ebene).
-FELDER = ("error", "detail", "meldung", "message", "grund", "hinweis", "fehler", "msg")
+FELDER = ("error", "detail", "meldung", "message", "grund", "hinweis", "fehler", "msg",
+          # Lizenz-Warnung im Portal (/api/me, nur Admins)
+          "license_banner")
 ANTWORT_MAX = 256 * 1024
 _index: dict = {}
 

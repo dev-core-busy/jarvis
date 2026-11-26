@@ -20,6 +20,10 @@ Die Zusagen:
      meldung/…, HTTPException(detail=…)) hat eine Uebersetzung. Geltungsbereich
      main.py – Saetze aus anderen Modulen sind (noch) nicht erfasst, und ein
      Satz, den die Muster-Erkennung nicht als deutsch erkennt, ebenfalls nicht.
+  6. Lizenz-Banner (``license_banner`` in /api/me, Saetze aus main.py und
+     die Bannergruende aus license.py) und die Fehlersaetze der Update-Pill
+     (update_manager.py) sind uebersetzt; git selbst meldet bei nicht
+     deutscher Oberflaeche englisch (``LANGUAGE=en``) statt „Schwerwiegend …".
 
 Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
 """
@@ -230,6 +234,100 @@ pruefe(len(saetze) >= 300, "Positivkontrolle: Antwortsaetze in main.py gefunden 
 fehlt = sorted(s for _, s in saetze if s not in gesehen)
 pruefe(not fehlt, "jeder deutsche Antwortsatz in main.py hat EN/FR/NL in server_texte.json%s"
        % ((" – %d fehlen, z.B. %r" % (len(fehlt), fehlt[:3])) if fehlt else ""))
+
+# ── 6. Lizenz-Banner und Update-Meldungen ───────────────────────────────────
+# Gemeldet 2026-11-26: bei FR kamen „Kein Lizenzschlüssel eingetragen – …"
+# (Portal, Feld ``license_banner`` in /api/me) und „git fetch fehlgeschlagen:
+# Schwerwiegend: …" (Update-Pill, update_manager.py) deutsch. Beides liegt
+# ausserhalb der Regel aus [5]: der Banner wird ueber eine Variable gebaut,
+# die Update-Saetze stehen in einem anderen Modul.
+print("[6] Lizenz-Banner und Update-Meldungen")
+pruefe("license_banner" in FELDER, "license_banner gehoert zu den uebersetzten Feldern")
+
+
+def gedeckt(satz: str) -> bool:
+    """Liegt der Satz (mit {wN}) als Eintrag vor?"""
+    return satz in gesehen
+
+
+main_baum = ast.parse(main_src)
+banner = []
+for n in ast.walk(main_baum):
+    if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "banner" for t in n.targets):
+        if isinstance(n.value, ast.JoinedStr):
+            banner.append(muster(n.value))
+        elif isinstance(n.value, ast.Constant) and isinstance(n.value.value, str) and n.value.value:
+            banner.append(n.value.value)
+pruefe(len(banner) >= 2, "Positivkontrolle: Bannersaetze in main.py gefunden (%d)" % len(banner))
+fehlt = [s for s in banner if not gedeckt(s)]
+pruefe(not fehlt, "jeder Bannersatz aus main.py hat EN/FR/NL%s" % (" – fehlt %r" % fehlt[:2] if fehlt else ""))
+
+lic_src = (REPO / "backend/license.py").read_text(encoding="utf-8")
+lic = []
+for n in ast.walk(ast.parse(lic_src)):
+    # info["banner"] = info["grund"] -> der Grund, der unmittelbar davor gesetzt wird
+    if isinstance(n, ast.If):
+        rumpf = n.body
+        setzt_banner = any(isinstance(s, ast.Assign) and isinstance(s.targets[0], ast.Subscript)
+                           and isinstance(s.targets[0].slice, ast.Constant) and s.targets[0].slice.value == "banner"
+                           for s in rumpf)
+        if not setzt_banner:
+            continue
+        for s in rumpf:
+            if isinstance(s, ast.Assign) and isinstance(s.targets[0], ast.Subscript) \
+                    and isinstance(s.targets[0].slice, ast.Constant) and s.targets[0].slice.value == "grund":
+                if isinstance(s.value, ast.JoinedStr):
+                    lic.append(muster(s.value))
+                elif isinstance(s.value, ast.Constant) and isinstance(s.value.value, str):
+                    lic.append(s.value.value)
+pruefe(len(lic) >= 4, "Positivkontrolle: Bannergruende in license.py gefunden (%d)" % len(lic))
+fehlt = [s for s in lic if not gedeckt(s)]
+pruefe(not fehlt, "jeder Bannergrund aus license.py hat EN/FR/NL%s" % (" – fehlt %r" % fehlt[:2] if fehlt else ""))
+
+upd_src = (REPO / "backend/update_manager.py").read_text(encoding="utf-8")
+upd_baum = ast.parse(upd_src)
+konst = {n.targets[0].id: ast.literal_eval(n.value) for n in upd_baum.body
+         if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+         and n.targets[0].id.endswith("_HINWEIS")}
+upd = set()
+for n in ast.walk(upd_baum):
+    if not isinstance(n, ast.Dict):
+        continue
+    for k, v in zip(n.keys, n.values):
+        if not (isinstance(k, ast.Constant) and k.value == "error"):
+            continue
+        if isinstance(v, ast.Call) and getattr(v.func, "id", "") == "_mit_diagnose" and v.args:
+            v = v.args[0]
+        if isinstance(v, ast.JoinedStr):
+            upd.add(muster(v))
+        elif isinstance(v, ast.BinOp) and isinstance(v.left, ast.BinOp) and isinstance(v.left.left, ast.Name) \
+                and v.left.left.id in konst:
+            # HINWEIS + "\n\n" + Rohtext
+            upd.add(konst[v.left.left.id] + "\n\n{w1}")
+        elif isinstance(v, ast.BoolOp):
+            upd.update(w.value for w in v.values if isinstance(w, ast.Constant) and isinstance(w.value, str))
+pruefe(len(upd) >= 4, "Positivkontrolle: Fehlersaetze in update_manager.py gefunden (%d)" % len(upd))
+fehlt = sorted(s for s in upd if not gedeckt(s))
+pruefe(not fehlt, "jeder Fehlersatz aus update_manager.py hat EN/FR/NL%s"
+       % (" – fehlt %r" % [f[:50] for f in fehlt[:2]] if fehlt else ""))
+if "ZUGANG_HINWEIS" in konst:
+    pruefe(gedeckt("{w1}\n\n⚠ " + konst["ZUGANG_HINWEIS"]),
+           "der Zugangshinweis, den _mit_diagnose anhaengt, ist uebersetzt")
+
+# Wirkung: der Rohtext von git kommt bei nicht deutscher Oberflaeche englisch
+from backend import update_manager as U  # noqa: E402
+_t = S.setzen("fr")
+try:
+    env_fr = U._git_umgebung()
+finally:
+    S.zuruecksetzen(_t)
+pruefe(bool(env_fr) and env_fr.get("LANGUAGE") == "en", "Oberflaeche fr: git bekommt LANGUAGE=en")
+pruefe(U._git_umgebung() is None, "Oberflaeche de / ohne Kontext: geerbte Umgebung")
+git_fn = next((n for n in upd_baum.body if isinstance(n, ast.FunctionDef) and n.name == "_git"), None)
+env_arg = [k for n in ast.walk(git_fn) if isinstance(n, ast.Call) for k in n.keywords
+           if k.arg == "env" and isinstance(k.value, ast.Call)
+           and getattr(k.value.func, "id", "") == "_git_umgebung"] if git_fn else []
+pruefe(bool(env_arg), "_git uebergibt env=_git_umgebung() an subprocess.run")
 
 print("\nERGEBNIS: %d OK, %d FAIL" % (OK, FAIL))
 sys.exit(1 if FAIL else 0)

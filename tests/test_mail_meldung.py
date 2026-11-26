@@ -196,9 +196,40 @@ try:
            "SMTP-Eingang wird abgeschaltet (postconf -M# smtp/inet)")
     pruefe(mm._p(mm.AIDE_DROPIN).read_text().count("MAILCMD=true") == 1,
            "Debians AIDE-Tagesbericht stillgelegt (Drop-in)")
+    # Serverueberwachung (ProtectSystem=strict) muss Mails abgeben koennen –
+    # DEV 2026-11-26: "maildrop: Read-only file system", keine Mail, Lauf haengt.
+    ue_quelle = (REPO / "backend" / "ueberwachung.py").read_text(encoding="utf-8")
+    ue_unit = next((k.value.value for k in ast.parse(ue_quelle).body
+                    if isinstance(k, ast.Assign) and any(getattr(t, "id", "") == "UNIT" for t in k.targets)
+                    and isinstance(k.value, ast.Constant)), None)
+    haertung = (REPO / "deploy" / "security" / "system_haertung.sh").read_text(encoding="utf-8")
+    ue_block = haertung.split('UEBERW_SERVICE="', 1)[-1].split('"\n', 1)[0] if 'UEBERW_SERVICE="' in haertung else ""
+    pruefe("ProtectSystem=strict" in ue_block,
+           "Positivkontrolle: die Unit der Ueberwachung laeuft mit ProtectSystem=strict (der Grund fuer das Drop-in)")
+    pruefe(ue_unit is not None and mm.UEBERW_DROPIN.startswith("/etc/systemd/system/%s.d/" % ue_unit),
+           "Drop-in liegt im Verzeichnis GENAU der Unit (ueberwachung.UNIT): %s / %s" % (ue_unit, mm.UEBERW_DROPIN))
+    # Bestandsserver ohne das Drop-in (Stand vor 2026-11-26): anwenden legt es an
+    mm._p(mm.UEBERW_DROPIN).unlink(missing_ok=True)
+    AUFRUFE.clear()
+    e = mm.anwenden()
+    pruefe(e.get("ok") and "Serverueberwachung darf Mails abgeben" in (e.get("schritte") or []),
+           "fehlendes Drop-in: anwenden legt es an und nennt den Schritt")
+    try:
+        dropin = mm._p(mm.UEBERW_DROPIN).read_text()
+    except OSError:
+        dropin = ""
+    rw = [w for z in dropin.splitlines() if z.startswith("ReadWritePaths=") for w in z.split("=", 1)[1].split()]
+    pruefe("[Service]" in dropin and ("-" + mm.MAILDROP) in rw and ("-" + mm.ZUSTAND_DIR) in rw,
+           "Ueberwachung darf in maildrop und den Mail-Zustand schreiben (ReadWritePaths, '-' = optional): %s" % rw)
+    pruefe(mm.MAILDROP == "/var/spool/postfix/maildrop", "maildrop ist Debians Postfix-Warteschlange")
+    pruefe(any(a["befehl"][:2] == ["systemctl", "daemon-reload"] for a in AUFRUFE),
+           "neues Drop-in: systemd liest es neu ein (daemon-reload)")
     konf_setzen("MAIL_EMPFAENGER=a@beispiel.de\nMAIL_RELAY=\n")
+    AUFRUFE.clear()
     mm.anwenden()
     pruefe("relayhost = \n" in mm._p(mm.MAIN_CF).read_text(), "leerer Relay = direkte Zustellung")
+    pruefe(not any(a["befehl"][:2] == ["systemctl", "daemon-reload"] for a in AUFRUFE),
+           "unveraenderte Drop-ins: kein daemon-reload")
 
     # ── 4. root-Weiterleitung ────────────────────────────────────────────────
     print("[4] root-Weiterleitung")

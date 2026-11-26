@@ -86,6 +86,11 @@ ALIASES = "/etc/aliases"
 MAILNAME = "/etc/mailname"
 AIDE_DROPIN = "/etc/systemd/system/dailyaidecheck.service.d/81-jarvis-mail.conf"
 AIDE_AUSNAHME = "/etc/aide/aide.conf.d/96_jarvis_mailversand"
+# Serverueberwachung (B13, jarvis-ueberwachung.service) laeuft mit
+# ProtectSystem=strict – ohne diese Freigabe scheitert ihr sendmail an
+# "maildrop: Read-only file system" und der Lauf haengt, bis postdrop aufgibt.
+UEBERW_DROPIN = "/etc/systemd/system/jarvis-ueberwachung.service.d/81-jarvis-mail.conf"
+MAILDROP = "/var/spool/postfix/maildrop"
 
 QUELLEN = ("ueberwachung", "aide", "sicherheit", "system")
 GRENZE_JE_STUNDE = {"ueberwachung": 20, "aide": 6, "sicherheit": 12, "test": 5}
@@ -429,6 +434,14 @@ AIDE_DROPIN_TEXT = (
     "# Gemeldet wird der Abgleich (nicht erklaerte Aenderungen, Fehler).\n"
     "[Service]\n"
     "Environment=MAILCMD=true\n")
+UEBERW_DROPIN_TEXT = (
+    "# Jarvis E-Mail-Versand (backend/mail_meldung.py): die Serverueberwachung\n"
+    "# (ProtectSystem=strict) muss Mails abgeben (postdrop -> maildrop) und die\n"
+    "# Drosselung fuehren koennen. Gemessen DEV 2026-11-26: ohne diese Zeile\n"
+    "# 'maildrop: Read-only file system', keine Mail, Lauf haengt ~60 s.\n"
+    "# '-' = fehlt der Pfad (Postfix noch nicht da), startet die Unit trotzdem.\n"
+    "[Service]\n"
+    "ReadWritePaths=-%s -%s\n" % (MAILDROP, ZUSTAND_DIR))
 AIDE_AUSNAHME_TEXT = (
     "# Jarvis E-Mail-Versand (backend/mail_meldung.py): Zustand der Drosselung\n"
     "!/var/lib/jarvis-mail\n")
@@ -460,6 +473,7 @@ def _anwenden() -> dict:
     g_name = _atomar(_p(MAILNAME), fqdn + "\n", 0o644)
     g_alias = _atomar(_p(ALIASES), aliases(alt_aliases, k), 0o644)
     g_drop = _atomar(_p(AIDE_DROPIN), AIDE_DROPIN_TEXT, 0o644)
+    g_ueberw = _atomar(_p(UEBERW_DROPIN), UEBERW_DROPIN_TEXT, 0o644)
     if _p("/etc/aide/aide.conf.d").is_dir():
         _atomar(_p(AIDE_AUSNAHME), AIDE_AUSNAHME_TEXT, 0o644)
     # SMTP-Eingang aus: Postfix lauscht dann auf keinem Port
@@ -483,9 +497,12 @@ def _anwenden() -> dict:
         for db in _alias_dbs():
             _merken(db, _sha(_p(db).read_bytes()))
         schritte.append("Weiterleitung fuer root aktualisiert")
-    if g_drop:
+    if g_drop or g_ueberw:
         _lauf(["systemctl", "daemon-reload"], timeout=30)
+    if g_drop:
         schritte.append("Debians AIDE-Tagesbericht stillgelegt")
+    if g_ueberw:
+        schritte.append("Serverueberwachung darf Mails abgeben")
     r = _lauf(["postfix", "check"], timeout=30)
     if r.returncode != 0:
         return antwort(False, Meldung("postfix_check", "postfix check: %s" % (r.stderr or r.stdout).strip()[:300],

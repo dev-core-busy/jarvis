@@ -117,6 +117,14 @@ PROBEN = [
     ("Auto-Sperre mit Befehlstext", "backend/security_guard.py",
      '_mail("konto_gesperrt_verstoss", benutzer=user, kanal=channel, muster=kind, ip=ip)',
      '_mail("konto_gesperrt_verstoss", benutzer=user, kanal=channel, muster=kind, ip=ip, detail=detail)', 1),
+    # Serverueberwachung darf Mails abgeben (DEV 2026-11-26: maildrop read-only)
+    ("Ueberwachungs-Drop-in nicht geschrieben", MM,
+     '    g_ueberw = _atomar(_p(UEBERW_DROPIN), UEBERW_DROPIN_TEXT, 0o644)\n', '    g_ueberw = False\n', 1),
+    ("Drop-in ohne daemon-reload", MM, '    if g_drop or g_ueberw:\n', '    if g_drop:\n', 1),
+    ("Drosselzustand nicht freigegeben", MM,
+     '"ReadWritePaths=-%s -%s\\n" % (MAILDROP, ZUSTAND_DIR))', '"ReadWritePaths=-%s\\n" % MAILDROP)', 1),
+    ("Drop-in an der falschen Unit", MM, 'jarvis-ueberwachung.service.d/81-jarvis-mail.conf',
+     'jarvis-ueberwachung.timer.d/81-jarvis-mail.conf', 1),
 ]
 
 
@@ -140,6 +148,8 @@ def main() -> int:
         shutil.copy2(REPO / "start_jarvis_root.sh", tmp / "start_jarvis_root.sh")
         (tmp / "deploy" / "security").mkdir(parents=True)
         shutil.copy2(REPO / "deploy/security/broker_installieren.sh", tmp / "deploy/security/broker_installieren.sh")
+        # Der Waechter liest die Unit der Serverueberwachung (ProtectSystem, seit 2026-11-26)
+        shutil.copy2(REPO / "deploy/security/system_haertung.sh", tmp / "deploy/security/system_haertung.sh")
         (tmp / "frontend" / "js").mkdir(parents=True)
         for f in ("i18n.js", "i18n_fr.js", "i18n_nl.js"):
             shutil.copy2(REPO / "frontend/js" / f, tmp / "frontend/js" / f)

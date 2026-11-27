@@ -663,12 +663,77 @@ def _lauf(cmd: list, cwd: Path, timeout: int = 120,
         return 1, f"{type(e).__name__}: {e}"
 
 
+# ── Zugriffstor auf den Wegwerf-Klon (Befund 2026-11-27) ─────────────────────
+# Bis hierher stand ALLES unter /tmp/claude_subagent/<job> auf 0777: jeder
+# lokale Prozess konnte die Arbeitskopie zwischen Lauf und Patch veraendern –
+# der Patch, den der Benutzer anwendet, haette fremden Code enthalten koennen.
+#
+# Jetzt dieselbe Bauform wie bei den Lauf-Verzeichnissen (lauf_tmp.py): das
+# VERZEICHNIS ist das Tor, nicht die Dateirechte darin.
+#   * Wurzel /tmp/claude_subagent: gehoert dem Dienst, 0755, kein Symlink. In
+#     /tmp (1777) koennte sie ein Fremder VOR dem Dienst anlegen und dann jeden
+#     Auftragsordner austauschen – eine fremde Wurzel ist ein Abbruch.
+#   * Auftragsordner <job>: Dienst, 0770, dazu per ACL rwx fuer die beiden
+#     Sandbox-Konten (shell_execute laeuft als jarvis_sandbox*). Die Konten
+#     sind bewusst NICHT in der Dienstgruppe (sonst kaemen sie an data/) –
+#     eine benannte ACL ist der einzige Weg, der beides erfuellt.
+#   * Innen bleibt 0777/0666: Dienst und Sandbox muessen gegenseitig Dateien
+#     ueberschreiben koennen (Vorfall 2026-08-21, safe.directory). Erreichbar
+#     ist das nur noch fuer den, der durch das Tor kommt.
+# Laesst sich die ACL nicht setzen, bricht der Auftrag ab (fail-closed) statt
+# auf 0777 zurueckzufallen.
+
+def _sandbox_konten() -> tuple:
+    from backend import sandbox_grenzen as _sg
+    return (_sg.SBX_USER, _sg.NOINET_USER)
+
+
+def _wurzel_pruefen() -> str | None:
+    """Wurzel anlegen bzw. pruefen. Rueckgabe: Fehlertext oder None."""
+    try:
+        ARBEIT_ROOT.mkdir(mode=0o755, exist_ok=True)
+        st = os.lstat(ARBEIT_ROOT)
+    except Exception as e:  # noqa: BLE001
+        return f"Arbeitswurzel {ARBEIT_ROOT} nicht anlegbar: {e}"
+    import stat as _stat
+    if not _stat.S_ISDIR(st.st_mode):
+        return f"Arbeitswurzel {ARBEIT_ROOT} ist kein Verzeichnis (Symlink?) – Abbruch."
+    if st.st_uid != os.geteuid():
+        return (f"Arbeitswurzel {ARBEIT_ROOT} gehoert nicht dem Dienst (uid "
+                f"{st.st_uid}) – jemand hat sie vorab angelegt. Abbruch; das "
+                f"Verzeichnis muss entfernt werden.")
+    if st.st_mode & 0o7777 != 0o755:
+        try:
+            os.chmod(ARBEIT_ROOT, 0o755)
+        except Exception as e:  # noqa: BLE001
+            return f"Arbeitswurzel {ARBEIT_ROOT} nicht auf 0755 setzbar: {e}"
+    return None
+
+
+def _tor_setzen(ziel: Path) -> str | None:
+    """Auftragsordner auf 0770 + ACL fuer die Sandbox-Konten. Fehlertext oder None."""
+    try:
+        os.chmod(ziel, 0o770)
+    except Exception as e:  # noqa: BLE001
+        return f"Arbeitsbereich nicht absicherbar: {e}"
+    eintraege = ",".join(f"u:{k}:rwx" for k in _sandbox_konten())
+    rc, aus = _lauf(["setfacl", "-m", eintraege, str(ziel)], cwd=ARBEIT_ROOT, timeout=30)
+    if rc != 0:
+        return (f"Zugriffsrecht fuer die Sandbox nicht setzbar (setfacl, rc {rc}): "
+                f"{aus.strip()[-300:]}")
+    return None
+
+
 def arbeitsbereich_anlegen(job_id: str, basis: str) -> tuple[Path, str | None]:
     """Legt den Wegwerf-Klon an. Rueckgabe (pfad, fehler)."""
     ziel = ARBEIT_ROOT / job_id
+    fehler = _wurzel_pruefen()
+    if fehler:
+        return ziel, fehler
     try:
         shutil.rmtree(ziel, ignore_errors=True)
-        ziel.mkdir(parents=True, exist_ok=True)
+        # 0700 bis das Tor steht – waehrend des Klonens kommt niemand hinein.
+        ziel.mkdir(mode=0o700)
     except Exception as e:  # noqa: BLE001
         return ziel, f"Arbeitsbereich nicht anlegbar: {e}"
 
@@ -689,14 +754,17 @@ def arbeitsbereich_anlegen(job_id: str, basis: str) -> tuple[Path, str | None]:
         return work, (f"Basis stimmt nicht: angefordert {basis}, origin/master steht auf "
                       f"{kopf[:12]}. Committe und pushe zuerst, oder delegiere nicht.")
 
-    # Damit sowohl das filesystem-Werkzeug (laeuft als Dienstbenutzer) als auch
-    # shell_execute (laeuft als jarvis_sandbox) arbeiten koennen. In der Probe
-    # war GENAU DAS die Stelle, an der sich das Modell selbst blockierte: der
-    # Klon gehoerte root, git verweigerte mit safe.directory.
+    # INNERHALB des Tors: damit sowohl das filesystem-Werkzeug (laeuft als
+    # Dienstbenutzer) als auch shell_execute (laeuft als jarvis_sandbox)
+    # arbeiten koennen. In der Probe war GENAU DAS die Stelle, an der sich das
+    # Modell selbst blockierte: der Klon gehoerte root, git verweigerte mit
+    # safe.directory. Der Auftragsordner selbst bleibt 0770 + ACL (_tor_setzen).
     try:
         for p in ziel.rglob("*"):
+            if p.is_symlink():
+                continue
             if p.is_dir():
-                # bandit B103: gewollt – Dienst und Sandbox-Benutzer teilen den Klon (s. o.)
+                # bandit B103: gewollt – nur hinter dem Tor erreichbar (s. o.)
                 os.chmod(p, 0o777)  # nosec B103
                 continue
             # ⚠ DAS AUSFUEHRBIT MUSS ERHALTEN BLEIBEN. Ein pauschales 0666
@@ -707,10 +775,13 @@ def arbeitsbereich_anlegen(job_id: str, basis: str) -> tuple[Path, str | None]:
             # start_jarvis.sh und start_jarvis_root.sh. (Dieselbe Datei, die
             # dem Projekt schon einmal einen 203/EXEC beschert hat.)
             m = p.stat().st_mode
-            os.chmod(p, 0o777 if (m & 0o111) else 0o666)
-        os.chmod(ziel, 0o777)  # nosec B103
+            os.chmod(p, 0o777 if (m & 0o111) else 0o666)  # nosec B103
     except Exception:  # noqa: BLE001
         pass
+    fehler = _tor_setzen(ziel)
+    if fehler:
+        shutil.rmtree(ziel, ignore_errors=True)
+        return work, fehler
     return work, None
 
 

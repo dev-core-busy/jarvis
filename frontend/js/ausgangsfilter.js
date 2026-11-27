@@ -200,12 +200,12 @@
                     return;
                 }
                 html += '<tr data-af-zeile="' + i + '">'
-                    + '<td><input type="text" data-f="benutzer" value="' + esc(r.benutzer) + '" placeholder="jarvis"></td>'
+                    + '<td><input data-tabfill-nein="Freigabe im Ausgangsfilter – ein Beispielwert darf nicht per Tab zur Regel werden" type="text" data-f="benutzer" value="' + esc(r.benutzer) + '" placeholder="jarvis"></td>'
                     + '<td><select data-f="proto">' + ['tcp', 'udp', 'icmp'].map(function (p) {
                         return '<option value="' + p + '"' + (r.proto === p ? ' selected' : '') + '>' + p + '</option>';
                     }).join('') + '</select></td>'
-                    + '<td><input type="text" data-f="ports" value="' + esc(r.ports) + '" placeholder="443"></td>'
-                    + '<td><input type="text" data-f="ziele" value="' + esc(r.ziele) + '" placeholder="*"></td>'
+                    + '<td><input data-tabfill-nein="Freigabe im Ausgangsfilter – ein Beispielwert darf nicht per Tab zur Regel werden" type="text" data-f="ports" value="' + esc(r.ports) + '" placeholder="443"></td>'
+                    + '<td><input data-tabfill-nein="Freigabe im Ausgangsfilter – ein Beispielwert darf nicht per Tab zur Regel werden" type="text" data-f="ziele" value="' + esc(r.ziele) + '" placeholder="*"></td>'
                     + '<td><input type="text" data-f="notiz" value="' + esc(r.notiz) + '"></td>'
                     + '<td><button type="button" class="sec-btn small danger" data-af-weg="' + i + '" title="' + weg + '" aria-label="' + weg + '">' + muell + '</button></td></tr>';
             });

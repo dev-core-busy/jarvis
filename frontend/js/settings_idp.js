@@ -183,12 +183,6 @@
                 T('security.idp_test_schluessel', 'Signaturschlüssel:') + ' ' + d.schluessel];
             if (d.algorithmen_erlaubt === false) zeilen.push(T('security.idp_test_alg',
                 'Achtung: Der IdP bietet kein Signaturverfahren an, das {marke} annimmt.') + ' (' + (d.algorithmen || []).join(', ') + ')');
-            // Abmeldung am IdP (2026-11-27): ohne end_session_endpoint bleibt die
-            // IdP-Sitzung beim Abmelden stehen; mit ihm muss die Rueckkehr dort stehen.
-            if (d.end_session_endpoint === false) zeilen.push(T('security.idp_test_keine_abmeldung',
-                'Der IdP bietet keine Abmeldung an: beim Abmelden bleibt die Sitzung am IdP bestehen. Die nächste Anmeldung über den IdP verlangt dort trotzdem eine neue Anmeldung.'));
-            else if (d.end_session_endpoint && d.abmelde_ruecksprung) zeilen.push(
-                T('security.idp_test_abmeldung', 'Abmelde-Rückkehradresse (beim IdP einzutragen):') + ' ' + d.abmelde_ruecksprung);
             meldung('idp-msg', zeilen.join('\n'), d.algorithmen_erlaubt === false);
         }).catch(function () {
             if (btn) btn.disabled = false;

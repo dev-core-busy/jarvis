@@ -6364,11 +6364,12 @@ _OIDC_COOKIE_VORGANG = "__Host-jarvis_oidc"
 _OIDC_COOKIE_SCHEIN = "__Host-jarvis_oidc_schein"
 # Merkmal "dieser Browser hat sich ueber den IdP angemeldet" (2026-11-27):
 # Sitzungs-Cookie OHNE Max-Age, also weg, sobald der Browser geschlossen wird.
-# Wert = Schluessel in ``oidc_anmeldung.IDP_SITZUNGEN`` (id_token fuer die
-# Abmeldung). Fehlt es beim Start, verlangt Jarvis vom IdP eine NEUE Anmeldung
-# (prompt=login) – das ist die Abmeldung am IdP nach dem Schliessen des
-# Browsers: beim Schliessen selbst kann der Browser nichts mehr senden, und
-# ein pagehide-Signal waere von einem Seitenwechsel nicht zu unterscheiden.
+# Wert = Schluessel in ``oidc_anmeldung.IDP_SITZUNGEN``. Fehlt es beim Start,
+# verlangt Jarvis vom IdP eine NEUE Anmeldung (prompt=login) – nach dem
+# Abmelden (/api/logout loescht das Merkmal, leitet aber bewusst nicht zur
+# Abmeldeseite des IdP) ebenso wie nach dem Schliessen des Browsers: beim
+# Schliessen selbst kann der Browser nichts mehr senden, und ein
+# pagehide-Signal waere von einem Seitenwechsel nicht zu unterscheiden.
 _OIDC_COOKIE_SITZUNG = "__Host-jarvis_idp"
 
 
@@ -6671,8 +6672,7 @@ async def oidc_callback(request: Request):
     # Zugangsdaten erst NACH allen Pruefungen holen: ein abgewiesenes Konto
     # bekommt keine Anfrage an userinfo und keinen Schein mit Geheimnissen.
     zugaenge = await _oidc_zugaenge_holen(claims, doc, tausch.get("access_token", ""), ctx)
-    # id_token mit in den Schein: es wird beim Abmelden als id_token_hint gebraucht.
-    schein = _oidc.SCHEINE.neu({"konto": konto, "zugaenge": zugaenge, "id_token": id_token})
+    schein = _oidc.SCHEINE.neu({"konto": konto, "zugaenge": zugaenge})
     resp = _oidc_zurueck(request)
     _oidc_cookie(resp, _OIDC_COOKIE_SCHEIN, schein, _oidc.SCHEIN_TTL_S)
     print(f"[AUTH] IdP-Anmeldung geprueft, Schein ausgestellt: {konto} ({ip})", flush=True)
@@ -6750,50 +6750,12 @@ async def _oidc_einloesen_ablauf(request: Request):
         daten["idp_zugaenge"] = await _idp_zugaenge_uebernehmen(
             konto, schein.get("zugaenge") or {})
     # Die Sitzung endet mit dem Browser (Cookie ohne Max-Age), ebenso das
-    # Merkmal fuer die Abmeldung am IdP – siehe _OIDC_COOKIE_SITZUNG.
+    # Merkmal der IdP-Anmeldung – siehe _OIDC_COOKIE_SITZUNG.
     resp = _sitzung_antwort(request, daten, bis_browserende=True)
     _oidc_cookie_weg(resp, _OIDC_COOKIE_SCHEIN)
-    kennung = _oidc.IDP_SITZUNGEN.neu({"konto": konto, "id_token": schein.get("id_token") or ""})
+    kennung = _oidc.IDP_SITZUNGEN.neu({"konto": konto})
     _oidc_cookie(resp, _OIDC_COOKIE_SITZUNG, kennung, None)
     return resp
-
-
-def _oidc_abmelde_ruecksprung(request: Request, cfg: dict | None) -> str:
-    """Wohin der IdP nach der Abmeldung zurueckleitet: die Startseite unter dem
-    Namen der Rueckkehradresse (dort liegen Anmeldung und Sitzung). Muss beim
-    IdP als Abmelde-Rueckkehr eingetragen sein."""
-    adresse = _oidc_ursprung_adresse(_oidc_redirect_uri(request, cfg))
-    return adresse + "/" if adresse else ""
-
-
-async def _oidc_abmeldung(request: Request, user: str) -> str | None:
-    """Adresse fuer die Abmeldung am IdP – nur, wenn DIESER Browser ueber den
-    IdP angemeldet ist (Merkmal-Cookie) und der IdP eine Abmeldung anbietet.
-    Ein Fehler kostet nie die Jarvis-Abmeldung: dann eben ohne IdP."""
-    from backend import oidc_anmeldung as _oidc
-    kennung = request.cookies.get(_OIDC_COOKIE_SITZUNG, "")
-    if not kennung:
-        return None
-    eintrag = _oidc.IDP_SITZUNGEN.nehmen(kennung) or {}
-    cfg = _oidc_konfig()
-    if cfg is None:
-        return None
-    try:
-        ctx = _oidc.ssl_kontext(cfg["ca_cert"])
-        doc = await asyncio.to_thread(_oidc.discovery, cfg["issuer"], ctx)
-    except _oidc.OidcFehler as e:
-        print(f"[AUTH] Abmeldung am IdP nicht moeglich ({e.code}: {e})", flush=True)
-        return None
-    # Den Hinweis nur fuer das eigene Konto: hat sich im selben Browser
-    # inzwischen jemand anders (per Kennwort) angemeldet, gehoert das Token
-    # nicht zu dieser Sitzung.
-    hinweis = (eintrag.get("id_token") or "") \
-        if _norm_login(eintrag.get("konto") or "") == _norm_login(user) else ""
-    url = _oidc.abmelde_url(doc, cfg["client_id"], _oidc_abmelde_ruecksprung(request, cfg), hinweis)
-    if url is None:
-        print("[AUTH] Abmeldung am IdP: der IdP bietet keine an (end_session_endpoint fehlt)",
-              flush=True)
-    return url
 
 
 async def _oidc_zugaenge_holen(claims: dict, doc: dict, access_token: str, ctx) -> dict:
@@ -6995,9 +6957,6 @@ async def oidc_verbindung_testen(request: Request, user: str = Depends(require_l
                                        config.get_setting("oidc_ca_cert", "") or None)
     except _oidc.OidcFehler as e:
         return JSONResponse({"ok": False, "error": str(e), "code": e.code})
-    # Fuer die Maske: diese Adresse muss beim IdP als Abmelde-Rueckkehr stehen.
-    info["abmelde_ruecksprung"] = _oidc_abmelde_ruecksprung(
-        request, {"redirect_uri": str(config.get_setting("oidc_redirect_uri", "") or "").strip()})
     return JSONResponse({"ok": True, **info})
 
 
@@ -7049,17 +7008,15 @@ async def logout(request: Request, user: str = Depends(require_auth)):
     _sicherheits_log.ereignis("abmeldung", benutzer=user,
                               ip=request.client.host if request.client else "",
                               ergebnis="erfolg")
-    # Ueber den IdP angemeldet: der Browser geht anschliessend zur Abmeldung
-    # an den IdP (sessions.js folgt "idp_abmeldung"), und das Merkmal faellt
-    # weg – die naechste IdP-Anmeldung verlangt damit in jedem Fall eine neue
-    # Anmeldung am IdP (prompt=login), auch wenn dessen Abmeldung scheitert.
-    try:
-        idp_abmeldung = await _oidc_abmeldung(request, user)
-    except Exception as e:  # noqa: BLE001
-        print(f"[AUTH] Abmeldung am IdP: {type(e).__name__}: {str(e)[:200]}", flush=True)
-        idp_abmeldung = None
-    resp = JSONResponse({"ok": True, **({"idp_abmeldung": idp_abmeldung} if idp_abmeldung else {})})
-    if request.cookies.get(_OIDC_COOKIE_SITZUNG):
+    # Ueber den IdP angemeldet: KEINE Weiterleitung zur Abmeldeseite des IdP
+    # (Festlegung 2026-11-27) – der Browser landet wie jede Abmeldung auf der
+    # Jarvis-Anmeldemaske. Das Merkmal faellt weg, die naechste IdP-Anmeldung
+    # verlangt damit am IdP eine neue Anmeldung (prompt=login).
+    resp = JSONResponse({"ok": True})
+    kennung = request.cookies.get(_OIDC_COOKIE_SITZUNG)
+    if kennung:
+        from backend import oidc_anmeldung as _oidc
+        _oidc.IDP_SITZUNGEN.nehmen(kennung)
         _oidc_cookie_weg(resp, _OIDC_COOKIE_SITZUNG)
     # Das Cookie gehoert mit weg (BSI H4) – das Token darin ist oben widerrufen,
     # aber ein stehengebliebenes Cookie wuerde beim naechsten Anmelden auf einer

@@ -305,29 +305,11 @@ qs = parse_qs(urlparse(O.autorisierungs_url(DOC, CID, "https://r/cb", "ST", "NO"
 pruefe(qs.get("prompt") == ["login"] and qs.get("state") == ["ST"],
        "prompt=login wird mitgeschickt (neue Anmeldung am IdP)")
 
-abschnitt("1f2. Abmeldung am IdP (RP-Initiated Logout)")
-ABDOC = dict(DOC, end_session_endpoint=ISS + "/logout")
-u = O.abmelde_url(ABDOC, CID, "https://jarvis.beispiel.de/", "IDTOK")
-qs = parse_qs(urlparse(u or "").query)
-pruefe(bool(u) and u.startswith(ISS + "/logout?"), "Positivkontrolle: Abmeldeadresse = end_session_endpoint")
-pruefe(qs.get("client_id") == [CID] and qs.get("id_token_hint") == ["IDTOK"]
-       and qs.get("post_logout_redirect_uri") == ["https://jarvis.beispiel.de/"],
-       "client_id, id_token_hint und Rueckkehr in der Adresse")
-# keep_blank_values: sonst verwirft parse_qs ein leeres "id_token_hint=" und die
-# Pruefung waere trivial wahr (Gegenprobe "leerer id_token_hint" blieb stumm).
-qs = parse_qs(urlparse(O.abmelde_url(ABDOC, CID, "https://jarvis.beispiel.de/", "") or "").query,
-              keep_blank_values=True)
-pruefe("id_token_hint" not in qs and qs.get("client_id") == [CID],
-       "ohne bekanntes id_token: nur client_id (kein leerer Hinweis)")
-u = O.abmelde_url(dict(ABDOC, end_session_endpoint=ISS + "/logout?x=1"), CID, "https://j/", "T")
-pruefe(bool(u) and "?x=1&" in u, "vorhandene Abfrage im Endpunkt bleibt erhalten")
-pruefe(O.abmelde_url(DOC, CID, "https://j/", "T") is None, "IdP ohne end_session_endpoint -> None")
-pruefe(O.abmelde_url(dict(DOC, end_session_endpoint="http://idp.beispiel.de/logout"), CID,
-                     "https://j/", "T") is None, "Abmeldeadresse ohne https -> None")
-pruefe(O.abmelde_url(dict(DOC, end_session_endpoint=["x"]), CID, "https://j/", "T") is None,
-       "Abmeldeadresse kein Text -> None")
+abschnitt("1f2. Keine Weiterleitung zur Abmeldeseite des IdP (2026-11-27)")
+pruefe(not hasattr(O, "abmelde_url"),
+       "keine Abmeldeadresse des IdP mehr (Abmelden fuehrt auf die Jarvis-Anmeldemaske)")
 pruefe(isinstance(O.IDP_SITZUNGEN, O.Ablage) and O.IDP_SITZUNGEN.ttl_s >= 8 * 3600,
-       "IDP_SITZUNGEN haelt das id_token mindestens einen Arbeitstag")
+       "IDP_SITZUNGEN haelt das Merkmal mindestens einen Arbeitstag")
 
 abschnitt("1g. Code-Tausch (httpx-Attrappe mit echter Signatur)")
 _gesehen = {}
@@ -560,7 +542,7 @@ NOETIG = ("_oidc_schalter", "_oidc_konfig", "_oidc_redirect_uri",
           "oidc_einloesen", "_oidc_einloesen_ablauf", "oidc_start", "oidc_status",
           "_oidc_ad_modus", "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
           "_oidc_ursprung", "_oidc_ursprung_adresse", "_oidc_start_umleitung",
-          "_oidc_abmelde_ruecksprung", "_oidc_abmeldung", "logout")
+          "logout")
 for n in NOETIG:
     pruefe(n in FUNK, "%s existiert in main.py" % n)
 if not all(n in FUNK for n in NOETIG):
@@ -718,7 +700,7 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
               "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
               "_oidc_zugaenge_holen", "_idp_zugaenge_uebernehmen",
               "_oidc_ursprung", "_oidc_ursprung_adresse", "_oidc_start_umleitung",
-              "_oidc_abmelde_ruecksprung", "_oidc_abmeldung", "logout", "oidc_start"):
+              "logout", "oidc_start"):
         fn = FUNK[n]
         fn2 = ast.FunctionDef(name=fn.name, args=fn.args, body=fn.body, decorator_list=[],
                               returns=None, type_params=[]) if isinstance(fn, ast.FunctionDef) else \
@@ -933,64 +915,29 @@ r, d, log, _ = _einloesen(block={"reason": "x", "incidents": []}, admin=True)
 pruefe(d.get("account_blocked") and d.get("is_admin") is False, "gesperrter Account (Sicherheit): nur Sperrhinweis")
 
 
-abschnitt("2a. Abmeldung am IdP und Ende mit dem Browser (2026-11-27)")
+abschnitt("2a. Abmelden ohne IdP-Abmeldeseite, Ende mit dem Browser (2026-11-27)")
 r, log = _callback()
 sch = O.SCHEINE.lesen((r.cookies.get("__Host-jarvis_oidc_schein") or ("",))[0]) or {}
-pruefe(sch.get("id_token") == _tausch["tok"], "Callback legt das id_token in den Einloese-Schein")
-r, d, log, _ = _einloesen({"konto": "m.muster", "id_token": "IDTOK-1"})
+pruefe(sch.get("konto") and "id_token" not in sch,
+       "Callback legt kein id_token in den Einloese-Schein (wird nicht mehr gebraucht)")
+r, d, log, _ = _einloesen({"konto": "m.muster"})
 _mk = r.cookies.get("__Host-jarvis_idp") or (None, {})
 pruefe(d.get("success") and bool(_mk[0]), "Positivkontrolle: Einloesen setzt das IdP-Merkmal")
 pruefe(_mk[1].get("max_age", "fehlt") is None and _mk[1].get("httponly") and _mk[1].get("secure"),
        "IdP-Merkmal ist ein Sitzungs-Cookie (ohne Max-Age, HttpOnly, Secure)")
 pruefe(log.get("sitzung_kw") == [{"bis_browserende": True}],
        "Jarvis-Sitzung der IdP-Anmeldung endet mit dem Browser (bis_browserende)")
-pruefe((O.IDP_SITZUNGEN.lesen(_mk[0]) or {}) == {"konto": "m.muster", "id_token": "IDTOK-1"},
-       "Merkmal verweist auf Konto + id_token fuer die Abmeldung")
-_KENNUNG = _mk[0]
+pruefe((O.IDP_SITZUNGEN.lesen(_mk[0]) or {}) == {"konto": "m.muster"},
+       "Merkmal verweist nur auf das Konto (kein id_token)")
 r, d, log, _ = _einloesen(schein_id="erfunden")
 pruefe("__Host-jarvis_idp" not in r.cookies, "abgewiesenes Einloesen setzt kein Merkmal")
 
-O.discovery = lambda issuer, ctx, neu=False: ABDOC
-ns, log = _ns(EINST)
-_abm = ns["_oidc_abmeldung"]
-u = asyncio.run(_abm(_Req(cookies={"__Host-jarvis_idp": _KENNUNG}), "m.muster"))
-qs = parse_qs(urlparse(u or "").query)
-pruefe(bool(u) and qs.get("id_token_hint") == ["IDTOK-1"]
-       and qs.get("post_logout_redirect_uri") == ["https://jarvis.beispiel.de/"],
-       "Abmeldung: Adresse mit id_token_hint und Startseite als Rueckkehr")
-pruefe(O.IDP_SITZUNGEN.lesen(_KENNUNG) is None, "Eintrag ist danach verbraucht")
-u = asyncio.run(_abm(_Req(cookies={"__Host-jarvis_idp": _KENNUNG}), "m.muster"))
-pruefe(bool(u) and "id_token_hint" not in parse_qs(urlparse(u).query),
-       "zweite Abmeldung (Eintrag weg, z. B. nach Neustart): trotzdem Abmeldung, ohne Hinweis")
-k2 = O.IDP_SITZUNGEN.neu({"konto": "m.muster", "id_token": "IDTOK-2"})
-u = asyncio.run(_abm(_Req(cookies={"__Host-jarvis_idp": k2}), "a.nders"))
-pruefe(bool(u) and "id_token_hint" not in parse_qs(urlparse(u).query),
-       "anderes Konto im selben Browser: kein fremdes id_token als Hinweis")
-pruefe(asyncio.run(_abm(_Req(), "m.muster")) is None, "ohne Merkmal (Kennwortanmeldung): keine IdP-Abmeldung")
-ns2, _ = _ns(dict(EINST, oidc_redirect_uri="https://192.0.2.30/api/login/oidc/callback"))
-k3 = O.IDP_SITZUNGEN.neu({"konto": "m.muster", "id_token": "T"})
-u = asyncio.run(ns2["_oidc_abmeldung"](_Req(cookies={"__Host-jarvis_idp": k3}), "m.muster"))
-pruefe(parse_qs(urlparse(u or "").query).get("post_logout_redirect_uri") == ["https://192.0.2.30/"],
-       "feste Rueckkehradresse: Abmelde-Rueckkehr unter demselben Namen")
-ns3, _ = _ns(dict(EINST, oidc_aktiv=False))
-k4 = O.IDP_SITZUNGEN.neu({"konto": "m.muster", "id_token": "T"})
-pruefe(asyncio.run(ns3["_oidc_abmeldung"](_Req(cookies={"__Host-jarvis_idp": k4}), "m.muster")) is None,
-       "IdP-Anmeldung inzwischen aus: keine IdP-Abmeldung")
-O.discovery = lambda issuer, ctx, neu=False: DOC
-k5 = O.IDP_SITZUNGEN.neu({"konto": "m.muster", "id_token": "T"})
-pruefe(asyncio.run(_abm(_Req(cookies={"__Host-jarvis_idp": k5}), "m.muster")) is None,
-       "IdP ohne end_session_endpoint: keine IdP-Abmeldung")
+_disc_aufrufe = []
 
 
-def _disc_fehler(issuer, ctx, neu=False):
-    raise O.OidcFehler("nicht erreichbar", "nicht_erreichbar")
-
-
-O.discovery = _disc_fehler
-k6 = O.IDP_SITZUNGEN.neu({"konto": "m.muster", "id_token": "T"})
-pruefe(asyncio.run(_abm(_Req(cookies={"__Host-jarvis_idp": k6}), "m.muster")) is None,
-       "IdP nicht erreichbar: keine IdP-Abmeldung, kein Wurf")
-O.discovery = lambda issuer, ctx, neu=False: ABDOC
+def _disc_zaehlen(issuer, ctx, neu=False):
+    _disc_aufrufe.append(issuer)
+    return DOC
 
 
 def _abmelden(cookies=None):
@@ -1000,22 +947,19 @@ def _abmelden(cookies=None):
     return r, json.loads(r.body), log
 
 
-k7 = O.IDP_SITZUNGEN.neu({"konto": "m.muster", "id_token": "IDTOK-7"})
+O.discovery = _disc_zaehlen
+k7 = O.IDP_SITZUNGEN.neu({"konto": "m.muster"})
 r, d, log = _abmelden({"__Host-jarvis_idp": k7})
 pruefe(d.get("ok") and log.get("widerrufen") == ["SIG"], "Positivkontrolle: /api/logout widerruft das Token")
-pruefe(isinstance(d.get("idp_abmeldung"), str) and "id_token_hint=IDTOK-7" in d["idp_abmeldung"],
-       "/api/logout nennt die Abmeldeadresse des IdP")
+pruefe(set(d) == {"ok"}, "/api/logout nennt KEIN Weiterleitungsziel (Browser bleibt bei Jarvis): %s"
+       % sorted(d))
+pruefe(not _disc_aufrufe, "/api/logout fragt den IdP nicht (keine Abmeldung dort)")
 pruefe((r.cookies.get("__Host-jarvis_idp") or ("x",))[0] is None,
        "/api/logout loescht das IdP-Merkmal (naechste IdP-Anmeldung mit prompt=login)")
+pruefe(O.IDP_SITZUNGEN.lesen(k7) is None, "/api/logout raeumt den Eintrag des Merkmals ab")
 r, d, log = _abmelden()
-pruefe(d.get("ok") and "idp_abmeldung" not in d and "__Host-jarvis_idp" not in r.cookies,
+pruefe(d.get("ok") and set(d) == {"ok"} and "__Host-jarvis_idp" not in r.cookies,
        "Kennwortanmeldung: Abmeldung wie bisher, ohne IdP")
-O.discovery = _disc_fehler
-k8 = O.IDP_SITZUNGEN.neu({"konto": "m.muster", "id_token": "T"})
-r, d, log = _abmelden({"__Host-jarvis_idp": k8})
-pruefe(d.get("ok") and log.get("widerrufen") == ["SIG"] and "idp_abmeldung" not in d
-       and (r.cookies.get("__Host-jarvis_idp") or ("x",))[0] is None,
-       "IdP nicht erreichbar: Jarvis-Abmeldung gelingt trotzdem, Merkmal faellt weg")
 O.discovery = lambda issuer, ctx, neu=False: DOC
 
 

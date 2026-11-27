@@ -39,16 +39,10 @@
     // und die Abmeldung käme nie an. sendBeacon scheidet aus – es kann keinen
     // Authorization-Header setzen.
     //
-    // Abmeldung am IdP (2026-11-27): war die Sitzung eine Anmeldung ueber den
-    // IdP, nennt der Server in "idp_abmeldung" die Abmeldeadresse des IdP. Dann
-    // geht DIESE Funktion dorthin (der IdP leitet danach auf "/" zurueck) und
-    // ihr Promise bleibt offen – die Aufrufer warten darauf und navigieren
-    // sonst selbst auf "/", das wuerde die Abmeldung am IdP ueberholen.
-    function _idpZiel(d) {
-        var z = d && d.idp_abmeldung;
-        return (typeof z === 'string' && /^https:\/\/[^\s]+$/i.test(z)) ? z : '';
-    }
-
+    // Anmeldung ueber den IdP (2026-11-27): bewusst KEINE Weiterleitung zur
+    // Abmeldeseite des IdP – die Aufrufer fuehren wie bei jeder Abmeldung auf
+    // die Anmeldemaske. Die naechste IdP-Anmeldung verlangt dort trotzdem eine
+    // neue Anmeldung (der Server schickt dann prompt=login).
     function logout(token) {
         var tok = token || anyToken();
         if (!tok) return Promise.resolve(false);
@@ -57,14 +51,7 @@
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + tok },
                 keepalive: true,
-            }).then(function (r) {
-                return r.json().catch(function () { return {}; }).then(function (d) {
-                    var ziel = _idpZiel(d);
-                    if (!ziel) return true;
-                    window.location.replace(ziel);
-                    return new Promise(function () { /* Seite wird verlassen */ });
-                });
-            }).catch(function () { return false; });
+            }).then(function () { return true; }).catch(function () { return false; });
         } catch (e) {
             return Promise.resolve(false);
         }

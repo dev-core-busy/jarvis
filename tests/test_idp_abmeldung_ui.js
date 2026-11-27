@@ -1,20 +1,21 @@
 #!/usr/bin/env node
 /**
- * Waechter: Abmelden nach einer Anmeldung ueber den IdP fuehrt den Browser zur
- * Abmeldung am IdP (2026-11-27, frontend/js/sessions.js).
+ * Waechter: Abmelden nach einer Anmeldung ueber den IdP fuehrt NICHT zur
+ * Abmeldeseite des IdP, sondern wie jede Abmeldung auf die Jarvis-Anmeldemaske
+ * (Festlegung 2026-11-27, frontend/js/sessions.js).
  *
- * WARUM: Der Abmelde-Knopf beendete nur die Jarvis-Sitzung; die Sitzung am IdP
- * blieb offen, und "Mit Firmenkonto anmelden" meldete danach ohne Kennwort
- * wieder an. /api/logout nennt jetzt in "idp_abmeldung" die Abmeldeadresse des
- * IdP; JarvisSession.logout geht dorthin und laesst sein Promise OFFEN – die
- * Abmelde-Knoepfe warten darauf und fuehren sonst selbst auf "/", das wuerde
- * die Abmeldung am IdP ueberholen (test_abmelden_ziel.js).
+ * WARUM: Die erste Fassung (selber Tag) leitete den Browser nach /api/logout
+ * zur Abmeldeseite des IdP weiter; der Benutzer blieb dort auf der Seite des
+ * IdP stehen. Gewuenscht ist die Anmeldemaske von Jarvis. Die Sitzung am IdP
+ * zwingt trotzdem niemand still weiter: die naechste IdP-Anmeldung verlangt
+ * dort eine neue Anmeldung (prompt=login, test_oidc_anmeldung.py).
  *
  * Gemessen wird die WIRKUNG: sessions.js wird mit einer fetch-Attrappe in der
  * echten Antwortform ausgefuehrt, gezaehlt werden location.replace-Aufrufe und
- * ob das Promise aufgeloest wird.
+ * ob das Promise aufgeloest wird (die Abmelde-Knoepfe warten darauf und fuehren
+ * danach selbst auf "/", test_abmelden_ziel.js).
  *
- * Positivkontrolle: ohne "idp_abmeldung" loest das Promise mit true auf und
+ * Positivkontrolle: bei normaler Antwort loest das Promise mit true auf und
  * es wird NICHT navigiert – sonst Exit 2.
  *
  * Exit 0 = gruen, 1 = Befund, 2 = konnte nicht laufen.
@@ -62,34 +63,28 @@ async function lauf(antwort, status) {
     // Positivkontrolle
     let r = await lauf({ ok: true });
     if (!(r.erledigt && r.wert === true && r.ziele.length === 0 && r.anfragen.length === 1)) {
-        console.log('ABBRUCH: Positivkontrolle – ohne idp_abmeldung kein sauberes Ende ('
+        console.log('ABBRUCH: Positivkontrolle – Abmeldung endet nicht sauber ('
                     + JSON.stringify(r) + ')');
         process.exit(2);
     }
-    check('Positivkontrolle: ohne idp_abmeldung -> true, keine Navigation', true);
+    check('Positivkontrolle: Abmeldung -> true, keine Navigation', true);
     check('Abmeldung geht an /api/logout mit keepalive',
           r.anfragen[0].url === '/api/logout' && r.anfragen[0].opt.keepalive === true
           && r.anfragen[0].opt.headers.Authorization === 'Bearer CSRF');
 
-    const IDP = 'https://idp.beispiel.de/logout?client_id=c&post_logout_redirect_uri=https%3A%2F%2Fj%2F';
-    r = await lauf({ ok: true, idp_abmeldung: IDP });
-    check('mit idp_abmeldung: Browser geht zur Abmeldung am IdP', r.ziele.length === 1 && r.ziele[0] === IDP,
-          JSON.stringify(r.ziele));
-    check('mit idp_abmeldung: Promise bleibt offen (Aufrufer navigiert nicht auf "/")', !r.erledigt);
-
-    for (const [schlecht, text] of [['javascript:alert(1)', 'javascript:'],
-                                    ['http://idp.beispiel.de/logout', 'http ohne TLS'],
-                                    ['/lokal', 'relative Adresse'],
-                                    ['https://idp.beispiel.de/a b', 'Leerraum'],
-                                    [['https://x'], 'kein Text']]) {
-        r = await lauf({ ok: true, idp_abmeldung: schlecht });
-        check('unbrauchbares Ziel (' + text + '): keine Navigation, Promise loest auf',
-              r.ziele.length === 0 && r.erledigt && r.wert === true);
+    // Auch wenn ein (alter) Server noch ein Ziel nennt: kein Sprung zum IdP.
+    for (const [ziel, text] of [['https://idp.beispiel.de/logout?client_id=c', 'https-Adresse des IdP'],
+                                ['javascript:alert(1)', 'javascript:'],
+                                ['/lokal', 'relative Adresse']]) {
+        r = await lauf({ ok: true, idp_abmeldung: ziel });
+        check('Server nennt Ziel (' + text + '): keine Navigation, Promise loest mit true auf',
+              r.ziele.length === 0 && r.erledigt && r.wert === true, JSON.stringify(r.ziele));
     }
+    check('sessions.js kennt kein idp_abmeldung mehr', !/idp_abmeldung/.test(QUELLE));
     r = await lauf('kein json', 200);
     check('Antwort ohne JSON: keine Navigation, true', r.ziele.length === 0 && r.erledigt && r.wert === true);
     r = await lauf({ detail: 'Nicht autorisiert' }, 401);
-    check('abgelaufenes Token (401): keine Navigation', r.ziele.length === 0 && r.erledigt);
+    check('abgelaufenes Token (401): keine Navigation, Promise loest auf', r.ziele.length === 0 && r.erledigt);
 
     console.log('\nErgebnis: ' + ok + ' OK, ' + fail + ' FAIL');
     process.exit(fail ? 1 : 0);

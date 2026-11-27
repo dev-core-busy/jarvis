@@ -156,7 +156,14 @@
     <!-- 1.0.16 (2026-11-20): Anmeldung, Ergebnis und Einstellungen tragen das
          Tray-Symbol in Titel- und Taskleiste statt des generischen
          WinForms-Symbols. Ohne Erhoehung kaeme es nur bei Neu-Downloads an. -->
-    <Version>1.0.16</Version>
+    <!-- 1.0.17 (2026-11-27): Anmeldung ueber das Firmenkonto (IdP) im
+         Systembrowser – Knopf oben in der Anmeldemaske, Ruecksprung auf
+         127.0.0.1 mit Einmal-Code und PKCE, Kennwortfelder als Notweg
+         (eingeklappt je nach `ad_modus` des Servers). Die Windows-Anmeldung
+         per Kerberos aus 1.0.12 ist ENTFERNT (Betreiberentscheid): der Server
+         bietet `/api/login/windows` nicht mehr an. Eine 1.0.16 versucht sie
+         still weiter und zeigt danach wie gewohnt die Kennwortmaske. -->
+    <Version>1.0.17</Version>
     <!-- DPI awareness is owned by app.manifest, not by ApplicationHighDpiMode: it has to
          be in effect from process start, before any screen coordinate is read.
          WFAC010 asks for the opposite; suppressed because that trade-off is intentional. -->

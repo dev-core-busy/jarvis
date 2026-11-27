@@ -47,7 +47,7 @@ WAS DIESES MODUL NICHT TUT
 Es stellt **keine** Jarvis-Sitzung aus und kennt keine Freigaben. Es sagt nur:
 "dieses Token gehoert zu Konto X". Lokales Konto, Kontosperre, AD-Freigabe,
 Lizenz, 2FA und Sitzung entscheidet ``main.py`` – dieselbe Trennung wie bei
-``kerberos_anmeldung.py`` und ``addin_sso.py``. Bewusst ohne Import von
+``addin_sso.py``. Bewusst ohne Import von
 ``backend.config``: die Einstellungen kommen als Argument, damit ein Test das
 Modul ohne Live-``settings.json`` pruefen kann.
 """
@@ -75,6 +75,9 @@ JWKS_NEULADEN_ABSTAND_S = 60
 VORGANG_TTL_S = 600
 SCHEIN_TTL_S = 120
 SCHEIN_MAX_VERSUCHE = 3
+# Einmal-Code der App-Anmeldung: der Client tauscht ihn sofort nach der
+# Rueckkehr ein – zwei Minuten sind reichlich und halten das Fenster klein.
+APP_CODE_TTL_S = 120
 # Wie lange der Eintrag einer IdP-Anmeldung je Browser vorgehalten wird.
 IDP_SITZUNG_TTL_S = 24 * 3600
 MAX_EINTRAEGE = 2000
@@ -675,6 +678,8 @@ class Ablage:
 
 VORGAENGE = Ablage(VORGANG_TTL_S)
 SCHEINE = Ablage(SCHEIN_TTL_S)
+# Einmal-Codes der App-Anmeldung (siehe "Anmeldung aus den Clients" unten).
+APP_CODES = Ablage(APP_CODE_TTL_S)
 # Je Browser, der sich ueber den IdP angemeldet hat: das Konto. Schluessel steht im Sitzungs-Cookie ``__Host-jarvis_idp`` (main.py).
 IDP_SITZUNGEN = Ablage(IDP_SITZUNG_TTL_S)
 
@@ -710,3 +715,92 @@ def verbindung_testen(issuer: str, ca_cert: str | None) -> dict[str, Any]:
         "pkce": doc.get("code_challenge_methods_supported"),
         "schluessel": len(keys),
     }
+
+
+# ── Anmeldung aus den Clients (Outlook, Excel, Browser-Erweiterung, AI-Maus) ──
+#
+# WARUM (2026-11-27): Die Clients halten ein Bearer-Token, kein Cookie der
+# Weboberflaeche. Der IdP kennt nur EINEN Client – Jarvis selbst mit seiner
+# Rueckkehradresse –, also bleibt die Registrierung beim IdP unveraendert:
+# Jarvis fuehrt die Anmeldung wie im Portal durch und gibt am Ende statt eines
+# Cookies einen EINMAL-CODE an den Client zurueck (RFC 8252, "native Apps").
+#
+# WOHIN der Code geht, entscheidet NICHT der Aufrufer frei, sondern die Art:
+#   outlook/excel  -> <ursprung>/addin/idp-fertig.html (Office-Dialog, messageParent)
+#   browser        -> identity.getRedirectURL() der Erweiterung (chromiumapp.org /
+#                     extensions.allizom.org) – landet nur in DER Erweiterung
+#   ai-maus        -> http://127.0.0.1:<port>/… bzw. [::1] (Loopback des Rechners)
+# Eine freie https-Adresse ist bewusst NICHT erlaubt: wer einen Link mit seiner
+# eigenen Adresse verschickt, bekaeme sonst den Code des Opfers.
+#
+# DER CODE ALLEIN NUETZT NICHTS: er ist per PKCE an den Client gebunden, der
+# die Anmeldung begonnen hat (``challenge`` beim Start, ``verifier`` beim
+# Einloesen). Ein mitgelesener Code (Protokoll, Browserverlauf) ist damit
+# wertlos – und nach zwei Minuten ohnehin verfallen.
+
+APP_ARTEN = ("outlook", "excel", "browser", "ai-maus")
+# Fertigseite der Office-Add-ins (relativ zum Ursprung der Rueckkehr).
+OFFICE_FERTIG_PFAD = "/addin/idp-fertig.html"
+# PKCE S256: base64url(SHA-256) ohne Auffuellung ist immer 43 Zeichen lang.
+_CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+# RFC 7636: 43–128 Zeichen aus dem "unreserved"-Satz.
+_VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
+# Vom Client gewaehlter Wert, den er bei der Rueckkehr wiedererkennt.
+_ZUSTAND_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+_PFAD_RE = r"/[A-Za-z0-9._~/-]{0,200}"
+# Chrome/Edge: Erweiterungskennung = 32 Buchstaben a–p; Firefox: 40 Hex-Zeichen.
+_RUECK_BROWSER = (
+    re.compile(r"^https://[a-p]{32}\.chromiumapp\.org" + _PFAD_RE + r"$"),
+    re.compile(r"^https://[0-9a-f]{40}\.extensions\.allizom\.org" + _PFAD_RE + r"$"),
+)
+_RUECK_LOOPBACK = re.compile(r"^http://(?:127\.0\.0\.1|\[::1\]):(\d{4,5})" + _PFAD_RE + r"$")
+
+
+def app_art(wert: Any) -> str:
+    """Bekannte Art oder ``""``."""
+    w = str(wert or "").strip().lower()
+    return w if w in APP_ARTEN else ""
+
+
+def app_rueck(art: str, rueck: str, ursprung: str) -> str:
+    """Rueckkehradresse fuer den Einmal-Code – oder ``""``, wenn sie nicht
+    zur Art passt. ``ursprung`` (``schema://host[:port]``) gilt fuer die
+    Office-Add-ins: deren Adresse setzt der Server selbst, ein mitgeschicktes
+    ``rueck`` wird dort abgewiesen statt still ersetzt (ein Client, der eine
+    Adresse schickt, erwartet sie auch)."""
+    rueck = str(rueck or "")
+    if art in ("outlook", "excel"):
+        if rueck or not ursprung:
+            return ""
+        return ursprung.rstrip("/") + OFFICE_FERTIG_PFAD
+    if art == "browser":
+        return rueck if any(m.match(rueck) for m in _RUECK_BROWSER) else ""
+    if art == "ai-maus":
+        m = _RUECK_LOOPBACK.match(rueck)
+        if not m or not 1024 <= int(m.group(1)) <= 65535:
+            return ""
+        return rueck
+    return ""
+
+
+def challenge_gueltig(challenge: Any) -> bool:
+    return bool(_CHALLENGE_RE.match(str(challenge or "")))
+
+
+def zustand_gueltig(zustand: Any) -> bool:
+    return bool(_ZUSTAND_RE.match(str(zustand or "")))
+
+
+def pkce_passt(verifier: Any, challenge: str) -> bool:
+    """``verifier`` gehoert zu ``challenge`` (S256), Vergleich in konstanter Zeit."""
+    v = str(verifier or "")
+    if not _VERIFIER_RE.match(v) or not challenge_gueltig(challenge):
+        return False
+    ist = _b64url(hashlib.sha256(v.encode("ascii")).digest())
+    return secrets.compare_digest(ist, str(challenge))
+
+
+def rueck_mit(rueck: str, werte: dict) -> str:
+    """Rueckkehradresse mit angehaengten Abfragewerten (``rueck`` hat keinen
+    Abfrageteil – die Muster oben lassen keinen zu)."""
+    return rueck + "?" + urlencode({k: v for k, v in werte.items() if v}, quote_via=quote)

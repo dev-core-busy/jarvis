@@ -2332,6 +2332,9 @@
         if (_officeGrund) melde('xl-login-office', _officeGrund, 'fehler');
         else if (_office) melde('xl-login-office', T('xl.office_ok', 'Mit Excel verbunden.'), 'ok');
         zeichneUpdBand();
+        // Knopf "Mit Firmenkonto anmelden" (office_idp.js): nur, wenn der Server
+        // den IdP anbietet und office.js einen Dialog oeffnen kann.
+        if (_idp) { try { _idp.anzeigen(); } catch (e) { } }
     }
 
     function zeigeApp() {
@@ -2476,8 +2479,23 @@
     }
 
     /* ── Start ─────────────────────────────────────────────────────────── */
+    // IdP-Anmeldung (office_idp.js). Nach Erfolg derselbe Weg wie nach der
+    // Kennwortanmeldung: pruefeFreigabe() klaert die Excel-Freigabe.
+    var _idp = null;
     function binden() {
         var e;
+        if (window.OfficeIdp && !_idp) {
+            try {
+                _idp = window.OfficeIdp.einrichten({
+                    app: 'excel', praefix: 'xl', T: T,
+                    tokenSetzen: tokenSetzen,
+                    weiter: function () {
+                        pruefeFreigabe(_speicherGeht ? '' : T('addin.no_storage',
+                            'Hinweis: Dieser Browser erlaubt dem Fenster keinen dauerhaften Speicher. Die Anmeldung gilt nur, solange das Fenster offen ist.'));
+                    }
+                });
+            } catch (e2) { _idp = null; }
+        }
         if ((e = $('xl-do-login'))) e.addEventListener('click', anmelden);
         if ((e = $('xl-pass'))) e.addEventListener('keydown', function (ev) {
             if (ev.key === 'Enter') anmelden();

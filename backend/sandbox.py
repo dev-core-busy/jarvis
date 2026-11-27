@@ -117,7 +117,7 @@ _SECRET_NAMES = {
     # liest, meldet sich als beliebiger Benutzer an (2026-09-28).
     ".secret_key", ".erstkennwort",
 }
-# .keytab: Kerberos-Dienstschluessel (Windows-Anmeldung, backend/kerberos_anmeldung.py).
+# .keytab: Kerberos-Dienstschluessel (Altbestand der 2026-11-27 entfallenen Windows-Anmeldung).
 _SECRET_SUFFIX = {".key", ".pem", ".crt", ".cer", ".p12", ".pfx", ".jks", ".keystore",
                   ".keytab"}
 _SECRET_DIRPARTS = {".ssh", ".git", "certs"}
@@ -268,10 +268,11 @@ _APP_DENY_REL = (
     # administrativen – Benutzer eintragen und sich anschliessend als dieser
     # anmelden. Das ist die direkteste Rechteerhoehung im ganzen Verzeichnis.
     "data/addin_links.json",
-    # Windows-Anmeldung (backend/kerberos_anmeldung.py): die Keytab traegt den
-    # Dienstschluessel von HTTP/<server>. Wer sie LIEST, stellt sich selbst
-    # Tickets fuer Jarvis aus ("Silver Ticket") und meldet sich damit als
-    # BELIEBIGER Domaenenbenutzer an – ohne Kennwort, ohne DC, ohne Spur im AD.
+    # Keytab der entfallenen Windows-Anmeldung (Kerberos, bis 2026-11-27): sie
+    # traegt den Dienstschluessel von HTTP/<server> und kann auf Servern noch
+    # liegen. Jarvis nimmt keine Tickets mehr an, der Schluessel gilt aber im AD
+    # fuer den SPN weiter (andere Dienste unter demselben Namen) – deshalb
+    # BLEIBT die Sperre, bis Keytab und SPN entfernt sind.
     "data/kerberos",
     # Google-OAuth (backend/google_auth.py; frueher auch das gog-Setup, dessen
     # gog_client_secret.json als Altbestand noch liegen kann): das
@@ -392,7 +393,7 @@ PRIVATE_DIRS = ("data/documents", "data/chats", "data/logs",
                 "data/chat_history", "data/destillat_filter",
                 "data/issue_attachments", "data/backups",
                 "data/learnings", "data/erfahrung",
-                # Keytab der Windows-Anmeldung (siehe _APP_DENY_REL)
+                # Keytab der entfallenen Windows-Anmeldung (siehe _APP_DENY_REL)
                 "data/kerberos",
                 # Google-OAuth-Geheimnisse (siehe _APP_DENY_REL)
                 "data/google_auth",
@@ -577,8 +578,8 @@ PRIVATE_FILES_STRENG = ("data/.mailkey", "data/.sapkey", "data/.jirakey",
                         # (backend/wa_bruecke.py): wer es liest, sendet in
                         # fremdem Namen und spielt Auftraege ein.
                         "data/.wa_bridge_secret",
-                        # Kerberos-Keytab: wer sie liest, meldet sich als
-                        # beliebiger Domaenenbenutzer an (siehe _APP_DENY_REL).
+                        # Kerberos-Keytab (Altbestand, siehe _APP_DENY_REL):
+                        # traegt den Dienstschluessel des SPN.
                         "data/kerberos/http.keytab",
                         # Google-OAuth: client_secret des Clients und das
                         # Zugriffstoken des verbundenen Kontos. Am 2026-11-06
@@ -921,8 +922,8 @@ SHELL_SECRET_PATHS = re.compile(
     # Outlook-Add-in: Postfach → Jarvis-Konto. Beschreibbar waere das die
     # kuerzeste Rechteerhoehung im Verzeichnis (siehe _APP_DENY_REL).
     r'addin_links\.json\b|'
-    # Windows-Anmeldung: die Keytab erlaubt, sich Tickets fuer Jarvis selbst
-    # auszustellen – also die Anmeldung als beliebiger Benutzer.
+    # Keytab (Altbestand der entfallenen Windows-Anmeldung, siehe
+    # _APP_DENY_REL): bleibt gesperrt, solange sie auf einem Server liegen kann.
     r'\.keytab\b|/kerberos/http\b|'
     r'gog_client_secret\.json\b|/google_auth\b|'
     # Microsoft 365 Copilot: Refresh-Token je Benutzer fuer Microsoft Graph

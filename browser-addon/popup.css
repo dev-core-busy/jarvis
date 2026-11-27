@@ -659,3 +659,9 @@ html.leiste #f-ergebnis {
  * abgeschwaecht, damit sie nicht wie ein bedienbares Angebot aussieht. Die
  * Aussage traegt der Hinweistext darunter, nicht die Deckkraft. */
 .ansicht-fuss.aus .ansicht-schalter { opacity: .55; cursor: default; }
+
+/* Anmeldung ueber das Firmenkonto: der Knopf ueber die ganze Breite, der
+ * Notweg zur Kennwortmaske als leiser Textknopf darunter. */
+.idp-block { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+.idp-block[hidden], #kennwort-block[hidden], .idp-link[hidden] { display: none; }
+.idp-link { border: none; padding: 2px 0; text-align: left; text-decoration: underline; }

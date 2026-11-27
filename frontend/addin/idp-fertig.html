@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Die Adresse traegt den Einmal-Code: an keine andere Seite weiterreichen. -->
+    <meta name="referrer" content="no-referrer">
+    <title>Anmeldung</title>
+    <link rel="stylesheet" href="/static/css/theme.css?v=83">
+    <!--
+        Letzte Seite der IdP-Anmeldung aus den Office-Add-ins (Outlook und Excel).
+        Laeuft im Office-Dialog (displayDialogAsync), reicht code/fehler und
+        zustand per messageParent an das Aufgabenfenster und tut sonst nichts:
+        getauscht wird im Fenster, nur dort liegt der PKCE-verifier.
+        Kein Inline-Skript (Inhaltsrichtlinie), siehe idp_fertig.js.
+    -->
+    <style>
+        body { font-family: var(--font-body); background: var(--bg-primary);
+               color: var(--text-primary); display: flex; align-items: center;
+               justify-content: center; min-height: 100vh; margin: 0; padding: 16px;
+               box-sizing: border-box; text-align: center; font-size: 14px; }
+        .if-zeile { display: flex; align-items: center; gap: 10px; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+<script src="/static/js/theme_frueh.js?v=1"></script>
+    <div class="if-zeile" id="if-laeuft">
+        <span class="jv-pkg-spin" aria-hidden="true"></span>
+        <span data-i18n="addin.idp_fertig_laeuft">Anmeldung wird abgeschlossen …</span>
+    </div>
+    <p class="hidden" id="if-ohne-office" data-i18n="addin.idp_fertig_ohne_office">Die Anmeldung konnte nicht an das Add-in übergeben werden. Bitte dieses Fenster schließen und im Add-in erneut anmelden.</p>
+<script src="/static/js/sitzung.js?v=4"></script>
+<script src="/static/js/icons.js?v=11"></script>
+<script src="/static/js/pwreveal.js?v=5"></script>
+<script src="/static/js/auswahlliste.js?v=1"></script>
+<!--
+    jarvis-extern-erlaubt: Office.js – dieselbe einzige Ausnahme wie im
+    Aufgabenfenster (frontend/addin/taskpane.html, dort ausfuehrlich begruendet):
+    ohne Office.js gibt es kein messageParent. Faellt es aus, zeigt die Seite
+    nach OFFICE_WARTE_MS einen Hinweis (idp_fertig.js) statt zu haengen; das
+    Add-in selbst bleibt mit der Kennwortanmeldung benutzbar. `async`, nicht
+    `defer` (Begruendung ebenfalls im Aufgabenfenster).
+-->
+<script async src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script src="/static/js/i18n.js?v=549"></script>
+<script src="/static/js/i18n_fr.js?v=23"></script>
+<script src="/static/js/i18n_nl.js?v=7"></script>
+<script src="/static/addin/idp_fertig.js?v=1"></script>
+</body>
+</html>

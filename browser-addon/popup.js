@@ -103,7 +103,7 @@ function brauche(name, methode) {
  * Begruendung dort; kurz: Chrome laedt diese Seite bei jedem Oeffnen frisch,
  * behaelt den Service-Worker aber im Speicher. Ohne diesen Abgleich sieht ein
  * halb aktualisierter Zustand wie ein Programmierfehler aus. */
-const STAND = 9;
+const STAND = 10;
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -767,6 +767,15 @@ async function start() {
   einstAbschnittZeigen(z.einst_offen === true);
   if (!z.angemeldet) {
     await zugriffAnzeigen();
+    /* Eine IdP-Anmeldung, die dieses Fenster nicht mehr erlebt hat (es schloss
+     * sich beim Oeffnen des Anmeldefensters): ihr Ergebnis steht EINMAL da. */
+    if (z.idp_meldung) {
+      _idpMeldung = String(z.idp_meldung);
+      if (z.idp_kennwort === true) _kennwortOffen = true;
+      try { await frage({ art: "merken", idp_meldung: "", idp_kennwort: false }); } catch (e) {}
+    }
+    await idpPruefen();
+    if (_idpMeldung) { melde(_idpMeldung); _idpMeldung = ""; }
     /* Nach dem Wiederöffnen SAGEN, was passiert ist. Ohne diesen Satz sieht
      * die Maske aus wie beim ersten Mal, und der Benutzer weiß nicht, ob die
      * Erlaubnis angekommen ist – genau das war die Verwirrung hinter „man muss
@@ -1611,6 +1620,103 @@ async function zugriffSichern(basis) {
 }
 
 // ── Anmelden ────────────────────────────────────────────────────────────────
+/* Nach einer gelungenen Anmeldung – EINE Fassung fuer Kennwort und
+ * Firmenkonto. Derselbe Aufbau wie beim Oeffnen eines schon angemeldeten
+ * Fensters: Vorlagen laden (sonst nur „Zusammenfassen“ im Pulldown, gemeldet
+ * 2026-11-23) und - in der Leiste - den Tab-Wechsel beobachten, sonst bliebe
+ * ein Ergebnis nach einem Wechsel neben dem falschen Ticket stehen, bis das
+ * Fenster neu geoeffnet wird. */
+function nachAnmeldung(a, basis, benutzer) {
+  brandingHolen(basis);
+  zeige(true);
+  angemeldetEinrichten(benutzer);
+  leisteBeobachten();
+  melde(a.erlaubt ? "" : a.hinweis);
+  if (a.erlaubt && !_key) {
+    melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
+  }
+}
+
+// ── Anmeldung über das Firmenkonto (IdP) ────────────────────────────────────
+/* Der Ablauf selbst laeuft im HINTERGRUND (background.js::idpAnmelden –
+ * Begruendung dort: das Fenster schliesst sich, sobald das Anmeldefenster
+ * aufgeht). Hier nur: anbieten, ausloesen, Ergebnis zeigen.
+ *
+ * Die Kennwortmaske bleibt der Notweg (Vorgabe 2026-11-27):
+ *   ad_modus "fallback"    -> eingeklappt, per Textknopf aufklappbar und von
+ *                             selbst offen, wenn die IdP-Anmeldung scheitert;
+ *   ad_modus "zusaetzlich" -> immer sichtbar.
+ * Ohne IdP (Server bietet nichts an, alter Server, nicht erreichbar, Browser
+ * ohne identity) bleibt die Maske genau wie bisher. */
+let _idpStatus = { aktiv: false };
+let _kennwortOffen = false;
+let _idpMeldung = "";
+
+function idpZeigen(st) {
+  _idpStatus = (st && st.aktiv === true) ? st : { aktiv: false };
+  const block = $("idp-block"), kw = $("kennwort-block"), link = $("btn-kennwort-zeigen");
+  if (!block || !kw) return;
+  const aktiv = _idpStatus.aktiv;
+  const eingeklappt = aktiv && _idpStatus.ad_modus !== "zusaetzlich" && !_kennwortOffen;
+  block.hidden = !aktiv;
+  kw.hidden = eingeklappt;
+  if (link) link.hidden = !eingeklappt;
+}
+
+async function idpPruefen() {
+  const basis = (el.basis.value || "").trim();
+  let st = { aktiv: false };
+  if (basis) {
+    try { st = await frage({ art: "idp_status", basis }); } catch (e) { st = { aktiv: false }; }
+  }
+  idpZeigen(st);
+}
+
+el.basis.addEventListener("change", () => { idpPruefen(); });
+
+$("btn-kennwort-zeigen").addEventListener("click", () => {
+  _kennwortOffen = true;
+  idpZeigen(_idpStatus);
+  try { el.benutzer.focus(); } catch (e) {}
+});
+
+$("btn-idp").addEventListener("click", async () => {
+  const basis = (el.basis.value || "").trim();
+  if (!basis) { melde("Bitte die {marke}-Adresse eintragen."); return; }
+  if (!/^https:\/\//i.test(basis)) {
+    melde("Die Adresse muss mit https:// beginnen.");
+    return;
+  }
+  sperre(true);
+  try {
+    // Wie beim Kennwort: ZUERST das Zugriffsrecht – das Einloesen des Codes
+    // geht aus dem Hintergrund an den Server und braucht es.
+    melde("Prüfe das Zugriffsrecht …", true);
+    await zugriffSichern(basis);
+    melde("Anmeldung über das Firmenkonto läuft … (eigenes Fenster)", true);
+    const a = await frage({ art: "idp_anmelden", basis });
+    // Das Fenster hat das Ende erlebt: die gemerkte Meldung gilt als gezeigt.
+    try { await frage({ art: "merken", idp_meldung: "", idp_kennwort: false }); } catch (e) {}
+    if (a.angemeldet) {
+      nachAnmeldung(a, basis, a.benutzer || "");
+      return;
+    }
+    // Gescheitert (nicht abgebrochen): der Notweg geht von selbst auf.
+    if (!a.abgebrochen) {
+      _kennwortOffen = true;
+      idpZeigen(_idpStatus);
+    }
+    melde(a.text || "Die Anmeldung über das Firmenkonto ist fehlgeschlagen.");
+  } catch (e) {
+    _kennwortOffen = true;
+    idpZeigen(_idpStatus);
+    melde(e.message);
+    zugriffAnzeigen();
+  } finally {
+    sperre(false);
+  }
+});
+
 $("btn-anmelden").addEventListener("click", async () => {
   const basis = (el.basis.value || "").trim();
   if (!basis) { melde("Bitte die {marke}-Adresse eintragen."); return; }
@@ -1637,19 +1743,7 @@ $("btn-anmelden").addEventListener("click", async () => {
     // Das Kennwort verlässt das Feld, sobald es nicht mehr gebraucht wird.
     el.kennwort.value = "";
     el.totp.value = "";
-    brandingHolen(basis);
-    zeige(true);
-    /* Derselbe Aufbau wie beim Oeffnen eines schon angemeldeten Fensters:
-     * Vorlagen laden (sonst nur „Zusammenfassen“ im Pulldown, gemeldet
-     * 2026-11-23) und - in der Leiste - den Tab-Wechsel beobachten, sonst
-     * bliebe ein Ergebnis nach einem Wechsel neben dem falschen Ticket stehen,
-     * bis das Fenster neu geoeffnet wird. */
-    angemeldetEinrichten((el.benutzer.value || "").trim());
-    leisteBeobachten();
-    melde(a.erlaubt ? "" : a.hinweis);
-    if (a.erlaubt && !_key) {
-      melde("Kein Jira-Ticket in diesem Tab. Öffne ein Ticket (…/browse/ABC-123).");
-    }
+    nachAnmeldung(a, basis, (el.benutzer.value || "").trim());
   } catch (e) {
     melde(e.message);
     // Der Hinweis über dem Knopf wird nachgezogen: scheiterte es am
@@ -1700,6 +1794,9 @@ el.abmelden.addEventListener("click", async () => {
   zeige(false);
   el.ergebnis.hidden = true;
   melde("");
+  // Zurueck in der Maske: das Angebot des Firmenkontos gilt wieder.
+  _kennwortOffen = false;
+  idpPruefen();
 });
 
 // ── Auswerten ───────────────────────────────────────────────────────────────

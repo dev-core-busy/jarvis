@@ -228,6 +228,9 @@
         }
         var u = $('ad-user');
         if (u && !u.value) { try { u.focus(); } catch (e) { } }
+        // Knopf "Mit Firmenkonto anmelden" (office_idp.js): erscheint nur, wenn
+        // der Server den IdP anbietet und office.js einen Dialog oeffnen kann.
+        if (_idp) { try { _idp.anzeigen(); } catch (e) { } }
     }
     function anmelden() {
         var u = ($('ad-user').value || '').trim();
@@ -2290,7 +2293,19 @@
     }
 
     /* ── Einstieg ─────────────────────────────────────────────────────── */
+    // IdP-Anmeldung (office_idp.js). Nach Erfolg derselbe Weg wie nach der
+    // Kennwortanmeldung: start() prueft Token und Freigabe.
+    var _idp = null;
     function los() {
+        if (window.OfficeIdp) {
+            try {
+                _idp = window.OfficeIdp.einrichten({
+                    app: 'outlook', praefix: 'ad', T: T,
+                    tokenSetzen: tokenSetzen,
+                    weiter: function () { melde('ad-login-status', speicherHinweis()); start(); }
+                });
+            } catch (e) { _idp = null; }
+        }
         if ($('ad-do-login')) {
             $('ad-do-login').addEventListener('click', anmelden);
             ['ad-user', 'ad-pass', 'ad-totp'].forEach(function (id) {

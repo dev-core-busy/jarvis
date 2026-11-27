@@ -32,6 +32,7 @@ MOD = "backend/oidc_anmeldung.py"
 MAIN = "backend/main.py"
 SAP = "backend/sap_accounts.py"
 VEM = "backend/vemas_accounts.py"
+FERTIG = "frontend/addin/idp-fertig.html"
 SICHERUNG = Path.home() / ".gegen_oidc_sicherung"
 # Ablage nach geordnetem Ende abraeumen (tests/lib/gegen_ablage.py) - VOR jedem
 # atexit.register dieses Skripts, damit es als Letztes laeuft (atexit: LIFO).
@@ -94,7 +95,7 @@ PROBEN = [
      "    if konto in {_norm_login(u) for u in ALLOWED_USERS}:\n",
      "    if konto in ALLOWED_USERS and False:\n"),
     ("Freigabe 'fehler' gilt als ja", MAIN,
-     '    if freigabe == "fehler":\n        return _oidc_zurueck(request, "pruefung", konto, "Freigabe nicht pruefbar")\n'
+     '    if freigabe == "fehler":\n        return _z(request, "pruefung", konto, "Freigabe nicht pruefbar")\n'
      '    if freigabe != "ja":\n',
      '    if freigabe == "fehler":\n        pass\n'
      '    if freigabe not in ("ja", "fehler"):\n'),
@@ -231,6 +232,61 @@ PROBEN = [
     ("VEMAS: ausgesetzter Zugang bekommt Kennwort", VEM,
      '    if k.get("ausgesetzt"):\n        return {"grund": "Zugang ausgesetzt"}\n    if (k.get("auth_kind") or "").strip().lower() not in ("basic", "login"):\n',
      '    if (k.get("auth_kind") or "").strip().lower() not in ("basic", "login"):\n'),
+    # ── App-Anmeldung aus den Clients (2026-11-27) ──
+    ("App: PKCE passt immer", MOD,
+     '    return secrets.compare_digest(ist, str(challenge))\n',
+     '    return True\n'),
+    ("App: Browser-Rueckkehr jede https-Adresse", MOD,
+     '        return rueck if any(m.match(rueck) for m in _RUECK_BROWSER) else ""\n',
+     '        return rueck if rueck.startswith("https://") else ""\n'),
+    ("App: Loopback ohne Portgrenze", MOD,
+     '        if not m or not 1024 <= int(m.group(1)) <= 65535:\n',
+     '        if not m:\n'),
+    ("App: Office nimmt mitgeschickte Adresse", MOD,
+     '        if rueck or not ursprung:\n            return ""\n',
+     '        if rueck:\n            return rueck\n        if not ursprung:\n            return ""\n'),
+    ("App: localhost als Loopback", MOD,
+     '_RUECK_LOOPBACK = re.compile(r"^http://(?:127\\.0\\.0\\.1|\\[::1\\]):',
+     '_RUECK_LOOPBACK = re.compile(r"^http://(?:127\\.0\\.0\\.1|localhost|\\[::1\\]):'),
+    ("App: Einloesen ohne PKCE", MAIN,
+     '    if not _oidc.pkce_passt(verifier, eintrag.get("challenge", "")):\n',
+     '    if False:\n'),
+    ("App: falscher verifier verbraucht nichts", MAIN,
+     '        _oidc.APP_CODES.nehmen(code)\n        print(f"[AUTH] IdP-App-Anmeldung abgewiesen',
+     '        print(f"[AUTH] IdP-App-Anmeldung abgewiesen'),
+    ("App: Sitzung mit Admin-Rechten", MAIN,
+     '    token = generate_token(konto, ohne_admin=True, nur_ai_maus=nur_maus)\n',
+     '    token = generate_token(konto, nur_ai_maus=nur_maus)\n'),
+    ("App: AI-Maus ohne Pfadgrenze", MAIN,
+     '    nur_maus = art == "ai-maus"\n',
+     '    nur_maus = False\n'),
+    ("App: Code mehrfach einloesbar", MAIN,
+     '    if _oidc.APP_CODES.nehmen(code) is None:\n',
+     '    if _oidc.APP_CODES.lesen(code) is None:\n'),
+    ("App: Callback stellt Schein statt Code aus", MAIN,
+     '    if _app:\n        app_code = ',
+     '    if False:\n        app_code = '),
+    ("App: Fehler im Callback gehen ins Portal", MAIN,
+     '        return _oidc_zurueck(*args, app=_app, **kwargs)\n',
+     '        return _oidc_zurueck(*args, **kwargs)\n'),
+    ("App: ungueltige Angaben beim Start ignoriert", MAIN,
+     '    if app_grund:\n        return _oidc_zurueck(request, "konfiguration"',
+     '    if False:\n        return _oidc_zurueck(request, "konfiguration"'),
+    ("App: Ursprung ohne Signaturpruefung", MAIN,
+     '    if u and sig and hmac.compare_digest(sig, _oidc_ursprung_sig(u)) \\\n',
+     '    if u \\\n'),
+    ("App: Umleitung verliert die App-Angaben", MAIN,
+     '    werte = [(k, v) for k, v in request.query_params.items()\n             if k not in ("umgeleitet", "ursprung", "usig")]\n',
+     '    werte = []\n'),
+    ("App: Vorgang ohne App-Angaben", MAIN,
+     '"client_id": cfg["client_id"], "app": app_daten})',
+     '"client_id": cfg["client_id"]})'),
+    ("App: Rueckkehr ohne zustand", MAIN,
+     '                                              "zustand": app.get("zustand", "")})\n',
+     '                                              })\n'),
+    ("App: Fertigseite gibt Referer weiter", FERTIG,
+     '    <meta name="referrer" content="no-referrer">\n',
+     ''),
 ]
 DATEIEN = sorted({p[1] for p in PROBEN})
 

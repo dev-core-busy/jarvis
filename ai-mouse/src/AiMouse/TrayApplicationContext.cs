@@ -344,6 +344,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    /// <summary>Maske nach dem Einstellungsdialog; Fehler gehen in die Sprechblase.</summary>
+    private async Task MaskeNachEinstellungenAsync()
+    {
+        try
+        {
+            await MaskeAnmeldenAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ShowTrayError(ex.Message);
+        }
+    }
+
     private async Task StartAnmeldungAsync()
     {
         try
@@ -376,17 +389,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
 
             // ⚠ OHNE GUELTIGE SITZUNG ERSCHEINT DIE ANMELDEMASKE SCHON BEIM
-            // START (Vorgabe 2026-11-11: „wenn keine automatische (SPN)
-            // Anmeldung moeglich ist, Anmeldebildschirm anzeigen, Fokus auf
-            // dem Eingabefeld"). Das loest die Vorgabe vom 2026-09-09 ab
-            // („direkt nach dem Start noch so ein Anmeldefenster") – die galt
-            // vor der Windows-Anmeldung: damals haette JEDER Start gefragt.
-            // Heute erscheint die Maske nur noch, wenn die stille
-            // Windows-Anmeldung scheitert oder fuer ein fremdes Konto nicht
-            // versucht wird.
+            // START (Vorgabe 2026-11-11: Anmeldebildschirm anzeigen, Fokus auf
+            // dem Eingabefeld). Bietet der Server das Firmenkonto (IdP) an,
+            // steht dessen Knopf oben in der Maske – der Browser wird aber
+            // NIE von selbst geoeffnet: das waere bei jedem Windows-Start ein
+            // fremdes Fenster, ohne dass der Benutzer etwas getan hat.
             //
-            // DERSELBE Weg wie beim ersten Rahmen: zuerst still Kerberos, dann
-            // die Maske, Einmal-Code, Benutzer und Sitzung merken, Fragen
+            // DERSELBE Weg wie beim ersten Rahmen: Maske, Firmenkonto oder
+            // Kennwort samt Einmal-Code, Benutzer und Sitzung merken, Fragen
             // holen. Kein Zeitlimit-Token: es liefe weiter, waehrend der
             // Benutzer tippt; die HTTP-Aufrufe haben ihr eigenes Zeitlimit.
             //
@@ -398,7 +408,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            // Bis zur Maske bleibt es still (Netz, Kerberos – ein
+            // Bis zur Maske bleibt es still (Netz, Serverauskunft – ein
             // Fehlerfenster beim Windows-Start waere Stoerung). Was HIER
             // ankommt, stammt aus der Anmeldung mit eingegebenem Kennwort: der
             // Benutzer muss erfahren, ob es stimmte. Der naechste Rahmen
@@ -829,6 +839,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
             {
                 _ = AnmeldenMitKennwortAsync(dialog.Result.Benutzer, dialog.Kennwort);
             }
+            else if (!_client.Angemeldet && !ConfigStore.Eingerichtet())
+            {
+                // Nur die Adresse eingetragen, noch nie angemeldet: das ist der
+                // Weg des Firmenkontos (dort gibt es keinen Benutzernamen
+                // einzutragen). Die Maske bietet den Knopf an; ohne IdP ist es
+                // die gewohnte Kennwortmaske.
+                _ = MaskeNachEinstellungenAsync();
+            }
         }
         finally
         {
@@ -944,6 +962,42 @@ internal sealed class TrayApplicationContext : ApplicationContext
         return probe;
     }
 
+    /// <summary>Anmeldemaske mit Firmenkonto-Knopf. <c>Firmenkonto = true</c>:
+    /// der Benutzer will ueber den IdP anmelden. Benutzer leer = abgebrochen.</summary>
+    private (bool Firmenkonto, string Benutzer, string Kennwort, string Totp) FrageAnmeldungMaske(
+        AppSettings settings, IdpStatus idp, bool kennwortOffen, string hinweis)
+    {
+        using var dlg = new LoginWindow(settings, idp: idp, kennwortOffen: kennwortOffen,
+                                        hinweis: hinweis);
+        DialogResult r = AufBildschirmDerMaus(() => dlg.ShowDialog(_owner));
+        if (r == DialogResult.Yes)
+        {
+            return (true, string.Empty, string.Empty, string.Empty);
+        }
+        return r == DialogResult.OK
+            ? (false, dlg.Benutzer, dlg.Kennwort, dlg.Totp)
+            : (false, string.Empty, string.Empty, string.Empty);
+    }
+
+    /// <summary>Anmeldung ueber das Firmenkonto im Systembrowser – danach wie
+    /// nach der Kennwortanmeldung: Benutzer und Sitzung merken, Fragen holen.
+    /// Wirft <see cref="VisionException"/> mit Klartext.</summary>
+    private async Task FirmenkontoAnmeldenAsync(CancellationToken ct)
+    {
+        _trayIcon.ShowBalloonTip(5000, Texte.Marke, Texte.IdpWarten, ToolTipIcon.Info);
+        string name = await _client.FirmenkontoAnmeldenAsync(IdpAnmeldung.BrowserOeffnen, ct)
+            .ConfigureAwait(true);
+        // Erst NACH der gelungenen Anmeldung schreiben (wie beim Kennwort).
+        if (name.Length > 0 && !string.Equals(_settings.Benutzer, name, StringComparison.Ordinal))
+        {
+            _settings.Benutzer = name;
+            try { ConfigStore.SaveSettings(_settings); } catch (Exception) { }
+        }
+        ConfigStore.SaveToken(_client.Token);
+        await FragenNachladenAsync().ConfigureAwait(true);
+        _trayIcon.ShowBalloonTip(3000, Texte.Marke, Texte.Angemeldet, ToolTipIcon.Info);
+    }
+
     /// <summary>Fragt Anmeldedaten ab. Rueckgabe leer = abgebrochen.</summary>
     private (string, string, string) FrageAnmeldung(AppSettings settings,
                                                     bool totpNoetig = false,
@@ -953,31 +1007,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
         return AufBildschirmDerMaus(() => dlg.ShowDialog(_owner)) == DialogResult.OK
             ? (dlg.Benutzer, dlg.Kennwort, dlg.Totp)
             : (string.Empty, string.Empty, string.Empty);
-    }
-
-    /// <summary>Darf die Windows-Anmeldung versucht werden?
-    ///
-    /// Ja, wenn noch kein Benutzer gemerkt ist oder der gemerkte zum
-    /// angemeldeten Windows-Konto passt. Nein, wenn jemand hier ausdruecklich
-    /// mit einem ANDEREN Konto arbeitet (z. B. einem Testkonto): die
-    /// Windows-Anmeldung meldete ihn sonst still als sich selbst an. Verglichen
-    /// wird der blosse Kontoname – <c>DOMAENE\name</c> und <c>name@domaene</c>
-    /// zaehlen wie <c>name</c>.
-    /// </summary>
-    internal static bool WindowsKontoPasst(AppSettings s)
-    {
-        string gemerkt = (s.Benutzer ?? string.Empty).Trim();
-        if (gemerkt.Length == 0)
-        {
-            return true;
-        }
-        string konto = gemerkt.Split('@')[0];
-        int trenner = konto.LastIndexOf('\\');
-        if (trenner >= 0)
-        {
-            konto = konto[(trenner + 1)..];
-        }
-        return string.Equals(konto.Trim(), Environment.UserName, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Stellt sicher, dass eine Sitzung steht. <c>false</c> = abgebrochen.
@@ -1017,22 +1046,49 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return _client.Angemeldet;
         }
 
-        // ZUERST STILL MIT DER WINDOWS-ANMELDUNG (Kerberos, 2026-10-20). Gelingt
-        // sie, sieht der Benutzer keine Maske – auch nicht nach einer
-        // abgelaufenen Sitzung. Scheitert sie aus irgendeinem Grund, geht es
-        // unveraendert mit der Kennwortmaske weiter: sie ist der Rueckfall und
-        // bleibt es.
-        if (WindowsKontoPasst(_settings) &&
-            await _client.WindowsAnmeldenAsync(ct).ConfigureAwait(true))
+        return await MaskeAnmeldenAsync(ct).ConfigureAwait(true);
+    }
+
+    /// <summary>Die Anmeldemaske samt Firmenkonto (IdP) und Kennwort-Notweg.
+    /// <c>false</c> = abgebrochen.
+    ///
+    /// ⚠ EINE EIGENE METHODE, damit der Einstellungsdialog sie nach dem
+    /// Speichern direkt rufen kann: wer sich NUR ueber das Firmenkonto anmeldet,
+    /// traegt dort keinen Benutzernamen ein – `Eingerichtet()` bliebe falsch,
+    /// und `SicherstellenAngemeldetAsync` schickte ihn immer wieder in die
+    /// Einstellungen statt in die Maske mit dem Firmenkonto-Knopf.
+    ///
+    /// Scheitert die Firmenkonto-Anmeldung, erscheint die Maske ERNEUT – mit
+    /// dem Grund oben und offenen Kennwortfeldern (Notweg, wie im Portal).
+    /// </summary>
+    private async Task<bool> MaskeAnmeldenAsync(CancellationToken ct)
+    {
+        IdpStatus idp = await _client.IdpStatusAsync(ct).ConfigureAwait(true);
+        bool kennwortOffen = false;
+        string hinweis = string.Empty;
+        string benutzer, kennwort, totp;
+        while (true)
         {
-            ConfigStore.SaveToken(_client.Token);
-            await FragenNachladenAsync().ConfigureAwait(true);
-            return true;
+            (bool firmenkonto, benutzer, kennwort, totp) =
+                FrageAnmeldungMaske(_settings, idp, kennwortOffen, hinweis);
+            if (!firmenkonto)
+            {
+                break;
+            }
+            try
+            {
+                await FirmenkontoAnmeldenAsync(ct).ConfigureAwait(true);
+                return true;
+            }
+            catch (VisionException ex)
+            {
+                hinweis = ex.Message;
+                kennwortOffen = true;
+            }
         }
 
         // Die Adresse wird hier NICHT abgefragt: sie steht in den
-        // Einstellungen. Der vierte Rueckgabewert bleibt deshalb ungenutzt.
-        (string benutzer, string kennwort, string totp) = FrageAnmeldung(_settings);
+        // Einstellungen.
         if (benutzer.Length == 0)
         {
             return false;

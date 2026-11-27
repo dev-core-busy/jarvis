@@ -1618,9 +1618,12 @@ section("9) Zugriffsrecht: erst merken, dann fragen, dann anmelden");
    * nach – mit der frueheren festen Liste fehlte `knoepfeAktualisieren`, und
    * der Lauf brach mit einem nackten ReferenceError ab statt fehlzuschlagen.
    * Vierter Harness in dieser Datei, in dem dieselbe Falle stand. */
+  /* `nachAnmeldung` (seit 2026-11-27): Kennwort- und Firmenkonto-Anmeldung
+   * teilen den Aufbau danach – der Handler ruft ihn, also gehoert er in den
+   * Schnitt (der Handler-RUMPF ist selbst keine Wurzel von popupTeile). */
   const { teile: t4, drin: d4 } = popupTeile(
     ['melde', 'sperre', 'zeige', 'hostMuster', 'hatZugriff',
-     'zugriffAnzeigen', 'zugriffSichern'],
+     'zugriffAnzeigen', 'zugriffSichern', 'nachAnmeldung'],
     ['frage', 'brandingHolen', 'angemeldetEinrichten', 'leisteBeobachten']);
   for (const name of ['melde', 'sperre', 'zeige', 'hostMuster', 'hatZugriff',
                       'zugriffAnzeigen', 'zugriffSichern']) {

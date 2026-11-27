@@ -446,6 +446,12 @@
    "nl": "De aanmeldtoestemming kan momenteel niet worden gecontroleerd. Meld u aan met uw wachtwoord."
   },
   {
+   "de": "Die Anmeldung über das Firmenkonto gehört nicht zu diesem Programm. Bitte erneut anmelden.",
+   "en": "The company account sign-in does not belong to this program. Please sign in again.",
+   "fr": "La connexion par compte d'entreprise n'appartient pas à ce programme. Veuillez vous reconnecter.",
+   "nl": "De aanmelding met het bedrijfsaccount hoort niet bij dit programma. Meld u opnieuw aan."
+  },
+  {
    "de": "Die Anmeldung über das Firmenkonto ist abgelaufen. Bitte erneut anmelden.",
    "en": "The sign-in via the company account has expired. Please sign in again.",
    "fr": "La connexion via le compte d'entreprise a expiré. Veuillez vous reconnecter.",
@@ -1350,12 +1356,6 @@
    "en": "Name missing",
    "fr": "Nom manquant",
    "nl": "Naam ontbreekt"
-  },
-  {
-   "de": "Negotiate-Token nicht lesbar",
-   "en": "Negotiate token cannot be read",
-   "fr": "Jeton Negotiate illisible",
-   "nl": "Negotiate-token kan niet worden gelezen"
   },
   {
    "de": "Neues Kennwort und Bestätigung stimmen nicht überein.",

@@ -2145,8 +2145,8 @@ _ACTION_DETAILS = [
     ("POST",   r"/api/admin/anmeldeschutz",             "Einstellungen · 2FA-Pflicht für Admins geändert"),
     ("POST",   r"/api/admin/anmeldeschutz/aufheben",    "Einstellungen · Anmeldesperre aufgehoben"),
     ("POST",   r"/api/auth/hinweise/gelesen",           "Konto · Hinweis gelesen"),
-    ("POST",   r"/api/login/windows",                   "Konto · Windows-Anmeldung"),
     ("POST",   r"/api/login/oidc/einloesen",            "Konto · Anmeldung über den IdP"),
+    ("POST",   r"/api/login/oidc/app-einloesen",        "Konto · Anmeldung über den IdP (App)"),
     ("POST",   r"/api/admin/oidc",                      "Einstellungen · IdP-Anmeldung geändert"),
     ("POST",   r"/api/admin/oidc/test",                 "Einstellungen · IdP-Verbindung getestet"),
     # Fehleranalyse (Einstellungen -> Fehleranalyse)
@@ -6138,8 +6138,8 @@ async def _login_ablauf(request: Request):
                                                       and _konto_ist_admin(username))})
 
 
-def _ad_windows_freigabe(plain: str) -> str:
-    """Freigabe eines per Kerberos erkannten Kontos – ueber das DIENSTKONTO.
+def _ad_freigabe_dienstkonto(plain: str) -> str:
+    """Freigabe eines per IdP erkannten Kontos – ueber das DIENSTKONTO.
 
     ``"ja"``, ``"nein"`` oder ``"fehler"`` (blocking – via asyncio.to_thread).
 
@@ -6149,17 +6149,18 @@ def _ad_windows_freigabe(plain: str) -> str:
     (``_ad_rollen_aktualisieren``, ``_ad_user_allowed``) – eine zweite Fassung
     der Rechtelogik liefe beim naechsten Rollenfeld auseinander.
 
-    Zusaetzlich: ein im AD DEAKTIVIERTES Konto ist ``"nein"``. Ein Ticket kann
-    bis zu seiner Laufzeit (Vorgabe 10 h) aelter sein als die Deaktivierung;
-    beim Kennwort-Bind lehnt das AD selbst ab, hier muessen wir nachsehen.
+    Zusaetzlich: ein im AD DEAKTIVIERTES Konto ist ``"nein"``. Der IdP kann ein
+    Konto noch anmelden, das im AD schon deaktiviert ist (eigene Sitzung, eigene
+    Synchronisation); beim Kennwort-Bind lehnt das AD selbst ab, hier muessen
+    wir nachsehen.
 
-    FAIL-CLOSED: ohne Dienst-Bind keine Anmeldung (``"fehler"``) – der Client
-    faellt dann auf die Kennwortmaske zurueck."""
+    FAIL-CLOSED: ohne Dienst-Bind keine Anmeldung (``"fehler"``) – die
+    Anmeldemaske klappt dann die Kennwortanmeldung auf."""
     from backend import ldap_directory
     try:
         conn, base_dn = ldap_directory._bind()
     except Exception as e:  # noqa: BLE001
-        print(f"[AUTH] Windows-Anmeldung '{plain}': Dienst-Bind gescheitert ({e})", flush=True)
+        print(f"[AUTH] Freigabe '{plain}': Dienst-Bind gescheitert ({e})", flush=True)
         return "fehler"
     try:
         conn.search(search_base=base_dn,
@@ -6170,7 +6171,7 @@ def _ad_windows_freigabe(plain: str) -> str:
         e = conn.entries[0]
         uac = int(e["userAccountControl"].value or 0) if "userAccountControl" in e else 0
         if uac & 0x2:
-            print(f"[AUTH] Windows-Anmeldung '{plain}': Konto im AD deaktiviert", flush=True)
+            print(f"[AUTH] Freigabe '{plain}': Konto im AD deaktiviert", flush=True)
             return "nein"
         status, _ = _ad_rollen_aktualisieren(conn, base_dn, plain)
         if status == "fehler":
@@ -6179,7 +6180,7 @@ def _ad_windows_freigabe(plain: str) -> str:
             return "nein"
         erlaubt = _ad_user_allowed(conn, plain, base_dn)
     except Exception as e:  # noqa: BLE001
-        print(f"[AUTH] Windows-Anmeldung '{plain}': Pruefung gescheitert ({e})", flush=True)
+        print(f"[AUTH] Freigabe '{plain}': Pruefung gescheitert ({e})", flush=True)
         return "fehler"
     finally:
         try:
@@ -6193,165 +6194,14 @@ def _ad_windows_freigabe(plain: str) -> str:
     return "ja" if erlaubt else "nein"
 
 
-@app.post("/api/login/windows")
-async def login_windows(request: Request):
-    """Siehe ``_login_windows_ablauf`` – hier der Rahmen wie bei ``/api/login``:
-    Bremse waehrend eines Spruehangriffs, Mindestdauer bei Fehlschlag,
-    Sicherheitsprotokoll (BSI M2).
-
-    Die nackte Aufforderung (401 + ``WWW-Authenticate: Negotiate``) ist KEIN
-    Fehlversuch, sondern der erste Schritt JEDER Windows-Anmeldung: sie geht
-    weder ins Protokoll noch durch Bremse und Mindestdauer – sonst stuende je
-    Anmeldung ein Fehlschlag im Sicherheitsprotokoll."""
-    if not (request.headers.get("authorization") or "").lower().startswith("negotiate "):
-        return await _login_windows_ablauf(request)
-    _start = _anmelde_schutz.uhr()
-    if not await _anmelde_schutz.bremse(request.client.host if request.client else ""):
-        resp = _bremse_ueberlauf_antwort()      # Warteschlange voll (A2)
-    else:
-        resp = await _login_windows_ablauf(request)
-    if getattr(resp, "status_code", 200) >= 400:
-        await _anmelde_schutz.angleichen(_start)
-    await _anmeldung_protokollieren(request, resp, "windows")
-    return resp
-
-
-async def _login_windows_ablauf(request: Request):
-    """Kennwortlose Anmeldung mit der Windows-Domaenenanmeldung (Kerberos).
-
-    **Bewusst ohne Dependency** – ein Anmeldeweg, es gibt noch keine Sitzung.
-    Ablauf: eingerichtet? → Ratenbegrenzung → Ticket (``kerberos_anmeldung``)
-    → Realm → kein lokales Konto → Kontosperre → AD-Freigabe ueber das
-    Dienstkonto → Lizenzgrenze → Sitzung.
-
-    **Die Sitzung hat NIE Admin-Rechte und keine 2FA** (Betreiberentscheid
-    2026-10-20: die AI-Maus braucht keine Admin-Rechte). Deshalb wird auch
-    kein Einmal-Code verlangt – anders als beim Outlook-SSO, das ein Konto mit
-    2FA abweist. Wer Admin-Rechte braucht, meldet sich mit Kennwort und Code an.
-
-    Jeder Fehlschlag ist fuer den Client das Signal, die Kennwortmaske zu
-    zeigen; der Grund steht im Journal (und in ``error``)."""
-    import base64
-    from backend import kerberos_anmeldung as _krb
-    client_ip = request.client.host if request.client else "unknown"
-
-    _ad_dom = (config.get_setting("ad_domain", "") or "").strip()
-    bereit, grund = _krb.eingerichtet()
-    if not (config.get_setting("ad_server", "") and _ad_dom):
-        bereit, grund = False, "kein AD konfiguriert"
-    if not bereit:
-        # Keine Aufforderung senden: sonst holte Windows ein Ticket fuer nichts.
-        return JSONResponse({"success": False, "nicht_eingerichtet": True,
-                             "error": "Die Windows-Anmeldung ist auf diesem Server nicht "
-                                      "eingerichtet (%s)." % grund}, status_code=503)
-
-    if not _check_rate_limit(client_ip):
-        return JSONResponse({"success": False,
-                             "error": "Zu viele Login-Versuche. Bitte warte 5 Minuten."},
-                            status_code=429)
-
-    kopf = (request.headers.get("authorization") or "").strip()
-    if not kopf.lower().startswith("negotiate "):
-        return JSONResponse({"success": False, "error": "Windows-Anmeldung erforderlich"},
-                            status_code=401, headers={"WWW-Authenticate": "Negotiate"})
-    try:
-        roh = base64.b64decode(kopf[len("negotiate "):].strip(), validate=True)
-    except Exception:  # noqa: BLE001
-        return JSONResponse({"success": False, "error": "Negotiate-Token nicht lesbar"},
-                            status_code=400)
-
-    # Ab hier KEIN WWW-Authenticate mehr in Fehlerantworten: der Client soll
-    # aufhoeren und auf das Kennwort ausweichen, nicht dasselbe Ticket erneut
-    # schicken. Ein ungueltiges Ticket zaehlt nicht als Fehlversuch – es ist ein
-    # Einrichtungs-, kein Rateindiz (wie beim Outlook-SSO).
-    try:
-        principal, antwort = await asyncio.to_thread(_krb.pruefe, roh)
-        konto = _krb.konto_aus_principal(principal, _ad_dom)
-    except _krb.KerberosFehler as e:
-        print(f"[AUTH] Windows-Anmeldung abgewiesen ({client_ip}): {e}", flush=True)
-        return JSONResponse({"success": False,
-                             "error": "Windows-Anmeldung nicht möglich: %s" % e},
-                            status_code=401)
-
-    # Lokale Konten (jarvis, root …) gibt es nur mit Kennwort – ein
-    # gleichnamiges Domaenenkonto darf nicht zu ihnen werden.
-    if konto in ALLOWED_USERS:
-        print(f"[AUTH] Windows-Anmeldung abgewiesen: '{konto}' ist ein lokales Konto",
-              flush=True)
-        return JSONResponse({"success": False, "error": "Keine Anmeldeberechtigung"},
-                            status_code=403)
-
-    _gesperrt = _konto_sperre_antwort(konto)
-    if _gesperrt is not None:
-        return _gesperrt
-
-    freigabe = await asyncio.to_thread(_ad_windows_freigabe, konto)
-    if freigabe == "fehler":
-        return JSONResponse({"success": False,
-                             "error": "Die Anmeldeberechtigung ist gerade nicht prüfbar. "
-                                      "Bitte mit Kennwort anmelden."}, status_code=503)
-    if freigabe != "ja":
-        print(f"[AUTH] Windows-Anmeldung verweigert (keine Freigabe): {konto}", flush=True)
-        return JSONResponse({"success": False, "error": "Keine Anmeldeberechtigung"},
-                            status_code=403)
-
-    try:
-        from backend import license_enforce as _lic_enf
-        _lic_ok, _lic_grund = _lic_enf.darf_benutzer_anmelden(konto)
-    except Exception:  # noqa: BLE001
-        _lic_ok, _lic_grund = True, ""
-    if not _lic_ok:
-        print(f"[Lizenz] Windows-Anmeldung abgewiesen (Benutzergrenze): {konto}", flush=True)
-        return JSONResponse({"success": False, "error": _lic_grund}, status_code=403)
-
-    # Konto mit persoenlicher 2FA (Befund A3, 2026-11-05): die Kerberos-
-    # Anmeldung ist KEIN zweiter Faktor. Bis hierher bekam ein solches Konto
-    # eine vollwertige Sitzung (nur ohne Admin) – wer am Arbeitsplatz sass,
-    # umging damit die bewusst eingeschaltete 2FA fuer die ganze Oberflaeche.
-    # Jetzt gilt die Sitzung nur fuer die AI-Maus (``nur_ai_maus``, dieselbe
-    # Pfadbegrenzung wie bei der Kennwort-Anmeldung der AI-Maus ohne Code).
-    # Nicht abweisen: die AI-Maus muss weiter kennwortlos funktionieren.
-    # Fail-closed: ist der 2FA-Bestand unlesbar, gilt das Konto als mit 2FA.
-    try:
-        _krb_st = _get_user_auth_state(konto)
-        _krb_nur_maus = bool(_krb_st.get("totp_enabled") and _krb_st.get("totp_secret"))
-    except Exception:  # noqa: BLE001
-        _krb_nur_maus = True
-    token = generate_token(konto, mit_2fa=False, ohne_admin=True, nur_ai_maus=_krb_nur_maus)
-    if _krb_nur_maus:
-        print(f"[AUTH] Windows-Anmeldung eines Kontos mit 2FA: nur AI-Maus-Zugriff: {konto}",
-              flush=True)
-    _anmelde_schutz.erfolg(konto)
-    try:
-        _user_sessions.record_login(konto, client_ip, display=_display_name(konto))
-    except Exception:  # noqa: BLE001
-        pass
-    print(f"[AUTH] Windows-Anmeldung (Kerberos) erfolgreich: {konto} ({client_ip})", flush=True)
-    _sitzung_kontext.set((konto, False, True))
-    _block = security_guard.get_block(konto)
-    if _block:
-        daten = {"success": True, "token": token, "username": konto,
-                 "must_change_password": False, "is_admin": False,
-                 "account_blocked": True, "block_reason": _block.get("reason", ""),
-                 "block_incidents": _block.get("incidents", [])}
-    else:
-        # is_admin = Rechte DIESER Sitzung, und die hat nie Admin-Rechte
-        daten = {"success": True, "token": token, "username": konto,
-                 "must_change_password": False, "is_admin": False}
-    resp = _sitzung_antwort(request, daten)
-    # Gegenseitige Authentisierung: der Client prueft damit, dass er mit dem
-    # echten Dienst (Besitzer der Keytab) spricht.
-    if antwort:
-        resp.headers["WWW-Authenticate"] = "Negotiate " + base64.b64encode(antwort).decode()
-    return resp
-
-
 # ─── Anmeldung ueber den IdP (OpenID Connect) ────────────────────────────
 # Plan: docs/plan-oidc-anmeldung.md. Pruefung des Tokens: backend/oidc_anmeldung.py.
 #
-# BESTANDSSCHUTZ: Alles hier ist zusaetzlich. Kennwortmaske, Windows-Anmeldung,
-# Outlook-Add-in und Apps bleiben unveraendert, und ohne ``oidc_aktiv`` antworten
-# die Endpunkte nur "nicht eingerichtet".
+# BESTANDSSCHUTZ: Alles hier ist zusaetzlich. Kennwortmaske und Outlook-SSO
+# bleiben unveraendert, und ohne ``oidc_aktiv`` antworten die Endpunkte nur
+# "nicht eingerichtet". Die Clients (Outlook, Excel, Browser-Erweiterung,
+# AI-Maus) melden sich seit 2026-11-27 ueber ``app=…`` + ``app-einloesen`` an;
+# die Windows-Anmeldung per Kerberos ist dafuer entfallen.
 #
 # ABLAUF: start (302 zum IdP) -> callback (Token pruefen, Konto, Freigabe ->
 # Einloese-Schein im Cookie, 303 auf /) -> einloesen (fetch der Anmeldeseite:
@@ -6443,13 +6293,19 @@ def _oidc_cookie_weg(resp, name: str) -> None:
     resp.delete_cookie(name, path="/", secure=True, httponly=True, samesite="lax")
 
 
-def _oidc_zurueck(request: Request, fehler: str = "", konto: str = "", grund: str = ""):
+def _oidc_zurueck(request: Request, fehler: str = "", konto: str = "", grund: str = "", *,
+                  app: dict | None = None, code: str = ""):
     """303 auf die Anmeldeseite – mit Fehlerkennung ODER als Erfolg (Schein liegt im Cookie).
 
     Die Kennung ist kurz und uebersetzbar; der Grund steht nur im Journal und im
-    Sicherheitsprotokoll, nie in der Adresse (Protokolle, Verlauf)."""
+    Sicherheitsprotokoll, nie in der Adresse (Protokolle, Verlauf).
+
+    ``app`` (Anmeldung aus einem Client, siehe ``_oidc_app_parameter``): statt
+    auf die Anmeldeseite geht es an die gepruefte Rueckkehradresse des Clients –
+    mit ``code`` (Erfolg) oder ``fehler``, jeweils samt ``zustand`` des Clients."""
     from urllib.parse import quote
     from fastapi.responses import RedirectResponse
+    from backend import oidc_anmeldung as _oidc
     ip = request.client.host if request.client else ""
     if fehler:
         print(f"[AUTH] IdP-Anmeldung abgewiesen ({ip}, {konto or '?'}): {fehler} – {grund}",
@@ -6462,6 +6318,12 @@ def _oidc_zurueck(request: Request, fehler: str = "", konto: str = "", grund: st
         ziel = "/?idp_fehler=" + quote(fehler, safe="")
     else:
         ziel = "/?anmeldung=idp"
+    if app:
+        # Ohne Fehler UND ohne Code gibt es fuer den Client nichts zu melden –
+        # dann ist es ein Fehler im Ablauf, kein Erfolg.
+        ziel = _oidc.rueck_mit(app["rueck"], {"fehler": fehler or ("" if code else "abgebrochen"),
+                                              "code": "" if fehler else code,
+                                              "zustand": app.get("zustand", "")})
     resp = RedirectResponse(ziel, status_code=303)
     resp.headers["Cache-Control"] = "no-store"
     _oidc_cookie_weg(resp, _OIDC_COOKIE_VORGANG)
@@ -6539,16 +6401,79 @@ def _oidc_start_umleitung(request: Request, redirect_uri: str) -> str | None:
               f"Umleitung nicht zur Rueckkehradresse {ziel[1]}:{ziel[2]}", flush=True)
         return None
     adresse = _oidc_ursprung_adresse(redirect_uri)
-    return f"{adresse}/api/login/oidc/start?umgeleitet=1" if adresse else None
+    if not adresse:
+        return None
+    # Eine Anmeldung aus einem Client (``app=…``) traegt ihre Angaben mit –
+    # ohne sie kaeme der Client nie zurueck. Dazu der URSPRUNG, unter dem der
+    # Office-Dialog begann (signiert, siehe ``_oidc_app_ursprung``).
+    from urllib.parse import urlencode, quote
+    werte = [(k, v) for k, v in request.query_params.items()
+             if k not in ("umgeleitet", "ursprung", "usig")]
+    if any(k == "app" for k, _ in werte):
+        hier_adr = _oidc_ursprung_adresse(str(request.base_url))
+        werte += [("ursprung", hier_adr), ("usig", _oidc_ursprung_sig(hier_adr))]
+    rest = ("&" + urlencode(werte, quote_via=quote)) if werte else ""
+    return f"{adresse}/api/login/oidc/start?umgeleitet=1{rest}"
+
+
+def _oidc_ursprung_sig(ursprung: str) -> str:
+    """Signatur des mitgereichten Ursprungs – damit die Umleitung keinen Weg
+    oeffnet, den Einmal-Code an eine frei gewaehlte Adresse zu schicken."""
+    return hmac.new(config.SECRET_KEY.encode(), ("oidc-ursprung:" + ursprung).encode(),
+                    hashlib.sha256).hexdigest()[:32]
+
+
+def _oidc_app_ursprung(request: Request) -> str:
+    """Ursprung der Fertigseite der Office-Add-ins: der, unter dem der Dialog
+    BEGANN (``messageParent`` geht nur von dort) – nach einer Umleitung der
+    signiert mitgereichte, sonst der eigene."""
+    q = request.query_params
+    u, sig = str(q.get("ursprung") or ""), str(q.get("usig") or "")
+    if u and sig and hmac.compare_digest(sig, _oidc_ursprung_sig(u)) \
+            and _oidc_ursprung_adresse(u) == u:
+        return u
+    return _oidc_ursprung_adresse(str(request.base_url))
+
+
+def _oidc_app_parameter(request: Request) -> tuple[dict | None, str]:
+    """Angaben einer Anmeldung aus einem Client – ``(None, "")`` ohne ``app``.
+
+    ``(None, grund)``: ``app`` ist da, aber etwas passt nicht (unbekannte Art,
+    Rueckkehradresse nicht erlaubt, PKCE oder zustand fehlt). Dann gibt es
+    KEINE Rueckkehr zum Client: an eine ungepruefte Adresse geht nichts."""
+    from backend import oidc_anmeldung as _oidc
+    q = request.query_params
+    if q.get("app") is None:
+        return None, ""
+    art = _oidc.app_art(q.get("app"))
+    if not art:
+        return None, "unbekannte App-Art"
+    challenge, zustand = str(q.get("challenge") or ""), str(q.get("zustand") or "")
+    if not _oidc.challenge_gueltig(challenge):
+        return None, "PKCE-challenge fehlt oder ist ungueltig"
+    if not _oidc.zustand_gueltig(zustand):
+        return None, "zustand fehlt oder ist ungueltig"
+    rueck = _oidc.app_rueck(art, str(q.get("rueck") or ""), _oidc_app_ursprung(request))
+    if not rueck:
+        return None, "Rueckkehradresse fuer %s nicht erlaubt" % art
+    return {"art": art, "rueck": rueck, "challenge": challenge, "zustand": zustand}, ""
 
 
 @app.get("/api/login/oidc/start")
 async def oidc_start(request: Request):
-    """Anmeldung beim IdP beginnen: state, nonce, PKCE ablegen, 302 zum IdP."""
+    """Anmeldung beim IdP beginnen: state, nonce, PKCE ablegen, 302 zum IdP.
+
+    Mit ``app=…`` (Outlook, Excel, Browser-Erweiterung, AI-Maus) endet die
+    Anmeldung nicht im Portal, sondern mit einem Einmal-Code beim Client – siehe
+    ``oidc_anmeldung`` Abschnitt "Anmeldung aus den Clients"."""
     from backend import oidc_anmeldung as _oidc
+    app_daten, app_grund = _oidc_app_parameter(request)
+    if app_grund:
+        return _oidc_zurueck(request, "konfiguration", grund="App-Anmeldung: " + app_grund)
     cfg = _oidc_konfig()
     if cfg is None:
-        return _oidc_zurueck(request, "nicht_eingerichtet", grund="IdP-Anmeldung aus")
+        return _oidc_zurueck(request, "nicht_eingerichtet", grund="IdP-Anmeldung aus",
+                             app=app_daten)
     umleitung = _oidc_start_umleitung(request, _oidc_redirect_uri(request, cfg))
     if umleitung:
         from fastapi.responses import RedirectResponse
@@ -6557,12 +6482,12 @@ async def oidc_start(request: Request):
         return resp
     ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(ip):
-        return _oidc_zurueck(request, "zu_viele", grund="Ratenbegrenzung")
+        return _oidc_zurueck(request, "zu_viele", grund="Ratenbegrenzung", app=app_daten)
     try:
         ctx = _oidc.ssl_kontext(cfg["ca_cert"])
         doc = await asyncio.to_thread(_oidc.discovery, cfg["issuer"], ctx)
     except _oidc.OidcFehler as e:
-        return _oidc_zurueck(request, e.code, grund=str(e))
+        return _oidc_zurueck(request, e.code, grund=str(e), app=app_daten)
     verifier, challenge = _oidc.pkce_paar()
     import secrets as _secrets
     from fastapi.responses import RedirectResponse
@@ -6571,7 +6496,7 @@ async def oidc_start(request: Request):
     redirect_uri = _oidc_redirect_uri(request, cfg)
     state = _oidc.VORGAENGE.neu({"nonce": nonce, "verifier": verifier, "bindung": bindung,
                                  "redirect_uri": redirect_uri, "issuer": cfg["issuer"],
-                                 "client_id": cfg["client_id"]})
+                                 "client_id": cfg["client_id"], "app": app_daten})
     # Ohne Merkmal (Browser seit der letzten IdP-Anmeldung geschlossen, oder
     # ausdruecklich abgemeldet, oder nie angemeldet): der IdP muss neu
     # anmelden, statt eine noch offene Sitzung still weiterzubenutzen.
@@ -6588,10 +6513,14 @@ async def oidc_start(request: Request):
 async def oidc_callback(request: Request):
     """Rueckkehr vom IdP: Code tauschen, Token pruefen, Konto, Freigabe -> Einloese-Schein.
 
-    Dieselbe Kette wie die Windows-Anmeldung (``_login_windows_ablauf``): kein
-    lokales Konto, Kontosperre, AD-Freigabe ueber das Dienstkonto (dabei auch
-    "Konto im AD deaktiviert"), Lizenzgrenze. Ein ungueltiges Token zaehlt NICHT
-    als Fehlversuch des Kontos – es ist ein Einrichtungs-, kein Rateindiz."""
+    Kette: kein lokales Konto, Kontosperre, AD-Freigabe ueber das Dienstkonto
+    (dabei auch "Konto im AD deaktiviert"), Lizenzgrenze. Ein ungueltiges Token
+    zaehlt NICHT als Fehlversuch des Kontos – es ist ein Einrichtungs-, kein
+    Rateindiz.
+
+    Traegt der Vorgang eine App-Anmeldung (``app``), geht jede Antwort ab hier an
+    den Client – der Erfolg als Einmal-Code (``APP_CODES``) statt als Schein im
+    Cookie. Die Pruefkette ist fuer beide Wege DIESELBE."""
     from backend import oidc_anmeldung as _oidc
     ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(ip):
@@ -6600,27 +6529,33 @@ async def oidc_callback(request: Request):
     vorgang = _oidc.VORGAENGE.nehmen(q.get("state", ""))
     if vorgang is None:
         return _oidc_zurueck(request, "abgelaufen", grund="state unbekannt oder abgelaufen")
+    # Ab hier ist bekannt, wohin die Antwort geht (Portal oder Client).
+    _app = vorgang.get("app") or None
+
+    def _z(*args, **kwargs):
+        return _oidc_zurueck(*args, app=_app, **kwargs)
+
     _bindung_cookie = request.cookies.get(_OIDC_COOKIE_VORGANG, "")
     if not _oidc.bindung_passt(_bindung_cookie, vorgang.get("bindung", "")):
         # Fehlt das Cookie ganz, lief der Start meist unter einem anderen Namen
         # als die Rueckkehr (siehe _oidc_start_umleitung) – das gehoert ins Journal.
-        return _oidc_zurueck(
+        return _z(
             request, "abgelaufen",
             grund=("Vorgang gehoert nicht zu diesem Browser (Cookie passt nicht)"
                    if _bindung_cookie else
                    "Vorgang gehoert nicht zu diesem Browser (kein Cookie unter %s)"
                    % str(request.base_url).rstrip("/")))
     if q.get("error"):
-        return _oidc_zurueck(request, "abgebrochen",
+        return _z(request, "abgebrochen",
                              grund="IdP meldet %s" % str(q.get("error"))[:60])
     cfg = _oidc_konfig()
     if cfg is None or cfg["issuer"] != vorgang.get("issuer") \
             or cfg["client_id"] != vorgang.get("client_id"):
-        return _oidc_zurueck(request, "nicht_eingerichtet",
+        return _z(request, "nicht_eingerichtet",
                              grund="Konfiguration waehrend der Anmeldung geaendert")
     code = q.get("code", "")
     if not code:
-        return _oidc_zurueck(request, "abgebrochen", grund="kein code")
+        return _z(request, "abgebrochen", grund="kein code")
     try:
         ctx = _oidc.ssl_kontext(cfg["ca_cert"])
         doc = await asyncio.to_thread(_oidc.discovery, cfg["issuer"], ctx)
@@ -6648,32 +6583,38 @@ async def oidc_callback(request: Request):
             claims, cfg["namensclaim"],
             _oidc.domaenen_aus(config.get_setting("ad_domain", ""), cfg["upn_suffixe"]))
     except _oidc.OidcFehler as e:
-        return _oidc_zurueck(request, e.code, grund=str(e))
+        return _z(request, e.code, grund=str(e))
 
     # Lokale Konten (jarvis …) gibt es nur mit Kennwort – ein gleichnamiges
     # Konto beim IdP darf nicht zu ihnen werden. Normiert verglichen.
     if konto in {_norm_login(u) for u in ALLOWED_USERS}:
-        return _oidc_zurueck(request, "lokal", konto, "lokales Konto")
+        return _z(request, "lokal", konto, "lokales Konto")
     if _konto_sperre_antwort(konto) is not None:
-        return _oidc_zurueck(request, "gesperrt", konto, "Konto nach Fehlversuchen gesperrt")
-    freigabe = await asyncio.to_thread(_ad_windows_freigabe, konto)
+        return _z(request, "gesperrt", konto, "Konto nach Fehlversuchen gesperrt")
+    freigabe = await asyncio.to_thread(_ad_freigabe_dienstkonto, konto)
     if freigabe == "fehler":
-        return _oidc_zurueck(request, "pruefung", konto, "Freigabe nicht pruefbar")
+        return _z(request, "pruefung", konto, "Freigabe nicht pruefbar")
     if freigabe != "ja":
-        return _oidc_zurueck(request, "keine_freigabe", konto, "keine Freigabe im AD")
+        return _z(request, "keine_freigabe", konto, "keine Freigabe im AD")
     try:
         from backend import license_enforce as _lic_enf
         _lic_ok, _lic_grund = _lic_enf.darf_benutzer_anmelden(konto)
     except Exception:  # noqa: BLE001
         _lic_ok, _lic_grund = True, ""
     if not _lic_ok:
-        return _oidc_zurueck(request, "lizenz", konto, _lic_grund)
+        return _z(request, "lizenz", konto, _lic_grund)
 
     # Zugangsdaten erst NACH allen Pruefungen holen: ein abgewiesenes Konto
     # bekommt keine Anfrage an userinfo und keinen Schein mit Geheimnissen.
     zugaenge = await _oidc_zugaenge_holen(claims, doc, tausch.get("access_token", ""), ctx)
+    if _app:
+        app_code = _oidc.APP_CODES.neu({"konto": konto, "zugaenge": zugaenge,
+                                        "art": _app["art"], "challenge": _app["challenge"]})
+        print(f"[AUTH] IdP-Anmeldung geprueft, Einmal-Code fuer {_app['art']} ausgestellt: "
+              f"{konto} ({ip})", flush=True)
+        return _z(request, code=app_code)
     schein = _oidc.SCHEINE.neu({"konto": konto, "zugaenge": zugaenge})
-    resp = _oidc_zurueck(request)
+    resp = _z(request)
     _oidc_cookie(resp, _OIDC_COOKIE_SCHEIN, schein, _oidc.SCHEIN_TTL_S)
     print(f"[AUTH] IdP-Anmeldung geprueft, Schein ausgestellt: {konto} ({ip})", flush=True)
     return resp
@@ -6756,6 +6697,90 @@ async def _oidc_einloesen_ablauf(request: Request):
     kennung = _oidc.IDP_SITZUNGEN.neu({"konto": konto})
     _oidc_cookie(resp, _OIDC_COOKIE_SITZUNG, kennung, None)
     return resp
+
+
+@app.post("/api/login/oidc/app-einloesen")
+@_sprot_keine_aenderung
+async def oidc_app_einloesen(request: Request):
+    """Einmal-Code eines Clients (Outlook, Excel, Browser-Erweiterung, AI-Maus)
+    gegen ein Bearer-Token tauschen. Rumpf: ``{"code": …, "verifier": …}``.
+
+    **Die Sitzung hat NIE Admin-Rechte** (Betreiberentscheid 2026-11-27, wie
+    zuvor die Kerberos-Anmeldung der AI-Maus): Verwaltung bleibt dem Portal mit
+    Zahnrad und Code vorbehalten. Die AI-Maus bekommt zusaetzlich nur ihre
+    eigenen Schnittstellen (``nur_ai_maus``) – dieselbe Grenze wie bei ihrer
+    Kennwortanmeldung. Keine Cookies: die Clients arbeiten mit dem Token im
+    Koerper (Bearer), wie nach ``/api/login``."""
+    try:
+        resp = await _oidc_app_einloesen_ablauf(request)
+    except AuthStateUnlesbar:
+        resp = JSONResponse(
+            {"success": False, "error": "Anmeldung ist gerade nicht möglich (Anmeldedaten "
+             "des Servers nicht lesbar). Bitte den Administrator informieren."},
+            status_code=503)
+    await _anmeldung_protokollieren(request, resp, "oidc-app")
+    return resp
+
+
+async def _oidc_app_einloesen_ablauf(request: Request):
+    from backend import oidc_anmeldung as _oidc
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(ip):
+        return JSONResponse({"success": False,
+                             "error": "Zu viele Login-Versuche. Bitte warte 5 Minuten."},
+                            status_code=429)
+    body = await _json_objekt(request)
+    if not isinstance(body, dict):
+        body = {}
+    code = body.get("code") if isinstance(body.get("code"), str) else ""
+    verifier = body.get("verifier") if isinstance(body.get("verifier"), str) else ""
+    eintrag = _oidc.APP_CODES.lesen(code) if code else None
+    if eintrag is None or _oidc_konfig() is None:
+        return JSONResponse({"success": False, "abgelaufen": True,
+                             "error": "Die Anmeldung über das Firmenkonto ist abgelaufen. "
+                                      "Bitte erneut anmelden."}, status_code=401)
+    # PKCE: nur der Client, der die Anmeldung begonnen hat, kennt den verifier.
+    # Ein falscher verbraucht den Code – wer ihn mitgelesen hat, bekommt keinen
+    # zweiten Versuch, und der echte Client meldet sich einfach neu an.
+    if not _oidc.pkce_passt(verifier, eintrag.get("challenge", "")):
+        _oidc.APP_CODES.nehmen(code)
+        print(f"[AUTH] IdP-App-Anmeldung abgewiesen ({ip}, {eintrag.get('konto', '?')}): "
+              f"verifier passt nicht zum Code", flush=True)
+        return JSONResponse({"success": False, "abgelaufen": True,
+                             "error": "Die Anmeldung über das Firmenkonto gehört nicht zu "
+                                      "diesem Programm. Bitte erneut anmelden."},
+                            status_code=401)
+    konto = eintrag["konto"]
+    _gesperrt = _konto_sperre_antwort(konto)
+    if _gesperrt is not None:
+        _oidc.APP_CODES.nehmen(code)
+        return _gesperrt
+    # Ab hier ist die Anmeldung entschieden: Code verbrauchen (einmalig).
+    if _oidc.APP_CODES.nehmen(code) is None:
+        return JSONResponse({"success": False, "abgelaufen": True,
+                             "error": "Die Anmeldung über das Firmenkonto ist abgelaufen. "
+                                      "Bitte erneut anmelden."}, status_code=401)
+    art = _oidc.app_art(eintrag.get("art"))
+    nur_maus = art == "ai-maus"
+    token = generate_token(konto, ohne_admin=True, nur_ai_maus=nur_maus)
+    _anmelde_schutz.erfolg(konto)
+    try:
+        _user_sessions.record_login(konto, ip, display=_display_name(konto))
+    except Exception:  # noqa: BLE001
+        pass
+    print(f"[AUTH] IdP-Anmeldung erfolgreich ({art}, ohne Admin-Rechte"
+          f"{', nur AI-Maus' if nur_maus else ''}): {konto} ({ip})", flush=True)
+    _sitzung_kontext.set((konto, False, True))
+    daten = {"success": True, "token": token, "username": konto,
+             "must_change_password": False, "is_admin": False, "app": art}
+    _block = security_guard.get_block(konto)
+    if _block:
+        daten.update({"account_blocked": True, "block_reason": _block.get("reason", ""),
+                      "block_incidents": _block.get("incidents", [])})
+    else:
+        daten["idp_zugaenge"] = await _idp_zugaenge_uebernehmen(
+            konto, eintrag.get("zugaenge") or {})
+    return JSONResponse(daten)
 
 
 async def _oidc_zugaenge_holen(claims: dict, doc: dict, access_token: str, ctx) -> dict:
@@ -17959,6 +17984,22 @@ async def addin_icon(groesse: int):
     Logo ohnehin offen heraus.
     """
     return _addin_icon_response(groesse, "addin")
+
+
+@app.get("/addin/idp-fertig.html", response_class=HTMLResponse)
+async def addin_idp_fertig():
+    """Letzte Seite der IdP-Anmeldung aus den Office-Add-ins (Outlook UND Excel).
+
+    Sie laeuft im Office-Dialog, liest ``code``/``fehler`` und ``zustand`` aus
+    der Adresse und reicht sie per ``messageParent`` an das Aufgabenfenster –
+    getauscht wird dort (``/api/login/oidc/app-einloesen``), nur das Fenster
+    kennt den PKCE-verifier. Unter ``/addin/``, damit die Inhaltsrichtlinie
+    ``office.js`` erlaubt (``csp._ADDIN_PRAEFIXE``)."""
+    f = FRONTEND_DIR / "addin" / "idp-fertig.html"
+    if not f.exists():
+        return HTMLResponse("<h1>404 – Add-in nicht installiert</h1>", status_code=404)
+    return HTMLResponse(content=f.read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @app.get("/addin/taskpane.html", response_class=HTMLResponse)

@@ -63,32 +63,6 @@ jobs:
           # Debian (die Server) nicht. unshare -r / bwrap brauchen sie.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
-      # MIT-KDC fuer test_kerberos_kdc.py – ENTPACKT, nicht installiert: das
-      # Paket krb5-kdc wuerde beim Installieren einen Dienst ohne Realm starten
-      # wollen. Ohne diesen Schritt endet der Waechter mit Exit 2, und das faellt
-      # den ganzen Lauf (so seit dem Kerberos-Commit 2026-10-20 in jedem Lauf).
-      - name: MIT-KDC als Paketbaum (Kerberos-Durchstich)
-        run: |
-          mkdir -p "$RUNNER_TEMP/krb5-deb" "$RUNNER_TEMP/krb5"
-          cd "$RUNNER_TEMP/krb5-deb"
-          # ⚠ KEINE feste Paketliste: die Bibliotheksnamen weichen zwischen
-          # Debian und Ubuntu ab (libverto-libev1t64 gibt es auf 24.04 nicht,
-          # Lauf 39590372478). Geholt wird jede rekursive Abhaengigkeit, die
-          # auf dem Runner NICHT installiert ist – Systembibliotheken (libc)
-          # bleiben damit aussen vor. Fremdarchitekturen (":i386") ausgefiltert,
-          # sie ueberschreiben sonst die 64-Bit-Programme im Baum.
-          PAKETE="krb5-kdc krb5-admin-server krb5-user"
-          DEPS=$(apt-cache depends --recurse --no-recommends --no-suggests \
-            --no-conflicts --no-breaks --no-replaces --no-enhances $PAKETE \
-            | grep -E '^[a-z0-9][^:]*$' | sort -u)
-          FEHLEND=$(for d in $DEPS; do
-            dpkg-query -W -f='${Status}' "$d" 2>/dev/null | grep -q "install ok installed" || echo "$d"
-          done)
-          echo "hole: $FEHLEND"
-          apt-get download $FEHLEND
-          for f in *.deb; do dpkg-deb -x "$f" "$RUNNER_TEMP/krb5"; done
-          echo "KRB5_TESTWURZEL=$RUNNER_TEMP/krb5" >> "$GITHUB_ENV"
-
       # Aus der Lock mit Hash-Pruefung (2026-10-21) – pip-audit und SBOM sehen
       # damit GENAU den festgelegten Stand. Vorher stand die torch-Fassung hier
       # ein zweites Mal von Hand; jetzt kommt sie (samt Hash) aus der Lock.

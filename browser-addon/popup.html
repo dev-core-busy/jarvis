@@ -106,6 +106,15 @@
     <p class="hinweis">
       Genau der Name, auf den das Serverzertifikat lautet – nicht die IP-Adresse.
     </p>
+    <!-- Anmeldung über das Firmenkonto (IdP). popup.js blendet den Block nur
+         ein, wenn der Server sie anbietet UND der Browser identity kennt
+         (idpZeigen). Die Kennwortmaske darunter ist dann der Notweg:
+         eingeklappt (ad_modus "fallback") oder daneben ("zusaetzlich"). -->
+    <div id="idp-block" class="idp-block" hidden>
+      <button type="button" id="btn-idp" class="haupt" data-ohne-ticket>Mit Firmenkonto anmelden (SSO)</button>
+      <button type="button" id="btn-kennwort-zeigen" class="leise idp-link" data-ohne-ticket hidden>Mit Benutzername und Kennwort anmelden</button>
+    </div>
+    <div id="kennwort-block">
     <label class="feld">
       <span>Benutzer</span>
       <input type="text" id="f-benutzer" autocomplete="username">
@@ -119,6 +128,7 @@
       <input type="text" id="f-totp" inputmode="numeric" autocomplete="one-time-code">
     </label>
     <button type="button" id="btn-anmelden" class="haupt" data-ohne-ticket>Anmelden</button>
+    </div>
     <!-- Fehlt das Zugriffsrecht auf den Server, steht die Erklärung HIER –
          über dem Knopf, der die Abfrage auslöst, und nicht erst als Meldung
          hinterher. Der Browser kann das Fenster dabei schließen; wer das

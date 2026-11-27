@@ -66,7 +66,7 @@ const api = new Proxy({}, {
  * tun ist.
  * Bei jeder Aenderung an den Nachrichtenfaellen HOCHZAEHLEN. Ein Test
  * vergleicht beide Zahlen. */
-const STAND = 9;
+const STAND = 10;
 
 const EINST = "einstellungen";   // storage.local: { basis }
 const SITZUNG = "sitzung";       // storage.local: { token, benutzer }
@@ -190,6 +190,14 @@ async function einstSchreiben(teil) {
    * das Feld muss AN ergeben, nicht AUS. `!!` macht aus jedem Muellwert einen
    * der zwei erlaubten Zustaende. */
   if (teil.auto_wechsel !== undefined) neu.auto_wechsel = !!teil.auto_wechsel;
+  /* Ergebnis einer IdP-Anmeldung, das das Fenster nicht mehr erlebt hat
+   * (siehe `idpAnmelden`). Einmalig: das Fenster zeigt es und leert es. */
+  if (teil.idp_meldung !== undefined) {
+    neu.idp_meldung = String(teil.idp_meldung || "").slice(0, 500);
+  }
+  // Gehoert dazu: soll die Kennwortmaske deshalb offen stehen (gescheitert,
+  // nicht bloss abgebrochen)?
+  if (teil.idp_kennwort !== undefined) neu.idp_kennwort = !!teil.idp_kennwort;
   /* Der Ring wird hier GEKAPPT, nicht beim Lesen: was einmal in der Ablage
    * steht, waechst sonst mit jedem Ticket weiter – und niemand sieht es. */
   if (teil.auto_gelaufen !== undefined) {
@@ -563,8 +571,11 @@ async function autoStart(key) {
 }
 
 /** Ein Aufruf an Jarvis. Wirft mit KLARTEXT – der Text geht 1:1 ins Popup. */
-async function ruf(pfad, { methode = "GET", rumpf = null, mitToken = true } = {}) {
-  const basis = await basisLesen();
+async function ruf(pfad, { methode = "GET", rumpf = null, mitToken = true,
+                           basis: basisVorgabe = "" } = {}) {
+  /* `basis` nur fuer Aufrufe VOR der Anmeldung (IdP-Status), bei denen die
+   * Adresse im Feld steht, aber noch nicht gemerkt ist. */
+  const basis = String(basisVorgabe || "").replace(/\/+$/, "") || await basisLesen();
   if (!basis) throw new Error("Es ist keine {marke}-Adresse hinterlegt.");
 
   const kopf = { "Content-Type": "application/json" };
@@ -654,9 +665,13 @@ async function anmelden({ basis, benutzer, kennwort, totp }) {
     throw new Error((d && d.error) || "Anmeldung fehlgeschlagen.");
   }
   await sitzungSchreiben({ token: d.token, benutzer: benutzer });
+  return freigabePruefen(benutzer);
+}
 
-  // Darf dieser Benutzer den Assistenten ueberhaupt? Wird sofort geklaert, statt
-  // den Knopf anzubieten und beim Druecken 403 zu liefern.
+/* Darf dieser Benutzer den Assistenten ueberhaupt? Wird sofort geklaert, statt
+ * den Knopf anzubieten und beim Druecken 403 zu liefern. EINE Fassung fuer
+ * beide Anmeldewege (Kennwort und Firmenkonto) – zwei liefen auseinander. */
+async function freigabePruefen(benutzer) {
   let erlaubt = false, hinweis = "";
   try {
     const me = await ruf("/api/me");
@@ -669,6 +684,172 @@ async function anmelden({ basis, benutzer, kennwort, totp }) {
     hinweis = e.message;
   }
   return { ok: true, benutzer, erlaubt, hinweis };
+}
+
+// ── Anmeldung ueber das Firmenkonto (IdP) ───────────────────────────────────
+/* Ablauf (Server: /api/login/oidc/start?app=browser … -> IdP -> Rueckkehr an
+ * die Umleitungsadresse DIESER Erweiterung mit einem Einmal-Code):
+ *   1. verifier/challenge (PKCE, S256) und `zustand` erzeugen,
+ *   2. identity.launchWebAuthFlow oeffnet die Anmeldung in einem eigenen
+ *      Fenster des Browsers und liefert die Rueckkehradresse,
+ *   3. `zustand` pruefen, den Code mit dem verifier einloesen -> Token.
+ *
+ * ⚠ DAS LAEUFT IM HINTERGRUND, NICHT IM FENSTER. launchWebAuthFlow oeffnet ein
+ * eigenes Browserfenster; das Popup verliert dabei den Fokus und SCHLIESST
+ * sich (dieselbe Bauart wie bei der Berechtigungsabfrage). Liefe der Ablauf im
+ * Popup, stuerbe er mit ihm – der Code kaeme nie an. Der Hintergrund erlebt
+ * das Ende; die Sitzung liegt danach in `storage.local`, und das Fenster
+ * zeigt beim naechsten Oeffnen den angemeldeten Zustand. Ein Fehlschlag, den
+ * kein Fenster mehr sieht, wird als `idp_meldung` gemerkt und beim naechsten
+ * Oeffnen einmal angezeigt.
+ * Annahme (nicht im echten Browser gemessen): der Service-Worker bleibt
+ * waehrend der offenen Anmeldung am Leben, weil ein Erweiterungsaufruf
+ * aussteht. Der Verifier liegt deshalb nur im Speicher – stirbt der Worker
+ * doch, ist der Code wertlos und der Benutzer klickt erneut (fail-closed).
+ *
+ * Benutzergeste: launchWebAuthFlow verlangt in Chrome keine (anders als
+ * permissions.request oder sidePanel.open); `interactive: true` erlaubt das
+ * sichtbare Anmeldefenster.
+ *
+ * Die Rueckkehradresse ist `identity.getRedirectURL()` – Chrome/Edge
+ * `https://<id>.chromiumapp.org/`, Firefox `https://<hash>.extensions.allizom.org/`.
+ * Der Server nimmt NUR diese Formen an; der Browser faengt die Navigation
+ * dorthin ab, die Adresse wird nie wirklich geladen. */
+const IDP_FEHLER = {
+  nicht_eingerichtet: "Die Anmeldung über das Firmenkonto ist auf diesem Server nicht eingerichtet.",
+  zu_viele: "Zu viele Anmeldeversuche. Bitte warte 5 Minuten.",
+  abgelaufen: "Die Anmeldung über das Firmenkonto ist abgelaufen. Bitte erneut versuchen.",
+  abgebrochen: "Die Anmeldung beim Firmenkonto wurde abgebrochen.",
+  nicht_erreichbar: "Der Anmeldedienst des Unternehmens ist gerade nicht erreichbar.",
+  konfiguration: "Die Anmeldung über das Firmenkonto ist falsch eingerichtet. Bitte den Administrator informieren.",
+  idp: "Der Anmeldedienst des Unternehmens hat die Anmeldung abgelehnt.",
+  token: "Die Bestätigung des Anmeldedienstes war ungültig. Bitte den Administrator informieren.",
+  schluessel: "Die Bestätigung des Anmeldedienstes war ungültig. Bitte den Administrator informieren.",
+  name: "Das Firmenkonto passt zu keinem Benutzer dieses Servers.",
+  lokal: "Dieses Konto lässt sich nur mit Kennwort anmelden.",
+  gesperrt: "Das Konto ist nach zu vielen Fehlversuchen vorübergehend gesperrt.",
+  keine_freigabe: "Keine Anmeldeberechtigung.",
+  pruefung: "Die Anmeldeberechtigung ist gerade nicht prüfbar. Bitte mit Kennwort anmelden.",
+  lizenz: "Die Zahl der Benutzer für diese Lizenz ist erreicht.",
+};
+
+function idpFehlerText(kennung) {
+  return IDP_FEHLER[kennung]
+    || "Die Anmeldung über das Firmenkonto ist fehlgeschlagen. Bitte mit Kennwort anmelden.";
+}
+
+function _b64url(bytes) {
+  let s = "";
+  for (const b of new Uint8Array(bytes)) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** PKCE (S256) und Zustand: {verifier, challenge, zustand}. */
+async function pkceErzeugen() {
+  const verifier = _b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return { verifier, challenge: _b64url(hash),
+           zustand: _b64url(crypto.getRandomValues(new Uint8Array(16))) };
+}
+
+/** Gibt es die identity-Schnittstelle? Ohne sie bleibt nur das Kennwort. */
+function idpApi() {
+  const id = api.identity;
+  return (id && typeof id.launchWebAuthFlow === "function"
+          && typeof id.getRedirectURL === "function") ? id : null;
+}
+
+/** Fuer die Anmeldemaske: gibt es die Anmeldung ueber das Firmenkonto?
+ * Jeder Fehler (alter Server, kein Zugriffsrecht, Netz) heisst „nein“ –
+ * dann bleibt die Maske, wie sie war. */
+async function idpStatus(basis) {
+  if (!idpApi()) return { aktiv: false };
+  basis = String(basis || "").trim();
+  if (!/^https:\/\//i.test(basis)) return { aktiv: false };
+  try {
+    const d = await ruf("/api/login/oidc/status", { mitToken: false, basis });
+    if (!d || d.aktiv !== true) return { aktiv: false };
+    return { aktiv: true,
+             ad_modus: d.ad_modus === "zusaetzlich" ? "zusaetzlich" : "fallback" };
+  } catch (e) {
+    return { aktiv: false };
+  }
+}
+
+async function idpAnmelden({ basis }) {
+  const id = idpApi();
+  basis = String(basis || "").trim().replace(/\/+$/, "");
+  if (!id) {
+    return { ok: true, angemeldet: false,
+             text: "Dieser Browser bietet die Anmeldung über das Firmenkonto nicht an." };
+  }
+  if (!/^https:\/\//i.test(basis)) {
+    return { ok: true, angemeldet: false, text: "Die Adresse muss mit https:// beginnen." };
+  }
+  await einstSchreiben({ basis, zugriff_erfragt: false, idp_meldung: "", idp_kennwort: false });
+  const ende = async (text, abgebrochen) => {
+    // Fuer den Fall, dass das Fenster inzwischen zu ist (siehe oben).
+    await einstSchreiben({ idp_meldung: text, idp_kennwort: !abgebrochen });
+    return { ok: true, angemeldet: false, abgebrochen: !!abgebrochen, text };
+  };
+
+  const { verifier, challenge, zustand } = await pkceErzeugen();
+  const rueck = id.getRedirectURL();
+  const url = basis + "/api/login/oidc/start?app=browser"
+    + "&challenge=" + encodeURIComponent(challenge)
+    + "&zustand=" + encodeURIComponent(zustand)
+    + "&rueck=" + encodeURIComponent(rueck);
+
+  let zurueck;
+  try {
+    zurueck = await id.launchWebAuthFlow({ url, interactive: true });
+  } catch (e) {
+    /* Hierher kommt vor allem das Schliessen des Anmeldefensters durch den
+     * Benutzer – eine Entscheidung, kein Fehler. EIN ruhiger Satz, keine
+     * Kaskade; die Kennwortmaske bleibt, wie sie ist. */
+    const m = (e && e.message) || "";
+    if (/approve|cancel|denied|closed/i.test(m) || !m) {
+      return ende("Anmeldung über das Firmenkonto abgebrochen.", true);
+    }
+    return ende("Das Anmeldefenster ließ sich nicht öffnen (" + m + ").", false);
+  }
+
+  let q;
+  try {
+    const u = new URL(String(zurueck || ""));
+    // Nur die eigene Rueckkehradresse zaehlt.
+    if (u.origin !== new URL(rueck).origin) throw new Error("fremde Adresse");
+    q = u.searchParams;
+  } catch (e) {
+    return ende("Die Rückmeldung der Anmeldung war unbrauchbar.", false);
+  }
+  /* ⚠ DER ZUSTAND MUSS PASSEN – sonst gehoert die Rueckkehr nicht zu DIESER
+   * Anmeldung (etwa ein untergeschobener Code). Verworfen wird VOR dem
+   * Einloesen, der Code geht dann nirgends hin. */
+  if (q.get("zustand") !== zustand) {
+    return ende("Die Rückmeldung der Anmeldung gehört nicht zu diesem Vorgang. "
+                + "Bitte erneut anmelden.", false);
+  }
+  if (q.get("fehler")) {
+    return ende(idpFehlerText(q.get("fehler")), q.get("fehler") === "abgebrochen");
+  }
+  const code = q.get("code") || "";
+  if (!code) return ende(idpFehlerText(""), false);
+
+  let d;
+  try {
+    d = await ruf("/api/login/oidc/app-einloesen", {
+      methode: "POST", mitToken: false, basis, rumpf: { code, verifier } });
+  } catch (e) {
+    return ende(e.message, false);
+  }
+  if (!d || d.success === false || !d.token) {
+    return ende((d && d.error) || idpFehlerText(""), false);
+  }
+  const benutzer = String(d.username || "");
+  await sitzungSchreiben({ token: d.token, benutzer });
+  await einstSchreiben({ benutzer, idp_meldung: "", idp_kennwort: false });
+  return Object.assign(await freigabePruefen(benutzer), { angemeldet: true });
 }
 
 // ── Nachrichten aus dem Popup ───────────────────────────────────────────────
@@ -689,6 +870,10 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
                       // Berechtigungsabfrage lief.
                       benutzer_vorschlag: e.benutzer || "",
                       zugriff_erfragt: !!e.zugriff_erfragt,
+                      // Ergebnis einer IdP-Anmeldung, die kein Fenster mehr
+                      // erlebt hat (einmalig, das Fenster leert es).
+                      idp_meldung: e.idp_meldung || "",
+                      idp_kennwort: e.idp_kennwort === true,
                       /* Welche Ansicht gilt, und kann dieser Browser
                        * ueberhaupt eine Leiste?
                        * ⚠ UEBER `ansichtLesen()`, NICHT ueber `e.ansicht`.
@@ -748,6 +933,12 @@ api.runtime.onMessage.addListener((nachricht, absender, antworten) => {
         }
         case "anmelden":
           antworten(await anmelden(nachricht));
+          break;
+        case "idp_status":
+          antworten(Object.assign({ ok: true }, await idpStatus(nachricht.basis)));
+          break;
+        case "idp_anmelden":
+          antworten(await idpAnmelden(nachricht));
           break;
         case "abmelden":
           await sitzungSchreiben({});

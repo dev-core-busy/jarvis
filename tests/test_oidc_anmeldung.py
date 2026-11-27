@@ -29,6 +29,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import sys
 import time
 import types
@@ -633,7 +634,8 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
     log.setdefault("gespeichert", {})
     log.setdefault("ausgaben", [])
     log.setdefault("zugang", [])
-    cfg = types.SimpleNamespace(get_setting=lambda k, d=None: einst.get(k, d),
+    cfg = types.SimpleNamespace(SECRET_KEY="pruefstand-geheimnis",
+                                get_setting=lambda k, d=None: einst.get(k, d),
                                 save_setting=lambda k, v: log["gespeichert"].__setitem__(k, v))
     lic = types.ModuleType("backend.license_enforce")
     lic.darf_benutzer_anmelden = lambda u: (lizenz, "" if lizenz else "Grenze")
@@ -649,6 +651,7 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
 
     ns = {
         "config": cfg, "JSONResponse": JSONResponse, "asyncio": asyncio, "Request": _Req,
+        "hmac": __import__("hmac"), "hashlib": __import__("hashlib"),
         "print": lambda *a, **k: log["ausgaben"].append(" ".join(str(x) for x in a)),
         "ALLOWED_USERS": {"jarvis"},
         "_user_may_use_sap": lambda u: darf, "_user_may_use_vemas": lambda u: darf,
@@ -658,7 +661,7 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
         "_norm_login": lambda n: (n or "").split("@")[0].split("\\")[-1].strip().lower(),
         "_check_rate_limit": lambda ip: True,
         "_konto_sperre_antwort": lambda u: gesperrt,
-        "_ad_windows_freigabe": lambda u: (log.setdefault("freigabe", []).append(u), freigabe)[1],
+        "_ad_freigabe_dienstkonto": lambda u: (log.setdefault("freigabe", []).append(u), freigabe)[1],
         "_sicherheits_log": types.SimpleNamespace(
             ereignis=lambda art, **kw: log["sicherheit"].append((art, kw))),
         "_record_login_attempt": lambda ip, u="": log["versuche"].append(u),
@@ -700,7 +703,8 @@ def _ns(einst, *, freigabe="ja", gesperrt=None, lizenz=True, auth_state=None,
               "oidc_einstellungen_lesen", "oidc_einstellungen_setzen",
               "_oidc_zugaenge_holen", "_idp_zugaenge_uebernehmen",
               "_oidc_ursprung", "_oidc_ursprung_adresse", "_oidc_start_umleitung",
-              "logout", "oidc_start"):
+              "_oidc_ursprung_sig", "_oidc_app_ursprung", "_oidc_app_parameter",
+              "_oidc_app_einloesen_ablauf", "logout", "oidc_start"):
         fn = FUNK[n]
         fn2 = ast.FunctionDef(name=fn.name, args=fn.args, body=fn.body, decorator_list=[],
                               returns=None, type_params=[]) if isinstance(fn, ast.FunctionDef) else \
@@ -1085,11 +1089,229 @@ pruefe(d.get("success") and len(d.get("idp_zugaenge") or []) == 4,
        "Konto mit eigener 2FA: ohne Code-Abfrage, Zugangsdaten aus dem Schein angemeldet")
 
 
+# ═══ 2c. App-Anmeldung aus den Clients (2026-11-27) ══════════════════════════
+# Outlook, Excel, Browser-Erweiterung und AI-Maus melden sich ueber den IdP an
+# und bekommen am Ende einen EINMAL-CODE (PKCE-gebunden) statt eines Cookies.
+# Gemessen wird AUSGEFUEHRT: das echte Modul fuer die Rueckkehradressen, die
+# geschnittenen Endpunkte fuer Start, Callback und Einloesen.
+abschnitt("2c. App-Anmeldung aus den Clients")
+import base64 as _b64  # noqa: E402
+import hashlib as _hl  # noqa: E402
+
+
+def pruefe_d(bed, text, detail=""):
+    """Wie pruefe, nennt bei FAIL zusaetzlich den gemessenen Wert."""
+    pruefe(bed, text if bed else "%s – gemessen: %s" % (text, detail))
+
+
+def _pkce(verifier):
+    return _b64.urlsafe_b64encode(_hl.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+
+
+VER = "v" * 20 + "Abc123_-.~" + "w" * 20          # 50 Zeichen, RFC 7636
+CHA = _pkce(VER)
+ZUS = "zustand_1234"
+CHROME = "https://" + "abcdefghijklmnopabcdefghijklmnop" + ".chromiumapp.org/"
+FIREFOX = "https://" + "0123456789abcdef0123456789abcdef01234567" + ".extensions.allizom.org/"
+LOOP = "http://127.0.0.1:53111/jarvis-anmeldung/x1/"
+
+# Positivkontrolle: die Rechnung des Pruefstands entspricht der des Moduls –
+# sonst waeren alle folgenden PKCE-Aussagen trivial (beide falsch = gleich).
+pruefe(len(CHA) == 43 and O.pkce_passt(VER, CHA), "Positivkontrolle: PKCE-Rechnung stimmt mit dem Modul")
+pruefe(not O.pkce_passt(VER + "x", CHA) and not O.pkce_passt("", CHA)
+       and not O.pkce_passt(VER, "") and not O.pkce_passt("kurz", _pkce("kurz")),
+       "PKCE: falscher, leerer oder zu kurzer verifier passt nicht")
+pruefe(O.app_art("Outlook") == "outlook" and O.app_art("ai-maus") == "ai-maus"
+       and O.app_art("portal") == "" and O.app_art(None) == "", "App-Arten: feste Liste")
+
+U = "https://jarvis.beispiel.de"
+pruefe(O.app_rueck("outlook", "", U) == U + "/addin/idp-fertig.html"
+       and O.app_rueck("excel", "", U) == U + "/addin/idp-fertig.html",
+       "Office: Rueckkehr setzt der Server selbst (Fertigseite unter /addin/)")
+pruefe(O.app_rueck("outlook", "https://boese.example/x", U) == ""
+       and O.app_rueck("excel", "", "") == "",
+       "Office: mitgeschickte Adresse oder fehlender Ursprung -> abgewiesen")
+pruefe(O.app_rueck("browser", CHROME, U) == CHROME and O.app_rueck("browser", FIREFOX, U) == FIREFOX
+       and O.app_rueck("browser", CHROME + "anmeldung", U) == CHROME + "anmeldung",
+       "Browser: chromiumapp.org und extensions.allizom.org der Erweiterung")
+_schlecht_browser = [
+    "https://boese.example/", "http://" + CHROME[8:], CHROME.replace("abcd", "ABCD"),
+    "https://abcdefghijklmnopabcdefghijklmno.chromiumapp.org/",      # 31 Zeichen
+    "https://" + "q" * 32 + ".chromiumapp.org/",                    # q liegt nicht in a-p
+    CHROME[:-1] + ".boese.example/", CHROME + "?x=1", CHROME + "#x",
+    "https://" + "0123456789abcdef0123456789abcdef0123456g" + ".extensions.allizom.org/",
+    LOOP]
+pruefe_d(all(O.app_rueck("browser", r, U) == "" for r in _schlecht_browser),
+       "Browser: fremde Hosts, http, falsche Kennung, Anhaengsel, Abfrageteil -> abgewiesen",
+       str([r for r in _schlecht_browser if O.app_rueck("browser", r, U)]))
+pruefe(O.app_rueck("ai-maus", LOOP, U) == LOOP
+       and O.app_rueck("ai-maus", "http://[::1]:5000/a", U) == "http://[::1]:5000/a",
+       "AI-Maus: Loopback 127.0.0.1 und [::1]")
+_schlecht_maus = ["http://localhost:53111/", "https://127.0.0.1:53111/", "http://127.0.0.1:80/",
+                  "http://127.0.0.1:999/", "http://127.0.0.1:70000/", "http://127.0.0.2:5000/",
+                  "http://127.0.0.1:5000@boese.example/", "http://127.0.0.1:5000/a?x=1",
+                  "http://127.0.0.1:5000", CHROME]
+pruefe_d(all(O.app_rueck("ai-maus", r, U) == "" for r in _schlecht_maus),
+       "AI-Maus: kein localhost-Name, kein https, Port < 1024, fremde Adresse, Abfrageteil -> abgewiesen",
+       str([r for r in _schlecht_maus if O.app_rueck("ai-maus", r, U)]))
+pruefe(O.rueck_mit(LOOP, {"code": "c d", "fehler": "", "zustand": ZUS})
+       == LOOP + "?code=c%20d&zustand=" + ZUS, "Rueckkehradresse: leere Werte fallen weg, Werte kodiert")
+
+
+def _app_q(art, **extra):
+    q = {"app": art, "challenge": CHA, "zustand": ZUS}
+    q.update(extra)
+    return q
+
+
+def _start_app(q, einst=None):
+    ns, log = _ns(EINST if einst is None else einst)
+    r = asyncio.run(ns["oidc_start"](_Req(query=q)))
+    return r, log
+
+
+# Start: Angaben im Vorgang, Weiterleitung zum IdP wie im Portal
+_vorher = set(O.VORGAENGE._d)
+r, log = _start_app(_app_q("ai-maus", rueck=LOOP))
+qs = parse_qs(urlparse(_ziel(r)).query)
+_neu = [O.VORGAENGE._d[k][1] for k in set(O.VORGAENGE._d) - _vorher]
+pruefe(r.status_code == 302 and qs.get("state") and qs.get("code_challenge")
+       and qs.get("code_challenge") != [CHA],
+       "Start (App): 302 zum IdP, mit EIGENEM PKCE gegenueber dem IdP (nicht dem des Clients)")
+pruefe(len(_neu) == 1 and (_neu[0].get("app") or {}).get("rueck") == LOOP
+       and _neu[0]["app"].get("challenge") == CHA and _neu[0]["app"].get("art") == "ai-maus",
+       "Start (App): Art, Rueckkehr und challenge des Clients liegen im Vorgang")
+_vorher = set(O.VORGAENGE._d)
+r, log = _start_app(_app_q("ai-maus", rueck="https://boese.example/"))
+pruefe(_ziel(r) == "/?idp_fehler=konfiguration" and set(O.VORGAENGE._d) == _vorher,
+       "Start mit unerlaubter Rueckkehr: kein Vorgang, nichts an die fremde Adresse")
+for _fall, _q in (("ohne challenge", {"app": "browser", "zustand": ZUS, "rueck": CHROME}),
+                  ("ohne zustand", {"app": "browser", "challenge": CHA, "rueck": CHROME}),
+                  ("unbekannte Art", _app_q("portal"))):
+    r, log = _start_app(_q)
+    pruefe(_ziel(r) == "/?idp_fehler=konfiguration", "Start %s -> abgewiesen" % _fall)
+r, log = _start_app(_app_q("browser", rueck=CHROME), einst={})
+pruefe(_ziel(r) == CHROME + "?fehler=nicht_eingerichtet&zustand=" + ZUS,
+       "IdP aus: der CLIENT erfaehrt es (Fehler an seine Rueckkehr, mit zustand)")
+r, log = _start_app({})
+pruefe(_ziel(r).startswith("https://idp.") or parse_qs(urlparse(_ziel(r)).query).get("state"),
+       "Start ohne app: Portal-Weg unveraendert")
+
+# Umleitung auf den Namen der Rueckkehradresse: die App-Angaben reisen mit, der
+# Ursprung des Office-Dialogs signiert.
+ns, _ = _ns(EINST)
+_u = ns["_oidc_start_umleitung"](_Req(query=_app_q("outlook")), "https://192.0.2.30/cb")
+_uq = parse_qs(urlparse(_u or "").query)
+pruefe(_uq.get("app") == ["outlook"] and _uq.get("challenge") == [CHA] and _uq.get("zustand") == [ZUS]
+       and _uq.get("umgeleitet") == ["1"] and _uq.get("ursprung") == ["https://jarvis.beispiel.de"]
+       and _uq.get("usig"), "Umleitung nimmt app/challenge/zustand und den signierten Ursprung mit")
+_rq2 = _Req(query={k: v[0] for k, v in _uq.items()})
+_rq2.base_url = "https://192.0.2.30/"
+pruefe(ns["_oidc_app_ursprung"](_rq2) == "https://jarvis.beispiel.de",
+       "nach der Umleitung gilt der signierte Ursprung (dort lief der Dialog an)")
+_rq3 = _Req(query=dict(_rq2.query_params, ursprung="https://boese.example"))
+_rq3.base_url = "https://192.0.2.30/"
+pruefe(ns["_oidc_app_ursprung"](_rq3) == "https://192.0.2.30",
+       "gefaelschter Ursprung (Signatur passt nicht) -> der eigene, nie der fremde")
+
+
+def _callback_app(app, **kw):
+    ns, log = _ns(EINST, **kw)
+    w, h = O.browser_bindung()
+    st = O.VORGAENGE.neu({"nonce": NONCE, "verifier": "v", "bindung": h,
+                          "redirect_uri": "https://r/cb", "issuer": ISS, "client_id": CID,
+                          "app": app})
+    _tausch["tok"] = kw.pop("tok", None) or signieren(claims())
+    resp = asyncio.run(ns["oidc_callback"](_Req({"state": st, "code": "C"},
+                                                {"__Host-jarvis_oidc": w})))
+    return resp, log
+
+
+APP = {"art": "ai-maus", "rueck": LOOP, "challenge": CHA, "zustand": ZUS}
+r, log = _callback_app(APP)
+_cq = parse_qs(urlparse(_ziel(r)).query)
+_code = (_cq.get("code") or [""])[0]
+pruefe(r.status_code == 303 and _ziel(r).startswith(LOOP + "?") and _cq.get("zustand") == [ZUS]
+       and _code and "fehler" not in _cq,
+       "Callback (App): 303 an die Rueckkehr des Clients mit Einmal-Code und zustand")
+pruefe("__Host-jarvis_oidc_schein" not in r.cookies, "Callback (App): kein Einloese-Schein im Cookie")
+_eintrag = O.APP_CODES.lesen(_code)
+pruefe(bool(_eintrag) and _eintrag.get("konto") == "m.muster" and _eintrag.get("challenge") == CHA
+       and _eintrag.get("art") == "ai-maus", "Einmal-Code traegt Konto, Art und challenge")
+pruefe(log.get("freigabe") == ["m.muster"], "Callback (App): dieselbe Freigabepruefung wie im Portal")
+r, log = _callback_app(APP, freigabe="nein")
+_cq = parse_qs(urlparse(_ziel(r)).query)
+pruefe(_ziel(r).startswith(LOOP + "?") and _cq.get("fehler") == ["keine_freigabe"]
+       and "code" not in _cq, "Callback (App) ohne Freigabe: Fehler an den Client, KEIN Code")
+r, log = _callback_app(APP, gesperrt=JSONResponse({}, 423))
+pruefe(parse_qs(urlparse(_ziel(r)).query).get("fehler") == ["gesperrt"],
+       "Callback (App), gesperrtes Konto: Fehler an den Client")
+
+
+def _app_einloesen(body, einst=None, **kw):
+    ns, log = _ns(EINST if einst is None else einst, **kw)
+    r = asyncio.run(ns["_oidc_app_einloesen_ablauf"](_Req(body=body)))
+    return r, json.loads(bytes(r.body).decode() or "{}"), log
+
+
+def _code_neu(art="ai-maus"):
+    return O.APP_CODES.neu({"konto": "m.muster", "zugaenge": {}, "art": art, "challenge": CHA})
+
+
+c = _code_neu()
+r, d, log = _app_einloesen({"code": c, "verifier": VER + "x"})
+pruefe(r.status_code == 401 and not d.get("token") and not log["token"],
+       "Einloesen mit falschem verifier: abgewiesen, kein Token")
+r, d, log = _app_einloesen({"code": c, "verifier": VER})
+pruefe(r.status_code == 401 and not log["token"],
+       "ein falscher verifier VERBRAUCHT den Code (kein zweiter Versuch)")
+c = _code_neu()
+r, d, log = _app_einloesen({"code": c, "verifier": VER})
+pruefe(r.status_code == 200 and d.get("success") and d.get("token") == "TOK"
+       and d.get("is_admin") is False and d.get("username") == "m.muster",
+       "Einloesen (AI-Maus): Bearer-Token im Koerper")
+pruefe_d(log["token"] == [("m.muster", {"ohne_admin": True, "nur_ai_maus": True})],
+       "AI-Maus: Sitzung OHNE Admin-Rechte und nur fuer die AI-Maus", str(log["token"]))
+pruefe(not log.get("sitzung_kw"), "kein Cookie-Verfahren (_sitzung_antwort) fuer Clients")
+r, d, log = _app_einloesen({"code": c, "verifier": VER})
+pruefe(r.status_code == 401 and not log["token"], "derselbe Code ein zweites Mal -> abgewiesen")
+for _art in ("outlook", "excel", "browser"):
+    r, d, log = _app_einloesen({"code": _code_neu(_art), "verifier": VER})
+    pruefe_d(log["token"] == [("m.muster", {"ohne_admin": True, "nur_ai_maus": False})],
+           "%s: Sitzung ohne Admin-Rechte" % _art, str(log["token"]))
+r, d, log = _app_einloesen({"code": _code_neu(), "verifier": VER}, gesperrt=JSONResponse({}, 423))
+pruefe(r.status_code == 423 and not log["token"], "gesperrtes Konto: kein Token")
+r, d, log = _app_einloesen({"code": _code_neu(), "verifier": VER}, einst={})
+pruefe(r.status_code == 401 and not log["token"], "IdP inzwischen aus: kein Token")
+r, d, log = _app_einloesen({"code": ["x"], "verifier": {"a": 1}})
+pruefe(r.status_code == 401 and not log["token"], "falsche Typen im Rumpf: sauber abgewiesen")
+
+# Begleitstellen: Route, Protokoll, Zugangsregel, Fertigseite
+_dek_app = _dek(FUNK["oidc_app_einloesen"]) if "oidc_app_einloesen" in FUNK else ""
+pruefe("app.post('/api/login/oidc/app-einloesen')" in _dek_app, "Route POST /api/login/oidc/app-einloesen")
+pruefe(any(isinstance(c, ast.Call) and ast.unparse(c.func) == "_anmeldung_protokollieren"
+           for c in ast.walk(FUNK.get("oidc_app_einloesen", ast.Module(body=[], type_ignores=[])))),
+       "app-einloesen protokolliert jeden Ausgang (BSI M2)")
+_zr = (ROOT / "backend" / "zugang_regel.py").read_text(encoding="utf-8")
+pruefe('("POST", "/api/login/oidc/app-einloesen")' in _zr and '("GET", "/addin/idp-fertig.html")' in _zr
+       and "/api/login/windows" not in _zr, "Zugangsregel: neue Wege eingetragen, Windows-Anmeldung entfernt")
+_fs = (ROOT / "frontend" / "addin" / "idp-fertig.html").read_text(encoding="utf-8")
+_fj = (ROOT / "frontend" / "addin" / "idp_fertig.js").read_text(encoding="utf-8")
+pruefe('name="referrer" content="no-referrer"' in _fs, "Fertigseite: Adresse mit Code geht als Referer nirgends hin")
+pruefe(not re.search(r"<script(?![^>]*\bsrc=)[^>]*>", _fs), "Fertigseite: kein Inline-Skript (Inhaltsrichtlinie)")
+pruefe("messageParent(" in _fj and "replaceState(" in _fj and "fetch(" not in _fj,
+       "Fertigseite: reicht weiter, leert die Adresse, ruft den Server NICHT selbst")
+
+
 # ═══ 3. Bestandsschutz und Begleitstellen ════════════════════════════════════
 abschnitt("3. Bestandsschutz")
 pruefe("login" in FUNK and "app.post('/api/login')" in _dek(FUNK["login"])
        and "_login_ablauf" in FUNK, "Kennwortanmeldung /api/login unveraendert vorhanden")
-pruefe("login_windows" in FUNK, "Windows-Anmeldung unveraendert vorhanden")
+# Seit 2026-11-27 ist die Windows-Anmeldung (Kerberos) entfallen – die AI-Maus
+# meldet sich ueber den IdP an (app=ai-maus). Kehrt sie zurueck, gehoert das
+# bewusst entschieden, nicht nebenbei mitgezogen.
+pruefe("login_windows" not in FUNK and "_login_windows_ablauf" not in FUNK
+       and "/api/login/windows" not in MAIN, "Windows-Anmeldung (Kerberos) entfernt")
 _login_aufr = {ast.unparse(n.func) for n in ast.walk(FUNK["_login_ablauf"]) if isinstance(n, ast.Call)}
 pruefe(not any("oidc" in a for a in _login_aufr), "die Kennwortanmeldung ruft nichts aus dem IdP-Weg")
 # Vollstaendige Konfiguration OHNE den Schalter: sonst waere "aus" schon wegen

@@ -168,63 +168,37 @@ internal sealed class JarvisClient : IDisposable
         throw new VisionException(Fehlertext(wurzel, Texte.KeineAntwort));
     }
 
-    /// <summary>Anmeldung mit der Windows-Domaenenanmeldung (Kerberos), ohne Kennwort.
+    /// <summary>Bietet der Server die Anmeldung ueber das Firmenkonto (IdP) an?
     ///
-    /// <c>true</c> = die Sitzung steht. **JEDER Fehlschlag ist <c>false</c>**,
-    /// nie eine Ausnahme: kein SPN im AD, Server ohne Keytab, Rechner nicht in
-    /// der Domaene, DC nicht erreichbar, keine Freigabe – in allen Faellen ist
-    /// der naechste Schritt derselbe, die Kennwortmaske. Den Grund nennt das
-    /// Journal des Servers; hier gibt es niemanden, dem er nuetzte.
-    ///
-    /// ⚠ EIN EIGENER HttpClient, NICHT <c>_http</c>. Nur dieser eine Aufruf
-    /// darf die Windows-Anmeldung mitschicken; der normale Client kennt sie
-    /// nicht und kann sie damit auch an keine andere Adresse verlieren.
-    /// <c>AllowAutoRedirect = false</c> aus demselben Grund: eine Umleitung
-    /// wuerde das Ticket an ein anderes Ziel weiterreichen.
-    ///
-    /// Windows fragt das Ticket fuer <c>HTTP/&lt;host aus der Adresse&gt;</c> an
-    /// – die eingestellte Adresse muss also der Name sein, fuer den der SPN
-    /// registriert ist, keine IP. Mit einer IP faellt Windows auf NTLM zurueck,
-    /// und der Server lehnt das ab.
+    /// Haengt an KEINER Anmeldung (die Maske fragt, bevor es eine Sitzung gibt).
+    /// **Jeder Fehler heisst „nein"** – dann bleibt die Maske, wie sie vor dem
+    /// IdP war (Kennwort). Ein Server ohne den Endpunkt (aeltere Fassung)
+    /// antwortet 404 und landet ebenfalls hier.
     /// </summary>
-    public async Task<bool> WindowsAnmeldenAsync(CancellationToken ct)
+    public async Task<IdpStatus> IdpStatusAsync(CancellationToken ct)
     {
         string basis = EndpointResolver.Basis(_settings.Endpoint);
         if (basis.Length == 0)
         {
-            return false;
+            return IdpStatus.Aus;
         }
         try
         {
-            using var handler = new HttpClientHandler
-            {
-                UseDefaultCredentials = true,
-                AllowAutoRedirect = false,
-            };
-            using var httpWin = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
-            using var inhalt = new StringContent("{}", Encoding.UTF8, "application/json");
-            using HttpResponseMessage antwort = await httpWin
-                .PostAsync(basis + "/api/login/windows", inhalt, ct).ConfigureAwait(false);
+            using var zeit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            zeit.CancelAfter(TimeSpan.FromSeconds(10));
+            using HttpResponseMessage antwort = await _http
+                .GetAsync(basis + "/api/login/oidc/status", zeit.Token).ConfigureAwait(false);
             if (antwort.StatusCode != HttpStatusCode.OK)
             {
-                return false;
+                return IdpStatus.Aus;
             }
-            string roh = await antwort.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            string roh = await antwort.Content.ReadAsStringAsync(zeit.Token).ConfigureAwait(false);
             using JsonDocument doc = JsonDocument.Parse(roh);
-            JsonElement wurzel = doc.RootElement;
-            if (!wurzel.TryGetProperty("success", out JsonElement erf) ||
-                erf.ValueKind != JsonValueKind.True ||
-                !wurzel.TryGetProperty("token", out JsonElement t))
-            {
-                return false;
-            }
-            string token = t.GetString() ?? string.Empty;
-            if (token.Length == 0)
-            {
-                return false;
-            }
-            _token = token;
-            return true;
+            JsonElement w = doc.RootElement;
+            bool aktiv = w.TryGetProperty("aktiv", out JsonElement a) && a.ValueKind == JsonValueKind.True;
+            string modus = w.TryGetProperty("ad_modus", out JsonElement m) && m.ValueKind == JsonValueKind.String
+                ? (m.GetString() ?? string.Empty) : string.Empty;
+            return new IdpStatus(aktiv, modus);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -232,8 +206,60 @@ internal sealed class JarvisClient : IDisposable
         }
         catch (Exception)
         {
-            return false;
+            return IdpStatus.Aus;
         }
+    }
+
+    /// <summary>Anmeldung ueber das Firmenkonto (IdP) im Systembrowser.
+    /// Rueckgabe: der Benutzername der neuen Sitzung. Wirft
+    /// <see cref="VisionException"/> (bzw. <see cref="IdpFehlerException"/>)
+    /// mit Klartext.
+    ///
+    /// Die Prueffolge (verifier) verlaesst diesen Prozess NUR beim Einloesen,
+    /// ueber https an den Server, der die Anmeldung begonnen hat. Der Browser
+    /// sieht nur ihren Hash (challenge).
+    /// </summary>
+    public async Task<string> FirmenkontoAnmeldenAsync(Action<string> oeffnen, CancellationToken ct)
+    {
+        string basis = EndpointResolver.Basis(_settings.Endpoint);
+        if (basis.Length == 0)
+        {
+            throw new VisionException(Texte.KeinServerFuer(_settings.Endpoint));
+        }
+
+        string verifier = IdpAnmeldung.NeuerVerifier();
+        string zustand = IdpAnmeldung.NeuerZustand();
+        string code = await IdpAnmeldung.CodeHolenAsync(
+            basis, IdpAnmeldung.Challenge(verifier), zustand, oeffnen, ct).ConfigureAwait(false);
+
+        var rumpf = new Dictionary<string, string> { ["code"] = code, ["verifier"] = verifier };
+        using var inhalt = new StringContent(
+            JsonSerializer.Serialize(rumpf, AppJsonContext.Default.DictionaryStringString),
+            Encoding.UTF8, "application/json");
+        JsonElement wurzel;
+        try
+        {
+            using HttpResponseMessage antwort = await _http
+                .PostAsync(basis + "/api/login/oidc/app-einloesen", inhalt, ct).ConfigureAwait(false);
+            string roh = await antwort.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using JsonDocument doc = JsonDocument.Parse(roh);
+            wurzel = doc.RootElement.Clone();
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            throw new VisionException(Texte.NichtErreichbar + e.Message, e);
+        }
+
+        if (wurzel.TryGetProperty("success", out JsonElement erf) &&
+            erf.ValueKind == JsonValueKind.True &&
+            wurzel.TryGetProperty("token", out JsonElement t) &&
+            (t.GetString() ?? string.Empty).Length > 0)
+        {
+            _token = t.GetString()!;
+            return wurzel.TryGetProperty("username", out JsonElement u) && u.ValueKind == JsonValueKind.String
+                ? (u.GetString() ?? string.Empty) : string.Empty;
+        }
+        throw new VisionException(Fehlertext(wurzel, Texte.KeineAntwort));
     }
 
     /// <summary>Bildausschnitt und Frage auswerten.
@@ -702,4 +728,16 @@ internal class VisionException : Exception
     public VisionException(string message) : base(message) { }
 
     public VisionException(string message, Exception inner) : base(message, inner) { }
+}
+
+/// <summary>Auskunft des Servers ueber die Anmeldung mit dem Firmenkonto.
+/// <see cref="AdModus"/>: <c>fallback</c> = Kennwortanmeldung eingeklappt (Notweg),
+/// <c>zusaetzlich</c> = immer sichtbar. Unbekanntes gilt wie <c>fallback</c>
+/// (Vorgabe des Servers, <c>_oidc_ad_modus</c>).</summary>
+internal sealed record IdpStatus(bool Aktiv, string AdModus)
+{
+    public static readonly IdpStatus Aus = new(false, string.Empty);
+
+    /// <summary>Kennwortfelder eingeklappt anzeigen?</summary>
+    public bool KennwortEingeklappt => Aktiv && AdModus != "zusaetzlich";
 }

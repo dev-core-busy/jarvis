@@ -62,7 +62,7 @@ PROBEN = [
     ("Bremse wirkungslos", AS,
      '    if not spruehlage()["aktiv"]:\n        return True\n    loop', '    if True:\n        return True\n    loop'),
     ("Mindestdauer nicht verdrahtet", MAIN,
-     # Anker am Login-Rahmen: dieselbe Zeile steht auch in login_windows
+     # Anker am Login-Rahmen (eindeutig mit dem Protokoll-Weg "kennwort")
      '        await _anmelde_schutz.angleichen(_start)\n    await _anmeldung_protokollieren(request, resp, "kennwort")',
      '        pass\n    await _anmeldung_protokollieren(request, resp, "kennwort")'),
     ("Suchfehler wird zu 'nein'", MAIN,

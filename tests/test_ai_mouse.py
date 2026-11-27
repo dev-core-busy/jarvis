@@ -844,8 +844,14 @@ print("\n=== 8d. Die Fragen werden BEIM START geladen ===")
 #
 # Gemessen wird die EIGENSCHAFT "jeder Weg, der anmeldet, laedt danach", nicht
 # das Vorkommen des Namens irgendwo in der Datei.
-cs_sicher = cs_block(cs_tray, "private async Task<bool> SicherstellenAngemeldetAsync")
-check("SicherstellenAngemeldetAsync gefunden", len(cs_sicher) > 100)
+# ⚠ SEIT 1.0.17 (IdP) liegt die Maske samt Kennwortanmeldung in
+#   `MaskeAnmeldenAsync` – `SicherstellenAngemeldetAsync` ruft sie, und der
+#   Einstellungsdialog ruft sie direkt (Firmenkonto ohne Benutzernamen).
+_cs_sich_rahmen = cs_block(cs_tray, "private async Task<bool> SicherstellenAngemeldetAsync")
+check("SicherstellenAngemeldetAsync ruft die Maske (MaskeAnmeldenAsync)",
+      "await MaskeAnmeldenAsync(ct)" in _cs_sich_rahmen)
+cs_sicher = cs_block(cs_tray, "private async Task<bool> MaskeAnmeldenAsync")
+check("MaskeAnmeldenAsync gefunden", len(cs_sicher) > 100)
 if cs_sicher:
     check("nach der Anmeldung werden die Fragen geholt",
           "FragenNachladenAsync" in cs_sicher)
@@ -917,11 +923,13 @@ check("Eingerichtet() gefunden", len(eingr) > 30)
 check("es entscheidet die Serveradresse, nicht die Existenz des Schluessels",
       'Lies(k, "Endpoint").Length > 0' in eingr)
 
-sicher2 = cs_block(cs_tray, "private async Task<bool> SicherstellenAngemeldetAsync")
+sicher2_rahmen = cs_block(cs_tray, "private async Task<bool> SicherstellenAngemeldetAsync")
 check("der erste Start wird ueber Eingerichtet() erkannt",
-      "ConfigStore.Eingerichtet()" in sicher2)
-check("und fuehrt in die Einstellungen", "ShowSettings()" in sicher2)
-i_anm = sicher2.find("AnmeldenAsync")
+      "ConfigStore.Eingerichtet()" in sicher2_rahmen)
+check("und fuehrt in die Einstellungen", "ShowSettings()" in sicher2_rahmen)
+# Die Kennwortanmeldung selbst steht seit 1.0.17 in der Maske.
+sicher2 = cs_block(cs_tray, "private async Task<bool> MaskeAnmeldenAsync")
+i_anm = sicher2.find("_client.AnmeldenAsync(")
 
 # (c) Geschrieben wird erst NACH gelungener Anmeldung.
 i_save = sicher2.find("ConfigStore.SaveSettings")
@@ -1168,8 +1176,9 @@ check("Kommentar-Filter greift (Positivkontrolle)",
 # ⚠ ABGELOEST DURCH DIE VORGABE 2026-11-11: „wenn keine automatische (SPN)
 # Anmeldung moeglich ist, Anmeldebildschirm anzeigen, Fokus auf dem
 # Eingabefeld". Bis dahin galt hier „der Start meldet sich NICHT selbst an" –
-# das stammte aus der Zeit vor der Windows-Anmeldung, als JEDER Start gefragt
-# haette. Jetzt fragt er nur, wenn Sitzung UND Windows-Anmeldung fehlen.
+# das stammte aus der Zeit vor der stillen Anmeldung, als JEDER Start gefragt
+# haette. Seit 1.0.17 (Kerberos entfernt) erscheint ohne Sitzung die Maske –
+# mit dem Firmenkonto-Knopf, aber OHNE den Browser von selbst zu oeffnen.
 _i_hol = start3_code.find("await FragenNachladenAsync()")
 _i_noch = start3_code.find("if (_client.Angemeldet)", _i_hol + 1) if _i_hol >= 0 else -1
 _i_anm = start3_code.find("SicherstellenAngemeldetAsync(")
@@ -1178,8 +1187,7 @@ check("mit gemerkter Sitzung werden nur die Fragen geholt, und gilt sie danach "
       0 <= _i_hol < _i_noch < _i_anm
       and re.search(r"if \(_client\.Angemeldet\)\s*\{\s*return;\s*\}",
                     start3_code[_i_noch:_i_anm]) is not None)
-check("ohne (gueltige) Sitzung meldet sich der Start an – Windows zuerst, "
-      "sonst die Maske",
+check("ohne (gueltige) Sitzung meldet sich der Start an (Maske)",
       re.search(r"_startAnmeldung\s*=\s*SicherstellenAngemeldetAsync\(CancellationToken\.None\)",
                 start3_code) is not None)
 # Kein Zeitlimit-Token: es liefe ab, waehrend der Benutzer in der Maske tippt.
@@ -1189,7 +1197,7 @@ check("die Start-Anmeldung hat kein Zeitlimit, das waehrend der Maske ablaeuft",
 # oeffnen – und zwar VOR jedem eigenen Anmeldeversuch.
 _sich_code = "\n".join(z for z in sich3.split("\n") if not z.lstrip().startswith("//"))
 _i_warte = _sich_code.find("_startAnmeldung is { IsCompleted: false }")
-_i_win2 = _sich_code.find("WindowsAnmeldenAsync")
+_i_win2 = _sich_code.find("MaskeAnmeldenAsync(")
 check("ein Rahmen waehrend der Start-Maske wartet auf sie (keine zweite Maske)",
       0 <= _i_warte < _i_win2
       and re.search(r"_startAnmeldung is \{ IsCompleted: false \} (\w+)\)\s*\{\s*"
@@ -4890,6 +4898,174 @@ check("…der Text nennt BEIDE Versionen", "{0}" in _z34t and "{1}" in _z34t)
 # Eine Warnung ohne Weg zur Abhilfe ist nur Laerm.
 check("…und wer den neuen Stand ausrollt",
       "dministration" in _z34t and "dministrator" in _z34t)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 35. Firmenkonto (IdP) statt Kerberos (1.0.17, Betreiberentscheid 2026-11-27)
+#
+# Die Windows-Anmeldung per Kerberos/SPN ist ENTFERNT; angemeldet wird ueber
+# den IdP im Systembrowser mit Ruecksprung auf 127.0.0.1 (RFC 8252), Einmal-
+# Code von Jarvis und PKCE. Die Kennwortanmeldung bleibt als Notweg.
+# Geprueft werden die Zusagen, an denen die Sicherheit haengt: nur Loopback,
+# Zustand VOR dem Code, nur der Hash der Prueffolge geht an den Browser, und
+# der Browser oeffnet sich NIE von selbst.
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n=== 35. Firmenkonto (IdP) statt Kerberos ===")
+_SRC35 = ROOT / "ai-mouse" / "src" / "AiMouse"
+_idp35_pfad = _SRC35 / "Vision" / "IdpAnmeldung.cs"
+check("IdpAnmeldung.cs existiert", _idp35_pfad.is_file())
+_idp35 = cs_nackt(_idp35_pfad.read_text(encoding="utf-8")) if _idp35_pfad.is_file() else ""
+_cl35 = cs_nackt(cs_client)
+_tr35 = cs_nackt(cs_tray)
+_lw35 = cs_nackt((_SRC35 / "Ui" / "LoginWindow.cs").read_text(encoding="utf-8"))
+_tx35 = (_SRC35 / "Localization" / "Texte.cs").read_text(encoding="utf-8")
+check("Positivkontrolle: Kommentarfilter greift und laesst Code stehen",
+      "TcpListener" in _idp35 and "RFC 8252" not in _idp35)
+
+# (a) Kerberos ist WEG – im ganzen Quellbaum, auch in Kommentaren der .cs.
+_reste35 = []
+for _q in sorted(_SRC35.rglob("*.cs")):
+    if "/obj/" in str(_q) or "/bin/" in str(_q):
+        continue
+    _t = _q.read_text(encoding="utf-8")
+    for _w in ("Kerberos", "UseDefaultCredentials", "login/windows", "WindowsAnmelden",
+               "WindowsKontoPasst", "Negotiate", "SPN"):
+        if _w in _t:
+            _reste35.append("%s:%s" % (_q.name, _w))
+check("es werden .cs-Dateien durchsucht (Positivkontrolle)",
+      len(list(_SRC35.rglob("*.cs"))) >= 20)
+check("kein Kerberos-Rest im Quellbaum (%s)" % (_reste35[:3] or "sauber"), not _reste35)
+_proj35 = (_SRC35 / "AiMouse.csproj").read_text(encoding="utf-8")
+check("Version 1.0.17 oder hoeher (sonst kein Update auf den Arbeitsplaetzen)",
+      re.search(r"<Version>1\.0\.(1[7-9]|[2-9]\d)</Version>", _proj35) is not None)
+
+# (b) Lauschen NUR auf Loopback.
+check("Lauscher auf IPAddress.Loopback, Port vom System",
+      "new TcpListener(IPAddress.Loopback, 0)" in _idp35)
+check("kein Lauschen auf allen Adressen / kein http.sys",
+      not re.search(r"IPAddress\.(Any|IPv6Any)|0\.0\.0\.0|HttpListener|\"http://\+", _idp35))
+check("Ruecksprung zeigt auf 127.0.0.1 mit festem Praefix",
+      '"http://127.0.0.1:" + port + pfad' in _idp35 and 'PfadPraefix + NeuerZustand()' in _idp35)
+
+# (c) PKCE S256 und Zufall aus dem Kryptogenerator.
+check("Prueffolge aus 32 Zufallsbytes (RandomNumberGenerator)",
+      "RandomNumberGenerator.GetBytes(32)" in _idp35)
+check("challenge = SHA-256 ueber den ASCII-Text der Prueffolge",
+      "SHA256.HashData(Encoding.ASCII.GetBytes(verifier))" in _idp35)
+check("base64url ohne Auffuellung",
+      re.search(r"TrimEnd\('='\)\.Replace\('\+', '-'\)\.Replace\('/', '_'\)", _idp35) is not None)
+_start35 = cs_block(_idp35, "public static string StartAdresse(")
+check("Startadresse: app=ai-maus mit challenge, zustand und rueck",
+      "/api/login/oidc/start?app=ai-maus" in _idp35
+      and all(k in _idp35 for k in ('"&challenge="', '"&zustand="', '"&rueck="')))
+# Nur der HASH geht in den Browser – die Prueffolge nie.
+_fk35 = cs_block(_cl35, "public async Task<string> FirmenkontoAnmeldenAsync")
+check("FirmenkontoAnmeldenAsync gefunden", len(_fk35) > 200)
+check("an den Browser geht nur IdpAnmeldung.Challenge(verifier)",
+      "IdpAnmeldung.Challenge(verifier)" in _fk35
+      and re.search(r"CodeHolenAsync\(\s*basis,\s*IdpAnmeldung\.Challenge\(verifier\)", _fk35) is not None)
+check("eingeloest wird an /api/login/oidc/app-einloesen mit code UND verifier",
+      "/api/login/oidc/app-einloesen" in _fk35
+      and '["code"] = code' in _fk35 and '["verifier"] = verifier' in _fk35)
+check("Token nur bei success UND nicht-leerem token",
+      re.search(r"erf\.ValueKind == JsonValueKind\.True\s*&&", _fk35) is not None
+      and "_token = t.GetString()!" in _fk35)
+
+# (d) Der ZUSTAND entscheidet zuerst – in fester Zeit.
+_ausw35 = cs_block(_idp35, "public static (string Code, string Fehler) Auswerten(")
+check("Auswerten gefunden", len(_ausw35) > 100)
+_i_z = _ausw35.find("FixedTimeEquals")
+_i_f = _ausw35.find('"fehler"')
+_i_c = _ausw35.find('"code"')
+check("Zustand wird VOR Fehler und Code geprueft (fester Zeitvergleich)",
+      0 <= _i_z < _i_f and _i_z < _i_c)
+check("ein leerer oder fehlender Zustand gilt als falsch",
+      "string.IsNullOrEmpty(z)" in _ausw35 and "string.IsNullOrEmpty(zustand)" in _ausw35)
+_anf35 = cs_block(_idp35, "private static async Task<(bool, string)> AnfrageBearbeitenAsync(")
+check("ein falscher Zustand liefert KEINEN Code (weiter warten)",
+      re.search(r'if \(fehler == "zustand"\)\s*\{[^}]*return \(false, string\.Empty\);', _anf35) is not None)
+check("ein fremder Pfad wird abgewiesen",
+      "string.Equals(weg, pfad, StringComparison.Ordinal)" in _anf35)
+check("die Seite fuer den Browser maskiert den Text",
+      "WebUtility.HtmlEncode(text)" in _idp35)
+check("Zeitgrenze fuer die Rueckkehr", "zeit.CancelAfter(Zeitgrenze)" in _idp35)
+
+# (e) Jede Fehlerkennung hat einen Text (und den gibt es in Texte.cs).
+_kenn35 = re.findall(r'"(\w+)"', _idp35.split("Fehlerkennungen =", 1)[1].split("];", 1)[0]) \
+    if "Fehlerkennungen =" in _idp35 else []
+check("Fehlerkennungen gelesen (Positivkontrolle)", len(_kenn35) >= 15)
+_sw35 = cs_block(_idp35, "public static string FehlerText(")
+_ohne35 = [k for k in _kenn35 if not re.search(r'"%s"' % k, _sw35)]
+check("jede Fehlerkennung hat einen eigenen Text (%s)" % (_ohne35 or "alle"), not _ohne35)
+_texte35 = set(re.findall(r"Texte\.(Idp\w+)", _idp35 + _cl35 + _tr35 + _lw35))
+_fehlt35 = [t for t in sorted(_texte35)
+            if not re.search(r"public static string %s\b" % t, _tx35)]
+check("jeder benutzte Idp-Text steht in Texte.cs (%s)" % (_fehlt35 or "alle"),
+      _texte35 and not _fehlt35)
+_gleich35 = []
+for _m in re.finditer(r'public static string (Idp\w+)\s*=>\s*T\(\s*"([^"]*)",\s*"([^"]*)"', _tx35):
+    if _m.group(2) == _m.group(3):
+        _gleich35.append(_m.group(1))
+check("Idp-Texte sind in DE und EN verschieden (%s)" % (_gleich35 or "ja"), not _gleich35)
+
+# (f) Der Browser oeffnet sich NIE von selbst – nur nach dem Klick.
+_maske35 = cs_block(_tr35, "private async Task<bool> MaskeAnmeldenAsync")
+_i_frage = _maske35.find("FrageAnmeldungMaske(")
+_i_break = _maske35.find("if (!firmenkonto)")
+_i_idp = _maske35.find("FirmenkontoAnmeldenAsync(")
+check("Firmenkonto-Anmeldung erst NACH der Wahl in der Maske",
+      0 <= _i_frage < _i_break < _i_idp)
+_auf35 = [m.start() for m in re.finditer(r"FirmenkontoAnmeldenAsync\(|BrowserOeffnen", _tr35)]
+_defs35 = [m.start() for m in re.finditer(r"private async Task FirmenkontoAnmeldenAsync\(", _tr35)]
+_innen35 = [i for i in _auf35 if i not in _defs35]
+_maske_ab = _tr35.find("private async Task<bool> MaskeAnmeldenAsync")
+_fk_tr = cs_block(_tr35, "private async Task FirmenkontoAnmeldenAsync(")
+_fk_ab = _tr35.find("private async Task FirmenkontoAnmeldenAsync(")
+check("Browser/Firmenkonto nur aus der Maske bzw. ihrem Helfer erreichbar",
+      _innen35 and all(_maske_ab <= i < _maske_ab + len(_maske35)
+                       or _fk_ab <= i < _fk_ab + len(_fk_tr) for i in _innen35))
+_start35 = cs_block(_tr35, "private async Task StartAnmeldungAsync")
+check("der Programmstart oeffnet keinen Browser",
+      "Firmenkonto" not in _start35 and "BrowserOeffnen" not in _start35)
+# Gescheitert -> Maske wieder, mit Grund und offenen Kennwortfeldern.
+check("nach gescheitertem Firmenkonto: Grund oben, Kennwortfelder offen",
+      re.search(r"catch \(VisionException ex\)\s*\{\s*hinweis = ex\.Message;\s*kennwortOffen = true;",
+                _maske35) is not None)
+check("Erfolg: Benutzer und Sitzung gemerkt, Fragen geholt",
+      "ConfigStore.SaveToken(_client.Token)" in _fk_tr
+      and "await FragenNachladenAsync()" in _fk_tr and "_settings.Benutzer = name" in _fk_tr)
+# Nur Adresse eingetragen (Firmenkonto-Nutzer): nach dem Speichern die Maske.
+_set35 = cs_block(_tr35, "private void ShowSettings()")
+check("Einstellungen ohne Kennwort und ohne Einrichtung fuehren in die Maske",
+      re.search(r"else if \(!_client\.Angemeldet && !ConfigStore\.Eingerichtet\(\)\)\s*\{\s*_ = MaskeNachEinstellungenAsync\(\);",
+                _set35) is not None)
+
+# (g) Die Maske: Knopf oben, Kennwort als Notweg, Hoehe aus dem Inhalt.
+check("der Firmenkonto-Knopf schliesst mit DialogResult.Yes",
+      "DialogResult = DialogResult.Yes" in _lw35 and "Firmenkonto => DialogResult == DialogResult.Yes" in _lw35)
+check("eingeklappt nur bei IdP + Modus fallback und nicht nach einem Fehlschlag",
+      "bool eingeklappt = mitIdp && idp!.KennwortEingeklappt && !kennwortOffen;" in _lw35)
+check("beim Einmal-Code gibt es keinen Firmenkonto-Knopf",
+      "bool mitIdp = idp is { Aktiv: true } && !totpNoetig;" in _lw35)
+check("KennwortEingeklappt: alles ausser 'zusaetzlich' (Vorgabe des Servers)",
+      'Aktiv && AdModus != "zusaetzlich"' in _cl35)
+_link35 = re.search(r"_zeigen\.LinkClicked \+= \(_, _\) =>\s*\{(.*?)\};", _lw35, re.S)
+check("der Link klappt auf und rechnet die Hoehe neu",
+      _link35 is not None and "KennwortZeigen(true)" in _link35.group(1)
+      and "HoeheAnInhalt()" in _link35.group(1))
+_h35 = cs_block(_lw35, "private void HoeheAnInhalt()")
+check("Hoehe aus dem Inhalt, gedeckelt auf den Bildschirm, fail-safe",
+      "GetPreferredSize(" in _h35 and "WorkingArea" in _h35
+      and re.search(r"catch\s*\{", _h35) is not None)
+# ⚠ Automatische Platzierung ueberspringt unsichtbare Controls (2026-09-14):
+#   jede Zeile hier traegt deshalb ihre Zelle selbst.
+_add35 = re.findall(r"layout\.Controls\.Add\(([^)]*)\)", _lw35)
+check("Zeilen der Maske haben feste Zellen (%s)" % ([a for a in _add35 if "," not in a] or "ja"),
+      _add35 and all("," in a for a in _add35))
+# Auskunft des Servers: jeder Fehler heisst "kein IdP" (Maske wie bisher).
+_st35 = cs_block(_cl35, "public async Task<IdpStatus> IdpStatusAsync(")
+check("IdpStatusAsync fragt /api/login/oidc/status und faellt auf 'aus' zurueck",
+      "/api/login/oidc/status" in _st35 and _st35.count("return IdpStatus.Aus;") >= 3)
 
 print("\n%d OK, %d FAIL" % (ok, fail))
 sys.exit(1 if fail else 0)

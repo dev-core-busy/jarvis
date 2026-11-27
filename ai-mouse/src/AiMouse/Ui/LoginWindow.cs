@@ -1,6 +1,7 @@
 using AiMouse.Configuration;
 using AiMouse.Interop;
 using AiMouse.Localization;
+using AiMouse.Vision;
 
 namespace AiMouse.Ui;
 
@@ -16,6 +17,15 @@ namespace AiMouse.Ui;
 /// der Registry. Die Datei liegt im Klartext neben der Exe und wird per
 /// Netzfreigabe verteilt. Gemerkt wird nur der BENUTZERNAME, und auch das nur
 /// als Bequemlichkeit.
+///
+/// FIRMENKONTO (IdP, seit 1.0.17): bietet der Server die Anmeldung ueber das
+/// Firmenkonto an, steht OBEN der Knopf „Mit Firmenkonto anmelden" – er
+/// schliesst die Maske mit <see cref="DialogResult.Yes"/>, die eigentliche
+/// Anmeldung laeuft danach im Systembrowser (<c>IdpAnmeldung</c>). Die
+/// Kennwortfelder sind dann der NOTWEG: bei <c>ad_modus = fallback</c>
+/// eingeklappt hinter einem Link, offen nach einer gescheiterten
+/// IdP-Anmeldung (<c>kennwortOffen</c>), bei <c>zusaetzlich</c> immer offen.
+/// Ohne IdP sieht die Maske aus wie vorher.
 /// </summary>
 internal sealed class LoginWindow : Form
 {
@@ -23,6 +33,16 @@ internal sealed class LoginWindow : Form
     private readonly TextBox _kennwort = new() { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
     private readonly TextBox _totp = new() { Dock = DockStyle.Fill };
     private readonly Label _totpLabel;
+    private readonly Label _benutzerLabel;
+    private readonly Label _kennwortLabel;
+    private readonly TableLayoutPanel _layout;
+    private readonly Control _kopf;
+    private readonly FlowLayoutPanel _knoepfe;
+    private readonly Button _anmelden;
+    private readonly LinkLabel? _zeigen;
+
+    /// <summary>Wurde „Mit Firmenkonto anmelden" gewaehlt?</summary>
+    public bool Firmenkonto => DialogResult == DialogResult.Yes;
 
     public string Benutzer => _benutzer.Text.Trim();
 
@@ -30,8 +50,13 @@ internal sealed class LoginWindow : Form
 
     public string Totp => _totp.Text.Trim();
 
-    public LoginWindow(AppSettings settings, bool totpNoetig = false, string benutzer = "")
+    public LoginWindow(AppSettings settings, bool totpNoetig = false, string benutzer = "",
+                       IdpStatus? idp = null, bool kennwortOffen = false, string hinweis = "")
     {
+        // Beim Nachfragen des Einmal-Codes gehoert die Maske der KENNWORT-
+        // Anmeldung – dort gibt es keinen Firmenkonto-Knopf.
+        bool mitIdp = idp is { Aktiv: true } && !totpNoetig;
+        bool eingeklappt = mitIdp && idp!.KennwortEingeklappt && !kennwortOffen;
         Text = settings.Marke + " — " + Texte.AnmeldenTitel;
         // Dasselbe Symbol wie im Tray (TrayIconFactory.Fenster).
         Icon = TrayIconFactory.Fenster;
@@ -62,11 +87,14 @@ internal sealed class LoginWindow : Form
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Segoe UI", 9f);
-        // Je sichtbarer Zeile rund 30 px – sonst steht der Anmelden-Knopf
-        // ausserhalb des Fensters (im Projekt mehrfach bezahlt).
-        ClientSize = new Size(460, 160 + (totpNoetig ? 40 : 0));
+        // Startwert; die tatsaechliche Hoehe rechnet `HoeheAnInhalt()` aus den
+        // SICHTBAREN Zeilen (Firmenkonto-Knopf, Hinweis, Kennwortfelder je nach
+        // Lage). Eine feste Zahl je Zeile hat im Projekt schon Bedienelemente
+        // aus dem Fenster geschoben (Einstellungsdialog 2026-09-14).
+        ClientSize = new Size(460, 160);
 
         var kopf = Marken.Kopf(settings);
+        _kopf = kopf;
 
         var layout = new TableLayoutPanel
         {
@@ -83,9 +111,40 @@ internal sealed class LoginWindow : Form
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _layout = layout;
 
-        AddRow(layout, Texte.Benutzername, _benutzer);
-        AddRow(layout, Texte.Kennwort, _kennwort);
+        // ⚠ JEDE ZEILE MIT FESTER ZELLE (`AddRow`/`AddVoll`): die automatische
+        // Platzierung des TableLayoutPanel ueberspringt UNSICHTBARE Controls,
+        // und hier sind je nach Lage Hinweis, Knopf oder Kennwortfelder
+        // unsichtbar – ab dort rutschte alles um eine Zelle (Einstellungsdialog,
+        // gemeldet 2026-09-14 mit Screenshot).
+        var hinweisLabel = new Label
+        {
+            Text = hinweis, AutoSize = true, MaximumSize = new Size(420, 0),
+            ForeColor = Color.Firebrick, Margin = new Padding(0, 6, 0, 6),
+            Visible = hinweis.Length > 0,
+        };
+        AddVoll(layout, hinweisLabel);
+
+        Button? idpKnopf = null;
+        if (mitIdp)
+        {
+            idpKnopf = new Button
+            {
+                Text = Texte.IdpKnopf, AutoSize = true, Height = 32,
+                Dock = DockStyle.Fill, DialogResult = DialogResult.Yes,
+            };
+            AddVoll(layout, idpKnopf);
+            _zeigen = new LinkLabel
+            {
+                Text = Texte.IdpKennwortZeigen, AutoSize = true,
+                Margin = new Padding(0, 8, 0, 4), Visible = eingeklappt,
+            };
+            AddVoll(layout, _zeigen);
+        }
+
+        _benutzerLabel = AddRow(layout, Texte.Benutzername, _benutzer);
+        _kennwortLabel = AddRow(layout, Texte.Kennwort, _kennwort);
         _totpLabel = AddRow(layout, Texte.EinmalCode, _totp);
         _totpLabel.Visible = totpNoetig;
         _totp.Visible = totpNoetig;
@@ -95,6 +154,7 @@ internal sealed class LoginWindow : Form
             Text = "&" + Texte.Anmelden, Width = 110, Height = 28,
             DialogResult = DialogResult.OK,
         };
+        _anmelden = anmelden;
         var abbrechen = new Button
         {
             Text = Texte.Abbrechen, Width = 110, Height = 28,
@@ -110,6 +170,7 @@ internal sealed class LoginWindow : Form
         };
         knoepfe.Controls.Add(abbrechen);
         knoepfe.Controls.Add(anmelden);
+        _knoepfe = knoepfe;
 
         Controls.Add(layout);
         Controls.Add(knoepfe);
@@ -117,6 +178,26 @@ internal sealed class LoginWindow : Form
 
         AcceptButton = anmelden;
         CancelButton = abbrechen;
+
+        // Eingeklappt: Kennwortzeilen und Anmelden-Knopf verborgen, Enter
+        // startet die Firmenkonto-Anmeldung. Der Link klappt auf.
+        if (eingeklappt)
+        {
+            KennwortZeigen(false);
+            AcceptButton = idpKnopf;
+        }
+        if (_zeigen is not null)
+        {
+            _zeigen.LinkClicked += (_, _) =>
+            {
+                KennwortZeigen(true);
+                _zeigen.Visible = false;
+                AcceptButton = anmelden;
+                HoeheAnInhalt();
+                (_benutzer.Text.Length > 0 ? _kennwort : _benutzer).Focus();
+            };
+        }
+        HoeheAnInhalt();
 
         // ⚠ DIE PRUEFUNG SITZT IM SCHLIESSEN, nicht am Knopf: `DialogResult.OK`
         // am Button schliesst das Fenster, BEVOR ein Click-Handler laufen
@@ -140,6 +221,10 @@ internal sealed class LoginWindow : Form
         Control eingabe = totpNoetig ? _totp
                         : _benutzer.Text.Length > 0 ? _kennwort
                         : _benutzer;
+        if (eingeklappt && idpKnopf is not null)
+        {
+            eingabe = idpKnopf;
+        }
         ActiveControl = eingabe;
 
         // ⚠ BEIM START STEHT DIE MASKE SONST HINTER ALLEM (Vorgabe 2026-11-11:
@@ -161,6 +246,40 @@ internal sealed class LoginWindow : Form
     }
 
 
+    /// <summary>Kennwortzeilen und Anmelden-Knopf ein- oder ausblenden.</summary>
+    private void KennwortZeigen(bool an)
+    {
+        _benutzerLabel.Visible = an;
+        _benutzer.Visible = an;
+        _kennwortLabel.Visible = an;
+        _kennwort.Visible = an;
+        _anmelden.Visible = an;
+    }
+
+    /// <summary>Hoehe aus dem SICHTBAREN Inhalt rechnen, gedeckelt auf den
+    /// Bildschirm. Bauart wie <c>SettingsWindow.HoeheAnInhaltBinden</c>.
+    ///
+    /// ⚠ FAIL-SAFE: scheitert die Rechnung, bleibt die bisherige Hoehe stehen,
+    /// und `AutoScroll` traegt den Rest – ein Wurf hier duerfte NIE die
+    /// Anmeldung verhindern.</summary>
+    private void HoeheAnInhalt()
+    {
+        try
+        {
+            int zeilen = _layout.GetPreferredSize(new Size(ClientSize.Width, 0)).Height;
+            int rand = Math.Max(_kopf.Height, _kopf.PreferredSize.Height) + _knoepfe.Height;
+            // Titelleiste und Rahmen zaehlen nicht zu `ClientSize`.
+            int platz = Screen.FromPoint(Cursor.Position).WorkingArea.Height - 80;
+            ClientSize = new Size(ClientSize.Width,
+                                  Math.Clamp(zeilen + rand, 140, Math.Max(140, platz)));
+        }
+        catch
+        {
+            // Startgroesse bleibt, AutoScroll faengt auf.
+        }
+    }
+
+    /// <summary>Zeile mit Beschriftung links und Feld rechts – in FESTER Zelle.</summary>
     private static Label AddRow(TableLayoutPanel layout, string caption, Control editor)
     {
         var label = new Label
@@ -171,10 +290,22 @@ internal sealed class LoginWindow : Form
             Margin = new Padding(0, 0, 8, 0),
         };
 
+        int zeile = layout.RowStyles.Count;
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.Controls.Add(label);
-        layout.Controls.Add(editor);
+        layout.RowCount = zeile + 1;
+        layout.Controls.Add(label, 0, zeile);
+        layout.Controls.Add(editor, 1, zeile);
         editor.Margin = new Padding(0, 3, 0, 6);
         return label;
+    }
+
+    /// <summary>Zeile ueber beide Spalten – in FESTER Zelle.</summary>
+    private static void AddVoll(TableLayoutPanel layout, Control c)
+    {
+        int zeile = layout.RowStyles.Count;
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowCount = zeile + 1;
+        layout.Controls.Add(c, 0, zeile);
+        layout.SetColumnSpan(c, 2);
     }
 }

@@ -323,6 +323,31 @@ neu zu laden ist. **Bei jeder Änderung an den Nachrichtenfällen hochzählen** 
 vergleicht beide Zahlen. Eine Versionsnummer taugt dafür nicht: beide Seiten lesen dasselbe
 Manifest von der Platte und melden dieselbe Version, auch wenn der Worker-Code alt ist.
 
+## Anmeldung über das Firmenkonto (IdP, seit 0.11.0)
+
+Bietet der Server die IdP-Anmeldung an (`GET /api/login/oidc/status` → `aktiv`), steht in der
+Anmeldemaske oben **„Mit Firmenkonto anmelden (SSO)“**. Die Kennwortanmeldung bleibt der
+Notweg: bei `ad_modus` **fallback** eingeklappt (Link „Mit Benutzername und Kennwort
+anmelden“, geht nach einer gescheiterten IdP-Anmeldung von selbst auf), bei **zusaetzlich**
+immer sichtbar. Ohne IdP, mit altem Server oder ohne `identity`-API bleibt die Maske wie bisher.
+
+Ablauf (`background.js::idpAnmelden`): PKCE (S256) und `zustand` erzeugen →
+`identity.launchWebAuthFlow` mit `/api/login/oidc/start?app=browser&challenge=…&zustand=…&rueck=<identity.getRedirectURL()>`
+→ Rückkehr an `https://<id>.chromiumapp.org/` (Chrome/Edge) bzw.
+`https://<hash>.extensions.allizom.org/` (Firefox) mit `code` oder `fehler` → `zustand` prüfen →
+`POST /api/login/oidc/app-einloesen {code, verifier}` → Bearer-Token wie bei der
+Kennwortanmeldung, die Freigabe „Jira-Assistent“ wird gleich danach geprüft.
+
+- **Der Ablauf läuft im Hintergrund**, nicht im Fenster: das Anmeldefenster des Browsers
+  nimmt dem Popup den Fokus, das Popup schließt sich. Die Sitzung liegt danach in
+  `storage.local`; ein Ergebnis, das kein Fenster mehr gesehen hat, wird als `idp_meldung`
+  gemerkt und beim nächsten Öffnen einmal angezeigt.
+- Permission **`identity`** in beiden Manifesten (keine Rückfrage beim Installieren).
+- Wie bei der Kennwortanmeldung wird zuerst das Zugriffsrecht auf die Adresse gesichert –
+  das Einlösen des Codes geht aus dem Hintergrund an den Server.
+- Wächter `tests/test_browser_addon_idp.js` (der echte `background.js` in einer VM,
+  PKCE nachgerechnet), Gegenprobe `tests/gegen_browser_addon_idp.py`.
+
 ## Voraussetzungen
 
 1. Der **Jira-Skill** ist in Jarvis aktiv und konfiguriert (Adresse + Token).

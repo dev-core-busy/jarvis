@@ -65,6 +65,66 @@ internal static class Texte
     public static string Abbrechen => T("Abbrechen", "Cancel");
     public static string AnmeldungLaeuft => T("Anmeldung läuft…", "Signing in…");
 
+    // ── Anmeldung ueber das Firmenkonto (IdP, Systembrowser) ───────────────
+    // Wortlaut wie 'login.idp_*' in frontend/js/i18n.js – dieselbe Anmeldung,
+    // derselbe Name im Portal und hier.
+    public static string IdpKnopf => T("Mit Firmenkonto anmelden (SSO)", "Sign in with company account (SSO)");
+    public static string IdpKennwortZeigen => T("Mit Benutzername und Kennwort anmelden",
+                                                "Sign in with user name and password");
+    public static string IdpOder => T("oder", "or");
+    public static string IdpWarten => T(
+        "Die Anmeldung läuft im Browser. Bitte dort anmelden – danach geht es hier von selbst weiter.",
+        "Sign-in continues in your browser. Please sign in there – this window then continues by itself.");
+    public static string IdpSeiteFertig => T(
+        "Anmeldung abgeschlossen – du kannst dieses Fenster schließen.",
+        "Signed in – you can close this window.");
+    public static string IdpSeiteFehler => T("Diese Anfrage wird hier nicht bearbeitet.",
+                                             "This request is not handled here.");
+    public static string IdpBrowser => T("Der Browser ließ sich nicht öffnen: ",
+                                         "The browser could not be opened: ");
+    public static string IdpNichtEingerichtet => T(
+        "Die Anmeldung über das Firmenkonto ist auf diesem Server nicht eingerichtet.",
+        "Sign-in with the company account is not set up on this server.");
+    public static string IdpZuViele => T("Zu viele Anmeldeversuche. Bitte warte 5 Minuten.",
+                                         "Too many sign-in attempts. Please wait 5 minutes.");
+    public static string IdpAbgelaufen => T(
+        "Die Anmeldung über das Firmenkonto ist abgelaufen. Bitte erneut versuchen.",
+        "Sign-in with the company account has expired. Please try again.");
+    public static string IdpAbgebrochen => T("Die Anmeldung beim Firmenkonto wurde abgebrochen.",
+                                             "Sign-in with the company account was cancelled.");
+    public static string IdpNichtErreichbar => T(
+        "Der Anmeldedienst des Unternehmens ist gerade nicht erreichbar.",
+        "The company sign-in service is currently unreachable.");
+    public static string IdpKonfiguration => T(
+        "Die Anmeldung über das Firmenkonto ist falsch eingerichtet. Bitte den Administrator informieren.",
+        "Sign-in with the company account is misconfigured. Please inform the administrator.");
+    public static string IdpAbgelehnt => T("Der Anmeldedienst des Unternehmens hat die Anmeldung abgelehnt.",
+                                           "The company sign-in service rejected the sign-in.");
+    public static string IdpUngueltig => T(
+        "Die Bestätigung des Anmeldedienstes war ungültig. Bitte den Administrator informieren.",
+        "The confirmation from the sign-in service was invalid. Please inform the administrator.");
+    public static string IdpName => T("Das Firmenkonto passt zu keinem Benutzer dieses Servers.",
+                                      "The company account does not match any user on this server.");
+    public static string IdpLokal => T("Dieses Konto lässt sich nur mit Kennwort anmelden.",
+                                       "This account can only sign in with a password.");
+    public static string IdpGesperrt => T("Das Konto ist nach zu vielen Fehlversuchen vorübergehend gesperrt.",
+                                          "The account is temporarily locked after too many failed attempts.");
+    public static string IdpKeineFreigabe => T("Keine Anmeldeberechtigung.", "Not authorised to sign in.");
+    public static string IdpPruefung => T(
+        "Die Anmeldeberechtigung ist gerade nicht prüfbar. Bitte mit Kennwort anmelden.",
+        "Sign-in permission cannot be checked right now. Please sign in with your password.");
+    public static string IdpLizenz => T("Die Zahl der Benutzer für diese Lizenz ist erreicht.",
+                                        "The number of users for this licence has been reached.");
+    public static string IdpZustand => T(
+        "Die Rückmeldung aus dem Browser gehört nicht zu dieser Anmeldung und wurde verworfen.",
+        "The response from the browser does not belong to this sign-in and was discarded.");
+    public static string IdpZeit => T(
+        "Die Anmeldung im Browser wurde nicht innerhalb von 5 Minuten abgeschlossen.",
+        "Sign-in in the browser was not completed within 5 minutes.");
+    public static string IdpUnbekannt(string kennung) => T(
+        "Die Anmeldung über das Firmenkonto ist gescheitert (" + kennung + ").",
+        "Sign-in with the company account failed (" + kennung + ").");
+
     /// <summary>Beschriftung der Versionsanzeige im Marken-Kopf.
     ///
     /// ⚠ IN BEIDEN SPRACHEN GLEICH – das ist kein vergessener Eintrag, sondern

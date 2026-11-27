@@ -597,6 +597,15 @@ def _mail_modul():
 
 _MELDUNG = re.compile(r"^B13 (ALARM|WARNUNG|BEHOBEN) (\S+): ")
 
+# Befunde, die eine EIGENE Mailquelle schon meldet. DEV 27.11.2026: der
+# AIDE-Abgleich mailte um 02:36 seine 28 offenen Eintraege (Quelle "aide"),
+# drei Minuten spaeter kam dieselbe Sache noch einmal als "Serverueberwachung:
+# WARNUNG: 28 Aenderung(en) … nicht erklaert". Ein Befund = eine Mail. Der
+# Abgleich mailt "offen" und "fehler" selbst (aide_abgleich.mail_melden); dass er
+# gar nicht mehr laeuft, kann er nicht melden – "aide_alt" bleibt deshalb hier.
+# Journal und Zahnrad zeigen weiterhin alles.
+NICHT_MAILEN = frozenset({"aide"})
+
 
 def mail_melden(meldungen: list[tuple[str, str]], zustand: dict | None = None,
                 vorher: dict | None = None) -> dict | None:
@@ -619,6 +628,8 @@ def mail_melden(meldungen: list[tuple[str, str]], zustand: dict | None = None,
             m = _MELDUNG.match(roh)
             b = None
             if m:
+                if m.group(2) in NICHT_MAILEN:
+                    continue
                 b = (alt_b if m.group(1) == "BEHOBEN" else jetzt_b).get(m.group(2))
             if b is None:
                 # Kein Befund zur Zeile (unbekannte Form): die Journalzeile unveraendert
@@ -626,6 +637,8 @@ def mail_melden(meldungen: list[tuple[str, str]], zustand: dict | None = None,
                 continue
             etikett = mm.text("mvm.ue_" + stufe, stufe.upper(), sp)
             zeilen.append((stufe, "%s: %s" % (etikett, mm.befund_text(b, sp, marke))))
+        if not zeilen:
+            return None
         oberste = max((s for s, _ in zeilen), key=lambda s: {"alarm": 3, "warnung": 2}.get(s, 1))
         erste = next(t for s, t in zeilen if s == oberste)
         betreff = erste if len(zeilen) == 1 else \

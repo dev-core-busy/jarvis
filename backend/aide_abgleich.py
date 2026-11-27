@@ -656,6 +656,28 @@ _POSTFIX_LAUFZEIT = (
 # Erklaert nur, wenn sich NICHTS ausser Zeit/Inode/Linkzahl geaendert hat –
 # Rechte und Eigentuemer bleiben ein Befund (Regel davor in einteilen).
 _SOCKET_NEU_ANGELEGT = re.compile(r"^/var/spool/postfix/dev/log$")
+# Dasselbe fuer die Dienst-Sockets von Postfix (DEV 27.11.2026: nach einem
+# Neustart von Postfix – der E-Mail-Versand startet es beim Einrichten neu –
+# standen alle 24 unter private/ und public/ mit "mci" als "geaendert" in der
+# Mail). Fail-closed: nur Namen, die master.cf als Dienst fuehrt.
+_POSTFIX_DIENST_SOCKET = re.compile(r"^/var/spool/postfix/(?:private|public)/(?P<name>[a-z][a-z0-9-]*)$")
+POSTFIX_MASTER = "/etc/postfix/master.cf"
+
+
+def _postfix_dienste() -> set:
+    """Dienstnamen aus master.cf (erste Spalte, Typ unix/fifo/unix-dgram/pass)."""
+    try:
+        text = _p(POSTFIX_MASTER).read_text(errors="replace")
+    except OSError:
+        return set()
+    namen = set()
+    for zeile in text.splitlines():
+        if not zeile or zeile[0] in "# \t":
+            continue
+        teile = zeile.split()
+        if len(teile) >= 2 and teile[1] in ("unix", "fifo", "unix-dgram", "pass"):
+            namen.add(teile[0])
+    return namen
 _RC_LINK = re.compile(r"^/etc/rc[0-6S]\.d/[SK]\d\d(?P<name>[A-Za-z0-9][A-Za-z0-9._+-]*)$")
 
 
@@ -1002,6 +1024,46 @@ def _code_rechte(pfad: str, rel: str, merkmale: set, k: dict) -> str | None:
     return "Jarvis-Stand (signiert; Rechte nach umask %s)" % ("002" if modus & 0o020 else "022")
 
 
+def _mail_verzeichnis(pfad: str) -> bool:
+    """NEUES Verzeichnis, das mail_meldung als Elternordner seiner Datei
+    angelegt hat (``_atomar`` -> mkdir), z. B. der Drop-in-Ordner der
+    Ueberwachung (DEV 27.11.2026: "[neu] …jarvis-ueberwachung.service.d –
+    gehoert keinem Paket", die Datei darin war erklaert). Erklaert nur, wenn:
+    root:root, 0755 ohne Sonderbits, und JEDER Eintrag darin eine Datei ist,
+    die mail_meldung byteweise so geschrieben hat (mindestens einer)."""
+    import stat as _st
+    e = _eigentuemer(pfad)
+    if e is None or not _st.S_ISDIR(e[2]) or not (_root_konto(e[0]) and _root_gruppe(e[1])) \
+            or (e[2] & 0o7777) != 0o755:
+        return False
+    try:
+        namen = sorted(os.listdir(_p(pfad)))
+    except OSError:
+        return False
+    return bool(namen) and all(_mail_erklaert(pfad + "/" + n) for n in namen)
+
+
+def _kopie_hash(wurzel: Path) -> str | None:
+    """Hash der Broker-Kopie wie broker_installieren.sh (``find -type f`` ohne
+    __pycache__, Byte-Reihenfolge, ``sha256sum`` je Datei, davon sha256, 16
+    Zeichen). STAND selbst entsteht NACH dem Hash und zaehlt nicht mit."""
+    zeilen = []
+    try:
+        for d, _, dateien in os.walk(wurzel):
+            for f in dateien:
+                voll = Path(d) / f
+                rel = "./" + voll.relative_to(wurzel).as_posix()
+                if "/__pycache__/" in rel or rel == "./STAND" or voll.is_symlink():
+                    continue
+                zeilen.append((rel.encode("utf-8", "surrogateescape"), voll))
+        zeilen.sort(key=lambda t: t[0])
+        text = b"".join(hashlib.sha256(v.read_bytes()).hexdigest().encode() + b"  " + rel + b"\n"
+                        for rel, v in zeilen)
+    except OSError:
+        return None
+    return hashlib.sha256(text).hexdigest()[:16]
+
+
 def _mail_erklaert(pfad: str) -> bool:
     """Datei, die backend/mail_meldung.py geschrieben hat – byteweise genau
     der dort vermerkte Stand (Pruefsumme). Ohne das Modul: nie erklaert."""
@@ -1047,8 +1109,12 @@ def einteilen(e: dict, k: dict) -> str | None:
             return eipp
         if merkmale & {"p", "u", "g", "l", "A", "X", "E"}:
             return None
-        if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"} and _SOCKET_NEU_ANGELEGT.match(pfad):
-            return "Laufzeit-Socket neu angelegt"
+        if typ == "s" and merkmale <= {"m", "c", "i", "b", "n"}:
+            if _SOCKET_NEU_ANGELEGT.match(pfad):
+                return "Laufzeit-Socket neu angelegt"
+            m_s = _POSTFIX_DIENST_SOCKET.match(pfad)
+            if m_s and m_s.group("name") in _postfix_dienste():
+                return "Postfix-Socket neu angelegt (Dienst aus master.cf)"
     if typ == "f" and art in ("neu", "geaendert") and _mail_erklaert(pfad):
         return "Jarvis-Mailversand (eigene Konfiguration)"
     if typ == "f":
@@ -1080,6 +1146,8 @@ def einteilen(e: dict, k: dict) -> str | None:
             except OSError:
                 return None
             return None if zeilen or not _ohne_ausfuehrung(pfad) else "Postfix: leeres dynamicmaps.cf (Paketskript)"
+    if typ == "d" and art == "neu" and _mail_verzeichnis(pfad):
+        return "Jarvis-Mailversand (Ordner der eigenen Konfiguration)"
     if art == "neu" and _AIDE_ALTORDNER.match(pfad):
         e_ = _eigentuemer(pfad)
         return "Arbeitsordner der AIDE-Pruefung" if e_ is not None and _aide_benutzer(e_[0]) else None
@@ -1093,8 +1161,16 @@ def einteilen(e: dict, k: dict) -> str | None:
                 stand = json.loads(_p(pfad).read_text())
             except (OSError, ValueError):
                 return None
-            return "Jarvis-Stand (Installationsvermerk)" if \
-                str(stand.get("commit", ""))[:12] == k.get("baum_info") else None
+            if str(stand.get("commit", ""))[:12] == k.get("baum_info"):
+                return "Jarvis-Stand (Installationsvermerk)"
+            # Modus 'lokal' (DEV) traegt keinen Commit (DEV 27.11.2026: STAND
+            # stand nach jeder Installation in der Mail). Erklaert, wenn der
+            # Vermerk genau die installierte Kopie beschreibt – deren Dateien
+            # werden einzeln gegen den signierten Stand geprueft.
+            h = str(stand.get("hash", ""))
+            wurzel = _p("/usr/local/lib/jarvis-broker")
+            return "Jarvis-Stand (Installationsvermerk, Inhalt nachgerechnet)" if \
+                stand.get("quelle") == "lokal" and h and h == _kopie_hash(wurzel) else None
         if art == "entfernt":
             enthalten = rel in baum or any(r.startswith(rel + "/") for r in baum)
             return None if enthalten else "Jarvis-Stand (im signierten Stand entfernt)"

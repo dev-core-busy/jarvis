@@ -257,6 +257,67 @@ pruefe("aide_alt" not in ids(s), "frisch eingerichtet, erste Nacht noch nicht vo
 s, _ = ue.auswerten(eingabe(aide_eingerichtet=None, aide={"zeit": 0, "zustand": "offen"}), {}, KONF, JETZT)
 pruefe("aide" not in ids(s) and "aide_alt" not in ids(s), "nicht eingerichtet: kein Befund")
 
+# ── 4c. Ein Befund = eine Mail (DEV 27.11.2026) ─────────────────────────────
+# Der AIDE-Abgleich mailt "offen"/"fehler" selbst; die Ueberwachung schickte
+# dieselbe Sache drei Minuten spaeter noch einmal. Gemessen am echten Weg
+# auswerten -> mail_melden, mit einer Attrappe der Mail-Schnittstelle
+# (Signaturen wie backend/mail_meldung.py).
+print("[4c] AIDE-Befunde gehen nicht ein zweites Mal per Mail")
+
+
+class _MailAttrappe:
+    def __init__(self):
+        self.gesendet = []
+
+    def konf(self):
+        return {"sprache": "de", "marke": "Jarvis"}
+
+    def text(self, key, vorgabe, sprache="de", **werte):
+        return vorgabe.format(**werte) if werte else vorgabe
+
+    def befund_text(self, b, sprache, marke="Jarvis"):
+        return str(b.get("text", ""))
+
+    def senden(self, quelle, betreff, text):
+        self.gesendet.append((quelle, betreff, text))
+        return {"ok": True, "gesendet": True}
+
+
+_mm_alt = getattr(ue, "_mail_modul", None)
+if not callable(_mm_alt):
+    abbruch("ue._mail_modul fehlt – die Mail-Probe kann nicht laufen")
+
+
+def mails(eing, vorher=None):
+    att = _MailAttrappe()
+    ue._mail_modul = lambda: att
+    try:
+        z, meld = ue.auswerten(eing, vorher or {}, KONF, JETZT)
+        ue.mail_melden(meld, z, vorher or {})
+    finally:
+        ue._mail_modul = _mm_alt
+    return z, meld, att.gesendet
+
+
+_offen = {"zeit": JETZT - 3600, "zustand": "offen", "offen_anzahl": 28, "kennung": "k1"}
+# Positivkontrolle: ein anderer Befund geht per Mail hinaus (sonst waere "keine Mail" trivial)
+_, _m, g = mails(eingabe(platz={"/": platz(3 * 10**9)}))
+pruefe(len(g) == 1 and g[0][0] == "ueberwachung", "Positivkontrolle: Platz-Alarm geht als Mail hinaus (%d)" % len(g))
+z_aide, _m, g = mails(eingabe(aide_eingerichtet=EIN, aide=_offen))
+pruefe(any(t.startswith("B13 WARNUNG aide:") for _, t in _m),
+       "Positivkontrolle: der offene Abgleich steht als Meldung im Journal (%s)" % [t[:30] for _, t in _m])
+pruefe(g == [], "offener AIDE-Abgleich: KEINE zweite Mail der Ueberwachung (%d)" % len(g))
+_, _m, g = mails(eingabe(aide_eingerichtet=EIN, aide={"zeit": JETZT - 3600, "zustand": "fehler", "grund": "x"}))
+pruefe(g == [], "gescheiterter AIDE-Abgleich: keine zweite Mail (%d)" % len(g))
+_, _m, g = mails(eingabe(aide_eingerichtet=EIN, aide={"zeit": JETZT - 3600, "zustand": "uebernommen"}), z_aide)
+pruefe(any(t.startswith("B13 BEHOBEN aide:") for _, t in _m) and g == [],
+       "Uebernahme danach: BEHOBEN im Journal, aber keine Mail (%d)" % len(g))
+_, _m, g = mails(eingabe(aide_eingerichtet=EIN, aide=_offen, platz={"/": platz(3 * 10**9)}))
+pruefe(len(g) == 1 and "aide" not in g[0][2].lower() and "28" not in g[0][2],
+       "AIDE + anderer Befund: eine Mail, nur mit dem anderen Befund (%r)" % (g[0][2][:80] if g else None))
+_, _m, g = mails(eingabe(aide_eingerichtet=EIN, aide={"zeit": JETZT - ue.AIDE_VERALTET_S - 60, "zustand": "uebernommen"}))
+pruefe(len(g) == 1, "Abgleich laeuft nicht mehr (aide_alt): DAS meldet nur die Ueberwachung – Mail (%d)" % len(g))
+
 # ── 5. Zertifikat ────────────────────────────────────────────────────────────
 print("[5] Zertifikat")
 for tage, soll in ((5, "alarm"), (20, "warnung"), (400, None), (-2, "alarm")):

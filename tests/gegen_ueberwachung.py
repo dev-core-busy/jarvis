@@ -186,6 +186,10 @@ PROBEN = [
      "el.querySelectorAll('.jv-gear-tip-row[data-fokus]')", "el.querySelectorAll('.jv-gear-tip-row')", 1),
     ("Zahnrad: SSH-Alarm faerbt nicht rot", "sbtn",
      "(_badge.gesperrt || _badge.ssh_alarm || _badge.ue_alarm)", "(_badge.gesperrt || _badge.ue_alarm)", 1),
+    ("Mail: AIDE-Befund wieder doppelt gemailt", "ue", 'NICHT_MAILEN = frozenset({"aide"})', "NICHT_MAILEN = frozenset()", 1),
+    ("Mail: auch 'Abgleich laeuft nicht' unterdrueckt", "ue", 'NICHT_MAILEN = frozenset({"aide"})',
+     'NICHT_MAILEN = frozenset({"aide", "aide_alt"})', 1),
+    ("Mail: Unterdrueckung wirkungslos", "ue", "                if m.group(2) in NICHT_MAILEN:\n                    continue\n", "", 1),
     ("Zahnrad: Benutzername unmaskiert", "sbtn", "var unten = [esc(sub),", "var unten = [sub,", 1),
 ]
 NACHTRAG: dict = {}

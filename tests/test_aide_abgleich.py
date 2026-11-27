@@ -501,6 +501,86 @@ try:
            and grund("geaendert", "l =.... mci.... .", "/var/spool/postfix/dev/log") is None,
            "anderer Socket bzw. Datei statt Socket: nicht erklaert")
 
+    # Dienst-Sockets von Postfix nach einem Neustart (DEV 27.11.2026: 24 Stueck
+    # "mci" in der Mail). Erklaert nur, was master.cf als Dienst fuehrt.
+    schreibe("/etc/postfix/master.cf", "# Kommentar\nanvil     unix  -  -  y  -  1  anvil\n"
+             "  -o weiter=1\n  fremd   unix  -  -  y  -  1  fremd\n#fremd   unix  -  -  y  -  1  fremd\nqmgr      unix  n  -  n  300  1  qmgr\n")
+    pruefe(grund("geaendert", "s =.... mci. ..", "/var/spool/postfix/private/anvil") ==
+           "Postfix-Socket neu angelegt (Dienst aus master.cf)"
+           and grund("geaendert", "s =.... mc.. ..", "/var/spool/postfix/public/qmgr") is not None,
+           "Postfix-Dienst-Socket neu angelegt (Name in master.cf): erklaert")
+    pruefe(grund("geaendert", "s =.... mci. ..", "/var/spool/postfix/private/fremd") is None
+           and grund("geaendert", "s =.... mci. ..", "/var/spool/postfix/private/weiter") is None,
+           "Socket ohne Dienst in master.cf (auch auskommentiert / Fortsetzungszeile): nicht erklaert")
+    pruefe(grund("geaendert", "s =.p.. mci. ..", "/var/spool/postfix/private/anvil") is None
+           and grund("geaendert", "s =..u. mci. ..", "/var/spool/postfix/private/anvil") is None,
+           "Postfix-Socket mit geaenderten Rechten/Eigentuemer: nicht erklaert")
+    (W / "etc/postfix/master.cf").unlink()
+    pruefe(grund("geaendert", "s =.... mci. ..", "/var/spool/postfix/private/anvil") is None,
+           "ohne master.cf: kein Postfix-Socket erklaert")
+
+    # Installationsvermerk der Broker-Kopie im Modus 'lokal' (DEV 27.11.2026: STAND
+    # ohne Commit stand nach jeder Installation in der Mail). Der Hash kommt vom
+    # ERZEUGER: die HASH-Zeile aus broker_installieren.sh, in bash ausgefuehrt.
+    _hz = [z for z in (REPO / "deploy/security/broker_installieren.sh").read_text().splitlines()
+           if z.startswith('HASH="$(cd "$NEU"')]
+    if len(_hz) != 1:
+        abbruch("HASH-Zeile in broker_installieren.sh nicht eindeutig gefunden (%d)" % len(_hz))
+    KOPIE = W / "usr/local/lib/jarvis-broker"
+    for _n, _t in (("backend/b_x.py", "1"), ("backend/Bx.py", "2"), ("backend/a.py", "3"),
+                   ("deploy/_s.sh", "4"), ("backend/__pycache__/a.cpython-313.pyc", "5")):
+        (KOPIE / _n).parent.mkdir(parents=True, exist_ok=True)
+        (KOPIE / _n).write_text(_t)
+    # Unter deutscher Sprachumgebung (wie aus einer Shell): ohne LC_ALL=C im
+    # Installer sortiert sort -z dann anders als die Byte-Reihenfolge.
+    _umg = {k_: v_ for k_, v_ in os.environ.items() if not k_.startswith("LC_")}
+    _umg.update(NEU=str(KOPIE), LANG="de_DE.UTF-8")
+    _de = subprocess.run(["bash", "-c", "printf 'b_x\\0Bx\\0a\\0_s\\0' | sort -z | tr '\\0' ' '"],
+                         env=_umg, capture_output=True, text=True).stdout.split()
+    if _de != sorted(_de, key=lambda t: t.encode()):
+        pruefe(True, "Positivkontrolle: die Sprachumgebung de_DE sortiert anders als Bytes (%s)" % _de)
+    else:
+        # Ohne installierte de_DE-Locale (CI) misst der folgende Fall LC_ALL=C nicht mit
+        print("  HINWEIS de_DE nicht verfuegbar – die Pruefung auf LC_ALL=C im Installer greift hier nicht")
+    _r = subprocess.run(["bash", "-c", _hz[0] + '\nprintf %s "$HASH"'], env=_umg, capture_output=True, text=True)
+    H_INST = _r.stdout.strip()
+    pruefe(len(H_INST) == 16, "Positivkontrolle: Installer-Hash im Sandkasten berechnet (%r)" % H_INST)
+
+    def stand_grund(**felder):
+        (KOPIE / "STAND").write_text(json.dumps(dict({"quelle": "lokal", "commit": "", "hash": H_INST}, **felder)))
+        return grund("geaendert", "f >.... mci.H.. .", "/usr/local/lib/jarvis-broker/STAND")
+    pruefe(stand_grund() == "Jarvis-Stand (Installationsvermerk, Inhalt nachgerechnet)",
+           "STAND 'lokal' mit Hash der installierten Kopie: erklaert")
+    pruefe(stand_grund(hash="0" * 16) is None, "STAND 'lokal' mit fremdem Hash: nicht erklaert")
+    pruefe(stand_grund(quelle="github") is None, "STAND 'github' ohne passenden Commit: nicht erklaert")
+    (KOPIE / "backend/a.py").write_text("untergeschoben")
+    pruefe(stand_grund() is None, "Kopie nach der Installation veraendert: STAND nicht erklaert")
+    shutil.rmtree(KOPIE)
+
+    # Neuer Ordner, den der E-Mail-Versand fuer seinen Drop-in anlegt (DEV 27.11.2026)
+    import backend.mail_meldung as MM
+    _mm_w = MM.W
+    MM.W = str(W)
+    try:
+        DI = MM.UEBERW_DROPIN.rsplit("/", 1)[0]
+        MM._atomar(MM._p(MM.UEBERW_DROPIN), MM.UEBERW_DROPIN_TEXT, 0o644)   # der echte Schreiber
+        pruefe(grund("neu", "d++++++++++++++++++", DI) == "Jarvis-Mailversand (Ordner der eigenen Konfiguration)",
+               "neuer Drop-in-Ordner mit ausschliesslich eigenen Dateien des Mailversands: erklaert")
+        schreibe(DI + "/99-fremd.conf", "[Service]\nExecStartPre=/bin/sh -c id\n")
+        pruefe(grund("neu", "d++++++++++++++++++", DI) is None, "Ordner mit fremder Datei darin: nicht erklaert")
+        (W / (DI.lstrip("/") + "/99-fremd.conf")).unlink()
+        os.chmod(W / DI.lstrip("/"), 0o777)
+        pruefe(grund("neu", "d++++++++++++++++++", DI) is None, "Ordner fremd beschreibbar: nicht erklaert")
+        os.chmod(W / DI.lstrip("/"), 0o755)
+        (W / MM.UEBERW_DROPIN.lstrip("/")).write_text("[Service]\nUser=root\n")
+        pruefe(grund("neu", "d++++++++++++++++++", DI) is None, "Datei darin nachtraeglich veraendert: nicht erklaert")
+        shutil.rmtree(W / DI.lstrip("/"))
+        (W / DI.lstrip("/")).mkdir(mode=0o755)
+        pruefe(grund("neu", "d++++++++++++++++++", DI) is None, "leerer neuer Ordner: nicht erklaert")
+        shutil.rmtree(W / DI.lstrip("/"))
+    finally:
+        MM.W = _mm_w
+
     # Quelle ohne Signatur bzw. fremd beschreibbar: der Code erklaert nichts
     signers = W / "etc/jarvis/allowed_signers"
     gesichert = signers.read_text()

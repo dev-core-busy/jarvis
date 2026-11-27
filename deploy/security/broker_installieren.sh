@@ -266,7 +266,10 @@ if ! ( cd "$NEU" && env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin PYTHONDONTWRITEBYT
     rm -rf "$NEU"; fehler "Neuer Stand laedt nicht mit $PY: $FEHL"
 fi
 
-HASH="$(cd "$NEU" && find . -type f ! -path '*/__pycache__/*' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+# LC_ALL=C: Byte-Reihenfolge. Mit der Sprachumgebung des Aufrufers (de_DE aus
+# der Shell, C aus systemd) ergab derselbe Inhalt verschiedene Hashes (DEV
+# 27.11.2026) – der AIDE-Abgleich rechnet ihn nach (aide_abgleich._kopie_hash).
+HASH="$(cd "$NEU" && find . -type f ! -path '*/__pycache__/*' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
 ALT_HASH=""
 [ -f "$ZIEL/STAND" ] && ALT_HASH="$("$PY" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("hash",""))' "$ZIEL/STAND" 2>/dev/null)"
 if [ -n "$ALT_HASH" ] && [ "$ALT_HASH" = "$HASH" ]; then

@@ -4570,6 +4570,16 @@ def _ist_ai_maus_anmeldung(body: dict) -> bool:
     return str((body or {}).get("client") or "").strip().lower() == "ai-mouse"
 
 
+def _ai_maus_kennwort_gesperrt(body: dict) -> bool:
+    """AI-Maus-Kennwortanmeldung bei eingerichtetem IdP abweisen?
+
+    Betreiberentscheid 2026-11-27 (Befund "2FA per Client-Kennung umgehbar"):
+    mit IdP meldet sich die AI-Maus nur noch ueber das Firmenkonto an (dessen
+    MFA greift dort); ohne IdP bleibt Kennwort plus 2FA-Code. Der Browser und
+    die uebrigen Clients behalten die Kennwortanmeldung als Notweg."""
+    return _ist_ai_maus_anmeldung(body) and _oidc_konfig() is not None
+
+
 def _konto_ist_admin(user: str) -> bool:
     """Ist das KONTO Administrator – unabhaengig davon, ob die laufende Sitzung
     die Admin-Rechte gerade traegt? Fuer die Anmeldung (Admins werden dort nicht
@@ -5951,6 +5961,16 @@ async def _login_ablauf(request: Request):
             status_code=400,
         )
 
+    # AI-Maus mit eingerichtetem IdP: nur noch ueber das Firmenkonto
+    # (Betreiberentscheid 2026-11-27). VOR jeder Kennwortpruefung – es wird
+    # also weder ein Fehlversuch gezaehlt noch das Kennwort beurteilt.
+    if _ai_maus_kennwort_gesperrt(body):
+        return JSONResponse(
+            {"success": False, "idp_erforderlich": True,
+             "error": "Die AI-Maus meldet sich über das Firmenkonto an. "
+                      "Bitte „Mit Firmenkonto anmelden“ wählen."},
+            status_code=403)
+
     # Konto nach zu vielen Fehlversuchen gesperrt (BSI M3) – VOR jeder
     # Kennwortpruefung, sonst ginge das Durchprobieren am Zaehler vorbei weiter.
     # Seit 2026-11-05 (A1) pruefen UND belegen in einem Schritt: Kontosperre,
@@ -6020,17 +6040,17 @@ async def _login_ablauf(request: Request):
     # Pflicht-Einrichtung. Fuer Nicht-Admins aendert sich nichts: wer eine 2FA
     # hat, braucht den Code auch in der App.
     #
-    # AI-Maus (Betreiberentscheid 2026-10-27): KEIN Konto wird nach der 2FA
-    # gefragt, auch kein Nicht-Admin mit eingerichteter 2FA. Die Sitzung ist
-    # dafuer "ohne Admin" und gilt nur fuer /api/ai-mouse/* und
-    # /api/generated/* – sonst oeffnete die faelschbare Kennung mit dem
-    # Kennwort allein die ganze Oberflaeche an der 2FA vorbei.
+    # AI-Maus: die Sitzung ist "ohne Admin" und gilt nur fuer /api/ai-mouse/*
+    # und /api/generated/* (die Kennung ist faelschbar). Die 2FA gilt dort seit
+    # dem Befund 2026-11-27 wie im Browser: ueber die AI-Maus laeuft ein
+    # Agentenlauf mit den Internet-/SAP-/VEMAS-Freigaben des Benutzers, und
+    # das Kennwort allein durfte daran nicht mehr reichen (Betreiberentscheid
+    # 2026-11-27, loest den vom 2026-10-27 ab). Ist der IdP eingerichtet,
+    # nimmt _ai_maus_kennwort_gesperrt die Kennwortanmeldung schon oben ab.
     _mit_2fa = False
     _ai_maus = _ist_ai_maus_anmeldung(body)
     _ohne_admin = _ai_maus or (_ist_app_anmeldung(request, body) and _is_admin_user(username))
-    if _ai_maus:
-        print(f"[AUTH] AI-Maus-Anmeldung ohne 2FA, nur AI-Maus-Zugriff: {username}", flush=True)
-    elif _ohne_admin:
+    if _ohne_admin and not _ai_maus:
         print(f"[AUTH] App-Anmeldung eines Admin-Kontos ohne Admin-Rechte: {username}",
               flush=True)
     elif _konto_ist_admin(username):

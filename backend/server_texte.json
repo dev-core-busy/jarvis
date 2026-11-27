@@ -2544,6 +2544,12 @@
    "en": "Update not possible: an earlier update could not restore local changes, an unresolved conflict remains in the working directory. Please resolve it manually once (as the service user in the program directory): reset the listed files to the software version (git checkout HEAD -- <datei>) and check the saved local version (git stash list / git stash show -p) – then the update works again.\n\n{w1}",
    "fr": "Mise à jour impossible : une mise à jour précédente n'a pas pu restaurer des modifications locales, un conflit non résolu subsiste dans le répertoire de travail. Veuillez le résoudre une fois manuellement (en tant qu'utilisateur du service dans le répertoire du programme) : remettre les fichiers indiqués à la version du logiciel (git checkout HEAD -- <datei>) et vérifier la version locale sauvegardée (git stash list / git stash show -p) – ensuite la mise à jour fonctionne à nouveau.\n\n{w1}",
    "nl": "Update niet mogelijk: een eerdere update kon lokale wijzigingen niet terugzetten, in de werkmap staat nog een onopgelost conflict. Los dit eenmalig handmatig op (als dienstgebruiker in de programmamap): zet de genoemde bestanden terug naar de softwareversie (git checkout HEAD -- <datei>) en controleer de opgeslagen lokale versie (git stash list / git stash show -p) – daarna werkt de update weer.\n\n{w1}"
+  },
+  {
+   "de": "Die AI-Maus meldet sich über das Firmenkonto an. Bitte „Mit Firmenkonto anmelden“ wählen.",
+   "en": "The AI Mouse signs in with the company account. Please choose “Sign in with company account”.",
+   "fr": "La souris IA se connecte avec le compte d'entreprise. Veuillez choisir « Se connecter avec le compte d'entreprise ».",
+   "nl": "De AI-muis meldt zich aan met het bedrijfsaccount. Kies „Aanmelden met bedrijfsaccount”."
   }
  ]
 }

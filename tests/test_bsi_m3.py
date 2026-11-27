@@ -21,8 +21,9 @@ Gemessen an der WIRKUNG:
   [E] die Erhoehung selbst (``admin_erhoehen``/``admin_erhoehung_beenden``):
       Code, Einrichtung mit Kennwort, IdP-MFA ohne Code, App/AI-Maus/Nicht-Admin
       abgewiesen, Fehlversuche zaehlen, Beenden nimmt nur DIESER Sitzung die Rechte.
-  [D] AI-Maus (Betreiberentscheid 2026-10-27): keine 2FA-Abfrage fuer IRGENDEIN
-      Konto, dafuer gilt die Sitzung nur auf /api/ai-mouse/* und /api/generated/*
+  [D] AI-Maus (Betreiberentscheid 2026-11-27, loest 2026-10-27 ab): ohne IdP
+      gilt die 2FA wie im Browser, mit IdP keine Kennwortanmeldung der AI-Maus;
+      die Sitzung gilt weiter nur auf /api/ai-mouse/* und /api/generated/*
       (ohne Admin-Seiten) und nie als Admin.
 
 ``backend.config`` nur als Stub. Exit 0 = gruen, 1 = FAIL, 2 = konnte nicht laufen.
@@ -293,11 +294,15 @@ NS = {
 EINST.update({"ad_admins": "andreas", "ad_server": "dc.firma.local", "ad_domain": "firma.local"})
 # BSI H4: Token-Antworten laufen ueber _sitzung_antwort – mit dem ECHTEN Modul
 NS["_sitzung_cookie"] = __import__("backend.sitzung_cookie", fromlist=["x"])
+# IdP eingerichtet? Umschaltbar fuer [D] (Betreiberentscheid 2026-11-27)
+OIDC = {"cfg": None}
+NS["_oidc_konfig"] = lambda: OIDC["cfg"]
 NS.setdefault("_json_objekt", _json_objekt_aus_main(NS.get("HTTPException")))
 exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "_konto_ist_admin",
                  "_sitzung_ohne_admin", "_abruf_sitzung", "_totp_code_pruefen",
                  "admin_erhoehen", "admin_erhoehung_beenden", "_erhoehung_protokoll",
-                 "_ist_app_anmeldung", "_ist_ai_maus_anmeldung", "_user_is_admin",
+                 "_ist_app_anmeldung", "_ist_ai_maus_anmeldung", "_ai_maus_kennwort_gesperrt",
+                 "_user_is_admin",
                  "_is_admin_user", "_admin_verweigert_text", "require_local_auth",
                  "_check_rate_limit", "_record_login_attempt", "_mail_sicherheit", "_konto_sperre_antwort",
                  # A1/A2 (2026-11-05): Reservierung vor der Pruefung, Bremsen-Ueberlauf
@@ -601,14 +606,58 @@ STATE["andreas"] = {"totp_enabled": True, "totp_secret": "AS"}
 r = anmelden("bert")
 if r.inhalt.get("requires_totp") is not True:
     abbruch("Positivkontrolle: Nicht-Admin mit 2FA im Browser wird nicht nach dem Code gefragt")
-for wer in ("bert", "andreas"):
-    r = anmelden(wer, client="ai-mouse")
-    check("AI-Maus: %s mit 2FA bekommt ein Token ohne Code" % wer,
-          r.status_code == 200 and bool(r.inhalt.get("token")) and "requires_totp" not in r.inhalt)
-    check("…Sitzung 'nur AI-Maus' und 'ohne Admin', nicht 'mit 2FA'",
-          ST.nur_ai_maus(_sig(r)) and ST.ohne_admin(_sig(r)) and not ST.mit_2fa(_sig(r)))
-    check("…Antwort meldet is_admin false", r.inhalt.get("is_admin") is False)
-r = anmelden("bert", client="AI-Mouse ")
+def _code_frisch():
+    """Wiederholungsschutz (BSI N3) zuruecksetzen – derselbe Code wird in [D]
+    mehrfach benutzt; ohne das wiese der Schutz ihn ab und die Pruefung mass
+    BSI N3 statt der AI-Maus-Regel."""
+    TS._zuruecksetzen_fuer_test()
+    TS.STORE_PATH.unlink(missing_ok=True)
+    TS._zuruecksetzen_fuer_test()
+
+
+# Ohne IdP: Nicht-Admin mit 2FA braucht den Code AUCH in der AI-Maus (Befund
+# 2026-11-27 – vorher reichte das Kennwort fuer einen Agentenlauf mit allen
+# Freigaben des Benutzers).
+r = anmelden("bert", client="ai-mouse")
+check("AI-Maus ohne IdP: Nicht-Admin mit 2FA wird nach dem Code gefragt",
+      r.inhalt.get("requires_totp") is True and not r.inhalt.get("token"))
+r = anmelden("bert", client="ai-mouse", code="code-FALSCH")
+check("AI-Maus ohne IdP: falscher Code → kein Token",
+      not r.inhalt.get("token") and r.inhalt.get("requires_totp") is True)
+_code_frisch()
+r = anmelden("bert", client="ai-mouse", code="code-BS")
+check("AI-Maus ohne IdP: richtiger Code → Token",
+      r.status_code == 200 and bool(r.inhalt.get("token")))
+check("…Sitzung 'nur AI-Maus', 'ohne Admin' und 'mit 2FA'",
+      ST.nur_ai_maus(_sig(r)) and ST.ohne_admin(_sig(r)) and ST.mit_2fa(_sig(r)))
+check("…Antwort meldet is_admin false", r.inhalt.get("is_admin") is False)
+# Admin-Konto: wie im Browser (Zahnrad-Entscheid 2026-11-20) keine Abfrage
+r = anmelden("andreas", client="ai-mouse")
+check("AI-Maus: Admin mit 2FA wie im Browser ohne Code, Sitzung nur AI-Maus/ohne Admin",
+      bool(r.inhalt.get("token")) and ST.nur_ai_maus(_sig(r)) and ST.ohne_admin(_sig(r))
+      and not ST.admin_erhoeht(_sig(r)))
+
+# Mit IdP: keine Kennwortanmeldung der AI-Maus – und zwar VOR der Kennwort-
+# pruefung (kein Aufruf von authenticate, kein Fehlversuch).
+OIDC["cfg"] = {"issuer": "https://idp.beispiel.de"}
+AUTH_AUFRUFE.clear()
+for wer, code in (("bert", "code-BS"), ("andreas", None), ("carla", None)):
+    r = anmelden(wer, client="ai-mouse", code=code)
+    check(f"AI-Maus mit IdP: {wer} → 403 idp_erforderlich, kein Token",
+          r.status_code == 403 and r.inhalt.get("idp_erforderlich") is True
+          and not r.inhalt.get("token"))
+check("…dabei wurde kein Kennwort geprueft", AUTH_AUFRUFE == [])
+# Eigenes Konto: ein Token desselben Kontos in derselben Sekunde waere mit dem
+# AI-Maus-Token oben IDENTISCH und truege dessen Merkmal (Register).
+r = anmelden("dora")
+check("mit IdP: Browser-Anmeldung (Notweg) bleibt moeglich",
+      bool(r.inhalt.get("token")) and not ST.nur_ai_maus(_sig(r)))
+r = anmelden("emil", client="android")
+check("mit IdP: andere App behaelt die Kennwortanmeldung", bool(r.inhalt.get("token")))
+OIDC["cfg"] = None
+
+_code_frisch()
+r = anmelden("bert", client="AI-Mouse ", code="code-BS")
 check("Kennung unabhaengig von Gross/Klein und Leerraum", ST.nur_ai_maus(_sig(r)))
 r = anmelden("bert", client="ai-mouse", pw="falsch")
 check("AI-Maus: falsches Kennwort bleibt 401 ohne Token",

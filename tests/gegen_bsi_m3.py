@@ -190,6 +190,16 @@ PROBEN = [
      '                                   "nur_ai_maus": _nur_ai_maus,\n', ""),
     ("Merkmal 'nur AI-Maus' wird nicht vermerkt", ST,
      "        if nur_ai_maus:\n            _nur_ai_maus[schluessel(sig)] = int(ts)\n", ""),
+    # ── AI-Maus (Betreiberentscheid 2026-11-27): 2FA wie im Browser, mit IdP nur Firmenkonto ──
+    ("AI-Maus wieder ohne 2FA-Abfrage", MAIN,
+     "    if _ohne_admin and not _ai_maus:\n",
+     "    if _ai_maus:\n        pass\n    elif _ohne_admin:\n"),
+    ("AI-Maus-Kennwort trotz IdP angenommen", MAIN,
+     "    return _ist_ai_maus_anmeldung(body) and _oidc_konfig() is not None\n",
+     "    return False\n"),
+    ("IdP-Sperre gilt fuer jede Anmeldung", MAIN,
+     "    return _ist_ai_maus_anmeldung(body) and _oidc_konfig() is not None\n",
+     "    return _oidc_konfig() is not None\n"),
     ("AI-Maus schickt keine Kennung", CLIENT,
      '            ["client"] = "ai-mouse",\n', ""),
 ]

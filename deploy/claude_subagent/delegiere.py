@@ -18,12 +18,20 @@ ZUGANG – je Jarvis-Installation zu setzen, es gibt KEINE Vorgabe
     Der Schluessel gehoert NICHT ins Repo. ~/.<marke>-csa-key liegt ausserhalb,
     die Umgebungsvariable erst recht.
 
+ZERTIFIKAT
+    Geprueft wird wie im Browser (Systemspeicher, Name). Vertraut das System
+    dem Serverzertifikat nicht (selbst ausgestellt, Zugriff per IP), gilt nur
+    ein bestaetigter Fingerabdruck: einmalig `delegiere.py vertrauen` – er
+    landet in ~/.<marke>-csa-cert (bzw. <MARKE>_CSA_CERT). http:// wird
+    abgelehnt: der Schluessel geht in jeder Anfrage mit.
+
 AUFRUF
     delegiere.py senden --spec-datei auftrag.txt \\
                         --dateien frontend/css/chat.css \\
                         --riegel tests/test_branding_aliase.py
     delegiere.py holen <id>
     delegiere.py warten <id>          # bis fertig, dann Patch auf stdout
+    delegiere.py vertrauen            # Serverzertifikat bestaetigen (s. u.)
 
 Die Basis (Commit-Hash) wird aus dem lokalen Repo ermittelt; der Client bricht
 ab, wenn der Arbeitsbaum an den Zieldateien schmutzig ist – ein Patch gegen
@@ -31,14 +39,16 @@ einen anderen Stand liesse sich nachher nicht sauber anwenden.
 """
 
 import argparse
+import hashlib
+import hmac
+import http.client
 import json
 import os
 import ssl
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 from pathlib import Path
 
 def fehler(text: str, code: int = 1):
@@ -103,40 +113,188 @@ def basis_url() -> str:
                "aus dem Branding (steht im Bereich /claude in der Anleitung). "
                "Es gibt bewusst keine Vorgabe: der Client laeuft gegen jede "
                "Installation.", 2)
-    if not u.startswith(("http://", "https://")):
+    if u.lower().startswith("http://"):
+        # Der Schluessel geht in JEDER Anfrage im Kopf mit – ueber http liest
+        # ihn jeder im Netzpfad mit (Befund 2026-11-27). Kein Rueckfall.
+        fehler("Die Server-Adresse beginnt mit http:// – der Delegations-"
+               "Schluessel ginge unverschluesselt ueber das Netz. Trage die "
+               "https://-Adresse ein.", 2)
+    if not u.lower().startswith("https://"):
         u = "https://" + u
     return u.rstrip("/")
 
 
-def _ctx() -> ssl.SSLContext:
-    """Jarvis benutzt ein selbst ausgestelltes Zertifikat (backend/security.py).
+# ── Serverzertifikat (Befund 2026-11-27) ──────────────────────────────────
+# Bis hierher lief jede Verbindung mit CERT_NONE: wer im Netzpfad sass, las den
+# Delegations-Schluessel aus dem Kopf X-Jarvis-Key und konnte damit Code-
+# Auftraege im Namen des Benutzers starten. Jetzt dieselbe Regel wie im
+# Windows-Client (windows-app-go/tlsvertrauen, BSI M11):
+#
+#   1. Normal pruefen – Vertrauensspeicher des Systems (Firmen-CA) und Name.
+#   2. Scheitert das (selbst ausgestelltes Zertifikat, Zugriff per IP), gilt
+#      NUR ein ausdruecklich bestaetigter SHA-256-Fingerabdruck. Er liegt neben
+#      Schluessel und Adresse: <MARKE>_CSA_CERT oder ~/.<marke>-csa-cert,
+#      bestaetigt ueber `delegiere.py vertrauen`.
+#   3. Ohne Bestaetigung oder bei abweichendem Fingerabdruck: Abbruch, BEVOR
+#      der Schluessel gesendet wird. Die Pruefung laeuft auf DERSELBEN
+#      Verbindung, ueber die danach die Anfrage geht.
 
-    Die Pruefung ist deshalb aus. Das ist hier vertretbar, weil der Schluessel
-    nur zu DIESEM Server passt und ueber ihn keine fremden Daten laufen – aber
-    es ist eine bewusste Ausnahme, kein Versehen.
-    """
+def fingerabdruck(der: bytes) -> str:
+    """SHA-256 des ganzen Zertifikats, AA:BB:… (wie Browser und openssl)."""
+    h = hashlib.sha256(der).hexdigest().upper()
+    return ":".join(h[i:i + 2] for i in range(0, len(h), 2))
+
+
+def _norm_fp(fp: str) -> str:
+    return "".join(ch for ch in (fp or "").upper() if ch in "0123456789ABCDEF")
+
+
+def _ziel() -> tuple:
+    """(host, port, pfadpraefix) der Server-Adresse."""
+    u = urllib.parse.urlsplit(basis_url())
+    if not u.hostname:
+        fehler(f"Server-Adresse ohne Rechnernamen: {basis_url()}", 2)
+    return u.hostname, u.port or 443, u.path.rstrip("/")
+
+
+def _oeffne(ctx: ssl.SSLContext) -> http.client.HTTPSConnection:
+    host, port, _ = _ziel()
+    c = http.client.HTTPSConnection(host, port, context=ctx, timeout=60)
+    c.connect()
+    return c
+
+
+def _ungeprueft() -> ssl.SSLContext:
+    """NUR fuer den Weg ueber den Fingerabdruck – geprueft wird danach von Hand."""
     c = ssl.create_default_context()
     c.check_hostname = False
     c.verify_mode = ssl.CERT_NONE
     return c
 
 
+def _pin_datei() -> Path:
+    """Ablage des bestaetigten Fingerabdrucks – gleicher Stamm wie die Adresse.
+
+    Kam die Adresse aus ``FOO_CSA_URL``, heisst die Datei ``~/.foo-csa-cert``;
+    kam sie aus ``~/.foo-csa-url``, ebenso. So findet ``_aus_umgebung_oder_datei``
+    sie mit demselben Muster wieder, und mehrere Zugaenge bleiben getrennt."""
+    for n, w in os.environ.items():
+        if n.upper().endswith("_CSA_URL") and w.strip():
+            return Path.home() / ("." + n[:-len("_CSA_URL")].lower() + "-csa-cert")
+    for p in sorted(Path.home().glob(".*-csa-url")):
+        if p.read_text(encoding="utf-8").strip():
+            return p.with_name(p.name[:-len("url")] + "cert")
+    fehler("Keine Server-Adresse hinterlegt – zuerst <MARKE>_CSA_URL bzw. "
+           "~/.<marke>-csa-url setzen.", 2)
+
+
+def verbindung() -> http.client.HTTPSConnection:
+    """Gepruefte Verbindung zum Server oder Abbruch (vor jedem Senden)."""
+    try:
+        return _oeffne(ssl.create_default_context())
+    except ssl.SSLCertVerificationError as e:
+        grund = e.verify_message or str(e)
+    except (OSError, ssl.SSLError) as e:
+        fehler(f"Verbindung zu {basis_url()} gescheitert: {type(e).__name__}: {e}")
+    try:
+        c = _oeffne(_ungeprueft())
+    except (OSError, ssl.SSLError) as e:
+        fehler(f"Verbindung zu {basis_url()} gescheitert: {type(e).__name__}: {e}")
+    fp = fingerabdruck(c.sock.getpeercert(binary_form=True) or b"")
+    pin = _norm_fp(_aus_umgebung_oder_datei("cert", "Zertifikat-Fingerabdruck"))
+    if not pin:
+        c.close()
+        fehler(f"Das Zertifikat von {basis_url()} ist nicht vertrauenswuerdig "
+               f"({grund}) und nicht bestaetigt.\n"
+               f"  Fingerabdruck (SHA-256): {fp}\n"
+               f"Vergleiche ihn mit dem Zertifikat, das dein Browser fuer diese "
+               f"Adresse zeigt (Schloss-Symbol), und bestaetige ihn mit:\n"
+               f"  python3 deploy/claude_subagent/delegiere.py vertrauen\n"
+               f"Der Schluessel wurde NICHT gesendet.", 3)
+    if not hmac.compare_digest(pin, _norm_fp(fp)):
+        c.close()
+        fehler(f"Das Zertifikat von {basis_url()} weicht vom bestaetigten ab – "
+               f"jemand koennte die Verbindung umleiten.\n"
+               f"  bestaetigt: {_fmt_fp(pin)}\n"
+               f"  vorgelegt:  {fp}\n"
+               f"Wurde das Serverzertifikat erneuert, pruefe den neuen "
+               f"Fingerabdruck im Browser und bestaetige ihn mit "
+               f"`delegiere.py vertrauen`. Der Schluessel wurde NICHT gesendet.", 3)
+    return c
+
+
+def _fmt_fp(roh: str) -> str:
+    return ":".join(roh[i:i + 2] for i in range(0, len(roh), 2))
+
+
 def ruf(pfad: str, methode: str = "GET", rumpf: dict | None = None) -> dict:
     daten = json.dumps(rumpf).encode("utf-8") if rumpf is not None else None
-    req = urllib.request.Request(basis_url() + pfad, data=daten, method=methode)
-    req.add_header("X-Jarvis-Key", schluessel())
+    kopf = {"X-Jarvis-Key": schluessel()}
     if daten:
-        req.add_header("Content-Type", "application/json")
+        kopf["Content-Type"] = "application/json"
+    _, _, praefix = _ziel()
+    c = verbindung()
     try:
-        with urllib.request.urlopen(req, timeout=60, context=_ctx()) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        try:
-            return json.loads(e.read().decode("utf-8"))
-        except Exception:  # noqa: BLE001
-            return {"ok": False, "error": f"HTTP {e.code}"}
-    except Exception as e:  # noqa: BLE001
+        c.request(methode, praefix + pfad, body=daten, headers=kopf)
+        r = c.getresponse()
+        roh = r.read().decode("utf-8", "replace")
+        status = r.status
+    except (OSError, http.client.HTTPException) as e:
         fehler(f"{type(e).__name__}: {e}")
+    finally:
+        c.close()
+    try:
+        return json.loads(roh)
+    except ValueError:
+        if 200 <= status < 300:
+            fehler(f"Antwort ist kein JSON (HTTP {status})")
+        return {"ok": False, "error": f"HTTP {status}"}
+
+
+def cmd_vertrauen(a) -> None:
+    """Fingerabdruck des Servers anzeigen und nach Bestaetigung hinterlegen.
+
+    Nicht automatisch beim ersten Kontakt (trust on first use): sonst wuerde
+    genau der erste Abruf durch einen Angreifer dessen Zertifikat verankern.
+    Bestaetigt wird interaktiv oder mit ``--fingerabdruck`` (aus dem Browser
+    abgeschrieben) – beides vergleicht mit dem, was der Server vorlegt."""
+    try:
+        _oeffne(ssl.create_default_context()).close()
+        print(f"Das Zertifikat von {basis_url()} wird bereits vom System als "
+              f"vertrauenswuerdig erkannt – keine Bestaetigung noetig.")
+        return
+    except ssl.SSLCertVerificationError as e:
+        grund = e.verify_message or str(e)
+    except (OSError, ssl.SSLError) as e:
+        fehler(f"Verbindung zu {basis_url()} gescheitert: {type(e).__name__}: {e}")
+    try:
+        c = _oeffne(_ungeprueft())
+    except (OSError, ssl.SSLError) as e:
+        fehler(f"Verbindung zu {basis_url()} gescheitert: {type(e).__name__}: {e}")
+    fp = fingerabdruck(c.sock.getpeercert(binary_form=True) or b"")
+    c.close()
+    print(f"Server:        {basis_url()}")
+    print(f"Pruefung:      {grund}")
+    print(f"Fingerabdruck: {fp}  (SHA-256)")
+    if a.fingerabdruck:
+        if not hmac.compare_digest(_norm_fp(a.fingerabdruck), _norm_fp(fp)):
+            fehler("Der angegebene Fingerabdruck stimmt NICHT mit dem vorgelegten "
+                   "Zertifikat ueberein – nichts hinterlegt.", 3)
+    else:
+        if not sys.stdin.isatty():
+            fehler("Keine Eingabe moeglich. Bestaetige mit --fingerabdruck "
+                   "<AA:BB:…> (aus dem Zertifikat im Browser abgeschrieben).", 2)
+        antwort = input("Stimmt er mit dem Fingerabdruck im Browser ueberein? "
+                        "[ja/nein] ").strip().lower()
+        if antwort not in ("ja", "j", "yes", "y"):
+            fehler("Nicht bestaetigt – nichts hinterlegt.", 3)
+    ziel = _pin_datei()
+    alt = os.umask(0o077)
+    try:
+        ziel.write_text(fp + "\n", encoding="utf-8")
+    finally:
+        os.umask(alt)
+    print(f"Hinterlegt in {ziel}.")
 
 
 def git(*args) -> str:
@@ -374,6 +532,13 @@ def main() -> None:
 
     b = sub.add_parser("bericht", help="Kosten und Ersparnis aller Auftraege")
     b.set_defaults(fn=cmd_bericht)
+
+    v = sub.add_parser("vertrauen",
+                       help="Serverzertifikat per Fingerabdruck bestaetigen "
+                            "(nur noetig, wenn das System ihm nicht vertraut)")
+    v.add_argument("--fingerabdruck",
+                   help="SHA-256 aus dem Browser (AA:BB:…) – statt der Rueckfrage")
+    v.set_defaults(fn=cmd_vertrauen)
 
     a = p.parse_args()
     a.fn(a)

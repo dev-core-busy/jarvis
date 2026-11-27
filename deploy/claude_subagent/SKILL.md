@@ -108,6 +108,14 @@ chmod 600 ~/.{marke_slug}-csa-key
 - **Adresse** ist oben schon eingesetzt: `{adresse}`. (Ueber `{MARKE}_CSA_URL`
   bzw. die Datei laesst sich der Client auch gegen eine andere Installation
   richten – eine feste Vorgabe im Code gibt es bewusst nicht.)
+- **Zertifikat:** der Client prueft es wie ein Browser und sendet den
+  Schluessel nur ueber eine gepruefte Verbindung (`http://` wird abgelehnt).
+  Bricht er mit „nicht vertrauenswuerdig und nicht bestaetigt" ab (Exit 3,
+  selbst ausgestelltes Zertifikat), bestaetigt der **Benutzer** den
+  angezeigten Fingerabdruck einmalig selbst – nach Vergleich mit dem
+  Zertifikat im Browser: `python3 deploy/claude_subagent/delegiere.py vertrauen`.
+  Nicht selbst bestaetigen und nicht umgehen – das waere genau der Angriff,
+  gegen den die Pruefung steht. Abdruck abweichend: Abbruch, Benutzer fragen.
 - Der lokale Stand muss auf `origin/master` liegen und die Zieldateien duerfen
   keine ungespeicherten Aenderungen haben – der Client prueft beides und bricht
   sonst ab.

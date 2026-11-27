@@ -1695,6 +1695,12 @@ app.add_middleware(_AnfragePfadMiddleware)
 from backend import kompression as _kompression
 app.add_middleware(_kompression.KompressionsWeiche)
 
+# Rumpf der Endpunkte OHNE Sitzung gedeckelt einlesen (Befund 2026-11-27,
+# Speicher-DoS ohne Anmeldung) – Liste und Grenzen in backend/rumpf_deckel.py.
+# Ausserhalb aller Routen-Middlewares, damit keine davon den Rumpf vorher liest.
+from backend import rumpf_deckel as _rumpf_deckel
+app.add_middleware(_rumpf_deckel.RumpfDeckel)
+
 # Servername pruefen (Haertung B12, Checkliste 109): eine Anfrage mit fremdem
 # Host-Kopf wird abgewiesen (CA-Zertifikat) bzw. gemeldet (selbst signiert) –
 # Regeln und erlaubte Namen in backend/host_pruefung.py. NACH der Kompression
@@ -32239,27 +32245,53 @@ async def _run_wa_task(task_text: str, sender: str, source_info: str, auto_reply
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────
+from backend import ws_vorab as _ws_vorab  # noqa: E402
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    """Haupt-WebSocket für Agent-Steuerung und Status-Updates."""
+    """Haupt-WebSocket für Agent-Steuerung und Status-Updates.
+
+    Vor der Anmeldung (Befund 2026-11-27, Speicher-DoS): begrenzte Anzahl,
+    kleine Nachrichten eine nach der anderen und eine Frist – siehe
+    ``backend/ws_vorab.py``."""
+    if not _ws_vorab.zulassen(ws):
+        await ws.close(code=1013)
+        return
+    _ws_vorab.vorbereiten(ws)
     await ws.accept()
     session_id = str(id(ws))
     active_sessions[session_id] = ws
     _active_ws.add(ws)
+    _beginn = time.monotonic()
 
     # CPU-Last-Sender im Hintergrund
     cpu_task = asyncio.create_task(cpu_broadcast(ws))
 
     try:
         while True:
-            data = await ws.receive_text()
-            msg = json.loads(data)
-            await _ws_nachricht_behandeln(ws, msg)
+            _rest = _ws_vorab.frist(ws, _beginn, time.monotonic())
+            if _rest is None:
+                data = await ws.receive_text()
+            else:
+                try:
+                    data = await asyncio.wait_for(ws.receive_text(), timeout=_rest)
+                except asyncio.TimeoutError:
+                    await ws.close(code=1008)
+                    break
+            try:
+                msg = json.loads(data)
+                await _ws_nachricht_behandeln(ws, msg)
+            finally:
+                # Erst jetzt liest die Bibliothek die naechste Nachricht einer
+                # noch nicht angemeldeten Verbindung.
+                _ws_vorab.verarbeitet(ws)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         print(f"[WS Error] {e}")
     finally:
+        _ws_vorab.entfernen(ws)
         cpu_task.cancel()
         active_sessions.pop(session_id, None)
         _active_ws.discard(ws)
@@ -32420,6 +32452,8 @@ async def handle_ws_message(ws: WebSocket, msg: dict):
                 return
         # Erst HIER (alle Pruefungen bestanden) bekommt die Verbindung Rundsendungen.
         _ws_angemeldet.add(id(ws))
+        # ... und wieder die volle Nachrichtengroesse ohne Takt (ws_vorab).
+        _ws_vorab.freischalten(ws)
 
     # Reiner Registrierungs-Handshake: setzt nur _ws_usernames (oben) fuer Live-Sync
     if msg_type == "hello":

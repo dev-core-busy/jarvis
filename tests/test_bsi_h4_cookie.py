@@ -156,6 +156,16 @@ check("setzen: Path=/", "path=/" in attr, s0)
 check("setzen: KEIN Domain (sonst verwirft der Browser __Host-)",
       not any(a.startswith("domain=") for a in attr), s0)
 check("setzen: Max-Age = Laufzeit", "max-age=43200" in attr, s0)
+# IdP-Anmeldung (2026-11-27): die Sitzung endet mit dem Browser – Cookie ohne
+# Max-Age/Expires, alle Schutz-Attribute bleiben.
+r = JSONResponse({})
+sc.setzen(r, T1, 43200, bis_browserende=True)
+_sb = [v.decode() for k, v in r.raw_headers if k == b"set-cookie"]
+_ab = [a.strip().lower() for a in (_sb[0] if len(_sb) == 1 else "").split(";")]
+check("setzen(bis_browserende): Sitzungs-Cookie ohne Max-Age/Expires",
+      len(_sb) == 1 and not any(a.startswith(("max-age=", "expires=")) for a in _ab), _sb)
+check("setzen(bis_browserende): HttpOnly, Secure, SameSite=Strict, Path=/ bleiben",
+      {"httponly", "secure", "samesite=strict", "path=/"} <= set(_ab), _sb)
 r = JSONResponse({})
 sc.loeschen(r)
 sl = [v.decode().lower() for k, v in r.raw_headers if k == b"set-cookie"]

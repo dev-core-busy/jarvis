@@ -56,8 +56,8 @@ PROBEN = [
      "            scope[\"headers\"] = list(scope[\"headers\"]) + [(b\"authorization\", auth_wert.encode())]\n"
      "        if auth_i is None:\n            return await self.app(scope, receive, send)\n"),
     ("Cookie traegt das Token roh (DEV-Befund: AD-Backslash)", PY, SC,
-     "    response.set_cookie(COOKIE_NAME, wert_kodieren(token), max_age=max(int(max_age), 60), path=\"/\",\n",
-     "    response.set_cookie(COOKIE_NAME, token, max_age=max(int(max_age), 60), path=\"/\",\n"),
+     "    response.set_cookie(COOKIE_NAME, wert_kodieren(token),\n",
+     "    response.set_cookie(COOKIE_NAME, token,\n"),
     ("Lesen ohne Dekodierung", PY, SC,
      "            return wert_lesen(wert)\n",
      "            return wert.strip().strip('\"')\n"),
@@ -65,14 +65,17 @@ PROBEN = [
      "        roh = _sitzung_cookie.wert_lesen(verbindung.cookies.get(_sitzung_cookie.COOKIE_NAME, \"\"))\n",
      "        roh = verbindung.cookies.get(_sitzung_cookie.COOKIE_NAME, \"\")\n"),
     ("Cookie ohne HttpOnly", PY, SC,
-     "    response.set_cookie(COOKIE_NAME, wert_kodieren(token), max_age=max(int(max_age), 60), path=\"/\",\n"
+     "                        max_age=None if bis_browserende else max(int(max_age), 60), path=\"/\",\n"
      "                        secure=True, httponly=True, samesite=\"strict\")\n",
-     "    response.set_cookie(COOKIE_NAME, wert_kodieren(token), max_age=max(int(max_age), 60), path=\"/\",\n"
+     "                        max_age=None if bis_browserende else max(int(max_age), 60), path=\"/\",\n"
      "                        secure=True, httponly=False, samesite=\"strict\")\n"),
+    ("Sitzungs-Cookie bekommt doch eine Laufzeit", PY, SC,
+     "                        max_age=None if bis_browserende else max(int(max_age), 60), path=\"/\",\n",
+     "                        max_age=max(int(max_age), 60), path=\"/\",\n"),
     ("Cookie SameSite=Lax", PY, SC,
-     "    response.set_cookie(COOKIE_NAME, wert_kodieren(token), max_age=max(int(max_age), 60), path=\"/\",\n"
+     "                        max_age=None if bis_browserende else max(int(max_age), 60), path=\"/\",\n"
      "                        secure=True, httponly=True, samesite=\"strict\")\n",
-     "    response.set_cookie(COOKIE_NAME, wert_kodieren(token), max_age=max(int(max_age), 60), path=\"/\",\n"
+     "                        max_age=None if bis_browserende else max(int(max_age), 60), path=\"/\",\n"
      "                        secure=True, httponly=True, samesite=\"lax\")\n"),
     ("CSRF-Token traegt das Token", PY, SC,
      "    return PRAEFIX + mac\n",

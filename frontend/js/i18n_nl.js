@@ -1766,6 +1766,8 @@ _I18N.nl = {
     "security.idp_test_ok": "De verbinding met de IdP werkt.",
     "security.idp_test_schluessel": "Ondertekeningssleutels:",
     "security.idp_test_alg": "Waarschuwing: de IdP biedt geen handtekeningalgoritme dat {marke} accepteert.",
+    "security.idp_test_abmeldung": "Retouradres na afmelden (te registreren bij de IdP):",
+    "security.idp_test_keine_abmeldung": "De IdP biedt geen afmelding: bij het afmelden blijft de sessie bij de IdP bestaan. De volgende aanmelding via de IdP vereist daar toch een nieuwe aanmelding.",
     "security.idp_test_fehler": "Verbinding mislukt.",
     "security.sperren_h": "Momenteel geblokkeerde accounts",
     "security.sperren_none": "Er is momenteel geen account geblokkeerd wegens mislukte pogingen.",

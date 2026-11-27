@@ -147,8 +147,13 @@ def wert_lesen(wert: str) -> str:
         return ""
 
 
-def setzen(response, token: str, max_age: int) -> None:
-    response.set_cookie(COOKIE_NAME, wert_kodieren(token), max_age=max(int(max_age), 60), path="/",
+def setzen(response, token: str, max_age: int, *, bis_browserende: bool = False) -> None:
+    """``bis_browserende``: Cookie OHNE Max-Age – der Browser verwirft es beim
+    Schliessen, die Sitzung endet damit (Anmeldung ueber den IdP, 2026-11-27).
+    Das Token selbst behaelt seine Laufzeit; ohne Cookie passt aber kein
+    CSRF-Token mehr dazu."""
+    response.set_cookie(COOKIE_NAME, wert_kodieren(token),
+                        max_age=None if bis_browserende else max(int(max_age), 60), path="/",
                         secure=True, httponly=True, samesite="strict")
 
 

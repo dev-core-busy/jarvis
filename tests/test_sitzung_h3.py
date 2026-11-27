@@ -207,6 +207,7 @@ class _Req:
         self.headers = {"Authorization": "Bearer " + token}
         self.client = None   # wie Starlette ohne Gegenstelle (logout protokolliert die IP)
         self.scope = {}      # wie Starlette: ohne Cookie-Anmeldung (BSI H4) kein Merker
+        self.cookies = {}    # wie Starlette: ohne IdP-Merkmal (Abmeldung am IdP, 2026-11-27)
 
 
 abgemeldet = []
@@ -230,6 +231,11 @@ NS = {
     # schreibt ins Sicherheitsprotokoll
     "_admin_anfrage": __import__("contextvars").ContextVar("_aa", default=None),
     "_sicherheits_log": types.SimpleNamespace(ereignis=lambda *a, **k: {}),
+    # Abmeldung am IdP (2026-11-27): ohne Merkmal-Cookie keine – Attrappe mit
+    # der echten Signatur, gemessen in test_oidc_anmeldung.py.
+    "_OIDC_COOKIE_SITZUNG": "__Host-jarvis_idp",
+    "_oidc_abmeldung": lambda request, user: asyncio.sleep(0, result=None),
+    "_oidc_cookie_weg": lambda resp, name: None,
 }
 exec(_funktionen("generate_token", "verify_token", "_epoche_widerrufen", "logout",
                  "_sitzungen_nach_kennwortwechsel", "_save_revocations",

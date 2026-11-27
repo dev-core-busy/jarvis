@@ -16,6 +16,12 @@ VERFAHREN: Authorization Code mit PKCE (S256), vertraulicher Client
    (``konto_aus_claims``).
 4. Zugangsdaten fuer Jira/Confluence/SAP/VEMAS, falls der IdP sie als Claims
    mitliefert (``zugaenge_aus_claims``, sonst ``userinfo``).
+5. Abmelden (2026-11-27): ``abmelde_url`` baut die Adresse fuer die
+   RP-initiierte Abmeldung am IdP (``end_session_endpoint``, OIDC RP-Initiated
+   Logout 1.0); das ``id_token`` dafuer liegt je Browser in ``IDP_SITZUNGEN``.
+   Nach dem Schliessen des Browsers kann der Browser nichts mehr an den IdP
+   schicken – dort sorgt ``prompt=login`` beim naechsten Start dafuer, dass
+   der IdP neu anmeldet statt seine alte Sitzung still weiterzubenutzen.
 
 WAS GEPRUEFT WIRD – UND WARUM JEDER PUNKT NOETIG IST
 -----------------------------------------------------
@@ -69,6 +75,10 @@ JWKS_NEULADEN_ABSTAND_S = 60
 VORGANG_TTL_S = 600
 SCHEIN_TTL_S = 120
 SCHEIN_MAX_VERSUCHE = 3
+# Wie lange das id_token einer Sitzung fuer die Abmeldung (id_token_hint)
+# vorgehalten wird. Faellt es heraus, meldet die Abmeldung ohne Hinweis ab
+# (nur client_id) – der IdP fragt dann ggf. nach, statt still zu scheitern.
+IDP_SITZUNG_TTL_S = 24 * 3600
 MAX_EINTRAEGE = 2000
 # Claims, aus denen der Kontoname kommen darf (feste Liste fuer die Maske).
 NAMENSCLAIMS = ("preferred_username", "sub", "upn", "email", "samaccountname", "username")
@@ -273,9 +283,12 @@ def pkce_paar() -> tuple[str, str]:
 
 
 def autorisierungs_url(doc: dict, client_id: str, redirect_uri: str, state: str,
-                       nonce: str, challenge: str, scope: str = "openid profile") -> str:
+                       nonce: str, challenge: str, scope: str = "openid profile",
+                       prompt: str = "") -> str:
+    """``prompt="login"`` verlangt vom IdP eine NEUE Anmeldung, auch wenn er
+    noch eine Sitzung hat (OIDC Core 3.1.2.1) – siehe ``oidc_start``."""
     ziel = str(doc["authorization_endpoint"])
-    param = urlencode({
+    werte = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -284,8 +297,32 @@ def autorisierungs_url(doc: dict, client_id: str, redirect_uri: str, state: str,
         "nonce": nonce,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
-    }, quote_via=quote)
+    }
+    if prompt:
+        werte["prompt"] = prompt
+    param = urlencode(werte, quote_via=quote)
     return ziel + ("&" if "?" in ziel else "?") + param
+
+
+def abmelde_url(doc: dict, client_id: str, ruecksprung: str, id_token: str = "") -> str | None:
+    """Adresse fuer die Abmeldung am IdP (OIDC RP-Initiated Logout 1.0) oder
+    None, wenn der IdP keine anbietet.
+
+    Der Browser wird dorthin geschickt; der IdP beendet seine Sitzung und
+    leitet auf ``ruecksprung`` zurueck (muss beim IdP als Abmelde-Rueckkehr
+    eingetragen sein). ``id_token_hint`` nur, wenn das Token bekannt ist –
+    ohne Hinweis traegt ``client_id`` die Zuordnung (Abschnitt 2 der Norm).
+    Nur ``https``: die Adresse geht unveraendert als Navigationsziel an den
+    Browser."""
+    ziel = doc.get("end_session_endpoint")
+    if not isinstance(ziel, str) or not _ist_https(ziel):
+        return None
+    werte = {"client_id": client_id}
+    if ruecksprung:
+        werte["post_logout_redirect_uri"] = ruecksprung
+    if id_token:
+        werte["id_token_hint"] = id_token
+    return ziel + ("&" if "?" in ziel else "?") + urlencode(werte, quote_via=quote)
 
 
 def code_tauschen(doc: dict, client_id: str, client_secret: str, code: str,
@@ -661,6 +698,9 @@ class Ablage:
 
 VORGAENGE = Ablage(VORGANG_TTL_S)
 SCHEINE = Ablage(SCHEIN_TTL_S)
+# Je Browser, der sich ueber den IdP angemeldet hat: das id_token fuer die
+# Abmeldung. Schluessel steht im Sitzungs-Cookie ``__Host-jarvis_idp`` (main.py).
+IDP_SITZUNGEN = Ablage(IDP_SITZUNG_TTL_S)
 
 
 def browser_bindung() -> tuple[str, str]:

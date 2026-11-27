@@ -1765,6 +1765,8 @@ _I18N.fr = {
     "security.idp_test_ok": "La connexion à l'IdP fonctionne.",
     "security.idp_test_schluessel": "Clés de signature :",
     "security.idp_test_alg": "Attention : l'IdP ne propose aucun algorithme de signature que {marke} accepte.",
+    "security.idp_test_abmeldung": "Adresse de retour après déconnexion (à enregistrer auprès de l'IdP) :",
+    "security.idp_test_keine_abmeldung": "L'IdP ne propose pas de déconnexion : lors de la déconnexion, la session auprès de l'IdP subsiste. La prochaine connexion via l'IdP y exige néanmoins une nouvelle authentification.",
     "security.idp_test_fehler": "Échec de la connexion.",
     "security.sperren_h": "Comptes actuellement verrouillés",
     "security.sperren_none": "Aucun compte n'est actuellement verrouillé à cause de tentatives échouées.",
